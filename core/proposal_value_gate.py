@@ -1,31 +1,20 @@
 """Deterministic pre-publish value gate for self-build proposals (TD-035).
 
-The self-build producer's Critic (``core/self_build_producer.py``) checks that a
-generated patch is *technically* valid: it parses, is not a diff, is not a
-critical file, has tests, and passes the lane risk classifier. It does NOT judge
-whether the change is *worth making*. A live run produced a proposal for
-``core/redaction.py`` that reached ``committed_local`` and passed tests but was
-only a comment-capitalization edit (``WIDEST`` -> ``widest``) dressed up as a
-"robustness improvement" — technically valid, zero value.
-
-This module adds a small, deterministic value gate that runs AFTER the Critic
-passes and BEFORE the Reporter publishes an approval item. It has two tiers:
+The self-build producer's Critic (``core/self_build_producer.py``) checks
+that a generated patch is *technically* valid: it parses, is not a diff, is
+not a critical file, has tests, and passes the lane risk classifier. It does
+NOT judge whether the change is *worth making*. A live run produced a
+proposal for ``core/redaction.py`` that reached ``committed_local`` and
+passed tests but was only a comment-capitalization edit (``WIDEST`` ->
+``widest``) dressed up as a "robustness improvement" — technically valid,
+zero value.
 
 * **Hard veto** (``value_veto``): the change has *no code effect* — it is
-  whitespace-only, formatting-only, comment-only (Python), or identical after
-  normalization. The producer must not publish such a proposal.
-* **Soft flag**: the change is published, but a human-visible warning is attached
-  (e.g. the summary overclaims value relative to a trivial diff). A soft flag
-  never blocks publication and never weakens human approval.
-
-Doc targets (``*.md``) are exempt from hard veto: for a docs file the text *is*
-the content, so a text/comment-style change is legitimate. They may still carry
-soft flags.
-
-Strictly deterministic and pure: NO LLM call, NO network, NO git, NO file or
-inbox side effects. The overclaim signal reuses the deterministic
-``core.truth_hype_filter`` (whose ``is_hype`` is a computed property, also no
-LLM).
+whitespace-only, formatting-only, comment-only (Python), or identical after
+normalization. The producer must not publish such a proposal. * **Soft
+flag**: the change is published, but a human-visible warning is attached
+(e.g. the summary overclaims value relative to a trivial diff). A soft flag
+never blocks publication and never weakens human approval.
 """
 from __future__ import annotations
 
@@ -196,12 +185,8 @@ def evaluate_proposal_value(
 ) -> ValueGateResult:
     """Evaluate the value of a proposed change to ``target``.
 
-    ``current_content`` / ``proposed_content`` are the full pre/post file bodies.
-    ``reason`` is the Builder's one-line summary. ``hype_fn`` defaults to
-    :func:`core.truth_hype_filter.evaluate` (deterministic, no LLM); it is
-    injectable for tests.
-
-    Returns a :class:`ValueGateResult`. Never raises, never has side effects.
+    Returns a :class:`ValueGateResult`. Never raises, never has side
+    effects.
     """
     current = current_content or ""
     proposed = proposed_content or ""

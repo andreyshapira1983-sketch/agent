@@ -1,32 +1,16 @@
 """Clarification Gate — режим переспроса (ask, don't build).
 
-When the agent is stuck (``loop_suspected``) or the goal is too broad /
-ambiguous, the mature response is **not** to create chaos — spawning
-subagents, writing new modules, writing memory, spraying proposals, or burning
-more expensive LLM calls. It is to do what a competent human would do: stop,
-narrow the frame, and **ask one clarifying question** (or take one minimal
-diagnostic step).
-
-The guiding formula (operator's words):
-
-    Если агент не понимает, что строить, он должен не строить,
-    а спросить, что значит "построить".
-
-This module is a pure, deterministic POLICY. Given a set of signals it decides
-whether to PROCEED or switch to CLARIFY mode, and in CLARIFY mode it enumerates:
-
 * the single allowed action (ask a question / one diagnostic report / one
-  minimal next step);
-* the forbidden actions (the "chaos" set that must NOT run while unclear);
-* the minimal clarifying questions to put to the operator.
+minimal next step); * the forbidden actions (the "chaos" set that must NOT
+run while unclear); * the minimal clarifying questions to put to the
+operator.
 
-Design principles
------------------
-* No LLM calls, no I/O, mutates nothing — deterministic and O(n).
-* Conservative: with zero signals it returns PROCEED (never blocks a clear
-  task). Any one ambiguity/stuck signal switches to CLARIFY.
-* In CLARIFY mode it commits to exactly ONE allowed action so the agent cannot
-  "do everything" — the whole point is to reduce chaos, not add to it.
+Design principles ----------------- * No LLM calls, no I/O, mutates nothing
+— deterministic and O(n). * Conservative: with zero signals it returns
+PROCEED (never blocks a clear task). Any one ambiguity/stuck signal switches
+to CLARIFY. * In CLARIFY mode it commits to exactly ONE allowed action so
+the agent cannot "do everything" — the whole point is to reduce chaos, not
+add to it.
 """
 from __future__ import annotations
 
@@ -214,13 +198,7 @@ def _reason_for(signals: ClarificationSignals) -> str:
 # ---------------------------------------------------------------------------
 
 def evaluate(signals: ClarificationSignals) -> ClarificationOutcome:
-    """Decide PROCEED vs CLARIFY for the given signals.
-
-    With no signals set the agent is clear to act (PROCEED). Any one ambiguity
-    or stuck signal flips it to CLARIFY: it commits to exactly ONE allowed
-    action (ask the operator), forbids the chaos set, and returns the minimal
-    set of clarifying questions.
-    """
+    """Decide PROCEED vs CLARIFY for the given signals."""
     if not signals.any_set():
         return ClarificationOutcome(
             mode="proceed",
@@ -247,12 +225,7 @@ def evaluate(signals: ClarificationSignals) -> ClarificationOutcome:
 
 
 def for_loop_suspected(*, goal_too_broad: bool = False) -> ClarificationOutcome:
-    """Convenience: the clarify outcome for a suspected loop.
-
-    ``loop_suspected`` alone is enough to switch into the question mode; callers
-    that also know the goal is broad can set ``goal_too_broad`` to widen the
-    asked questions.
-    """
+    """Convenience: the clarify outcome for a suspected loop."""
     return evaluate(ClarificationSignals(
         loop_suspected=True,
         goal_too_broad=goal_too_broad,
@@ -279,16 +252,6 @@ ASK_BACK_PREFIX = "Уточнение:"
 def build_self_analysis_ask_back() -> str:
     """The deterministic ask-back for a self-analysis turn with ZERO verified
     support (MIR-075).
-
-    Measured (operator's live test, 2026-08-03): five abstract questions, not
-    one counter-question — the gate above is reachable only through replan
-    exhaustion, and `completion_contract.needs_clarification` has no consumer.
-    This is the missing wire, deliberately narrow: it fires only when the
-    turn's OWN post-answer numbers already say «я ответил рассуждением без
-    единой подтверждённой опоры» on a turn the self-analysis sensor marked.
-    No LLM call: one canned narrowing question, per the gate's philosophy of
-    exactly one allowed action. Question wording is NOT inspected — the
-    lexical route was retired in #263 (8 of 8 false).
     """
     return (
         f"{ASK_BACK_PREFIX} я ответил рассуждением — без единой проверенной "

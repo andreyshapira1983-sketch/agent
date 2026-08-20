@@ -99,23 +99,7 @@ _COMPACT_DATE_RE = re.compile(r"(\d{8})")
 
 
 def _model_recency_key(model_id: str) -> tuple:
-    """Return a comparable key so that the newest model sorts last (max wins).
-
-    Key = (major_version, minor_version, year, month, day, model_id)
-
-    Version numbers come FIRST — they reflect the model generation.
-    Date is a tiebreaker within the same version (patch/revision date).
-
-    Examples:
-      claude-opus-4-8           → (4, 8, 0,    0,  0,  ...)  # version only
-      claude-opus-4-5-20251101  → (4, 5, 2025, 11, 1,  ...)  # 4-8 > 4-5 ✓
-      claude-sonnet-4-6         → (4, 6, 0,    0,  0,  ...)
-      claude-sonnet-4-5-20250929→ (4, 5, 2025, 9,  29, ...)  # 4-6 > 4-5 ✓
-      gpt-5.4-nano-2026-03-17   → (5, 4, 2026, 3,  17, ...)
-      o4-mini-2025-04-16        → (4, 0, 2025, 4,  16, ...)
-      o1-2024-12-17             → (1, 0, 2024, 12, 17, ...)  # 4 > 1 ✓
-      gpt-4                     → (4, 0, 0,    0,  0,  ...)
-    """
+    """Return a comparable key so that the newest model sorts last (max wins)."""
     name = model_id
     year, month, day = 0, 0, 0
 
@@ -151,13 +135,6 @@ def classify_model(model_id: str) -> ComplexityTier:
     """Classify a model into a tier by its name pattern.
 
     No version numbers — only family keywords and structural patterns.
-
-    Priority: DEEP is checked before LIGHT so that reasoning models whose
-    name also contains "mini" (e.g. ``o3-mini``, ``o4-mini``) are correctly
-    classified as DEEP instead of LIGHT.
-
-    OpenAI o-series is detected by a regex matching "o" + digit (o1, o3, o4,
-    o5, ...) automatically without listing each version explicitly.
     """
     n = model_id.casefold()
     # OpenAI o-series reasoning models → always DEEP
@@ -187,14 +164,7 @@ def _ttl_days() -> int:
 
 
 def _catalog_age_days(data: dict[str, Any]) -> int | None:
-    """Age of a loaded catalog in whole days, or None when it is undated.
-
-    One definition, used by both the loader (which decides whether to serve the
-    cache) and `catalog_freshness` (which explains why it was not served). Two
-    copies of "is this expired?" that agree today are two copies that can stop
-    agreeing, and the disagreement would show up as a diagnosis contradicting
-    the behaviour it is diagnosing.
-    """
+    """Age of a loaded catalog in whole days, or None when it is undated."""
     updated_at = data.get("updated_at", "")
     if not updated_at:
         return None
@@ -282,28 +252,16 @@ def discover_catalog(
 ) -> dict[str, Any]:
     """Query provider model lists and classify them — WITHOUT writing anything.
 
-    This is the read-only half of :func:`refresh_catalog`. It performs the same
-    provider queries and tier classification and returns the resulting catalog
-    dict, but it never touches ``config/model_catalog.json``.
+    This is the read-only half of :func:`refresh_catalog`. It performs the
+    same provider queries and tier classification and returns the resulting
+    catalog dict, but it never touches ``config/model_catalog.json``.
 
-    IMPORTANT: querying a provider's model list is a metadata-only, non-inference
-    provider call — it runs no LLM inference and generates no completion — but it
-    is still a real network/provider call. It must only be triggered by an
-    explicit operator request (e.g. a dry-run discovery command), never on a
-    normal run, and should be recorded as provider metadata access rather than an
-    LLM inference call.
-
-    Parameters
-    ----------
-    providers : list[str] | None
-        Which providers to query. Defaults to all in _FETCHERS.
-    api_keys : dict[str, str] | None
-        Optional explicit API keys; falls back to env vars.
-
-    Returns
-    -------
-    dict
-        The discovered catalog data (NOT saved to disk).
+    IMPORTANT: querying a provider's model list is a metadata-only, non-
+    inference provider call — it runs no LLM inference and generates no
+    completion — but it is still a real network/provider call. It must only
+    be triggered by an explicit operator request (e.g. a dry-run discovery
+    command), never on a normal run, and should be recorded as provider
+    metadata access rather than an LLM inference call.
     """
     providers = providers or list(_FETCHERS.keys())
     api_keys  = api_keys or {}
@@ -359,18 +317,6 @@ def refresh_catalog(
     read-only discovery and then persists the result to
     ``config/model_catalog.json``. Behaviour is unchanged from before the
     discover/refresh split.
-
-    Parameters
-    ----------
-    providers : list[str] | None
-        Which providers to refresh. Defaults to all in _FETCHERS.
-    api_keys : dict[str, str] | None
-        Optional explicit API keys; falls back to env vars.
-
-    Returns
-    -------
-    dict
-        The catalog data that was saved.
     """
     catalog = discover_catalog(providers, api_keys=api_keys)
     _save_catalog(catalog)
@@ -400,13 +346,7 @@ def _credentialed_providers() -> list[str]:
 
 
 def ensure_fresh_catalog() -> str:
-    """Мёртвый каталог сначала пытаются обновить — и только потом обходят.
-
-    Постановление оператора 2026-08-12 (R7): протухший список — сигнал
-    «обнови», а не разрешение молча подстроиться под зашитые дефолты; probe_r1
-    исполнился целиком на builtin-моделях при правильном, но просроченном
-    каталоге. Подробности: docs/CODE_NOTES.md «Refresh before adapt».
-    """
+    """Мёртвый каталог сначала пытаются обновить — и только потом обходят."""
     global _AUTOREFRESH_DONE  # noqa: PLW0603 — одна попытка на процесс и есть контракт
     if _load_catalog() is not None:
         return "fresh"
@@ -462,17 +402,8 @@ def tier_model_for(tier: ComplexityTier, provider: str) -> str:
 
 
 def catalog_freshness() -> dict[str, Any]:
-    """Is the cache usable, and if not, why — in numbers the operator can act on.
-
-    Expiry used to be silent. `_load_catalog` returned `None`, every
-    `tier_model_for` returned `""`, and the escalation gate reported
-    ``no_deep_model`` — which reads as "your provider has no such model" and
-    sends the reader to check credentials and registries that are all fine. The
-    truth was "this cached list is 12 days old at a 7-day TTL".
-
-    Measured on this repository: that state disabled complexity routing for
-    **every** `for_task` caller — planner and synthesizer as well as repair —
-    and nothing anywhere said so.
+    """Is the cache usable, and if not, why — in numbers the operator can act
+    on.
 
     Statuses are kept distinct because they need different actions:
     ``missing`` (never built), ``expired`` (stale, refresh it), ``fresh``,
@@ -521,12 +452,7 @@ def catalog_summary() -> dict[str, Any]:
 
 
 def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
-    """Равный по уровню у нового провайдера, или None — тогда его дефолт.
-
-    Отказ провайдера — не повод понижать задачу; None означает «уровень не
-    определить», и это прежнее поведение, а не поломка. Замер и цена:
-    docs/CODE_NOTES.md, «Failover kept the provider and threw away the tier».
-    """
+    """Равный по уровню у нового провайдера, или None — тогда его дефолт."""
     if not model:
         return None
     try:
@@ -536,21 +462,7 @@ def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
 
 
 def offered_models(provider: str) -> frozenset[str]:
-    """Что провайдер предлагает СЕЙЧАС, по последнему наблюдению мира.
-
-    Каталог — не украшение, а снимок внешнего мира: его строит
-    `discover_catalog` запросом к самим провайдерам. Здесь он спрашивается
-    затем, чтобы собственный опыт агента не голосовал за модель, которой уже
-    нет: живой замер 2026-08-15 показал `claude-sonnet-4-5` с 67% полностью
-    подтверждённых на 63 прогонах — сильнейшее свидетельство в таблице — и
-    этого имени в текущем каталоге больше нет.
-
-    Пустое множество значит «мир не наблюдён», и вызывающий обязан толковать
-    это как «не знаю», а не как «ничего не предлагают»: разница между
-    незнанием и отрицанием здесь стоит выбора модели.
-
-    Зачем: docs/CODE_NOTES.md, «Which model earns the role».
-    """
+    """Что провайдер предлагает СЕЙЧАС, по последнему наблюдению мира."""
     if catalog_freshness().get("expired"):
         ensure_fresh_catalog()
     catalog = _load_catalog() or {}

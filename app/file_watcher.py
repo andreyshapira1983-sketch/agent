@@ -79,33 +79,24 @@ _Snapshot = "dict[Path, tuple[int, int]]"
 class FileWatcher:
     """Watch files/directories and emit coalesced change batches.
 
-    Parameters
-    ----------
-    paths:
-        Files and/or directories to watch. Directory targets contribute their
-        direct child files (optionally recursively). Non-existent targets are
-        allowed and simply contribute nothing until they appear.
-    on_change:
-        Optional callback (sync or async) invoked with a non-empty list of
-        :class:`FileChange` whenever a settled batch is detected. This is the
-        hook the daemon loop uses to ``wake`` its dispatcher. Callback errors
-        are logged and never kill the watcher.
-    patterns:
-        Optional iterable of ``fnmatch`` glob patterns (matched against each
-        file's name). When given, only matching files are watched.
-    now / sleep:
-        Injectable clock and awaitable sleep (default UTC ``datetime.now`` and
-        :func:`asyncio.sleep`), so tests use a controllable clock.
-    poll_interval:
-        Seconds between snapshot scans. Must be > 0.
-    debounce:
-        Quiet window (seconds, >= 0) a change burst must settle for before the
-        batch is emitted, coalescing rapid repeated writes.
-    recursive:
-        Whether directory targets are scanned recursively. Defaults to False.
-    emit_existing:
-        Whether files already present at startup are reported as ``created`` on
-        the first settled batch. Defaults to False (baseline is silent).
+    Parameters ---------- paths: Files and/or directories to watch.
+    Directory targets contribute their direct child files (optionally
+    recursively). Non-existent targets are allowed and simply contribute
+    nothing until they appear. on_change: Optional callback (sync or async)
+    invoked with a non-empty list of :class:`FileChange` whenever a settled
+    batch is detected. This is the hook the daemon loop uses to ``wake`` its
+    dispatcher. Callback errors are logged and never kill the watcher.
+    patterns: Optional iterable of ``fnmatch`` glob patterns (matched
+    against each file's name). When given, only matching files are watched.
+    now / sleep: Injectable clock and awaitable sleep (default UTC
+    ``datetime.now`` and :func:`asyncio.sleep`), so tests use a controllable
+    clock. poll_interval: Seconds between snapshot scans. Must be > 0.
+    debounce: Quiet window (seconds, >= 0) a change burst must settle for
+    before the batch is emitted, coalescing rapid repeated writes.
+    recursive: Whether directory targets are scanned recursively. Defaults
+    to False. emit_existing: Whether files already present at startup are
+    reported as ``created`` on the first settled batch. Defaults to False
+    (baseline is silent).
     """
 
     def __init__(

@@ -235,12 +235,7 @@ class InstructionConflictOutcome:
         return self.mode == "blocked" and action in self.forbidden_actions
 
     def report(self) -> str:
-        """The six-point operator report required by INSTRUCTION_AUTHORITY §4.
-
-        Empty string in proceed mode. Point 4 states what the gate *forbade*;
-        proving the working tree is actually untouched is a separate, external
-        check (``git diff``) and this text does not claim to be that proof.
-        """
+        """The six-point operator report required by INSTRUCTION_AUTHORITY §4."""
         if self.mode != "blocked" or not self.findings:
             return ""
 
@@ -304,9 +299,6 @@ def evaluate(directives: Iterable[Directive]) -> InstructionConflictOutcome:
     Two directives conflict when they share a subject and demand different
     things of it. Requirements about different subjects are not a conflict —
     they must simply both be satisfied.
-
-    Any single conflict blocks, including one where the ranking makes the
-    winner obvious: the agent's job at that point is to report, not to decide.
     """
     findings = _find_conflicts(directives)
     if not findings:

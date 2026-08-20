@@ -1,11 +1,8 @@
-"""Source ingestion + source-registry + planning REPL commands.
+"""The `:ingest-*` REPL commands: source, project, web topic and RSS feed.
 
-Split out of ``main.py``. The whole cluster is self-contained: it uses only
-``cli.parsers``, ``core.ingestion`` / ``core.source_library``, the agent's
-public surface, and its own internal helpers — never back into ``main`` — so
-there is no import cycle. ``main.py`` re-exports the nine command handlers used
-by the REPL dispatch and the conversational router; the payload / format /
-extract helpers stay internal to this module.
+Each handler parses its options, calls the matching `core.ingestion` entry
+point and reports the result. Nothing here plans, edits or reads the Source
+Registry back; a failure is named rather than raised.
 """
 from __future__ import annotations
 

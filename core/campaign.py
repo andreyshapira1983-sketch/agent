@@ -1,57 +1,27 @@
 """24/48h autonomous work campaign engine.
 
-A *campaign* is the layer above a single tick. A tick does one thing; a
-campaign answers ONE honest question across many cycles:
+* An IDLE cycle never calls the LLM. When there is no high-priority action
+the agent records ``reason_if_idle`` and stamps an advisory
+``next_check_at`` on the ledger record instead of asking a model "what
+should I do" (which would cost money to be told "nothing").
+``next_check_at`` is informational only — actual cycle pacing (including
+idle cycles) is driven by ``cycle_pause_seconds``; nothing re-reads
+``next_check_at`` to skip or delay a cycle. * ``max_idle_streak``
+consecutive no-progress cycles ends the campaign with a report — as
+``healthy_idle`` (status ``completed``) when every cycle in the streak was a
+pure priority-0 observation, or as ``idle_stall`` / ``no_progress_stall``
+(status ``stopped``) when the streak contains repeat cycles: work was wanted
+and went nowhere, ask the operator. * The campaign opens NO new effect path.
+A useful cycle runs through the existing
+:class:`~core.autonomous_runtime.AutonomousRuntime`, which already routes
+every effect through PolicyGate + the approval inbox. Dry-run is the
+default. * Budget caps (cycles / llm_calls / cost_units) stop the campaign
+BEFORE the next spend, not after.
 
-    "For these keys, did the agent move the system forward — or just burn
-     tokens?"
-
-The loop is::
-
-    goal -> budget -> cycle -> best_next_action
-                              |
-                  +-----------+-----------+
-                  |                       |
-            no high-priority         a real action
-            action (observe)              |
-                  |                        |
-            IDLE  (NO LLM)          one bounded GATED pass
-            record reason_if_idle    (existing approval gate)
-            advance next_check_at    record cost + result + proposal
-                  |                        |
-                  +-----------+-----------+
-                              |
-                       campaign ledger
-                              |
-                  stop on: budget | no-progress streak | max cycles
-                  (a pure-observation streak completes as healthy_idle;
-                   a streak with repeats stops as a stall)
-
-Hard guarantees (the whole point of this layer):
-
-* An IDLE cycle never calls the LLM. When there is no high-priority action the
-  agent records ``reason_if_idle`` and stamps an advisory ``next_check_at`` on
-  the ledger record instead of asking a model "what should I do" (which would
-  cost money to be told "nothing"). ``next_check_at`` is informational only —
-  actual cycle pacing (including idle cycles) is driven by
-  ``cycle_pause_seconds``; nothing re-reads ``next_check_at`` to skip or delay
-  a cycle.
-* ``max_idle_streak`` consecutive no-progress cycles ends the campaign with a
-  report — as ``healthy_idle`` (status ``completed``) when every cycle in the
-  streak was a pure priority-0 observation, or as ``idle_stall`` /
-  ``no_progress_stall`` (status ``stopped``) when the streak contains repeat
-  cycles: work was wanted and went nowhere, ask the operator.
-* The campaign opens NO new effect path. A useful cycle runs through the
-  existing :class:`~core.autonomous_runtime.AutonomousRuntime`, which already
-  routes every effect through PolicyGate + the approval inbox. Dry-run is the
-  default.
-* Budget caps (cycles / llm_calls / cost_units) stop the campaign BEFORE the
-  next spend, not after.
-
-This module is deliberately split into a *pure loop* (``run_campaign``) plus two
-injectable collaborators (``gather_signals`` and ``execute_action``). The
-defaults wire the real signal-gathering and the real bounded runtime pass; tests
-inject deterministic fakes and assert on the real record shapes.
+This module is deliberately split into a *pure loop* (``run_campaign``) plus
+two injectable collaborators (``gather_signals`` and ``execute_action``).
+The defaults wire the real signal-gathering and the real bounded runtime
+pass; tests inject deterministic fakes and assert on the real record shapes.
 """
 from __future__ import annotations
 
@@ -103,18 +73,8 @@ def run_campaign(
 
     The function is blocking and deterministic given its collaborators. It
     NEVER calls a model directly: the only spend happens inside
-    ``execute_action`` for a *useful* cycle, and that spend is bounded by the
-    campaign budget which is checked BEFORE each cycle.
-
-    Real wall-clock pacing (``cycle_pause_seconds`` / ``max_wall_clock_seconds``)
-    is driven through the injected ``now_fn`` and ``sleep_fn`` so tests stay
-    instant and deterministic. With both at their ``0`` defaults the loop runs
-    cycles back-to-back exactly as before.
-
-    ``on_cycle`` is an optional liveness seam fired once per recorded cycle with
-    a small snapshot dict (cycle number, result, running totals). It lets a
-    daemon emit a heartbeat per cycle during a multi-hour paced run WITHOUT the
-    pure loop knowing anything about heartbeats/I/O. Default ``None`` = no-op.
+    ``execute_action`` for a *useful* cycle, and that spend is bounded by
+    the campaign budget which is checked BEFORE each cycle.
     """
     gather = gather_signals or _default_gather_signals
     execute = execute_action or _default_execute_action

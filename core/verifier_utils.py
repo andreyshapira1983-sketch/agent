@@ -165,22 +165,11 @@ def _normalise_path(text: str) -> str:
 def same_file(cited: str, source_id: str) -> bool:
     """Do a citation body and an evidence label name the SAME file?
 
-    Measured 2026-08-14 — one file, three spellings, 4 of 9 pairs failed to
-    match, and asymmetrically: the plain substring rule finds the short form
-    inside the long one and never the reverse. Live consequence: the agent
-    wrote `README.md`, was asked about
-    `C:\\Users\\andre\\Projects\\agent\\README.md`, and reported it had
-    evidence only for the first — about a file it had just created itself.
-
-    Suffix at a SEGMENT boundary, not containment. Strictly tighter than what
-    it replaces: `sub/x.txt` no longer matches `other/sub/x.txt` by accident of
-    characters, while `x.txt` and `./x.txt` and an absolute path ending in the
-    same segments become one file — which is what they are.
-
-    Not resolved against the workspace root on purpose: the root is not known
-    here, and it is not needed. The sanitiser drops absolute paths from tool
-    arguments (`core/step_sanitizer.py`), so a label is always relative; only
-    the CITATION varies, and a suffix test settles that without new plumbing.
+    Not resolved against the workspace root on purpose: the root is not
+    known here, and it is not needed. The sanitiser drops absolute paths
+    from tool arguments (`core/step_sanitizer.py`), so a label is always
+    relative; only the CITATION varies, and a suffix test settles that
+    without new plumbing.
     """
     a = _normalise_path(cited)
     b = _normalise_path(source_id.split(":", 1)[-1] if ":" in source_id else source_id)
@@ -192,16 +181,13 @@ def same_file(cited: str, source_id: str) -> bool:
 def runtime_evidence_pool() -> list[Evidence]:
     """What this process measured about itself, as citable Evidence.
 
-    Built on demand and NOT folded into the provenance chain. The first attempt
-    did fold it, and 21 tests said why that is wrong: the chain is counted and
-    ordered, and its contracts are real — a failed step yields no evidence, a
-    `file_write` yields none, a zero-step plan yields an EMPTY chain. Five
-    always-present entries break every one of those, and they also destroy
-    `chain_was_empty`, which separates "the agent looked and found nothing" from
-    "the agent did not look".
-
-    So the runtime facts get their own pool, on the pattern `web` already uses
-    below: a prefix may draw on candidates the chain does not hold.
+    Built on demand and NOT folded into the provenance chain. The first
+    attempt did fold it, and 21 tests said why that is wrong: the chain is
+    counted and ordered, and its contracts are real — a failed step yields
+    no evidence, a `file_write` yields none, a zero-step plan yields an
+    EMPTY chain. Five always-present entries break every one of those, and
+    they also destroy `chain_was_empty`, which separates "the agent looked
+    and found nothing" from "the agent did not look".
     """
     from core.evidence import make_evidence
     from core.runtime_self import process_facts
@@ -330,22 +316,9 @@ def _is_derivative_subagent_evidence(ev: Evidence) -> bool:
 
     The parent loop embeds only a sub-agent's *answer text* (via
     ``SubAgentRunResult.to_evidence_text()``) into its provenance chain —
-    never the sub-agent's raw file / web evidences. So the parent can
-    never independently inspect what a sub-agent looked at; it holds only
-    the child's prose conclusion.
-
-    Therefore any sub-agent-origin evidence is derivative: promoting it to
-    ``verified`` would be "trusting one LLM that trusted another LLM".
-
-    The ``external_evidence_count`` in the meta marker is the child's own
-    self-report — it proves the child *looked at* N external sources, not
-    that the child's conclusion is faithful to them. A real trace showed a
-    sub-agent read 7 repo files and still asserted a non-existent code bug
-    (``EpisodeRecord.to_dict`` "dropping" ``full_answer``); with the old
-    ``count > 0 -> not derivative`` shortcut that fabrication was minted as
-    ``verified``. Likewise, ``[web:...]`` / ``[file:...]`` tokens a
-    sub-agent embeds in its answer are still the child's unverifiable
-    claims, not evidence the parent holds. Both are treated as derivative.
+    never the sub-agent's raw file / web evidences. So the parent can never
+    independently inspect what a sub-agent looked at; it holds only the
+    child's prose conclusion.
     """
     excerpt = ev.excerpt or ""
     if _SUBAGENT_META_RE.search(excerpt) is not None:
@@ -382,13 +355,8 @@ _ENUM_EXCLUDED_RE = re.compile(
 
 
 def enumeration_count_reason(text: str) -> Any:
-    """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же предложения.
-
-    Живой случай B1 (probe_r1): «пять полок (A1, B2, C4, D0)» и «три позиции
-    (…, stator-6: 7 шт. не подходит)» ушли `unverified` и забанковались
-    success/eligible — счёт не покрывал ни один гейт. Противоречие внутреннее,
-    улике о нём нечего сказать, поэтому иск не снимается подтверждённой
-    цитатой (ветка в `verifier_core`). Молчит на всём, чего не распознал.
+    """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же
+    предложения.
     """
     from .verifier_models import ClaimReason
 
@@ -419,12 +387,7 @@ def literal_covered_by_union(
     evidences: list[Any],
     chain_source_ids: list[str] | None = None,
 ) -> bool:
-    """R3: литерал накрыт ОБЪЕДИНЕНИЕМ процитированных улик (текст + адрес).
-
-    Живой случай B3: перекрёстное утверждение цитировало обе улики по половине,
-    а гейт литералов мерил каждую цитату против всего куска и опроверг истину
-    дважды зеркально (`expected=notes_a` из notes_b и наоборот).
-    """
+    """R3: литерал накрыт ОБЪЕДИНЕНИЕМ процитированных улик (текст + адрес)."""
     # `expected` — склейка до трёх литералов через ", " (см. absent_literal_
     # reason): живой прогон a5813910 показал, что поиск склейки как одной
     # подстроки не находил НИЧЕГО, и объединение не снимало ни одного иска.

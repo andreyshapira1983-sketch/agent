@@ -1,32 +1,18 @@
 """Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a
 HUMAN-APPROVED, FROZEN acceptance test pass.
 
-Stage A (:mod:`core.self_task_producer`) turned a real ``# TODO`` into a coding
-task plus a failing acceptance test and dropped ONE inert
-``self_build_task.approve`` inbox item. A human read and approved that test
-BEFORE any implementation existed — that is the anti-cheating guarantee.
-
-Stage B consumes exactly one such *approved* item and:
-
-* asks the Builder to produce the COMPLETE new content of the target file so the
-  frozen test passes (existing behaviour and public API preserved),
-* critic-validates that implementation cheaply (parses, low-risk, confident),
-* publishes ONE ``self_apply_lane.run`` proposal carrying BOTH the new
-  implementation and the frozen test, targeted at the new test file.
-
-The existing self-apply lane then applies the change on a temp branch, runs the
-targeted test plus the full suite, and auto-rolls-back on any failure. Stage B
-therefore never applies anything itself and never mutates the frozen test — it
-only proposes an implementation for the already-blessed yardstick.
-
-Design constraints mirror Stage A and the self-build producer:
+The existing self-apply lane then applies the change on a temp branch, runs
+the targeted test plus the full suite, and auto-rolls-back on any failure.
+Stage B therefore never applies anything itself and never mutates the frozen
+test — it only proposes an implementation for the already-blessed yardstick.
 
 * consumes only an APPROVED ``self_build_task.approve`` item (no free-text);
-* the implementation target is fixed to the file the task named — no LLM target;
-* the frozen test is read via :func:`core.self_task_producer.decode_frozen_test`
-  so a redaction-mangled preview is never fed to the builder or the lane;
-* deterministic gates first (kill-switch, budget, dirty tree);
-* every failure is a hard veto that creates NO self-apply item.
+* the implementation target is fixed to the file the task named — no LLM
+target; * the frozen test is read via
+:func:`core.self_task_producer.decode_frozen_test` so a redaction-mangled
+preview is never fed to the builder or the lane; * deterministic gates first
+(kill-switch, budget, dirty tree); * every failure is a hard veto that
+creates NO self-apply item.
 """
 from __future__ import annotations
 

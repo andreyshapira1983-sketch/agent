@@ -26,10 +26,6 @@ from core.state_integrity import (
 class PersistentMemoryStore:
     """JSONL-backed list of MemoryRecords.
 
-    Two files on disk:
-      self.path         — active memory (high-value, frequently accessed)
-      self.archive_path — archived memory (low-value, moved out of hot path)
-
     Active memory is loaded every cycle. Archive is never injected into
     prompts automatically — it is a reference store for explicit recall.
     """
@@ -56,12 +52,8 @@ class PersistentMemoryStore:
         return len(payloads)
 
     def update(self, record: MemoryRecord) -> bool:
-        """Replace an existing record in-place (full rewrite). Returns True on success.
-
-        Read and rewrite happen under ONE lock: between them the file is a
-        stale copy, and anything another writer appends in that window is
-        overwritten with no error and no log line. `_rewrite` cannot be used
-        here — it takes the same lock, which is not reentrant.
+        """Replace an existing record in-place (full rewrite). Returns True on
+        success.
         """
         with state_file_lock(self.path):
             records = self._active_unlocked()
@@ -81,24 +73,7 @@ class PersistentMemoryStore:
         return updated
 
     def update_many(self, records: Iterable[MemoryRecord]) -> int:
-        """Replace several records in ONE rewrite. Returns how many landed.
-
-        `update` rewrites the whole file per record, and calling it in a loop is
-        therefore quadratic: measured on five records it performed 5 rewrites
-        and wrote 25 rows, where this performs 1 and writes 5. Two callers were
-        doing exactly that (census A5) and a third had reached past the API into
-        `_rewrite` to avoid it — three improvisations because the store offered
-        no bulk update. `save_many` is not one: it APPENDS.
-
-        Same lock discipline as `update`, and for the same reason: read and
-        rewrite happen under one lock, because between them the file is a stale
-        copy and anything another writer appends in that window would be
-        overwritten with no error and no log line.
-
-        Unknown ids are skipped rather than raising — a caller updating what it
-        just retrieved should not fail because hygiene archived a record in
-        between. The return value is how a caller learns that happened.
-        """
+        """Replace several records in ONE rewrite. Returns how many landed."""
         by_id = {r.id: r for r in records}
         if not by_id:
             return 0
@@ -143,13 +118,7 @@ class PersistentMemoryStore:
     # ---------- reads ----------
 
     def load(self) -> list[MemoryRecord]:
-        """Full file scan — returns only LIVE (non-expired) records.
-
-        TTL eviction: records with ``ttl_seconds`` set are considered expired
-        when ``created_at + ttl_seconds <= now(UTC)``.  Expired records are
-        silently dropped from the return value **and** removed from the on-disk
-        store so they don't accumulate across restarts.
-        """
+        """Full file scan — returns only LIVE (non-expired) records."""
         all_records = self._load_raw()
         now = _dt.datetime.now(_dt.timezone.utc)
         live: list[MemoryRecord] = []
@@ -178,16 +147,12 @@ class PersistentMemoryStore:
     def _is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
         """Has this record's TTL run out as of ``now``?
 
-        One predicate, two callers, and they are not interchangeable: `active`
-        reads and evicts, `_active_unlocked` reads inside a lock its caller
-        already holds and leaves the rewrite to that caller. They must agree on
-        WHICH records are alive, or a rewrite would preserve rows the read path
-        has already stopped returning — the store would keep answering "gone"
-        while never actually letting go.
-
-        `created_at` is timezone-naive on rows written before the store moved to
-        aware timestamps. Those are read as UTC, which is what they were; a naive
-        value compared against an aware `now` raises instead.
+        One predicate, two callers, and they are not interchangeable:
+        `active` reads and evicts, `_active_unlocked` reads inside a lock
+        its caller already holds and leaves the rewrite to that caller. They
+        must agree on WHICH records are alive, or a rewrite would preserve
+        rows the read path has already stopped returning — the store would
+        keep answering "gone" while never actually letting go.
         """
         if rec.ttl_seconds is None:
             return False
@@ -197,12 +162,7 @@ class PersistentMemoryStore:
         return expires_at <= now
 
     def _load_raw_unlocked(self) -> list[MemoryRecord]:
-        """Same as `_load_raw`, but the caller already holds the file lock.
-
-        The lock is not reentrant: `update`/`delete`/`archive_record` hold it
-        across read+rewrite, and re-taking it here deadlocks
-        (`OSError: Resource deadlock avoided`).
-        """
+        """Same as `_load_raw`, but the caller already holds the file lock."""
         if not self.path.exists():
             return []
         out: list[MemoryRecord] = []
@@ -214,12 +174,7 @@ class PersistentMemoryStore:
         return out
 
     def _load_raw(self) -> list[MemoryRecord]:
-        """Load ALL records from disk without TTL filtering.
-
-        Used by :func:`core.hygiene.expire_memory` so it can read and
-        report expired records before deleting them.  Normal callers
-        should use :meth:`load` instead.
-        """
+        """Load ALL records from disk without TTL filtering."""
         if not self.path.exists():
             return []
         out: list[MemoryRecord] = []

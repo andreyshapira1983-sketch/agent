@@ -1,23 +1,4 @@
-"""Thin LLM client wrapper.
-
-Single point of contact for the loop. Provider is selected via
-AGENT_PROVIDER env var. Supported:
-    anthropic   -> Anthropic Messages API (default)
-    openai      -> OpenAI Chat Completions
-    huggingface -> HuggingFace Inference Router (free with HF_TOKEN)
-    local       -> OpenAI-compatible local server (LM Studio, vLLM, llama.cpp)
-    mock        -> Deterministic offline stub (no network; for testing)
-
-MVP-14.5c — Usage tracking. Every successful `complete()` increments
-`call_count` and accumulates `input_tokens` / `output_tokens` /
-`total_tokens` so the audit harness (and future cost-budget hooks)
-can see how many API tokens a single `run()` consumed. Token counts
-come straight from the provider's `usage` payload — Anthropic uses
-`usage.input_tokens` / `usage.output_tokens`, OpenAI-compatible APIs
-use `usage.prompt_tokens` / `usage.completion_tokens`. When the
-provider doesn't return usage we leave the counters at 0 rather than
-guess.
-"""
+"""Thin LLM client wrapper."""
 from __future__ import annotations
 
 import os
@@ -252,27 +233,7 @@ class LLM:
         *,
         allow_continuation: bool = True,
     ) -> str:
-        """Send a single-turn prompt and return the text response.
-
-        `temperature` should be 0.0 for the planner (deterministic JSON) and
-        0.5..0.9 for synthesis (a little stylistic freedom).
-
-        Large answers: when the provider stops because it hit ``max_tokens``
-        (Anthropic ``stop_reason='max_tokens'`` / OpenAI ``finish_reason=
-        'length'``) the answer is auto-continued — the partial text is fed back
-        and the model resumes where it left off — until it finishes naturally or
-        ``AGENT_MAX_CONTINUATIONS`` rounds are reached. Token usage is summed
-        across every round so the budget ledger sees the full spend.
-
-        ``allow_continuation=False`` is for callers whose answer must parse as a
-        whole — JSON, above all. Stitching cannot resume a JSON string: the
-        model comes back writing plain code where escaped code was required, and
-        the joined text is corrupt in a way no reader can tell from a model that
-        simply wrote nonsense. Three live builder replies died exactly so on
-        2026-08-04, each after paying for extra legs. Such a caller gets the
-        first leg and reads :attr:`last_answer_was_truncated` to learn why it is
-        short — asking for less is an answer; a corrupted splice is not.
-        """
+        """Send a single-turn prompt and return the text response."""
         text, stop_reason = self._complete_once(
             system, user, max_tokens, temperature, prior=None
         )
@@ -373,17 +334,8 @@ class LLM:
         temperature: float = 0.7,
         on_token: Any | None = None,
     ) -> str:
-        """Stream a single-turn prompt, invoking *on_token(text)* for each token chunk.
-
-        Returns the full accumulated text so callers can use it for post-processing
-        (verification, memory writes, etc.) exactly like :meth:`complete`.
-        Falls back to :meth:`complete` for providers that do not support streaming
-        (HuggingFace, mock).
-
-        Args:
-            on_token: Optional callable ``(str) -> None`` called for each token
-                      chunk as it arrives. Useful for live CLI display
-                      (``lambda t: print(t, end="", flush=True)``).
+        """Stream a single-turn prompt, invoking *on_token(text)* for each
+        token chunk.
         """
         if self.provider == "anthropic":
             return self._stream_anthropic(system, user, max_tokens, temperature, on_token)
@@ -510,19 +462,14 @@ class LLM:
 
     @classmethod
     def _anthropic_supports_prefill(cls, model: str) -> bool:
-        """Whether *model* accepts a trailing assistant message to continue from.
+        """Whether *model* accepts a trailing assistant message to continue
+        from.
 
-        Anthropic's native prefill — end the conversation on a partial assistant
-        turn and let the model resume it — is how `complete` continues a reply
-        cut off at `max_tokens`. Generation 5 rejects it: the request must end
-        with a user message, and sending one anyway costs the whole call.
-
-        Observed on claude-opus-5 (HTTP 400, "does not support assistant message
-        prefill"). Applied to generation 5 and later rather than to that one id,
-        for the same reason the temperature rule is. The asymmetry justifies
-        erring this way — a model wrongly sent down the fallback path still
-        answers, just via replay-and-ask; a model wrongly sent a prefill loses
-        the call.
+        Anthropic's native prefill — end the conversation on a partial
+        assistant turn and let the model resume it — is how `complete`
+        continues a reply cut off at `max_tokens`. Generation 5 rejects it:
+        the request must end with a user message, and sending one anyway
+        costs the whole call.
         """
         generation = cls._anthropic_generation(model)
         return generation is None or generation < 5
@@ -593,12 +540,6 @@ class LLM:
     def _reasoning_budget(self, max_tokens: int) -> int:
         """Effective token budget for an OpenAI reasoning model.
 
-        For these models ``max_completion_tokens`` covers internal reasoning
-        AND the visible answer, so a budget sized for the answer alone can be
-        spent entirely on reasoning — yielding ``content=None`` with
-        ``finish_reason='length'`` and no error. Treat the caller's request as
-        a floor and give reasoning room above it.
-
         Never lowers a caller's budget: a caller that already asked for more
         than the floor keeps its own, larger value.
         """
@@ -608,16 +549,7 @@ class LLM:
         return max(max_tokens, floor)
 
     def _effective_budget(self, max_tokens: int) -> int:
-        """Tokens the next leg will really be allowed to spend.
-
-        Mirrors what :meth:`_complete_once` ends up sending: reasoning models
-        get the floor applied inside :meth:`_complete_openai_compatible`, every
-        other provider and model gets the caller's number verbatim.
-
-        Kept as a separate method so the continuation loop escalates from the
-        real cost of a leg rather than from a request that was already silently
-        raised underneath it.
-        """
+        """Tokens the next leg will really be allowed to spend."""
         if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
             return self._reasoning_budget(max_tokens)
         return max_tokens
@@ -693,12 +625,7 @@ class LLM:
 
     @staticmethod
     def _mock_plan(user: str) -> str:
-        """Heuristic stand-in for an LLM planner.
-
-        Inspects the user prompt for cues about the question and any file hint,
-        then emits a deterministic JSON plan with the same shape a real model
-        would return. Good enough to exercise the parser end-to-end offline.
-        """
+        """Heuristic stand-in for an LLM planner."""
         import json as _json
         import re as _re
 

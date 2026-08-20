@@ -1,6 +1,4 @@
 """The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report.
-
-Extracted from `core/verifier` by autonomous self-build module split.
 """
 from __future__ import annotations
 
@@ -74,13 +72,7 @@ def _memory_citation_is_independent(ev: Evidence) -> bool:
 
 
 def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence | None:
-    """Session-dialogue evidence that legitimately supports this chunk.
-
-    Scope is the whole point (issue #119): the verbatim record of what was said
-    this session supports a claim *about that exchange* and nothing else. A
-    world claim sitting in the same answer gets no credit from it, so the
-    ordinary unsupported-claim filtering is untouched.
-    """
+    """Session-dialogue evidence that legitimately supports this chunk."""
     if not is_dialogue_scoped_claim(chunk_text):
         return None
     for ev in chain.evidences:

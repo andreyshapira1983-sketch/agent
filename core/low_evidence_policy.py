@@ -1,51 +1,17 @@
 """Low-evidence answer policy.
 
-Empirical observation from live runs: when the verifier produces a low
-``evidence_score`` (e.g. 0.0 with ``verified=6, unverified=33``), the
-agent still emits a long, polished answer — a 30-day product launch
-plan, a market report, a step-by-step business strategy. The
-:mod:`core.evidence_support` already reports this as
-``evidence_support``, but it is purely observational: the long,
-under-supported answer ships unchanged.
+* keeps only the chunks the verifier marked ``verified``; * states
+explicitly that evidence was insufficient (in the user's locale, EN or RU);
+* downgrades the Output Contract ``Confidence`` line to ``low``; * routes
+the suppressed bulk into the ``Unverified`` section so the count is visible
+to the operator.
 
-This module is the *enforcement* layer paired with the gate. When
-the verifier's verdict distribution is *severely* below threshold, the
-final answer is rewritten to a short, honest reply that:
-
-  * keeps only the chunks the verifier marked ``verified``;
-  * states explicitly that evidence was insufficient (in the user's
-    locale, EN or RU);
-  * downgrades the Output Contract ``Confidence`` line to ``low``;
-  * routes the suppressed bulk into the ``Unverified`` section so
-    the count is visible to the operator.
-
-The policy fires *strictly* — its trigger is more conservative than the
-informational evidence-support telemetry so it cannot quietly truncate
-borderline answers.
-
-Trigger contract::
-
-    supported = verified + dialogue_supported
-
-    triggered iff
-        report.total_chunks >= MIN_TOTAL
-      and supported_ratio = supported / total <= MAX_VERIFIED_RATIO
-      and (
-            supported == 0
-         or unverified + cited_unmatched + topic_supported >= UNVERIFIED_FLOOR
-      )
-
-The last clause is a safety net: a 5-chunk answer with 1 verified +
-4 unverified would otherwise pass the ratio gate accidentally because
-the small denominator leaves the agent room to be wrong about most
-claims.
-
-``dialogue_supported`` joins the numerator because of issue #119: a
-claim about *this session's own exchange* is backed by the verbatim
-transcript, so counting it as unsupported mass is what let the gate
-delete a valid self-correction. It is support, not verification — it
-is never folded into ``verified_chunks``, and a world claim never
-earns it (the scoping test lives in :mod:`core.evidence_classes`).
+``dialogue_supported`` joins the numerator because of issue #119: a claim
+about *this session's own exchange* is backed by the verbatim transcript, so
+counting it as unsupported mass is what let the gate delete a valid self-
+correction. It is support, not verification — it is never folded into
+``verified_chunks``, and a world claim never earns it (the scoping test
+lives in :mod:`core.evidence_classes`).
 """
 
 from __future__ import annotations
@@ -317,20 +283,7 @@ def evaluate_low_evidence_policy(
     evidence_expected: bool = True,
     local_critique_active: bool = False,
 ) -> LowEvidencePolicyResult:
-    """Decide whether to truncate the answer because evidence is too thin.
-
-    The decision is purely a function of the verification distribution +
-    a length floor; no LLM call. When triggered, the result carries a
-    rebuilt short answer that follows the Output Contract.
-
-    Locale (EN / RU) is detected from the user's question first, then
-    falls back to the answer text. RU users get RU notices; everyone
-    else gets EN.
-
-    When ``local_critique_active`` is true (resolved referent critique
-    path), empty rewrite is forbidden even if the bulk trigger would
-    fire — the analysis target is known (critique plan PR3 invariant).
-    """
+    """Decide whether to truncate the answer because evidence is too thin."""
     if report is None:
         return LowEvidencePolicyResult(
             triggered=False, answer=answer,

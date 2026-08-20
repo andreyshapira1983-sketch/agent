@@ -1,28 +1,12 @@
 """Approval -> trusted self-apply lane bridge (TD-024).
 
-This is the *narrow* connection between the human approval surface and the
-trusted low-risk apply lane (TD-023, :mod:`core.self_apply_lane`). It does one
-thing only: take an approval-inbox item that a human has already approved,
-rehydrate the validated structured proposal it carries, and route it through
-``run_self_apply_lane``.
-
 It is deliberately *not*:
 
-  * a daemon / scheduler / agent_tick hook (never auto-triggered),
-  * a free-text patch executor (only a persisted, validated proposal is run),
-  * a widening of ``shell_exec`` or the network surface (the lane still goes
-    exclusively through :class:`core.safe_vcs.SafeVCS`, which has no push /
-    fetch / pull / remote method at all).
-
-Gate order in :func:`run_approved_self_apply` (first trip wins, all *before*
-any file is touched):
-
-  1. item missing / not approved            -> status="approval_required"
-  2. wrong operation / invalid payload       -> status="needs_validated_proposal"
-  3. patch not low-risk                       -> status="risk_rejected"
-  4. otherwise -> run_self_apply_lane exactly once; its status is surfaced
-     unchanged (budget_kill_switch / budget_wait / approval_wait / rejected /
-     rolled_back / committed_local / error).
+* a daemon / scheduler / agent_tick hook (never auto-triggered), * a free-
+text patch executor (only a persisted, validated proposal is run), * a
+widening of ``shell_exec`` or the network surface (the lane still goes
+exclusively through :class:`core.safe_vcs.SafeVCS`, which has no push /
+fetch / pull / remote method at all).
 
 Only terminal lane statuses (``committed_local`` / ``rolled_back``) mark the
 inbox item executed; transient refusals (``budget_kill_switch`` /
@@ -273,15 +257,7 @@ def run_approved_self_apply(
     gateway: Any = None,
     dry_run: bool = False,
 ) -> dict:
-    """Route one approved inbox item through the trusted self-apply lane.
-
-    Returns a normalized result dict (always includes ``proposal_id`` and the
-    lane report fields). Marks the item executed only on a terminal lane
-    status. ``lane`` is injectable purely so tests can substitute a fake.
-    ``registry`` is an optional TD-031 :class:`SubagentRegistry`; when ``None``
-    (default) behaviour is unchanged. Lane outcomes are recorded best-effort and
-    a registry write failure never affects the self-apply flow.
-    """
+    """Route one approved inbox item through the trusted self-apply lane."""
     item = inbox.get(item_id)
     if item is None:
         return _refusal(

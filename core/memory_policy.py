@@ -82,12 +82,11 @@ class MemoryWritePolicy:
 
     def __init__(self, frozen_sources: Iterable[str] = ()):
         """`frozen_sources` names write sources that are blocked in this
-        context (run-scoped). Used by the operator brake to freeze
-        agent-initiated ("agent-auto") memory writes so the agent cannot
-        silently grow its own persistent memory without a human in the
-        loop. Empty by default — existing behaviour is unchanged. User
-        writes (source='user-explicit') are never frozen unless explicitly
-        listed.
+        context (run-scoped). Used by the operator brake to freeze agent-
+        initiated ("agent-auto") memory writes so the agent cannot silently
+        grow its own persistent memory without a human in the loop. Empty by
+        default — existing behaviour is unchanged. User writes
+        (source='user-explicit') are never frozen unless explicitly listed.
         """
         self.frozen_sources: frozenset[str] = frozenset(
             (s or "").strip().lower() for s in frozen_sources if s
@@ -126,17 +125,16 @@ class MemoryWritePolicy:
     ) -> MemoryWriteDecision:
         """Decide whether `content` may reach persistent storage.
 
-        `existing` lets the policy refuse near-duplicates of records
-        already on disk. Pass `store.load()` from the caller — the
-        policy never reads the store itself, keeping it a pure
-        function over inputs.
+        `existing` lets the policy refuse near-duplicates of records already
+        on disk. Pass `store.load()` from the caller — the policy never
+        reads the store itself, keeping it a pure function over inputs.
 
-        `recent_writes` is the time-windowed rolling log of recent
-        `agent-auto` writes (from `core.memory_echo_antibody`). When
-        supplied, the Memory Echo Antibody (A1) refuses an `agent-auto`
-        record that merely re-states something the agent already wrote in
-        the last window — the "echo chamber" failure mode. `user-explicit`
-        writes are never affected.
+        `recent_writes` is the time-windowed rolling log of recent `agent-
+        auto` writes (from `core.memory_echo_antibody`). When supplied, the
+        Memory Echo Antibody (A1) refuses an `agent-auto` record that merely
+        re-states something the agent already wrote in the last window — the
+        "echo chamber" failure mode. `user-explicit` writes are never
+        affected.
         """
         reasons: list[str] = []
         tags_set = {t.strip().lower() for t in tags if t}
@@ -419,13 +417,6 @@ def _record_prompt_note(record: MemoryRecord) -> str:
 class RetrievalSelection:
     """What `select` kept, and why each of the rest did not make it.
 
-    The reasons are produced where the decision is taken. An observer that
-    re-derives them by subtracting list lengths cannot separate causes it
-    never saw: `len(candidates) - len(selected)` reads a `max_records`
-    cut-off and a score below the floor as one number, and reports whichever
-    label the caller happened to write down. Measured on the live store, that
-    inference was wrong for 4 of 6 realistic questions.
-
     Counts are aggregated **by reason, never per record** — a per-record
     trace would grow with the store and cost more than the retrieval it
     observes. A reason that did not fire is absent, not zero.
@@ -436,12 +427,7 @@ class RetrievalSelection:
 
 
 class MemoryRetrievalPolicy:
-    """Picks the few persistent records most relevant to the current question.
-
-    No embeddings, no vectors — keyword overlap with stopword filtering,
-    plus a recency tiebreaker. That is the MVP-5 contract: smart enough to
-    surface obvious matches, dumb enough to be deterministic and testable.
-    """
+    """Picks the few persistent records most relevant to the current question."""
 
     def __init__(
         self,

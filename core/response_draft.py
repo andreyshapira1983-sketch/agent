@@ -95,12 +95,7 @@ class ResponseDraft:
     # ── contributing ─────────────────────────────────────────────────────
 
     def add_notice(self, *, author: str, channel: Channel, text: str) -> bool:
-        """Attach something the deciders say *about* the answer.
-
-        Returns whether it was attached. A blank notice, or one already present
-        verbatim in the body, is skipped — both are the checks the call sites
-        performed inline before this object existed.
-        """
+        """Attach something the deciders say *about* the answer."""
         if channel not in NOTICE_CHANNELS:
             raise ValueError(f"not a notice channel: {channel!r}")
         if not text or not text.strip():
@@ -113,12 +108,7 @@ class ResponseDraft:
         return True
 
     def set_body(self, text: str, *, by: str) -> None:
-        """Rewrite the claims. Records who superseded whom.
-
-        Rewriting is a legitimate act — it is what truncation does. What was
-        not legitimate was doing it to a variable that also held other
-        deciders' notices.
-        """
+        """Rewrite the claims. Records who superseded whom."""
         if text == self.body:
             return
         self.body_history.append(
@@ -149,13 +139,7 @@ class ResponseDraft:
     # ── auditing ─────────────────────────────────────────────────────────
 
     def missing_from(self, rendered: str) -> list[Contribution]:
-        """Notices whose text did not make it into *rendered*.
-
-        The invariant this object exists to hold: a decider that contributed
-        something either sees it in the answer or sees itself recorded as
-        superseded. Anything this returns is a contribution that vanished with
-        neither, which is a defect by construction rather than by opinion.
-        """
+        """Notices whose text did not make it into *rendered*."""
         return [n for n in self.notices if n.text not in rendered]
 
     def to_log_payload(self, rendered: str | None = None) -> dict[str, Any]:

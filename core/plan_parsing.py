@@ -14,23 +14,8 @@ from typing import Any
 
 
 def _strip_markdown_fence(text: str) -> str | None:
-    """Return the body of a ```` ``` ````/```` ```json ```` block, else ``None``.
-
-    This replaces ``^```(?:json)?\\s*(.*?)\\s*```\\s*$`` under ``DOTALL``. In
-    that pattern ``.`` and ``\\s`` both matched a blank, so every space between
-    the opening fence and the body could be claimed by either side and the
-    engine tried each split before concluding there was no closing fence.
-    Measured: 2.9 s for 2000 trailing blanks, 65.6 s for 4000 — and the input
-    is a model reply, so a truncated answer that opens a fence and never closes
-    it is enough to stall the planner. Reading the string directly is linear.
-
-    The rules are the old ones, kept literally: the fence must open at the very
-    first character; ``json`` is stripped only in lower case, as ``(?:json)?``
-    had no ``IGNORECASE``; trailing whitespace after the closing fence is
-    allowed; the closing fence is the last one, since ``\\s*$`` forced the lazy
-    body to grow past any earlier ```` ``` ````; and the body is stripped.
-    Checked against the old pattern on 26 hand-written cases and 2793 generated
-    fence-like strings: identical answers, every one.
+    """Return the body of a ```` ``` ````/```` ```json ```` block, else
+    ``None``.
     """
     if not text.startswith("```"):
         return None
@@ -174,16 +159,9 @@ _SCAN_RESTART_CAP = 32
 def embedded_json_objects(text: str) -> Iterator[str]:
     """Every balanced ``{...}`` span in `text`, left to right.
 
-    Yields rather than returning the first, because the first is often not the
-    answer: a model narrating "the block builds {'k': 1} before writing" leaves
-    a balanced span that parses as nothing, and an earlier illustrative object
-    ("here is the shape I will return: {...}") parses fine while being the wrong
-    object. Taking only the leftmost defeats the fix in exactly the
-    narrating-model case it exists for.
-
-    Brace counting is string-aware: a `{` inside a JSON string value — common
-    here, since `proposed_content` carries Python code — must not open a level,
-    and the matching `}` must not close one early.
+    Brace counting is string-aware: a `{` inside a JSON string value —
+    common here, since `proposed_content` carries Python code — must not
+    open a level, and the matching `}` must not close one early.
     """
     index = 0
     restarts = 0

@@ -1,32 +1,30 @@
-"""Live Model Discovery + Provider Catalog diff — read-only / dry-run (TD-011/012).
+"""Live Model Discovery + Provider Catalog diff — read-only / dry-run
+(TD-011/012).
 
 This module is deliberately conservative. It exposes:
 
-* :func:`build_discovery_audit` — a purely LOCAL, no-network snapshot of provider
-  discovery readiness (which providers are supported, have a live fetcher, and
-  have credentials configured) plus what the current on-disk catalog knows. It
-  never touches the network and never writes anything. This backs the
-  ``:model-discovery-audit`` command.
+* :func:`build_discovery_audit` — a purely LOCAL, no-network snapshot of
+provider discovery readiness (which providers are supported, have a live
+fetcher, and have credentials configured) plus what the current on-disk
+catalog knows. It never touches the network and never writes anything. This
+backs the ``:model-discovery-audit`` command.
 
 * :func:`build_discovery_report` — a DRY-RUN discovery: it queries the model
-  lists of the providers that can be queried, classifies them, and diffs the
-  result against the current ``config/model_catalog.json``. It performs real
-  provider metadata calls (non-inference, but still network) ONLY for providers
-  that are supported, have a fetcher, and have credentials.
-  It NEVER writes the catalog. This backs ``:provider-catalog-refresh --dry-run``.
+lists of the providers that can be queried, classifies them, and diffs the
+result against the current ``config/model_catalog.json``. It performs real
+provider metadata calls (non-inference, but still network) ONLY for
+providers that are supported, have a fetcher, and have credentials. It NEVER
+writes the catalog. This backs ``:provider-catalog-refresh --dry-run``.
 
-Hard limits (by design, enforced here):
-  - no catalog write (discovery is read-only; refresh/write stays in
-    :func:`core.model_catalog.refresh_catalog` / the ``:refresh-models`` command);
-  - no registry overwrite;
-  - no automatic model switching;
-  - no self-update;
-  - no LLM inference calls;
-  - no secrets in any output (only env-var NAMES and booleans are surfaced).
+Hard limits (by design, enforced here): - no catalog write (discovery is
+read-only; refresh/write stays in :func:`core.model_catalog.refresh_catalog`
+/ the ``:refresh-models`` command); - no registry overwrite; - no automatic
+model switching; - no self-update; - no LLM inference calls; - no secrets in
+any output (only env-var NAMES and booleans are surfaced).
 
 Querying a provider's model list is metadata-only / non-inference, but it is
-still an external provider call and is only ever made from the explicit dry-run
-path, never from the audit path or a normal run.
+still an external provider call and is only ever made from the explicit dry-
+run path, never from the audit path or a normal run.
 """
 from __future__ import annotations
 
@@ -52,12 +50,7 @@ def _provider_env_names(provider: str) -> tuple[str, ...]:
 
 
 def _has_credentials(provider: str) -> bool:
-    """True when every required env var for *provider* is set (non-empty).
-
-    Providers with no known env requirement (e.g. ``mock``) are treated as
-    having no discoverable credentials here because they also have no live
-    fetcher — they are surfaced as unsupported-for-discovery, not queryable.
-    """
+    """True when every required env var for *provider* is set (non-empty)."""
     required = _provider_env_names(provider)
     if not required:
         return False
@@ -304,13 +297,7 @@ def build_discovery_audit(
     *,
     providers: list[str] | None = None,
 ) -> DiscoveryReport:
-    """LOCAL, no-network discovery readiness snapshot.
-
-    Reports which providers are supported / have a fetcher / have credentials,
-    and what the current on-disk catalog knows. Makes NO provider calls and
-    writes nothing. ``router`` is accepted for symmetry with other audits but is
-    not required.
-    """
+    """LOCAL, no-network discovery readiness snapshot."""
     requested = {p.lower() for p in providers} if providers else None
     current = mc._load_catalog()
     rows: list[ProviderDiscovery] = []

@@ -53,12 +53,7 @@ from core.instruction_conflict_gate import AuthorityLevel, Directive
 
 @dataclass(frozen=True)
 class Stance:
-    """One position on an axis, and the wordings that signal it.
-
-    ``demand`` is the stable label written into the ``Directive``. Two sources
-    reaching the same stance share it verbatim, which is what stops "the same
-    requirement, said differently" from being reported as a contradiction.
-    """
+    """One position on an axis, and the wordings that signal it."""
 
     demand: str
     patterns: tuple[str, ...]
@@ -66,12 +61,7 @@ class Stance:
 
 @dataclass(frozen=True)
 class Axis:
-    """A decision that can only be settled one way.
-
-    Stances on the same axis are mutually exclusive by construction — that is
-    the whole claim this module makes, and the reason conflict detection can be
-    deterministic.
-    """
+    """A decision that can only be settled one way."""
 
     subject: str
     stances: tuple[Stance, ...]
@@ -290,12 +280,7 @@ _POST_NEGATION = re.compile(
 
 
 def _is_negated(sentence: str, match_start: int, match_end: int) -> bool:
-    """True when a negation flips the matched phrase.
-
-    Patterns that spell out their own negation ("не менять порядок") consume the
-    negation themselves, so nothing precedes the match and this correctly
-    returns False.
-    """
+    """True when a negation flips the matched phrase."""
     preceding = _WORD.findall(sentence[:match_start].lower())
     if any(
         word in _NEGATIONS
@@ -317,13 +302,7 @@ def _sentences(text: str) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 def extract(sources: Iterable[SourceText]) -> tuple[Directive, ...]:
-    """Extract ranked directives from tagged instruction text.
-
-    One directive per (source, axis, stance): a source that repeats the same
-    stance in three sentences states one requirement, not three. The first
-    matching sentence is kept as the verbatim quote, so the operator sees the
-    source's own words in the conflict report.
-    """
+    """Extract ranked directives from tagged instruction text."""
     found: list[Directive] = []
     seen: set[tuple[str, str, str, str]] = set()
 

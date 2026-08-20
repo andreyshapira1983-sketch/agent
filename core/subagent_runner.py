@@ -165,17 +165,7 @@ def _compute_structural_confidence(answer: str) -> float:
 
 
 def _estimate_complexity(objective: str) -> str:
-    """Classify objective complexity as 'trivial', 'standard', or 'complex'.
-
-    Based on 'More Agents Is All You Need' (Li et al., 2024): performance
-    gains from multi-agent work are near-zero for trivially easy tasks
-    (low inherent difficulty, few reasoning steps) and peak at medium
-    difficulty.
-
-    'trivial'  → short, no research keywords; parent synthesizer could answer
-    'standard' → typical independent sub-task worth spawning
-    'complex'  → multi-step research; benefits most from a dedicated agent
-    """
+    """Classify objective complexity as 'trivial', 'standard', or 'complex'."""
     word_count = len(objective.split())
     text = objective.lower()
     has_research_kw = any(kw in text for kw in _RESEARCH_KEYWORDS)
@@ -189,24 +179,7 @@ def _estimate_complexity(objective: str) -> str:
 
 @dataclass(frozen=True)
 class SubAgentRunResult:
-    """Structured result returned by SubAgentRunner.run().
-
-    The parent loop embeds ``to_evidence_text()`` into its evidence chain so
-    the synthesiser can cite sub-agent findings with a stable label.
-
-    Quality fields
-    --------------
-    confidence_score : float [0.0, 1.0]
-        Structural heuristic: length + specificity - hedging.  No extra
-        LLM call — computed from the answer text alone.
-    quality_score : int [1–5], 0 = not judged
-        LLM judge score (Agent Importance Score, DyLAN-inspired).
-        0 means the judge call failed or was skipped.
-    complexity_tier : str  "trivial" | "standard" | "complex"
-        Pre-run estimate of the objective complexity.  Surfaces in the
-        Evidence so the parent synthesiser can learn when sub-agents are
-        over-allocated.
-    """
+    """Structured result returned by SubAgentRunner.run()."""
 
     contract_name: str   # human-readable identifier, e.g. "WebResearcher"
     role: str            # role description, e.g. "Web research specialist"
@@ -266,25 +239,7 @@ class SubAgentRunResult:
 
 
 class SubAgentRunner:
-    """Creates and runs a bounded child AgentLoop for one sub-agent contract.
-
-    Parameters
-    ----------
-    workspace_root:
-        Absolute path to the workspace.  Forwarded to tools that need it
-        (``FileReadTool``, ``ListDirTool``, etc.).
-    policy:
-        The same PolicyGate as the parent.  Sub-agents share the policy
-        contract — they cannot bypass rules the parent is subject to.
-    model_router:
-        The parent's ModelRouter.  Sub-agents reuse the same LLM pool and
-        usage ledger, so their token spend is accounted for correctly.
-    parent_registry:
-        The parent's full ToolRegistry.  Used to clone the subset of tools
-        the sub-agent is allowed to use.
-    log_dir:
-        Directory where child trace logs are written.
-    """
+    """Creates and runs a bounded child AgentLoop for one sub-agent contract."""
 
     def __init__(
         self,
@@ -313,15 +268,10 @@ class SubAgentRunner:
     ) -> SubAgentRunResult:
         """Execute a canonical contract after strict capability prechecks.
 
-        This compatibility entry point is intentionally strict.  The current
-        child loop is stateless, read-only, and single-iteration, so policy it
-        cannot honour is refused rather than silently ignored.  The legacy
+        This compatibility entry point is intentionally strict. The current
+        child loop is stateless, read-only, and single-iteration, so policy
+        it cannot honour is refused rather than silently ignored. The legacy
         :meth:`run` API remains available while callers migrate in stages.
-
-        Exact child-trace tool/attempt observations are attached as a typed
-        receipt and audited after the run. Per-contract model-call/cost
-        accounting remains unknown until the shared usage ledger carries trace
-        attribution; verifier execution is also a later stage.
         """
         if contract.approval_required and not approved:
             raise SubagentContractRefused(
@@ -566,13 +516,7 @@ class SubAgentRunner:
         *,
         approved: bool,
     ) -> SubagentExecutionReceipt:
-        """Build only observations the current runner can prove.
-
-        Tool calls and attempts come from the flushed child trace.  Persistent
-        memory is structurally absent from the child loop.  Model usage and
-        cost remain unknown because the current usage ledger is shared and has
-        no trace id, so a process-wide delta cannot safely be attributed here.
-        """
+        """Build only observations the current runner can prove."""
         used_tools, iterations = self._trace_observations(result.trace_id)
         return SubagentExecutionReceipt(
             contract_id=contract.contract_id,
@@ -629,13 +573,9 @@ class SubAgentRunner:
     def _judge_answer(self, objective: str, answer: str) -> int:
         """Rate sub-agent answer quality via a single lightweight LLM call.
 
-        Inspired by DyLAN's Agent Importance Score: ask a downstream
-        evaluator to rate the upstream agent's output 1–5, then propagate
-        that score back to the parent as a quality signal.
-
         Returns int 1–5 on success, 0 if the judge call fails (network
-        error, parse error, or mock LLM in tests).  0 means 'not judged'
-        and must not be treated as a low score.
+        error, parse error, or mock LLM in tests). 0 means 'not judged' and
+        must not be treated as a low score.
         """
         try:
             judge_llm = self.model_router.for_role("synthesizer")

@@ -162,19 +162,13 @@ class LLMPlanner:
     ) -> PlannerOutput:
         """Ask the LLM for a plan.
 
-        `failure_context` is the formatted `<replan_context>` block built by
-        `AgentLoop` from previous attempts' `ReplanTrigger`s. Empty on the
-        first attempt; non-empty on every replan. The block sits AFTER
-        conversation history and IMMEDIATELY BEFORE the question so the
-        model reads the failure right before it decides what to try.
-
         `forbidden_actions` (MVP-12) is a tuple of (tool, args_json) pairs
-        the sanitiser must REJECT. Populated by `ReplanPolicy` for
-        failures whose budget has `requires_different_action=True`
-        (approval_deny, policy_blocked, etc.).
+        the sanitiser must REJECT. Populated by `ReplanPolicy` for failures
+        whose budget has `requires_different_action=True` (approval_deny,
+        policy_blocked, etc.).
 
-        `llm` — optional per-call override (adaptive routing). When provided,
-        it replaces `self.llm` for this single call only.
+        `llm` — optional per-call override (adaptive routing). When
+        provided, it replaces `self.llm` for this single call only.
         """
         user_prompt = self._build_user_prompt(
             question, file_hint, history, failure_context

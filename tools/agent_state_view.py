@@ -1,36 +1,11 @@
 #!/usr/bin/env python3
 """Read-only view of this agent's own state, for whoever is watching it.
 
-The operator's question, 2026-08-05: can the autonomous agent and an assistant
-coordinate instead of losing each other between sessions? MCP runs
-client → server, and Claude Code is a CLIENT — so the working direction is the
-reverse of the intuitive one: the AGENT exposes a server, and the assistant
-connects to it.
-
 ## Read-only, and that is a design decision rather than a first version
 
-Every tool here reads a store and returns what it found. Nothing enqueues,
-approves, writes or deletes. Two reasons, both worth keeping:
-
-**The loop needs a brake.** An autonomous agent that can ask an assistant which
-can edit code and run commands is a cycle with no human in it. This repository
-already owns the right gate — `ActuationGateway` and the approval inbox — and
-a write path added here would sit beside that gate rather than behind it.
-
-**The interface is not knowable yet.** What the agent will actually want to ask
-is unmeasured. Designing the answer channel before the first real question is
-how you build the wrong one; the same mistake, in miniature, as guessing a
-field name instead of reading it.
-
-## Failure is reported, never swallowed (MIR-077)
-
-A store that will not open returns `{"error": ...}` naming the store and the
-exception type. An empty list and an unreadable file are different facts, and
-a reader who cannot tell them apart is worse off than one who gets an error.
-
-No `mcp` import here on purpose. That package brings 18 direct dependencies —
-starlette, uvicorn, sse-starlette, websockets, pyjwt[crypto], typer, rich —
-and this repository pins and locks everything it ships, with an SBOM. A
+No `mcp` import here on purpose. That package brings 18 direct dependencies
+— starlette, uvicorn, sse-starlette, websockets, pyjwt[crypto], typer, rich
+— and this repository pins and locks everything it ships, with an SBOM. A
 read-only viewer the agent never imports does not justify that expansion of
 the supply chain, so the transport lives in `agent_mcp_server.py` and the
 reading lives here, testable with nothing installed.
@@ -52,23 +27,7 @@ _LOGS = REPO / "logs"
 
 
 def _read_jsonl(path: Path, *, last: int = 0) -> Any:
-    """Rows of a JSONL store, or a named error -- never a silent empty list.
-
-    Streams line by line. `read_text().splitlines()` held the whole file plus
-    the whole list of lines in memory at once, and the largest journal in this
-    workspace is already 5 MB across 292 files -- a viewer that dies reading
-    the log is worse than no viewer, because it fails exactly when the run was
-    long enough to be worth looking at.
-
-    `last` is served by a bounded `deque`, so asking for the final 40 events of
-    a million-line journal costs 40 rows of memory rather than a million.
-    `total` counts every row the reader could PARSE; the rest are in
-    `unreadable_rows`, and the two never overlap. The docstring used to say
-    "every row", which contradicted the test one screen away asserting
-    `total == 2, unreadable_rows == 1` for a three-line file (review of
-    #317). Both numbers are kept because "the last 40 of 12 000" and "the
-    last 40 of 40" are different facts about the same answer.
-    """
+    """Rows of a JSONL store, or a named error -- never a silent empty list."""
     if not path.exists():
         return {"error": "missing", "store": path.name,
                 "detail": "the store has never been written"}
@@ -105,17 +64,10 @@ def _payload(row: dict) -> dict:
 def agent_status() -> str:
     """Daemon liveness, run mode, pending approvals, self-build state.
 
-    Calls the agent's own `_print_status` in-process and captures what it
-    writes, rather than shelling out to `agent_tick.py --status`. Two reasons,
-    and the second is the repository's own rule:
-
-    It is the SAME code, so this cannot drift into a second opinion about the
-    agent's state -- the failure mode a re-implementation would have.
-
-    And notebook section 7: diagnostics may not spawn processes or cause side
-    effects. That rule was written after subprocess-based diagnostics broke 20
-    tests by intercepting pytest's own process spawning. A read-only viewer is
-    diagnostics; the rule applies to it.
+    And notebook section 7: diagnostics may not spawn processes or cause
+    side effects. That rule was written after subprocess-based diagnostics
+    broke 20 tests by intercepting pytest's own process spawning. A read-
+    only viewer is diagnostics; the rule applies to it.
     """
     import contextlib
     import io
@@ -141,14 +93,7 @@ def agent_status() -> str:
 
 
 def task_queue() -> dict:
-    """Runtime tasks with their status, attempts and last error.
-
-    One store. Until 2026-08-05 there were two and this returned both, because
-    the daemon read `data/task_queue.jsonl` while everything an operator
-    touched wrote `data/runtime_tasks.jsonl` -- a task could be pending in one
-    and invisible to the process meant to run it. That is fixed; the second
-    store is gone, and so is the two-headed view of it.
-    """
+    """Runtime tasks with their status, attempts and last error."""
     result = _read_jsonl(_DATA / "runtime_tasks.jsonl")
     if "rows" not in result:
         return result
@@ -193,11 +138,8 @@ def approval_inbox() -> dict:
 
 
 def recent_episodes(limit: int = 10) -> dict:
-    """The agent's own record of its last runs: question, outcome, verdict counts.
-
-    `verified_chunks` here is the number MIR-060 is about — it counts claims
-    whose citation resolved, which since direction (b) also means the
-    arithmetic did not refute them.
+    """The agent's own record of its last runs: question, outcome, verdict
+    counts.
     """
     result = _read_jsonl(_DATA / "episodic_memory.jsonl", last=max(1, min(limit, 50)))
     if "rows" not in result:
@@ -217,16 +159,12 @@ def recent_episodes(limit: int = 10) -> dict:
 def run_journal(limit: int = 40, event_filter: str = "") -> dict:
     """Events from the most recent run log, newest last.
 
-    `event_filter` is a comma-separated list of event names; empty means all.
-    This is where a failure now leaves a trace -- before MIR-077 closed, 46
-    handlers in `core/` swallowed one without writing anything here.
-
     Streams the file and keeps only the last N MATCHED events in a bounded
-    deque. The first version made `_read_jsonl` stream and then called it with
-    `last=0`, materialising every row and filtering into a second list -- the
-    plumbing was fixed and the one tap that pours 5 MB was left open (review
-    of #317). Filtering has to happen DURING the walk, because `last` counts
-    matches and the reader cannot know which rows match.
+    deque. The first version made `_read_jsonl` stream and then called it
+    with `last=0`, materialising every row and filtering into a second list
+    -- the plumbing was fixed and the one tap that pours 5 MB was left open
+    (review of #317). Filtering has to happen DURING the walk, because
+    `last` counts matches and the reader cannot know which rows match.
     """
     try:
         logs = sorted(_LOGS.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
@@ -277,27 +215,7 @@ def run_journal(limit: int = 40, event_filter: str = "") -> dict:
 
 
 def open_defects() -> dict:
-    """Registered defects that are still open, from the agent's own registry.
-
-    The registry it reads was the single owner of defect status, so that an
-    assistant and the agent argued from the same list instead of each keeping
-    its own.
-
-    That file was deleted from the repository on 2026-08-06 and this function
-    returned `{"error": "missing"}` on every call for nine days — verified, not
-    assumed. It was left in place rather than removed because the contract still
-    held the day a registry came back. It came back on 2026-08-14.
-
-    **The status line is parsed by `scripts/registry_tally.py`, never here.**
-    Restoring the registry exposed why that matters: this function used to carry
-    its own regex, `` \\*\\*Status:\\*\\*\\s*`?(\\w+)`? ``, which cannot match a
-    bold-wrapped verdict — and 16 entries write `**Status:** **`fixed`**`. Each
-    of those parsed as `?`, `?` is not in the closed set, so every one was
-    reported OPEN: `open_count` said 55 where the registry held 39. Two readers
-    of one field, one of them wrong, and the wrong one was the one an assistant
-    saw. The tally script's parser is the single reader now, so this view cannot
-    drift from the count the build checks.
-    """
+    """Registered defects that are still open, from the agent's own registry."""
     path = REPO / "docs" / "audit" / "MASTER_ISSUE_REGISTRY.md"
     if not path.exists():
         return {"error": "missing", "store": path.name}

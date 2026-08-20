@@ -176,18 +176,7 @@ def extract_from_question(
     run_id: str = "",
     known_language: str | None = None,
 ) -> list[Assumption]:
-    """Extract implicit assumptions from the raw question text.
-
-    Pure function — no I/O, no side effects.
-
-    Parameters
-    ----------
-    known_language:
-        If the ``UserProfile`` (Layer 4) already has a confirmed language
-        (``"ru"`` or ``"en"``), pass it here so the heuristic is skipped and
-        replaced by a higher-confidence profile-backed assumption.  When
-        ``None`` the regex heuristic runs as usual.
-    """
+    """Extract implicit assumptions from the raw question text."""
     assumptions: list[Assumption] = []
 
     # Language assumption
@@ -444,13 +433,7 @@ class AssumptionRegistry:
 # ---------------------------------------------------------------------------
 
 class AssumptionStore:
-    """Append-only JSONL store for Assumption objects across runs.
-
-    Each line in the JSONL file is a single serialised ``Assumption``.
-    A corrupted line is skipped — one bad row must not sink the store — but it
-    is counted in :attr:`last_dropped_rows` and logged, so a shorter list can
-    be told apart from a shorter file (MIR-077).
-    """
+    """Append-only JSONL store for Assumption objects across runs."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)

@@ -1,26 +1,9 @@
 """Episodic memory hygiene — staleness scoring and pruning.
 
-Chroma's *Context Rot* study (Jul 2025) shows model performance degrades
-non-uniformly with input length on simple tasks; distractors compound
-the drop. Our :class:`core.smart_memory.EpisodicMemoryStore` already
-caps the file at ``max_episodes``, but the eviction is purely FIFO over
-*non-protected* episodes.  That's coarse:
-
-* It evicts useful old high-quality answers before junk recent ones.
-* It keeps low-quality ``replan_exhausted`` failures around as long as
-  they are recent — these end up as distractors in retrieval.
-
-This module computes a **staleness score** combining age, outcome,
-quality, and explicit failure flags so the store can prune the worst
-candidates first. Protected tags (``lesson``, ``bug-fix``,
-``regression-guard``) are still untouchable.
-
-Public API:
-
 * :func:`score_staleness(ep, now)` — pure scoring function. Higher = more
-  worth evicting. Always non-negative; ``inf`` for protected = NEVER.
-* :func:`select_for_pruning(episodes, *, max_age_days, ...)` — returns
-  the subset whose score crosses the threshold and that are old enough.
+worth evicting. Always non-negative; ``inf`` for protected = NEVER. *
+:func:`select_for_pruning(episodes, *, max_age_days, ...)` — returns the
+subset whose score crosses the threshold and that are old enough.
 """
 
 from __future__ import annotations
@@ -167,12 +150,9 @@ def prune_stale_episodes(
     dry_run: bool = False,
     now: datetime | None = None,
 ) -> list[str]:
-    """Apply :func:`select_for_pruning` to ``store`` and remove the
-    selected episodes. Returns the IDs of episodes that were (or, in
-    dry-run mode, would have been) deleted.
-
-    The store's file lock is held for the read+rewrite to avoid races
-    with concurrent ``save`` calls.
+    """Apply :func:`select_for_pruning` to ``store`` and remove the selected
+    episodes. Returns the IDs of episodes that were (or, in dry-run mode,
+    would have been) deleted.
     """
     # We use the store's public helpers + a re-write so we do not depend
     # on the file_lock helpers' private API. EpisodicMemoryStore.save

@@ -112,7 +112,7 @@ _Planning, verification, clarification, control loop._
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
-| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path. |
+| `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim- level short path. |
 | `core/subsystem_disagreement` | Detect disagreements between cognitive subsystems on the same turn. |
 | `core/completion_marker` | An attempt-bound channel for the synthesizer's completion declaration. |
 | `core/completion_obligation` | Did this cycle incur an obligation to observe or act, and leave it unmet? |

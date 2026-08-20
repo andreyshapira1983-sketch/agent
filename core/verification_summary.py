@@ -1,33 +1,11 @@
 """MIR-069, phase 1 — the five-point verification explanation.
 
-Operator ruling (2026-08-03): for every confirmation the agent must state in
-human language (1) what it checked, (2) by what method, (3) on what evidence,
-(4) what remains unverified, and (5) how confident it is. The loop has always
-HAD these ingredients — per-claim verdicts, matched evidence ids, disclaimers —
-but composed none of them into something a person can read: the numbers lived
-only as JSONL counters, and the operator saw at most a one-line disclaimer.
-
-This module is the missing composer. It is a pure function of the
-:class:`~core.verifier_models.VerificationReport` (plus, optionally, the
-provenance chain to resolve matched evidence ids into named sources): no LLM
-call, no I/O, no state. The loop logs the full five points as a
-``verification_explained`` journal event and appends the compact one-line
-tail to the answer through the ResponseDraft notice ledger — so a later body
-rewrite (truncation, enforcement) cannot delete the explanation.
-
-The five markers are deliberately the SAME vocabulary the daemon liveness
-probe introduced (MIR-070, `core/campaign_io.py`): every self-explanation in
-the system should read the same way.
-
-Honesty rules baked in (MIR-028 ruling):
-
-* only ``verified`` counts as confirmed;
-* ``user_asserted`` and ``dialogue_supported`` are named in point 4 as NOT
-  externally confirmed — support by the operator's words or this session's
-  transcript is stated as exactly that, never upgraded;
-* a report with nothing examined produces no answer tail (the existing
-  disclaimers already speak for that case) but still explains itself for the
-  journal.
+* only ``verified`` counts as confirmed; * ``user_asserted`` and
+``dialogue_supported`` are named in point 4 as NOT externally confirmed —
+support by the operator's words or this session's transcript is stated as
+exactly that, never upgraded; * a report with nothing examined produces no
+answer tail (the existing disclaimers already speak for that case) but still
+explains itself for the journal.
 """
 from __future__ import annotations
 
@@ -163,20 +141,11 @@ def build_verification_summary(
 ) -> VerificationSummary:
     """Compose the five points from the verifier's own numbers. Pure.
 
-    ``vector`` is the three-axis confidence diagnosis. It is optional because
-    the summary predates it and must still build without one, and it is REPORTED
-    RATHER THAN MERGED: citation integrity and task relevance answer different
-    questions, and folding them into a single word would destroy the very
-    information this argument exists to carry.
-
-    ``evidence_support`` is the applicability verdict from
-    :func:`core.evidence_support.evaluate_evidence_support`. MEASURED
-    2026-08-13: a small-talk turn logged ``no_evidence_expected`` and the tail
-    still told the operator «уверенность: нулевая» — the very conflation of
-    "no evidence was owed" with "owed and missing" that module was rewritten
-    to stop making, resurrected one consumer downstream. When the verdict
-    says no evidence was owed (and no citation was fabricated), point 5 and
-    the tail say that instead of a zero.
+    ``vector`` is the three-axis confidence diagnosis. It is optional
+    because the summary predates it and must still build without one, and it
+    is REPORTED RATHER THAN MERGED: citation integrity and task relevance
+    answer different questions, and folding them into a single word would
+    destroy the very information this argument exists to carry.
     """
     examined = sum(1 for c in report.chunks if c.verdict != "structural")
     verified = report.verified_chunks

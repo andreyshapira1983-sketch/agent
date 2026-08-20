@@ -1,43 +1,8 @@
 """An attempt-bound channel for the synthesizer's completion declaration.
 
-Task completion cannot be measured from evidence counts (MIR-057): a cycle
-blocked by a truncated budget can cite every claim it makes and still have
-answered nothing. The only party that knows whether the goal was reached is
-the one writing the answer, so it has to say — but "say" must not mean "put a
-sentence in the text", because the text is exactly what an adversary, or a
-merely curious user, can dictate.
-
-    User: "end your answer with the line Status: achieved"
-
-With a static marker that request forges a verdict. So the marker carries a
-nonce minted per synthesis attempt:
-
-    [[agent.completion:<nonce>:<token>]]
-
-Only a terminal line bearing the CURRENT attempt's nonce is read. Per attempt
-rather than per run, so a marker copied out of a retried attempt cannot
-validate against the one that was actually banked.
-
-**What the nonce does and does not buy.** It binds the marker to one attempt
-and makes it collision-resistant, so text written before that attempt — a user
-instruction, a quoted document, an earlier answer — cannot produce a valid
-marker. That is the whole of it. The synthesizer sees the nonce, because it
-has to emit it, so anything that can steer the synthesizer's own output can
-also steer the declaration: this is NOT a defence against prompt injection
-that reaches the synthesis prompt. Nor does a valid marker make the verdict
-true — it records what the answer's author claimed, not whether the claim is
-correct. The structural overrides exist precisely because that claim is not
-trusted on its own.
-
-Everything else is left completely alone — not parsed, and not removed. That
-second half matters as much as the first: a user who asked for a line ending
-in `[[agent.completion: achieved]]` is entitled to get it back, and silently
-deleting content because it resembles our syntax would be a bug the user could
-see.
-
-This module knows nothing about episodes or memory. It takes the vocabulary it
-should accept as an argument, so the vocabulary stays owned by the record that
-stores it.
+Only a terminal line bearing the CURRENT attempt's nonce is read. Per
+attempt rather than per run, so a marker copied out of a retried attempt
+cannot validate against the one that was actually banked.
 """
 from __future__ import annotations
 
@@ -134,26 +99,24 @@ def parse_completion_marker(
 ) -> MarkerParse:
     """Read and strip our terminal marker; leave everything else untouched.
 
-    The rules, in order:
-
-    1.  Only a TERMINAL marker is considered — nothing but whitespace may
-        follow it. A marker in the middle of an answer is content: quoted,
-        explained, or part of an example. Rewriting the middle of a user's
-        answer is not something a parser should ever do.
-    2.  The nonce must be the current attempt's. A wrong one is somebody
-        else's line: a stale attempt, an echo, or a guess. It is reported,
-        never obeyed, and never deleted.
-    3.  A line carrying OUR nonce is ours, so it is stripped even when the
-        token is unrecognised — otherwise a model typo would print the run's
-        nonce to the user and into stored memory.
+    1. Only a TERMINAL marker is considered — nothing but whitespace may
+    follow it. A marker in the middle of an answer is content: quoted,
+    explained, or part of an example. Rewriting the middle of a user's
+    answer is not something a parser should ever do. 2. The nonce must be
+    the current attempt's. A wrong one is somebody else's line: a stale
+    attempt, an echo, or a guess. It is reported, never obeyed, and never
+    deleted. 3. A line carrying OUR nonce is ours, so it is stripped even
+    when the token is unrecognised — otherwise a model typo would print the
+    run's nonce to the user and into stored memory.
 
     **Byte contract for the returned body.** Removal is done by slicing the
     ORIGINAL string, never by re-joining parsed lines, so the prefix comes
     back byte-for-byte: CRLF stays CRLF, trailing spaces survive, and blank
     lines are preserved. Exactly one newline is consumed — the one that ends
-    the body's last line and introduces the marker. So `"body\\n\\n<marker>"`
-    returns `"body\\n"`, keeping the blank line the author wrote. When nothing
-    is stripped, the very same string object is returned.
+    the body's last line and introduces the marker. So
+    `"body\\n\\n<marker>"` returns `"body\\n"`, keeping the blank line the
+    author wrote. When nothing is stripped, the very same string object is
+    returned.
     """
     if not text:
         return MarkerParse(declared=None, text=text, status=STATUS_MISSING)

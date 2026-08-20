@@ -1,33 +1,23 @@
 """Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec.
 
-The contract is simple and intentionally narrow:
-
-  1. BEFORE a tool mutates state, it must build a CompensationPlan
-     describing what to do to undo the change.
-  2. AFTER the mutation succeeds, the tool surfaces the plan as part of
-     its structured output.
-  3. The AgentLoop captures the plan (audit log + in-memory registry).
-  4. The user (or a future automatic re-planner) can call `rollback`
-     to apply the plan in reverse.
+1. BEFORE a tool mutates state, it must build a CompensationPlan describing
+what to do to undo the change. 2. AFTER the mutation succeeds, the tool
+surfaces the plan as part of its structured output. 3. The AgentLoop
+captures the plan (audit log + in-memory registry). 4. The user (or a future
+automatic re-planner) can call `rollback` to apply the plan in reverse.
 
 Compensation is **not** a transaction system. It is a best-effort, audit-
 trailed undo. It exists because some tools (shell_exec, file_write) are
-irreversible by nature, and the agent must be able to undo what it did
-when a subsequent step fails or a human asks "actually, undo that".
+irreversible by nature, and the agent must be able to undo what it did when
+a subsequent step fails or a human asks "actually, undo that".
 
 Supported action kinds (deliberately small):
 
-  - `delete_path_if_created` — remove a file/directory that was NOT
-    present before the tool ran (i.e. the tool itself created it)
-  - `restore_from_backup`    — copy a backup file back over a target,
-    then remove the backup (used by file_write overwrites)
-  - `noop`                   — placeholder for read-only operations
-                               that still want an audit trail entry
-
-Every Action carries enough context to rollback IDEMPOTENTLY: a second
-apply() is a no-op, not a failure. Paths are sandboxed to the workspace
-root passed at apply-time — a compensation plan from one workspace
-cannot reach into another.
+- `delete_path_if_created` — remove a file/directory that was NOT present
+before the tool ran (i.e. the tool itself created it) -
+`restore_from_backup` — copy a backup file back over a target, then remove
+the backup (used by file_write overwrites) - `noop` — placeholder for read-
+only operations that still want an audit trail entry
 """
 from __future__ import annotations
 
@@ -44,25 +34,7 @@ ActionKind = Literal["delete_path_if_created", "restore_from_backup", "noop"]
 
 @dataclass(frozen=True)
 class CompensationAction:
-    """One reversible step of a compensation plan.
-
-    Two action kinds are concrete today, plus a noop placeholder:
-
-      delete_path_if_created
-        path: str — workspace-relative path to remove
-        Used after a tool *created* a new path. Idempotent: if the
-        path was already deleted (by a human, or by an earlier apply),
-        the action succeeds silently.
-
-      restore_from_backup
-        path: str        — workspace-relative target file
-        backup_path: str — workspace-relative backup file holding the
-                           pre-change content
-        Used after a tool *overwrote* an existing file. The action
-        copies backup_path back over path, then deletes the backup.
-        Idempotent: if the backup is already gone, the action is a
-        no-op.
-    """
+    """One reversible step of a compensation plan."""
 
     kind: ActionKind
     description: str = ""

@@ -204,14 +204,7 @@ def _common_prefix_len(a: str, b: str) -> int:
 
 
 def _same_word(q_tok: str, a_tok: str) -> bool:
-    """Do two tokens denote the same content word up to inflection?
-
-    True on an exact match, or when the tokens share a common prefix that
-    is both long (>= ``_FUZZY_MIN_PREFIX`` chars) and covers most of the
-    longer token (>= ``_FUZZY_MIN_RATIO``). This lets inflected forms
-    ("проблема"/"проблемы", "problem"/"problems") count as one word
-    without matching unrelated words that merely share a short prefix.
-    """
+    """Do two tokens denote the same content word up to inflection?"""
     if q_tok == a_tok:
         return True
     cp = _common_prefix_len(q_tok, a_tok)
@@ -221,19 +214,7 @@ def _same_word(q_tok: str, a_tok: str) -> bool:
 
 
 def relevance_score(question: str | None, answer: str | None) -> float:
-    """Morphology-aware overlap between question and answer content tokens.
-
-    Returns ``0.5`` when either side is empty after stopword removal —
-    we cannot judge alignment in either direction, so we stay neutral
-    rather than punish a short answer to a vague prompt.
-
-    Coverage is the fraction of question TOPIC words the answer
-    addresses (see :func:`_question_topic_tokens` — indefinite pronouns and
-    their descriptors are not topics). Matching is fuzzy on a shared prefix
-    (see :func:`_same_word`) so inflected forms — pervasive in Russian and
-    common in English plurals — are not miscounted as misses, which
-    previously pinned the score near ~0.3 even for on-topic answers.
-    """
+    """Morphology-aware overlap between question and answer content tokens."""
     q_tokens = _question_topic_tokens(question or "")
     a_tokens = _tokenise(answer or "")
     if not q_tokens or not a_tokens:
@@ -270,29 +251,7 @@ def _script_of(tokens: Sequence[str]) -> str:
 
 
 def relevance_applicable(question: str | None, answer: str | None) -> bool:
-    """Whether word coverage can mean "the answer addressed the question".
-
-    MEASURED 2026-08-10: the same Russian answer scored 0.009 against an English
-    question and 0.421 against the same question in Russian. The measurement did
-    not change its mind about the answer — it changed alphabets. The operator
-    writes in Latin script and transliteration and reads Cyrillic answers, so
-    the low score was not a finding about the answer, it was a finding about the
-    keyboard, and it was being reported as the former.
-
-    Coverage counts shared word forms. Between writing systems there are almost
-    none, so the number is not a low relevance — it is no measurement at all,
-    and the honest report of a measurement that did not happen is that it did
-    not happen.
-
-    MEASURED 2026-08-13, same class, new form: «скажи что-нибудь умное» scored
-    0.0 against an on-topic reply and the operator was told the answer «может
-    отвечать не на заданный вопрос». The question names no topic — «умное»
-    describes the reply being requested, «что-нибудь» is a placeholder — so
-    there is nothing for coverage to cover and the zero was, again, not a
-    finding about the answer. Applicability therefore asks TWO questions,
-    both before the value: same writing system, and does the question name a
-    topic at all (:func:`_question_topic_tokens`).
-    """
+    """Whether word coverage can mean "the answer addressed the question"."""
     q_topic = _question_topic_tokens(question or "")
     if not q_topic:
         return False

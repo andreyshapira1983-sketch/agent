@@ -1,62 +1,25 @@
-"""Evidence classes — *what kind* of support a claim actually needs (issue #119).
+"""Evidence classes — *what kind* of support a claim actually needs (issue
+#119).
 
-Before this module the verification contract knew exactly one question: "is this
-claim backed by a source the agent fetched this cycle?" That question is right
-for a claim about the outside world and wrong for a claim about the conversation
-the operator is sitting in. A recorded live turn made the cost concrete: the
-operator said the previous answer was wrong and asked why; the planner correctly
-decided no tool was needed; the synthesizer produced a substantive self-analysis;
-the verifier scored ``verified=0, unverified=10``; ``low_evidence_truncation``
-deleted 1287 characters of it and shipped "ни одно утверждение не подтверждено
-источниками этого цикла". The agent could not explain its own mistake precisely
-when explaining it was the whole point.
+``self_analysis`` The agent's reasoning *about* the two classes above. It is
+a deliverable, not a source, so it is never promoted to ``verified`` — but
+it is also not an unsupported world claim, and deleting it is a defect.
 
-The fix is not "trust the agent about itself". It is to name the classes of
-evidence the system already has and say what each one is allowed to support:
-
-``external_world``
-    Files, web pages, tool/test/shell/log output. Independent of the agent.
-    Supports claims about the world. This is what the pre-existing verifier
-    checks and nothing here weakens it.
-
-``session_dialogue``
-    The literal text of earlier turns in *this* session — what the operator
-    asked and what the agent replied. High fidelity (it is a recording, not a
-    recollection) but narrow scope: it can establish what was said, and nothing
-    else. It must never confirm an arbitrary external fact.
-
-``trace``
-    The audit journal of this run. Same shape as ``session_dialogue``: it
-    establishes what the machinery did, not whether a world-claim is true.
-
-``self_analysis``
-    The agent's reasoning *about* the two classes above. It is a deliverable,
-    not a source, so it is never promoted to ``verified`` — but it is also not
-    an unsupported world claim, and deleting it is a defect.
-
-``generative``
-    Newly synthesized code / docs / diffs. Cannot appear verbatim in the file
-    they were derived from, so factual verification is the wrong test. Already
-    handled by ``_GENERATIVE_ROLES`` in :mod:`core.low_evidence_policy`; named
-    here so the taxonomy is complete in one place.
-
-Two deterministic predicates carry the policy. Both are pure, both are regex
-level, neither calls an LLM:
-
-* :func:`is_self_analysis_turn` — is the *turn* a conversational correction or a
-  request to explain the agent's own previous reply? Requires a prior turn to
-  exist, so it can never fire on the first message of a session.
-* :func:`is_dialogue_scoped_claim` — is this *chunk* a statement about the
-  preceding interaction, as opposed to a claim about the world that happens to
-  be phrased in the first person? Both a person marker and a dialogue-object
-  marker are required, so "Я рекомендую купить X" stays an ordinary world claim
-  and only "Мой предыдущий ответ не отвечал на вопрос" becomes dialogue-scoped.
+* :func:`is_self_analysis_turn` — is the *turn* a conversational correction
+or a request to explain the agent's own previous reply? Requires a prior
+turn to exist, so it can never fire on the first message of a session. *
+:func:`is_dialogue_scoped_claim` — is this *chunk* a statement about the
+preceding interaction, as opposed to a claim about the world that happens to
+be phrased in the first person? Both a person marker and a dialogue-object
+marker are required, so "Я рекомендую купить X" stays an ordinary world
+claim and only "Мой предыдущий ответ не отвечал на вопрос" becomes dialogue-
+scoped.
 
 Under-crediting is the deliberately safe direction here: a self-analysis
-sentence this module fails to recognise is treated exactly as it was before, so
-the worst regression is the status quo. Over-crediting is what would let an
-unsupported world claim ride out on a first-person pronoun, which is why the
-second marker is mandatory.
+sentence this module fails to recognise is treated exactly as it was before,
+so the worst regression is the status quo. Over-crediting is what would let
+an unsupported world claim ride out on a first-person pronoun, which is why
+the second marker is mandatory.
 """
 from __future__ import annotations
 
@@ -258,16 +221,11 @@ def is_self_analysis_turn(
 def is_dialogue_scoped_claim(text: str) -> bool:
     """Is this claim a statement about the preceding interaction?
 
-    True when the chunk contains **both** a person marker (я / ты / I / you …)
-    and a dialogue-object marker (ответ / вопрос / answer / question …).
-    Requiring both is what keeps an ordinary world claim in the first person —
-    "Я рекомендую купить X" — out of the dialogue class.
-
     Scope is judged from the claim's own wording, never from a citation the
-    model attached to it. A model that writes ``[dialogue:turn_1]`` after "the
-    central bank rate is 21%" is asserting scope, not demonstrating it; letting
-    that token decide would hand any world claim the transcript's support for
-    the cost of one bracket.
+    model attached to it. A model that writes ``[dialogue:turn_1]`` after
+    "the central bank rate is 21%" is asserting scope, not demonstrating it;
+    letting that token decide would hand any world claim the transcript's
+    support for the cost of one bracket.
     """
     body = text or ""
     if not body.strip():

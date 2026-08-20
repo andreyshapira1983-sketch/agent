@@ -64,12 +64,7 @@ def _json_safe_event(event: DaemonEvent) -> dict:
 
 
 class InFlightCheckpointStore:
-    """Atomic JSONL snapshot of events whose handlers are currently running.
-
-    Each update is a locked read-modify-write so concurrent workers and
-    processes cannot replace one another's checkpoints.  A process crash
-    leaves the last atomic file intact for roadmap item 4.2 to inspect.
-    """
+    """Atomic JSONL snapshot of events whose handlers are currently running."""
 
     FORMAT = "daemon-in-flight-v1"
 
@@ -125,26 +120,18 @@ class WorkerPoolError(RuntimeError):
 class WorkerPool:
     """Run up to ``max_workers`` concurrent handlers over a priority queue.
 
-    Parameters
-    ----------
-    queue:
-        Existing :class:`PriorityEventQueue` to consume (not duplicated).
-    handler:
-        Async callback invoked once per event. Exceptions are logged and do
-        not stop the pool.
-    max_workers:
-        Concurrent handler limit (default :data:`DEFAULT_MAX_WORKERS`).
-    drain_timeout:
-        Seconds to wait for in-flight handlers during :meth:`shutdown`
-        before cancelling them.
-    task_timeout:
-        Seconds allowed for a single handler. ``None`` disables per-task
-        timeout. Timed-out work is cancelled and recorded in
-        :attr:`timeout_count` (never as a successful :attr:`processed_count`).
-    checkpoint_store:
-        Optional durable in-flight store. When provided, an event checkpoint
-        is atomically persisted before its handler begins and removed after
-        success, error, timeout, or cancellation. Existing callers may omit it.
+    Parameters ---------- queue: Existing :class:`PriorityEventQueue` to
+    consume (not duplicated). handler: Async callback invoked once per
+    event. Exceptions are logged and do not stop the pool. max_workers:
+    Concurrent handler limit (default :data:`DEFAULT_MAX_WORKERS`).
+    drain_timeout: Seconds to wait for in-flight handlers during
+    :meth:`shutdown` before cancelling them. task_timeout: Seconds allowed
+    for a single handler. ``None`` disables per-task timeout. Timed-out work
+    is cancelled and recorded in :attr:`timeout_count` (never as a
+    successful :attr:`processed_count`). checkpoint_store: Optional durable
+    in-flight store. When provided, an event checkpoint is atomically
+    persisted before its handler begins and removed after success, error,
+    timeout, or cancellation. Existing callers may omit it.
     """
 
     def __init__(
@@ -230,12 +217,7 @@ class WorkerPool:
         }
 
     def start(self) -> None:
-        """Spawn worker tasks on the running event loop.
-
-        Idempotent while already started and not shutting down. Raises
-        :class:`WorkerPoolError` if called during/after shutdown without a
-        fresh pool instance.
-        """
+        """Spawn worker tasks on the running event loop."""
         if self._shutting_down:
             raise WorkerPoolError("cannot start WorkerPool during/after shutdown")
         if self._started and self._workers:

@@ -38,16 +38,7 @@ _MAX_SPAWN_PER_PLAN = 3   # documented in planner system prompt
 
 
 class SpawnSubagentTool(Tool):
-    """Spawn a bounded sub-agent to handle one independent parallel sub-task.
-
-    The tool is registered in the parent loop's ToolRegistry.  It is NOT
-    included in any child registry, so sub-agents cannot spawn further
-    sub-agents (depth limit enforced structurally, not via a flag).
-
-    Constructor parameters are the same dependencies that ``AgentLoop``
-    itself uses — they are forwarded to ``SubAgentRunner`` which uses them
-    to build the child loop.
-    """
+    """Spawn a bounded sub-agent to handle one independent parallel sub-task."""
 
     name = "spawn_subagent"
     description = (
@@ -106,26 +97,18 @@ class SpawnSubagentTool(Tool):
     ) -> str:
         """Execute a sub-agent and return its answer as a string.
 
-        Parameters
-        ----------
-        role:
-            Who the sub-agent is, e.g. "WebResearcher" or "FileAnalyst".
-            Used in the child's system context and as the citation label.
-        objective:
-            A precise description of what the sub-agent must return.
-            Be specific — vague objectives produce vague answers.
-        context:
-            Optional background information from the parent agent.
-            Keep it focused; only include what the child actually needs.
-        allowed_tools:
-            Subset of safe tools the child may use.
-            Must be a subset of: file_read, list_dir, web_search,
-            web_fetch, rss_fetch, semantic_scholar_search, run_tests,
-            read_logs, diff_file.
-            Defaults to all of the above if None or empty.
-        contract_name:
-            Short identifier for this contract (ASCII, max 40 chars).
-            Defaults to a slug of `role` if not provided.
+        Parameters ---------- role: Who the sub-agent is, e.g.
+        "WebResearcher" or "FileAnalyst". Used in the child's system context
+        and as the citation label. objective: A precise description of what
+        the sub-agent must return. Be specific — vague objectives produce
+        vague answers. context: Optional background information from the
+        parent agent. Keep it focused; only include what the child actually
+        needs. allowed_tools: Subset of safe tools the child may use. Must
+        be a subset of: file_read, list_dir, web_search, web_fetch,
+        rss_fetch, semantic_scholar_search, run_tests, read_logs, diff_file.
+        Defaults to all of the above if None or empty. contract_name: Short
+        identifier for this contract (ASCII, max 40 chars). Defaults to a
+        slug of `role` if not provided.
         """
         # ── input validation ─────────────────────────────────────────
         self._validate_role(role)

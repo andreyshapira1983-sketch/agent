@@ -292,13 +292,7 @@ def propose_subagent(
     llm: Any,
     logger: Any = None,
 ) -> SubagentProposalResult:
-    """Generate a SubagentProposal from a natural-language goal.
-
-    Calls the LLM for a structured JSON proposal.  Falls back to
-    ``status="llm_error"`` (with a warning) if the LLM response is not
-    valid JSON.  Returns ``status="not_needed"`` if the LLM concludes that
-    the goal can be handled directly without delegation.
-    """
+    """Generate a SubagentProposal from a natural-language goal."""
     _emit(logger, "subagent_proposal_start", {"goal": goal})
 
     raw = llm.complete(

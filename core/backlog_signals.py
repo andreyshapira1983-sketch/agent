@@ -62,11 +62,7 @@ _SELF_BUILD_DOC_QUOTE_RE = re.compile(
 class SignalRecord:
     """One grounded backlog signal. ``problem_quote`` is an exact substring of
     the source text; ``evidence_ref`` is ``<file>:<line>``.
-
-    ``rank_hint`` is an optional within-source tiebreak added to the score by the
-    selector (default ``0.0`` — existing organs are unaffected). It lets an organ
-    order its own emissions (e.g. worst-first) without crossing into another
-    source's score tier."""
+    """
 
     signal_source: str
     target_path: str
@@ -188,13 +184,7 @@ def anatomy_candidates(anatomy_text: str) -> list[SignalRecord]:
 
 
 def self_build_docs_candidate(proposal_text: str) -> list[SignalRecord]:
-    """TD-038 slice 2 Approach D: one grounded docs-only pilot target.
-
-    This deliberately does not parse arbitrary proposal prose. It only emits the
-    already allowlisted ``docs/self_build.md`` target when the TD-038 slice 2
-    proposal contains the Approach D section and the exact "first grounded
-    target" quote.
-    """
+    """TD-038 slice 2 Approach D: one grounded docs-only pilot target."""
     lines = proposal_text.splitlines()
     has_td_038 = any("TD-038 slice 2" in line for line in lines)
     has_approach_d = any(
@@ -262,22 +252,13 @@ def architecture_audit_candidates(
     *,
     exists: Callable[[str], bool] | None = None,
 ) -> tuple[list[SignalRecord], str]:
-    """Turn an architecture audit's priority gaps into grounded backlog signals.
+    """Turn an architecture audit's priority gaps into grounded backlog
+    signals.
 
-    Deterministic: takes the already-computed priority-gap mappings
-    (``ArchitectureAudit.to_dict()["priority_gaps"]``) and returns
-    ``(records, source_text)``. Each gap becomes one :class:`SignalRecord` whose
-    ``problem_quote`` is the gap ``title`` verbatim and whose ``target_path`` is
-    the gap's first **missing** evidence file when an ``exists`` predicate is
-    given (else its first evidence file), so the producer targets the file that
-    actually needs to be created rather than one already present.
-    ``source_text`` contains every quote verbatim so the selector's provenance
-    check passes by construction.
-
-    ``exists`` is an optional ``(rel_path) -> bool`` predicate (kept injectable so
-    the function stays pure/testable). Gaps without a usable title are skipped.
-    Best-effort per-gap: a malformed gap entry is skipped rather than raising, so
-    a bad audit never breaks the backlog.
+    ``exists`` is an optional ``(rel_path) -> bool`` predicate (kept
+    injectable so the function stays pure/testable). Gaps without a usable
+    title are skipped. Best-effort per-gap: a malformed gap entry is skipped
+    rather than raising, so a bad audit never breaks the backlog.
     """
     records: list[SignalRecord] = []
     quotes: list[str] = []
@@ -369,20 +350,7 @@ def _comment_markers(content: str) -> list[tuple[int, str]]:
 def code_todo_candidates(
     files: Iterable[tuple[str, str]],
 ) -> tuple[list[SignalRecord], str]:
-    """Turn self-flagged code comments into grounded backlog signals.
-
-    ``files`` is an iterable of ``(rel_path, content)`` pairs already read by the
-    caller (this function performs NO IO, so it stays pure/deterministic and
-    unit-testable). Every real ``#`` comment carrying a ``TODO`` / ``FIXME`` /
-    ``XXX`` marker becomes one :class:`SignalRecord` whose ``target_path`` is the
-    file, ``evidence_ref`` is ``<rel_path>:<line>`` (so a human can jump to it),
-    and ``problem_quote`` is the exact stripped comment.
-
-    Returns ``(records, source_text)`` where ``source_text`` joins every quote
-    verbatim, so the selector's provenance check (`quote in source_text`) passes
-    by construction. Records are de-duplicated by ``<rel_path>:<line>`` and the
-    total is capped at :data:`_MAX_CODE_TODO_RECORDS` for a bounded backlog.
-    """
+    """Turn self-flagged code comments into grounded backlog signals."""
     records: list[SignalRecord] = []
     quotes: list[str] = []
     seen: set[str] = set()
@@ -434,20 +402,17 @@ _OVERSIZED_TARGET_PREFIX = "split:"
 def oversized_module_candidates(
     files: Iterable[tuple[str, str]],
 ) -> tuple[list[SignalRecord], str]:
-    """Turn oversized source modules into grounded, report-only backlog signals.
+    """Turn oversized source modules into grounded, report-only backlog
+    signals.
 
-    ``files`` is an iterable of ``(rel_path, content)`` pairs already read by the
-    caller (this function performs NO IO, so it stays pure/deterministic and
-    unit-testable). Every file whose line count is at or above
-    :data:`_OVERSIZED_MODULE_MIN_LINES` becomes one :class:`SignalRecord` whose
-    ``target_path`` is the abstract ``split:<rel_path>`` (report-only — see
-    :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``, and
-    ``problem_quote`` states the concrete line count.
-
-    Records are sorted worst-first (largest line count, then path) and the total
-    is capped at :data:`_MAX_OVERSIZED_RECORDS`. Returns ``(records, source_text)``
-    where ``source_text`` joins every quote verbatim so the selector's provenance
-    check (``quote in source_text``) passes by construction.
+    ``files`` is an iterable of ``(rel_path, content)`` pairs already read
+    by the caller (this function performs NO IO, so it stays
+    pure/deterministic and unit-testable). Every file whose line count is at
+    or above :data:`_OVERSIZED_MODULE_MIN_LINES` becomes one
+    :class:`SignalRecord` whose ``target_path`` is the abstract
+    ``split:<rel_path>`` (report-only — see
+    :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``,
+    and ``problem_quote`` states the concrete line count.
     """
     measured: list[tuple[int, str]] = []
     seen: set[str] = set()
@@ -492,12 +457,11 @@ def value_review_penalties(
 ) -> ValuePenalties:
     """Derive suppress/penalize target sets from human value reviews.
 
-    ``reviews`` is an iterable of objects with ``item_id`` and ``verdict`` (e.g.
-    :class:`core.value_review.ValueReview`). A review contributes only when its
-    ``item_id`` resolves to a target via ``item_target_map`` (best-effort: with
-    no map, no penalties are produced, and value_reviews is never mutated).
-
-    Latest verdict per ``item_id`` wins (input assumed in write order).
+    ``reviews`` is an iterable of objects with ``item_id`` and ``verdict``
+    (e.g. :class:`core.value_review.ValueReview`). A review contributes only
+    when its ``item_id`` resolves to a target via ``item_target_map`` (best-
+    effort: with no map, no penalties are produced, and value_reviews is
+    never mutated).
     """
     if not item_target_map:
         return ValuePenalties.empty()

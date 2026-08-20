@@ -1,30 +1,21 @@
 """Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself.
 
-The agent's failure mode this guards against is the "echo chamber": an
-autonomous loop that keeps re-writing the same lesson / observation /
-"insight" to persistent memory under slightly different wording, cycle after
-cycle. The existing `core.hygiene.find_duplicate` already refuses an exact or
-near-duplicate of what is *already on disk*, but it has no notion of *time* and
-no notion of *who* wrote it. This antibody adds exactly those two missing
-properties and nothing else:
+1. **Time window.** Only writes made in the recent past (default 24h) count
+as an echo. A genuine new observation a week later is fine. 2. **Source
+scope.** Only the agent's own `agent-auto` writes are guarded. The human
+operator (`user-explicit`) is never limited — the point is to stop the
+*agent* from talking to itself, not the person.
 
-    1. **Time window.** Only writes made in the recent past (default 24h)
-       count as an echo. A genuine new observation a week later is fine.
-    2. **Source scope.** Only the agent's own `agent-auto` writes are guarded.
-       The human operator (`user-explicit`) is never limited — the point is to
-       stop the *agent* from talking to itself, not the person.
-
-HARD BOUNDARIES (by design, do not relax):
-    * It NEVER deletes memory.
-    * It NEVER writes new memory.
-    * It NEVER calls an LLM.
-    * It draws NO conclusions about meaning, truth, or value.
-    * It only ever returns ``allow`` / ``reject`` plus a human-readable reason.
+HARD BOUNDARIES (by design, do not relax): * It NEVER deletes memory. * It
+NEVER writes new memory. * It NEVER calls an LLM. * It draws NO conclusions
+about meaning, truth, or value. * It only ever returns ``allow`` /
+``reject`` plus a human-readable reason.
 
 The detector (`detect_memory_echo`) is a pure function: same inputs → same
 outputs, no I/O. Persistence of the rolling write-log lives in the small
-append-only `MemoryWriteRegistry` (data/memory_writes.jsonl), which is the only
-part that touches disk and is kept deliberately separate from the decision.
+append-only `MemoryWriteRegistry` (data/memory_writes.jsonl), which is the
+only part that touches disk and is kept deliberately separate from the
+decision.
 """
 
 from __future__ import annotations
@@ -191,16 +182,7 @@ def detect_memory_echo(
     recent_writes: Iterable[MemoryWriteEvent] = (),
     echo_threshold: float = DEFAULT_ECHO_THRESHOLD,
 ) -> MemoryEchoOutcome:
-    """Decide whether ``candidate_content`` echoes a recent agent-auto write.
-
-    ``recent_writes`` is expected to be **already time-windowed** (the registry
-    owns the clock); this keeps the detector a pure content+source function.
-
-    Returns ``allow`` for anything that is not a guarded agent-auto write, for
-    empty content (other policy gates own that), or when nothing recent is
-    close enough. Returns ``reject`` with ``reason=memory_echo_suspected`` on an
-    exact repeat or a similarity at/above ``echo_threshold``.
-    """
+    """Decide whether ``candidate_content`` echoes a recent agent-auto write."""
     source = (candidate_source or "").strip().lower()
     if source != GUARDED_SOURCE:
         return MemoryEchoOutcome(
@@ -304,13 +286,7 @@ class MemoryWriteRegistry:
         now: datetime | None = None,
         source: str = GUARDED_SOURCE,
     ) -> list[MemoryWriteEvent]:
-        """Events newer than ``window_hours`` ago, restricted to ``source``.
-
-        ``window_hours <= 0`` means *no time limit* (consistent with the
-        codebase '0 = off/unlimited' convention); events with an unparseable
-        timestamp are excluded from a windowed query (fail closed: an event we
-        can't date can't be proven recent).
-        """
+        """Events newer than ``window_hours`` ago, restricted to ``source``."""
         reference = (now or _utcnow()).astimezone(timezone.utc)
         wanted_source = (source or "").strip().lower() if source else ""
         out: list[MemoryWriteEvent] = []
@@ -335,12 +311,7 @@ def recent_within_window(
     now: datetime | None = None,
     source: str = GUARDED_SOURCE,
 ) -> list[MemoryWriteEvent]:
-    """Pure window filter over an in-memory sequence (no disk).
-
-    Mirrors :meth:`MemoryWriteRegistry.recent` so callers that already hold the
-    events (e.g. tests, or a caller that loaded once) can window them without a
-    second disk read.
-    """
+    """Pure window filter over an in-memory sequence (no disk)."""
     reference = (now or _utcnow()).astimezone(timezone.utc)
     wanted_source = (source or "").strip().lower() if source else ""
     out: list[MemoryWriteEvent] = []

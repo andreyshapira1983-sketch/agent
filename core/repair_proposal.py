@@ -2,18 +2,6 @@
 
 This layer gives the agent a way to *think up* a repair, while keeping the
 existing SelfRepairController as the only layer that may apply it.
-
-Flow:
-
-    run_tests + optional read_logs + target file
-        -> LLM strict JSON
-        -> validate target/content/evidence/confidence
-        -> diff preview
-        -> RepairProposal
-
-No file is written here. Bad JSON, wrong target files, giant diffs, secrets,
-empty patches, and passing baseline tests all stop before a proposal can reach
-the repair controller.
 """
 
 from __future__ import annotations
@@ -590,16 +578,8 @@ except ImportError:  # pragma: no cover
 def _parse_json_object(raw: str) -> dict[str, Any]:
     """Parse the model's reply, tolerating a reply that thinks out loud first.
 
-    The prompt asks for JSON only, and that is still what it asks for. But a
-    reasoning model narrating before it answers is ordinary behaviour, not
-    misbehaviour: `claude-opus-4-8` opened a 41 000-character reply with "I'll
-    analyze the failing tests…" and put a perfectly good object underneath.
-    Reading only character 0 turned that into "invalid JSON" and threw the
-    proposal away — the mechanism worked only for models terse enough to skip
-    the preamble, which is the opposite of the selection anyone wants.
-
-    Order matters: try the whole reply first, so a well-formed answer is never
-    reinterpreted, and only then look for an embedded object.
+    Order matters: try the whole reply first, so a well-formed answer is
+    never reinterpreted, and only then look for an embedded object.
     """
     text = raw.strip()
     if text.startswith("```"):

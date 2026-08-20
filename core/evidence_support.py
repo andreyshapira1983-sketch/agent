@@ -123,14 +123,7 @@ def evaluate_evidence_support(
     threshold: float = DEFAULT_WEAK_THRESHOLD,
     min_total_chunks: int = DEFAULT_MIN_TOTAL_CHUNKS,
 ) -> EvidenceSupportResult:
-    """Report evidence support for one verified answer.
-
-    ``evidence_expected`` comes from
-    :func:`core.low_evidence_policy.is_evidence_expected` — the same call the
-    enforcing layer makes. When it is false the score is ``None``: a turn that
-    owed no evidence has no support ratio, and reporting 0.0 for it is the
-    error this module was rewritten to stop making.
-    """
+    """Report evidence support for one verified answer."""
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("threshold must be in [0, 1]")
     if min_total_chunks < 0:
