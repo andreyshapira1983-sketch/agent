@@ -22,6 +22,7 @@ it and a bypass cannot hide from it.
 from __future__ import annotations
 
 import socket
+import ssl
 import urllib.error
 
 import pytest
@@ -96,3 +97,27 @@ def test_a_public_peer_still_gets_to_send(monkeypatch: pytest.MonkeyPatch) -> No
     assert not isinstance(inner, PermissionError), (
         f"a public peer was refused: {inner}"
     )
+
+
+@pytest.mark.parametrize("peer_ip", ["169.254.169.254", "10.0.0.7"])
+def test_the_https_path_is_guarded_too(
+    monkeypatch: pytest.MonkeyPatch, peer_ip: str
+) -> None:
+    """The HTTPS handler opens a different connection class, so the HTTP case
+    above says nothing about it. Note what this pins and what it does not: the
+    guard runs AFTER `super().connect()`, so on this path the TLS handshake
+    with the hostile peer has already happened when the refusal arrives."""
+    fake = _RebindingSocket((peer_ip, 443))
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: fake)
+    monkeypatch.setattr(ssl.SSLContext, "wrap_socket", lambda self, sock, **k: sock)
+
+    opener = build_safe_opener(NetworkSafetyPolicy(tool_name="probe"))
+    with pytest.raises((PermissionError, urllib.error.URLError)) as caught:
+        opener.open("https://example.invalid/x", timeout=1)
+
+    inner = getattr(caught.value, "reason", caught.value)
+    assert isinstance(inner, PermissionError), (
+        f"an https request to {peer_ip} raised {type(inner).__name__}: {inner}"
+    )
+    assert peer_ip in str(inner)
+
