@@ -3484,3 +3484,47 @@ model call, it is exactly what MIR-100 is about, and it stays UNKNOWN.
 falsified before being trusted: inserting `return ""` at the top of
 `_retrieve_persistent` turns it red with the right message, and removing that
 line turns it green again. A green test that cannot go red proves nothing.
+
+## Where meaning first appears
+
+The operator's architectural question, asked after the wiring census: who
+receives a human utterance first, where does semantic intent appear, and can
+a lexical router destroy meaning before that point.
+
+Traced end to end rather than argued. The order is:
+
+    a colon-prefixed token  -> deterministic parser
+    free text               -> decide_activity            (lexical rules)
+                            -> route_operator_intent      (lexical patterns)
+                                 soft match -> MODEL VETO (_model_says_conversation)
+                                 hard match -> dispatched locally
+                                 no match   -> the agent's own model
+
+Two measurements decide whether this is the feared "keyword sieve in front of
+the brain".
+
+**It is not, for more than half the surface.** Of 24 intent kinds, 13 are
+subject to a model veto: a keyword match must survive the model being asked
+whether this is a request or a passing mention. On live traffic the lexical
+route fired 10 times and the model overturned it 3. A quarter of the gated
+attempts were reversed by semantic judgement, so the check is load-bearing.
+
+**It is, for the rest.** 11 kinds — the explicit imperatives — dispatch on a
+lexical match alone, and 5 of the 10 live dispatches were those. For those
+utterances the model never saw the text. Whether any of the five was wrong is
+UNKNOWN: nothing labelled ground truth, and the MIR-015 rule applies here as
+everywhere — a firing count is not an error count.
+
+The specific defect MIR-098 recorded is fixed: the soft branch now matches
+whole words, so «планировщик» no longer contains a request for a plan. Eight
+realistic utterances were probed, including that one and several from this
+session's own conversation; 0 of 8 were intercepted.
+
+What this does not settle is the design question the operator posed — whether
+free language should reach a semantic interpreter FIRST and a deterministic
+router only afterwards, with typed meaning rather than words crossing the
+boundary. Today the two are interleaved: hard commands parse deterministically
+(correctly — a kill or a stop must never be a probability), soft intents are semantically
+vetoed, and imperatives are lexical. Moving the imperatives behind the same
+veto is a design decision with a cost, not a bug to be fixed quietly, and it
+belongs to the operator.
