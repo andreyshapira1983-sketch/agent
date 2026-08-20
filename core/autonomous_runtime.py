@@ -1,10 +1,4 @@
-"""Autonomous runtime orchestrator.
-
-This is the first safe autopilot layer. It does not make the agent fully
-unsupervised; it gives the system a bounded way to run project-health tasks,
-spend from a runtime budget, stop through a circuit breaker, and queue human
-approval items instead of silently crossing a risky boundary.
-"""
+"""Autonomous runtime orchestrator."""
 from __future__ import annotations
 
 import hashlib
@@ -169,12 +163,7 @@ _PROPOSAL_JACCARD_THRESHOLD: float = 0.4
 
 
 def _proposal_stem(token: str) -> str:
-    """Strip a few common English suffixes so 'claim'/'claims' collapse.
-
-    Intentionally tiny and deterministic — no NLTK, no language detection.
-    Good enough to make Sonnet's reworded near-duplicates collide on the
-    Jaccard threshold below.
-    """
+    """Strip a few common English suffixes so 'claim'/'claims' collapse."""
     for suffix in ("ization", "ations", "ation", "ings", "ies", "ied", "ing", "ers", "ers", "ed", "es", "s"):
         if len(token) > len(suffix) + 2 and token.endswith(suffix):
             base = token[: -len(suffix)]
@@ -1363,12 +1352,7 @@ class AutonomousRuntime:
         return out
 
     def _active_standing_grant(self):
-        """Действующий стоячий грант с остатком на сегодня, или None.
-
-        Действующий = одобрен человеком, не истёк, дневной лимит не исчерпан.
-        Заявка без «да» — не грант; исчерпанный лимит возвращает прежний мир
-        (разовую заявку), а не тихий пропуск.
-        """
+        """Действующий стоячий грант с остатком на сегодня, или None."""
         now = datetime.now(timezone.utc)
         for item in self.approval_inbox.list(status="approved"):
             if item.operation != "autonomous_runtime.standing_grant":

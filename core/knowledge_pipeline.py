@@ -1,13 +1,4 @@
-"""Knowledge pipeline integration.
-
-This layer connects the source stack:
-
-    Evidence -> SourceRegistry -> extracted claims -> conflict resolver
-    -> source catalog persistence -> optional long-term knowledge memory
-
-It is deterministic and local. LLM-based claim extraction can replace the
-extractor later, but the safety contract stays here.
-"""
+"""Knowledge pipeline integration."""
 from __future__ import annotations
 
 import re
@@ -214,14 +205,7 @@ class ClaimExtractor:
 
 
 def claim_provenance_tag(claim_id: str) -> str:
-    """Tag linking a memory record back to the claim it came from.
-
-    Without it a record cannot be found again when its claim later turns out
-    to be contradicted — quarantine has no addressee, which is why conflict
-    detection stayed advisory (MIR-047). Carried as a tag rather than a new
-    field because tags are already persisted, already filtered by
-    `KnowledgeUsePolicy`, and need no schema change.
-    """
+    """Tag linking a memory record back to the claim it came from."""
     return f"claim:{claim_id}"
 
 
@@ -230,13 +214,9 @@ def quarantine_conflicted_records(
 ) -> tuple[list[MemoryRecord], dict]:
     """Tag records whose originating claim is now contradicted.
 
-    Marks strictly by provenance tag. A record with no claim link is reported
-    as `unlinked` and left alone: matching it by content would be the guess
-    MIR-049/050 exist to forbid, and mis-quarantining a correct record is
-    worse than leaving a conflicted one in place until an operator looks.
-
-    Idempotent — a record already carrying the tag is counted, not re-tagged.
-    Resolution is operator-only: removing the tag restores the record.
+    Idempotent — a record already carrying the tag is counted, not re-
+    tagged. Resolution is operator-only: removing the tag restores the
+    record.
     """
     report = {"quarantined": 0, "already_quarantined": 0, "unlinked": 0, "unaffected": 0}
     if not conflicted_claim_ids:
@@ -688,20 +668,7 @@ class KnowledgePipeline:
 
 
 def claim_source_is_untrusted(text: str) -> bool:
-    """True when the injection guard refuses this text.
-
-    `blocked` only, deliberately. The pre-existing `override` pattern matches
-    the bare word "command", so `suspicious` would bar ordinary technical prose
-    — measured: it flagged "If a command is not here, it does not exist" out of
-    the operator's own store.
-
-    The durable half of the 2026-08-14 attack. The agent correctly ignored an
-    order planted in a workspace file — and the pipeline then banked the order's
-    own sentences as `fact`/`source-backed` at confidence 0.85, where keyword
-    retrieval re-injects them on later turns. Refusing in the moment is not
-    enough when memory outlives the turn. See docs/CODE_NOTES.md, "Injection
-    through a workspace file".
-    """
+    """True when the injection guard refuses this text."""
     from core.injection_guard import scan_for_injection
 
     return scan_for_injection(text or "").is_blocked
@@ -864,13 +831,7 @@ def _normalise_value(text: str) -> str:
 
 
 def _value_tokens(value: str) -> list[str]:
-    """Word tokens for equivalence comparison, negation canonicalised.
-
-    «never proof of implementation» and «not proof of implementation» assert
-    the same thing in a copular claim — measured live (MIR-076): two doctrine
-    files agreeing on this exact rule were booked as a contradiction because
-    the values were compared byte-for-byte.
-    """
+    """Word tokens for equivalence comparison, negation canonicalised."""
     tokens = re.sub(r"[^\w\s-]", " ", value, flags=re.UNICODE).casefold().split()
     return ["not" if t in ("never", "никогда") else t for t in tokens]
 

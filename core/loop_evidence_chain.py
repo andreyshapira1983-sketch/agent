@@ -1,35 +1,4 @@
-"""Досборка цепочки улик — вырезано из ``core/loop.py`` дословно.
-
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Четвёртый кусок раскола `core/loop.py` и второй — раскола `_run_inner`.
-
-Улики уровня инструментов добавляются в цепочку пошагово, внутри попытки.
-Три источника приходят по другим путям и досыпаются ЗДЕСЬ, одним местом,
-чтобы верификатор видел одну однородную цепочку: записи долгой памяти,
-кэшированные выводы инструментов из рабочей памяти прошлых ходов и дословная
-запись самого диалога (issue #119).
-
-Защита — ПОРЕКОРДНАЯ, а не вокруг цикла (MIR-061): с `try` снаружи одна
-незашедшая запись бросала весь цикл, и всё, что шло за ней, исчезало из
-цепочки молча — замерено 1 из 5 доехавших, — после чего верификатор судил
-ответ по урезанной цепочке. Три цикла здесь обязаны не разъехаться по
-гранулярности снова.
-
-Второй метод здесь — то, что происходит с УЖЕ СОБРАННОЙ цепочкой: сенсор
-преждевременного завершения (теневой, оставлен только для сверки со сменившей
-его проверкой обязательств), ранжирование источников и каталогизация через
-конвейер знаний. Дешёвый путь их пропускает: цепочка пуста, каталогизировать
-нечего, а платить за проход — есть чем.
-
-Границы выбрали измерением: досборке на входе три имени (`chain`,
-`persistent_block`, `self`), наружу — ничего; цепочка меняется на месте,
-ссылка на неё кладётся на цикл. Тела перенесены символ в символ, что пинится AST-сверкой с историей
-в `tests/test_loop_evidence_chain_split.py`.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
-"""
+"""Досборка цепочки улик — вырезано из ``core/loop.py`` дословно."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,29 +16,14 @@ from core.source_ranker import SourceRankingReport, rank_chain
 
 @dataclass(frozen=True)
 class CatalogueResult:
-    """What cataloguing a chain produces, for the caller to act on.
-
-    Two values. NOT a pure result: producing them runs the knowledge pipeline,
-    which may write to long-term memory — see `_catalogue_chain`.
-
-    Both callers used to compute these inline and then diverge: one skips the
-    pipeline on the cheap path, the other runs inside the citation-fetch loop,
-    quarantines conflicted records and stamps every event with its iteration.
-    Those differences are real, so they stay with the callers; what was
-    duplicated is the sequence above them.
-    """
+    """What cataloguing a chain produces, for the caller to act on."""
 
     ranking: SourceRankingReport
     knowledge: KnowledgePipelineResult
 
 
 class AgentLoopEvidenceChain:
-    """Досборка цепочки: память, рабочие артефакты, диалог.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """Досборка цепочки: память, рабочие артефакты, диалог."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -110,18 +64,6 @@ class AgentLoopEvidenceChain:
         when `source_store` is supplied. Both are governed by the two
         permissions this method takes and by `_unattended_run()`, and both
         happen inside this call.
-
-        What it does NOT do is the caller's part: it writes no journal event and
-        assigns no field on the agent or the run state. Those differ — the two
-        callers log different payloads (the verify path stamps `phase` and
-        `iteration` on every event) and store into different places (`self` here,
-        the run state there) — so folding them in would need a mode flag, and a
-        function that behaves two ways by argument is two functions wearing one
-        name.
-
-        The sequence was written twice before this: here and in
-        `core/loop_verify_replan.py`, which repeated it rather than calling it
-        (census B3).
         """
         ranking = rank_chain(chain, question=question)
         knowledge = self.knowledge_pipeline.run(
@@ -144,12 +86,7 @@ class AgentLoopEvidenceChain:
         *,
         persistent_block: str,
     ) -> None:
-        """Досыпать в цепочку то, что пришло не через шаги плана.
-
-        Меняет `chain` НА МЕСТЕ и кладёт её на цикл (`last_provenance`) —
-        подпись `-> None` про это и говорит: новой цепочки не возникает,
-        и вызывающий продолжает работать с той же самой.
-        """
+        """Досыпать в цепочку то, что пришло не через шаги плана."""
         if persistent_block and self.persistent_store is not None:
             # `persistent_block` was built from a small set of records
             # in `_retrieve_persistent`; we replay that retrieval cheaply
@@ -268,14 +205,7 @@ class AgentLoopEvidenceChain:
         may_knowledge: bool,
         may_source_registry: bool,
     ) -> tuple[bool, SourceRankingReport, Any]:
-        """Теневой вердикт сенсора, ранжирование источников и реестр.
-
-        Первый элемент — НЕ решение: ключевой детектор преждевременного
-        завершения оставлен только для сверки со сменившей его проверкой
-        обязательств (замерен на 1/12 полноты и срабатывает на «объясни
-        разницу…», потому что `разниц` — слово diff-инструмента). Вызывающий
-        несёт его в событие, а не действует по нему.
-        """
+        """Теневой вердикт сенсора, ранжирование источников и реестр."""
         # MAST FM-3.1 — premature completion risk, keyword detector.
         # RETAINED FOR SHADOW COMPARISON ONLY. It is no longer the source of
         # truth: measured at 1/12 recall on phrasings that unambiguously demand

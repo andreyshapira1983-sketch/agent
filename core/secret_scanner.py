@@ -164,12 +164,7 @@ class SecretFinding:
 
 
 def scan(text: str) -> list[SecretFinding]:
-    """Return every regex hit in `text`. Empty list for clean input.
-
-    Hits across different rules CAN overlap (e.g. an Anthropic key is also
-    a substring of an OpenAI-shape match). The redactor handles overlap by
-    sorting hits and skipping covered ranges.
-    """
+    """Return every regex hit in `text`. Empty list for clean input."""
     if not text:
         return []
     findings: list[SecretFinding] = []
@@ -180,12 +175,7 @@ def scan(text: str) -> list[SecretFinding]:
 
 
 def keyword_hits(text: str) -> list[str]:
-    """Return the keywords found in `text` (lowercased).
-
-    Used by MemoryWritePolicy to refuse a write even when no regex span
-    matches: a document that mentions "password=…" loud enough to use the
-    word "password" is one we treat as credential-adjacent.
-    """
+    """Return the keywords found in `text` (lowercased)."""
     if not text:
         return []
     lower = text.lower()

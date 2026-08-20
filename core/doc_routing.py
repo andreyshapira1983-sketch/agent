@@ -1,12 +1,4 @@
-"""Question classification and governing-doc routing for the planner.
-
-Which questions are about the project itself, which demand the doctrine,
-memory-governance, subagent or self-repair documents, and how those document
-sources are injected ahead of (or dropped from) a drafted plan. Every function
-here is pure text analysis over the question/history/sources -- none touches
-planner state or the LLM. Moved byte-verbatim from core/planner.py, where this
-family was ~940 lines between the module header and the system prompt.
-"""
+"""Question classification and governing-doc routing for the planner."""
 from __future__ import annotations
 
 from typing import Any
@@ -160,18 +152,10 @@ _RU_SELF_DOMAIN_STEMS = tuple(
 
 
 def _ru_pronoun_domain_introspection(tokens: tuple[str, ...]) -> bool:
-    """True when a self-domain noun stem immediately follows a Russian
-    self-referential pronoun (e.g. "свою архитектуру", "свой репозиторий",
+    """True when a self-domain noun stem immediately follows a Russian self-
+    referential pronoun (e.g. "свою архитектуру", "свой репозиторий",
     "своими тестами").
-
-    Adjacency — not mere co-occurrence — is required on purpose. Co-occurrence
-    anywhere in the sentence is far too broad: "в своей стране архитектура
-    власти" or "в своём городе сдают тесты" would be mis-flagged as self-repo
-    introspection and wrongly denied a legitimate web lookup. The pronoun must
-    directly modify the domain noun, which in Russian means it sits right before
-    it. Stable collocations that place an adjective between the pronoun and the
-    noun (e.g. "твоей долговременной памяти") are handled by the phrase list, so
-    they do not need a wider window here."""
+    """
     for i, tok in enumerate(tokens):
         if tok not in _RU_SELF_PRONOUNS:
             continue
@@ -384,13 +368,10 @@ def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
 
 
 def _wants_external_lookup(question: str) -> bool:
-    """True when the question genuinely needs outside/web/current information or
-    a comparison against a named external system — the one case where web egress
-    on a self-referential question is still legitimate.
-
-    Matching is token-boundary aware (see core.lang_match) so short function
-    words cannot substring-collide with longer inflected words — e.g. the
-    preposition "с" no longer matches inside "своё"."""
+    """True when the question genuinely needs outside/web/current information
+    or a comparison against a named external system — the one case where web
+    egress on a self-referential question is still legitimate.
+    """
     return any_term_matches(question or "", _EXTERNAL_LOOKUP_TERMS)
 
 
@@ -803,17 +784,15 @@ def _ensure_thematic_docs_first(
     lead_paths: tuple[str, ...],
     warning_prefix: str,
 ) -> list[dict[str, Any]]:
-    """Place one thematic doc group ahead of code, behind higher-priority groups.
+    """Place one thematic doc group ahead of code, behind higher-priority
+    groups.
 
-    Single implementation for every conditionally routed doc group. Each group
-    differs only in *which* docs it owns (`target_paths`), which groups outrank
-    it (`lead_paths`), and how the injection is reported (`warning_prefix`);
-    the ordering and de-duplication rule itself is an invariant and lives here
-    once, so a new group cannot re-introduce a fixed bug by copying the shape.
-
-    De-duplication is total: *every* request for a target doc is consumed, not
-    just the first. Keeping later duplicates in the remainder made the agent
-    `file_read` the same doctrine file twice and burn context for nothing.
+    Single implementation for every conditionally routed doc group. Each
+    group differs only in *which* docs it owns (`target_paths`), which
+    groups outrank it (`lead_paths`), and how the injection is reported
+    (`warning_prefix`); the ordering and de-duplication rule itself is an
+    invariant and lives here once, so a new group cannot re-introduce a
+    fixed bug by copying the shape.
     """
     target_norms = {_norm_source_path(path) for path in target_paths}
     lead_norms = {_norm_source_path(path) for path in lead_paths}
@@ -859,12 +838,7 @@ def _ensure_subagent_governance_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
-    """Ensure the thematic sub-agent lifecycle doc leads a sub-agent question.
-
-    Placed right after any leading doctrine/corporate docs (so a broad
-    doctrine+subagent question keeps corporate docs first, then the sub-agent
-    contract), or at the very front when no corporate docs are present.
-    """
+    """Ensure the thematic sub-agent lifecycle doc leads a sub-agent question."""
     return _ensure_thematic_docs_first(
         sources,
         warnings,
@@ -878,13 +852,7 @@ def _ensure_memory_governance_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
-    """Ensure the thematic memory docs lead a memory/durable-learning question.
-
-    Placed after any leading doctrine/corporate docs AND after the sub-agent
-    contract, so a question touching several themes keeps a stable order
-    (corporate → sub-agent → memory) instead of the two thematic groups
-    competing for the same slot.
-    """
+    """Ensure the thematic memory docs lead a memory/durable-learning question."""
     return _ensure_thematic_docs_first(
         sources,
         warnings,
@@ -898,13 +866,7 @@ def _ensure_self_repair_doctrine_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
-    """Ensure the self-repair protocol leads a self-diagnosis/repair question.
-
-    Placed after any leading corporate, sub-agent AND memory docs, so a question
-    touching several themes keeps a stable order (corporate → sub-agent →
-    memory → self-repair) instead of the thematic groups competing for the same
-    slot.
-    """
+    """Ensure the self-repair protocol leads a self-diagnosis/repair question."""
     return _ensure_thematic_docs_first(
         sources,
         warnings,

@@ -3,38 +3,28 @@
 Only one continuous-service daemon may run at a time. This module provides
 :class:`SingleInstanceLock`, a small cross-platform lock file that:
 
-- refuses to start a second daemon while one is already running;
-- recovers automatically from a *stale* lock left behind by a crashed process
-  (the operating system releases the lock when the owning process dies, so a
-  new instance can acquire it without manual clean-up);
-- never removes a lock that another *live* process still holds;
-- releases the OS lock on normal shutdown but leaves the lock *file* on disk;
-- reports a clear, actionable message identifying the running instance.
+- refuses to start a second daemon while one is already running; - recovers
+automatically from a *stale* lock left behind by a crashed process (the
+operating system releases the lock when the owning process dies, so a new
+instance can acquire it without manual clean-up); - never removes a lock
+that another *live* process still holds; - releases the OS lock on normal
+shutdown but leaves the lock *file* on disk; - reports a clear, actionable
+message identifying the running instance.
 
-Source of truth
----------------
-The **OS lock is the only source of truth** for whether a daemon is running.
-The presence of ``data/daemon.lock`` on disk does **not** mean a daemon is
-alive: the file is a permanent service artefact that persists after the daemon
-exits. ``release()`` deliberately never unlinks it — deleting the pathname is
-racy on POSIX and could permit two simultaneous owners (see
-:meth:`SingleInstanceLock.release`). A leftover, unlocked file is therefore the
-normal, healthy resting state; the next :meth:`SingleInstanceLock.acquire`
-re-locks it and rewrites the diagnostics.
+Source of truth --------------- The **OS lock is the only source of truth**
+for whether a daemon is running. The presence of ``data/daemon.lock`` on
+disk does **not** mean a daemon is alive: the file is a permanent service
+artefact that persists after the daemon exits. ``release()`` deliberately
+never unlinks it — deleting the pathname is racy on POSIX and could permit
+two simultaneous owners (see :meth:`SingleInstanceLock.release`). A
+leftover, unlocked file is therefore the normal, healthy resting state; the
+next :meth:`SingleInstanceLock.acquire` re-locks it and rewrites the
+diagnostics.
 
-Mechanism
----------
-The lock relies on an OS-level advisory exclusive lock on an open file
-descriptor — ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows. This
-is the existing project idiom (see :mod:`core.file_lock`) and has one very
-convenient property: the OS drops the lock automatically when the holding
-process exits *for any reason*, including a crash or ``kill -9``. That is what
-makes stale locks self-healing without racy "is this PID still alive?" games.
-
-The file also stores small JSON diagnostics (pid, hostname, start time) so an
-operator — or the "already running" error message — can point at the culprit.
-Those diagnostics are advisory only; correctness comes from the OS lock, not
-from the PID written in the file.
+The file also stores small JSON diagnostics (pid, hostname, start time) so
+an operator — or the "already running" error message — can point at the
+culprit. Those diagnostics are advisory only; correctness comes from the OS
+lock, not from the PID written in the file.
 
 This module does not import or replace ``agent_tick.py``; the single-shot
 fallback mode never needs the daemon lock.
@@ -69,12 +59,7 @@ _WINDOWS_LOCK_OFFSET = 0x40000000  # 1 GiB — well past any diagnostics payload
 
 
 class AlreadyRunningError(RuntimeError):
-    """Raised when another daemon instance already holds the lock.
-
-    The :attr:`details` mapping carries whatever diagnostics could be read from
-    the existing lock file (``pid``, ``hostname``, ``started_at``); it may be
-    empty if the file was unreadable or being rewritten concurrently.
-    """
+    """Raised when another daemon instance already holds the lock."""
 
     def __init__(self, path: Path, details: dict | None = None) -> None:
         self.path = path
@@ -94,28 +79,7 @@ class AlreadyRunningError(RuntimeError):
 
 
 class SingleInstanceLock:
-    """Cross-platform single-instance lock backed by an OS advisory file lock.
-
-    Use as a context manager::
-
-        with SingleInstanceLock():
-            run_the_daemon()
-
-    or explicitly::
-
-        lock = SingleInstanceLock(path)
-        lock.acquire()      # raises AlreadyRunningError if busy
-        try:
-            ...
-        finally:
-            lock.release()   # idempotent
-
-    Parameters
-    ----------
-    path:
-        Lock file location. Defaults to :data:`DEFAULT_LOCK_PATH`. The parent
-        directory is created on acquire.
-    """
+    """Cross-platform single-instance lock backed by an OS advisory file lock."""
 
     def __init__(self, path: Path | str = DEFAULT_LOCK_PATH) -> None:
         self._path = Path(path)
@@ -136,12 +100,7 @@ class SingleInstanceLock:
     # ── acquire / release ────────────────────────────────────────────────
 
     def acquire(self) -> SingleInstanceLock:
-        """Acquire the lock, or raise :class:`AlreadyRunningError` if busy.
-
-        Idempotent: acquiring an already-held lock is a no-op. A stale lock from
-        a crashed process is acquired transparently because the OS has already
-        released it.
-        """
+        """Acquire the lock, or raise :class:`AlreadyRunningError` if busy."""
         if self._fh is not None:
             return self
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,17 +126,6 @@ class SingleInstanceLock:
 
         Releasing only drops the OS lock, closes the file handle, and clears
         internal state. The lock *file* is intentionally **not** unlinked.
-
-        Deleting the pathname in ``release()`` is racy on POSIX: the OS lock is
-        tied to the open file *description* (inode), not to the name. Between
-        our unlock and our ``unlink`` a second process can open the same file
-        and take the lock on that inode; our ``unlink`` then removes the name
-        out from under it, and a third process is free to create a brand-new
-        ``daemon.lock`` and acquire a *second, simultaneous* lock — two live
-        owners at once. Leaving the file in place closes that window: the OS
-        lock (not the file's presence) is the single source of truth, so a
-        leftover, unlocked file is the normal, healthy resting state and the
-        next :meth:`acquire` simply re-locks and rewrites its diagnostics.
         """
         fh = self._fh
         if fh is None:

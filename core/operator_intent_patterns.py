@@ -16,11 +16,6 @@ def _has_any(text: str, terms: tuple[str, ...]) -> bool:
 def _loose_patterns(term: str) -> tuple[re.Pattern[str], ...]:
     """Regexes matching ``term`` with exactly ONE extra word wedged into it.
 
-    A trigger phrase is a sequence of words; an operator types the same question
-    with a filler in the middle ("готов **уже** к автономной работе"). One
-    pattern per gap, strict everywhere else, so at most one insertion is ever
-    tolerated — the looseness cannot compound across a long phrase.
-
     Single-word terms get nothing: there is no gap to be tolerant about, and
     loosening them would only invite false matches.
     """
@@ -43,15 +38,9 @@ def _has_any_loose(text: str, terms: tuple[str, ...]) -> bool:
     """``_has_any`` plus tolerance for one word inserted into a phrase.
 
     Used by the *positive* intent matchers only. The suppression guards
-    (``_looks_like_*``) deliberately keep strict substring matching: loosening
-    them would change *when routing is blocked*, which is a different and riskier
-    decision than widening what is recognised.
-
-    Why this exists: measured 2026-07-26, 283 of 372 natural phrasings (76%) of
-    the pattern file's own trigger phrases stopped routing when a single neutral
-    word was inserted, and the turn went to the LLM — which then answered as a
-    generic model rather than from the agent's own state. See
-    ``docs/COGNITIVE_CORE.md`` section 8.1.
+    (``_looks_like_*``) deliberately keep strict substring matching:
+    loosening them would change *when routing is blocked*, which is a
+    different and riskier decision than widening what is recognised.
     """
     if _has_any(text, terms):
         return True
