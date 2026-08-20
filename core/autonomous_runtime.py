@@ -1457,6 +1457,11 @@ class AutonomousRuntime:
                         auto_write_memory=config.learning_writes_memory,
                         require_verified=True,
                     )
+                    grounding = result.learning_grounding or {}
+                    unmet = [
+                        *grounding.get("phantom", ()),
+                        *grounding.get("unresolvable", ()),
+                    ]
                     self._log(
                         "reflection_learning_ingest",
                         {
@@ -1464,6 +1469,12 @@ class AutonomousRuntime:
                             "claims": ingest.claim_count,
                             "conflicts": ingest.conflicts,
                             "dry_run": config.dry_run,
+                            # A count of ingested files says nothing about
+                            # whether the diagnosed weak spot was the thing
+                            # studied. `grounding` carries that distinction so
+                            # a substitution cannot read as success (MIR-106).
+                            "grounding": grounding.get("status", "none"),
+                            "unmet_targets": unmet or None,
                         },
                     )
                 except Exception as ingest_exc:  # noqa: BLE001 — the failure is recorded and logged

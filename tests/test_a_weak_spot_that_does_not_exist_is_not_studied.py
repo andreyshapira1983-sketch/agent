@@ -1,31 +1,24 @@
-"""Banked: reflection names a weak spot, and nothing checks that it exists.
+"""Reflection names a weak spot; can the agent tell whether it is real?
 
-Measured on live traffic 2026-08-20. Reflection ran seven times and produced
-four learning plans. Of the twelve weak spots its lessons named, **ten do not
-exist as files**: core/reasoning.py, core/citation.py, core/user_contract.py,
-core/obligation_management.py, core/logical_coherence.py,
-core/file_management.py and others — plausible module names the model
-invented. Only tools/file_read.py and core/__init__.py were real.
+Measured on live traffic 2026-08-20, then **re-measured after the first
+reading turned out to be wrong** — the correction is the useful part.
 
-What that costs, from the same logs:
+What the logs show: of the twelve weak spots reflection's lessons named, ten
+do not exist as files — core/reasoning.py, core/citation.py,
+core/user_contract.py and others, plausible module names the model invented.
+Only tools/file_read.py and core/__init__.py were real.
 
-  named tools/file_read.py (real)   -> it is the plan's first source
-  named core/__init__.py   (real)   -> it is the plan's first source
-  named four phantoms               -> NONE of them enters the plan, which
-                                       silently returns ten default sources,
-                                       and the run logs
-                                       reflection_learning_ingest sources=10
-                                       claims=80 — a success
+What that does NOT show: that the current tree accepts them. Every one of the
+ten is from 2026-08-15, the day commit `010bdd2` added `_checked_focus_area`
+to core/reflection.py — "a lesson may not point at a file that does not
+exist". The first test below proves by intervention that a path-shaped
+phantom is now blanked and its `repair` intent downgraded to `monitor`.
+Historical logs, current code: a different question.
 
-So the edge carries its signal only when the model happens to name a real
-path. When it does not, the agent studies files unrelated to any diagnosed
-defect while the journal says it studied its weak areas. The architecture
-ascribes "identify the weak spot, then study it"; the mechanism performs
-that in 2 cases of 12.
-
-The invariant below is the smallest one that would have caught it. The fix is
-deliberately unprescribed: refuse the plan, drop the phantom focus areas, or
-record them as a defect signal of their own — each is a different policy.
+The residual is narrower and still live. The guard can only question a name
+that LOOKS like a path. `"memory subsystem"` is unresolvable by shape, passes
+through untouched, and reaches the planner — which answers it with very
+nearly the default source list. That is what the strict xfail banks.
 """
 from __future__ import annotations
 
@@ -49,25 +42,39 @@ def test_a_real_weak_spot_reaches_the_plan() -> None:
     assert "tools/file_read.py" in list(plan.source_paths)
 
 
+def test_a_path_shaped_phantom_is_refused_before_it_becomes_a_goal() -> None:
+    """The half that is fixed, proven at the guard rather than by reading it."""
+    from core.reflection import _checked_focus_area
+
+    assert not (_REPO / "core/reasoning.py").is_file(), (
+        "core/reasoning.py exists now — re-measure before trusting this test"
+    )
+    assert _checked_focus_area("core/reasoning.py", "repair") == ("", "monitor")
+    assert _checked_focus_area("tools/file_read.py", "repair") == (
+        "tools/file_read.py",
+        "repair",
+    )
+
+
 @pytest.mark.xfail(
     reason=(
-        "KNOWN GAP, measured live 2026-08-20 and banked rather than fixed "
-        "(MIR-106): 10 of the 12 weak spots reflection named do not exist, and "
-        "the planner answers a goal full of phantoms with ten default sources "
-        "instead of refusing. The invariant: a plan built to study a named "
-        "weak spot must not silently study something else. Fix unprescribed — "
-        "refuse, drop the phantom, or raise it as its own defect signal."
+        "KNOWN GAP, re-measured 2026-08-20 and banked rather than fixed "
+        "(MIR-106): a topic-shaped weak spot cannot be checked against disk, "
+        "and naming one changes nothing — 'planner interface design' returns "
+        "the same five sources as naming no weak spot at all, and as a "
+        "nonsense topic. Recorded honestly since today (learning_grounding -> "
+        "'unresolvable'), but no policy chosen: refuse, study anyway and say "
+        "so, or treat an unresolvable self-diagnosis as its own defect signal."
     ),
     strict=True,
 )
-def test_a_phantom_weak_spot_does_not_yield_a_confident_plan() -> None:
-    phantoms = ["core/reasoning.py", "core/citation.py", "core/user_contract.py"]
-    assert not any((_REPO / p).is_file() for p in phantoms), (
-        "these were phantom paths when this bank was written; if one now "
-        "exists, re-measure before trusting the bank"
+def test_naming_a_topic_weak_spot_changes_what_is_studied() -> None:
+    bare = list(_plan_for([], _REPO).source_paths)
+    topic = list(_plan_for(["planner interface design"], _REPO).source_paths)
+    nonsense = list(_plan_for(["ZZZQQQ nonexistent topic 8811"], _REPO).source_paths)
+    assert topic != bare, (
+        f"naming a weak spot studied exactly what naming nothing studies: {bare}"
     )
-    plan = _plan_for(phantoms, _REPO)
-    assert not list(plan.source_paths), (
-        "a goal naming only files that do not exist produced "
-        f"{len(list(plan.source_paths))} sources to study"
+    assert topic != nonsense, (
+        f"a topic and gibberish produced the same study plan: {topic}"
     )
