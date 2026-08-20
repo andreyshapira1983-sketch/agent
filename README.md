@@ -1,5 +1,15 @@
 # Agent
 
+> **Architectural freeze, declared 2026-08-20.** Nothing new is built until the
+> architecture of autonomy is corrected: much of this agent's executive
+> decision-making — its task agenda, its roles, its utility ranking, what it
+> studies first — is written into the code rather than derived by the agent.
+> That is the blocking issue of the project, and all other development is
+> subordinate to it. The declaration, the verified sites, the permitted work
+> and the condition that lifts the freeze are in
+> [docs/audit/AUTONOMY_FREEZE.md](docs/audit/AUTONOMY_FREEZE.md).
+
+
 An autonomous, self-diagnosing research agent that answers with **verified
 evidence**, records its own defects, and — under explicit human approval —
 proposes repairs to its own code.
