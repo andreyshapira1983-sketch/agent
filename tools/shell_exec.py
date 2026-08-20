@@ -3,62 +3,30 @@
 MVP-11 contract (deliberately tiny; widen only when each new command is
 proven safe in tests):
 
-  Whitelist
-    READ_ONLY_COMMANDS   purely informational binaries the OS provides
-                         (whoami, hostname, where on Windows / which on
-                         POSIX). These produce output, do not mutate
-                         state, and carry a no-op compensation plan.
-    MUTATING_COMMANDS    file-system creators that are EASY to undo:
-                         `mkdir <path>` and `touch <path>`. Both create
-                         a single new path; compensation is a single
-                         `delete_path_if_created` action.
-    UNRECOGNIZED         everything else — classified as `external`
-                         risk so the policy gate escalates it; even on
-                         approval, `run()` refuses to dispatch.
+Hard rules enforced in `_validate_argv` (defence in depth — they hold even
+if the policy gate, planner sanitiser or approval gate are bypassed):
 
-  Hard rules enforced in `_validate_argv` (defence in depth — even when
-  the policy gate, planner sanitiser, or approval gate are bypassed):
-    - argv must be a non-empty list of strings (no shell-string allowed)
-    - argv[0] must be in the whitelist
-    - no argv element may contain a shell metacharacter:
-        ; | & < > ` $ ( ) { } [ ] \\n \\r \\t \\0
-    - no argv element may equal '..', start with '/' or '\\\\', look
-      like 'C:\\...', or contain '~' / '$VAR'
-    - all path arguments to mutating commands must resolve INSIDE
-      the workspace root
+- argv is a non-empty list of strings; no shell-string form is accepted
+- argv[0] is in the whitelist
+- no element carries a shell metacharacter: ; | & < > ` $ ( ) { } [ ] \\n \\r \\t \\0
+- no element equals '..', starts with '/' or '\\\\', looks like 'C:\\...',
+  or contains '~' / '$VAR'
+- every path argument to a mutating command resolves INSIDE the workspace
 
-  Sandbox
-    - subprocess.run with `shell=False` always
-    - `cwd = workspace_root` (no escape)
-    - `env` reset to a tiny safe subset (PATH + SystemRoot on Windows)
-    - `timeout` in seconds, default 5 — short on purpose
-    - stdout/stderr captured with a HARD cap (`DEFAULT_OUTPUT_CAP`
-      bytes); excess is truncated and a flag set in the output
-    - text mode with strict UTF-8 (errors='replace' is silent corruption)
+Sandbox:
 
-  Compensation Plan
-    Built BEFORE execution. For mutating commands it captures whether
-    the target path existed BEFORE the run; the plan only removes
-    paths the tool itself created. Read-only commands carry a noop
-    plan so the audit trail is uniform.
+- `subprocess.run` with `shell=False`, always
+- `cwd = workspace_root`, no escape
+- `env` reset to a tiny safe subset (PATH + SystemRoot on Windows)
+- `timeout` in seconds, default 5 — short on purpose
+- stdout/stderr capped at `DEFAULT_OUTPUT_CAP` bytes; excess truncated and
+  flagged in the output
+- text mode with strict UTF-8 (`errors='replace'` is silent corruption)
 
-  Secret redaction
-    stdout/stderr pass through `core.redaction.redact_text` before
-    they leave the tool. Detected hits surface as additional
-    `secret_detected` events at the loop level via `data_classified`.
-
-Output shape (consumed by `validate_output` and by the synthesizer):
-    {
-        "argv":              list[str],          # the actual argv that ran
-        "exit_code":         int | None,         # None on timeout
-        "stdout":            str,                # redacted, truncated
-        "stderr":            str,                # redacted, truncated
-        "stdout_truncated":  bool,
-        "stderr_truncated":  bool,
-        "duration_ms":       int,
-        "timed_out":         bool,
-        "compensation_plan": dict,                # CompensationPlan.to_dict()
-    }
+Compensation Plan Built BEFORE execution. For mutating commands it captures
+whether the target path existed BEFORE the run; the plan only removes paths
+the tool itself created. Read-only commands carry a noop plan so the audit
+trail is uniform.
 """
 from __future__ import annotations
 
@@ -110,12 +78,6 @@ def classify_shell_result(
     command: str, *, exit_code: int | None, stderr: str
 ) -> tuple[str, str]:
     """Return `(execution_status, answer_result)` for one finished command.
-
-    `execution_status` is `success` or `failure`: did the command run
-    correctly. `answer_result` is `positive`, `negative` or `not_applicable`:
-    what it answered. They are separate facts on purpose — "grep found
-    nothing" is a successful execution with a negative answer, and calling
-    that a failure is as wrong as calling a crash a success.
 
     `answer_result` is telemetry about ONE command. It is deliberately not a
     completion signal: it says nothing about whether the task was done,
@@ -311,11 +273,9 @@ class ShellExecTool(Tool):
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
         """Decide risk per invocation, NOT per tool class.
 
-        - empty / missing argv     -> external  (will be rejected anyway)
-        - argv[0] in READ_ONLY     -> read_only  (no approval gate)
-        - argv[0] in MUTATING      -> irreversible  (approval gate fires)
-        - argv[0] anywhere else    -> external  (approval gate fires +
-                                                 run() still refuses)
+        empty/missing argv -> external (rejected anyway); argv[0] in
+        READ_ONLY -> read_only (no approval gate); in MUTATING ->
+        irreversible (gate fires); anything else -> external (gate fires).
         """
         argv = arguments.get("argv") if isinstance(arguments, dict) else None
         if not isinstance(argv, list) or not argv:
@@ -342,12 +302,7 @@ class ShellExecTool(Tool):
     # Validation
     # ------------------------------------------------------------------
     def _validate_argv(self, argv: list[str]) -> tuple[str, list[str]]:
-        """Return (command_norm, validated_argv) or raise PermissionError.
-
-        Hard rejection at the tool layer — does NOT depend on the
-        policy gate, planner sanitiser, or approval provider. This is
-        the last line of defence.
-        """
+        """Return (command_norm, validated_argv) or raise PermissionError."""
         if not isinstance(argv, list) or not argv:
             raise PermissionError("shell_exec requires a non-empty 'argv' list")
         if len(argv) > 16:
@@ -460,13 +415,7 @@ class ShellExecTool(Tool):
         return result.stdout.strip()
 
     def _validate_write_subcommand(self, cmd: str, sub: str, argv: list[str]) -> None:
-        """Shape and branch checks for the subcommands that record work.
-
-        Each one is pinned to a single argv shape. A recording command with a
-        free argument list is a different tool: `git add -A` sweeps whatever the
-        agent happened to leave behind, and `git checkout <ref>` moves the
-        operator's working tree instead of adding to it.
-        """
+        """Shape and branch checks for the subcommands that record work."""
         if sub == "add":
             paths = argv[2:]
             if not paths:
@@ -634,12 +583,7 @@ class ShellExecTool(Tool):
     # Execution
     # ------------------------------------------------------------------
     def run(self, argv: list[str]) -> dict[str, Any]:
-        """Execute one whitelisted command in the workspace sandbox.
-
-        Returns a structured dict (see module docstring for the schema)
-        on success and on graceful timeout. Raises PermissionError on
-        validation failure (caller surfaces as `tool_result.status=error`).
-        """
+        """Execute one whitelisted command in the workspace sandbox."""
         cmd, argv = self._validate_argv(argv)
 
         # Snapshot pre-condition for compensation BEFORE the side effect.
@@ -748,17 +692,7 @@ class ShellExecTool(Tool):
         target: Path | None,
         plan: CompensationPlan,
     ) -> dict[str, Any]:
-        """Mutating whitelist is interpreted by the tool, not spawned.
-
-        On Windows, `mkdir` and `touch` are NOT standalone executables
-        (mkdir is a `cmd.exe` builtin; touch ships nowhere by default).
-        Spawning them via `shell=False` would either fail or require
-        `cmd /c`, which would reintroduce shell parsing — exactly what
-        the validator forbids. So the MVP interprets these two commands
-        in-process, behind the same compensation contract.
-
-        This is documented in README §"shell_exec — narrow MVP".
-        """
+        """Mutating whitelist is interpreted by the tool, not spawned."""
         assert target is not None  # mypy hint; validator ensures this
         started = time.monotonic()
         stderr = ""
@@ -797,20 +731,7 @@ class ShellExecTool(Tool):
     # Helpers
     # ------------------------------------------------------------------
     def _resolve_binary(self, cmd: str) -> tuple[str, bool]:
-        """Pick the binary to run: `(name, substituted)`.
-
-        The requested command WINS when it is installed. The platform
-        equivalent is a fallback for when it is absent, not a rewrite applied
-        regardless — which is what it used to be, and what made a live cycle
-        fail. Measured on the machine where that happened:
-
-            shutil.which("grep")     -> C:\\Program Files\\Git\\usr\\bin\\grep.EXE
-            grep -c ^ core/loop.py   -> exit 0, "4093"  (either slash style)
-            findstr /C:x core/loop.py-> exit 1, "FINDSTR: Cannot open loop.py"
-
-        Real grep was installed, worked, and was swapped away for a tool that
-        could not read the path it was handed.
-        """
+        """Pick the binary to run: `(name, substituted)`."""
         if shutil.which(cmd) is not None:
             return cmd, False
         alias = self._platform_alias(cmd)
@@ -822,17 +743,11 @@ class ShellExecTool(Tool):
     def _normalise_argv_for(argv: list[str], *, substituted: bool) -> list[str]:
         """Make the arguments readable by the program that will actually run.
 
-        Only when a SUBSTITUTION happened: if the requested binary is the one
-        executing, its own dialect is already correct and rewriting would be
-        damage. On Windows `findstr` reads `/` as a switch prefix, so
-        `core/loop.py` parses as `core` plus `/l /o /o /p` — the exact live
-        failure.
-
-        Separators only. Flags are NOT translated: `grep -c` has no findstr
-        equivalent worth guessing at, and a half-built dialect mapper turns
-        every unmapped flag into a new silent failure. After MIR-010 a
-        fallback that cannot read its arguments fails visibly, which is the
-        honest outcome and leaves the planner able to see it.
+        Only when a SUBSTITUTION happened: if the requested binary is the
+        one executing, its own dialect is already correct and rewriting
+        would be damage. On Windows `findstr` reads `/` as a switch prefix,
+        so `core/loop.py` parses as `core` plus `/l /o /o /p` — the exact
+        live failure.
         """
         if not substituted or sys.platform != "win32":
             return argv
@@ -913,27 +828,13 @@ class ShellExecTool(Tool):
     # Output validation (Tool contract)
     # ------------------------------------------------------------------
     def execution_status(self, output: Any) -> str:
-        """The command's own verdict, not the subprocess's.
-
-        `run()` returning means the process started and was captured. Whether
-        the COMMAND worked is a separate fact, and reporting only the first
-        is what let `exit_code: 1` with `FINDSTR: Cannot open` reach the log
-        as `status=success` (MIR-010).
-        """
+        """The command's own verdict, not the subprocess's."""
         if isinstance(output, dict):
             return str(output.get("execution_status") or "success")
         return "success"
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
-        """Answers ONE question: does this object match the tool's schema?
-
-        A command that failed produces a perfectly well-formed report OF that
-        failure, so it validates. Rejecting it here would conflate "the tool
-        returned a correct message saying the command failed" with "the tool
-        returned something malformed", and only the second is a validation
-        problem. The failure travels in `execution_status` and surfaces as the
-        tool-result status (MIR-010).
-        """
+        """Answers ONE question: does this object match the tool's schema?"""
         warnings: list[str] = []
         if not isinstance(output, dict):
             return False, ["shell_exec output must be a dict"]

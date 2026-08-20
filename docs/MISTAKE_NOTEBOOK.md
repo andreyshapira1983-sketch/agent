@@ -864,7 +864,7 @@ away.
     >>> _.decode("cp866")[:25]
     ' Том в устройстве C имеет'          # the actual message
 
-**Where the two ends are.** `tools/shell_exec.py:900` (`_cap_and_decode`)
+**Where the two ends are.** `tools/shell_exec.py:815` (`_cap_and_decode`)
 decodes strict UTF-8 with a replacement fallback. The child is `cmd`, `where`,
 `git` — not Python — so `PYTHONIOENCODING=utf-8`, which `app/io._force_utf8_io`
 exports, has no effect on it whatsoever.
@@ -937,7 +937,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | 29 | [core/self_build_memory.py:137](../core/self_build_memory.py#L137) | a rollback was banked with no file tag, so `recent_self_build_lessons` found 0 — the agent broke the same test the same way twice | assistant, 2026-08-04 | MIR-085 |
 | 30 | [core/memory_policy.py:324](../core/memory_policy.py#L324) | recall scored Russian questions against English records by word overlap: «кто владеет архитектурой?» 0 records, the English form 3 | assistant, 2026-08-04 | MIR-086 |
 | 30 | [core/bilingual_terms.py:74](../core/bilingual_terms.py#L74) | every recall miss now says whether the table could widen the question at all — the number that decides the next step | assistant, 2026-08-04 | MIR-086 |
-| 31 | [tools/shell_exec.py:877](../tools/shell_exec.py#L877) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
+| 31 | [tools/shell_exec.py:792](../tools/shell_exec.py#L792) | PATHEXT was withheld, so `where python` returned exit 1 on a machine where python is on PATH — the agent read that as "my tools may not be connected" | operator run, 2026-08-04 | MIR-087 |
 | 32 | [tools/run_tests.py:322](../tools/run_tests.py#L322) | the agent's own test run strips PATHEXT, so it reported 2 failures the operator's terminal did not have — same commit, opposite verdicts | **the agent**, 2026-08-04 | MIR-088 |
 | 33 | [scripts/except_audit.py:36](../scripts/except_audit.py#L36) | the audit matched call names by exact token, so `self._log` read as silence and 5 of 46 flagged sites were never broken | assistant, 2026-08-05 | MIR-077 |
 

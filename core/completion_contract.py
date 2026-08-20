@@ -1,71 +1,23 @@
 """What must EXIST or have CHANGED when this request is done (MIR-067).
 
-The gap this closes, in the operator's words (ruling of 2026-08-02):
-
-    The result of a task must be represented by a separate structured
-    completion contract. The contract is derived from the original request
-    BEFORE the work is performed, and carries verifiable obligations together
-    with the way each one is verified. A plan and a good textual answer do not
-    by themselves prove completion. An unmet obligation forbids the status
-    `achieved`, forbids banking a successful episode, and forbids procedural
-    success credit. If an obligation cannot be unambiguously derived from the
-    request, the agent must ask for clarification rather than guess.
-
-Until now nothing in the system carried the *deliverable*. The recorded goal of
-every run is ``f"Answer the question: {question}"``, and every completion check
-measured the ANSWER — its citations, its chunks, its shape. So a run that was
-asked to change a file, and only read it, succeeded by the system's own
-definition. `core/completion_obligation.py` named this missing fourth source
-`acceptance_criteria` and reported it as `not_wired`. This module is that
-source.
-
-## Derived before the work — structurally, not by convention
-
-:func:`derive_completion_contract` takes the request and the file hint. It
-cannot see the plan, the artifacts or the answer, because it is not given
-them. A contract that could read the work it judges would be a description of
-what happened, not a criterion for it.
+The result of a task must be represented by a separate structured completion
+contract. The contract is derived from the original request BEFORE the work
+is performed, and carries verifiable obligations together with the way each
+one is verified. A plan and a good textual answer do not by themselves prove
+completion. An unmet obligation forbids the status `achieved`, forbids
+banking a successful episode, and forbids procedural success credit. If an
+obligation cannot be unambiguously derived from the request, the agent must
+ask for clarification rather than guess.
 
 ## Small vocabulary on purpose; ambiguity is an ASK, never a guess
 
 Only three deliverables are recognised, each with a mechanical check:
 
-===================  ==============================================
-`file_exists`        a path named for creation must exist afterwards
-`file_modified`      a path named for change must have been written
-`tests_green`         the run must carry a passing test result
-===================  ==============================================
-
-`core/completion_obligation.py` keys its `intent` source on the OBJECT and
-avoids verb lists, for a measured reason: wording is a weak proxy for duty. A
-deliverable cannot be read off the object alone — "прочитай core/foo.py" and
-"почини core/foo.py" name the same object and owe different things — so a
-narrow verb vocabulary is unavoidable here. What keeps it honest is that an
-unreadable request yields an EMPTY contract, never an invented duty.
-
-## Ambiguity is OBSERVED, not yet acted on — and here is why
-
-The operator's clause 6 says an obligation that cannot be unambiguously
-derived must be asked about. `ambiguities` records those cases and the loop
-journals them, but nothing stops the run to ask. That restraint is measured,
-not timid. Two candidate rules were tried against the 48 real requests in the
-live agent's episodic memory:
-
-* *a path is named under no recognised verb* → 4 clarifications, of which 2
-  were ordinary discussion turns that merely cited a file ("твоя гипотеза
-  неверна, доказательство: core/evidence.py строка 522"). Stopping a
-  conversation to ask what should happen to a quoted file is a defect, not
-  caution.
-* *a change verb with no path* (the rule kept here) → 7 clarifications, and
-  all 7 were genuine change requests whose target was named in PROSE rather
-  than as a path ("сделай так, чтобы эпизод сохранял, что пошло не так").
-  Asking "what should I change?" there is obtuse.
-
-So with this vocabulary the signal cannot yet tell "the operator was vague"
-from "the operator was clear in words this module does not parse". Wiring it
-to the stop-and-ask path would trade a silent wrong answer for a loud wrong
-question. It stays observational until the numbers justify power — the
-standing sensor policy for this repository.
+=================== ==============================================
+`file_exists` a path named for creation must exist afterwards
+`file_modified` a path named for change must have been written `tests_green`
+the run must carry a passing test result ===================
+==============================================
 """
 from __future__ import annotations
 
@@ -179,19 +131,7 @@ _REQUESTED_UNIT_RE = re.compile(
 
 @dataclass(frozen=True)
 class RequestedUnit:
-    """Названный оператором раздел работы или отчёта.
-
-    `identifier` — метка, которую оператор объявил САМ (`U01`, `R7`, `B`).
-    Она часть контракта, а не наша перефразировка, и по ней же считается
-    адресованность: ответ «U01: точка входа — verify()» покрывает единицу, не
-    повторяя её заголовок дословно. Без этого сверка помечала непокрытыми все
-    единицы разом и была бесполезна (замер 2026-08-10).
-
-    Существует, потому что `unsupported_deliverables` группирует по КЛАССАМ:
-    четырнадцать названных единиц живого задания давали две записи
-    (`report_sections`, `prohibition`). `partial` сообщал, что часть контракта
-    не представлена, и не сообщал какая — в конце хода сверять было не с чем.
-    """
+    """Названный оператором раздел работы или отчёта."""
 
     title: str
     identifier: str = ""
@@ -266,13 +206,7 @@ def _units_without_body(text: str) -> tuple[str, ...]:
 
 
 def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
-    """Названные единицы, следа которых в ответе нет.
-
-    Присутствие, а не качество. Единица считается адресованной, если в ответе
-    встречается её содержательная часть — заголовок без номера. Судить, ХОРОШО
-    ли раздел раскрыт, эта функция не берётся: для этого нужно понимание, а
-    выдуманный судья здесь был бы тем же дефектом, что и выдуманный долг.
-    """
+    """Названные единицы, следа которых в ответе нет."""
     body = (answer or "").casefold()
     missing: list[str] = []
     for unit in getattr(contract, "requested_units", ()) or ():
@@ -290,12 +224,7 @@ def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class UnsupportedDeliverable:
-    """Затребованное, которое извлекатель видит и НЕ умеет проверять.
-
-    Существует ради одного различия: пустой список обязательств раньше означал
-    и «запрос ничего не должен», и «запрошенное я представить не умею».
-    Потребитель читал второе как первое (живой случай 2026-08-10).
-    """
+    """Затребованное, которое извлекатель видит и НЕ умеет проверять."""
 
     kind: str
     evidence: str
@@ -335,12 +264,7 @@ class CompletionContract:
 
     @property
     def coverage(self) -> str:
-        """`complete`, пока извлекатель не встретил ничего вне своей области.
-
-        Отвечает на вопрос, который раньше задать было негде: «этот ноль —
-        про запрос или про меня?». Потребитель, увидевший `partial`, знает,
-        что отсутствие обязательств не означает отсутствия долга.
-        """
+        """`complete`, пока извлекатель не встретил ничего вне своей области."""
         return "partial" if self.unsupported_deliverables else "complete"
 
     @property
@@ -370,12 +294,7 @@ def _mentions_read(tokens: tuple[str, ...]) -> bool:
 
 
 def _action_for(tokens: tuple[str, ...]) -> str:
-    """`create` / `modify` / `read` / `unknown` for one request's tokens.
-
-    Modify wins over create when both appear ("исправь и добавь"): the stricter
-    duty is the safer one to owe, since a modification check also fails when
-    nothing was written at all.
-    """
+    """`create` / `modify` / `read` / `unknown` for one request's tokens."""
     def _hit(stems: tuple[str, ...]) -> bool:
         return any(tok.startswith(stem) for tok in tokens for stem in stems)
 
@@ -530,17 +449,7 @@ _CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|\s+—\s+)")
 
 
 def demanding_text(text: str) -> str:
-    """Текст без запрещающих предложений — из него и читаются долги.
-
-    Отрицание не входило в область видимости извлекателя, и это давало не
-    неполноту, а ИНВЕРСИЮ: запрет становился ровно тем долгом, который
-    запрещает. Последствие поведенческое — послушание запрету доходило до
-    `assemble_completion_verdict` как `obligation_silently_missing` и понижало
-    вердикт прогона.
-
-    Режется по предложениям, а не по всему тексту: «Создай A. Не трогай B.»
-    обязано сохранить долг по A.
-    """
+    """Текст без запрещающих предложений — из него и читаются долги."""
     kept = [
         part for part in _CLAUSE_SPLIT_RE.split(text or "")
         if part.strip() and not _PROHIBITING_CLAUSE_RE.match(part)
@@ -549,12 +458,7 @@ def demanding_text(text: str) -> str:
 
 
 def _unsupported_in(text: str) -> tuple[UnsupportedDeliverable, ...]:
-    """Затребованное, которое видно в тексте и непроверяемо этим модулем.
-
-    Возвращает по одной записи на класс, с ЦИТАТОЙ из запроса: запись без
-    улики недоказуема, а потребителю нужно не «где-то там просили отчёт», а
-    место, по которому он это проверит сам.
-    """
+    """Затребованное, которое видно в тексте и непроверяемо этим модулем."""
     found: list[UnsupportedDeliverable] = []
     for kind, pattern in _UNSUPPORTED_PATTERNS:
         match = pattern.search(text)
@@ -587,12 +491,7 @@ def _norm(path: str) -> str:
 
 
 def _tests_really_passed(output: Any) -> bool:
-    """A `run_tests` receipt that actually reports a green run.
-
-    The first draft accepted ANY run_tests artifact, so a run whose tests
-    failed satisfied "make the tests pass" (Copilot, PR #258). The tool
-    returns structured counts; they are what the contract reads.
-    """
+    """A `run_tests` receipt that actually reports a green run."""
     if not isinstance(output, dict):
         return False
     if output.get("timed_out"):
@@ -613,11 +512,6 @@ def unmet_obligations(
     never against the answer text. That is the operator's "a good textual
     answer does not prove completion", made mechanical: the answer is not a
     parameter here, so it cannot satisfy anything.
-
-    Paths are compared as whole normalized paths, taken from the write
-    receipt's own ``output["path"]``. The first draft matched the BASENAME
-    inside the artifact label, which let `tests/test_auth.py` satisfy a duty
-    owed about `auth.py` (Codacy, PR #258).
     """
     artifacts = artifacts or {}
     entries = [(str(label), meta or {}) for label, meta in artifacts.items()]
