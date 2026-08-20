@@ -118,17 +118,18 @@ file. Even a "measured" module was measured at its head.
 
 ### The safety-class breaks that nothing caught
 
-Six of the thirty are safety-class. Two were closed the same day; four remain
-open and are the shortest list of what to do next.
+Six of the thirty are safety-class. All six were closed the same day (MIR-113
+covers the last four). Production code was correct in every case: what was
+missing was a witness.
 
 | Site | The break | What it would mean | State |
 |---|---|---|---|
 | `core/model_router.py:82` | the admission gate returns True | a disabled spec, or one whose provider is unsupported, becomes selectable, and `require_available` is skipped | closed — `tests/test_an_unsupported_provider_is_never_selectable.py` |
 | `core/step_sanitizer.py:22` | userinfo split on the first `@` | the pre-filter judges a different host from the one dialled (MIR-111) | closed — fixed and witnessed |
-| `cli/intent_bridge.py:146` | the answer-is-None branch returns True | a message is reported handled although no reply was produced; both call sites then consume the turn | open |
-| `cli/intent_bridge.py:197` | the except-branch returns True | the documented fail-safe inverts: when no planner model can be built, the model is treated as having spoken | open |
-| `cli/intent_bridge.py:265` | token overlap inverts | a stop order cancels queued work it does not name, on any six-character coincidence | open |
-| `core/loop_step_execution.py:154` | the risk-probe failure branch returns True | a tool whose risk probe RAISES is declared read-only and joins the concurrent batch — its own docstring promises the opposite | open |
+| `cli/intent_bridge.py:146` | the answer-is-None branch returns True | a message is reported handled although no reply was produced; both call sites then consume the turn | closed — `tests/test_the_bridge_claims_only_what_it_did.py` |
+| `cli/intent_bridge.py:197` | the except-branch returns True | the documented fail-safe inverts: when no planner model can be built, the model is treated as having spoken | closed — same file |
+| `cli/intent_bridge.py:265` | token overlap inverts | a stop order cancels queued work it does not name, on any six-character coincidence | closed — same file |
+| `core/loop_step_execution.py:154` | the risk-probe failure branch returns True | a tool whose risk probe RAISES is declared read-only and joins the concurrent batch — its own docstring promises the opposite | closed — a case added beside its siblings in `tests/test_integration.py` |
 
 The rest of the thirty, by what they touch:
 
