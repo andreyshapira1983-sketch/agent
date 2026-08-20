@@ -1,23 +1,9 @@
 """Task Complexity Assessment — automatic model tier selection.
 
-The agent evaluates task complexity BEFORE making an LLM call and selects
-the appropriate model tier:
-
-  LIGHT    → fast, cheap  (haiku-family, mini-family)
-  STANDARD → balanced     (sonnet-family, standard GPT)
-  DEEP     → powerful     (opus-family, o1/o3-family)
-
-No LLM call is made here — this is a pure rule-based heuristic.
-
-Model names are NEVER hardcoded here.
-Actual model selection is in core/model_catalog.py which queries the
-provider's own API (anthropic.models.list / openai.models.list) and
-classifies results into tiers by naming pattern.
-
-Env override (optional — otherwise auto-discovered):
-  AGENT_MODEL_TIER_LIGHT    = <model-id>
-  AGENT_MODEL_TIER_STANDARD = <model-id>
-  AGENT_MODEL_TIER_DEEP     = <model-id>
+Model names are NEVER hardcoded here. Actual model selection is in
+core/model_catalog.py which queries the provider's own API
+(anthropic.models.list / openai.models.list) and classifies results into
+tiers by naming pattern.
 """
 from __future__ import annotations
 
@@ -306,14 +292,7 @@ _LIVE_GROUNDING_SIGNALS: frozenset[str] = frozenset({
 
 
 def needs_live_grounding(text: str) -> bool:
-    """Return True when the task likely requires fresh web data.
-
-    Called by the planner to inject a ``[LIVE_GROUNDING=required]`` hint
-    into the user prompt, which makes the LLM reliably add ``web_search``
-    as the first plan step instead of answering from stale training data.
-
-    This is a keyword heuristic — no LLM call, O(n) in signal count.
-    """
+    """Return True when the task likely requires fresh web data."""
     if not isinstance(text, str) or not text.strip():
         return False
     normalized = text.strip().casefold()
