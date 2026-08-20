@@ -191,18 +191,7 @@ class ModelUsageLedger:
             self.run_id = getattr(self.logger, "trace_id", None)
 
     def _run_id_for_record(self) -> str | None:
-        """Which run to bill this call to.
-
-        The ledger's own id comes from ``TraceLogger.trace_id``, which is minted
-        once per agent in ``build_agent`` — it names a SESSION, not a run
-        (``core/run_context`` states this and keeps run identity separate for
-        exactly this reason). Billing every record to it puts an entire
-        autonomous drain under one identifier and leaves the spend unjoinable to
-        the episode that caused it, which is what per-run attribution exists to
-        prevent. The active run scope, when there is one, is the honest answer;
-        outside any run (a REPL command, a probe) the session id still beats
-        nothing.
-        """
+        """Which run to bill this call to."""
         if not self._run_id_pinned:
             active = current_run()
             if active is not None and active.run_id:
@@ -235,16 +224,7 @@ class ModelUsageLedger:
         max_output_tokens: int = 0,
         cost_tier: str = "unknown",
     ) -> None:
-        """Pre-flight budget gate, run *before* an LLM call is dispatched.
-
-        In addition to the reactive checks against already-spent session totals,
-        this estimates the cost of the *upcoming* call from the prompt size plus
-        the requested output cap and blocks when ``totals + estimate`` would
-        exceed a configured session limit or a persistent budget window. This
-        prevents a single oversized call from blowing past the cap before any
-        tokens have been recorded. The estimate parameters are optional so
-        existing callers keep their previous behaviour.
-        """
+        """Pre-flight budget gate, run *before* an LLM call is dispatched."""
         totals = _totals(self.records)
         est_tokens = _estimate_tokens(system, user) + max(0, int(max_output_tokens))
         est_cost = estimate_cost_units(est_tokens, cost_tier)

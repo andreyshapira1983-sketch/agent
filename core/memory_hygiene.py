@@ -1,19 +1,4 @@
-"""Гигиена памяти: просрочка, дедупликация, сводка, архивация.
-
-Переименовано из `core/hygiene.py` — прежнее имя не говорило, ЧЬЯ это гигиена,
-и под него затесалась уборка резервных копий, к памяти не относящаяся (уехала
-в `core/backup_cleanup.py`).
-
-Четыре независимые политики, один принцип: *уборка — намеренная операция, а не
-побочный эффект другого действия*. Каждая возвращает типизированный отчёт,
-чтобы вызывающий (CLI, журнал аудита, планировщик) записал, что именно удалено
-и почему. Всякое удаление идёт через атомарную перезапись
-`PersistentMemoryStore` — промежуточного состояния не бывает.
-
-Политики намеренно НЕ сцеплены здесь между собой: порядок задаёт поверхность
-`:hygiene` в CLI (`expire` -> `dedupe` -> `summarise` -> `backups`), и каждый
-шаг пишет своё событие аудита. Тесты зовут их по одной.
-"""
+"""Гигиена памяти: просрочка, дедупликация, сводка, архивация."""
 from __future__ import annotations
 
 import re
@@ -33,16 +18,7 @@ def _normalise(text: str) -> str:
     return _WS_RE.sub(" ", (text or "").strip().lower())
 
 def _similarity(a: str, b: str) -> float:
-    """Cheap Jaccard over word sets, then boosted by substring containment.
-
-    The MVP-10 brief explicitly forbids embeddings until proven
-    necessary. Word-level Jaccard catches "same fact, different word
-    order" and `containment` catches "old record is a prefix of the new
-    one". Together they cover the common "user repeats themselves"
-    pattern without needing a vector DB.
-
-    Returns 0.0 .. 1.0.
-    """
+    """Cheap Jaccard over word sets, then boosted by substring containment."""
     na, nb = _normalise(a), _normalise(b)
     if not na or not nb:
         return 0.0
@@ -129,11 +105,9 @@ def deduplicate_memory(
     """Collapse near-duplicates already on disk.
 
     The OLDEST record in every duplicate group is treated as canonical
-    (oldest = first to be deliberately remembered). Newer near-copies
-    are deleted. This makes dedup idempotent: a second run finds zero
-    new groups.
-
-    `dry_run=True` returns what WOULD be deleted but rewrites nothing.
+    (oldest = first to be deliberately remembered). Newer near-copies are
+    deleted. This makes dedup idempotent: a second run finds zero new
+    groups.
     """
     if not 0.0 < threshold <= 1.0:
         raise ValueError(f"threshold must be in (0, 1], got {threshold}")
@@ -285,16 +259,10 @@ def summarise_memory(
 ) -> SummaryReport:
     """Merge records sharing `tag` into a single summarised record.
 
-    Behaviour:
-      - 0 matching records  -> no-op (skipped_reason='no records')
-      - 1 matching record   -> no-op (skipped_reason='single record')
-      - 2..max_records      -> LLM called, summary saved, originals removed
-      - >max_records        -> only the oldest `max_records` are merged
-
-    On any LLM exception the store is left UNTOUCHED and the report
-    carries `skipped_reason='llm_error: <type>: <msg>'`. Records
-    carrying `tag == SUMMARY_TAG` are skipped — summaries don't get
-    re-summarised on every run.
+    Behaviour: - 0 matching records -> no-op (skipped_reason='no records') -
+    1 matching record -> no-op (skipped_reason='single record') -
+    2..max_records -> LLM called, summary saved, originals removed -
+    >max_records -> only the oldest `max_records` are merged
     """
     if not tag or not tag.strip():
         raise ValueError("tag must be a non-empty string")
@@ -433,11 +401,10 @@ class ArchiveReport:
 def _importance_score(record: MemoryRecord, now: datetime) -> float:
     """Score a memory record 0.0-1.0. Higher = more worth keeping active.
 
-    Formula:
-      base     = best tag weight (or 0.3 if no known tags)
-      access   = +0.05 per access, capped at +0.3 (logarithmic feel)
-      recency  = -0.01 per day since last access, capped at -0.3
-                  (records never accessed use created_at as reference)
+    Formula: base = best tag weight (or 0.3 if no known tags) access = +0.05
+    per access, capped at +0.3 (logarithmic feel) recency = -0.01 per day
+    since last access, capped at -0.3 (records never accessed use created_at
+    as reference)
     """
     tags_lower = {t.strip().lower() for t in (record.tags or [])}
     base = max((_TAG_WEIGHTS.get(t, 0.0) for t in tags_lower), default=0.3)

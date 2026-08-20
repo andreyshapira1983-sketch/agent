@@ -259,13 +259,7 @@ class SourceRankingReport:
 
 
 def is_realtime_question(question: str) -> bool:
-    """Return True when a question asks for current/fresh data.
-
-    Repo-local guard: when the question is clearly about the local repository /
-    codebase (see ``_REPO_LOCAL_MARKERS``), ambiguous recency words like
-    "current"/"latest"/"now"/"текущ"/"последн"/"сейчас" are ignored. Strong
-    market/news/weather terms still force realtime even on repo-local text.
-    """
+    """Return True when a question asks for current/fresh data."""
     lowered = (question or "").casefold()
     repo_local = _is_repo_local(lowered)
 

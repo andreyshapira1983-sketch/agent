@@ -1,12 +1,8 @@
 """Source Registry and extracted claims.
 
-Evidence is per-run proof. SourceRegistry is the catalog view over that proof:
-what source was used, what type it is, how much trust it has, and which
-claims were extracted from it.
-
 This module is deliberately local and deterministic. It does not parse PDFs,
-books, videos, or GitHub by itself; those ingestion layers can add sources and
-claims here without changing the agent loop.
+books, videos, or GitHub by itself; those ingestion layers can add sources
+and claims here without changing the agent loop.
 """
 from __future__ import annotations
 

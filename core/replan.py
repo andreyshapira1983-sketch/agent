@@ -150,12 +150,7 @@ class ReplanTrigger:
 
 
 def count_failures(history: list[ReplanTrigger]) -> dict[str, int]:
-    """Return {failure_code: count} over the cumulative history.
-
-    Used both by the audit log payload (`replan_attempt`) and the
-    synthesizer prompt, so it's worth having one place that knows
-    how to summarise the list.
-    """
+    """Return {failure_code: count} over the cumulative history."""
     counts: dict[str, int] = {}
     for t in history:
         counts[t.code] = counts.get(t.code, 0) + 1
@@ -237,25 +232,19 @@ def format_replan_context(
 class FailureBudget:
     """Retry budget + planner guidance for one failure type.
 
-    Attributes
-    ----------
-    max_occurrences:
-        How many times this failure type may occur across the WHOLE
-        run (including the first time) before the loop must stop. A
-        budget of 1 means "no retry at all". A budget of 2 means "one
-        retry allowed". Must be >= 1 (a value of 0 would be a contract
-        violation: by the time we read the budget we already saw the
-        failure once).
-    advice:
-        Human-readable guidance attached to the next planner prompt's
-        <replan_context> block. Keep it short and concrete; the LLM
-        reads dozens of these.
-    requires_different_action:
-        When True, the loop tells the planner sanitiser to REJECT any
-        step that repeats the exact same (tool, arguments) pair from
-        a previous attempt's failure. This is the right behaviour for
-        approval_deny, approval_abort, policy_blocked — retrying the
-        same action would be either wasteful or unsafe.
+    Attributes ---------- max_occurrences: How many times this failure type
+    may occur across the WHOLE run (including the first time) before the
+    loop must stop. A budget of 1 means "no retry at all". A budget of 2
+    means "one retry allowed". Must be >= 1 (a value of 0 would be a
+    contract violation: by the time we read the budget we already saw the
+    failure once). advice: Human-readable guidance attached to the next
+    planner prompt's <replan_context> block. Keep it short and concrete; the
+    LLM reads dozens of these. requires_different_action: When True, the
+    loop tells the planner sanitiser to REJECT any step that repeats the
+    exact same (tool, arguments) pair from a previous attempt's failure.
+    This is the right behaviour for approval_deny, approval_abort,
+    policy_blocked — retrying the same action would be either wasteful or
+    unsafe.
     """
 
     max_occurrences: int
@@ -534,17 +523,13 @@ class ReplanPolicy:
     ) -> ReplanDecision:
         """Return what the loop should do before its next attempt.
 
-        Parameters
-        ----------
-        failure_history:
-            Iterable of `ReplanTrigger`-like objects. Only the `code`
-            attribute is read (it must be a `FailureType` string) plus
-            `tool_name` and `arguments` for forbidden-action tracking.
-            Defined as `Any` so this module doesn't have to import the
-            loop's dataclass (avoids a cycle).
-        completed_attempts:
-            How many planner attempts have already finished (>=1 by the
-            time decide() is called the first time).
+        Parameters ---------- failure_history: Iterable of
+        `ReplanTrigger`-like objects. Only the `code` attribute is read (it
+        must be a `FailureType` string) plus `tool_name` and `arguments` for
+        forbidden-action tracking. Defined as `Any` so this module doesn't
+        have to import the loop's dataclass (avoids a cycle).
+        completed_attempts: How many planner attempts have already finished
+        (>=1 by the time decide() is called the first time).
         """
         if completed_attempts < 1:
             raise ValueError(
@@ -617,12 +602,7 @@ class ReplanPolicy:
     def _forbidden_actions(
         self, triggers: list[Any]
     ) -> tuple[tuple[str, str], ...]:
-        """Collect (tool, canonical-args) pairs that must not be retried.
-
-        Returns a tuple of (tool_name, args_json) pairs. We canonicalise
-        the args dict to a sorted JSON string so the planner sanitiser
-        can do exact-match dedup without worrying about key order.
-        """
+        """Collect (tool, canonical-args) pairs that must not be retried."""
         forbidden: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
         for t in triggers:

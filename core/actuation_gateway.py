@@ -1,8 +1,5 @@
-"""Actuation gateway — checked door for effectful actions (REPL, runtime, daemon).
-
-Gateway answers **may it happen?** before effectful tool handlers run. It delegates
-risk classification to :class:`core.policy.PolicyGate`, consults kill-switch /
-readiness hard stops (G5a), and adds path/dry-run context.
+"""Actuation gateway — checked door for effectful actions (REPL, runtime,
+daemon).
 """
 from __future__ import annotations
 
@@ -169,12 +166,8 @@ class ActuationGateway:
         *,
         operation: str = "self_apply_lane.run",
     ) -> GatewayDecision:
-        """G3: the single actuation door before an approved self-apply lane run.
-
-        Human approval, proposal validation, and low-risk classification happen
-        upstream in ``core.self_apply_bridge``. The gateway adds the run-mode
-        decision: ``simulate`` under dry-run (no mutation), ``allow`` otherwise.
-        Kill-switch / readiness may return ``block`` before any mutation (G5a).
+        """G3: the single actuation door before an approved self-apply lane
+        run.
         """
         blocked = self._hard_stop_decision(operation)
         if blocked is not None:

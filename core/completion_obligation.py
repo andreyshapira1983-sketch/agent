@@ -1,54 +1,29 @@
 """Did this cycle incur an obligation to observe or act, and leave it unmet?
 
-Replaces the keyword detector in :mod:`core.termination_guard` as the *source of
-truth* for premature completion. That detector asked "does the user's wording
-contain a tool-ish word?", and measurement showed what that costs: it
-recognised **1 of 12** phrasings
-that unambiguously demand a tool, and it fired on *«объясни разницу между REST и
-GraphQL»* because `"разниц"` is a keyword for the diff tool. Wording is not the
-obligation; it is one weak proxy for it.
+``intent`` Structural, object-based, and deliberately **not** a verb list: a
+question that names a workspace path, or a turn carrying a ``file_hint``,
+incurs a workspace-observation duty. Keying on the *object referenced*
+rather than on the phrasing is what makes «объясни разницу…» a non-event —
+it names no file — while «прочитай core/foo.py» is one regardless of the
+verb used.
 
-The question this module asks instead:
+``plan`` Only **admitted** plan steps, never the planner's raw output. A
+step that reached execution for an observing tool is a duty to produce a
+result.
 
-    Did some part of this cycle create a duty to observe the world or to run
-    something — and was that duty left unsatisfied *without saying so*?
-
-## Four sources, three of them wired
-
-``intent``
-    Structural, object-based, and deliberately **not** a verb list: a question
-    that names a workspace path, or a turn carrying a ``file_hint``, incurs a
-    workspace-observation duty. Keying on the *object referenced* rather than on
-    the phrasing is what makes «объясни разницу…» a non-event — it names no
-    file — while «прочитай core/foo.py» is one regardless of the verb used.
-
-``plan``
-    Only **admitted** plan steps, never the planner's raw output. A step that
-    reached execution for an observing tool is a duty to produce a result.
-
-``freshness``
-    The existing ``realtime_required`` from the source ranker.
-
-``acceptance_criteria``
-    **not_wired.** ``Goal.success_criteria`` and ``PlanStep.expected_outcome``
-    exist as free-text fields, but no criterion is carried through the cycle,
-    tied to an obligation, given a verification method, or allowed to affect
-    completion. So this module reports the source as *unavailable* and draws no
-    conclusion from it. `not_wired` is not `no_requirement`: an unwired source
-    must not create a duty, must not cancel one, and must not count as a passed
-    check. Wiring it is a separate architectural change — a contract between
-    task statement, completion check and outcome — not a detail of this sensor.
-
-## The rule
-
-One wired source is enough. Sources do not vote: ``realtime_required=False``
-cannot cancel a duty that ``intent`` or ``plan`` created.
-
-    triggered  iff  some obligation is `silently_missing`
+``acceptance_criteria`` **not_wired.** ``Goal.success_criteria`` and
+``PlanStep.expected_outcome`` exist as free-text fields, but no criterion is
+carried through the cycle, tied to an obligation, given a verification
+method, or allowed to affect completion. So this module reports the source
+as *unavailable* and draws no conclusion from it. `not_wired` is not
+`no_requirement`: an unwired source must not create a duty, must not cancel
+one, and must not count as a passed check. Wiring it is a separate
+architectural change — a contract between task statement, completion check
+and outcome — not a detail of this sensor.
 
 An obligation the run failed to meet **and said so** is not premature
-completion; it is an honest report of a failure. That is why the four states are
-distinguished, and why only the silent one fires.
+completion; it is an honest report of a failure. That is why the four states
+are distinguished, and why only the silent one fires.
 """
 from __future__ import annotations
 
@@ -207,12 +182,7 @@ def evaluate_completion_obligations(
     denied_tools: Iterable[str] = (),
     contract: Any | None = None,
 ) -> CompletionObligationResult:
-    """Collect obligations from the wired sources and judge each one.
-
-    Pure: no I/O, no LLM, no store access. ``answer`` is the composed,
-    user-facing text, so disclosure is read from what the operator actually
-    receives.
-    """
+    """Collect obligations from the wired sources and judge each one."""
     artifacts = artifacts or {}
     artifact_tools = {
         str((meta or {}).get("tool") or "") for meta in artifacts.values()

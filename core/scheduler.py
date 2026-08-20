@@ -415,12 +415,7 @@ class SchedulerService:
     # ── control ──────────────────────────────────────────────────────────
 
     def notify(self) -> None:
-        """Wake the service so it re-evaluates the next due time immediately.
-
-        Call this after adding or changing a schedule so a newly-due entry is
-        not delayed until the current sleep elapses. Idempotent and safe to
-        call before :meth:`run` starts.
-        """
+        """Wake the service so it re-evaluates the next due time immediately."""
         self._wake_event.set()
 
     def stop(self) -> None:
@@ -455,13 +450,7 @@ class SchedulerService:
     # ── main loop ────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """Run until :meth:`stop` is called or the task is cancelled.
-
-        Each iteration computes the exact wait to the next due schedule, sleeps
-        (cooperatively, so a :meth:`notify` or cancellation interrupts it), then
-        ticks the store when something is due. Cancellation propagates so the
-        daemon's graceful shutdown can drain/cancel it.
-        """
+        """Run until :meth:`stop` is called or the task is cancelled."""
         if self._running:
             raise RuntimeError("SchedulerService is already running")
         self._running = True
@@ -501,13 +490,7 @@ class SchedulerService:
             logger.info("scheduler service stopped after %d tick(s)", self._ticks)
 
     async def _sleep_or_wake(self, delay: float) -> bool:
-        """Sleep up to ``delay`` seconds or until notified/stopped.
-
-        Returns True if woken early (by :meth:`notify` / :meth:`stop`) rather
-        than by the sleep elapsing. Any pending child futures are cancelled and
-        awaited so no work is left dangling — including when this coroutine is
-        itself cancelled.
-        """
+        """Sleep up to ``delay`` seconds or until notified/stopped."""
         if self._stopped or self._wake_event.is_set():
             self._wake_event.clear()
             return True
