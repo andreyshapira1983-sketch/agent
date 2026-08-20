@@ -3425,3 +3425,62 @@ says 1028 lines of code needs splitting either. What the measurement
 licenses is narrower and worth more: a signal was believed for months
 without anyone asking what it counted, which is exactly what happened with
 the reasoning↔action detector two files over.
+
+## The wire is not the signal
+
+After the files, the prose, the linter and the documents, the operator asked
+the question none of those answer: is the organism actually assembled, or is
+it a set of good organs that never form one loop.
+
+Importing proves nothing, so the census walked the import graph from every
+process anyone really starts — main.py, agent_tick.py, cli.app, cli.one_shot,
+app.daemon, app.bootstrap, api.server, tools.agent_mcp_server,
+app.windows_service, app.runtime_cli, app.task_scheduler_cli — and asked what
+is left outside. **238 of 303 modules are reachable directly, 34 only through
+a function-local import, 8 are pulled by tests alone, and 23 by nothing** —
+those 23 being scripts/, which are standalone by design.
+
+The instrument was wrong on its first run and said the whole `cli.commands_*`
+surface was test-only. It was not: `from cli import command_dispatch` imports
+a SUBMODULE, and the analyser had counted it as an import of the package.
+Fixing that moved 55 modules from "unreachable" to "reachable". A measurement
+that indicts an entire subsystem deserves suspicion before the subsystem does.
+
+Three modules survived the corrected pass unreached: `app/worker_pool.py`,
+`app/priority_event_queue.py`, `app/file_watcher.py`. **This is not a defect,
+and the rule matters more than the case:** a module found unwired is not an
+instruction to wire it — it is a reason to ask whether it should be, where,
+why, and on what proof. Here the answer was already written down.
+`docs/daemon-progress.md` marks items 2.2, 3.1 and 3.2 as *merged (acceptance
+pending)*, and each module's own docstring says it "does not own the daemon
+loop, does not change agent_tick.py". Category: FUTURE / merged-not-accepted.
+Wiring them would have been the same error as trusting a proxy — acting on a
+signal without asking what it measures.
+
+### The memory chain, proven by intervention
+
+For the chain that matters most the census is not enough either, because
+"reachable" is three levels below "carries a signal". So it was run as an
+experiment on the production path, in three separate processes:
+
+  baseline      empty store                 -> injection block empty
+  intervention  remember() -> policy `save` -> data/persistent_memory.jsonl
+  fresh process records_loaded=1 -> policy allowed=1 -> inject selected=1
+                and a marker that exists nowhere else in the tree arrives
+                inside the `<long_term_memory>` block that enters the prompt
+  control       the same record, an unrelated question -> block empty,
+                rejected as `not_applicable`
+
+The control is what makes it an experiment rather than a demonstration: the
+filter discriminates, so the wire carries a signal and not everything.
+
+Eight edges are therefore proven: write, policy decision, persistence,
+survival across a process boundary, retrieval trigger, correct record,
+eligibility, injection into cognition. The ninth — that a later decision
+DIFFERS because the record was injected — is not proven here. It needs a
+model call, it is exactly what MIR-100 is about, and it stays UNKNOWN.
+
+`tests/test_a_memory_written_reaches_cognition.py` pins the eight, and it was
+falsified before being trusted: inserting `return ""` at the top of
+`_retrieve_persistent` turns it red with the right message, and removing that
+line turns it green again. A green test that cannot go red proves nothing.
