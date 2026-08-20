@@ -4,7 +4,7 @@ Background: docs/CODE_NOTES.md, "The approved goal that never ran".
 """
 from __future__ import annotations
 
-from core.autonomous_runtime import AutonomousRuntimeConfig, AutonomousRuntime
+from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 
 _GOAL = "найди и почини свои собственные дефекты"
 

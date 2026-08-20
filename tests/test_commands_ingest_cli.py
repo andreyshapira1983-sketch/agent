@@ -27,6 +27,8 @@ from cli.commands_ingest import (
     _handle_ingest_rss,
     _handle_ingest_source,
     _handle_ingest_web,
+)
+from cli.commands_source_registry import (
     _handle_source_library,
     _handle_source_registry,
 )

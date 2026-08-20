@@ -1,9 +1,10 @@
 """The deterministic planners and scanners behind the ingestion commands.
 
-The second half of `cli/commands_ingest.py`: `:source-review-plan`,
-`:implementation-plan`, `:patch-proposal-plan`, the `:self-build-propose`
-scanner, and the pure helpers they are built from. #167 covered the command
-surface and said this part was left; this is that part.
+`:source-review-plan`, `:implementation-plan`, `:patch-proposal-plan`, the
+`:self-build-propose` scanner, and the pure helpers they are built from.
+These lived inside `cli/commands_ingest.py` until 2026-08-20, when a cluster
+scan showed they shared no reference with the ingest handlers; they now live
+in `cli/commands_plan.py` and `cli/commands_self_build.py`.
 
 Two behaviours here are worth more than their line count:
 
@@ -28,23 +29,25 @@ from types import SimpleNamespace
 
 import pytest
 
-import cli.commands_ingest as mod
-from cli.commands_ingest import (
-    LARGE_FILE_LINE_THRESHOLD,
-    _format_large_file_report,
+import cli.commands_self_build as mod
+from cli.commands_plan import (
     _handle_implementation_plan,
     _handle_patch_proposal_plan,
-    _handle_self_build_propose,
-    _handle_source_registry,
     _handle_source_review_plan,
     _insufficient_source_evidence_payload,
+    _requests_explicit_file_read,
+)
+from cli.commands_self_build import (
+    LARGE_FILE_LINE_THRESHOLD,
+    _format_large_file_report,
+    _handle_self_build_propose,
     _large_file_report,
     _propose_self_build_operator_intent_patch,
-    _requests_explicit_file_read,
     _safe_python_file,
     _safe_scan_dir,
     _self_build_propose_payload,
 )
+from cli.commands_source_registry import _handle_source_registry
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
 
 
