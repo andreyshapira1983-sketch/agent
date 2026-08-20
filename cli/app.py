@@ -48,7 +48,7 @@ from app.daemon_notice import _print_daemon_inbox_notice
 from app.io import _force_utf8_io
 from app.task_scheduler_cli import _schedule_disable_message
 from cli.args import build_parser
-from cli.commands_ingest import _handle_self_build_propose
+from cli.commands_self_build import _handle_self_build_propose
 from cli.help import render_startup_commands
 from cli.one_shot import run_one_shot
 from cli.repl import _stdin_is_interactive, _StdinLineReader, run_repl

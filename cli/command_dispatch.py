@@ -79,16 +79,10 @@ from cli.commands_budget import (
 from cli.commands_connectors import _handle_connector_plan, _handle_connectors
 from cli.commands_health import _handle_dry_health_pass
 from cli.commands_ingest import (
-    _handle_implementation_plan,
     _handle_ingest_project,
     _handle_ingest_rss,
     _handle_ingest_source,
     _handle_ingest_web,
-    _handle_patch_proposal_plan,
-    _handle_self_build_propose,
-    _handle_source_library,
-    _handle_source_registry,
-    _handle_source_review_plan,
 )
 from cli.commands_knowledge_review import _handle_assumptions, _handle_conflicts
 from cli.commands_learn import _handle_learn
@@ -107,6 +101,11 @@ from cli.commands_models import (
     _handle_provider_catalog_refresh,
     _handle_refresh_models,
 )
+from cli.commands_plan import (
+    _handle_implementation_plan,
+    _handle_patch_proposal_plan,
+    _handle_source_review_plan,
+)
 from cli.commands_proposals import (
     _handle_capability_request,
     _handle_subagent_proposal,
@@ -118,12 +117,17 @@ from cli.commands_repair import (
 from cli.commands_self_apply import _handle_self_apply_run
 from cli.commands_self_build import (
     _handle_self_build_produce,
+    _handle_self_build_propose,
     _handle_self_build_supervisor,
 )
 from cli.commands_self_split import _handle_self_split
 from cli.commands_self_task import (
     _handle_self_task_build,
     _handle_self_task_propose,
+)
+from cli.commands_source_registry import (
+    _handle_source_library,
+    _handle_source_registry,
 )
 from cli.commands_team import _handle_team_plan, _handle_team_run
 from cli.commands_value_review import (
