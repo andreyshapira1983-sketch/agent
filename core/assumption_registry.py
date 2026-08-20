@@ -540,7 +540,7 @@ class AssumptionStore:
         for row in rows:
             try:
                 result.append(Assumption.from_dict(row))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # Skipping stays — one bad row must not sink the register — but
                 # silence does not: an assumption that cannot be parsed is an
                 # assumption nobody will ever be asked to confirm, and the

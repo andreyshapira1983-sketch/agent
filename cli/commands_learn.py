@@ -85,7 +85,7 @@ def _handle_learn(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(learn failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
     print(report.user_summary(), file=sys.stderr)

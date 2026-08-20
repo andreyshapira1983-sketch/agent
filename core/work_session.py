@@ -364,7 +364,7 @@ def _cycle_signature(run_report: Any) -> tuple:
             for t in getattr(run_report, "tasks", []) or []
         )
         return (getattr(run_report, "status", ""), tasks)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # The signature feeds repetition detection. `("__unknown__",)` is
         # deliberately CONSTANT: two unreadable reports in a row compare equal
         # and trip the "nothing is changing" guard, which is the safe direction
@@ -396,7 +396,7 @@ def _is_budget_exhausted(run_report: Any) -> bool:
             if details.get("error_type") == "ModelBudgetExceeded":
                 return True
         return False
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # `False` means "budget is fine, keep going" — the permissive answer.
         # An unreadable report therefore does not stop the session, it lets it
         # spend on (MIR-077).
@@ -434,7 +434,7 @@ def _is_approval_blocked(run_report: Any) -> bool:
             if "approval" in str(details.get("reason", "")).lower():
                 return True
         return False
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # Same permissive direction as the budget check above: `False` means
         # "nothing is waiting for a human", so an unreadable report silently
         # removes the reason to pause (MIR-077).

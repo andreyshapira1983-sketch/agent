@@ -78,7 +78,7 @@ def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:  # Layer 5
         return True
     try:
         recent = store.load_recent(20)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(assumption store error: {exc})", file=sys.stderr)
         return True
     if not recent:

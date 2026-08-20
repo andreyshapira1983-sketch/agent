@@ -419,7 +419,7 @@ def record_approval_receipt(
     )
     try:
         return append_receipt(receipt, workspace=ws)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         return None  # documented contract: never raises
 
 
@@ -502,5 +502,5 @@ def record_gateway_receipt(
     )
     try:
         return append_receipt(receipt, workspace=ws)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         return None  # documented contract: never raises

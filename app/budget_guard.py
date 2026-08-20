@@ -133,7 +133,7 @@ def _retire_resumed_pause(
                     "resumed_by": report["resumed_by"],
                 },
             )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — advisory scan; no match changes nothing
         pass
 
 
@@ -145,7 +145,7 @@ def _workspace_from_agent(agent: AgentLoop, workspace: Path | None) -> Path | No
         return None
     try:
         return Path(log_dir).resolve().parent
-    except Exception:
+    except (OSError, TypeError, ValueError):
         return None
 
 
@@ -187,7 +187,7 @@ def _existing_paused_checkpoint(agent: AgentLoop) -> dict | None:
             payload = dict(ctx.paused)
             payload.setdefault("trace_id", trace_id)
             return payload
-    except Exception:
+    except (ImportError, OSError):
         return None
     return None
 
@@ -227,7 +227,7 @@ def _persist_resumable_budget_stop(
                     "blocked_model": payload["blocked_model"],
                 },
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — checkpoint is best-effort; the run still pauses
             pass
 
     resolved_workspace = _workspace_from_agent(agent, workspace)
@@ -266,5 +266,5 @@ def _persist_resumable_budget_stop(
                 "stop_reason": payload.get("stop_reason"),
             },
         )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — queue entry is best-effort; the run still pauses
         pass

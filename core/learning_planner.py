@@ -356,7 +356,7 @@ def _apply_staleness(
 def _rel(workspace: Path, path: Path) -> str:
     try:
         return path.resolve().relative_to(workspace.resolve()).as_posix()
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         # Same as `core/ingestion_utils._relative_label`: `relative_to` raises
         # on any path outside the workspace, which is an ordinary case with an
         # ordinary answer, not a failure.

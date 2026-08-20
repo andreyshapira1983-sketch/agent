@@ -82,7 +82,7 @@ def agent_status() -> str:
         # describing silence it had created itself.
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
             _print_status(REPO)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # Named, never swallowed (MIR-077): a viewer that returns "" on an
         # error tells the reader the agent is quiet when in fact nothing was
         # asked.

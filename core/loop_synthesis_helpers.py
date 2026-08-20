@@ -92,7 +92,7 @@ def _log_budget_trim(
                 memory_label=memory_label,
             ):
                 log.log("subsystem_disagreement", _ev)
-        except Exception as _sd_exc:
+        except Exception as _sd_exc:  # noqa: BLE001 — the failure is recorded and logged
             try:
                 log.log(
                     "subsystem_disagreement_error",
@@ -101,5 +101,5 @@ def _log_budget_trim(
                         "error": str(_sd_exc)[:300],
                     },
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — the logger must never break the answer path
                 pass

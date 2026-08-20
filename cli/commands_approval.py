@@ -427,7 +427,7 @@ def _record_producer_approval(workspace: Path, item: Any) -> None:
         from core.subagent_registry import SubagentRegistry
         registry = SubagentRegistry.load(workspace)
         registry.apply_lane_outcome(getattr(item, "id", None), "approved")
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — advisory origin read; absence means not ours
         pass
 
 
@@ -541,7 +541,7 @@ def _run_approved_subagent(
         )
         print(f"(approval run refused: {exc})", file=sys.stderr)
         return True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         _record_subagent_contract_outcome(workspace, contract, "error")
         agent.log.log(
             "approval_subagent_error",
@@ -600,7 +600,7 @@ def _record_subagent_contract_outcome(
             execution_receipt=execution_receipt,
             audit_report=audit_report,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(
             "(approval run warning: contract registry write failed: "
             f"{type(exc).__name__}: {exc})",

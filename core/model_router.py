@@ -490,7 +490,7 @@ class UsageTrackedLLM:
                 role=self.role, provider=nxt, current_model=self.model)
             self._failover_choice_reason = why
             return self._llm_factory(nxt, model)
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # noqa: BLE001 — pragma: no cover - defensive
             return None
 
     def _call_llm(

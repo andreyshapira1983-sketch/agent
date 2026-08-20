@@ -263,7 +263,7 @@ class RepairProposalGenerator:
 
         try:
             current_content = self.file_read.run(target_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Not silence: the failure becomes the report's own status
             # (`tool_error`) with the exception type and message in `warnings`,
             # and `_finish` is what the caller reads. Broad on purpose — this
@@ -412,7 +412,7 @@ class RepairProposalGenerator:
                 proposed_content=proposed,
                 context_lines=3,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # The reason travels in `reasons`, which `_rejected` puts into the
             # returned report — the operator sees why the draft was refused.
             reasons.append(f"diff_file rejected proposal: {type(exc).__name__}: {exc}")
@@ -486,7 +486,7 @@ class RepairProposalGenerator:
             if not ok:
                 return {"ok": False, "error": "run_tests invalid output: " + "; ".join(issues), "output": output}
             return {"ok": True, "output": redact_payload(output)}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # `ok=False` plus the typed reason IS the report; the caller
             # branches on it and shows the text. A raise here would abort a
             # proposal run over a tool that is allowed to be unavailable.
@@ -503,7 +503,7 @@ class RepairProposalGenerator:
             if not ok:
                 return {"ok": False, "error": "read_logs invalid output: " + "; ".join(issues), "output": output}
             return {"ok": True, "output": redact_payload(output)}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Same contract as `_run_tests` above: the failure is the value.
             return {"ok": False, "error": f"read_logs failed: {type(exc).__name__}: {exc}"}
 

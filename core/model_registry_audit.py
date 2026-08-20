@@ -38,7 +38,7 @@ def _observed_model_keys(router: ModelRouter) -> tuple[str, ...]:
         return ()
     try:
         by_model = (ledger.snapshot() or {}).get("by_model") or {}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # An empty key set makes the audit report "no models observed", which
         # reads as a clean bill of health rather than as a reading that never
         # happened (MIR-077).

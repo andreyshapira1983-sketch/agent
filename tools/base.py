@@ -128,7 +128,7 @@ class Tool(ABC):
                 output=output,
                 latency_ms=latency_ms,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — every tool failure becomes an error ToolResult
             latency_ms = int((time.perf_counter() - started) * 1000)
             result = ToolResult(
                 tool_call_id=call.id,

@@ -1312,7 +1312,7 @@ def run_paced_campaign(
         }
         try:
             write_heartbeat(workspace, payload)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             pass
 
     try:
@@ -1374,7 +1374,7 @@ def run_paced_campaign(
             ledger=ledger,
             on_cycle=_on_cycle,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the failure lands in the heartbeat
         write_heartbeat(workspace, {
             "event": "campaign_error",
             "dry_run": dry_run,

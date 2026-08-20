@@ -147,7 +147,7 @@ def test_local_strategies_covers_all_non_general_members() -> None:
 def test_classify_never_raises(text: object) -> None:
     try:
         result = classify_operator_strategy(text)  # type: ignore[arg-type]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the test itself is the assertion
         pytest.fail(f"classify_operator_strategy raised {type(exc).__name__}: {exc}")
     assert isinstance(result, OperatorStrategy)
 
