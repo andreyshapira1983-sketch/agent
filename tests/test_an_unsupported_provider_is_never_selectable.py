@@ -28,7 +28,7 @@ from core.model_router import SUPPORTED_PROVIDERS, ModelSpec
 
 
 def _spec(**kw) -> ModelSpec:
-    base = dict(id="probe", provider="anthropic", model="m")
+    base = {"id": "probe", "provider": "anthropic", "model": "m"}
     base.update(kw)
     return ModelSpec(**base)
 
