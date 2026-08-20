@@ -159,7 +159,7 @@ def main(argv: list[str]) -> int:
               f"(process exited {proc.returncode})")
         return OUT_OF_DOMAIN
 
-    source = fresh[0] if fresh else (sorted(after)[0] if after else None)
+    source = fresh[0] if fresh else (min(after) if after else None)
     if source is None:
         print("\nOUT_OF_DOMAIN: no carrier at all")
         return OUT_OF_DOMAIN

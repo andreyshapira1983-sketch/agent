@@ -135,7 +135,7 @@ def test_source_library_lists_groups_and_entries(capsys):
 def test_source_library_filters_by_group(capsys):
     assert _handle_source_library("--json") is True
     payload = json.loads(capsys.readouterr().err)
-    group = sorted(payload["groups"])[0]
+    group = min(payload["groups"])
 
     assert _handle_source_library(group) is True
     err = capsys.readouterr().err

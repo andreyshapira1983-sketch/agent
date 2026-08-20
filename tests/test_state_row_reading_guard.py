@@ -90,7 +90,7 @@ def test_a_naive_reader_produces_empty_aggregates(tmp_path: Path) -> None:
             )
         )
 
-    naive = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    naive = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     decoded = read_state_jsonl_unlocked(path)
 
     assert len(naive) == len(decoded) == 3, "both see three rows — only the fields differ"

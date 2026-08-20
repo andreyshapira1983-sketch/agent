@@ -23,8 +23,6 @@ import inspect
 import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
 from pathlib import Path
 
-import pytest
-
 import core.loop as loop_mod
 import core.loop_verification as verification_mod
 from core.loop import AgentLoop

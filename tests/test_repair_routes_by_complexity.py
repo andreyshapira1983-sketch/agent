@@ -21,8 +21,6 @@ docstring: "a forced DEEP still passes through the operator-escalation check").
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from core.task_complexity import ComplexityTier
 
 

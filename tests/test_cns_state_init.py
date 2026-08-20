@@ -26,7 +26,6 @@ per-run) and ignored `getattr(self, "X")` (making `durable_writes` and
 from __future__ import annotations
 
 import ast
-import collections
 import json
 import pathlib
 

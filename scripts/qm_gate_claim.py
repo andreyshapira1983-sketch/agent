@@ -73,8 +73,8 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
         return "UNRESOLVABLE", f"{certificate.name} is not readable -- {exc}"
     if cert.get("claim_id") != claim_id:
         return ("UNRESOLVABLE",
-                f"the binding names claim {claim_id!r} but {certificate.name} "
-                f"certifies {cert.get('claim_id')!r}")
+                (f"the binding names claim {claim_id!r} but {certificate.name} "
+                f"certifies {cert.get('claim_id')!r}"))
 
     validator = ROOT / "scripts" / "qm_claim_check.py"
     if not validator.is_file():
@@ -92,13 +92,13 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
                 if line.startswith(_VERDICT_MARKER)]
     if not declared:
         return ("UNRESOLVABLE",
-                f"the validator produced no {_VERDICT_MARKER} line (exit {proc.returncode}); "
-                f"no verdict was reached")
+                (f"the validator produced no {_VERDICT_MARKER} line (exit {proc.returncode}); "
+                f"no verdict was reached"))
     verdict, _, tail = declared[-1].partition(" exit=")
     if tail.strip() != str(proc.returncode):
         return ("UNRESOLVABLE",
-                f"the validator declared {verdict!r} at exit={tail.strip()} but exited "
-                f"{proc.returncode} -- the declaration and the code disagree")
+                (f"the validator declared {verdict!r} at exit={tail.strip()} but exited "
+                f"{proc.returncode} -- the declaration and the code disagree"))
     if verdict not in _GATE_MAPPING:
         return "UNRESOLVABLE", f"the validator declared an unknown verdict {verdict!r}"
     return _GATE_MAPPING[verdict], f"certificate -> {verdict}"

@@ -29,7 +29,7 @@ EXAM_QUESTION = (
 )
 
 
-def _resolve(text: str, prior_turns=()):  # noqa: ANN001 - test helper
+def _resolve(text: str, prior_turns=()):
     return ReferentResolver(workspace_root=None).resolve(
         text,
         current_session_id=SESSION,

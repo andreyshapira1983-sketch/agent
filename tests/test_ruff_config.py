@@ -84,7 +84,7 @@ def test_no_comment_is_mistaken_for_a_suppression_directive():
     # БЕЗ `--quiet`: именно этот флаг гасит предупреждение о негодной
     # директиве, и первая версия сторожа из-за него не срабатывала никогда
     # (проверено подсадкой настоящей строки — сторож молчал).
-    proc = subprocess.run(  # noqa: S603  # nosec B603 B607
+    proc = subprocess.run(  # nosec B603 B607
         ["ruff", "check", "."],  # noqa: S607
         cwd=_REPO, capture_output=True, check=False,
         # Кодировку задаём явно: на Windows `text=True` берёт локаль

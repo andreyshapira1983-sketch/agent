@@ -63,6 +63,6 @@ def test_exemptions_stay_justified(rel: str, reason: str) -> None:
     """An exemption with no counts left should be removed, not left standing."""
     path = _DOCS / rel
     assert path.exists(), f"exempted file {rel} no longer exists"
-    assert any(_COUNT.search(l) for l in path.read_text(encoding="utf-8").splitlines()), (
+    assert any(_COUNT.search(ln) for ln in path.read_text(encoding="utf-8").splitlines()), (
         f"{rel} no longer states any count — drop its exemption ({reason})"
     )
