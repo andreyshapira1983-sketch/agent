@@ -1098,7 +1098,10 @@ class TestHandleMetaCommand:
         assert "main.py" in out.err
         assert "not verified from registry" in out.err
         assert "tests to add" in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
 
     def test_conversational_implementation_plan_has_distinct_local_report(
         self,
@@ -1137,7 +1140,10 @@ class TestHandleMetaCommand:
         assert "approval boundary:" in out.err
         assert "source review plan" not in out.err
         assert "operator digest" not in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
 
     def test_explicit_read_first_request_does_not_emit_grounded_plan(
         self,
@@ -1163,7 +1169,10 @@ class TestHandleMetaCommand:
         # A normal grounded plan must NOT be produced.
         assert "implementation steps:" not in out.err
         assert "=== implementation plan ===" not in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
 
     def test_explicit_read_first_request_lists_missing_files(
         self,
@@ -1204,7 +1213,10 @@ class TestHandleMetaCommand:
         assert "kind: implementation_plan" in out.err
         assert "implementation steps:" in out.err
         assert "insufficient source evidence" not in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
 
     def test_explicit_read_first_block_is_side_effect_free(
         self,
@@ -2074,12 +2086,12 @@ Produce a patch proposal for the routing bug.
         assert "current gaps" in out.err
         assert "live weakness digest" in out.err
         assert "next safe test" in out.err
-        # Bridge: the 4 "soft" verified intents (capability_check,
-        # current_gaps_check, weakness_finder, next_safe_test) each make ONE
-        # lightweight model verification call before dispatch; safe_self_check
-        # is not gated (0 calls). Crucially, the full planner/tool loop still
-        # never runs — no tool_call, no file_read.
-        assert len(agent.llm.calls) == 4
+        # Bridge: each phrase makes ONE lightweight adjudication call before
+        # dispatch — five since the 2026-08-20 ruling, which put the remaining
+        # free-text intents (safe_self_check among them) behind the same model
+        # veto. Crucially, the full planner/tool loop still never runs — no
+        # tool_call, no file_read.
+        assert len(agent.llm.calls) == 5
         log_text = agent.log.path.read_text(encoding="utf-8")
         assert '"event": "tool_call"' not in log_text
         assert '"tool_name": "file_read"' not in log_text
@@ -2134,7 +2146,10 @@ Produce a patch proposal for the routing bug.
         assert "risk estimation:" in out.err
         assert "requires approval:" in out.err
         assert "operator digest" not in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
         log_text = agent.log.path.read_text(encoding="utf-8")
         assert "operator_programming_readiness" in log_text
         assert '"event": "tool_call"' not in log_text
@@ -2177,7 +2192,10 @@ Produce a patch proposal for the routing bug.
         assert "goal: Составь patch proposal" in out.err
         assert "source review plan" not in out.err
         assert "operator task report" not in out.err
-        assert agent.llm.calls == []
+        # 2026-08-20 ruling: lexis proposes, the model adjudicates. The route
+        # is unchanged; what is new is exactly one adjudication call.
+        assert len(agent.llm.calls) == 1
+        assert "intent router" in agent.llm.calls[0]["system"]
 
     def test_shell_like_repl_input_bypasses_llm_with_hint(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
