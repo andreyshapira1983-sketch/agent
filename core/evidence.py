@@ -261,7 +261,7 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     )
 
 
-def evidence_from_tool_result(
+def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
     *,
     tool_name: str,
     arguments: dict[str, Any] | None,

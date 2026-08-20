@@ -241,7 +241,7 @@ def _pending_excluding(inbox: Any, item_id: str) -> int:
     return sum(1 for it in pending if getattr(it, "id", None) != item_id)
 
 
-def run_approved_self_apply(
+def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns are guard clauses
     *,
     inbox: Any,
     item_id: str,

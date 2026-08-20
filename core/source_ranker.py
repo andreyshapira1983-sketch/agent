@@ -343,7 +343,7 @@ def rank_evidence(
     )
 
 
-def _source_tier(evidence: Evidence) -> tuple[SourceTier, list[str]]:
+def _source_tier(evidence: Evidence) -> tuple[SourceTier, list[str]]:  # noqa: PLR0911 — flat: depth 1, all 13 returns are guard clauses
     kind = evidence.kind
     if kind in {"user_explicit", "test_result"}:
         return "authoritative", [f"{kind} is authoritative for this run"]

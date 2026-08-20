@@ -302,7 +302,7 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
     return handled
 
 
-def _dispatch_operator_intent(
+def _dispatch_operator_intent(  # noqa: PLR0911 — flat: depth 1, all 24 returns are guard clauses
     intent: OperatorIntent,
     agent: AgentLoop,
     workspace: Path,

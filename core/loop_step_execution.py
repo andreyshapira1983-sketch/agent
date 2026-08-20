@@ -253,7 +253,7 @@ class AgentLoopStepExecution:
         results.sort(key=lambda r: order_map.get(r[0].id, 9999))
         return results
 
-    def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:
+    def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 3, all 16 returns are guard clauses
         """Run a single PlanStep through Act -> Policy -> Tool -> Verify.
 
         Working Memory short-circuit: if (tool, arguments) is already in the

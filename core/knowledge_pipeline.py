@@ -392,7 +392,7 @@ class KnowledgeWritePolicy:
         self.min_source_trust = min_source_trust
         self.max_chars = max_chars
 
-    def decide(
+    def decide(  # noqa: PLR0911 — flat: depth 1, all 14 returns are guard clauses
         self,
         claim: ClaimRecord,
         *,

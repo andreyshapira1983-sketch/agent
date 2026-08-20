@@ -114,7 +114,7 @@ class MemoryWritePolicy:
         self.frozen_sources = self.frozen_sources - {key}
         return True
 
-    def decide(
+    def decide(  # noqa: PLR0911 — flat: depth 2, all 13 returns are guard clauses
         self,
         content: str,
         tags: Iterable[str] = (),

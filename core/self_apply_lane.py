@@ -311,7 +311,7 @@ def _record_conflict_episodes(
         )
 
 
-def run_self_apply_lane(
+def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are guard clauses
     proposal: SelfApplyProposal,
     *,
     workspace: Path,
