@@ -109,12 +109,23 @@ working mode, and nothing beyond this task is to be built.
 Added 2026-08-20, from the same root. The first invariant is about who decides.
 This one is about who lives.
 
-> **ONE SUBJECT / ONE LIVE RUNTIME / ONE CANONICAL LIFECYCLE.** Diagnostic and
-> test harnesses may exist, but they are not alternative production identities
-> or autonomous execution roots. A shell, a future desktop window, the HTTP API
-> and any messaging adapter are doors to the same running subject, not separate
-> agent instances. A normal owner must not have to choose between auto-run,
-> campaign, work-session, tick and daemon for the autonomous agent to live.
+> **ONE LOGICAL SUBJECT / ONE CANONICAL LIFECYCLE.** At every moment there is
+> one canonical Agent identity that owns its state, intentions, memory,
+> commitments and lifecycle. Restarting a process recovers that same subject
+> rather than creating a new one. Diagnostic and test harnesses may exist, but
+> they are not alternative production identities or autonomous execution roots.
+> A shell, a future desktop window, the HTTP API and any messaging adapter are
+> doors to the same subject, not separate agent instances. A normal owner must
+> not have to choose between auto-run, campaign, work-session, tick and daemon
+> for the autonomous agent to live.
+
+Note what this invariant is NOT. It is not "one Python process never dies" —
+the subject has to survive a reboot, a crash, an update, its own repair and a
+power cut, so an immortal process would be the wrong requirement. Nor does it
+mean thinking continuously: **alive is not the same as calling a model.** A
+subject may sit in a cheap idle for hours, waiting on an event, a timer or a
+result, and only reach for a model when there is a reason to. Being autonomous
+means it does not need a human to decide when to leave idle.
 
 ### What is there today, read from the code
 
@@ -125,10 +136,15 @@ Four places construct an agent of their own: `agent_tick.py`, `api/server.py`,
 
 The installed production path is the one that matters most:
 `scripts/install_daemon.ps1` registers a Windows Scheduled Task that runs
-`agent_tick.py` **every 30 minutes**. The agent's life today is therefore a new
-process every half hour rather than a subject that persists — which is also why
-so much of memory is switched off on that path (`agent_tick.py:122`), and why a
-lesson learned in one tick has nowhere to live.
+`agent_tick.py` **every 30 minutes**. **A correction, because the obvious reading of that is too strong.** A
+short-lived process CAN load durable state from disk, continue an identity and
+save it again before exiting; `with_memory=False` is not an inevitable
+consequence of a tick architecture, and saying so would build a new dogma on
+top of the old one. What is true today is narrower and still enough: each tick
+constructs a NEW in-memory `AgentLoop`, and no continuous owner of working
+state exists between ticks, so continuity must either be reconstructed from the
+durable stores or is lost. On that path it is largely lost —
+`agent_tick.py:122`.
 
 On top of that, `app/runtime_cli.py` lets the human choose between `auto-run`,
 `work-session` and `campaign-start`, with flags for tests, reflection, goal
@@ -149,3 +165,30 @@ on, therefore the agent is alive** — observing, thinking, acting when there is
 justified action, remembering, learning, and telling its owner only what is
 significant. Not "the owner started the right combination of modules and
 flags", and not "Windows grants it a new small life every thirty minutes".
+
+### Restart is continuity, not rebirth
+
+Added to the lift condition, 2026-08-20. Restoring RAM bit for bit is
+meaningless; what has to survive is the semantic life of the subject. After a
+restart or a reboot it must be provable that:
+
+    identity before            == identity after
+    active commitments before  == recoverable after
+    relevant memory before     == accessible after
+    unfinished reasoning/work  == represented after
+    authority before           == authority after
+
+And memory must belong to the SUBJECT, not to a launch mode. The question that
+matters after a reboot is not what the API remembers, or the campaign, or the
+last shell session — it is what **the agent** remembers: which commitments are
+still open, what it was doing and why, which hypothesis it was testing, what
+the owner told it and what it understood from that, which workers exist and
+why it created them.
+
+### The two invariants depend on each other
+
+Fixing only the first — who decides — leaves a subject that reasons
+autonomously and then dies every half hour. Fixing only the second leaves a
+very long-lived executor of somebody else's script, with `_build_queue`, preset
+roles and a priority table intact. Neither property is worth much without the
+other, which is why one freeze covers both.
