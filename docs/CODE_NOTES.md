@@ -3385,6 +3385,10 @@ The trim followed the standing rule rather than the raw number: a contract
 of one to three lines stays in the file, the story moves here. 165 prose
 lines became 102 and the module fell to 791 lines, back under the 800-line
 soft limit. **The code count did not move: 602 lines before, 602 after.**
+Stated precisely, because the loose version of this sentence was wrong: 79
+physical lines went, of which 63 were prose and 16 were blank. «I removed 79
+lines of prose» would have been an invented figure sitting inside a note
+about invented figures.
 Two things fell out of the cut and are worth naming because neither was the
 point of it. A comment
 still promised that Stage A eats «only the cleanest evidence source … broader
@@ -3397,12 +3401,19 @@ maintenance obligation nobody was honouring.
 That «602 before, 602 after» is the whole finding, and it is not about this
 file. The agent's `oversized_module` sensor counts `content.count("\n") + 1`
 and compares it to 800 — it cannot tell an organ from an explanation of an
-organ. Across the eleven modules it flags today, subtracting prose takes
-five of them below the limit (doc_routing 970 → 727, shell_exec 964 → 533,
-loop_step_execution 955 → 673, knowledge_pipeline 932 → 601, step_sanitizer
-837 → 678) and leaves six genuinely large — smart_memory is still 1028
-lines of code. So roughly half of the sensor's live verdicts are decided by
-prose. The agent's first unprompted engineering proposal was one of them.
+organ. Across the eleven modules it flags today, five fall below the limit
+when you count only lines that execute (doc_routing 970 → 727, shell_exec
+964 → 533, loop_step_execution 955 → 673, knowledge_pipeline 932 → 601,
+step_sanitizer 837 → 678), and six stay genuinely large — smart_memory is
+still 1028 lines of code.
+
+Those five are not five verdicts «decided by prose», and the difference
+matters enough to have been caught and corrected here. Subtracting prose but
+keeping blank lines — the counterfactual that isolates prose alone — flips
+only four: doc_routing lands at 811 and stays over. Its verdict is decided
+by whitespace. So: five verdicts change under code-line counting, four are
+attributable to prose, and one is attributable to blanks. The agent's first
+unprompted proposal is in the four — 870 − 165 = 705.
 
 The operator's ruling on what to do about it is the reason nothing was
 changed: «не менять threshold и не удалять комментарии ради красивой
