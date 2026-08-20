@@ -80,8 +80,8 @@ def _run(
     registry.register(tool)
     llm = FakeLLM(
         responses=[
-            "Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
-            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n"
+            ("Conclusion: ok. [stub:t]\nFacts:\n- ran [stub:t]\n"
+            "Sources:\n1. stub:t - t\nConfidence: medium\nUnverified: nothing\n")
         ] * 3
     )
     trace_id = new_trace_id()

@@ -29,10 +29,10 @@ DEAD = {"falsified", "structurally insufficient", "dead", "killed", "refuted",
 WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
             "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
-SUBJECT = re.compile(r"\bcandidate\s+(\d)\b", re.I)
+SUBJECT = re.compile(r"\bcandidate\s+(\d)\b", re.IGNORECASE)
 ROSTER = re.compile(r"\*\*(\d)\*\*\s*\(([^)]+)\)")
 COUNT_ENUM = re.compile(
-    r"\b(" + "|".join(WORD_NUM) + r")\s+\w+[^.(]*\(([^)]*\b[A-Z]\d[^)]*)\)", re.I)
+    r"\b(" + "|".join(WORD_NUM) + r")\s+\w+[^.(]*\(([^)]*\b[A-Z]\d[^)]*)\)", re.IGNORECASE)
 
 
 def _sentences(text: str) -> list[tuple[int, str]]:
@@ -102,7 +102,7 @@ def _strip_quotations(text: str) -> str:
     keeps every line number intact.
     """
     blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))  # noqa: E731
-    text = re.sub(r"```.*?```", blank, text, flags=re.S)
+    text = re.sub(r"```.*?```", blank, text, flags=re.DOTALL)
     # Inline spans may WRAP: prose reflows and a quotation ends up straddling a
     # newline. The first version forbade newlines inside a span, so a wrapped
     # quotation stayed live and the probe fired on its own evidence a second

@@ -107,7 +107,7 @@ class ReflectionReport:
             "events_scanned": self.events_scanned,
             "patterns_found": [p.to_dict() for p in self.patterns_found],
             "lessons_count": len(self.lessons),
-            "lessons": [l.to_dict() for l in self.lessons],
+            "lessons": [lesson.to_dict() for lesson in self.lessons],
             "learning_plan": (
                 self.learning_plan.to_log_payload() if self.learning_plan else None
             ),
@@ -524,9 +524,9 @@ class ReflectionEngine:
         # Only "learn_more" and "repair" actions warrant deeper ingestion.
         focus_areas = list(
             dict.fromkeys(
-                l.focus_area
-                for l in lessons
-                if l.action in ("learn_more", "repair") and l.focus_area
+                lesson.focus_area
+                for lesson in lessons
+                if lesson.action in ("learn_more", "repair") and lesson.focus_area
             )
         )
         if not focus_areas:

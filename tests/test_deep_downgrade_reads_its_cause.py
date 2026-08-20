@@ -53,7 +53,7 @@ def test_a_valid_reason_still_passes() -> None:
     from core.deep_escalation import ACTIVE_REASONS, EXPECTED_OUTPUTS
 
     decision = evaluate_deep_escalation(_request(
-        reason=sorted(ACTIVE_REASONS)[0],
-        expected_output=sorted(EXPECTED_OUTPUTS)[0],
+        reason=min(ACTIVE_REASONS),
+        expected_output=min(EXPECTED_OUTPUTS),
     ))
     assert decision.effective_tier == "deep"

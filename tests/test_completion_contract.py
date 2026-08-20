@@ -18,7 +18,6 @@ nothing represented the deliverable.
 from __future__ import annotations
 
 import inspect
-import pathlib
 
 from core.completion_contract import (
     CompletionContract,

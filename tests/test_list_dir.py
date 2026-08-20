@@ -65,8 +65,8 @@ class TestBasicListing:
         t = tool(ws)
         result = t.run(".")
         lines = result.splitlines()
-        dir_idx = next(i for i, l in enumerate(lines) if l.endswith("/"))
-        file_idx = next(i for i, l in enumerate(lines) if not l.endswith("/"))
+        dir_idx = next(i for i, ln in enumerate(lines) if ln.endswith("/"))
+        file_idx = next(i for i, ln in enumerate(lines) if not ln.endswith("/"))
         assert dir_idx < file_idx
 
     def test_windows_backslash_path(self, ws: Path):

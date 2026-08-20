@@ -102,8 +102,8 @@ def test_completed_cycle_checkpoints_its_plan_and_executed_steps(workspace: Path
     llm = FakeLLM(
         responses=[
             plan_json,
-            "Conclusion: file read. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
-            "Sources:\n1. file:doc.txt\nConfidence: high\n",
+            ("Conclusion: file read. [file:doc.txt]\nFacts:\n- alpha [file:doc.txt]\n"
+            "Sources:\n1. file:doc.txt\nConfidence: high\n"),
         ]
     )
     agent = _build_guarded_agent(

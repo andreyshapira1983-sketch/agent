@@ -42,7 +42,7 @@ class _Log:
     def __init__(self) -> None:
         self.events: list[str] = []
 
-    def log(self, name, payload=None, **kw):  # noqa: ANN001 - test spy
+    def log(self, name, payload=None, **kw):
         self.events.append(name)
 
 

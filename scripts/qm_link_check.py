@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from qm_gate_claim import gate  # noqa: E402 -- the one operation this walker defers to
+from qm_gate_claim import gate
 
 GREEN, BROKEN, STALE, UNRESOLVABLE, DEPENDENT_UNAVAILABLE = 0, 1, 2, 3, 5
 

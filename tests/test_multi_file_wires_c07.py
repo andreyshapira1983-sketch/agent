@@ -83,8 +83,8 @@ def test_a_forced_review_reads_the_kernels_plan_not_the_llms(tmp_path: Path) -> 
     llm = FakeLLM(
         responses=[
             '{"reasoning":"no tools","sources":[]}',   # would-be planner call
-            "Conclusion: compared. [file:a.md]\nFacts:\n- x [file:a.md]\n"
-            "Sources:\n1. file:a.md\nConfidence: high\n",
+            ("Conclusion: compared. [file:a.md]\nFacts:\n- x [file:a.md]\n"
+            "Sources:\n1. file:a.md\nConfidence: high\n"),
         ]
     )
     agent, log_path = _agent(tmp_path, llm)

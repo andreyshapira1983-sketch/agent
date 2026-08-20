@@ -21,8 +21,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
@@ -44,7 +42,7 @@ class _LatchedState:
 
 
 class _LatchedKillSwitch:
-    def status(self, snapshot=None):  # noqa: ANN001, ARG002 - shape only
+    def status(self, snapshot=None):
         return _LatchedState()
 
 
@@ -121,7 +119,7 @@ def test_a_gateway_deny_prevents_the_write(workspace: Path) -> None:
     agent, log_path = _agent(workspace)
     real_evaluate = gw_mod.ActuationGateway.evaluate
 
-    def denying_evaluate(self, action, *, registry=None):  # noqa: ANN001
+    def denying_evaluate(self, action, *, registry=None):
         verdict = real_evaluate(self, action, registry=registry)
         from core.models import PolicyDecision
 
