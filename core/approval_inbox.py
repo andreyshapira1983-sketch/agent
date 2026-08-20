@@ -324,7 +324,7 @@ class ApprovalInbox:
         }
 
     def _load(self) -> list[ApprovalInboxItem]:
-        assert self.path is not None
+        assert self.path is not None  # noqa: S101 — type narrowing, guarded above
         path = Path(self.path)
         if not path.exists():
             return list(self.items)

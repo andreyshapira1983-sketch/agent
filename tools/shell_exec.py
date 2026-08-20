@@ -679,7 +679,7 @@ class ShellExecTool(Tool):
         plan: CompensationPlan,
     ) -> dict[str, Any]:
         """Mutating whitelist is interpreted by the tool, not spawned."""
-        assert target is not None  # mypy hint; validator ensures this
+        assert target is not None  # noqa: S101 — narrowing; mypy hint; validator ensures this
         started = time.monotonic()
         stderr = ""
         exit_code = 0

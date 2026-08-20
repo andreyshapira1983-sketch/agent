@@ -317,7 +317,7 @@ class DaemonLoop:
         sigterm = getattr(signal, "SIGTERM", None)
         if sigterm is not None:
             wanted.append(sigterm)
-        assert self._loop is not None
+        assert self._loop is not None  # noqa: S101 — type narrowing, guarded above
         for sig in wanted:
             previous = signal.getsignal(sig)
             try:
@@ -338,7 +338,7 @@ class DaemonLoop:
         for sig, kind, previous in installed:
             try:
                 if kind == "loop":
-                    assert self._loop is not None
+                    assert self._loop is not None  # noqa: S101 — type narrowing, guarded above
                     self._loop.remove_signal_handler(sig)
                 signal.signal(sig, previous)
             except (ValueError, OSError, RuntimeError) as exc:

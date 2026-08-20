@@ -272,9 +272,9 @@ def _trim_to_budget(
     def name_of(node: ast.stmt) -> str:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return node.name
-        assert isinstance(node, ast.Assign)
+        assert isinstance(node, ast.Assign)  # noqa: S101 — type narrowing, guarded above
         tgt = node.targets[0]
-        assert isinstance(tgt, ast.Name)
+        assert isinstance(tgt, ast.Name)  # noqa: S101 — type narrowing, guarded above
         return tgt.id
 
     kept = list(group)
@@ -322,7 +322,7 @@ def _plan_function_split(
             moved_names.append(node.name)
         elif isinstance(node, ast.Assign):
             tgt = node.targets[0]
-            assert isinstance(tgt, ast.Name)
+            assert isinstance(tgt, ast.Name)  # noqa: S101 — type narrowing, guarded above
             moved_names.append(tgt.id)
 
     refs: set[str] = set()

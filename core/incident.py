@@ -251,7 +251,7 @@ class IncidentLog:
         return list(self.incidents)
 
     def _load(self) -> list[Incident]:
-        assert self.path is not None
+        assert self.path is not None  # noqa: S101 — type narrowing, guarded above
         path = Path(self.path)
         if not path.exists():
             return list(self.incidents)
