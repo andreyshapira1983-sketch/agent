@@ -103,3 +103,49 @@ for the sake of activity.
 
 Until these conditions are met the autonomous mode is not to be started as a
 working mode, and nothing beyond this task is to be built.
+
+## A second invariant: one subject, one runtime, one lifecycle
+
+Added 2026-08-20, from the same root. The first invariant is about who decides.
+This one is about who lives.
+
+> **ONE SUBJECT / ONE LIVE RUNTIME / ONE CANONICAL LIFECYCLE.** Diagnostic and
+> test harnesses may exist, but they are not alternative production identities
+> or autonomous execution roots. A shell, a future desktop window, the HTTP API
+> and any messaging adapter are doors to the same running subject, not separate
+> agent instances. A normal owner must not have to choose between auto-run,
+> campaign, work-session, tick and daemon for the autonomous agent to live.
+
+### What is there today, read from the code
+
+Four places construct an agent of their own: `agent_tick.py`, `api/server.py`,
+`cli/one_shot.py` and `cli/app.py`, all through the shared builder in
+`app/bootstrap.py`. Three more executables delegate rather than construct —
+`main.py`, `app/windows_service.py`, `docker/daemon_loop.py`.
+
+The installed production path is the one that matters most:
+`scripts/install_daemon.ps1` registers a Windows Scheduled Task that runs
+`agent_tick.py` **every 30 minutes**. The agent's life today is therefore a new
+process every half hour rather than a subject that persists — which is also why
+so much of memory is switched off on that path (`agent_tick.py:122`), and why a
+lesson learned in one tick has nowhere to live.
+
+On top of that, `app/runtime_cli.py` lets the human choose between `auto-run`,
+`work-session` and `campaign-start`, with flags for tests, reflection, goal
+inclusion, cycle counts and limits. As an engineering harness that is useful.
+As the way the organism exists, it is the same trap in another form: the human
+chooses in which manner the agent shall be autonomous today.
+
+### What follows, and what does not
+
+This is recorded, not acted on. Nothing is to be built now — no launcher, no
+service, no tray icon, no messaging adapter. When the freeze lifts, the
+question to answer is which of the existing runtime paths becomes the single
+one, and whether each of the others is subordinated to it, demoted to a
+diagnostic harness, or deleted.
+
+The operational criterion to hold against any future design: **the machine is
+on, therefore the agent is alive** — observing, thinking, acting when there is
+justified action, remembering, learning, and telling its owner only what is
+significant. Not "the owner started the right combination of modules and
+flags", and not "Windows grants it a new small life every thirty minutes".
