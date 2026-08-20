@@ -395,3 +395,26 @@ class TestEffectStepsRunInPlanOrder:
             PlanStep(plan_id="p", order=1, action_spec={}, expected_outcome="x")
         )
         assert loop._step_only_reads(self._step("file_read", {"path": "a.txt"}, 1))
+
+    def test_a_tool_whose_risk_probe_raises_counts_as_an_effect(
+        self, workspace: Path
+    ):
+        """The third unresolvable case, and the one nothing covered.
+
+        Found by mutation 2026-08-20: flipping this branch's `return False` to
+        `True` survived the whole suite. The siblings above pin the missing
+        tool and the empty spec; a tool whose `risk_for` RAISES had no witness,
+        so a step that may write anything could have joined the concurrent
+        batch. The contract is three lines above the branch: anything
+        unresolvable is treated as an effect.
+        """
+        loop = self._loop(workspace)
+
+        class _RaisingRisk(FileReadTool):
+            name = "risk_raiser"
+
+            def risk_for(self, arguments):  # type: ignore[override]
+                raise RuntimeError("risk probe is broken")
+
+        loop.registry.register(_RaisingRisk(workspace_root=workspace))
+        assert not loop._step_only_reads(self._step("risk_raiser", {"path": "a.txt"}, 1))
