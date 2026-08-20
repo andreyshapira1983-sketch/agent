@@ -19,7 +19,7 @@ def _url_host(url_lower: str) -> str:
     """Extract the bare host from an already http/https, ASCII, lowercased URL."""
     after_scheme = url_lower.split("://", 1)[-1]
     authority = after_scheme.split("/", 1)[0]
-    authority = authority.split("@", 1)[-1]   # strip any userinfo
+    authority = authority.rsplit("@", 1)[-1]  # userinfo ends at the LAST '@'
     if authority.startswith("["):             # bracketed IPv6 literal
         return authority.partition("]")[0].lstrip("[")
     return authority.split(":", 1)[0].strip(".")
