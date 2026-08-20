@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-12T21:12:45.467892+00:00",
+  "updated_at": "2026-08-20T00:34:27.864547+00:00",
   "providers": {
     "anthropic": {
       "models": [
@@ -53,19 +53,19 @@
     "openai": {
       "models": [
         {
-          "id": "gpt-3.5-turbo",
-          "tier": "standard"
-        },
-        {
-          "id": "gpt-3.5-turbo-16k",
-          "tier": "standard"
-        },
-        {
           "id": "gpt-4-0613",
           "tier": "standard"
         },
         {
           "id": "gpt-4",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-3.5-turbo",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-5.6-luna",
           "tier": "standard"
         },
         {
@@ -333,7 +333,7 @@
           "tier": "standard"
         },
         {
-          "id": "gpt-5.6-luna",
+          "id": "gpt-3.5-turbo-16k",
           "tier": "standard"
         }
       ],
