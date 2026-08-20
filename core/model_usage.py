@@ -358,7 +358,7 @@ class ModelUsageLedger:
             },
         )
 
-    def record(
+    def record(  # noqa: PLR0913 — flat: depth 2, all 1 returns are guard clauses
         self,
         *,
         role: str,

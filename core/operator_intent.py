@@ -80,7 +80,7 @@ class OperatorIntent:
         }
 
 
-def route_operator_intent(text: str) -> OperatorIntent | None:
+def route_operator_intent(text: str) -> OperatorIntent | None:  # noqa: PLR0911, PLR0912 — flat: depth 1, all 34 returns are guard clauses
     normalized = _normalize(text)
     if not normalized:
         return None

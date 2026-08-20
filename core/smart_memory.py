@@ -1334,7 +1334,7 @@ def _derive_episode_outcome(
     return "success"
 
 
-def episode_from_agent_cycle(
+def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns are guard clauses
     *,
     goal: str,
     question: str,

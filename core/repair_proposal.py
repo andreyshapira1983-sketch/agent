@@ -351,7 +351,7 @@ class RepairProposalGenerator:
         )
         return self._finish(report)
 
-    def _validate_draft(
+    def _validate_draft(  # noqa: PLR0911 — flat: depth 1, all 14 returns are guard clauses
         self,
         *,
         draft: dict[str, Any],

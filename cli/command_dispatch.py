@@ -142,7 +142,7 @@ if TYPE_CHECKING:  # annotations only
 
     from core.loop import AgentLoop
 
-def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:
+def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 94 returns are guard clauses
     """Returns True if the command was handled (so the REPL should skip the LLM)."""
     # Any whitespace, not a literal space -- see the comment at the same
     # split in `cli/app.py`. Both paths change together so the two

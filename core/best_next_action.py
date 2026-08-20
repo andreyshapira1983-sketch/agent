@@ -228,7 +228,7 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
     )
 
 
-def select_best_next_action(
+def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
     goal: str = "",
     result_status: str = "none",
