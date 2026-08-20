@@ -115,9 +115,9 @@ STALENESS_FACTOR = _hb.STALENESS_FACTOR
 #                            assumptions all stay denied by default-deny
 #   with_memory=False        unchanged — no cross-run session memory
 #
-# Episodes are written `usage_eligible=False` (quarantined), so the loop closes
-# mechanically but stays inert until the quality defects (MIR-002/041/046) are
-# fixed: wiring operational, usage quarantined.
+# The claim that episodes are quarantined (`usage_eligible=False`) was measured
+# false on 2026-08-20: 136 of 200 banked episodes are eligible, 127 of them
+# admitted by the unconditional `lesson` tag exemption. See MIR-115.
 UNATTENDED_MEMORY_PROFILE = {
     "with_memory": False,
     "with_experience": True,
