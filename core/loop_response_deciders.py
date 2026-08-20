@@ -257,7 +257,7 @@ class AgentLoopResponseDeciders:
                             "error": str(_cc_exc)[:300],
                         },
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — reason stated above
                     pass
 
     def _enforce_answer_safety(
@@ -418,7 +418,7 @@ class AgentLoopResponseDeciders:
                             "error": str(_vs_exc)[:300],
                         },
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — reason stated above
                     pass
 
         self._disclose_substituted_model(draft)
@@ -500,7 +500,7 @@ class AgentLoopResponseDeciders:
                     text=_clarify.prompt(),
                 ):
                     self.log.log("clarification_gate", _clarify.to_dict())
-            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                 self._sensor_failed("clarification_gate", exc)
 
         draft = self._enforce_answer_safety(

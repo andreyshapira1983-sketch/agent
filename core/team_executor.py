@@ -302,7 +302,7 @@ class TeamExecutor:
                             execution_receipt=getattr(result, "execution_receipt", None),
                             audit_report=getattr(result, "contract_audit", None),
                         )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — reason stated above
                     # Not silence: the typed reason becomes the step's summary,
                     # goes into `warnings`, flips the plan to `blocked`, and is
                     # recorded against the contract via `_record_contract_run`.
@@ -360,7 +360,7 @@ class TeamExecutor:
                     execution_receipt=execution_receipt,
                     audit_report=audit_report,
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # The registry write is bookkeeping ABOUT a run that already
             # happened; losing it must not turn a completed contract into a
             # failed one. The typed reason goes to the caller's `warnings`.

@@ -163,7 +163,7 @@ class AgentLoopVerification:
                         else "replan"
                     ),
                 })
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("subsystem_disagreement", exc)
 
         # P1/P2 — confidence vector. Decompose the scalar gate into
@@ -184,7 +184,7 @@ class AgentLoopVerification:
             # vector can never be shown beside this run's answer.
             self.last_confidence_vector = _cv
             self.log.log("confidence_vector", _cv.to_log_payload())
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("confidence_vector", exc)
         if report.malformed_output:
             self.log.log(
@@ -228,7 +228,7 @@ class AgentLoopVerification:
             # (measured live 2026-08-13 on a small-talk turn).
             self.last_evidence_support = _support
             self.log.log("evidence_support", _support.to_log_payload())
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("evidence_support", exc)
 
         return report, verifier_failure

@@ -407,7 +407,7 @@ class AgentLoopMemoryRead:
                         block = block + "\n\n" + hint
                     else:
                         block = hint
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — reason stated above
                 # Re-ask detection must never abort the main loop.
                 pass
 

@@ -102,7 +102,7 @@ class SemanticScholarSearchTool(Tool):
                 with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
                     raw = _json.loads(resp.read().decode("utf-8"))
                 return [_paper_dict(p) for p in raw.get("data", [])]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 last_exc = exc
                 code = getattr(exc, "code", None)
                 if code == 429:

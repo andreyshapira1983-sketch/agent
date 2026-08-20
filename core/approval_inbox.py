@@ -312,7 +312,7 @@ class ApprovalInbox:
             record_approval_receipt(
                 operation, item, workspace=self._receipt_workspace()
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — reason stated above
             pass  # receipts must never break approval-inbox operations
 
     def snapshot(self) -> dict:

@@ -86,7 +86,7 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
                 "self_build_rules_recorded",
                 {"proposal_id": result.get("proposal_id"), "rules_added": added},
             )
-    except Exception:  # noqa: BLE001 — rule recording must never break the command
+    except Exception:  # noqa: BLE001, S110 — rule recording must never break the command
         pass
 
     # No `--json` mode here on purpose. The documented surface of this command is

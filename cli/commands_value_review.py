@@ -103,7 +103,7 @@ def _handle_value_review(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             for item_id, review in log.effective_by_item_id().items()
         }
         registry.reconcile_value_reviews(effective)
-    except Exception:  # noqa: BLE001 — scoring is advisory; persistence must win
+    except Exception:  # noqa: BLE001, S110 — scoring is advisory; persistence must win
         pass
     print(
         f"(value-review recorded: {review.item_id} -> {review.verdict})",

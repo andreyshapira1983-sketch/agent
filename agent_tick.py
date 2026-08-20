@@ -1116,7 +1116,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         if _consumer_lock is not None:
             try:
                 _consumer_lock.release()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — the OS frees this lock at exit either way
                 pass
             _consumer_lock = None
         summary["error"] = f"{type(exc).__name__}: {exc}"

@@ -85,7 +85,7 @@ class AgentLoopMemoryCommands:
         if self.memory_write_registry is not None:
             try:
                 recent_writes = self.memory_write_registry.recent()
-            except Exception:
+            except Exception:  # noqa: BLE001 — reason stated above
                 recent_writes = []  # Registry hiccup must never block a write.
         decision = self.write_policy.decide(
             content=content,
@@ -154,7 +154,7 @@ class AgentLoopMemoryCommands:
                         cycle_id=getattr(self.log, "trace_id", "") or "",
                     )
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — reason stated above
                 pass  # Echo-log write must never abort the memory write.
         self.log.log(
             "persistent_memory_write",

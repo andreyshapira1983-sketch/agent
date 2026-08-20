@@ -97,7 +97,7 @@ def decode_frozen_test(payload: dict[str, Any]) -> str:
     if isinstance(b64, str) and b64.strip():
         try:
             return base64.b64decode(b64.encode("ascii")).decode("utf-8")
-        except Exception:  # noqa: BLE001 — fall back to the plaintext preview
+        except Exception:  # noqa: BLE001, S110 — fall back to the plaintext preview
             pass
     raw = payload.get("test_content")
     return raw if isinstance(raw, str) else ""

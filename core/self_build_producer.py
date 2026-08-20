@@ -579,7 +579,7 @@ def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[st
             concrete = str(mapping.candidate.target_path or "").replace("\\", "/").strip()
             if concrete:
                 out.add(concrete)
-    except Exception:  # noqa: BLE001 — a broken mapper must never break selection
+    except Exception:  # noqa: BLE001, S110 — a broken mapper must never break selection
         pass
     return out
 
@@ -1189,7 +1189,7 @@ def _incremental_split_test_paths(workspace: str | Path, target: str) -> list[st
         related = build_dependency_map(workspace, target).related_tests
         if related and len(related) <= MAX_PATHS:
             test_paths = sorted(related)
-    except Exception:  # noqa: BLE001 — dependency scan is advisory only
+    except Exception:  # noqa: BLE001, S110 — dependency scan is advisory only
         pass
     return test_paths
 
@@ -1214,7 +1214,7 @@ def publish_incremental_split_step(
     # Keep knowledge/generated/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
     try:
         _sync_anatomy_index(build, step.target, reader or _default_file_reader(workspace))
-    except Exception:  # noqa: BLE001 — doc sync is best-effort; lane catches drift
+    except Exception:  # noqa: BLE001, S110 — doc sync is best-effort; lane catches drift
         pass
     test_paths = _incremental_split_test_paths(workspace, step.target)
     evidence = [
@@ -1404,7 +1404,7 @@ def produce_self_apply_proposal(
         if registry is not None:
             try:
                 registry.record_report(report)
-            except Exception:  # noqa: BLE001 — recording must never break producer
+            except Exception:  # noqa: BLE001, S110 — recording must never break producer
                 pass
         return report
 
@@ -1626,7 +1626,7 @@ def produce_self_apply_proposal(
                     if test_file not in paths:
                         paths.append(test_file)
                 builder.data["test_paths"] = paths
-            except Exception:  # noqa: BLE001 — test enrichment must never break produce
+            except Exception:  # noqa: BLE001, S110 — test enrichment must never break produce
                 pass
 
         # Self-build head keeps the anatomy index in sync: a split that adds new
@@ -1635,7 +1635,7 @@ def produce_self_apply_proposal(
         if builder.decision == "built":
             try:
                 _sync_anatomy_index(builder.data, target, reader)
-            except Exception:  # noqa: BLE001 — doc sync must never break the producer
+            except Exception:  # noqa: BLE001, S110 — doc sync must never break the producer
                 pass
 
         # ── Critic ──────────────────────────────────────────────────────────
