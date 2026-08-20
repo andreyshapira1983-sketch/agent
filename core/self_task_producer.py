@@ -1,27 +1,12 @@
-"""Stage A of the coding-skill ladder (roadmap Ступень 1): propose a grounded
-coding TASK plus its acceptance test for HUMAN approval.
+"""Stage A: propose a grounded coding task plus its FAILING acceptance test,
+and drop exactly one ``self_build_task.approve`` item for a human.
 
-This module NEVER writes implementation code and NEVER applies anything. It turns
-a real ``# TODO``/``# FIXME`` comment already in the codebase into:
-
-* a plain-language task (title + summary), and
-* a *failing* acceptance test that pins down what "done" means,
-
-then drops exactly ONE approval item (``operation="self_build_task.approve"``)
-into the approval inbox. A human reviews the test BEFORE any implementation
-exists — this is the anti-cheating guarantee: the agent cannot grade its own
-homework, because the yardstick (the test) is blessed by a human first.
-
-Stage B (``core/self_task_builder.py``) only runs after the human approves this
-item; it writes code to make the FROZEN test pass via the existing self-apply
-lane (approval + targeted tests + auto-rollback).
-
-Design constraints mirrored from the self-build producer:
-
-* grounded only — no task without a real code TODO/FIXME evidence anchor;
-* no LLM-invented targets — the implementation file is the file the TODO lives in;
-* deterministic gates first (kill-switch, budget, dirty tree, one-in-flight);
-* every failure is a hard veto that creates NO inbox item.
+Writes no implementation code, applies nothing, invents no target. A human
+blesses the yardstick before any implementation exists; every failure is a
+hard veto that creates no inbox item. Stage B (core/self_task_builder.py)
+runs only after that blessing, against the FROZEN test. Why it is built
+this way: docs/CODE_NOTES.md, "The ladder opens to the organs it was built
+for".
 """
 from __future__ import annotations
 
@@ -51,28 +36,18 @@ from core.self_build_supervisor import (
     is_budget_near_exhaustion,
 )
 
-# The approval operation for a Stage-A coding-task blessing. It is deliberately
-# DISTINCT from ``self_apply_lane.run`` so approving it never triggers the lane:
-# the item is inert (a blessed spec) until Stage B consumes it.
+# Distinct from ``self_apply_lane.run`` on purpose: approving this blesses a
+# spec, it does not start the lane.
 SELF_TASK_OPERATION = "self_build_task.approve"
 
 TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 
-# Only the cleanest evidence source feeds Stage 1 at first: concrete, local
-# ``# TODO``/``# FIXME``/``# XXX`` comments. Broader sources (TECH_DEBT.md,
-# architecture audit) can be added later once the loop is proven.
 _CODE_TODO_SOURCE = "code_todo"
 
-#: Сигналы бэклога, из которых Stage A вправе взять работу.
-#: Решение оператора 2026-08-19: «пусть Stage A берёт самоизмеренные
-#: кандидаты» — до этого он ел ТОЛЬКО `code_todo`, то есть комментарий,
-#: набранный человеком, и проходил мимо всего, что агент измерил о себе сам.
-#: `architecture_audit` — его собственный read-only самоанализ (модуль-источник
-#: называет себя «проводом, которым агент находит себе работу из самоанализа»).
-#: `oversized_module` НЕ здесь и не по недосмотру: его цель — `split:<path>`,
-#: не файл для правки, а работа — раскол модуля, у которого свой производитель
-#: (лента самостройки, которую питает дорога хартии); контракт Stage A —
-#: «дефект зарабатывает падающий тест», а у предела размера уже есть храповик.
+#: Signal classes Stage A may take work from. `oversized_module` is excluded BY
+#: NAME, not by oversight: its target is `split:<path>` and its work belongs to
+#: the self-build producer. Rationale and the operator ruling that opened this
+#: set: tests/test_stage_a_takes_self_measured_work.py.
 _SELECTABLE_SIGNAL_SOURCES: frozenset[str] = frozenset({
     _CODE_TODO_SOURCE,
     "architecture_audit",
@@ -85,15 +60,9 @@ def _selectable_signal_sources() -> frozenset[str]:
 
 
 def _is_diagnosis_target_allowed(target: str) -> bool:
-    """Stage A acceptance for a VERIFIED-diagnosis target: critical organs open.
-
-    Operator decision 2026-08-15: a fully verified self-diagnosis may ground in
-    a critical organ (core/loop.py, ...) because Stage A produces only a NEW
-    failing test under tests/ — nothing edits the target at this stage, a human
-    blesses the test before any implementation exists, and Stage B keeps its own
-    gates. Path hygiene and the lane's low-risk classifier still apply: config/,
-    secrets, lockfiles, non-repo paths stay closed. Story: docs/CODE_NOTES.md,
-    "The ladder opens to the organs it was built for".
+    """Stage A acceptance for a VERIFIED-diagnosis target: critical organs open
+    (Stage A only adds a test), path hygiene stays closed. Why that is safe:
+    docs/CODE_NOTES.md, "The ladder opens to the organs it was built for".
     """
     rel = str(target or "").replace("\\", "/").strip()
     if not rel:
@@ -112,22 +81,17 @@ def _target_gate_for(source_kind: str) -> Callable[[str], bool]:
     ветка А кладёт только новый тест в tests/, цель на этом шаге не редактируется.
     """
     if source_kind in ("verified_diagnosis", "architecture_audit"):
-        # Самоанализ живёт в органах: находка аудита почти всегда указывает в
-        # core/. Основание то же, что записано у диагноза, и оно не ослаблено:
-        # Stage A кладёт ТОЛЬКО новый тест в tests/, цель не редактируется, а
-        # тест благословляет человек до того, как реализация существует.
-        # Гигиена путей (config/, секреты, локфайлы) остаётся закрытой.
+        # Self-analysis lives in the organs, so an audit finding gets the
+        # diagnosis-grade gate for the identical reason recorded there.
         return _is_diagnosis_target_allowed
     return _is_self_build_target_allowed
 
 
 def decode_frozen_test(payload: dict[str, Any]) -> str:
-    """Return the exact frozen acceptance test from a Stage-A approval payload.
+    """The exact frozen acceptance test from a Stage-A approval payload.
 
-    Prefers the redaction-inert ``test_content_b64`` blob (the byte-for-byte
-    copy) and falls back to the human-readable ``test_content`` field for
-    legacy items created before base64 preservation existed. Stage B MUST use
-    this so it never feeds a redaction-mangled test to the builder/lane.
+    Prefers the redaction-inert base64 copy, falls back to the plain field for
+    legacy items. Stage B MUST use this: the plain field may be DLP-mangled.
     """
     b64 = payload.get("test_content_b64")
     if isinstance(b64, str) and b64.strip():
@@ -140,10 +104,8 @@ def decode_frozen_test(payload: dict[str, Any]) -> str:
 
 
 def _default_task_selector(workspace: str | Path) -> Callable[[], Any]:
-    """Zero-arg selector yielding the top-ranked ``code_todo`` backlog candidate.
-
-    Read-only, best-effort: any load failure yields ``None`` so the producer
-    refuses (``no_task``) rather than inventing a task.
+    """Zero-arg selector for the top-ranked selectable backlog candidate.
+    Read-only; any load failure yields ``None`` so the producer refuses.
     """
 
     def _select() -> Any:
@@ -165,21 +127,10 @@ def _field(obj: Any, name: str) -> str:
 
 
 def _unresolved_task(inbox: Any) -> Any | None:
-    """Незакрытая заявка Stage-A, если она есть, — САМА, а не «да/нет».
-
-    Незакрытыми считаются два разных состояния, и это верно: `pending` ждёт
-    решения, `approved` решена и не исполнена — работа в обоих случаях не
-    сделана. Врало сообщение: оно называло любую из них «pending».
-
-    Живой случай 2026-08-15: оператор увидел «a pending … item already exists»,
-    открыл `:approval-list pending` — пусто, отклонил всё, что нашёл, и упёрся
-    в ту же стену; блокировала `ain_5755a5a5`, одобренная 2026-08-03 и не
-    исполненная. В списке `pending` её нет по определению, и найти её по
-    подсказке было нельзя. Двенадцать дней глухой стены.
-
-    Поэтому возвращается сам предмет: назвать блокиратор может только тот, кто
-    его нашёл. Зачем: docs/CODE_NOTES.md, «The wall that would not say its
-    name».
+    """The unfinished Stage-A item ITSELF (not a yes/no), so the refusal can
+    name its blocker. Unfinished means `pending` OR `approved`-but-unexecuted.
+    Why the object and not a flag: docs/CODE_NOTES.md, «The wall that would
+    not say its name».
     """
     try:
         items = inbox.list()
@@ -196,12 +147,9 @@ def _unresolved_task(inbox: Any) -> Any | None:
 # ── the task builder (LLM) ──────────────────────────────────────────────────
 
 
-#: Как представить источнику задачи его улику. Ключ — `source_kind`.
-#: 2026-08-15: у самонайденных дефектов агента нет красного теста (7928 passed
-#: при 30 открытых дефектах), и ремонтник честно отказывает им
-#: («no_failing_tests»). Их лента — эта: сначала падающий тест, благословлённый
-#: человеком, потом реализация. Рамка обязана называть улику своим именем —
-#: скармливать диагноз под видом «TODO-комментария» значит врать модели.
+#: How each source's evidence is presented to the model, keyed by `source_kind`.
+#: The frame must name the evidence for what it is: feeding a diagnosis to the
+#: model disguised as a "TODO comment" is a lie to the model.
 _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
     "code_todo": (
         "a real TODO/FIXME comment from a Python file",
@@ -229,11 +177,8 @@ _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
 
 
 def _signature_block(impl_path: str, *, max_lines: int = 40) -> str:
-    """Настоящие сигнатуры публичных вызываемых объектов модуля-цели.
-
-    Источник правды — работающий код через `inspect`, не память модели.
-    Любое сомнение (модуль не импортируется, сигнатура не читается) — молчание:
-    блок либо честный, либо его нет.
+    """Real signatures of the target module's public callables, read from the
+    running code via `inspect`. Any doubt is silence: honest block or none.
     """
     import importlib
     import inspect
@@ -266,11 +211,9 @@ def _signature_block(impl_path: str, *, max_lines: int = 40) -> str:
 def _lesson_prompt_parts(
     lessons: tuple[Any, ...], impl_path: str,
 ) -> tuple[str, str]:
-    """(добавка к system, добавка к user) из выжимок уроков.
-
-    Урок меняет ПЛАН механически: `machine_action == "include_real_signatures"`
-    кладёт в подсказку настоящие сигнатуры цели, а не надежду, что модель
-    прочтёт прозу. Пустое хранилище — прежняя подсказка (поведение A).
+    """(system addition, user addition) from lesson digests. A lesson changes
+    the PLAN mechanically — `include_real_signatures` injects real signatures
+    rather than hoping the model reads prose. No lessons ⇒ the old prompt.
     """
     if not lessons:
         return "", ""
@@ -405,13 +348,9 @@ def _has_meaningful_assert(test_content: str) -> bool:
 
 
 def _vacuous_assert_reason(tree: ast.AST) -> str | None:
-    """Тавтология в assert: истинно при любом исходе — линейка без делений.
-
-    Живой случай 2026-08-15 (заявка ain_31874b06, отклонена оператором):
-    `assert report.status in {...} or report.status == report.status` прошёл
-    сито, ловившее только литеральный `assert True`. Правило структурное:
-    сравнение узла с самим собой (X == X, X <= X, X >= X, X in X) всегда
-    истинно, и BoolOp-Or с таким операндом обесценивает весь assert.
+    """A tautological assert — true on any outcome, a ruler with no marks.
+    Structural rule: a node compared with itself (X == X, X in X …) is always
+    true, and an Or with such an operand voids the whole assert.
     """
 
     def always_true(node: ast.expr) -> bool:
@@ -442,11 +381,9 @@ _PARSE_FAIL_MARK = "test does not parse"
 def _record_critic_measurement(
     workspace: str | Path, lessons: tuple[Any, ...], critic: Any,
 ) -> None:
-    """The critic IS the measuring instrument for the phantom-kwargs class.
-
-    One row per delivered lesson of that class: defect_recurred when phantoms
-    survived the armed generation, defect_absent otherwise. A generation the
-    instrument never examined (parse failure) is not a measurement.
+    """The critic IS the instrument for the phantom-kwargs class: one row per
+    delivered lesson, defect_recurred/defect_absent. A generation it never
+    examined (parse failure) is not a measurement.
     """
     if not lessons:
         return
@@ -476,14 +413,9 @@ def _record_critic_measurement(
 
 
 def _phantom_kwargs_reason(tree: ast.AST) -> str | None:
-    """Именованный аргумент, которого нет у настоящего вызываемого.
-
-    Тест, строящий `RepairProposal(test_files=...)` при конструкторе без такого
-    поля, падает TypeError сегодня И после любой реализации — у него нет
-    зелёного состояния, это не приёмочный тест. Сверка идёт с НАСТОЯЩЕЙ
-    сигнатурой через importlib; любое сомнение (динамика, **kwargs, чужой
-    модуль, не импортируется) — молчание: сито только вычитает мусор и никогда
-    не блокирует на неуверенности.
+    """A kwarg the real callable does not have: such a test raises TypeError
+    today AND after any implementation, so it has no green state. Checked
+    against the real signature via importlib; any doubt is silence.
     """
     import importlib
     import inspect as _inspect
@@ -521,12 +453,9 @@ def _phantom_kwargs_reason(tree: ast.AST) -> str | None:
 
 
 def _diagnosis_linkage_reason(test_content: str, quote: str) -> str | None:
-    """Тест по диагнозу обязан упоминать хоть один его кодовый носитель.
-
-    Рамка требует REPRODUCE the diagnosed defect; живой тест про
-    reasoning_action_mismatch не содержал ни одного токена диагноза и проверял
-    выдуманный пробел. Носители — только кодовые имена (snake_case, CamelCase,
-    пути): прозаические слова совпадают случайно и судьями не являются.
+    """A diagnosis-grounded test must mention at least one CODE token of the
+    diagnosis (snake_case, CamelCase, paths). Prose words match by accident
+    and are not judges.
     """
     carriers = {
         m.group(0)
@@ -594,10 +523,8 @@ def _task_critic_review(
         except SyntaxError as exc:
             veto.append(f"test does not parse: {exc.msg}")
         if tree is not None:
-            # Живая заявка ain_31874b06 (2026-08-15, отклонена оператором)
-            # прошла строковое сито с тавтологией, фантомными kwargs и тестом
-            # не о диагнозе. Три структурные проверки — по AST и настоящим
-            # сигнатурам (docs/CODE_NOTES.md, «The critic that read strings»).
+            # Three structural checks (AST + real signatures) after a live item
+            # slipped the string sieve: CODE_NOTES, «The critic that read strings».
             from core.attribute_sieve import phantom_attribute_reason
 
             for reason in (
@@ -646,14 +573,10 @@ def _task_reporter_publish(
     impl_path = build["impl_path"]
     test_path = build["test_path"]
     test_content = build["test_content"]
-    # The durable inbox runs every payload through the DLP/secret redactor
-    # (approval_inbox._redact_durable_payload). A frozen acceptance test is
-    # SOURCE CODE that must survive byte-for-byte — but it legitimately contains
-    # example PII (e.g. "alice@mail.ru") that the redactor would scrub, breaking
-    # the test. We therefore persist an exact base64 copy (redaction-inert: no
-    # "@"/email/token patterns) alongside the human-readable preview. Stage B
-    # reads the exact test via ``decode_frozen_test``; the raw ``test_content``
-    # field is only a (possibly redacted) preview for humans.
+    # A frozen test is source code that must survive the inbox's DLP redactor
+    # byte-for-byte, yet may legitimately contain example PII. Hence an exact
+    # base64 copy (redaction-inert) plus a human-readable preview that may be
+    # scrubbed. Story: docs/CODE_NOTES.md, "The test the redactor ate".
     test_content_b64 = base64.b64encode(test_content.encode("utf-8")).decode("ascii")
     payload = {
         "task_title": build.get("task_title") or "",
@@ -706,10 +629,8 @@ def produce_coding_task(
 ) -> ProducerReport:
     """Stage A: publish at most one grounded coding-task proposal for approval.
 
-    Never writes code, never applies a patch, creates at most one inbox item.
-    Returns a :class:`ProducerReport` whose ``status`` is one of:
-    ``budget_kill_switch`` / ``budget_wait`` / ``task_wait`` / ``dirty_tree_wait``
-    / ``no_task`` / ``task_veto`` / ``proposed``.
+    Status is one of: budget_kill_switch / budget_wait / task_wait /
+    dirty_tree_wait / no_task / task_veto / proposed.
     """
     gates: list[str] = []
 
