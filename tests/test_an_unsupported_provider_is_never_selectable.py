@@ -11,14 +11,14 @@ selectable, a spec whose provider is outside SUPPORTED_PROVIDERS becomes
 selectable, and — because the early return skips the rest of the method — the
 `require_available` check is bypassed for both.
 
-That gate is load-bearing right now. `deepseek` is not in SUPPORTED_PROVIDERS,
-which is precisely what keeps a DeepSeek spec from being chosen while the
-operator has not authorised it. Measured on the mutant: a spec with
-provider="deepseek" reports selectable=True.
+That gate is load-bearing right now: an unauthorised provider stays out
+because it is not in SUPPORTED_PROVIDERS, and on the mutant such a spec
+reports selectable=True.
 
 Nothing in the repo asserted any of it. These tests are about the rule, not
-about today's registry contents, so adding a provider to the supported set
-does not redden them — only losing the rule does.
+about today's registry contents. Authorising a provider, disabling a spec, or
+changing which models exist must all stay cheap — what may not become cheap is
+a spec reaching selection without passing the gate at all.
 """
 from __future__ import annotations
 
@@ -34,11 +34,18 @@ def _spec(**kw) -> ModelSpec:
 
 
 def test_a_provider_outside_the_supported_set_is_never_selectable() -> None:
-    assert "deepseek" not in SUPPORTED_PROVIDERS, (
-        "this test's example provider joined the supported set — pick another "
-        "unsupported name rather than deleting the case"
-    )
-    spec = _spec(provider="deepseek", requires_env=("DEEPSEEK_API_KEY",))
+    """The rule, deliberately not today's roster.
+
+    An earlier draft asserted `"deepseek" not in SUPPORTED_PROVIDERS`, which
+    pins a configuration rather than an invariant: the day that provider is
+    authorised, a legitimate change would turn this red. Adding a provider is
+    the operator's decision and must stay cheap. What may never become cheap
+    is a spec bypassing the gate, so the case uses a name no roster will ever
+    hold.
+    """
+    unsupported = "provider-that-will-never-be-supported-qqzz"
+    assert unsupported not in SUPPORTED_PROVIDERS
+    spec = _spec(provider=unsupported, requires_env=("SOME_API_KEY_QQZZ",))
     assert spec.selectable(allow_mock=False, require_available=True) is False
     assert spec.selectable(allow_mock=True, require_available=False) is False, (
         "an unsupported provider became selectable once availability was not "

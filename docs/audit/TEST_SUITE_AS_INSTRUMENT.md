@@ -175,3 +175,31 @@ Eight modules were never probed and the six that were are covered only at their
 head. Continuing means resuming the run (completed agents replay from cache) or
 probing the remaining modules directly, and — for any survivor — replaying it
 against the whole suite before it is called anything at all.
+
+## Do the new tests guard a boundary, or decide for the agent?
+
+A suite that grows by pinning the agent's choices stops being an instrument and
+becomes a timetable. The distinction applied to every test added by this audit:
+a test may pin a limit on power, a causal claim, or a contract the code itself
+declares. It may not pin which way the agent should think.
+
+| Test added | Pins | Verdict |
+|---|---|---|
+| `tests/test_the_probe_knows_why_it_refused.py` | a tool must not report "could not measure" as "measured a failure" | instrument boundary; no agent behaviour involved |
+| `tests/test_the_opener_guards_the_socket_it_opens.py` | a private peer at connect time is refused | power boundary |
+| `tests/test_the_lane_cannot_reach_a_remote.py` | no remote verb reaches git | power boundary. The implementation is an allowlist, so adding a LOCAL verb is a one-line edit and these tests stay green — the test forbids reaching a remote, not extending the tool |
+| `tests/test_an_unsupported_provider_is_never_selectable.py` | a spec cannot reach selection without passing the gate | power boundary. An earlier draft asserted a specific provider was absent from the roster — a configuration pin that would have reddened the day that provider was authorised. Rewritten to use a name no roster will hold |
+| `tests/test_the_repair_gate_needs_both_its_reasons.py` | an unverified diagnosis is denied; satisfying the gate yields approval, never permission | power boundary — with a caveat worth naming: it also pins the current verdicts, so deliberately changing the policy means changing this test. That is the intent: such a change should be a decision, not a drift |
+| `tests/test_one_wedged_word_keeps_a_consent_request_a_consent_request.py` | a request for the operator's consent is not turned into an inbox query | contract the module declares in its own comment. The closest to the line of the six, because it pins routing on three concrete inputs. It says what must not be silently swallowed, not which route the agent must pick |
+
+None of them says the agent must call a particular function, choose a
+particular model, or reach a particular conclusion. The one banked invariant,
+MIR-110, is deliberately unprescribed for the same reason: it says a verified
+diagnosis must rest on evidence of a matching class, and refuses to name which
+class.
+
+The failure mode to watch for in later rounds: a mutation survives, and the
+cheapest way to redden it is to assert the current output for the current
+input. That closes the mutation and pins a decision. The test that belongs
+there is the one naming the property the output was supposed to have.
+
