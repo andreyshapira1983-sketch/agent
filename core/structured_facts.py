@@ -1,24 +1,9 @@
 """Structured fact extraction for tool outputs.
 
-Tools often return structured values — dicts, lists, JSON — that the
-LLM then verbalises in prose. The Verifier's substring matcher cannot
-bridge the gap: ``{"weekday": "Wednesday", "month": 6}`` does not
-contain the literal string ``"среда, июнь"``, but a Russian-language
-answer paraphrasing the same fact should still be considered grounded.
-
-This module normalises both sides into a small comparable fact set:
-calendar dates, weekdays (en + ru), meaningful numbers, booleans and
-verbatim strings. The Verifier uses :func:`claim_supported_by` to
-decide whether a claim is consistent with the structured source.
-
-Public API:
-    extract_facts(excerpt) -> StructuredFacts
-    claim_supported_by(claim, facts) -> bool
-
-The extractor is purely textual and never calls an LLM. It accepts
-JSON, Python ``repr`` of a dict, or any nested combination thereof.
-Anything it cannot parse yields an empty :class:`StructuredFacts` and
-the Verifier falls back to its existing matchers.
+The extractor is purely textual and never calls an LLM. It accepts JSON,
+Python ``repr`` of a dict, or any nested combination thereof. Anything it
+cannot parse yields an empty :class:`StructuredFacts` and the Verifier falls
+back to its existing matchers.
 """
 from __future__ import annotations
 
@@ -91,13 +76,7 @@ _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 @dataclass(frozen=True)
 class StructuredFacts:
-    """Normalised, locale-aware view of a structured tool output.
-
-    Each field is a frozenset of lower-case strings. Membership in any
-    field is a positive signal that the claim is consistent with the
-    source — no field implies a NEGATIVE signal (we do not assert
-    contradiction from absence).
-    """
+    """Normalised, locale-aware view of a structured tool output."""
     dates:    frozenset[str]
     weekdays: frozenset[str]
     numbers:  frozenset[str]
@@ -126,13 +105,7 @@ class StructuredFacts:
 # ---------------------------------------------------------------------------
 
 def _parse_excerpt(excerpt: str) -> Any:
-    """Best-effort parse of a tool output excerpt.
-
-    Tries JSON first (some tools serialise structured outputs that way),
-    then ``ast.literal_eval`` for Python ``repr`` of dict/list/tuple.
-    Returns ``None`` on any failure — the Verifier falls back to its
-    string matchers.
-    """
+    """Best-effort parse of a tool output excerpt."""
     s = (excerpt or "").strip()
     if not s:
         return None
@@ -174,12 +147,7 @@ def _add_date_forms(year: int, month: int, day: int, out: set[str]) -> None:
 
 
 def extract_facts(excerpt: str | Any) -> StructuredFacts:
-    """Parse *excerpt* and produce normalised facts.
-
-    Accepts either a string (JSON or repr) or an already-parsed
-    Python value. Returns ``StructuredFacts.empty()`` when the excerpt
-    is unparseable or carries no recognisable fields.
-    """
+    """Parse *excerpt* and produce normalised facts."""
     if isinstance(excerpt, str):
         parsed = _parse_excerpt(excerpt)
     else:
@@ -276,13 +244,7 @@ def _word_in(needle: str, hay: str) -> bool:
 
 
 def claim_supported_by(claim: str, facts: StructuredFacts) -> bool:
-    """Return True iff *claim* mentions at least one non-generic fact.
-
-    Matching is case-insensitive and word-boundary-aware so that a
-    short fact like ``"6"`` does not match ``"6th"`` accidentally,
-    and the weekday ``"ср"`` does not match the inside of ``"среда"``
-    from a different source.
-    """
+    """Return True iff *claim* mentions at least one non-generic fact."""
     if facts.is_empty():
         return False
     text = (claim or "").lower()

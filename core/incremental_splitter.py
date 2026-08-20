@@ -2,38 +2,25 @@
 
 The one-shot LLM splitter rewrites the whole target file in a single model
 reply, which is bounded by the model's output-token ceiling -- a 4500-line
-module like ``core/loop.py`` can never fit. This module removes that ceiling by
-splitting *deterministically*:
+module like ``core/loop.py`` can never fit. This module removes that ceiling
+by splitting *deterministically*:
 
-* no LLM at all -- code is moved **verbatim** (exact source-line slices), so
-  there is nothing to hallucinate and no token budget to exceed;
-* one small step per invocation -- each run extracts ONE cohesive block under a
-  line budget, leaving a re-export (or a mixin base) behind, so the module
-  shrinks safely across several approved steps instead of one big-bang rewrite;
-* every step still flows through the normal safety lane: an approval-inbox
-  item, human approval, targeted + full tests, auto-rollback on red.
-
-Two extraction modes, chosen automatically:
-
-1. **function mode** -- moves a dependency-closed group of top-level functions
-   (and the module constants only they use) into a new sibling module; the
-   target re-exports every moved name so all existing import paths keep
-   working (the hard rule learned from the verifier-split rollbacks).
-2. **mixin mode** -- when the file is dominated by one huge class (the
-   ``AgentLoop`` case), moves self-contained methods into a mixin class in a
-   new sibling module and adds the mixin to the class bases. Attribute access
-   through ``self`` keeps working unchanged.
-
-Safety rules (any violation -> the block simply is not moved):
+1. **function mode** -- moves a dependency-closed group of top-level
+functions (and the module constants only they use) into a new sibling
+module; the target re-exports every moved name so all existing import paths
+keep working (the hard rule learned from the verifier-split rollbacks). 2.
+**mixin mode** -- when the file is dominated by one huge class (the
+``AgentLoop`` case), moves self-contained methods into a mixin class in a
+new sibling module and adds the mixin to the class bases. Attribute access
+through ``self`` keeps working unchanged.
 
 * moved code may reference ONLY builtins, imported names, and other moved
-  names -- never a name that stays behind (that would create a circular
-  import);
-* methods using ``super()``, ``global``/``nonlocal``, or name-mangled
-  ``__private`` attributes are never moved (their semantics are tied to the
-  defining class/module);
-* both resulting files must parse; the target must actually shrink; every
-  moved top-level name must remain importable from the target.
+names -- never a name that stays behind (that would create a circular
+import); * methods using ``super()``, ``global``/``nonlocal``, or name-
+mangled ``__private`` attributes are never moved (their semantics are tied
+to the defining class/module); * both resulting files must parse; the target
+must actually shrink; every moved top-level name must remain importable from
+the target.
 """
 from __future__ import annotations
 

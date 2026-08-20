@@ -186,19 +186,14 @@ def _with_untagged_lessons(
 
 
 def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> list[str]:
-    """Return short summaries of PAST FAILED self-build attempts for ``target``.
+    """Return short summaries of PAST FAILED self-build attempts for
+    ``target``.
 
-    Reads the agent's episodic memory for lesson episodes tagged with the target
-    path AND a failed outcome, newest first, so the Builder can be warned not to
-    repeat a mistake it already made on this exact file (e.g. "left a dangling
-    import to a class it forgot to move"). Best-effort: returns ``[]`` when memory
-    is unavailable or empty, and never raises.
-
-    Rollbacks banked before the path tag existed are still found: their summary
-    names the files (``files=['cli/intent_bridge.py', …]``). Without this the
-    three rollbacks already in the live store would stay invisible forever, and
-    the next attempt on those files would repeat their mistakes — which is
-    exactly what happened twice.
+    Reads the agent's episodic memory for lesson episodes tagged with the
+    target path AND a failed outcome, newest first, so the Builder can be
+    warned not to repeat a mistake it already made on this exact file (e.g.
+    "left a dangling import to a class it forgot to move"). Best-effort:
+    returns ``[]`` when memory is unavailable or empty, and never raises.
     """
     try:
         store = getattr(agent, "episodic_store", None)

@@ -36,20 +36,8 @@ def run_maintenance_pass(
 ) -> dict:
     """One bounded hygiene pass: expire → dedupe → prune episodes → archive.
 
-    Exists so the unattended agent keeps its own memory: every operation below
-    already existed, but the sole caller was the `:hygiene` command, and nobody
-    types that on the daemon path (MIR-045).
-
-    `suppressed_reason` is the answer to "may this write at all", decided by the
-    caller. `None` means yes; any string is the reason it may not, and is
-    reported rather than silently returning an empty pass.
-
-    `dry_run=True` (the default) counts and reports without removing. Thresholds
-    tuned on synthetic data should be seen against a real store before they are
-    allowed to delete from it.
-
-    `summarise_persistent` is deliberately absent: it needs an LLM call, so it is
-    neither free nor deterministic, and it stays an operator action.
+    `summarise_persistent` is deliberately absent: it needs an LLM call, so
+    it is neither free nor deterministic, and it stays an operator action.
 
     Returns a delta report — the only way an operator learns what ran while
     nobody was watching.
@@ -168,13 +156,7 @@ def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) ->
 
 
 def compact_assumptions(*, log: Any, assumption_store: Any, dry_run: bool = False) -> dict:
-    """Dedupe and cap the assumptions archive (MIR-027's open half).
-
-    The store became a dormant archive when the cross-turn auto-restore was
-    removed; this keeps dormant BOUNDED — duplicates collapse to the newest row,
-    the tail is capped — while retrieval stays with the memory-lifecycle
-    contract.
-    """
+    """Dedupe and cap the assumptions archive (MIR-027's open half)."""
     if assumption_store is None:
         report = {
             "scanned": 0, "duplicates_removed": 0,
@@ -229,13 +211,7 @@ def prune_episodic(
     staleness_threshold: float = 1.5,
     dry_run: bool = False,
 ) -> list[str]:
-    """Evict old, low-quality, non-protected episodes from episodic memory.
-
-    Complements the persistent-memory hygiene chain: FIFO eviction alone keeps
-    recent ``replan_exhausted`` failures around as retrieval distractors.
-    Returns the IDs pruned (or, in dry-run, that would be). No-op when no
-    episodic store is configured.
-    """
+    """Evict old, low-quality, non-protected episodes from episodic memory."""
     if episodic_store is None:
         log.log(
             "episodic_memory_prune",
@@ -256,12 +232,7 @@ def prune_episodic(
 
 
 def dedupe_episodic(*, log: Any, episodic_store: Any, dry_run: bool = False) -> list[str]:
-    """Keep one copy of each repeated episode.
-
-    The episodic twin of `dedupe_persistent`: `save_once` guards ids, not
-    content, so a gate blocking the same way each tick banked a fresh identical
-    record. Returns the IDs dropped (or, dry-run, that would be).
-    """
+    """Keep one copy of each repeated episode."""
     if episodic_store is None:
         log.log("episodic_memory_dedupe",
                 {"dropped": 0, "dry_run": dry_run, "skipped_reason": "no store"})

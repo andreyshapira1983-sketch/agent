@@ -130,16 +130,10 @@ def apply_run_exception(
 class task_heartbeat:
     """Refresh a running task's liveness while the work happens.
 
-    ``updated_at`` is written once when the task is claimed and then stands
-    still, so a task legitimately running for an hour looks exactly like one
-    whose process was killed. That ambiguity is why the first attempt at
-    automatic recovery could double-run live work. A heartbeat removes it: a
-    daemon thread touches the row on an interval, and it stops the instant the
-    process dies — which is precisely the condition recovery wants to detect.
-
-    Best-effort by construction. A heartbeat that cannot be written must never
-    take down the run it is only observing; the consequence of a missed write is
-    a task that recovery may reclaim later, not a lost result.
+    Best-effort by construction. A heartbeat that cannot be written must
+    never take down the run it is only observing; the consequence of a
+    missed write is a task that recovery may reclaim later, not a lost
+    result.
     """
 
     def __init__(
@@ -194,20 +188,7 @@ def recover_orphaned_tasks(
     lock: Any,
     timeout_minutes: int = DEFAULT_ORPHAN_TIMEOUT_MINUTES,
 ) -> list[RuntimeTask]:
-    """Finalise tasks abandoned by a dead process — startup only, under a lock.
-
-    ``lock`` is any object exposing a truthy ``held`` attribute (in production,
-    :class:`app.single_instance.SingleInstanceLock`). It is not decoration: with
-    the lock held, no other consumer of this queue is running, so a ``running``
-    row with a stale heartbeat cannot be live work. Without it, "stale" and
-    "slow" are the same observation and reclaiming the row starts a second
-    execution of the same task — the hazard that got the previous attempt at
-    this wiring reverted.
-
-    Raises ``RuntimeError`` rather than recovering unlocked. A recovery that
-    silently degrades to unsafe is worse than no recovery: the previous
-    behaviour merely stranded tasks.
-    """
+    """Finalise tasks abandoned by a dead process — startup only, under a lock."""
     if not getattr(lock, "held", False):
         raise RuntimeError(
             "recover_orphaned_tasks requires the single-instance lock to be "

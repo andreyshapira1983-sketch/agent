@@ -343,13 +343,7 @@ def profile_to_prompt_block(profile: UserProfile) -> str:
 # ---------------------------------------------------------------------------
 
 class UserProfileStore:
-    """Single-record JSONL store for the user profile.
-
-    Design: the file holds at most ONE active record. Each ``save`` appends
-    a new snapshot; ``load`` returns the LAST valid record. This gives a
-    free audit trail of profile evolution without requiring a separate
-    history file.
-    """
+    """Single-record JSONL store for the user profile."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)

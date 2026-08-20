@@ -262,12 +262,8 @@ class ConflictEpisodeStore:
         lesson: str = "",
         ruled_at: str | None = None,
     ) -> ConflictEpisode | None:
-        """Append the resolved version of an episode. None if the id is unknown.
-
-        Read and append happen inside **one** lock. Splitting them lets two
-        operators resolving the same episode each read the ``open`` row and each
-        append a ruling; since reads collapse by id keeping the last row, one
-        of the two rulings would vanish without a trace.
+        """Append the resolved version of an episode. None if the id is
+        unknown.
         """
         with state_file_lock(self.path):
             current = self._get_unlocked(episode_id)

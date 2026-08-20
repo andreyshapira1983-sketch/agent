@@ -1,26 +1,15 @@
-"""Referent resolution for local critique / show-only turns (plan critique PR1).
+"""Referent resolution for local critique / show-only turns (plan critique
+PR1).
 
-The original failure mode was not merely \"low evidence\" — the agent failed to
-decide *what* to analyse among: the current user text, a turn-scoped file hint,
-session artifacts, a prior turn, or (last) memory. This module is a pure,
-deterministic resolver with **no LLM** and **no side effects**.
-
-Important invariants (critique v2)
-----------------------------------
-* The current user message is **not** world-fact evidence. When it is selected
-  as material, it is exposed only as ``analysis_target_excerpt`` (data channel).
-* ``user_explicit`` is **not** added here; this module never writes an evidence
-  chain and never auto-verifies claims.
-* Persistent memory is never a silent primary for local critique.
-* No auto ``file_read`` / planner bypass — a trusted file hint yields
-  ``needs_tool`` so a later stage can decide how to read it.
-* Conflict between multiple high-scoring candidates → ``ambiguous``, never a
-  random cached artifact.
-
-Feature flag
-------------
-Callers gate on :data:`FEATURE_FLAG` (default off). This module alone changes
-no loop behaviour until a later PR wires it behind the flag.
+Important invariants (critique v2) ---------------------------------- * The
+current user message is **not** world-fact evidence. When it is selected as
+material, it is exposed only as ``analysis_target_excerpt`` (data channel).
+* ``user_explicit`` is **not** added here; this module never writes an
+evidence chain and never auto-verifies claims. * Persistent memory is never
+a silent primary for local critique. * No auto ``file_read`` / planner
+bypass — a trusted file hint yields ``needs_tool`` so a later stage can
+decide how to read it. * Conflict between multiple high-scoring candidates →
+``ambiguous``, never a random cached artifact.
 """
 from __future__ import annotations
 
@@ -39,14 +28,7 @@ _ENV_MODE = "AGENT_REFERENT_RESOLVER"
 
 
 def referent_resolver_mode() -> str:
-    """Return ``on`` (default), ``shadow`` (log only), or ``off``.
-
-    Постановление оператора 2026-08-13 (R5): орган включён рождением, а не
-    переменной, которую никто не выставлял. Выключенный резолвер стоил живого
-    хода: анафора «результат предыдущего шага» при пустой истории пошла в
-    планирование и взяла чужое число из опыта под видом диалога. ``off`` и
-    ``shadow`` остаются операторскими переключателями.
-    """
+    """Return ``on`` (default), ``shadow`` (log only), or ``off``."""
     raw = (os.getenv(_ENV_MODE) or "").strip().lower()
     if raw in ("off", "false", "0", "no"):
         return "off"
@@ -581,12 +563,7 @@ class ReferentResolver:
         return None
 
     def _trust_path(self, raw: str) -> tuple[bool, str]:
-        """Basic path trust gate (no I/O of file contents).
-
-        Rejects empty, NUL, obvious traversal when a workspace root is set,
-        and directory-looking trailing separators. Symlink/size checks belong
-        to the later read stage (PR4).
-        """
+        """Basic path trust gate (no I/O of file contents)."""
         path_s = (raw or "").strip().strip("\"'")
         if not path_s or "\x00" in path_s:
             return False, "path_empty_or_nul"

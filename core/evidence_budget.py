@@ -446,10 +446,9 @@ def budget_file_content(
 
 
 # ── The long-term-memory block: shared vocabulary with its builder ──────────
-# The tags moved here from core/loop_methods2 (piece 5 of the loop
-# decomposition) so the module that TRIMS the block, the module that BUILDS
-# it (loop_methods2 imports these back) and the rebuilder below all speak
-# one definition. This module is a leaf, so the direction is cycle-free.
+# One definition shared by the module that TRIMS the block, the module that
+# BUILDS it (loop_methods2 imports these back) and the rebuilder below. This
+# module is a leaf, so the direction stays cycle-free.
 MEMORY_OPEN_TAG: str = "<long_term_memory>"
 MEMORY_CLOSE_TAG: str = "</long_term_memory>"
 

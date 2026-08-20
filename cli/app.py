@@ -1,40 +1,17 @@
 """The CLI itself: parse, decide the mode, wire the session, hand off.
 
-``run_cli`` is the whole startup sequence. The order below is the route, and
-several places in it are load-bearing rather than incidental:
-
-1. ``_force_utf8_io()`` -- must precede ``parse_args``, which writes ``--help``
-   and raises ``SystemExit`` from inside itself;
-2. parse the flags (``cli/args.py``);
-3. the two pre-``load_dotenv()`` fast paths, ``:self-build-propose`` and
-   ``:schedule-disable`` -- neither may build an agent or read ``.env``;
-4. ``load_dotenv(workspace / ".env")`` -- the workspace's file, not the launch
-   directory's;
-5. ``--resume`` (``cli/resume.py``), which can exit before an agent exists and
-   may replace ``ask`` / ``file_hint`` with the checkpoint's;
-6. reject an empty ``--ask``, then the file-hint preflight -- the two paths
-   that exit ``2`` without spending anything;
-7. one-shot ``--ask`` (``cli/one_shot.py``) -- or
-8. the interactive session: stdin reader, approval provider, agent, rate
-   limiter, daemon notice, banner, then the loop in ``cli/repl.py``.
-
-What the tests fix: ``test_cli_one_shot_policy.py`` pins step 1 before 2,
-``load_dotenv`` before ``build_agent``, and both fast paths ahead of either;
-``test_cli_mode_selection.py`` pins which mode is chosen and the exit codes of
-step 6; ``test_cli_command_precedence.py`` pins that both dispatch paths split
-a command on any whitespace, not on a literal space.
-
-``main.py`` is a launcher over this module and nothing else;
-``tests/characterization/test_main_public_surface.py`` keeps it that way.
-
-**Where to patch in tests.** Steps 1-8 are performed *here*, so a fake for
-``build_agent``, ``load_dotenv``, ``_StdinLineReader``, ``CLIApprovalProvider``,
-``_print_daemon_inbox_notice``, ``_schedule_disable_message`` or
-``_handle_self_build_propose`` belongs on ``cli.app`` -- patching ``main``
-intercepts nothing, and ``tests/characterization/test_main_patch_seams.py``
-fails loudly if a fake is left there. ``agent_tick.py`` and ``api/server.py``
-build their own agents through ``app.bootstrap``, so *their* fakes go on that
-module.
+1. ``_force_utf8_io()`` -- must precede ``parse_args``, which writes
+``--help`` and raises ``SystemExit`` from inside itself; 2. parse the flags
+(``cli/args.py``); 3. the two pre-``load_dotenv()`` fast paths, ``:self-
+build-propose`` and ``:schedule-disable`` -- neither may build an agent or
+read ``.env``; 4. ``load_dotenv(workspace / ".env")`` -- the workspace's
+file, not the launch directory's; 5. ``--resume`` (``cli/resume.py``), which
+can exit before an agent exists and may replace ``ask`` / ``file_hint`` with
+the checkpoint's; 6. reject an empty ``--ask``, then the file-hint preflight
+-- the two paths that exit ``2`` without spending anything; 7. one-shot
+``--ask`` (``cli/one_shot.py``) -- or 8. the interactive session: stdin
+reader, approval provider, agent, rate limiter, daemon notice, banner, then
+the loop in ``cli/repl.py``.
 """
 from __future__ import annotations
 

@@ -88,13 +88,7 @@ MAX_EXCERPT_CHARS = 800
 
 @dataclass(frozen=True)
 class Evidence:
-    """One immutable piece of supporting evidence for a claim.
-
-    Frozen on purpose: an Evidence record is an audit artefact. Once
-    issued, neither the loop nor the planner should be able to mutate
-    it. Modifications produce a new Evidence (with its own id +
-    fetched_at).
-    """
+    """One immutable piece of supporting evidence for a claim."""
     id: str
     kind: EvidenceKind
     source_id: str           # path / URL / trace_id#event / mem_xxx / req_xxx
@@ -143,13 +137,7 @@ class Evidence:
 
 @dataclass
 class ProvenanceChain:
-    """Per-cycle ordered collection of Evidence.
-
-    Order matters: the Verifier prefers the earliest evidence that
-    matches a given claim (the first thing a tool returned should be
-    the primary source, later evidence is supporting). Equal-rank
-    matches are tie-broken by confidence.
-    """
+    """Per-cycle ordered collection of Evidence."""
     evidences: list[Evidence] = field(default_factory=list)
 
     def add(self, ev: Evidence) -> None:
@@ -610,12 +598,7 @@ def evidence_from_memory_record(
     source: str | None,
     created_at: str | None,
 ) -> Evidence:
-    """Memory record retrieved during planning.
-
-    Confidence is reduced when the record has no `source` (no
-    provenance) — a memory entry with unknown origin can't be trusted
-    as much as one with a clear chain.
-    """
+    """Memory record retrieved during planning."""
     conf = DEFAULT_CONFIDENCE["memory"]
     if not source:
         conf = max(0.25, conf - 0.15)

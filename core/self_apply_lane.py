@@ -242,13 +242,7 @@ def _first_error_line(text: str) -> str:
 
 
 def _failure_detail(result: Any) -> str:
-    """Build a short, human-readable reason for a failed test stage.
-
-    Names the failing tests (when pytest reported FAILED lines) and/or the first
-    error line from the captured output (e.g. an ImportError left behind by a bad
-    split), so the rollback reason recorded to episodic memory says WHY, not just
-    "tests failed". Best-effort: returns "" when nothing useful can be extracted.
-    """
+    """Build a short, human-readable reason for a failed test stage."""
     if not isinstance(result, dict):
         return ""
     parts: list[str] = []

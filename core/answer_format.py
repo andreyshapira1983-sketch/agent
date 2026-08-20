@@ -1,19 +1,4 @@
-"""Как ответ выглядит: контракт вывода, человеческая печать, цитаты.
-
-Приехало из `core/loop_helpers.py`, которого больше нет. Тот файл сделал
-автоматический резчик, и «helpers» не говорило ничего: по имени нельзя было
-узнать, что внутри — а внутри почти целиком одна тема, вот эта.
-
-Префикс `loop_` тоже снят намеренно: `format_human_response` зовут семь
-модулей, из них четыре — CLI (`cli/repl.py`, `cli/one_shot.py`,
-`cli/resume.py`, `cli/intent_bridge.py`). Это не принадлежность цикла.
-
-Здесь три слоя одного предмета: `SYSTEM_ANSWER` — контракт, который выдаётся
-модели; `format_human_response` — как размеченный ответ показывают человеку;
-остальное — грамматика цитат, по которой верификатор потом сверяет claims с
-уликами. Они обязаны жить рядом: разъедутся — разъедется и грамматика,
-которую одна сторона выдаёт, а другая проверяет.
-"""
+"""Как ответ выглядит: контракт вывода, человеческая печать, цитаты."""
 from __future__ import annotations
 
 import re
@@ -203,15 +188,12 @@ _GENERIC_CONTRACT_MARKERS = ("Conclusion:", "Facts:")
 def output_contract_requires_headers(system_prompt: str | None) -> bool:
     """Whether *system_prompt* enforces the generic Conclusion/Facts contract.
 
-    Priority rule for the output contract:
-        task-specific/structured contract present -> generic prose contract OFF
-        no task-specific contract                 -> use Conclusion/Facts
-
-    When a task-specific contract replaces SYSTEM_ANSWER, the synthesised answer
-    legitimately lacks the six generic headers, so the verifier must not treat
-    it as ``malformed_output``. We can never simultaneously demand "table only"
-    and mandatory prose sections. Defaults to ``True`` (generic) for an
-    empty/unknown prompt so existing behaviour is preserved.
+    When a task-specific contract replaces SYSTEM_ANSWER, the synthesised
+    answer legitimately lacks the six generic headers, so the verifier must
+    not treat it as ``malformed_output``. We can never simultaneously demand
+    "table only" and mandatory prose sections. Defaults to ``True``
+    (generic) for an empty/unknown prompt so existing behaviour is
+    preserved.
     """
     if not system_prompt:
         return True
@@ -243,15 +225,8 @@ _ANSWER_CITATION_RE = re.compile(
 _EMPTY_QUOTE_LINE_RE = re.compile(r"^>+\s*$")
 
 def format_human_response(answer: str) -> str:
-    """Convert the internal Output Contract format to clean human-readable text.
-
-    Strips: section headers (Conclusion/Facts/Sources/Confidence/Safety/Unverified),
-    source citation tokens ([general-knowledge], [web:...], etc.),
-    and internal [note] disclaimers.
-
-    Keeps: the actual content — conclusion sentences + fact bullets —
-    formatted as natural prose.  If the answer is NOT in Output Contract
-    format (no "Conclusion:" header), returns the text unchanged.
+    """Convert the internal Output Contract format to clean human-readable
+    text.
     """
     if "Conclusion:" not in answer and "conclusion:" not in answer:
         return answer  # not an Output Contract reply — return as-is
@@ -409,18 +384,13 @@ def format_allowed_citations_block(
 ) -> str:
     """Render the citable-source list for the synthesizer prompt.
 
-    *memory_ids*, when given, is the set of long-term record ids that
-    survived the evidence-budget trim. A record outside it is dropped: it
-    is no longer in `<long_term_memory>`, so offering it as a citation
-    invites a citation to text the model never received.
-
-    The filter keys on ``obtained_via == "memory"``, not on
-    ``kind == "memory"``: cached tool outputs from previous turns share the
-    kind but are `obtained_via="working_memory"`, live in
-    `<conversation_history>` outside this budget, and were never trimmed —
-    revoking their citation licence would push follow-up answers toward
-    [general-knowledge] for no reason. `core/verifier_core.py:53-56`
-    already draws the line on the same axis.
+    The filter keys on ``obtained_via == "memory"``, not on ``kind ==
+    "memory"``: cached tool outputs from previous turns share the kind but
+    are `obtained_via="working_memory"`, live in `<conversation_history>`
+    outside this budget, and were never trimmed — revoking their citation
+    licence would push follow-up answers toward [general-knowledge] for no
+    reason. `core/verifier_core.py:53-56` already draws the line on the same
+    axis.
     """
     if not chain.evidences:
         return ""
@@ -446,11 +416,6 @@ def format_allowed_citations_block(
 def number_lines(content: str, *, original: str | None = None) -> str:
     """Prefix each line with its TRUE 1-based number in *original*, for the
     prompt only.
-
-    When *original* is given, *content* is an excerpt of it and numbers are
-    recovered by walking the original forward, so a line keeps the address it
-    has in the file rather than its position in the excerpt. Lines the budget
-    inserted itself (the trim notice) belong to no file line and stay bare.
     """
     lines = (content or "").splitlines()
     if not lines:
@@ -483,13 +448,7 @@ def format_artifact(
     question: str = "",
     self_documentation: bool = False,
 ) -> str:
-    """Render a tool output into a stable string the LLM can ground on.
-
-    File content is passed through :func:`core.evidence_budget.budget_file_content`
-    which applies the per-artifact character budget and performs intent-aware
-    extraction: instead of blindly returning the first N chars, the most
-    question-relevant paragraphs are selected (Realtime Intent Fix).
-    """
+    """Render a tool output into a stable string the LLM can ground on."""
     if tool_name == "web_search" and isinstance(output, list):
         if not output:
             return "(no results)"

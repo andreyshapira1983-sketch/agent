@@ -64,24 +64,15 @@ class DaemonLoopError(RuntimeError):
 class DaemonLoop:
     """Minimal persistent asyncio event loop with explicit wake-ups.
 
-    The loop sleeps on an internal :class:`asyncio.Event`. Producers wake it
-    with a *reason* string; all reasons accumulated while the loop was busy
-    are delivered together (batched) to ``on_wake`` on the next iteration.
-
-    Parameters
-    ----------
-    on_wake:
-        Async callback invoked with the list of wake reasons collected since
-        the previous iteration. Exceptions raised by the handler are logged
-        and do not terminate the loop.
-    idle_timeout:
-        Optional number of seconds after which the loop wakes on its own with
-        the reason :data:`IDLE_TIMEOUT_REASON`. ``None`` (default) means the
-        loop sleeps until explicitly woken. This is the hook future timer
-        sources (plan item 2.1) can build on.
-    drain_timeout:
-        Bounded number of seconds shutdown waits for in-flight tasks (started
-        via :meth:`spawn`) to finish before cancelling them. Must be >= 0.
+    Parameters ---------- on_wake: Async callback invoked with the list of
+    wake reasons collected since the previous iteration. Exceptions raised
+    by the handler are logged and do not terminate the loop. idle_timeout:
+    Optional number of seconds after which the loop wakes on its own with
+    the reason :data:`IDLE_TIMEOUT_REASON`. ``None`` (default) means the
+    loop sleeps until explicitly woken. This is the hook future timer
+    sources (plan item 2.1) can build on. drain_timeout: Bounded number of
+    seconds shutdown waits for in-flight tasks (started via :meth:`spawn`)
+    to finish before cancelling them. Must be >= 0.
     """
 
     def __init__(
@@ -142,13 +133,7 @@ class DaemonLoop:
     def spawn(
         self, coro: Coroutine[Any, Any, Any], *, name: str | None = None
     ) -> asyncio.Task:
-        """Start and track a task so shutdown can drain or cancel it.
-
-        Raises
-        ------
-        DaemonLoopError
-            If shutdown has begun — the daemon stops accepting new tasks.
-        """
+        """Start and track a task so shutdown can drain or cancel it."""
         if self._shutdown_started or self._stop_requested or self._finished:
             coro.close()
             raise DaemonLoopError("daemon is shutting down; not accepting new tasks")
@@ -250,14 +235,9 @@ class DaemonLoop:
     async def shutdown(self, *, drain_timeout: float | None = None) -> None:
         """Request a graceful stop and wait until shutdown has completed.
 
-        Safe to call multiple times and from multiple tasks: the first call
-        drives the stop, later calls simply wait for completion.
-
-        Parameters
-        ----------
-        drain_timeout:
-            Override for the instance ``drain_timeout`` (only effective on
-            the call that ends up performing the drain).
+        Parameters ---------- drain_timeout: Override for the instance
+        ``drain_timeout`` (only effective on the call that ends up
+        performing the drain).
         """
         if drain_timeout is not None:
             if drain_timeout < 0:
@@ -331,13 +311,7 @@ class DaemonLoop:
     # ── signal handling ──────────────────────────────────────────────────
 
     def _install_signal_handlers(self) -> list[tuple[signal.Signals, str, Any]]:
-        """Install SIGINT/SIGTERM handlers; returns entries for later removal.
-
-        Uses ``loop.add_signal_handler`` on platforms that support it (Unix);
-        falls back to ``signal.signal`` elsewhere (e.g. Windows, where the
-        Proactor event loop raises NotImplementedError). SIGTERM is skipped
-        where the platform does not define it.
-        """
+        """Install SIGINT/SIGTERM handlers; returns entries for later removal."""
         installed: list[tuple[signal.Signals, str, Any]] = []
         wanted = [signal.SIGINT]
         sigterm = getattr(signal, "SIGTERM", None)

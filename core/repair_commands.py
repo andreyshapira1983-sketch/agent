@@ -1,22 +1,17 @@
 """Operator repair commands: propose, roll back, clean up backups.
 
-Census item B1. This logic lived in `core/loop_repair.py`, a mixin composed into
-`AgentLoop` — and the cycle never called it. Verified by call sites, not by
-docstrings: `cli/commands_repair.py`, `cli/commands_memory.py`,
+Census item B1. This logic lived in `core/loop_repair.py`, a mixin composed
+into `AgentLoop` — and the cycle never called it. Verified by call sites,
+not by docstrings: `cli/commands_repair.py`, `cli/commands_memory.py`,
 `cli/command_dispatch.py` and `core/self_repair.py` call it, and no phase of
-`_run_inner` does. It sat in the loop layer because the CLI reached it through
-the agent object.
+`_run_inner` does. It sat in the loop layer because the CLI reached it
+through the agent object.
 
-The operator's ruling shapes what moved and what did not: `agent` stays the
-single entry point for operator commands, so `agent.propose_repair(...)` still
-works and no CLI call site changes — but the mixin stops being the home of the
-logic. It keeps thin methods that pass their dependencies in; the decisions live
-here.
-
-Dependencies arrive as ARGUMENTS, never as an agent object. A function taking
-`agent` and reaching into it with `getattr` would move the coupling rather than
-remove it, and that duck-typed seam is a defect this census already recorded
-elsewhere (`core/ingestion.py` finding `_remember_from_knowledge` by name).
+Dependencies arrive as ARGUMENTS, never as an agent object. A function
+taking `agent` and reaching into it with `getattr` would move the coupling
+rather than remove it, and that duck-typed seam is a defect this census
+already recorded elsewhere (`core/ingestion.py` finding
+`_remember_from_knowledge` by name).
 """
 from __future__ import annotations
 
@@ -78,13 +73,7 @@ def propose_repair(
         _target_chars = 0
 
     def _select_llm(failing_tests: int):
-        """Pick the model once the baseline is known.
-
-        Deferred on purpose: the failing-test count is half the difficulty
-        signal and only exists after `generate()` runs the baseline. An earlier
-        version passed a literal 0 here, which silently disabled that half —
-        the logic and its tests existed while production always saw zero.
-        """
+        """Pick the model once the baseline is known."""
         tier = repair_complexity(
             target_chars=_target_chars, failing_tests=failing_tests
         )
@@ -129,15 +118,6 @@ def rollback(
     workspace_root: Path | None = None,
 ):
     """Apply the most recent compensation plan (or one by id).
-
-    Returns the `CompensationReport`. Three ways there is nothing to undo, and
-    each says which: no workspace supplied, no plans registered, or a `plan_id`
-    that matches none. A bare empty report would leave an operator unable to
-    tell "nothing to roll back" from "your id was wrong".
-
-    `workspace_root` is required because `AgentLoop` is workspace-agnostic by
-    construction. The CLI passes it from the main() --workspace argument; tests
-    pass the same root the producing tool used.
 
     Mutates `compensation_log` in place — the caller owns that list, and the
     popped plan must not come back on a second call.

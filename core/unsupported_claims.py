@@ -1,38 +1,22 @@
-"""Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-level short path.
+"""Claim-level answer enforcement (critique plan PR3) — long-answer truncation
+is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-
+level short path.
 
-Separates outcomes the chunk-count gate used to conflate:
+Feature flag ``AGENT_ENFORCE_UNSUPPORTED_CLAIMS``: ``off`` (default) |
+``shadow`` | ``on``. It is the rollout switch for the **new claim-level
+short path only**, not a master switch for enforcement. Precisely:
 
-* ``insufficient_evidence`` — long unsupported factual deliverable
-* ``verifier_failure`` — verify() raised / timed out (soft-fail: keep draft)
-* ``malformed_report`` / ``citation_parse_failure`` — soft-fail markers
-* ``local_critique_preserved`` — referent resolved; empty rewrite forbidden
-* ``unsupported_world_claims`` — short categorical world claims without
-  non-user support (hedge, do not nuke)
-
-Feature flag ``AGENT_ENFORCE_UNSUPPORTED_CLAIMS``: ``off`` (default) | ``shadow``
-| ``on``. It is the rollout switch for the **new claim-level short path only**,
-not a master switch for enforcement. Precisely:
-
-===============================  ==========================================
-path                             gated by the flag?
-===============================  ==========================================
-``insufficient_evidence``        **No — always on.** Long-answer truncation
-                                 returns ``applied=True`` whatever the mode,
-                                 and the loop writes that answer back. This
-                                 predates PR3.
-``unsupported_world_claims``     **Yes.** ``applied = mode == "on"``;
-                                 ``shadow`` reports ``would_change_answer``.
-``verifier_failure`` /           Keeping the draft is unconditional (the
-``malformed_report``             function returns before any truncation);
-                                 only the explanatory note appended to the
-                                 answer is flag-gated.
-``local_critique_preserved``     No — invariant.
-===============================  ==========================================
-
-Reading ``off`` as "enforcement does nothing" is wrong and was wrong in
-``docs/COGNITIVE_CORE.md`` §8.11 until 2026-07-26; issue #119 is a recorded
-production turn where the always-on path truncated a real answer with the flag
-unset.
+=============================== ==========================================
+path gated by the flag? ===============================
+========================================== ``insufficient_evidence`` **No —
+always on.** Long-answer truncation returns ``applied=True`` whatever the
+mode, and the loop writes that answer back. This predates PR3.
+``unsupported_world_claims`` **Yes.** ``applied = mode == "on"``; ``shadow``
+reports ``would_change_answer``. ``verifier_failure`` / Keeping the draft is
+unconditional (the ``malformed_report`` function returns before any
+truncation); only the explanatory note appended to the answer is flag-gated.
+``local_critique_preserved`` No — invariant. ===============================
+==========================================
 """
 from __future__ import annotations
 
@@ -214,17 +198,7 @@ def apply_answer_enforcement(
     mode: str | None = None,
     contract: Any | None = None,
 ) -> EnforcementResult:
-    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов.
-
-    Противоречие ищется ОДИН раз и прикладывается к любому исходу — иначе оно
-    терялось бы всякий раз, когда более сильное правило (усечение по нехватке
-    улик, мягкий отказ верификатора) забирало исход себе. Собственным исходом
-    `self_contradicted` оно становится только там, где иначе стояло бы `none`:
-    более сильное действие уже принято, и переименовывать его нечестно.
-
-    Не зависит от флага раскатки: «утверждено и снято в одном ответе» — это
-    свойство текста, а не эвристика, которую выкатывают постепенно.
-    """
+    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов."""
     found = ()
     try:
         found = contradicted_claims(answer)
@@ -261,18 +235,7 @@ def apply_answer_enforcement(
 def _annotate_unrepresented_prohibitions(
     result: EnforcementResult, contract: Any | None, question: str
 ) -> EnforcementResult:
-    """Довести до ОПЕРАТОРА запрет, который контракт не умеет проверять.
-
-    Не блокирует и не судит о нарушении: модуль честно не умеет проверять
-    запрет, а значит не может и установить, что он нарушен. Блокировать по
-    непроверяемому признаку значило бы выдумать обязательство — ровно то, что
-    `derive_completion_contract` отказывается делать по своему контракту.
-
-    Чинится единственное, что доказано замером 2026-08-10: запрет был
-    распознан, помечен `unsupported`, и на этом след обрывался — у поля не
-    было ни одного потребителя вне своего модуля. Оператор узнавал о границе
-    из журнала, если вообще смотрел.
-    """
+    """Довести до ОПЕРАТОРА запрет, который контракт не умеет проверять."""
     entries = tuple(getattr(contract, "unsupported_deliverables", ()) or ())
     quoted = [e.evidence for e in entries if getattr(e, "kind", "") == "prohibition"]
     if not quoted:

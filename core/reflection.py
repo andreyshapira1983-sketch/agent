@@ -1,21 +1,4 @@
-"""Reflection engine — self-improvement feedback loop.
-
-After each AutonomousRuntime pass the ReflectionEngine reads the recent
-logs, extracts error/failure patterns, calls the LLM to formulate lessons,
-persists those lessons as episodic MemoryRecords, and optionally generates
-a LearningPlan to fill the knowledge gaps it found.
-
-This closes the loop that was previously only possible by a human:
-
-    AutonomousRuntime.run()
-        ↓  (writes logs/)
-    ReflectionEngine.reflect()
-        ↓  reads logs/ → extracts patterns
-        ↓  patterns → LLM → structured lessons
-        ↓  lessons → PersistentMemoryStore (type="episodic")
-        ↓  lessons → LearningPlan → KnowledgePipeline
-    next cycle: agent acts on what it learned from its own mistakes
-"""
+"""Reflection engine — self-improvement feedback loop."""
 from __future__ import annotations
 
 import json
@@ -156,28 +139,7 @@ _PATH_SHAPED_RE = re.compile(r"[\w./\\-]+\.(?:py|md|json|jsonl|toml|yaml|yml)|/"
 
 
 def _checked_focus_area(focus: str, action: str) -> tuple[str, str]:
-    """Урок не вправе указывать на файл, которого нет.
-
-    Замерено на двух прогонах 2026-08-15: рефлексия записала десять уроков,
-    назвавших девять файлов, и НИ ОДИН из них не существует —
-    `core/reasoning.py`, `core/citation.py`, `core/user_contract.py`,
-    `core/file_management.py`… Настоящие модули называются иначе
-    (`reasoning_action_check.py`, `answer_contradiction.py`). Следующий прогон
-    достал эти уроки из памяти и пошёл читать выдуманные файлы, а не найдя их,
-    вывел новый «дефект» — уже об отсутствии выдуманного файла, с уверенностью
-    0.9. Круг замкнулся на вымысле.
-
-    Само наблюдение при этом верное: `reasoning_action_mismatch` действительно
-    сработал десять раз. Поэтому урок остаётся, а выдуманный адрес снимается —
-    и `repair` понижается до `monitor`: починка без цели не починка, и хранить
-    её как задачу значит звать следующий прогон в ту же пустоту.
-
-    Существование спрашивается у диска (`core/workspace_reference.py`), а не у
-    списка «правильных» имён: список устареет с первым переименованием.
-
-    Зачем и чем мерялось: docs/CODE_NOTES.md, «Lessons about files that do not
-    exist».
-    """
+    """Урок не вправе указывать на файл, которого нет."""
     focus = focus.strip()
     if not focus or not _PATH_SHAPED_RE.search(focus):
         return focus, action
@@ -187,19 +149,7 @@ def _checked_focus_area(focus: str, action: str) -> tuple[str, str]:
 
 
 class ReflectionEngine:
-    """Reads recent agent logs, extracts failure patterns, formulates lessons.
-
-    Typical usage after an AutonomousRuntime pass::
-
-        engine = ReflectionEngine(
-            workspace=Path("."),
-            persistent_memory=agent.persistent_memory,
-            llm=agent.llm,
-            logger=agent.log,
-        )
-        report = engine.reflect()
-        print(report.user_summary())
-    """
+    """Reads recent agent logs, extracts failure patterns, formulates lessons."""
 
     def __init__(
         self,

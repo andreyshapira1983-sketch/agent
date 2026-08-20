@@ -1,30 +1,19 @@
 """Operational Design Domain detector (§7 Autonomy Governance — ODD / B-05).
 
-Answers one question before the agent plans or acts:
-
-    "Is this task inside my operational domain?"
-
-The agent's operational domain is a software/research assistant that reads,
-searches, reasons, and proposes changes inside this workspace through its tool
-catalog, under the approval gate. Some requests fall *outside* that domain no
-matter how they are phrased — they require a body, real money, a professional
-licence, authority over other people, or are outright harmful. For those the
-honest answer is NOT to improvise an action but to:
-
-    * REFUSE   — the request is harmful / illegal; never act, even for a human.
-    * ESCALATE — the request needs a human with authority/capability the agent
-                 does not have (physical world, real funds, regulated advice,
-                 authority over people). The agent stops and hands off.
+* REFUSE — the request is harmful / illegal; never act, even for a human. *
+ESCALATE — the request needs a human with authority/capability the agent
+does not have (physical world, real funds, regulated advice, authority over
+people). The agent stops and hands off.
 
 Design principles (mirrors core/clarification_policy.py)
---------------------------------------------------------
-* No LLM calls, no I/O. Pure regex + heuristics, deterministic, O(n).
-* Conservative / high precision: default to ``in_domain`` (proceed). Only a
-  strong, unambiguous out-of-domain signal flips the verdict, because a false
-  positive here would refuse legitimate coding work.
-* A strong coding/simulation/test context bypass prevents misfires on normal
-  requests like "напиши функцию, которая переводит деньги между счетами в
-  тестовой БД" (that is code, not a real-world money transfer).
+-------------------------------------------------------- * No LLM calls, no
+I/O. Pure regex + heuristics, deterministic, O(n). * Conservative / high
+precision: default to ``in_domain`` (proceed). Only a strong, unambiguous
+out-of-domain signal flips the verdict, because a false positive here would
+refuse legitimate coding work. * A strong coding/simulation/test context
+bypass prevents misfires on normal requests like "напиши функцию, которая
+переводит деньги между счетами в тестовой БД" (that is code, not a real-
+world money transfer).
 """
 from __future__ import annotations
 

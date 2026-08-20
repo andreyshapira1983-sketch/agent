@@ -77,9 +77,7 @@ WATCH: dict[str, int] = {
     "core/memory_policy.py:MemoryWritePolicy.decide": 167,
     "core/self_task_producer.py:produce_coding_task": 177,  # +2 (2026-08-15): второй источник улик — verified_diagnosis. У самонайденных дефектов агента нет красного теста, и ремонтник им честно отказывает (no_failing_tests); их лента — Stage A: сначала падающий тест, благословлённый человеком (docs/CODE_NOTES.md «A diagnosis earns a test, not a patch»). Рост — сам контракт: параметр и его проброс. +7 (2026-08-17): квитанции впрыска уроков — доставка после ухода промпта и действие при рождении заявки (lesson_provenance, «строй квитанцию впрыска»). +1 (2026-08-17): рука критика-измерителя — _record_critic_measurement после вердикта («строй писаря measured»).
     "core/role_router.py:RoleRouter.route": 163,
-    "core/low_evidence_policy.py:evaluate_low_evidence_policy": 161,
     "core/unsupported_claims.py:_enforce_without_contradictions": 170,  # замер 164 + запас (2026-08-13, R4): терминальная ветка сфабрикованных цитат живёт на рубеже принятия ответа — постановление оператора
-    "core/planner.py:LLMPlanner.plan": 159,
     # 2026-08-05, MIR-077: measured 149 -> 152. It sat one line under the 150
     # report threshold and crossed it when its two broad handlers were made to
     # say where the failure goes. Registered rather than shaved: the length was

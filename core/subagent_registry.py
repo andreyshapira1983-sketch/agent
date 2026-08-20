@@ -125,13 +125,7 @@ def _as_float(value: Any, default: float = 0.0) -> float:
 
 @dataclass
 class RoleRecord:
-    """Per-role performance counters plus derived, advisory scores.
-
-    ``cost_units`` is only populated when a real, attributed per-role cost is
-    available. This module never invents or divides a shared LLM bill across
-    roles; when the cost is unknown, ``cost_units`` stays ``0.0`` and
-    ``cost_source`` stays ``"unknown"`` (TD-028 clarification 3).
-    """
+    """Per-role performance counters plus derived, advisory scores."""
 
     role_id: str
     status: str = "active"
@@ -298,14 +292,7 @@ def _contract_run_key(contract_id: str, schema_version: int) -> str:
 
 
 def _trust_score(rec: RoleRecord) -> float:
-    """Fraction of *judged* events that went well (0..1).
-
-    Positives are successes, Critic vetoes (a veto is the Critic doing its job)
-    and human-``confirmed_value`` reviews. Negatives are failures, Builder
-    outputs that were vetoed, and human ``value_rejected`` reviews. Neutral
-    outcomes (e.g. manager ``no_target``) are ignored so they neither reward nor
-    punish. Returns 0.0 when there is nothing judged yet.
-    """
+    """Fraction of *judged* events that went well (0..1)."""
     positives = rec.successes + rec.vetoes + rec.confirmed_value
     negatives = rec.failures + rec.outputs_vetoed + rec.value_rejected
     denom = positives + negatives
@@ -352,21 +339,7 @@ def _usefulness_score(rec: RoleRecord) -> float:
 
 
 def _recommendation(rec: RoleRecord) -> str:
-    """Advisory only — NEVER changes ``status`` (TD-028 clarification 7).
-
-    Below a minimum number of judged events there is not enough evidence, so we
-    keep. Otherwise map trust to keep/watch/pause/retire. Because Critic vetoes
-    count as positives in trust, a diligent Critic trends to ``keep``; a Builder
-    with repeated failures or vetoed outputs trends toward watch/pause/retire.
-
-    Human value reviews (``confirmed_value`` / ``value_rejected``, TD-033/034)
-    count as judged evidence too, so that many human ``rejected_*`` verdicts can
-    move the recommendation even when the role has little producer-stage volume.
-    They already feed ``trust_score``; including them here lets the gate actually
-    open on human signal. Technical-only outcomes (``proposals_approved`` /
-    ``committed_local``) are deliberately NOT counted as judged evidence — they
-    prove a change was applied, not that it was judged good or bad.
-    """
+    """Advisory only — NEVER changes ``status`` (TD-028 clarification 7)."""
     judged = (
         rec.successes
         + rec.vetoes
@@ -514,12 +487,7 @@ class SubagentRegistry:
         audit_report: ContractAuditReport | None = None,
         save: bool = True,
     ) -> bool:
-        """Record one canonical runtime outcome without touching role scores.
-
-        ``outcome`` is one of ``executed``, ``error``, or ``refused``. Contract
-        identity is the pair ``(contract_id, schema_version)``; a reused identity
-        with a different role/source is rejected instead of merging histories.
-        """
+        """Record one canonical runtime outcome without touching role scores."""
         if outcome not in {"executed", "error", "refused"}:
             return False
         if audit_report is not None and (
@@ -623,14 +591,7 @@ class SubagentRegistry:
     def record_lane_outcome(
         self, role_id: str, outcome: str, *, save: bool = True
     ) -> bool:
-        """Link a downstream self-apply lane outcome to a role (TD-023/TD-024).
-
-        Low-level primitive. TD-031 invokes it via :meth:`apply_lane_outcome`
-        (which adds correlation + persistent dedup) from guarded, best-effort
-        hooks. ``outcome`` is one of ``approved`` / ``committed_local`` /
-        ``rolled_back``. Only updates counters/scores/recommendation; it never
-        mutates role ``status`` (advisory-only).
-        """
+        """Link a downstream self-apply lane outcome to a role (TD-023/TD-024)."""
         rec = self._role(role_id)
         if outcome == "approved":
             rec.proposals_approved += 1
@@ -676,21 +637,11 @@ class SubagentRegistry:
     ) -> bool:
         """Project the TD-032 value-review ledger onto role scoring (TD-033).
 
-        ``effective`` is ``{item_id: verdict}`` — the *latest valid* verdict per
-        item, as produced by
-        :meth:`core.value_review.ValueReviewLog.effective_by_item_id`.
-
-        This is a **projection**, not an accumulation: it resets every role's
-        ``confirmed_value`` / ``value_rejected`` to zero and rebuilds them from
-        ``effective`` in full. That makes it naturally idempotent and immune to
-        double-counting — a changed verdict (even one that moves attribution to a
-        different role) simply re-projects. These two counters are owned solely
-        by this method; no other code path increments them.
-
         Verdicts map to roles via :data:`VERDICT_ROLE`: ``accepted`` credits
         ``confirmed_value``; every ``rejected_*`` adds to that role's
-        ``value_rejected``. Unknown verdicts are ignored. Only counters/scores/
-        recommendation change — role ``status`` is never mutated.
+        ``value_rejected``. Unknown verdicts are ignored. Only
+        counters/scores/ recommendation change — role ``status`` is never
+        mutated.
         """
         for rec in self.roles.values():
             rec.confirmed_value = 0

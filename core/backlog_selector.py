@@ -306,10 +306,6 @@ def load_backlog(
 ) -> list[BacklogCandidate]:
     """Read the Phase 1 sources from ``workspace`` (read-only) and build the
     ranked backlog. Missing files degrade to empty; never raises.
-
-    ``value_reviews`` is an optional iterable of value-review records (e.g.
-    ``ValueReviewLog.list()``); combined with ``item_target_map`` it yields the
-    anti-repeat penalties. With neither, no penalties are applied.
     """
     root = Path(workspace)
     tech_debt_text = _read_text(root / "TECH_DEBT.md")

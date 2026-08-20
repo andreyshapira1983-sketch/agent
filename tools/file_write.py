@@ -1,33 +1,20 @@
 """File Write tool — sandboxed, secret-aware, backup-on-overwrite.
 
-Risk model (§5 Action Risk & Reversibility):
-  - Creating a NEW file inside the workspace  -> reversible
-      The caller can simply delete it; no prior content was lost.
-  - OVERWRITING an existing file              -> irreversible
-      Even though we keep a timestamped `.bak.<ts>` copy, the operation
-      crosses a trust boundary and must require human approval before
-      the loop dispatches it. The backup is a recovery aid, not a
-      reclassifier.
-  - Path escapes the workspace                -> static risk falls back
-      to `irreversible` (conservative) and `run()` raises PermissionError
-      before touching the filesystem.
+Risk model (§5 Action Risk & Reversibility): - Creating a NEW file inside
+the workspace -> reversible The caller can simply delete it; no prior
+content was lost. - OVERWRITING an existing file -> irreversible Even though
+we keep a timestamped `.bak.<ts>` copy, the operation crosses a trust
+boundary and must require human approval before the loop dispatches it. The
+backup is a recovery aid, not a reclassifier. - Path escapes the workspace
+-> static risk falls back to `irreversible` (conservative) and `run()`
+raises PermissionError before touching the filesystem.
 
-Hard rules enforced inside `run()` (defence in depth — even if the
-policy gate is misconfigured, these still hold):
-  - path must be a non-empty string
-  - content must be a string
-  - encoded content must be <= MAX_BYTES
-  - content must NOT contain any high-confidence credential pattern
-    (delegated to `core.secret_scanner.contains_secret`)
-  - resolved path must stay within `workspace_root`
-
-Output shape (consumed by `validate_output` and by the synthesizer):
-    {
-        "path":          str,         # workspace-relative
-        "mode":          "create" | "overwrite",
-        "bytes_written": int,
-        "backup_path":   str | None,  # workspace-relative, set when mode="overwrite"
-    }
+Hard rules enforced inside `run()` (defence in depth — even if the policy
+gate is misconfigured, these still hold): - path must be a non-empty string
+- content must be a string - encoded content must be <= MAX_BYTES - content
+must NOT contain any high-confidence credential pattern (delegated to
+`core.secret_scanner.contains_secret`) - resolved path must stay within
+`workspace_root`
 """
 from __future__ import annotations
 
