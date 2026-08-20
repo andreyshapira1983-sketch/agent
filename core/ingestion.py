@@ -149,7 +149,7 @@ def ingest_web_topic(
             search_output = web_search.run(query=query, max_results=search_limit)
             ok, issues = web_search.validate_output(search_output)
             if not ok:
-                raise ValueError("; ".join(issues) or "web_search validation failed")
+                raise ValueError("; ".join(issues) or "web_search validation failed")  # noqa: TRY301 — a validation failure enters the same error channel as an exception
             if issues:
                 report.errors.extend(f"{entry.id} search warning: {issue}" for issue in issues)
             search_ev = evidence_from_tool_result(
@@ -177,7 +177,7 @@ def ingest_web_topic(
                 fetched = web_fetch.run(url=url)
                 ok, issues = web_fetch.validate_output(fetched)
                 if not ok:
-                    raise ValueError("; ".join(issues) or "web_fetch validation failed")
+                    raise ValueError("; ".join(issues) or "web_fetch validation failed")  # noqa: TRY301 — a validation failure enters the same error channel as an exception
                 if issues:
                     report.errors.extend(f"{url} fetch warning: {issue}" for issue in issues)
                 fetch_ev = evidence_from_tool_result(

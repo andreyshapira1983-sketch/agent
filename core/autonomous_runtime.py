@@ -606,7 +606,7 @@ class AutonomousRuntime:
                 self._log("autonomous_task_result", report.to_dict())
                 if report.status == "failed":
                     circuit.record_failure(report.summary)
-                elif report.status == "done" or report.status == "clarify":
+                elif report.status in {"done", "clarify"}:
                     circuit.record_success()
 
         circuit_decision = circuit.check()

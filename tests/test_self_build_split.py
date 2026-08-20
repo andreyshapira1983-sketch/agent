@@ -325,7 +325,8 @@ def test_sync_anatomy_index_appends_row_for_new_module():
             {"path": "core/sample_big_helpers.py", "content": "def a():\n    return 1\n"},
         ],
     }
-    reader = lambda p: _ANATOMY_DOC if p == "knowledge/generated/AGENT_ANATOMY.md" else None
+    def reader(p):
+        return _ANATOMY_DOC if p == "knowledge/generated/AGENT_ANATOMY.md" else None
     _sync_anatomy_index(build, "core/sample_big.py", reader)
     doc = next(
         f["content"] for f in build["files"] if f["path"] == "knowledge/generated/AGENT_ANATOMY.md"
@@ -347,7 +348,8 @@ def test_sync_anatomy_index_noop_when_already_documented():
             {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
         ],
     }
-    reader = lambda p: doc if p == "knowledge/generated/AGENT_ANATOMY.md" else None
+    def reader(p):
+        return doc if p == "knowledge/generated/AGENT_ANATOMY.md" else None
     _sync_anatomy_index(build, "core/sample_big.py", reader)
     # no anatomy doc added to the proposal (already in sync)
     assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])

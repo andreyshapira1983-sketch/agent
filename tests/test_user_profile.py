@@ -216,7 +216,7 @@ class TestVerbosityDetection:
         "выведи логи подробнее",
         "список задач подробнее",
     ])
-    def test_contextual_подробнее_does_not_lock_verbosity(self, text: str) -> None:
+    def test_contextual_подробнее_does_not_lock_verbosity(self, text: str) -> None:  # noqa: PLC2401 — the Russian directive word is the subject of this test
         """'подробнее' modifying a specific object should NOT change the
         global verbosity preference."""
         p = update_profile(_fresh(), text)
@@ -229,7 +229,7 @@ class TestVerbosityDetection:
         "пиши подробнее",
         "объясняй подробнее",
     ])
-    def test_directive_подробнее_locks_verbosity(self, text: str) -> None:
+    def test_directive_подробнее_locks_verbosity(self, text: str) -> None:  # noqa: PLC2401 — the Russian directive word is the subject of this test
         """Communication-verb + 'подробн*' is an explicit verbosity directive."""
         p = update_profile(_fresh(), text)
         assert p.verbosity == "detailed"

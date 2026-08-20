@@ -130,7 +130,7 @@ def run_synthesizer_ladder(
             # Treating it as a finished answer is how a non-answer earns
             # credit, so it enters the same ladder an exception does.
             if not answer.strip():
-                raise _BlankSynthesis("synthesizer returned no visible text")
+                raise _BlankSynthesis("synthesizer returned no visible text")  # noqa: TRY301 — a blank answer enters the same recovery ladder as an exception
         except fatal_types:
             raise
         except Exception as exc:  # noqa: BLE001 — recovery boundary

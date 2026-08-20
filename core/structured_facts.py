@@ -172,7 +172,7 @@ def extract_facts(excerpt: str | Any) -> StructuredFacts:
             booleans.add("true" if val else "false")
             continue
         if isinstance(val, (int, float)):
-            n = ("%g" % val) if isinstance(val, float) else str(val)
+            n = ("{:g}".format(val)) if isinstance(val, float) else str(val)
             if len(n.lstrip("-")) >= _MIN_NUMERIC_LEN:
                 numbers.add(n)
             if isinstance(val, int):

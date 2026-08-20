@@ -143,6 +143,7 @@ def main(argv: list[str]) -> int:
     proc = subprocess.run(
         [sys.executable, *command, "--workspace", str(workspace)],
         capture_output=True, text=True, encoding="utf-8", timeout=600, cwd=str(ROOT),
+        check=False,
     )
     after = set(workspace.glob(obs["carrier_glob"]))
     fresh = sorted(after - before)

@@ -471,11 +471,10 @@ def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
     """
     out: list[tuple[str, int, int]] = []
     for label, content in blocks:
-        m = None
-        for m in _TRIM_NOTICE_RE.finditer(content):
-            pass
-        if m is not None:
-            out.append((label, int(m.group(1)), int(m.group(2))))
+        matches = list(_TRIM_NOTICE_RE.finditer(content))
+        if matches:
+            last = matches[-1]
+            out.append((label, int(last.group(1)), int(last.group(2))))
             continue
         drop_match = None
         for match in _DROP_NOTICE_RE.finditer(content):

@@ -397,8 +397,7 @@ def _iter_python_files_under(root: Path):
                 continue
             if child.suffix == ".py" and _safe_python_file(child):
                 files.append(child)
-        for path in sorted(files):
-            yield path
+        yield from sorted(files)
         stack.extend(sorted(dirs, reverse=True))
 
 

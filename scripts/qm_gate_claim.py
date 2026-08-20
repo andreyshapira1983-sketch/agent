@@ -82,6 +82,7 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
     proc = subprocess.run(
         [sys.executable, str(validator), str(certificate)],
         capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
+        check=False,
     )
     # PROVENANCE. An exit code proves nothing about where it came from: a crash, a
     # syntax error, a missing file and a deliberate refusal all arrive as integers.
