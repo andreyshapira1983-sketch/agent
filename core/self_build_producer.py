@@ -4,6 +4,21 @@ approval inbox, with full file content, for a human to bless.
 Never applies it: no patch reaches the tree, no lane runs, nothing is
 committed, pushed or merged, and the daemon, scheduler, agent_tick and the
 budget/model/catalog config are never touched.
+
+Roles: Manager -> Researcher -> Builder -> Critic -> Reporter.
+
+Four hard gates run before any LLM work, first trip wins, and each names the
+status it returns:
+
+  budget kill-switch active     -> "budget_kill_switch"
+  hour budget near exhaustion   -> "budget_wait"
+  a self_apply approval pending -> "approval_wait"
+  dirty git working tree        -> "dirty_tree_wait"
+
+After them the Manager may find no candidate ("no_patch") and the Critic may
+veto ("critic_veto"); either way no inbox item is created, and success is
+"proposed". Every dependency is injected, so no real provider is reachable
+from here.
 """
 from __future__ import annotations
 

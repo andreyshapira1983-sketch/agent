@@ -310,8 +310,8 @@ def apply_total_budget(
     Blocks whose label appears in *trim_first_labels* are **demoted**: they
     are spent before any other block is touched, largest demoted block
     first, down to the content floor. Only when no demoted block can shrink
-    further does a normal block get trimmed. This is what keeps recollection
-    from outranking the file the agent just read: memory is smaller than a
+    further does a normal block get trimmed. This is what keeps recollection from
+    outranking the file the agent just read: memory is smaller than a
     fresh source file, so "largest first" alone would always cut the fresh
     evidence and never memory.
     """

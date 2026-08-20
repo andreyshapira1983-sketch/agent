@@ -166,8 +166,8 @@ def same_file(cited: str, source_id: str) -> bool:
     """Do a citation body and an evidence label name the SAME file?
 
     Not resolved against the workspace root on purpose: the root is not
-    known here, and it is not needed. The sanitiser drops absolute paths
-    from tool arguments (`core/step_sanitizer.py`), so a label is always
+    known here, and it is not needed. The sanitiser drops absolute paths from
+    tool arguments (`core/step_sanitizer.py`), so a label is always
     relative; only the CITATION varies, and a suffix test settles that
     without new plumbing.
     """
