@@ -157,7 +157,7 @@ class WebFetchTool(Tool):
     def run(self, url: str) -> dict[str, Any]:
         self._network_policy.validate_url(url, role="web_fetch url")
 
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310 — validate_url above enforces the scheme allow-list and egress policy
             url,
             headers={
                 "User-Agent": USER_AGENT,

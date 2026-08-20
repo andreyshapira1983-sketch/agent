@@ -36,7 +36,7 @@ class VcsResult:
 
 
 def _default_runner(argv: list[str], *, cwd: Path) -> VcsResult:
-    completed = subprocess.run(
+    completed = subprocess.run(  # noqa: S603 — argv is git + literal subcommands; names pass _validate_branch (leading alphanumeric)
         argv,
         cwd=str(cwd),
         capture_output=True,

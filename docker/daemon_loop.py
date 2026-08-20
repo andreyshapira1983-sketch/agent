@@ -39,7 +39,7 @@ def _run_tick(workspace: Path, timeout_seconds: int) -> int:
     started = time.monotonic()
     print(f"[docker-daemon] tick start command={command!r}", flush=True)
     try:
-        completed = subprocess.run(
+        completed = subprocess.run(  # noqa: S603 — argv is sys.executable plus the workspace's own agent_tick.py
             command,
             cwd=workspace,
             check=False,

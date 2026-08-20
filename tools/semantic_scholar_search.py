@@ -98,8 +98,8 @@ class SemanticScholarSearchTool(Tool):
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                req = urllib.request.Request(url, headers=headers)  # noqa: S310 — URL is a constant https base with urlencoded params
+                with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:  # noqa: S310 — URL is a constant https base with urlencoded params
                     raw = _json.loads(resp.read().decode("utf-8"))
                 return [_paper_dict(p) for p in raw.get("data", [])]
             except Exception as exc:  # noqa: BLE001 — reason stated above
