@@ -3344,3 +3344,73 @@ answer's verifier-checked inline web citations, not from the model's
 «ИСТОЧНИК» line — the condenser invented "Page 12" on its first live run and
 that lesson is structural now. An answer with no web citations records
 nothing (hypothesis_declined:no_web_citations): no reading — no hypothesis.
+
+## The test the redactor ate
+
+Stage A's product is a frozen acceptance test, and a frozen test is source
+code: it has to survive storage byte for byte, or the yardstick a human
+blessed is not the yardstick Stage B builds against. The durable approval
+inbox runs every payload through the DLP/secret redactor, which is right for
+approval payloads in general and wrong for this one field: a perfectly good
+test legitimately contains example PII («alice@mail.ru» in a fixture), the
+redactor scrubs it, and the test that comes back out no longer compiles into
+the thing that was approved.
+
+So the item carries two copies. An exact base64 blob, which is
+redaction-inert because it holds no "@", no email shape and no token
+pattern, is the truth; the plain `test_content` field is a preview for human
+eyes and may be scrubbed. Everything downstream reads the blob through
+`decode_frozen_test()`, never the preview. The general shape is worth
+keeping in mind whenever a safety filter sits on a channel that also carries
+executable text: the filter is not wrong, it is simply not addressed to that
+payload, and the fix is a second representation rather than an exemption.
+
+## Half the prose, none of the meaning
+
+Operator ruling 2026-08-20, in his own words: «core/self_task_producer.py
+половина писанина бери… надо в каждом файле дохрена писанины». Measured
+before touching anything: that file was 870 lines, of which 165 were
+docstrings and pure comments — 19 %, not half, and level with the
+repository's own 19 % across 270 modules in core/, tools/, app/ and cli/.
+
+The first pass at that number was itself wrong in a way worth recording,
+because it is the same mistake this repository keeps banking. It counted
+`x = foo()  # why not bar()` as a line of prose, so every inline note
+inflated the total; the strict rule — a line is prose only if it carries NO
+code token — moves smart_memory.py from 692 prose lines to 685 and the
+repo-wide share from 21 % to 19 %. A metric that flatters the case it was
+built for is not a measurement.
+
+The trim followed the standing rule rather than the raw number: a contract
+of one to three lines stays in the file, the story moves here. 165 prose
+lines became 102 and the module fell to 791 lines, back under the 800-line
+soft limit. **The code count did not move: 602 lines before, 602 after.**
+Two things fell out of the cut and are worth naming because neither was the
+point of it. A comment
+still promised that Stage A eats «only the cleanest evidence source … broader
+sources can be added later», eleven hours after `architecture_audit` was
+added to exactly that set — a fresh echo of a fact corrected the same day.
+And the docstrings that shrank the most were the ones whose stories were
+already written here in full, duplicated in the file at the cost of a
+maintenance obligation nobody was honouring.
+
+That «602 before, 602 after» is the whole finding, and it is not about this
+file. The agent's `oversized_module` sensor counts `content.count("\n") + 1`
+and compares it to 800 — it cannot tell an organ from an explanation of an
+organ. Across the eleven modules it flags today, subtracting prose takes
+five of them below the limit (doc_routing 970 → 727, shell_exec 964 → 533,
+loop_step_execution 955 → 673, knowledge_pipeline 932 → 601, step_sanitizer
+837 → 678) and leaves six genuinely large — smart_memory is still 1028
+lines of code. So roughly half of the sensor's live verdicts are decided by
+prose. The agent's first unprompted engineering proposal was one of them.
+
+The operator's ruling on what to do about it is the reason nothing was
+changed: «не менять threshold и не удалять комментарии ради красивой
+цифры… пусть сначала установит, насколько total LOC действительно
+коррелирует с тем, что вы хотите считать переросшим модулем». Recorded as
+MIR-099 and left open. The tempting move — subtract prose and call the
+sensor fixed — would only swap one proxy for another; nothing measured here
+says 1028 lines of code needs splitting either. What the measurement
+licenses is narrower and worth more: a signal was believed for months
+without anyone asking what it counted, which is exactly what happened with
+the reasoning↔action detector two files over.

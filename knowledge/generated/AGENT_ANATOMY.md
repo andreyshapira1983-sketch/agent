@@ -248,7 +248,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_build_rules` | Hard rules learned from self-build rollbacks. |
 | `core/veto_cause` | Was a self-build veto a verdict on the target, or our own pipeline breaking? |
 | `core/builder_reply_diagnosis` | Say what was wrong with a builder reply, in words rather than in silence. |
-| `core/self_task_producer` | Stage A of the coding-skill ladder (roadmap Ступень 1): propose a grounded coding TASK plus its acceptance test for HUMAN approval. |
+| `core/self_task_producer` | Stage A: propose a grounded coding task plus its FAILING acceptance test, and drop exactly one ``self_build_task.approve`` item for a human. |
 | `core/self_task_builder` | Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a HUMAN-APPROVED, FROZEN acceptance test pass. |
 | `core/writer_completion` | The completion verdict a mechanical writer settles from its own outcome. |
 | `core/self_improvement_issues` | Durable lifecycle registry for self-improvement failures. |
