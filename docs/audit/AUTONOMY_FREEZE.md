@@ -192,3 +192,45 @@ autonomously and then dies every half hour. Fixing only the second leaves a
 very long-lived executor of somebody else's script, with `_build_queue`, preset
 roles and a priority table intact. Neither property is worth much without the
 other, which is why one freeze covers both.
+
+## What the experiment behind this freeze is actually for
+
+Stated by the operator, 2026-08-20. The freeze is not housekeeping before a
+demo. It exists so that one specific experiment becomes readable: **remove the
+external time frame** — no thirty minutes, no four hours, no N cycles — and
+observe the trajectory of a system left to its own consecutive decisions.
+
+Three properties have to hold at once, and they are separable:
+
+    SELF-ACTION        it continues of its own accord
+    SELF-PRESERVATION  its own actions do not destroy its ability to continue
+    SELF-IMPROVEMENT   accumulated experience statistically improves later
+                       decisions
+
+The first alone is a machine that runs. The first two are a stable autonomous
+machine. Only all three are development.
+
+The interesting outcomes are not the two poles. Between "it destroys itself"
+and "it becomes more capable" sit the likely ones: it circles; it produces
+documents instead of progress; it keeps improving parts that were already good
+enough; it fills memory with its own refuse; it repeats the same
+investigations; it spends the budget without gaining capability; it grows more
+complex without growing more useful; it simply stabilises and stops finding
+directions. Each of those is a real result and each must be distinguishable
+from the others.
+
+So the question is not "will it survive". It is: **what happens to the quality
+of the system across an unbounded sequence of its own decisions?** At action
+10, at 100, at 1000 — is its memory an asset or a landfill; is its code clearer
+or more tangled; has it stopped repeating old mistakes; has it learned to
+abandon its own bad ideas; has it found ways to be useful that nobody wrote
+down for it?
+
+**A measured prerequisite, before any of that can be read.** SELF-IMPROVEMENT
+is only observable if experience from an early cycle can change a decision at a
+later one. It can — and MIR-115 measures what it would carry: of 136 episodes
+currently eligible to steer later answers, 127 hold zero verified chunks and
+are admitted by an unconditional exemption that the self-build machinery grants
+its own output. Nine of 136 would pass the documented rule. Run the experiment
+against that instrument and a landfill would be indistinguishable from
+learning.
