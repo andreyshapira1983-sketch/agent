@@ -107,12 +107,12 @@ STALENESS_FACTOR = _hb.STALENESS_FACTOR
 #                            could neither record nor recall experience)
 #   episodic_replay=False    it may read that experience, but must never serve
 #                            a stored answer in place of running a real cycle
-#   durable_writes={"episode"}
-#                            a ONE-SINK allowlist: the unattended agent banks
-#                            episodes so its work leaves a trace, while
-#                            procedural promotion, consolidation, knowledge,
-#                            source registry, profile and assumptions all stay
-#                            denied by default-deny
+#   durable_writes={"episode", "hygiene"}
+#                            a TWO-SINK allowlist: episodes so the work leaves
+#                            a trace, hygiene so housekeeping is recorded,
+#                            while procedural promotion, consolidation,
+#                            knowledge, source registry, profile and
+#                            assumptions all stay denied by default-deny
 #   with_memory=False        unchanged — no cross-run session memory
 #
 # Episodes are written `usage_eligible=False` (quarantined), so the loop closes
