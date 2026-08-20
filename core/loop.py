@@ -159,8 +159,8 @@ class AgentLoop(
 
         Args: user_question: The user's natural-language input. file_hint:
         Optional workspace file path to pre-load. on_token: Optional ``(str)
-        -> None`` callback invoked for each synthesis token as it streams
-        from the LLM. Pass ``lambda t: print(t, end="", flush=True)`` for
+        -> None`` callback invoked for each synthesis token as it streams from
+        the LLM. Pass ``lambda t: print(t, end="", flush=True)`` for
         live CLI display. ``None`` (default) disables streaming.
         deep_escalation: Optional operator-supplied
         :class:`~core.deep_escalation.OperatorEscalation`. Only an explicit,
