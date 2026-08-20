@@ -31,7 +31,7 @@ _CONFIG = _REPO / "ruff.toml"
 #: где 405 было «замерено», ruff 0.16.1 сегодня считает 406. Тот же класс,
 #: что инцидент 2026-08-03 из шапки: приговор выносит версия. Красный держал
 #: ленту self-apply два прогона (ain_c166, ain_5fc5 — обе откатились).
-_BASELINE_FINDINGS = 166  # 779 → … → 419 → 405 → 406 → 405 → 358 → 265 → 192 → 166. Партия 1: 174 находки были не
+_BASELINE_FINDINGS = 159  # 779 → … → 405 → 358 → 265 → 192 → 166 → 159. Партия 1: 174 находки были не
 #: долгом, а шумом. 96 × S105 — слово `token` из лексера командной строки
 #: против эвристики про пароли (точность правила 0 из 96; настоящие секреты
 #: ловит gitleaks по всей истории), и 78 × S101 — обычные assert'ы во втором
@@ -75,6 +75,33 @@ _BASELINE_FINDINGS = 166  # 779 → … → 419 → 405 → 406 → 405 → 358 
 #: операторов или >=15 строк) 74, и самое широкое (agent_tick.py, 249
 #: строк) — верхний сторож тика: снимает блокировку, пишет трассу в
 #: журнал и аварийный пульс. Широта там и есть контракт.
+
+#: Партия 8 — семейства, разобранные и ОТКЛОНЁННЫЕ с доказательством.
+#: Это не остаток долга, а сознательно принятые исключения; следующий
+#: проход не должен начинать их «улучшать» заново.
+#:
+#: TRY300 rejected (17): every flagged `return` evaluates a literal, a bare
+#: name, or a collection containing no call — measured, all 17. Nothing there
+#: can raise, so moving it to an `else` block changes no behaviour, and the
+#: rule's purpose (keeping a raising return out of its own handler) finds
+#: nothing at these sites.
+#:
+#: TRY004 rejected (18): every site is `if not isinstance(...): raise
+#: ValueError` at a DATA boundary — a JSON payload, a tool argument. The
+#: exception type is part of the contract, not an accident: tests pin
+#: ValueError in each module (subagent_contract 7, model_router 7, diff_file
+#: 4, read_logs 4, budget_ledger 2, spawn_subagent 2) and core/budget_ledger
+#: catches it live at :56. TypeError would be an observable API change.
+#:
+#: UP042 rejected (6): replacing current str-valued Enum with StrEnum changes
+#: str(member) from the qualified enum name to the raw value (measured:
+#: 'Old.A' -> 'a'); 66 interpolation consumers exist, and migration safety
+#: has not been established.
+#:
+#: E402 (7) НЕ отклонён, а исправлен: импорты разделов в четырёх тестовых
+#: файлах перенесены в голову. Первая попытка сломала три файла — якорь
+#: вставки обрывался на докстринге и импорты уехали выше `from __future__`;
+#: откатано и переделано.
 
 #: Семейства, без которых наша дисциплина рассыпается: F — неопределённые
 #: имена, I — порядок импортов, S/BLE — безопасность и широкие `except`

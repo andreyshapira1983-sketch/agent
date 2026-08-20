@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from core.approval_inbox import ApprovalInbox
 
 
@@ -80,7 +82,6 @@ def test_approval_inbox_abort_and_executed_statuses(workspace):
 # Fix #4 — approval inbox TTL enforcement (expire_stale + default TTL)
 # ==========================================================================
 
-from datetime import datetime, timedelta, timezone
 
 
 def _past_iso(hours: int = 1) -> str:
