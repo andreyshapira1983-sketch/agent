@@ -262,13 +262,7 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
 # ── total budget across all artifacts ─────────────────────────────────────────
 
 def _trim_notice(new_len: int, old_len: int, budget: int) -> str:
-    """The notice appended to a block trimmed by the total budget.
-
-    One definition, because two places need the exact same string: the trim
-    itself, and the test deciding whether a block can still shrink. When that
-    test used a constant upper bound instead, blocks that could still give
-    chars back were skipped and the budget stayed violated.
-    """
+    """The notice appended to a block trimmed by the total budget."""
     return (
         f"\n...[TOTAL-BUDGET: trimmed to {new_len} of {old_len} chars "
         f"to fit {budget}-char total evidence budget]"
@@ -276,15 +270,7 @@ def _trim_notice(new_len: int, old_len: int, budget: int) -> str:
 
 
 def _drop_notice(old_len: int) -> str:
-    """The notice left where a block was dropped whole.
-
-    It used to be the empty string, and that silence was itself the defect:
-    asked «что ты помнишь», the agent had three records retrieved (822 chars)
-    and answered that it has no access to its memory. True of the prompt —
-    the block had been demoted, spent first and dropped — but indistinguishable
-    from having no memory at all. Kept far shorter than one record, so the
-    reason for dropping (do not pay for a useless stub) still holds.
-    """
+    """The notice left where a block was dropped whole."""
     return (
         f"[TOTAL-BUDGET: dropped whole — {old_len} chars did not fit; "
         f"content unavailable this turn, nothing here is quotable]"
@@ -303,14 +289,7 @@ def _block_floor(
     useful_floors: Mapping[str, int],
     fair_min: int,
 ) -> int:
-    """Smallest content size a block may be trimmed to on this pass.
-
-    A demoted block pays first, but not to nothing: the first pass floors it at
-    its own smallest indivisible item so the surplus cascades to the next block
-    instead of annihilating it. The relaxed pass restores the absolute floor, so
-    a budget that truly cannot hold one item still drops the block whole.
-    Why it matters: docs/CODE_NOTES.md, "Memory pays first, not last rites".
-    """
+    """Smallest content size a block may be trimmed to on this pass."""
     if label in demoted:
         useful = useful_floors.get(label)
         if relaxed or useful is None:
@@ -325,35 +304,16 @@ def apply_total_budget(
     trim_first_labels: AbstractSet[str] | None = None,
     min_useful: Mapping[str, int] | None = None,
 ) -> tuple[list[tuple[str, str]], bool]:
-    """Trim evidence blocks until their total fits in AGENT_EVIDENCE_TOTAL_CHARS.
+    """Trim evidence blocks until their total fits in
+    AGENT_EVIDENCE_TOTAL_CHARS.
 
-    Strategy: trim the **largest** block first (the one wasting the most
-    tokens), but never below its pass's floor — the surplus then CASCADES to
-    the next-largest block (MIR-073). The pre-cascade behaviour dumped the
-    entire overflow into one block, which starved the very file the plan was
-    built around while its siblings stayed pristine.
-
-    Blocks whose label appears in *trim_first_labels* are **demoted**: they are
-    spent before any other block is touched, largest demoted block first, down
-    to the content floor. Only when no demoted block can shrink further does a
-    normal block get trimmed. This is what keeps recollection from outranking
-    the file the agent just read: memory is smaller than a fresh source file, so
-    "largest first" alone would always cut the fresh evidence and never memory.
-
-    Parameters
-    ----------
-    blocks : list of (label, formatted_content)
-    trim_first_labels : labels to spend before anything else (order within the
-        group is still largest-first). Unknown labels are ignored.
-    min_useful : per-label size below which a block keeps nothing usable, so it
-        is dropped whole instead of being cut to a stub. Memory passes the size
-        of its first whole record: rebuilt from WHOLE records, a shorter block
-        yields no citable id yet still costs its ~120-char trim notice.
-
-    Returns
-    -------
-    (trimmed_blocks, was_trimmed)
-        was_trimmed is True when at least one block was shortened.
+    Blocks whose label appears in *trim_first_labels* are **demoted**: they
+    are spent before any other block is touched, largest demoted block
+    first, down to the content floor. Only when no demoted block can shrink
+    further does a normal block get trimmed. This is what keeps recollection
+    from outranking the file the agent just read: memory is smaller than a
+    fresh source file, so "largest first" alone would always cut the fresh
+    evidence and never memory.
     """
     budget = _total_chars()
     total  = sum(len(c) for _, c in blocks)
@@ -473,14 +433,11 @@ def budget_file_content(
 ) -> str:
     """Apply the per-artifact budget to a single file artifact.
 
-    If the content fits, return unchanged. Otherwise call extract_relevant()
-    with the per-file limit and the current question.
-
-    ``self_documentation`` raises the ceiling to AGENT_EVIDENCE_SELF_DOC_CHARS
-    for the files the planner may read without a hint — see the constant for
-    the measurement that forced it. The caller decides, not this module: the
-    allowlist lives with the planner and this file imports nothing from
-    ``core`` (INV-1, core imports downward only).
+    ``self_documentation`` raises the ceiling to
+    AGENT_EVIDENCE_SELF_DOC_CHARS for the files the planner may read without
+    a hint — see the constant for the measurement that forced it. The caller
+    decides, not this module: the allowlist lives with the planner and this
+    file imports nothing from ``core`` (INV-1, core imports downward only).
     """
     limit = _self_doc_chars() if self_documentation else _file_chars()
     if len(content) <= limit:
@@ -510,13 +467,8 @@ _DROP_NOTICE_RE = re.compile(
 
 
 def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
-    """(label, kept_chars, original_chars) for every total-budget-trimmed block.
-
-    The pure reader the orchestrator uses to SEE the cut (MIR-073): the trim
-    notices already carry both numbers, this just parses them back out of the
-    blocks `apply_total_budget` returned — one regex, owned by this module.
-    The LAST match wins, same rule as `rebuild_trimmed_memory` below: content
-    can QUOTE an older notice, and the budget writes its cut at the end.
+    """(label, kept_chars, original_chars) for every total-budget-trimmed
+    block.
     """
     out: list[tuple[str, int, int]] = []
     for label, content in blocks:

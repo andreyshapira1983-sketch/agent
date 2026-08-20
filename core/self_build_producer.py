@@ -4,13 +4,6 @@ approval inbox, with full file content, for a human to bless.
 Never applies it: no patch reaches the tree, no lane runs, nothing is
 committed, pushed or merged, and the daemon, scheduler, agent_tick and the
 budget/model/catalog config are never touched.
-
-Roles: Manager -> Researcher -> Builder -> Critic -> Reporter. Four hard
-gates run before any LLM work, first trip wins — budget kill-switch, hour
-budget, a self_apply approval already pending, dirty working tree. After
-them the Manager may find no candidate and the Critic may veto; either way
-no inbox item is created. Every dependency is injected, so no real provider
-is reachable from here.
 """
 from __future__ import annotations
 
@@ -229,12 +222,7 @@ def _top_level_defined_names(tree: ast.Module) -> set[str]:
 
 
 def _top_level_bound_names(tree: ast.Module) -> set[str]:
-    """Names *bound* at module top level: definitions plus imported aliases.
-
-    A split module keeps a name importable either by still defining it or by
-    re-importing (re-exporting) it — ``from .<new_module> import <name>``. Both
-    count as "exposed", so imports are included here.
-    """
+    """Names *bound* at module top level: definitions plus imported aliases."""
     names = set(_top_level_defined_names(tree))
     for node in tree.body:
         if isinstance(node, ast.Import):
@@ -253,12 +241,6 @@ def _top_level_bound_names(tree: ast.Module) -> set[str]:
 def _split_dropped_api(current_content: str, target_content: str) -> list[str]:
     """Return top-level names present in the original target but no longer
     defined *or* re-exported in the proposed (shrunk) target.
-
-    When a module is split, every symbol that used to live at its top level must
-    remain importable from it — otherwise external importers and tests that do
-    ``from core.<target> import <name>`` break with ImportError (exactly the
-    failure mode that repeatedly rolled back the verifier split). The Builder is
-    expected to leave a re-export shim for anything it moves out.
     """
     try:
         old = ast.parse(current_content)
@@ -373,19 +355,7 @@ def _default_file_reader(workspace: str | Path) -> Callable[[str], str | None]:
 def _llm_json_with_raw(
     llm: Any, *, system: str, user: str, max_tokens: int = 2000
 ) -> tuple[dict | None, str]:
-    """Like :func:`_llm_json`, but also returns the RAW reply.
-
-    MIR-071: a builder reply that fails (or fragment-parses) used to be
-    discarded with no trace — 84 cost units for a 15948-token reply left
-    nothing to diagnose. The raw travels back so the head can preserve it.
-
-    Continuation is declined here: the answer must parse as one JSON object, and
-    stitching cannot resume a JSON string. Measured 2026-08-04 — three builder
-    replies came back with the escaping style flipping at the leg boundary
-    (escaped `\\n` before it, real newlines after), unparseable, each after
-    paying for extra legs. A truncated first leg says "too big for one pass",
-    which is a usable answer; a corrupted splice says nothing at all.
-    """
+    """Like :func:`_llm_json`, but also returns the RAW reply."""
     safe_user, _redact_meta = prepare_text_for_llm_boundary(user)
     try:
         answer = llm.complete(
@@ -414,14 +384,8 @@ def _llm_json(
 
 
 def _preserve_rejected_raw(workspace: Path, roles: list[RoleOutput]) -> str | None:
-    """Persist a discarded builder reply to disk; return its repo-relative path.
-
-    MIR-071 (operator-approved retention-first): a vetoed/unparseable builder
-    reply used to vanish — 84 cost units left one `critic_veto` line and no
-    text anywhere (the run journal keeps only token counters). The raw is
-    redacted, written under ``logs/self_build_rejects/``, and STRIPPED from
-    the role data so reports and journals never balloon. Best-effort: a
-    preservation failure must never break the producer.
+    """Persist a discarded builder reply to disk; return its repo-relative
+    path.
     """
     raw = ""
     for role in roles:
@@ -496,16 +460,8 @@ def _manager_from_grounded(
     *,
     workspace: str | Path,
 ) -> RoleOutput:
-    """Manager variant (TD-036) that takes its target + diagnosis from a grounded
-    backlog candidate instead of inventing one via the LLM.
-
-    ``provider`` is a zero-arg callable returning a candidate (with
-    ``target_path``/``problem_quote``/``evidence_ref``) or ``None``. Before
-    validation, TD-038 gives known abstract targets one deterministic mapping
-    attempt. A ``None`` candidate, an unmapped/off-allowlist target, or a
-    critical target all yield ``no_target`` — the producer then refuses rather
-    than fabricating a diagnosis. Best-effort: a raising provider is treated as
-    ``None``.
+    """Manager variant (TD-036) that takes its target + diagnosis from a
+    grounded backlog candidate instead of inventing one via the LLM.
     """
     try:
         candidate = provider()
@@ -581,17 +537,7 @@ def _manager_from_grounded(
 
 
 def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> bool:
-    """True if the producer could actually act on this ranked candidate.
-
-    Either its raw target is directly low-risk and non-critical, OR the
-    deterministic mapper resolves its abstract target (e.g. ``TD-011 / TD-012``)
-    to an allowed, non-critical concrete file. Checking BOTH is essential: a
-    tech-debt item's raw target is an abstract id that fails the low-risk file
-    check, yet it is genuinely actionable once mapped — so a raw-only check would
-    wrongly skip a high-ranked tech-debt item in favour of a lower-ranked audit
-    item, breaking tech-debt-first ranking. Best-effort: a raising mapper is
-    treated as not actionable.
-    """
+    """True if the producer could actually act on this ranked candidate."""
     target = str(getattr(candidate, "target_path", "") or "")
     # Scale filter at SELECTION time: an oversized module-split cannot be done
     # safely in one Builder shot, so treat it as non-actionable here. This lets
@@ -619,14 +565,7 @@ def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> boo
 
 
 def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[str]:
-    """Best-effort set of concrete paths a backlog candidate resolves to.
-
-    Includes the candidate's own raw target and — when the deterministic mapper
-    resolves an abstract target (e.g. ``TD-011``) to a concrete file — the mapped
-    path. Used so the recently-vetoed cooldown matches regardless of whether the
-    backlog lists a raw path or an abstract id. A raising mapper degrades to the
-    raw target only.
-    """
+    """Best-effort set of concrete paths a backlog candidate resolves to."""
     out: set[str] = set()
     raw = str(getattr(candidate, "target_path", "") or "").replace("\\", "/").strip()
     if raw:
@@ -647,17 +586,8 @@ def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[st
 
 
 def _oversized_split_candidate(candidate: Any, workspace: str | Path) -> bool:
-    """True if this candidate is a module-split whose concrete target is too large
-    for a safe single-shot Builder split.
-
-    Used to mark such a candidate NON-actionable at selection time so the default
-    grounded selector advances to the next candidate WITHIN the same run, instead
-    of picking a doomed 1000+ line split that the produce-phase scale gate would
-    only refuse — which would end the run with no progress. The produce-phase gate
-    (see the scale filter in :func:`produce_self_apply_proposal`) remains as a
-    defense-in-depth backstop for callers that inject a specific candidate
-    directly. Best-effort: any mapper/read failure returns ``False`` (treated as
-    not oversized), and it never raises.
+    """True if this candidate is a module-split whose concrete target is too
+    large for a safe single-shot Builder split.
     """
     try:
         mapping = map_backlog_candidate(
@@ -690,23 +620,16 @@ def _default_grounded_selector(
     """Build the DEFAULT grounded backlog selector for a workspace (TD-036
     follow-up).
 
-    This is what makes the grounded path the default for the real callers
-    (``:self-build-produce`` and the daemon) without them having to assemble a
-    selector themselves. It reads ``TECH_DEBT.md``, ``knowledge/generated/AGENT_ANATOMY.md``,
-    the TD-038 slice 2 proposal doc, and the value-review ledger strictly
-    read-only and returns a zero-arg
-    callable yielding the top-ranked backlog candidate, or ``None`` when the
-    closed backlog set is empty.
-
     ``exclude_targets`` is a cooldown set of concrete paths that were just
-    critic-vetoed: candidates resolving to one of them are skipped so the run
-    advances to the NEXT grounded candidate instead of re-picking the same wall
-    (which would only be vetoed again). An empty set (the default) is a no-op.
+    critic-vetoed: candidates resolving to one of them are skipped so the
+    run advances to the NEXT grounded candidate instead of re-picking the
+    same wall (which would only be vetoed again). An empty set (the default)
+    is a no-op.
 
-    It never calls an LLM, never touches the network/git, and is fully
-    best-effort: any import/load failure yields a selector that returns
-    ``None``, so the Manager refuses (``no_patch``) instead of silently falling
-    back to the LLM manager.
+    It never calls an LLM, never touches the network/git, and is fully best-
+    effort: any import/load failure yields a selector that returns ``None``,
+    so the Manager refuses (``no_patch``) instead of silently falling back
+    to the LLM manager.
     """
     def _select() -> Any:
         try:
@@ -775,19 +698,8 @@ def _normalize_builder_files(
 ) -> tuple[list[dict[str, str]], str]:
     """Normalise a builder LLM reply into a canonical ``files`` list.
 
-    Returns ``(files, primary_content)`` where ``primary_content`` is the content
-    of the ``target`` file (used for the value gate, dedup digest, and legacy
-    single-file back-compat). Two reply shapes are accepted:
-
-    * legacy single-file ``{"content": "<full file>"}`` → one-element list
-      ``[{"path": target, "content": content}]`` (byte-identical to the previous
-      behaviour), and
-    * multi-file split ``{"files": [{"path","content"}, ...]}`` → the listed
-      files verbatim (paths normalised to forward slashes, deduped, target's own
-      content surfaced as ``primary_content``).
-
-    Malformed entries are dropped defensively; an empty/invalid result yields
-    ``([], "")`` so the Critic vetoes rather than the producer raising.
+    Accepts the legacy single-file ``{"content": ...}`` shape (becomes a
+    one-element list) and the multi-file ``{"files": [{path, content}, ...]}``.
     """
     raw_files = parsed.get("files")
     files: list[dict[str, str]] = []
@@ -1162,18 +1074,14 @@ def _new_core_module_stems(files: list[dict[str, Any]]) -> list[str]:
 def _sync_anatomy_index(
     build: dict[str, Any], target: str, reader: Callable[[str], str | None]
 ) -> None:
-    """Keep ``knowledge/generated/AGENT_ANATOMY.md`` in sync when the proposal adds NEW core modules.
+    """Keep ``knowledge/generated/AGENT_ANATOMY.md`` in sync when the proposal
+    adds NEW core modules.
 
-    The repo enforces (``scripts/agent_anatomy_check.py``) that every core/*.py
-    module is referenced as a ``core/<name>`` token in the anatomy index. A module
-    split introduces new core modules, so this deterministically appends one index
-    row per new module whose token is missing — teaching the self-build head to
-    maintain the invariant instead of hoping the LLM remembers it.
-
-    The base is ALWAYS the on-disk doc (never an LLM-supplied version), so no
-    existing rows can be dropped. Any LLM-provided anatomy doc is replaced by this
-    deterministic result. Best-effort: if the doc can't be read it is left alone
-    and the Critic/lane still catches the drift and rolls back.
+    The base is ALWAYS the on-disk doc (never an LLM-supplied version), so
+    no existing rows can be dropped. Any LLM-provided anatomy doc is
+    replaced by this deterministic result. Best-effort: if the doc can't be
+    read it is left alone and the Critic/lane still catches the drift and
+    rolls back.
     """
     files = build.get("files") or []
     stems = _new_core_module_stems(files)
@@ -1295,14 +1203,8 @@ def publish_incremental_split_step(
     reason: str,
     reader: Callable[[str], str | None] | None = None,
 ) -> tuple[Any, list[str]]:
-    """Publish ONE deterministic incremental-split step as a self-apply approval.
-
-    Shared source of truth for ``:self-split`` and ``:self-build-produce`` so both
-    emit a byte-identical, already-trusted approval item: the shrunk target plus
-    the new sibling module, an anatomy-index sync, dependency-scoped targeted
-    tests, and the ``incremental_splitter`` origin. Applies nothing itself — the
-    human approves and runs it via the self-apply lane (targeted + full tests,
-    auto-rollback on red). Returns ``(inbox_item, evidence)``.
+    """Publish ONE deterministic incremental-split step as a self-apply
+    approval.
     """
     build: dict[str, Any] = {
         "files": [
@@ -1492,26 +1394,12 @@ def produce_self_apply_proposal(
     recently_vetoed_targets: frozenset[str] | set[str] | tuple[str, ...] | None = None,
     max_builder_attempts: int = _DEFAULT_MAX_BUILDER_ATTEMPTS,
 ) -> ProducerReport:
-    """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at
-    most one validated low-risk self-apply proposal into the approval inbox.
+    """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce
+    at most one validated low-risk self-apply proposal into the approval
+    inbox.
 
     Returns a :class:`ProducerReport`. The function never applies the patch,
     never runs the lane, and creates at most one inbox item per call.
-
-    If ``registry`` (a ``SubagentRegistry``) is provided, the run's role outcomes
-    are recorded into it as an additive, best-effort side effect (TD-028). When
-    ``registry is None`` — the default — behaviour is byte-identical to before,
-    and a registry write failure can never change or break this function.
-
-    Manager target selection (TD-036 follow-up): by default the Manager takes its
-    target + diagnosis from a *grounded* backlog candidate (TECH_DEBT.md /
-    knowledge/generated/AGENT_ANATOMY.md / TD-038 slice 2 proposal doc), never inventing one
-    via the LLM. Pass an explicit
-    ``grounded_selector`` (a zero-arg callable returning a candidate or ``None``)
-    to override the default workspace-backed selector. An empty backlog yields
-    ``no_patch`` — there is no LLM fallback. The legacy LLM manager (which invents
-    a diagnosis from the static allowlist) runs ONLY when explicitly requested via
-    ``legacy_llm_manager=True`` (debug/tests).
     """
     def _record(report: ProducerReport) -> ProducerReport:
         if registry is not None:

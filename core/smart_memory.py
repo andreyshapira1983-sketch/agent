@@ -1,10 +1,4 @@
-"""Episodic, procedural and consolidation memory for autonomous operation.
-
-This module is intentionally local, deterministic and auditable. It does not
-train a model. It stores what happened, turns successful tool workflows into
-small reusable procedures, and writes consolidation reports that link episodes
-to procedures and surface stale knowledge risks.
-"""
+"""Episodic, procedural and consolidation memory for autonomous operation."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -106,19 +100,11 @@ def _compute_quality_score(
 ) -> float | None:
     """Fraction of evidence chunks that stood up as verified support.
 
-    ``weak`` counts claims the verifier could NOT confirm as faithful support —
-    sub-agent-asserted, cited-but-unmatched, receipt-missing and topic-only
-    chunks. They belong in the denominator, never in the numerator: an answer
-    resting on unconfirmed support must not score as if it were verified.
-
-    Returns **None** when there are no chunks at all (a pure general-knowledge
-    answer): with an empty denominator the fraction is undefined, not perfect.
-    This used to return 1.0 "so general knowledge is not penalised", but the
-    top of the scale is not a neutral value — every consumer read it as
-    "fully verified" and inverted (MIR-002): groundless episodes outlived
-    well-evidenced ones in hygiene, were shielded from pruning, and were less
-    likely to trigger a re-ask hint. Consumers must now decide explicitly what
-    an unmeasured answer means for them.
+    ``weak`` counts claims the verifier could NOT confirm as faithful
+    support — sub-agent-asserted, cited-but-unmatched, receipt-missing and
+    topic-only chunks. They belong in the denominator, never in the
+    numerator: an answer resting on unconfirmed support must not score as if
+    it were verified.
     """
     total = verified + unverified + weak
     if total == 0:
@@ -138,12 +124,7 @@ _CONF_PRIOR_FAILURE: float = 1.0
 
 
 def _smoothed_confidence(success_count: int, failure_count: int) -> float:
-    """Beta(1,1)-smoothed success probability, rounded to 3 dp.
-
-    ``(success + 1) / (success + failure + 2)`` — a single observation is weak
-    evidence, so one success stays well below 1.0 and grows asymptotically as
-    the workflow keeps succeeding.
-    """
+    """Beta(1,1)-smoothed success probability, rounded to 3 dp."""
     numerator = success_count + _CONF_PRIOR_SUCCESS
     denominator = success_count + failure_count + _CONF_PRIOR_SUCCESS + _CONF_PRIOR_FAILURE
     return round(numerator / denominator, 3)
@@ -424,13 +405,7 @@ class ProcedureRecord:
         )
 
     def with_outcome(self, episode: EpisodeRecord, verdict: str) -> ProcedureRecord:
-        """Apply one observation, recomputing every derived value together.
-
-        Counter, confidence and status move in a single new record, so no
-        reader can observe a bumped counter beside a stale confidence.
-        `source_episode_ids` doubles as the applied-feedback journal, which is
-        what makes re-processing a queue a no-op (see `apply_episode_feedback`).
-        """
+        """Apply one observation, recomputing every derived value together."""
         success_count = self.success_count + (1 if verdict == "success" else 0)
         failure_count = self.failure_count + (1 if verdict == "failure" else 0)
         confidence = _smoothed_confidence(success_count, failure_count)
@@ -447,29 +422,12 @@ class ProcedureRecord:
         )
 
     def merged_from_episode(self, episode: EpisodeRecord) -> ProcedureRecord:
-        """Fold an episode's PROVENANCE into this procedure without crediting it.
-
-        Operator ruling 2026-08-02: a procedure is promoted only for causally-
-        confirmed usefulness, and a mere `workflow_key` (tool-set) match is NOT
-        usefulness. `upsert_from_episode` used to call `with_episode` on every
-        workflow-key match, so a completely unrelated task that happened to use
-        the same tools promoted a candidate it never applied (measured: a
-        'fix the parser bug' run promoted a 'read-and-enumerate' candidate to
-        active). This method keeps the one-procedure-per-workflow consolidation
-        — source-episode ids and the lesson cap — but moves NO counter and
-        changes NO status. Credit flows only through the causal
-        `used_procedure_ids` path (`apply_episode_feedback` → `with_outcome`).
-
-        Lessons still accumulate here, under the credit gate
-        (`procedure_credit_allowed`): a lesson is content, not credit —
-        MIR-050's reason for keeping `lessons` a list is that unrelated runs
-        pool on one tool-shape key, and dropping the append (the #261
-        oversight) made the second run's lesson vanish while its episode id
-        was still merged.
+        """Fold an episode's PROVENANCE into this procedure without crediting
+        it.
 
         The cap is applied on EVERY return, not only when a lesson is
-        appended: an uncredited fold-in must repair an oversized older record
-        rather than carry it forward untouched.
+        appended: an uncredited fold-in must repair an oversized older
+        record rather than carry it forward untouched.
         """
         episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
         lesson = lesson_from_episode(episode)
@@ -577,12 +535,7 @@ class EpisodicMemoryStore:
         self.max_episodes = max_episodes
 
     def save(self, episode: EpisodeRecord) -> EpisodeRecord:
-        """Append one episode, admitting it first. Returns the stored record.
-
-        The return value is the record as written, so a caller that wants to
-        report the admission verdict reads it from what actually landed rather
-        than recomputing it.
-        """
+        """Append one episode, admitting it first. Returns the stored record."""
         admitted = admit_for_storage(episode)
         with state_file_lock(self.path):
             append_state_jsonl_unlocked(self.path, [admitted.to_dict()])
@@ -592,14 +545,11 @@ class EpisodicMemoryStore:
     def save_once(self, episode: EpisodeRecord) -> bool:
         """Append the episode unless its id is already stored.
 
-        Returns True if written, False if it was a duplicate. The lookup and
-        the append happen inside ONE `state_file_lock`, so two processes
-        racing on the same run cannot both write.
-
-        **Bounded idempotency.** The guarantee lasts only while the episode is
-        inside the FIFO window (`max_episodes`): once evicted, its id becomes
-        writable again. No separate ledger is kept, so this is deduplication
-        for a run and its immediate retries — not a permanent claim.
+        **Bounded idempotency.** The guarantee lasts only while the episode
+        is inside the FIFO window (`max_episodes`): once evicted, its id
+        becomes writable again. No separate ledger is kept, so this is
+        deduplication for a run and its immediate retries — not a permanent
+        claim.
         """
         admitted = admit_for_storage(episode)
         with state_file_lock(self.path):
@@ -710,19 +660,14 @@ class EpisodicMemoryStore:
     def find_most_similar(
         self, query: str, *, threshold: float = 0.35
     ) -> tuple[EpisodeRecord | None, float]:
-        """Return the episode whose *question* has the highest Jaccard similarity
-        to *query* and the similarity score.  Returns ``(None, 0.0)`` when no
-        episode reaches *threshold*.
+        """Return the episode whose *question* has the highest Jaccard
+        similarity to *query* and the similarity score. Returns ``(None,
+        0.0)`` when no episode reaches *threshold*.
 
-        Only the stored ``question`` field is compared (not goal/summary/tags)
-        so the signal is specifically "did the user ask THIS before?" rather than
-        "is this topic familiar?".  The Jaccard coefficient is:
-
-            |q_tokens ∩ ep_tokens| / |q_tokens ∪ ep_tokens|
-
-        When a candidate episode has low ``answer_quality_score`` (the previous
-        answer was poorly verified), the effective threshold is reduced by 0.10
-        so the re-ask hint fires more readily for known-weak episodes.
+        Only the stored ``question`` field is compared (not
+        goal/summary/tags), so the signal is «did the user ask THIS before?»
+        and not «is this topic familiar?». A candidate with a low
+        ``answer_quality_score`` gets the threshold lowered by 0.10.
         """
         q_tokens = _tokens(query)
         if not q_tokens:
@@ -811,30 +756,14 @@ class ProceduralMemoryStore:
     ) -> dict:
         """Feed one run's outcome back to the procedures it actually used.
 
-        `allow_credit=False` withholds the POSITIVE direction only, for a cycle
-        whose verifier threw: `verified=0, unverified=0` falls through the
-        outcome derivation to `success`, so an unmeasured run would otherwise
-        credit a procedure exactly like a verified one. The negative direction
-        is untouched — a debit comes from a structural failure the verifier had
-        no part in, and suppressing it would let a crash shield a procedure
-        that genuinely failed. The suppression is reported rather than made to
-        look like an absent verdict.
-
-        Driven **only** by `episode.used_procedure_ids`. There is deliberately
-        no fallback to workflow_key, tool set, name similarity, a fresh
-        retrieval or inference from content: MIR-050 measured that keys pool
-        unrelated goals, so any of those would debit a procedure that had
-        nothing to do with this run. An id that no longer resolves is reported
-        as `orphaned` — never substituted with something that merely looks
-        similar.
-
-        `None` (legacy, attribution unknown) and `()` (known to have applied
-        none) are both no-ops, and stay distinguishable in the report.
-
-        Idempotent per episode: a procedure whose journal already lists this
-        episode id is skipped, so re-processing a queue cannot turn the ratchet
-        twice. The check is an explicit journal lookup, not a guess from the
-        counters' shape.
+        `allow_credit=False` withholds the POSITIVE direction only, for a
+        cycle whose verifier threw: `verified=0, unverified=0` falls through
+        the outcome derivation to `success`, so an unmeasured run would
+        otherwise credit a procedure exactly like a verified one. The
+        negative direction is untouched — a debit comes from a structural
+        failure the verifier had no part in, and suppressing it would let a
+        crash shield a procedure that genuinely failed. The suppression is
+        reported rather than made to look like an absent verdict.
         """
         used = episode.used_procedure_ids
         verdict = feedback_for_episode(episode)
@@ -883,31 +812,12 @@ class ProceduralMemoryStore:
     def recompute_legacy_confidence(
         self, *, dry_run: bool = True, limit: int | None = None
     ) -> dict:
-        """Restore `confidence == _smoothed_confidence(success, failure)` (MIR-051).
-
-        Smoothing landed on 2026-07-11; rows written before it kept a raw
-        `confidence` the formula cannot produce — 45 of 65 in the live store
-        sat at 1.0, 39 of those on a single success. The writers are correct,
-        so this repairs data, not logic, and is deliberately a separate
-        explicit pass rather than something hidden inside read or upsert.
+        """Restore `confidence == _smoothed_confidence(success, failure)`
+        (MIR-051).
 
         Touches **only** derived values: `confidence`, and `status` with it,
-        since status is exactly `confidence >= 0.6`. Leaving status stale would
-        just trade one broken invariant for another.
-
-        Never touched: `success_count` / `failure_count` (reconstructing missing
-        failure history is MIR-048's problem, not a migration's), `created_at` /
-        `updated_at` (refreshing freshness would make stale procedures look
-        recently used and outlive hygiene), identity, provenance and content.
-
-        Operates on raw payloads so unknown fields survive untouched and the
-        real stored counters are visible — `ProcedureRecord.from_dict` clamps
-        negatives to 0, which would silently launder a corrupt row into a
-        valid-looking one. Writes through the store's own writer, so the
-        integrity envelope is recomputed normally.
-
-        Records already consistent are not rewritten at all, so their bytes,
-        checksums and audit trail stay exactly as they were.
+        since status is exactly `confidence >= 0.6`. Leaving status stale
+        would just trade one broken invariant for another.
         """
         with state_file_lock(self.path):
             rows = read_state_jsonl_unlocked(self.path)
@@ -1017,15 +927,9 @@ class ProceduralMemoryStore:
     def search_with_report(
         self, query: str, *, limit: int = 3, salience: TokenSalience = FLAT
     ) -> ProcedureSearchResult:
-        """Same as `search`, but it also reports why the store's other procedures
-        did not surface — symmetric with `EpisodicMemoryStore.search_with_report`.
-
-        Before this existed, `procedures_selected=0` was a silent black hole: a
-        candidate excluded here (the maturity gate below) and a procedure that
-        simply did not match were indistinguishable in the journal. The live
-        2026-08-02 learning probe hit exactly that — a relevant procedure was
-        present but never offered, and nothing said so. Reasons are counted by
-        reason, never per record; an absent reason means zero.
+        """Same as `search`, but it also reports why the store's other
+        procedures did not surface — symmetric with
+        `EpisodicMemoryStore.search_with_report`.
         """
         procedures = self.load()
         q_tokens = _tokens(query)
@@ -1097,17 +1001,8 @@ class MemoryConsolidationStore:
 def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
     """May this run raise a procedure's standing?
 
-    Both axes must agree, because they answer different questions and neither
-    substitutes for the other: `completion_state` says the task was done,
-    `outcome` says the claims that were made held up. A blocked non-answer
-    satisfies the second perfectly — that is how the live store's only
-    admitted episode credited `tools:file_read` to 0.857 (MIR-057).
-
     `completion_state` is read FROZEN, through the shared accessor. It is
     never recomputed and never taken from `declared_completion`.
-
-    One predicate, three callers — creation, the counter, and the feedback
-    verdict — so those cannot drift into crediting on different grounds.
     """
     # Третья ось, и она общая с допуском эпизода в использование. Прежде здесь
     # стояли только две первые, и 2026-08-10 самоопровергнувшийся прогон,
@@ -1129,22 +1024,12 @@ def procedure_debit_allowed(episode: EpisodeRecord) -> bool:
     exhausted replan is the loop giving up after trying — a fact about
     execution that the procedure took part in.
 
-    Everything else is neutral, and each for its own reason:
-
-    * a DECLARED `failed` is the answer's own claim, and a model reporting it
-      did not succeed says nothing about whether the workflow it used is bad —
-      the cause is usually upstream of the procedure;
-    * `cancelled` is a control signal; debiting for it would make the counters
-      describe scheduling rather than quality;
-    * `blocked` / `refused` / `partially_achieved` are non-completions the
-      procedure may have executed perfectly through;
-    * `unknown` and legacy `None` carry no verdict to act on.
-
-    An ABORTED run is neutral for a structural reason rather than a policy
-    one: `_record_aborted_episode` carries no `used_procedure_ids`, so there
-    is no causal link to debit through at all. Supporting abort feedback needs
-    attribution plus a normalised failure code, designed together — tracked
-    separately.
+    Everything else is neutral: a DECLARED `failed` (the answer's own claim
+    about itself), `cancelled` (a control signal), `blocked` / `refused` /
+    `partially_achieved` (non-completions the procedure may have executed
+    perfectly through), and `unknown` / legacy `None`. An ABORTED run is
+    neutral structurally — it carries no `used_procedure_ids`, so there is
+    no causal link to debit through.
 
     The frozen state is authoritative and comes first: `replan_exhausted`
     NARROWS an existing `failed`, it can never create one. A record claiming
@@ -1160,22 +1045,9 @@ def procedure_debit_allowed(episode: EpisodeRecord) -> bool:
 
 
 def feedback_for_episode(episode: EpisodeRecord) -> str:
-    """What this run's outcome says about a procedure it used.
-
-    Returns "success", "failure" or "none", and is now a thin reading of the
-    two predicates so the verdict cannot disagree with the gates that create
-    and count.
-
-    **Policy change (MIR-057).** An evidence-`partial` used to count as a
-    failure. It no longer does: `partial` means unverified support
-    outnumbered verified support, which is a fact about how well the ANSWER
-    was grounded, not proof that the workflow failed. A procedure that
-    executed exactly as designed was being debited for the synthesizer's weak
-    citations. Debits now come only from `procedure_debit_allowed`.
-
-    The old cancellation carve-out is gone as a special case and survives as
-    a consequence: a cancelled run freezes as `cancelled`, which is neither
-    credit nor debit.
+    """What this run's outcome says about a procedure it used: "success",
+    "failure" or "none". An evidence-`partial` is NOT a failure — debits
+    come only from `procedure_debit_allowed`.
     """
     if procedure_credit_allowed(episode):
         return "success"
@@ -1189,17 +1061,10 @@ def resolve_used_procedures(
 ) -> tuple[str, ...]:
     """Which of the SELECTED procedures this run actually applied.
 
-    Two gates, both required. A procedure must have been selected into the run
-    (retrieval alone is not use), and every tool in its workflow must have
-    actually executed — the plan is not evidence, so a run cancelled before
-    reaching a procedure's steps does not debit it.
-
-    Attribution follows the selected records, never `workflow_key`: MIR-050
-    measured that keys pool unrelated goals, so matching on shape would debit
-    whichever procedure happened to share it.
-
-    Order is first actual completion and the result is a tuple, so the stored
-    record is deterministic and reproducible — a serialised set would not be.
+    Two gates, both required. A procedure must have been selected into the
+    run (retrieval alone is not use), and every tool in its workflow must
+    have actually executed — the plan is not evidence, so a run cancelled
+    before reaching a procedure's steps does not debit it.
     """
     ran: list[str] = []
     seen: set[str] = set()
@@ -1227,15 +1092,7 @@ def _checked_declaration(
     raw: str | None,
     on_audit: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> CompletionDeclaration | None:
-    """Last line of defence for a token that bypassed the marker parser.
-
-    Deliberately coerces rather than raises. Banking runs inside a broad
-    `except Exception` that reports `smart_memory_error` (MIR-052), so an
-    exception here would surface as "memory is unavailable" and hide a
-    programming error behind an infrastructure symptom. Instead the value is
-    dropped — fail-closed, `unknown` rather than a verdict — and reported, so
-    the mistake is loud somewhere it cannot be mistaken for a storage fault.
-    """
+    """Last line of defence for a token that bypassed the marker parser."""
     if raw is None or raw in _COMPLETION_DECLARATIONS:
         return raw  # type: ignore[return-value]
     if on_audit is not None:
@@ -1258,41 +1115,17 @@ def assemble_completion_state(
 ) -> CompletionState:
     """Decide whether the goal was reached. Called ONCE, at banking.
 
-    A closed table, ordered so that any combination of signals resolves the
-    same way every time — the priority is the contract, not the order the
-    branches happen to be written in:
+    A closed table; the ORDER is the contract, first match wins:
 
-    ==  ==========================================  =================
-    #   predicate                                   state
-    ==  ==========================================  =================
-    1   aborted_reason == "cancelled"               cancelled
-    2   aborted_reason (anything else)              failed
-    3   replan_exhausted                            failed
-    4   obligation_unmet and declared == achieved   partially_achieved
-    5   declared is a known token                   that token
-    6   otherwise                                   unknown
-    ==  ==========================================  =================
+    1. aborted_reason == "cancelled"            -> cancelled
+    2. aborted_reason (anything else)           -> failed
+    3. replan_exhausted                         -> failed
+    4. obligation_unmet and declared==achieved  -> partially_achieved
+    5. declared is a known token                -> that token
+    6. otherwise                                -> unknown
 
-    Row 4 is the one authoritative *signal* in the table; rows 1-3 are facts
-    about how the run ended. It moves in one direction only — it can lower a
-    claim of `achieved`, never raise anything — so an honest `blocked` or
-    `failed` is left exactly where the run put it. Candour is not punished.
-
-    Structural facts outrank the declaration absolutely. An answer claiming it
-    achieved the goal is a claim about the answer; a run that was cancelled or
-    exhausted its replans is a fact about the run, and the fact wins. The
-    declaration is still stored, so a model that says "achieved" over a failed
-    run stays auditable.
-
-    The predicates read the CALLER'S arguments, not the tags derived from
-    them: tags are this function's downstream, and reading them back would be
-    parsing our own output.
-
-    The fast-path replay needs no rule of its own. It carries no abort, no
-    exhaustion and no declaration — the synthesizer never ran — so it lands on
-    `unknown` through branch 5. Giving it a `source_labels` predicate would
-    tie the verdict to a naming convention nothing enforces, to reach a result
-    branch 5 already produces.
+    Row 4 only ever LOWERS a claim of `achieved`; an honest `blocked` or
+    `failed` is left where the run put it.
     """
     return assemble_completion_verdict(
         aborted_reason=aborted_reason,
@@ -1430,36 +1263,15 @@ def _answer_disqualified(episode: EpisodeRecord) -> bool:
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
-    This is the admission policy, kept as a function rather than a literal
-    because admission is a judgement about a specific episode, not a global
-    switch. It always returns a bool: `None` means "never classified" and is
-    reserved for rows written before the field existed — a policy that just
-    examined an episode must not manufacture that state.
+    Admitted only when ALL hold: `completion_state == "achieved"` (read
+    frozen, never re-derived, never from the declaration); `outcome ==
+    "success"`; `verified_chunks > 0` (something was independently
+    confirmed); and not a replay. One exception: a curated `lesson` is
+    admitted whatever its outcome.
 
-    Admitted when every one of these holds:
-
-    - ``completion_state == "achieved"`` — the task was actually done. Read
-      frozen, never re-derived, and never taken from the declaration. This is
-      the axis `outcome` cannot express: a cycle blocked by a truncated
-      evidence budget cites everything it says and answers nothing (MIR-057).
-    - ``outcome == "success"`` — the cycle completed and was scored. A
-      ``partial`` means unverified support outnumbered verified support,
-      which is the self-reinforcement MIR-001 closed; ``failed`` speaks for
-      itself.
-    - ``verified_chunks > 0`` — something was independently confirmed. This
-      is what excludes a pure general-knowledge answer: it may be perfectly
-      correct and still carries nothing reusable — no sources, no findings.
-    - not a replay — a copy of an earlier answer is not new experience.
-      After MIR-041 a replay banks ``verified_chunks=0`` and so is already
-      refused by the rule above; the source-label check is defence in depth
-      for records written before that fix.
-
-    One deliberate exception: a curated ``lesson`` is admitted whatever its
-    outcome. Learning from a failure is the entire purpose of that tag, and
-    lessons are already protected from eviction for the same reason.
-
-    No threshold constant appears here on purpose — every rule reads a fact
-    the verifier measured, so there is no number to tune or to justify.
+    Always returns a bool — `None` means "never classified" and belongs to
+    rows written before the field existed. No threshold constant appears
+    here on purpose: every rule reads a fact the verifier measured.
     """
     # ПЕРЕД всеми остальными осями, включая исключение для урока: ответ,
     # который сам себя опроверг, не становится опытом ни на каком основании.
@@ -1506,27 +1318,15 @@ def is_usage_eligible(episode: EpisodeRecord) -> bool:
 def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
     """Resolve the admission verdict for an episode about to be written.
 
-    The policy belongs to the boundary it guards, not to the call site. It used
-    to live at exactly one of the three write sites: the cycle applied
-    :func:`decide_usage_eligibility`, while ``core/self_repair.py`` (repair
-    lessons) and ``core/self_build_memory.py`` (self-build / self-apply
-    outcomes) called ``save()`` straight through. Those records landed with
-    ``usage_eligible=None``, and since every reader is fail-closed on ``None``,
-    the three ``lesson``-specific branches in ``_retrieve_experience_memory``
-    were dead for exactly the records they exist to surface — while
-    ``decide_usage_eligibility`` would have admitted them (the ``lesson`` tag is
-    its first rule). Measured: the store found such a lesson by name, by tag,
-    and at similarity 1.0; the planner saw 0 characters of it.
-
-    ``None`` means "no one has decided yet" and is the only state this resolves.
-    An explicit ``True``/``False`` from the caller is a decision already taken
-    and is passed through untouched — that is how an aborted run stays
-    quarantined even though the policy is willing to look at it.
+    ``None`` means "no one has decided yet" and is the only state this
+    resolves. An explicit ``True``/``False`` from the caller is a decision
+    already taken and is passed through untouched — that is how an aborted
+    run stays quarantined even though the policy is willing to look at it.
 
     Idempotent, so calling it at the write site *and* inside the store is a
-    no-op the second time. Applied on **write only**: a ``None`` read back off
-    disk is a row that predates the field, and re-deciding it now would rewrite
-    history with today's rule.
+    no-op the second time. Applied on **write only**: a ``None`` read back
+    off disk is a row that predates the field, and re-deciding it now would
+    rewrite history with today's rule.
     """
     if episode.usage_eligible is None:
         episode = replace(
@@ -1564,15 +1364,12 @@ def _derive_episode_outcome(
     unverified: int,
     weak: int,
 ) -> EpisodeOutcome:
-    """The evidence axis, decided in one place, highest precedence first.
-
-    Extracted from `episode_from_agent_cycle` so the rules can be read (and
-    unit-tested) without building an episode. The order IS the contract:
+    """The evidence axis, decided in one place. The ORDER is the contract:
 
     1. the run did not finish — no chunk count can express that;
     2. replanning was exhausted — same;
-    3. the run SAID it did not deliver — an admission, not an evidence verdict;
-    4. otherwise the counters judge the support the answer actually had.
+    3. the run SAID it did not deliver — an admission, not a verdict;
+    4. otherwise the counters judge the support the answer had.
     """
     if aborted_reason:
         # The run did not finish. Decided before the counters and never
@@ -1750,17 +1547,8 @@ def _summarise_labels(labels: tuple[str, ...]) -> str:
 
 
 def lesson_from_episode(episode: EpisodeRecord) -> str:
-    """One factual line about what this run met and how it went. Never inferred.
-
-    Measured problem this replaces: a banked procedure read
-    ``"Workflow using shell_exec, shell_exec"`` with steps ``"Run tool:
-    shell_exec"`` twice. That is the *shape* of the run and carries no
-    information — it cannot tell a later reader (or the retrieval search, which
-    scores on name/tags/steps) what the workflow was ever good for.
-
-    Everything below is read off the episode, nothing is deduced. When the run
-    left no material — no request recorded — the result is the empty string and
-    no lesson is stored: an empty memory is safer than a confident wrong one.
+    """One factual line about what this run met and how it went. Never
+    inferred.
     """
     asked = _clean_text(episode.question, max_chars=160)
     if not asked:

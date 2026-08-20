@@ -1,9 +1,4 @@
-"""Role-based model routing.
-
-The agent core should not be married to one model. This module keeps that
-choice behind a small routing layer so planner, synthesis, repair proposal,
-and memory summarisation can move independently as better models appear.
-"""
+"""Role-based model routing."""
 from __future__ import annotations
 
 import errno
@@ -58,12 +53,7 @@ class ModelRoute:
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """One model option in the local model registry.
-
-    New models under an already-supported provider do not require code
-    changes: add them through `AGENT_MODEL_REGISTRY_JSON` with the roles they
-    should serve. New providers still need an LLM adapter.
-    """
+    """One model option in the local model registry."""
 
     id: str
     provider: str
@@ -218,12 +208,7 @@ def _append_skipped(reason: str, skipped: list[str]) -> str:
 
 @dataclass(frozen=True)
 class ModelSelectionPolicy:
-    """How the router may choose from the model registry.
-
-    `conservative` preserves the previous behaviour: explicit role env vars
-    win, then custom registry entries, then the default provider/model. Other
-    policies may select built-in registry models when the matching key exists.
-    """
+    """How the router may choose from the model registry."""
 
     name: str = "conservative"
     max_cost_tier: str | None = None
@@ -461,12 +446,7 @@ class UsageTrackedLLM:
         return replace(route, reason=reason)
 
     def attribution(self) -> dict[str, str | None]:
-        """Structured routing attribution for diagnostics/logging.
-
-        Separates what was *requested* from what the client actually resolved
-        to, plus the policy/override reason, so the teaching harness can assert
-        ``requested == actual`` (or a truthful downgrade reason is present).
-        """
+        """Structured routing attribution for diagnostics/logging."""
         actual_provider = getattr(self._llm, "provider", self.provider)
         actual_model = getattr(self._llm, "model", self.model)
         return {
@@ -486,11 +466,8 @@ class UsageTrackedLLM:
     def _failover_llm(self, exc: BaseException, tried: Sequence[str]) -> Any | None:
         """Return a replacement LLM on another credentialed provider, or None.
 
-        Fires when failover is enabled, a factory is available, and either:
-        - the error looks like a key/quota/auth problem (any provider), or
-        - the current provider is ``local`` and the error looks like downtime
-          (connection refused, timeout, hung server),
-        and another credentialed provider exists that hasn't been tried yet.
+        Only for two error shapes: a key/quota/auth problem on any provider,
+        or a downtime-looking error while the current provider is ``local``.
         """
         if self._llm_factory is None or not _provider_failover_enabled():
             return None
@@ -557,19 +534,16 @@ class UsageTrackedLLM:
         temperature: float = 0.7,
         on_token: Any | None = None,
     ) -> str:
-        """Route one STREAMED completion through the same billing as `complete`.
-
-        Must exist on this wrapper: without it `__getattr__` hands the name to
-        the raw provider LLM and the call escapes assert_can_start / record
-        entirely — measured 2026-08-08 as unbilled synthesis spend and an
-        unenforceable budget in the REPL's default streamed mode.
+        """Route one STREAMED completion through the same billing as
+        `complete`.
 
         No provider failover here, deliberately: by the time a stream dies,
-        chunks may already have reached the user's screen, and replaying them
-        from a substitute provider would emit the answer twice. The error is
-        recorded and re-raised; the caller's ladder decides what happens next.
-        A provider without `stream_complete` (test doubles; see core/llm.py:384
-        for the same rule inside LLM) falls back to the billed `complete`.
+        chunks may already have reached the user's screen, and replaying
+        them from a substitute provider would emit the answer twice. The
+        error is recorded and re-raised; the caller's ladder decides what
+        happens next. A provider without `stream_complete` (test doubles;
+        see core/llm.py:384 for the same rule inside LLM) falls back to the
+        billed `complete`.
         """
         raw_stream = getattr(self._llm, "stream_complete", None)
         if raw_stream is None:
@@ -948,20 +922,7 @@ def _default_provider_name(provider: str | None) -> str:
 
 
 def _llm_factory(provider: str | None, model: str | None) -> LLM:
-    """Build an LLM client, healing an un-credentialed provider choice.
-
-    The router can fall back to a real provider (historically hardcoded to
-    ``anthropic``) even when no matching API key is set. Constructing that
-    client and calling it later crashes deep inside the provider SDK with an
-    opaque authentication ``TypeError``. Instead, when the resolved provider is
-    a known real provider with no credentials we transparently switch to the
-    first credentialed provider, or to ``mock`` when offline mock routing is
-    allowed, or raise a clear, actionable error.
-
-    ``mock``, already-credentialed providers and unknown providers are built
-    unchanged (the latter still raise ``ValueError`` loudly in ``LLM``), so the
-    hermetic mock-based test suite is unaffected.
-    """
+    """Build an LLM client, healing an un-credentialed provider choice."""
     resolved = _default_provider_name(provider)
     known_real_provider = resolved in _DEFAULT_PROVIDER_ENV and resolved != "mock"
     if not known_real_provider or _provider_has_credentials(resolved):
@@ -1339,18 +1300,10 @@ class ModelRouter:
     ) -> ModelRoute:
         """Return *route* with the provider/model the call will really use.
 
-        A route can reach this point naming nothing at all: when no registry
-        candidate satisfies the selection policy, ``best_for_role`` returns
-        ``None`` and both defaults are unset, so the router builds the client
-        with ``(None, None)``. That client then resolves a concrete provider and
-        model from the environment and the call succeeds — but the ledger used
-        to record ``provider=None, model=None``, pricing real spend as
-        ``unknown``.
-
-        Recording what the client resolved keeps the ledger a description of the
-        call that happened rather than of the route that could not be planned.
-        An explicitly routed provider/model always wins; the client is consulted
-        only for the blanks.
+        Recording what the client resolved keeps the ledger a description of
+        the call that happened rather than of the route that could not be
+        planned. An explicitly routed provider/model always wins; the client
+        is consulted only for the blanks.
         """
 
         resolved_provider = (
@@ -1449,21 +1402,19 @@ class ModelRouter:
     ) -> tuple[str | None, str | None, list[str]]:
         """TD-010: choose a provider for *tier* by complexity preference.
 
-        Returns ``(provider, reason, skipped)`` when a supported, credentialed
-        provider that also has a catalog/env tier model is found; otherwise
-        ``(None, None, skipped)`` so the caller keeps today's role-default
-        behavior. The concrete model is never decided here — only the provider;
-        callers still resolve the model via ``tier_model_for(tier, provider)``.
+        Returns ``(provider, reason, skipped)`` when a supported,
+        credentialed provider that also has a catalog/env tier model is
+        found; otherwise ``(None, None, skipped)`` so the caller keeps
+        today's role-default behavior. The concrete model is never decided
+        here — only the provider; callers still resolve the model via
+        ``tier_model_for(tier, provider)``.
 
-        An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables the
-        preference entirely so the operator's choice always wins. The same rule
-        applies to ``AGENT_TIER_PROVIDERS_*``: a provider named there is not
-        dropped merely because catalog discovery cannot describe it, as long as
-        the operator declared a model for it (``_declared_model_for``).
-
-        ``AGENT_MODEL_MAX_COST`` is enforced here too. It used to be consulted
-        only by registry selection, so the complexity route — the path that
-        serves normal traffic — ignored the operator's ceiling outright.
+        An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables
+        the preference entirely so the operator's choice always wins. The
+        same rule applies to ``AGENT_TIER_PROVIDERS_*``: a provider named
+        there is not dropped merely because catalog discovery cannot
+        describe it, as long as the operator declared a model for it
+        (``_declared_model_for``).
         """
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
@@ -1505,14 +1456,7 @@ class ModelRouter:
         return None, None, skipped
 
     def _tier_model_within_cost_limit(self, provider: str, model: str) -> bool:
-        """Whether *model* respects ``AGENT_MODEL_MAX_COST``.
-
-        Reuses ``_cost_tier_for_route`` so a hand-priced registry model is judged
-        by its declared price and a catalog model by the catalog's own weight
-        class — the same number that will later be billed to the usage ledger.
-        Judging the route by one figure and billing it by another is how the
-        ceiling came to be ignored in the first place.
-        """
+        """Whether *model* respects ``AGENT_MODEL_MAX_COST``."""
 
         limit = self.selection_policy.max_cost_tier
         if limit is None:
@@ -1526,22 +1470,7 @@ class ModelRouter:
     def _cap_role_route(
         self, role_key: str, provider: str | None, model: str | None, reason: str
     ) -> tuple[str | None, str | None, str]:
-        """Apply ``AGENT_MODEL_MAX_COST`` to a role route.
-
-        The ceiling used to filter only the complexity preferences inside
-        ``_resolve_tier_provider``. Every branch that fails there falls back to
-        the role route, and a plain :meth:`for_role` never went near the
-        preferences at all — so the limit was bypassed exactly when it was meant
-        to bind: after every affordable candidate had already been rejected.
-
-        Measured live on the operator's environment: ``AGENT_MODEL_MAX_COST=low``
-        together with ``AGENT_REPAIR_PROVIDER/MODEL`` still returned
-        ``anthropic/claude-opus-4-20250514`` billed ``high``, on both
-        :meth:`for_role` and :meth:`for_task`.
-
-        A route already inside the ceiling is returned untouched, so with no
-        ceiling configured behaviour is byte-for-byte the old one.
-        """
+        """Apply ``AGENT_MODEL_MAX_COST`` to a role route."""
 
         limit = self.selection_policy.max_cost_tier
         if limit is None:
@@ -1582,42 +1511,31 @@ class ModelRouter:
         force_tier: Any = None,
         task_role: str | None = None,
     ) -> Any:
-        """Like :meth:`for_role` but auto-selects model based on task complexity.
-
-        Model selection order
-        ─────────────────────
-        1. env var  AGENT_MODEL_TIER_{LIGHT|STANDARD|DEEP}   (operator override)
-        2. config/model_catalog.json                          (:refresh-models cache)
-        3. :meth:`for_role`                                   (existing role routing)
-
-        No model names are hardcoded. Model discovery is delegated to
-        :mod:`core.model_catalog` which queries the provider API and
-        classifies models by naming pattern (haiku→light, opus→deep, …).
-
-        Env vars for explicit tier override (optional):
-            AGENT_MODEL_TIER_LIGHT
-            AGENT_MODEL_TIER_STANDARD
-            AGENT_MODEL_TIER_DEEP
+        """Like :meth:`for_role` but auto-selects model based on task
+        complexity. Tier resolution order: env
+        ``AGENT_MODEL_TIER_{LIGHT|STANDARD|DEEP}`` (operator override), then
+        ``config/model_catalog.json``, then :meth:`for_role`.
 
         ``escalation`` is an optional operator-supplied
-        :class:`~core.deep_escalation.OperatorEscalation` (role-free). It only
-        affects a DEEP request: without a valid operator reason the deep request
-        gracefully downgrades to the standard tier (the agent can never open
-        Opus for itself). LIGHT escalation is never gated.
+        :class:`~core.deep_escalation.OperatorEscalation` (role-free). It
+        only affects a DEEP request: without a valid operator reason the
+        deep request gracefully downgrades to the standard tier (the agent
+        can never open Opus for itself). LIGHT escalation is never gated.
 
-        ``force_tier`` lets a caller pin the tier explicitly (e.g. the loop's
-        cheap-path gate forcing LIGHT for a trivial no-tool turn) instead of
-        deriving it from ``assess_complexity``. It can never open a more
-        expensive tier without the normal escalation gate: a forced DEEP still
-        passes through the operator-escalation check below.
+        ``force_tier`` lets a caller pin the tier explicitly (e.g. the
+        loop's cheap-path gate forcing LIGHT for a trivial no-tool turn)
+        instead of deriving it from ``assess_complexity``. It can never open
+        a more expensive tier without the normal escalation gate: a forced
+        DEEP still passes through the operator-escalation check below.
 
-        ``task_role`` is the role decided by :class:`core.role_router.RoleRouter`
-        for this request (repair, programmer, researcher, …). The caller already
-        knows it before choosing a model; forwarding it lets
-        :func:`~core.task_complexity.assess_complexity` refuse the LIGHT tier
-        for roles that edit code or diagnose defects, however tersely the
-        request was phrased. It never opens a *stronger* tier on its own, so it
-        cannot bypass the escalation gate.
+        ``task_role`` is the role decided by
+        :class:`core.role_router.RoleRouter` for this request (repair,
+        programmer, researcher, …). The caller already knows it before
+        choosing a model; forwarding it lets
+        :func:`~core.task_complexity.assess_complexity` refuse the LIGHT
+        tier for roles that edit code or diagnose defects, however tersely
+        the request was phrased. It never opens a *stronger* tier on its
+        own, so it cannot bypass the escalation gate.
         """
         from core.model_catalog import tier_model_for
         from core.task_complexity import ComplexityTier, assess_complexity
@@ -1843,27 +1761,7 @@ class ModelRouter:
 
     @staticmethod
     def _classified_cost_tier(model: str) -> str:
-        """Cost band for a model nobody priced by hand.
-
-        Catalog-discovered models are absent from ``config/model_registry.json``,
-        so the registry scan above misses them and every such call used to be
-        priced ``unknown`` — which ``core.model_usage`` bills at 5 units/1k,
-        just under ``high``. Measured live, that over-charged the models actually
-        serving standard traffic by ~67%, corrupting budget enforcement.
-
-        The catalog is not silent about these models: it records a weight class
-        for each one (``classify_model``, persisted as the ``tier`` field). This
-        reads that existing judgement rather than inventing a price, and the
-        light/standard/deep → low/medium/high mapping is not invented either —
-        it is what the operator already wrote by hand in the registry for the
-        providers the catalog serves (``gpt-4o-mini`` and ``gpt-5.4-mini`` are
-        light and priced ``low``; ``claude-sonnet-4-5`` is standard and priced
-        ``medium``), with no counterexample.
-
-        ``unknown`` stays reachable: with no model name there is nothing to
-        classify, and guessing there would be dishonest rather than merely
-        imprecise.
-        """
+        """Cost band for a model nobody priced by hand."""
 
         name = (model or "").strip()
         if not name:

@@ -1,21 +1,12 @@
 """Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond.
 
-This is the §3 cycle from the architecture, minimal but real:
-  - Every phase produces a typed data model.
-  - Every phase emits a structured log line.
-  - Every action passes through the Policy Gate before execution.
-  - A Plan may now contain multiple steps (file_read + web_search + ...).
-  - Each artifact is labelled with its source so the Output Contract
-    can cite it back to the user.
+Invariants every phase upholds:
 
-MVP-8 — Re-planning. The plan→execute→verify pipeline is wrapped in a
-bounded retry loop. When every step in a plan fails (and the plan is
-non-empty), the agent asks the planner for a NEW plan and shows it
-exactly what went wrong via a `<replan_context>` block. Up to
-`max_replan_attempts` total attempts; after that the cycle stops with
-`error.code=replan_exhausted` and still produces an honest Output
-Contract response so the user gets a real answer instead of a stack
-trace.
+- each phase produces a typed data model and emits a structured log line;
+- every action passes the Policy Gate before execution;
+- a Plan may hold several steps (file_read + web_search + ...);
+- each artifact is labelled with its source, so the Output Contract can
+  tell what came from where.
 """
 from __future__ import annotations
 
@@ -192,24 +183,17 @@ class AgentLoop(
     ) -> str:
         """Run one observe→plan→act→verify→respond cycle.
 
-        Args:
-            user_question: The user's natural-language input.
-            file_hint: Optional workspace file path to pre-load.
-            on_token: Optional ``(str) -> None`` callback invoked for each
-                      synthesis token as it streams from the LLM.  Pass
-                      ``lambda t: print(t, end="", flush=True)`` for live
-                      CLI display.  ``None`` (default) disables streaming.
-            deep_escalation: Optional operator-supplied
-                      :class:`~core.deep_escalation.OperatorEscalation`. Only an
-                      explicit, valid operator reason lets planner/synthesizer
-                      escalate to the deep (Opus) tier; the default ``None``
-                      keeps every autonomous run on the standard tier.
-            task_id: Optional id of the *logical task* this run serves. It
-                      survives a retry; the run id minted below does not.
-
-        This is a thin wrapper: it owns run identity and nothing else, so the
-        identity is bound before any cycle work and released even if the cycle
-        raises. The body lives in `_run_inner`.
+        Args: user_question: The user's natural-language input. file_hint:
+        Optional workspace file path to pre-load. on_token: Optional ``(str)
+        -> None`` callback invoked for each synthesis token as it streams
+        from the LLM. Pass ``lambda t: print(t, end="", flush=True)`` for
+        live CLI display. ``None`` (default) disables streaming.
+        deep_escalation: Optional operator-supplied
+        :class:`~core.deep_escalation.OperatorEscalation`. Only an explicit,
+        valid operator reason lets planner/synthesizer escalate to the deep
+        (Opus) tier; the default ``None`` keeps every autonomous run on the
+        standard tier. task_id: Optional id of the *logical task* this run
+        serves. It survives a retry; the run id minted below does not.
         """
         with run_scope(new_id("run"), task_id) as _ctx:
             # Ребро происхождения ПЕРВЫМ событием прогона: пока связи не было,
@@ -277,13 +261,7 @@ class AgentLoop(
 
     @staticmethod
     def _quality_allows_replay(episode: Any) -> bool:
-        """May this episode's answer be replayed, on quality grounds alone?
-
-        An unmeasured score (None — the episode carried no evidence chunks)
-        is refused. Absence of measurement is not evidence of quality, and
-        the previous encoding of "unmeasured" as 1.0 cleared this gate by the
-        widest possible margin (MIR-002).
-        """
+        """May this episode's answer be replayed, on quality grounds alone?"""
         score = getattr(episode, "answer_quality_score", None)
         if score is None:
             return False
