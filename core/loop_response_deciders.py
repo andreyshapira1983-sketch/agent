@@ -246,7 +246,7 @@ class AgentLoopResponseDeciders:
                             "memory_causal_credit",
                             {"record_ids": _updated, "count": len(_updated)},
                         )
-            except Exception as _cc_exc:
+            except Exception as _cc_exc:  # noqa: BLE001 — reason stated above
                 # Credit must never break the answer — and its failure must
                 # not be invisible (the MIR-077 rule).
                 try:
@@ -406,7 +406,7 @@ class AgentLoopResponseDeciders:
                         channel="append",
                         text=_vsummary.tail,
                     )
-            except Exception as _vs_exc:
+            except Exception as _vs_exc:  # noqa: BLE001 — reason stated above
                 # The explanation must never break the answer — but its
                 # failure must not be invisible either (review round #283):
                 # the journal says why this turn carries no explanation.
@@ -453,7 +453,7 @@ class AgentLoopResponseDeciders:
                             ),
                         },
                     )
-            except Exception as _ab_exc:
+            except Exception as _ab_exc:  # noqa: BLE001 — the failure is recorded and logged
                 try:
                     self.log.log(
                         "clarification_ask_back_failed",
@@ -462,7 +462,7 @@ class AgentLoopResponseDeciders:
                             "error": str(_ab_exc)[:300],
                         },
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — the logger must never break the answer path
                     pass
 
         policy_result = apply_ranker_output_policy(

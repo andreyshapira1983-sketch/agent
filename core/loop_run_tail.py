@@ -152,7 +152,7 @@ class AgentLoopRunTail:
                     "attempts_used": self._current_attempt,
                     "replan_exhausted": replan_exhausted,
                 })
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — the logger must never break the answer path
                 pass
 
         self.log.log(

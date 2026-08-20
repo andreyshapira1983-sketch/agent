@@ -113,7 +113,7 @@ class SemanticScholarSearchTool(Tool):
         # Graceful fallback via DuckDuckGo scoped to semanticscholar.org
         try:
             return self._ddg_fallback(query, n)
-        except Exception:
+        except Exception:  # noqa: BLE001 — reason stated above
             raise RuntimeError(
                 f"Semantic Scholar API unavailable after retries "
                 f"({type(last_exc).__name__}: {last_exc}). "
@@ -157,7 +157,7 @@ class SemanticScholarSearchTool(Tool):
                         "citation_count": 0,
                         "source": "semantic_scholar_via_ddg",
                     })
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — optional network search; no results is the answer
             pass
         return results
 

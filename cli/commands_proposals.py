@@ -103,7 +103,7 @@ def _handle_subagent_proposal(rest: str, agent: AgentLoop, workspace: Path) -> b
             llm=agent.model_router.for_task(ModelRole.PLANNER, goal),
             logger=agent.logger if hasattr(agent, "logger") else None,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(subagent-proposal failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
 

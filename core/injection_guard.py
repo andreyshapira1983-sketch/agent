@@ -445,7 +445,7 @@ def _to_text(output: Any) -> str:
         return output
     try:
         return json.dumps(output, ensure_ascii=False, default=str)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         # The fallback loses formatting, never content: this text exists to be
         # SCANNED for injection markers, and `str()` keeps every character the
         # scanner looks at. Failing closed here would mean refusing to scan,

@@ -224,7 +224,7 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
         return architecture_audit_candidates(
             gaps, exists=lambda rel: _path_exists(root / rel)
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # An empty candidate list is indistinguishable from "the audit found
         # nothing wrong" — the backlog quietly loses a whole source of work and
         # looks healthier for it (MIR-077).

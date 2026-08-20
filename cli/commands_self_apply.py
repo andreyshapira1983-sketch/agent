@@ -43,7 +43,7 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
     try:
         from core.subagent_registry import SubagentRegistry
         registry = SubagentRegistry.load(workspace)
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort side hook; any failure means no registry
         registry = None
     result = run_approved_self_apply(
         inbox=inbox,

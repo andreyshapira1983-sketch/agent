@@ -429,7 +429,7 @@ class AutonomousRuntime:
                         budget=queue_budget,
                         circuit=queue_circuit,
                     )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
                 failed, decision = apply_run_exception(task_queue, task.id, exc)
                 self._log(
                     "task_lifecycle",
@@ -673,7 +673,7 @@ class AutonomousRuntime:
                     "failed_tasks": failed,
                 },
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # This method exists to leave a record that the run halted. Failing
             # it silently produces exactly the state it was written to prevent:
             # a halt with no incident, indistinguishable from a clean stop
@@ -721,7 +721,7 @@ class AutonomousRuntime:
                 return self._task_goal(task, config)
             if task.kind == "propose":
                 return self._task_propose(task, config, budget)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Not silence: the failure leaves as the task's own report — status
             # `failed`, the exception type in the summary AND in `details`,
             # which `run_task_queue` writes to the queue row and `_log`s as
@@ -888,7 +888,7 @@ class AutonomousRuntime:
         if callable(by_kind):
             try:
                 web_fetches = len(by_kind("web_page"))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # 0 stays, because the caller wants an int — but a 0 that means
                 # "counted none" and a 0 that means "could not count" read the
                 # same in the run report, and the operator has no way to tell
@@ -920,7 +920,7 @@ class AutonomousRuntime:
             return 0
         try:
             return len(list_persistent())
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Same shape as `_usage_counters`: "the store holds 0 records" and
             # "the store could not be read" are different facts and used to
             # produce the same number in the report (MIR-077).
@@ -1126,7 +1126,7 @@ class AutonomousRuntime:
 
         try:
             raw = llm.complete(system=system, user=user, max_tokens=800, temperature=0.4)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
             self._log("propose_llm_failed", {"error": f"{type(exc).__name__}: {exc}"})
             return AutonomousTaskReport(task, "failed", "llm error", {"error": str(exc)})
 
@@ -1247,7 +1247,7 @@ class AutonomousRuntime:
                     if "lesson" in (getattr(r, "tags", ()) or ())
                 ]
                 digest["recent_lessons"] = lessons[-5:]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # An empty list here goes into the prompt that asks the model
                 # what to propose next. "No lessons banked" and "the store
                 # would not open" lead to different proposals, and both used to
@@ -1271,7 +1271,7 @@ class AutonomousRuntime:
         token_sets: list[tuple[str, frozenset[str]]] = []
         try:
             snap = self.approval_inbox.snapshot()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Returning empty sets does not merely lose information: it turns
             # duplicate detection OFF for this cycle, so the very next proposal
             # is admitted as new however many times it has already been filed.
@@ -1313,7 +1313,7 @@ class AutonomousRuntime:
         # Find first JSON object.
         try:
             data = json.loads(text)
-        except Exception:
+        except Exception:  # noqa: BLE001 — reason stated above
             # Silent on purpose: this is not the verdict, it is the first of
             # two attempts. A reply wrapped in prose is ordinary and the
             # brace-slice below is the normal recovery — journaling here would
@@ -1329,7 +1329,7 @@ class AutonomousRuntime:
                 return None
             try:
                 data = json.loads(text[start : end + 1])
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # This one IS the verdict: both attempts are spent and a paid
                 # model reply is about to be dropped. §4 of the notebook was
                 # written for exactly this — an expensive result discarded with
@@ -1466,13 +1466,13 @@ class AutonomousRuntime:
                             "dry_run": config.dry_run,
                         },
                     )
-                except Exception as ingest_exc:
+                except Exception as ingest_exc:  # noqa: BLE001 — the failure is recorded and logged
                     self._log(
                         "reflection_learning_ingest_error",
                         {"error": f"{type(ingest_exc).__name__}: {ingest_exc}"},
                     )
             return result.to_dict()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
             self._log("reflection_error", {"error": f"{type(exc).__name__}: {exc}"})
             return {"error": str(exc)}
 
@@ -1487,7 +1487,7 @@ class AutonomousRuntime:
                 item.operation == "self_apply_lane.run"
                 for item in self.approval_inbox.pending()
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # False is the permissive answer — it means "nothing pending, go
             # ahead and propose". An unreadable inbox therefore does not block
             # the lane, it opens it, which is the wrong direction to fail in
@@ -1519,7 +1519,7 @@ class AutonomousRuntime:
         if model_router is not None:
             try:
                 llm = model_router.for_role("synthesizer")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # `None` sends the caller down the no-model branch, which looks
                 # from the outside like a deliberate choice not to use one
                 # (MIR-077).
@@ -1578,7 +1578,7 @@ class AutonomousRuntime:
                 agent, kind="self-build-produce", result=result
             )
             return result
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
             self._log(
                 "self_build_proposal_error",
                 {"error": f"{type(exc).__name__}: {exc}"},

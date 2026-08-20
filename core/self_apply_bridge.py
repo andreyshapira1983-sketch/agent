@@ -236,7 +236,7 @@ def _pending_excluding(inbox: Any, item_id: str) -> int:
     """Count *other* pending approvals — never the item being executed."""
     try:
         pending = inbox.pending()
-    except Exception:  # pragma: no cover - inbox contract is trusted
+    except Exception:  # noqa: BLE001 — pragma: no cover - inbox contract is trusted
         return 0
     return sum(1 for it in pending if getattr(it, "id", None) != item_id)
 
@@ -334,7 +334,7 @@ def run_approved_self_apply(
     try:
         decision = gw.evaluate_self_apply(operation=SELF_APPLY_OPERATION)
         outcome = getattr(decision, "outcome", "deny")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # Fail closed. Best-effort G4 error receipt — never let a receipt failure
         # affect the fail-closed outcome.
         _record_self_apply_gateway_error(workspace, item_id)
@@ -355,7 +355,7 @@ def run_approved_self_apply(
         record_gateway_receipt(
             decision, workspace=workspace, refs={"proposal_id": item_id}
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # A receipt missing from the audit trail of an EFFECTFUL operation is
         # the gap the trail exists to close: the self-apply ran, and nothing
         # durable says under which decision (MIR-077).
@@ -421,7 +421,7 @@ def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:
             status="error",
             refs={"proposal_id": item_id},
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # This IS the fail-closed path: it exists to leave a receipt saying the
         # gateway raised. Failing it silently produces the state it was written
         # to prevent — an effectful operation refused with no record that it
@@ -476,7 +476,7 @@ def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
         if _origin_of(item) != PRODUCER_ORIGIN:
             return
         registry.apply_lane_outcome(getattr(item, "id", None), status)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # The lane outcome is what stops the producer proposing the same target
         # again. Losing it silently means the next cycle re-proposes work that
         # has already been applied or refused (MIR-077).

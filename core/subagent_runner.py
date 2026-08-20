@@ -385,7 +385,7 @@ class SubAgentRunner:
                 verifier_enabled=False,  # sub-agent answers are reviewed by parent
             )
             answer = child_loop.run(user_question=question)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
             err = f"{type(exc).__name__}: {exc}"
             child_logger.log(
                 "subagent_done",
@@ -467,7 +467,7 @@ class SubAgentRunner:
                         if _ev.kind not in seen:
                             seen.append(_ev.kind)
                 ext_kinds = tuple(seen)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Zero external evidence is a JUDGEMENT about the sub-agent's
             # answer — it feeds the quality score. "The child cited nothing
             # external" and "we could not read the child's chain" are different
@@ -595,7 +595,7 @@ class SubAgentRunner:
                 return 0
             m = re.search(r"[1-5]", response)
             return int(m.group()) if m else 0
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # 0 is the worst rating on a 1-5 scale, so a judge that CRASHED is
             # indistinguishable from a judge that read the answer and hated it
             # — and the score gates whether the sub-agent's work is used.

@@ -237,7 +237,7 @@ def _skip(report: IngestReport, path: Path, workspace: Path, reason: str) -> Non
 def _relative_label(workspace: Path, path: Path) -> str:
     try:
         return path.resolve().relative_to(workspace.resolve()).as_posix()
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         # Not an error: `relative_to` raises for any path outside the
         # workspace, and a label for such a path is legitimately the absolute
         # one. Nothing failed, so there is nothing to journal.

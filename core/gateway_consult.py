@@ -88,7 +88,7 @@ def budget_ledger_snapshot(workspace: Path) -> dict | None:
             config_path=root / "config" / "budget_limits.json",
         )
         return ledger.snapshot()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         # `None` makes the caller skip the budget check entirely, so an
         # unreadable ledger does not block the action — it waves it through.
         # Failing open on a spend guard is exactly the direction that must

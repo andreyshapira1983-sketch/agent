@@ -409,7 +409,7 @@ class AgentLoopVerifyReplan:
                         expects_contract_headers=self._synthesis_expects_contract_headers,
                         **self._verification_receipt_kwargs(),
                     )
-                except Exception as _ver_exc:
+                except Exception as _ver_exc:  # noqa: BLE001 — reason stated above
                     st.verifier_failure = True
                     self.log.log(
                         "verifier_failure",

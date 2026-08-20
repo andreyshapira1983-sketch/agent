@@ -77,7 +77,7 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 test_paths=test_paths,
                 test_pattern=pattern,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
             print(f"repair: proposal generation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             return True
         print(gen_report.user_summary(), file=sys.stderr)
@@ -89,7 +89,7 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 gen_report.proposal,
                 workspace_root=workspace,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
             print(f"repair: apply failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             return True
         print(report.user_summary(), file=sys.stderr)
@@ -113,7 +113,7 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             ),
             workspace_root=workspace,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — reason stated above
         print(f"repair failed before controller run: {type(exc).__name__}: {exc}", file=sys.stderr)
         return True
 

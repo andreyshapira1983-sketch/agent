@@ -183,7 +183,7 @@ def _load_catalog() -> dict[str, Any] | None:
             logger.debug("model_catalog expired (age=%d days)", age_days)
             return None
         return data
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
         logger.warning("model_catalog load error: %s", exc)
         return None
 
@@ -278,7 +278,7 @@ def discover_catalog(
             continue
         try:
             model_ids = fetcher(api_keys.get(provider))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
             logger.warning("model fetch failed for %s: %s", provider, exc)
             continue
 

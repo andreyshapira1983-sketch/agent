@@ -531,7 +531,7 @@ class SelfRepairController:
                     "content_chars": len(content),
                 },
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # A confirmed repair already landed on disk; failing to persist the
             # LESSON must not crash the repair flow, so we still swallow the
             # exception here. But it must NOT be silent: a swallowed memory

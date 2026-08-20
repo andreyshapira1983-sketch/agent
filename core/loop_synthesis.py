@@ -121,7 +121,7 @@ class AgentLoopSynthesis:
         try:
             from core.prompt_registry import get_prompt as _get_prompt
             return _get_prompt("synthesizer.system")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Reported through `_sensor_failed`, which journals it — the audit
             # in `scripts/except_audit.py` looks for a literal `.log(` call and
             # does not recognise the layer's own reporting helper, so the
@@ -142,7 +142,7 @@ class AgentLoopSynthesis:
                 stores=_organ_map(self),
                 durable_writes=getattr(self, "durable_writes", ()) or (),
             )
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется
             # Молча вернуть пустоту здесь — ровно тот порок, который храповик
             # молчания и сторожит: оператор, читающий журнал, не узнал бы, что
             # агент не смог назвать собственный состав.

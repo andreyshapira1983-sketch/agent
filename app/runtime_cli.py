@@ -121,7 +121,7 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 include_proposals=include_proposals,
             )
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(auto-run failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
 
@@ -211,7 +211,7 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             workspace=workspace,
             approval_inbox=_approval_inbox_for(agent, workspace),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(work-session failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
 
@@ -361,7 +361,7 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
             approval_inbox=_approval_inbox_for(agent, workspace),
             ledger=ledger,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"(campaign failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
 
