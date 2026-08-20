@@ -76,34 +76,64 @@ skips, so a stale expectation cannot sit green.
 
 ## The mutation sweep
 
-Six modules of the fourteen selected were measured; the run stopped on a
-session limit before the rest. **Not measured at all:** `core/reflection.py`,
-`core/architecture_audit.py`, `cli/intent_bridge.py`,
-`core/self_build_producer.py`, `core/step_sanitizer.py`,
-`core/loop_step_execution.py`, `cli/commands_plan.py`,
-`core/memory_policy.py`.
+Thirteen modules of the fourteen selected were measured. `cli/commands_plan.py`
+never ran: its isolation worktree was refused as unverifiable and the agent
+stopped rather than working in an unknown tree — the correct outcome, and a
+gap in the coverage all the same.
 
 | | |
 |---|---|
-| Breaks applied | 74 |
-| Caught by the module's own slice | 29 |
-| Survived the slice | 45 |
-| — replayed and caught elsewhere | 5 |
-| — **survived the entire suite** | 11 |
-| — never replayed (UNKNOWN, not "fine") | 29 |
+| Breaks applied | 170 |
+| Caught by the module's own slice | 70 |
+| Survived the slice | 100 |
+| — replayed and caught elsewhere | 7 |
+| — **survived the entire suite** | 30 |
+| — never replayed (UNKNOWN, not "fine") | 63 |
 
-Of the eleven: 1 safety, 4 correctness, 6 cosmetic.
+Of the thirty: 6 safety, 16 correctness, 7 cosmetic, 1 equivalent mutant.
+
+Per module, breaks caught by that module's own tests — the spread is the point,
+not the average:
+
+| Module | Applied | Caught |
+|---|---|---|
+| `tools/shell_exec.py` | 14 | 12 |
+| `core/self_build_producer.py` | 14 | 9 |
+| `core/step_sanitizer.py` | 14 | 9 |
+| `core/reflection.py` | 14 | 8 |
+| `cli/intent_bridge.py` | 14 | 7 |
+| `core/operator_intent_patterns.py` | 14 | 5 |
+| `core/verifier_core.py` | 14 | 4 |
+| `core/model_router.py` | 14 | 4 |
+| `core/architecture_audit.py` | 12 | 4 |
+| `core/learning_planner.py` | 14 | 3 |
+| `core/memory_policy.py` | 14 | 3 |
+| `core/approval.py` | 4 | 1 |
+| `core/loop_step_execution.py` | 14 | 1 |
 
 **A sampling bias that limits every number above.** `--limit N` takes the
 first N mutations in source order, not a spread. For `core/model_router.py`
 that meant 14 of 85 possible mutations, all from lines 32–125 of a 1776-line
 file. Even a "measured" module was measured at its head.
 
-### The eleven that nothing caught
+### The safety-class breaks that nothing caught
+
+Six of the thirty are safety-class. Two were closed the same day; four remain
+open and are the shortest list of what to do next.
+
+| Site | The break | What it would mean | State |
+|---|---|---|---|
+| `core/model_router.py:82` | the admission gate returns True | a disabled spec, or one whose provider is unsupported, becomes selectable, and `require_available` is skipped | closed — `tests/test_an_unsupported_provider_is_never_selectable.py` |
+| `core/step_sanitizer.py:22` | userinfo split on the first `@` | the pre-filter judges a different host from the one dialled (MIR-111) | closed — fixed and witnessed |
+| `cli/intent_bridge.py:146` | the answer-is-None branch returns True | a message is reported handled although no reply was produced; both call sites then consume the turn | open |
+| `cli/intent_bridge.py:197` | the except-branch returns True | the documented fail-safe inverts: when no planner model can be built, the model is treated as having spoken | open |
+| `cli/intent_bridge.py:265` | token overlap inverts | a stop order cancels queued work it does not name, on any six-character coincidence | open |
+| `core/loop_step_execution.py:154` | the risk-probe failure branch returns True | a tool whose risk probe RAISES is declared read-only and joins the concurrent batch — its own docstring promises the opposite | open |
+
+The rest of the thirty, by what they touch:
 
 | Severity | Site | The break | What it would mean |
 |---|---|---|---|
-| safety | `core/model_router.py:82` | the admission gate returns True | a disabled spec, or one whose provider is unsupported, becomes selectable, and `require_available` is skipped |
 | correctness | `core/operator_intent_patterns.py:21` | `len(words) < 2` → `< 3` | the one-inserted-word tolerance switches off for every two-word term |
 | correctness | `core/learning_planner.py:107` | `score <= 0` → `< 0` | files with no learning value at all become eligible study sources |
 | correctness | `core/learning_planner.py:37` | `frozen=True` → `False` | the object that decides what the agent studies becomes mutable and unhashable |
@@ -130,11 +160,19 @@ two places, both defects the audit found, neither to make a test pass.
 | the one-wedged-word tolerance | `tests/test_one_wedged_word_keeps_a_consent_request_a_consent_request.py` | 3 of 5 red on the mutation |
 | the model-selection admission gate | `tests/test_an_unsupported_provider_is_never_selectable.py` | 2 of 8 red on the mutation |
 | the probe names its true refusal reason | `tests/test_the_probe_knows_why_it_refused.py` | 3 of 3 red before the fix |
+| the pre-filter parses the host that will be dialled | `tests/test_the_prefilter_sees_the_host_that_will_be_dialled.py` | 4 of 12 red before the fix; 1323 tests in the 47 related files stay green |
+| reflection reads its newest logs, not its oldest | `tests/test_reflection_reads_the_newest_logs_not_the_oldest.py` | red on the mutation, green on HEAD, pin holds in both worlds |
 
 Registry entries: MIR-107 (probe misreported its refusal), MIR-108 (four tests
 forbade four names while the capability stayed open), MIR-109 (the opener's
 only witness watched a class name), MIR-110 (banked — "verified diagnosis"
-means "pytest came back").
+means "pytest came back"), MIR-111 (two parsers, one URL), MIR-112 (reflection's
+recency window, where `max_logs` appeared in 0 of 552 test files).
+
+Two of those deserve to be read together, because they are the same organ:
+MIR-110 and MIR-112 are both the learning loop reporting healthy numbers about
+the wrong material — one about evidence it never checked, the other about logs
+it would never have read.
 
 ## What the audit learned about tests
 
