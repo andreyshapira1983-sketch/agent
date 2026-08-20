@@ -14,6 +14,52 @@ from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.workspace_reference import names_workspace_path
 
+
+def learning_grounding(
+    *, focus_areas: list[str], source_paths: list[str], workspace: Path | str
+) -> dict[str, Any]:
+    """Did the plan study the weak spots the diagnosis named, or other things?
+
+    Three kinds of name, and they are not the same failure:
+      * a real path that the plan studied      -> resolved
+      * a path-shaped name that is not a file  -> phantom
+      * a topic ("memory subsystem")           -> unresolvable BY SHAPE, so
+        no disk check can confirm or deny it
+
+    `status` is `targeted` (every named spot studied), `partial`,
+    `substituted` (the names were resolvable and the plan studied other
+    files), `invalid_diagnosis` (path-shaped names that are not files),
+    `unresolvable` (only topic-shaped names), `none`.
+
+    Judges the RECORD, not the policy: a fallback may still happen, it may
+    just not be written down as the thing it replaced (MIR-106).
+    """
+    root = Path(workspace)
+    named = [f.strip() for f in focus_areas if f and f.strip()]
+    if not named:
+        return {"named": [], "resolved": [], "phantom": [],
+                "unresolvable": [], "status": "none"}
+    studied = set(source_paths or ())
+    path_shaped = [f for f in named if _PATH_SHAPED_RE.search(f)]
+    unresolvable = [f for f in named if f not in path_shaped]
+    phantom = [f for f in path_shaped if not (root / f).is_file()]
+    resolved = [f for f in path_shaped if f not in phantom and f in studied]
+    if resolved and len(resolved) == len(named):
+        status = "targeted"
+    elif resolved:
+        status = "partial"
+    elif not path_shaped:
+        status = "unresolvable"
+    elif len(phantom) == len(path_shaped):
+        status = "invalid_diagnosis"
+    else:
+        status = "substituted"
+    return {
+        "named": named, "resolved": resolved, "phantom": phantom,
+        "unresolvable": unresolvable, "status": status,
+    }
+
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -100,6 +146,10 @@ class ReflectionReport:
     learning_plan: LearningPlan | None
     memory_records_saved: int
     warnings: list[str] = field(default_factory=list)
+    #: Studied the diagnosed weak spots, or other things instead — see
+    #: `learning_grounding`. A substitution may happen; it may not be recorded
+    #: as the thing it replaced (MIR-106).
+    learning_grounding: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +163,7 @@ class ReflectionReport:
             ),
             "memory_records_saved": self.memory_records_saved,
             "warnings": self.warnings,
+            "learning_grounding": self.learning_grounding or None,
         }
 
     def user_summary(self) -> str:
@@ -209,6 +260,14 @@ class ReflectionEngine:
         lessons = self._synthesize_lessons(patterns, config, warnings)
         saved = self._save_lessons(lessons)
         learning_plan = self._build_learning_plan(lessons, config, warnings)
+        grounding = learning_grounding(
+            focus_areas=[
+                lesson.focus_area for lesson in lessons
+                if lesson.action in ("learn_more", "repair") and lesson.focus_area
+            ],
+            source_paths=list(learning_plan.source_paths) if learning_plan else [],
+            workspace=self.workspace,
+        )
 
         report = ReflectionReport(
             logs_scanned=logs_scanned,
@@ -218,6 +277,7 @@ class ReflectionEngine:
             learning_plan=learning_plan,
             memory_records_saved=saved,
             warnings=warnings,
+            learning_grounding=grounding,
         )
         self._log("reflection_stop", report.to_dict())
         return report
