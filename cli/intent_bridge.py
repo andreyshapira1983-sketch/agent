@@ -149,16 +149,37 @@ def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
     return True
 
 
-# "Soft" status/capability intents that conversational phrasing can trip. For
-# these, the keyword match is VERIFIED by the model (it tells a request apart
-# from a passing mention) before dispatch. Explicit imperative intents are not
-# gated.
+# Every intent a free-text utterance can reach. The keyword table PROPOSES a
+# candidate; the model sees the original text plus that candidate and may veto
+# it. Lexis is a sensor here, never the judge of meaning — a colon-prefixed
+# token is machine syntax and keeps its deterministic parser instead.
+#
+# Extending the gate is monotone-safe: `_model_says_conversation` returns False
+# on any uncertainty, so a model error or a missing model leaves the old
+# deterministic route in place.
+#
+# Membership is checked against the declared kinds by
+# tests/test_no_free_text_intent_routes_on_words_alone.py, so a new intent
+# cannot quietly arrive ungated.
 _VERIFY_INTENTS: frozenset[str] = frozenset({
+    # status / capability, which conversational phrasing trips easily
     "capability_check", "project_health", "smart_memory_status",
     "current_gaps_check", "weakness_finder", "next_safe_test",
     "best_next_action", "next_actions", "autonomy_readiness",
     "model_status", "budget_status", "approval_status", "urgent_status",
+    # imperatives, gated 2026-08-20 by operator ruling
+    "architecture_audit", "capability_request", "implementation_plan",
+    "patch_proposal", "programming_readiness", "safe_self_check",
+    "self_build_request", "self_task_proposal",
+    "source_review_plan", "subagent_proposal",
 })
+
+# `shell_command_hint` stays ungated, and it is the ruling's own exception
+# rather than a leftover: it fires on MACHINE syntax — a pasted shell line —
+# not on human language, and its whole effect is printing "run this in
+# PowerShell". Nothing operational is acquired, so there is no intent for the
+# model to adjudicate.
+_UNGATED_MACHINE_SYNTAX: frozenset[str] = frozenset({"shell_command_hint"})
 
 
 def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop) -> bool:
