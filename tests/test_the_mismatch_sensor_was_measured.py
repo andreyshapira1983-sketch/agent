@@ -61,9 +61,7 @@ def test_the_table_does_not_cover_the_registry() -> None:
 
 def test_the_table_names_tools_that_do_not_exist() -> None:
     """The reverse direction accuses the planner of omitting a step it cannot
-    produce: this entry matches no registered tool. (`spawn_subagent` was
-    wrongly named a phantom in the first draft of this record and is in fact
-    registered — the error was caught by this very test.)"""
+    produce: this entry matches no registered tool."""
     phantom = set(_TOOL_KEYWORDS) - _registered_tools()
     assert phantom == {"self_repair"}, (
         f"the measured phantom entry changed; now phantom: {sorted(phantom)}"

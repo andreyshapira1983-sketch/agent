@@ -9,8 +9,8 @@ import hashlib
 import pytest
 
 from core.evidence import Evidence, ProvenanceChain
+from core.verifier_absence import absence_refuted_by_excerpt, asserts_absence
 from core.verifier_core import verify
-from core.verifier_utils import absence_refuted_by_excerpt, asserts_absence
 
 #: Дословно из живой проверки 2026-08-15: три ВЕРНЫХ утверждения получили
 #: `[claim-refuted]`, потому что пересказывали записанную ошибку.

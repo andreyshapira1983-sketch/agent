@@ -9,8 +9,8 @@ import hashlib
 import pytest
 
 from core.evidence import Evidence, ProvenanceChain
+from core.verifier_absence import absence_certifiable
 from core.verifier_core import verify
-from core.verifier_utils import absence_certifiable
 
 #: Дословно из автономного прогона 2026-08-15. Обработка ЕСТЬ —
 #: core/self_repair.py:117 ставит `low_confidence` и выходит, — но утверждение

@@ -29,10 +29,7 @@ we). Verified here today against main: the detector's keyword table knows
 `lesson_provenance` are invisible to it, so planning them is flagged by
 construction — and one entry it DOES hold (`self_repair`) names no
 registered tool at all, i.e. it accuses the planner of omitting a step it
-cannot produce. (`spawn_subagent` was named here as a second phantom on
-2026-08-19 and is in fact registered; the claim was corrected in
-core/reasoning_action_check.py and MIR-015 the same evening and this
-sentence kept the dead version for hours — the echo outlived the fact.) The invariant these tests
+cannot produce. The invariant these tests
 protect is unchanged: repeated defect signals must open an investigation.
 What changes is what such an investigation should find FIRST — suspect the
 sensor before the reasoning.

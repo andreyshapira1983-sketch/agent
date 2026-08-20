@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from core.evidence import ProvenanceChain, make_evidence
 from core.verifier import verify
-from core.verifier_utils import literals_absent_from_excerpt, salient_literals
+from core.verifier_absence import literals_absent_from_excerpt, salient_literals
 
 #: Живая проба 2026-08-16 (trace_3bb22486): составное утверждение «в доках
 #: “Added in version 3.12” И у меня Python 3.11.9» подтвердилось целиком по

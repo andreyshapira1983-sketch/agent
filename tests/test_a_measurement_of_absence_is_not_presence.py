@@ -5,7 +5,7 @@ Background: docs/CODE_NOTES.md, "The experiment's question refuted its answer".
 from __future__ import annotations
 
 from core.evidence import evidence_from_tool_result
-from core.verifier_utils import absence_reason, absence_refuted_by_excerpt
+from core.verifier_absence import absence_reason, absence_refuted_by_excerpt
 
 #: Живая проба №4 (2026-08-16, trace_471e5543): эксперимент напечатал
 #: `has batched: False`, ответ заключил «itertools.batched отсутствует» — и

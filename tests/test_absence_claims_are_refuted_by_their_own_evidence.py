@@ -129,7 +129,7 @@ def test_the_gate_only_subtracts() -> None:
     Выдержка усечена по построению, поэтому «предмета в выдержке нет» не
     доказывает, что его нет в файле. Гейт обязан молчать в эту сторону.
     """
-    from core.verifier_utils import absence_refuted_by_excerpt
+    from core.verifier_absence import absence_refuted_by_excerpt
 
     assert absence_refuted_by_excerpt('нет поля "lesson"', "lessons = ()")
     assert not absence_refuted_by_excerpt('нет поля "lesson"', "совсем другой текст")

@@ -290,12 +290,6 @@ def _handle_self_build_supervisor(rest: str, agent: AgentLoop, workspace: Path) 
     print("\n".join(lines), file=sys.stderr)
     return True
 
-# ---------------------------------------------------------------------------
-# Large-file scan + `:self-build-propose`, moved here from
-# cli/commands_ingest.py on 2026-08-20. It had always belonged to this module:
-# cli/commands_self_build.py already imported `_self_build_propose_payload`
-# back out of the ingest file.
-# ---------------------------------------------------------------------------
 LARGE_FILE_LINE_THRESHOLD = 3000
 SAFE_PYTHON_SCAN_ROOTS = (
     "api",
