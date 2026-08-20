@@ -128,8 +128,10 @@ def test_the_generator_asks_for_its_model_after_the_baseline(tmp_path):
 
     class _Recorder:
         def complete(self, **kwargs):
-            return '{"diagnosis": "d", "target_file": "target.py", ' \
-                   '"proposed_content": "x = 2\\n", "evidence": [], "confidence": 0.5}'
+            return (
+                '{"diagnosis": "d", "target_file": "target.py", '
+                '"proposed_content": "x = 2\n", "evidence": [], "confidence": 0.5}'
+            )
 
     class _RunTests:
         def run(self, **kwargs):

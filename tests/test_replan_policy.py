@@ -90,7 +90,7 @@ class TestDefaultBudgetsCoverage:
             assert DEFAULT_BUDGETS[code].max_occurrences >= 2
 
     def test_advice_strings_are_non_empty(self):
-        for code, budget in DEFAULT_BUDGETS.items():
+        for _code, budget in DEFAULT_BUDGETS.items():
             assert budget.advice.strip() != ""
 
 

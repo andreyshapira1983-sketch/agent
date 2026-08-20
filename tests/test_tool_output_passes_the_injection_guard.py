@@ -116,7 +116,7 @@ def test_a_contaminated_tool_result_is_refused_and_typed(tmp_path: Path) -> None
     # is the CONSEQUENCE: the step failed, so the attempt could not succeed.
     assert "replan_exhausted" in kinds, (
         "a blocked tool output must fail the step, not become an artifact; "
-        f"events seen: {sorted(set(k for k in kinds if k))}"
+        f"events seen: {sorted({k for k in kinds if k})}"
     )
 
 

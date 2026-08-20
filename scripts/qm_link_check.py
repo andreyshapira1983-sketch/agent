@@ -77,6 +77,7 @@ def _extract_ast_facts(bridge: Path, target: Path, anchor_name: str) -> dict | N
         [exe, "-NoProfile", "-File", str(bridge),
          "-Path", str(target), "-Function", anchor_name],
         capture_output=True, text=True, encoding="utf-8",
+        check=False,
     )
     if proc.returncode != 0 or not (proc.stdout or "").strip():
         return None
@@ -235,6 +236,7 @@ def _python_facts(bridge: Path, module_file: Path, function: str) -> dict | None
     proc = subprocess.run(
         [sys.executable, str(bridge), str(module_file), function],
         capture_output=True, text=True, encoding="utf-8", timeout=300, cwd=str(ROOT),
+        check=False,
     )
     try:
         return json.loads(proc.stdout)
@@ -272,6 +274,7 @@ def _check_producer_bindings(specimen: dict) -> int:
         proc = subprocess.run(
             [sys.executable, str(bridge), str(module_file), resolver.get("function", "")],
             capture_output=True, text=True, encoding="utf-8", timeout=300, cwd=str(ROOT),
+            check=False,
         )
         try:
             facts = json.loads(proc.stdout)

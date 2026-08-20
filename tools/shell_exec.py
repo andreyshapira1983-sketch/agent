@@ -777,7 +777,7 @@ class ShellExecTool(Tool):
         env = {"PATH": os.environ.get("PATH", "")}
         if sys.platform == "win32":
             # SystemRoot is REQUIRED for many Windows .exe to even start.
-            sr = os.environ.get("SystemRoot")
+            sr = os.environ.get("SystemRoot")  # noqa: SIM112 — Windows-only variable; this is the spelling the OS documents
             if sr:
                 env["SystemRoot"] = sr
             # PATHEXT is how Windows turns the NAME `python` into `python.exe`.

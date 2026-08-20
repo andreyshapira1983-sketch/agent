@@ -72,7 +72,7 @@ class TestParseCitations:
         assert cits[0].body == "foo.txt"
 
     def test_every_prefix_recognised(self):
-        text = " ".join(f"[{p}:x]" for p in CITATION_PREFIXES.keys())
+        text = " ".join(f"[{p}:x]" for p in CITATION_PREFIXES)
         cits = parse_citations(text)
         assert {c.prefix for c in cits} == set(CITATION_PREFIXES.keys())
 

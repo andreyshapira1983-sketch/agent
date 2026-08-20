@@ -32,6 +32,7 @@ def _facts(module_path: Path) -> dict:
     proc = subprocess.run(  # noqa: S603 — the test runs the repo's own checker
         [sys.executable, str(_BRIDGE), str(module_path), "__module__"],
         capture_output=True, text=True, encoding="utf-8", timeout=300,
+        check=False,
     )
     return json.loads(proc.stdout)
 

@@ -247,9 +247,46 @@ class RssFetchTool(Tool):
         return None
 
 
+def _prolog_declares_a_dtd(text: str) -> bool:
+    """True when the XML prolog carries a DTD or an entity declaration.
+
+    Only the prolog is examined — everything before the root element, skipping
+    processing instructions and comments — so the same characters inside a
+    text node or CDATA are not mistaken for a declaration.
+    """
+    i = 0
+    n = len(text)
+    while i < n:
+        while i < n and text[i].isspace():
+            i += 1
+        if not text.startswith("<", i):
+            return False
+        if text.startswith("<?", i):
+            end = text.find("?>", i)
+            if end < 0:
+                return False
+            i = end + 2
+            continue
+        if text.startswith("<!--", i):
+            end = text.find("-->", i)
+            if end < 0:
+                return False
+            i = end + 3
+            continue
+        head = text[i : i + 9].upper()
+        return head.startswith("<!DOCTYPE") or head.startswith("<!ENTITY")
+    return False
+
+
 def _parse_feed(text: str, *, limit: int) -> tuple[str, str, list[dict[str, str]]]:
+    # The feed comes off someone else's server. ElementTree resolves no
+    # external entities but does expand internal ones, which is all that
+    # billion-laughs and quadratic blowup need. RSS and Atom have no use for
+    # a DTD, so the declaration itself is the refusal.
+    if _prolog_declares_a_dtd(text):
+        raise ValueError("feed declares a DTD or entity — refused before parsing")
     try:
-        root = ET.fromstring(text)
+        root = ET.fromstring(text)  # noqa: S314 — the prolog guard above refuses DTD/entity feeds
     except ET.ParseError as exc:
         raise ValueError(f"feed XML parse failed: {exc}") from None
 

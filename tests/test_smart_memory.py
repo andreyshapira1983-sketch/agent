@@ -30,7 +30,7 @@ from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 
 
-def _declare_completion(monkeypatch, token: str = "achieved") -> None:
+def _declare_completion(monkeypatch, token: str = "achieved") -> None:  # noqa: S107 — a fixture value, not a credential
     """Append a valid completion marker to whatever synthesis produces.
 
     An end-to-end cycle here is driven by a canned `FakeLLM` answer, which

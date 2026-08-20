@@ -169,7 +169,7 @@ class AgentLoopInit:
             )
         else:
             if (
-                max_replan_attempts != DEFAULT_MAX_REPLAN_ATTEMPTS
+                max_replan_attempts != DEFAULT_MAX_REPLAN_ATTEMPTS  # noqa: PLR1714 — the split guard compares this body to core/loop.py symbol for symbol
                 and max_replan_attempts != replan_policy.max_total_replans
             ):
                 raise ValueError(
