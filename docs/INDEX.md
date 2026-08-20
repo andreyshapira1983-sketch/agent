@@ -240,14 +240,29 @@ Presence here is not authority. The `status` column is the whole point.
 | `doctrine/future/AGENT_ROLE_CONTRACT.md` | proposed durable specialised roles | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
 | `doctrine/future/ORGANISATIONAL_ROLES_CONTRACT.md` | proposed role contracts and performance ledgers | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
 
-**On those last two.** Together they are 2282 lines the agent wrote about
-itself, and nothing in the tree reads them. Both already carry a
-DRAFT/TARGET banner at their head, so the danger of a later model reading
-them as a live contract is bounded — but they are listed here explicitly as
-*unadopted agent-authored proposals* so that the ledger, not only the file,
-says so. Their operational utility is **not established**; that is not the
-same claim as "they are waste", and deciding between keep / merge / archive
-needs their content examined against the current charter first.
+**On those last two, read 2026-08-20 (MIR-104).** Together they are 2282
+lines the agent wrote about itself, and nothing in the tree reads them. Both
+carry a DRAFT/TARGET banner. Their content was then examined against the
+charter and the code, and the result inverts the expected worry:
+
+* their seven "hard invariants" are **not proposals** — they restate
+  `CENTRAL_AGENT_GOVERNANCE.md` §1–§9, where the same rules are marked
+  IMPLEMENTED;
+* the role contract they propose **exists** as `CanonicalSubagentContract`
+  (memory / tool / budget scopes) in `core/subagent_contract.py`;
+* the role-performance ledger of their §11 **exists** as `RoleRecord` in
+  `core/subagent_registry.py` — per-role counters plus advisory scores;
+* genuinely unbuilt, and this is what they are worth: durable role families
+  as standing offices, assignment contracts with closure states, and the
+  ledger refinements — segmentation by task class and risk tier,
+  tamper-evidence, retention policy.
+
+So the danger runs the other way. Read top-down under `future/`, they teach
+that the agent has no role contracts and no performance ledger — and it has
+both. A self-model that **understates** the system invites rebuilding what
+exists. **Verdict: keep**; the unbuilt part is real and the restating part
+is harmless once labelled. The smaller document is a subset of the larger on
+invariants and is the merge candidate if one is ever wanted.
 
 ### 6.3 Outside both trees
 

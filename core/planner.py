@@ -403,8 +403,11 @@ class LLMPlanner:
                 "episodic / procedural / consolidation / forgetting / retrieval "
                 "/ durable learning. Read knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md and "
                 "knowledge/doctrine/self-audit-lessons.md first, before core/*.py mechanics. "
-                "These record known defects and their causes — do not "
-                "re-derive them from the code.]\n"
+                "These record known defects and their CAUSES; do not re-derive "
+                "those from the code. Their status ledgers are superseded — "
+                "whether a defect is still open belongs to "
+                "docs/audit/MASTER_ISSUE_REGISTRY.md, and where a document and "
+                "the code disagree, the code wins.]\n"
             )
         self_repair_docs_block = ""
         if docs_readable and _is_self_repair_doctrine_question(question):
