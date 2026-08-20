@@ -424,17 +424,10 @@ _OVERSIZED_MODULE_MIN_LINES = 800
 _MAX_OVERSIZED_RECORDS = 25
 
 # The emitted target is deliberately abstract (``split:<file>``) so that this
-# module stays a pure detector: it names a structural property, not a file to edit.
-#
-# STALE UNTIL 2026-08-19, corrected here: this comment claimed the abstract form
-# meant "NO deterministic mapper … never auto-rewrite it … must stay human-driven".
-# That stopped being true when core/backlog_target_mapper.py grew
-# ``SPLIT_TARGET_PREFIX`` and ``_map_split_candidate()``: a split target now
-# resolves to its concrete ``.py`` and counts as ACTIONABLE, and the self-build
-# producer has a split mode. The human-owned part survives one floor down instead —
-# critical organs resolve here so ranking stays honest, and the Manager's critical
-# gate blocks the actual edit. Read that file, not this comment, for what a split
-# target does today.
+# module stays a pure detector: it names a structural property, not a file to
+# edit. Resolving it to a concrete module and deciding whether that module may
+# be touched belongs to core/backlog_target_mapper.py and the Manager's
+# critical gate, not here.
 _OVERSIZED_TARGET_PREFIX = "split:"
 
 

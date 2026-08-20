@@ -14,6 +14,11 @@ from core.evidence_classes import (
 )
 
 from .claim_arithmetic import evaluate as evaluate_claim_arithmetic
+from .verifier_absence import (
+    absence_certifiable,
+    absence_reason,
+    absent_literal_reason,
+)
 from .verifier_models import ClaimChunk, ClaimReason, VerificationReport
 from .verifier_patterns import (
     _NON_CLAIM_SECTIONS,
@@ -31,9 +36,6 @@ from .verifier_utils import (
     _merge_citation_only_chunks,
     _output_contract_header_name,
     _tool_citation_for,
-    absence_certifiable,
-    absence_reason,
-    absent_literal_reason,
     enumeration_count_reason,
     extract_statistical_figures,
     is_statistical_claim,

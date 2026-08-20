@@ -2,9 +2,7 @@
 
 `:source-review-plan`, `:implementation-plan`, `:patch-proposal-plan`, the
 `:self-build-propose` scanner, and the pure helpers they are built from.
-These lived inside `cli/commands_ingest.py` until 2026-08-20, when a cluster
-scan showed they shared no reference with the ingest handlers; they now live
-in `cli/commands_plan.py` and `cli/commands_self_build.py`.
+They live in `cli/commands_plan.py` and `cli/commands_self_build.py`.
 
 Two behaviours here are worth more than their line count:
 

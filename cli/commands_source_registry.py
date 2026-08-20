@@ -1,9 +1,4 @@
-"""REPL commands over the source library and the Source Registry.
-
-Split out of ``cli/commands_ingest.py`` on 2026-08-20: reading what is already
-stored is a different subject from putting things in, and the two shared no
-reference.
-"""
+"""REPL commands that read the source library and the Source Registry."""
 from __future__ import annotations
 
 import json

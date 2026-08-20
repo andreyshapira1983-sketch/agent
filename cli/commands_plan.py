@@ -1,10 +1,8 @@
 """Deterministic REPL planners: `:source-review-plan`,
 `:implementation-plan`, `:patch-proposal-plan`.
 
-Split out of ``cli/commands_ingest.py`` on 2026-08-20: the cluster scan found
-these 25 members shared no reference with the ingest handlers they lived
-beside — a module inside a module. They read the Source Registry and emit a
-plan payload; they never ingest, never write, and never call a model.
+They read the Source Registry and emit a plan payload; they never ingest,
+never write, and never call a model.
 """
 from __future__ import annotations
 
