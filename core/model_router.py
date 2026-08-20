@@ -689,7 +689,7 @@ class UsageTrackedLLM:
                     if self._reprice is not None and self.provider:
                         try:
                             self.cost_tier = self._reprice(self.provider, self.model)
-                        except Exception:  # pragma: no cover - defensive
+                        except Exception:  # noqa: BLE001, S110 — pragma: no cover - defensive
                             pass
                     route_reason = f"provider_failover:{provider}->{self.provider}"
                     choice = getattr(self, "_failover_choice_reason", "")
@@ -825,7 +825,7 @@ def _is_switch_key_error(exc: BaseException) -> bool:
     try:
         if isinstance(status, int) and status in _SWITCH_KEY_STATUS:
             return True
-    except Exception:  # pragma: no cover - defensive
+    except Exception:  # noqa: BLE001, S110 — pragma: no cover - defensive
         pass
     name = type(exc).__name__.lower()
     if any(marker in name for marker in _SWITCH_KEY_NAME_MARKERS):

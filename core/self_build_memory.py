@@ -311,7 +311,7 @@ def _recent_self_improvement_events(
                     f"detectors {', '.join(signals)}: {text}")
             elif self_improvement and failed:
                 add(getattr(episode, "created_at", ""), text)
-    except Exception:  # noqa: BLE001 — advisory history must never break CLI
+    except Exception:  # noqa: BLE001, S110 — advisory history must never break CLI
         pass
 
     try:
@@ -342,7 +342,7 @@ def _recent_self_improvement_events(
                     kind = "verified" if event.endswith("verified") else "resolved"
                     add(row.get("ts"), payload.get("evidence") or event, kind,
                         fingerprint=fingerprint, action=action)
-    except Exception:  # noqa: BLE001 — malformed traces are ignored best-effort
+    except Exception:  # noqa: BLE001, S110 — malformed traces are ignored best-effort
         pass
 
     records.sort(key=lambda record: record["stamp"])

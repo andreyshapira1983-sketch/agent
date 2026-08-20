@@ -224,7 +224,7 @@ class AgentLoopContext:
             # True when enabling ``on`` would change the answer path (PR2).
             payload["would_change_answer"] = eligible
             self.log.log("referent_decision", payload)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Observability must never abort the run — and its failure must not
             # be invisible either. Measured before this line existed: a healthy
             # turn logs `referent_decision`, a broken one logged NOTHING and
@@ -286,7 +286,7 @@ class AgentLoopContext:
                 known_language=_known_lang,
             )
             _run_assumptions.register_many(_q_assumptions)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Reported, not swallowed. This one hid better than the referent
             # above: `assumptions_registered` fires later (loop_attempt) and
             # ONLY when the registry is non-empty, so a crash here produced the

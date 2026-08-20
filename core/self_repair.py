@@ -547,7 +547,7 @@ class SelfRepairController:
                         "error": str(exc)[:200],
                     },
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — reason stated above
                 pass
 
     def _log_error(

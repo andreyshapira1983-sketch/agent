@@ -141,7 +141,7 @@ class WorkingMemory:
         """Stable key for tool-output caching."""
         try:
             payload = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 — reason stated above
             # A cache key only has to be stable and distinct, not readable.
             # `repr` over sorted items is both, so an unserialisable argument
             # costs nothing here — there is no failure to report.

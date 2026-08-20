@@ -162,7 +162,7 @@ class task_heartbeat:
                 if self._on_error is not None:
                     try:
                         self._on_error(exc)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001, S110 — the error reporter must not raise over the error
                         pass
 
     def __enter__(self) -> Self:

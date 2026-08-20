@@ -327,7 +327,7 @@ def record_tool_invoke_receipt(
     if callable(risk_for):
         try:
             risk = str(risk_for(call.arguments))
-        except Exception:
+        except Exception:  # noqa: BLE001 — reason stated above
             # Falls back to the tool's DECLARED risk, which is the conservative
             # direction: a receipt is still written, and written with the
             # tool's own class rather than with a guess. `read_only` as the

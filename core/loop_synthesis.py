@@ -553,7 +553,7 @@ class AgentLoopSynthesis:
                     "cheap_path_synth_model",
                     {"model": getattr(_synth_llm, "model", None)},
                 )
-            except Exception as _tier_exc:
+            except Exception as _tier_exc:  # noqa: BLE001 — reason stated above
                 # Falling back to the normal model is correct — a tier that
                 # cannot be selected is not a reason to fail the turn. Being
                 # quiet about it is not: the cheap path exists to cut cost, and

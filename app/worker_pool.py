@@ -318,7 +318,7 @@ class WorkerPool:
                     handler_task.cancel()
                     try:
                         await handler_task
-                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — the task was cancelled; its outcome is not an event
                         pass
                 self._cancelled += 1
                 raise

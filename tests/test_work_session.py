@@ -321,5 +321,5 @@ class TestRunWorkSession:
             run_work_session(config, agent=agent, workspace=workspace)
         except AttributeError as exc:
             pytest.fail(f"_log helper is not safe against a .log-less agent: {exc}")
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — reason stated above
             pass  # AutonomousRuntime may fail for unrelated reasons; only _log safety is under test

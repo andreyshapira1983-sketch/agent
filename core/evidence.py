@@ -559,7 +559,7 @@ def evidence_from_tool_result(
     # treat this as weak.
     try:
         excerpt = repr(output)
-    except Exception:
+    except Exception:  # noqa: BLE001 — reason stated above
         # Silence is the whole point: this IS the failure report. A tool whose
         # `__repr__` raises still produced output worth an evidence record, and
         # the placeholder says so in the text a reader sees. Journaling it

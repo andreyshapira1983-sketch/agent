@@ -369,7 +369,7 @@ class LLM:
                 if on_token is not None:
                     try:
                         on_token(text)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001, S110 — a token consumer must never break the stream
                         pass
             # Capture final usage from the completed message
             final_msg = stream.get_final_message()
@@ -414,7 +414,7 @@ class LLM:
                 if on_token is not None:
                     try:
                         on_token(text)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001, S110 — a token consumer must never break the stream
                         pass
             # Final chunk carries usage when stream_options.include_usage=True
             if chunk.usage is not None:

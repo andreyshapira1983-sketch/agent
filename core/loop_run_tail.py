@@ -135,7 +135,7 @@ class AgentLoopRunTail:
                     "artifacts_gained_after_detection": _new_after,
                     "replan_exhausted": replan_exhausted,
                 })
-            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                 self._sensor_failed("stagnation_shadow_outcome", exc)
         if _disagreement_shadow:
             try:
@@ -198,7 +198,7 @@ class AgentLoopRunTail:
                             "turns_after": len(self.memory.turns),
                         },
                     )
-            except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+            except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                 self._sensor_failed("memory_compaction", exc)
 
         verification = self.last_verification
@@ -248,7 +248,7 @@ class AgentLoopRunTail:
                         "novice_signals": updated.novice_signals,
                     },
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # A7: must never abort the run, and must not be invisible.
                 # Silence here reads exactly like "no update was due".
                 self._sensor_failed("user_profile_update", exc)
@@ -262,7 +262,7 @@ class AgentLoopRunTail:
         ):
             try:
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # A7, the worse of the two: measured, a run that lost every
                 # assumption journalled exactly like a healthy one.
                 self._sensor_failed("assumption_store_save", exc)
@@ -348,5 +348,5 @@ class AgentLoopRunTail:
             # задания — то самое дробление, которое оператор видел глазами.
             if _obl.unaddressed_units:
                 self._defect_signals.append("named_units_unaddressed")
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("completion_obligation", exc)

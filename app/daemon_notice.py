@@ -48,5 +48,5 @@ def _print_daemon_inbox_notice(workspace: Path) -> None:
             f"\n{'='*60}\n",
             file=sys.stderr,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass   # inbox missing or unreadable — silent; don't block startup

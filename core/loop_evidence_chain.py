@@ -151,7 +151,7 @@ class AgentLoopEvidenceChain:
                         excerpt=str(_output)[:500],
                         confidence=0.85,
                     ))
-                except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+                except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                     self._sensor_failed("working_memory_evidence", exc)
 
         # Issue #119 — дословная запись обмена. Гейт «только самокоррекция»
@@ -225,7 +225,7 @@ class AgentLoopEvidenceChain:
                 self.log.log(
                     "premature_completion_risk", _pc.to_log_payload()
                 )
-        except Exception as exc:  # наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("premature_completion_risk", exc)
 
         self.log.log(

@@ -185,7 +185,7 @@ class AgentLoopMemoryWrite:
                 payload["fingerprint"] = rec.fingerprint
                 payload["occurrences"] = rec.occurrences
             self.log.log("causal_observation", payload)
-        except Exception as exc:  # наблюдательный сенсор: сбой в журнал
+        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой в журнал
             self._sensor_failed("causal_observation", exc)
 
     def _record_experience_memory(

@@ -140,7 +140,7 @@ class Tool(ABC):
             from core.tool_receipts import record_tool_invoke_receipt
 
             record_tool_invoke_receipt(self, call, result)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — reason stated above
             pass  # receipts must never break tool execution
         return result
 

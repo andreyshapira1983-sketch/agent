@@ -202,7 +202,7 @@ def apply_answer_enforcement(
     found = ()
     try:
         found = contradicted_claims(answer)
-    except Exception:  # обнаружитель не имеет права уронить ход
+    except Exception:  # noqa: BLE001 — обнаружитель не имеет права уронить ход
         found = ()
     result = _enforce_without_contradictions(
         answer=answer,

@@ -161,7 +161,7 @@ def ingest_web_topic(
             if search_ev is not None:
                 chain.add(search_ev)
             report.search_results += len(search_output) if isinstance(search_output, list) else 0
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # Reported, not swallowed: `report.errors` reaches the caller.
             report.errors.append(f"{entry.id} search failed: {type(exc).__name__}: {exc}")
             continue
@@ -196,7 +196,7 @@ def ingest_web_topic(
                 report.bytes_read += int(fetched.get("bytes", 0)) if isinstance(fetched, dict) else 0
                 text = fetched.get("text", "") if isinstance(fetched, dict) else ""
                 report.chunks += len(_chunk_text(str(text), max_chunks=SOURCE_MAX_CHUNKS))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — reason stated above
                 # Reported: typed reason in `errors`, the URL in `skipped_urls`,
                 # so a reader can tell WHICH page is missing, not just how many.
                 report.errors.append(f"{url} fetch failed: {type(exc).__name__}: {exc}")
@@ -498,7 +498,7 @@ def _ingest_paths(
         except UnicodeDecodeError:
             _skip(report, path, workspace, "not valid UTF-8")
             continue
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — reason stated above
             # `_skip` records the path AND the typed reason in the report; the
             # narrower `UnicodeDecodeError` above says the same thing in
             # plainer words for the case that actually happens most.

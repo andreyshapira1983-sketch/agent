@@ -361,7 +361,7 @@ def run_campaign(
             records.append(err_record)
             try:
                 ledger.append(err_record)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — an error record that cannot be filed must not replace the error
                 pass
             try:
                 _log(agent, "campaign_cycle_error", {
@@ -370,11 +370,11 @@ def run_campaign(
                     "consecutive_errors": consecutive_errors,
                     "max_consecutive_errors": config.max_consecutive_errors,
                 })
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — an error record that cannot be filed must not replace the error
                 pass
             try:
                 _emit_cycle(err_record)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — an error record that cannot be filed must not replace the error
                 pass
             if consecutive_errors >= config.max_consecutive_errors:
                 stop_reason = (

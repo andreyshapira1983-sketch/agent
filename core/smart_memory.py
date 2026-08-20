@@ -1054,7 +1054,7 @@ def _checked_declaration(
                 "completion_declaration_coerced",
                 {"token": sanitize_token(raw), "coerced_to": None},
             )
-        except Exception:  # noqa: BLE001 — an audit channel must not break banking
+        except Exception:  # noqa: BLE001, S110 — an audit channel must not break banking
             pass
     return None
 
