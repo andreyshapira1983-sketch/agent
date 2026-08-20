@@ -1,5 +1,12 @@
 # Memory Fix Plan — concrete, code-anchored
 
+> **⚠️ STATUS LEDGER SUPERSEDED (2026-08-20).** This plan is partly executed
+> and partly superseded; its A3 prescription was never applied as written, so
+> a rule read from it may not hold. Defect status belongs to
+> `docs/audit/MASTER_ISSUE_REGISTRY.md`. `core/doc_routing.py` already
+> excludes this file from the memory-governance doc injection for exactly
+> this reason; the banner now says on the document what the router assumed.
+
 Working implementation plan for repairing the agent's memory system. It sits
 next to `knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md` (the audit that found the defects) and
 consumes its Section D/E. **Code on `main` is the source of truth**; where this
