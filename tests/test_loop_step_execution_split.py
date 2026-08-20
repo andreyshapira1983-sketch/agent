@@ -71,7 +71,7 @@ def _normalise(dump: str) -> str:
 def test_logic_moved_symbol_for_symbol():
     """Дословность ЛОГИКИ: тела методов совпадают с историей символ в символ."""
     old_src = subprocess.run(  # nosec B603 — фиксированный argv, без shell
-        ["git", "show", "HEAD~1:core/loop.py"],
+        ["git", "show", "HEAD~1:core/loop.py"],  # noqa: S607 — the test drives a real binary on purpose
         capture_output=True, cwd=_REPO, check=False,
     ).stdout.decode("utf-8")
     if not old_src.strip():  # pragma: no cover — поверхностный клон без истории
@@ -91,7 +91,7 @@ def test_logic_moved_symbol_for_symbol():
 def test_signatures_moved_unchanged():
     """Сигнатуры тоже не тронуты: те же аргументы в том же порядке."""
     old_src = subprocess.run(  # nosec B603 — фиксированный argv, без shell
-        ["git", "show", "HEAD~1:core/loop.py"],
+        ["git", "show", "HEAD~1:core/loop.py"],  # noqa: S607 — the test drives a real binary on purpose
         capture_output=True, cwd=_REPO, check=False,
     ).stdout.decode("utf-8")
     if not old_src.strip():  # pragma: no cover — поверхностный клон без истории

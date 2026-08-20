@@ -102,7 +102,7 @@ class RssFetchTool(Tool):
         self._network_policy.validate_url(url, role="rss_fetch url")
         entry_limit = max(1, min(int(max_entries or DEFAULT_MAX_ENTRIES), MAX_ENTRIES_CAP))
 
-        req = urllib.request.Request(
+        req = urllib.request.Request(  # noqa: S310 — validate_url above enforces the scheme allow-list and egress policy
             url,
             headers={
                 "User-Agent": USER_AGENT,

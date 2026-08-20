@@ -382,7 +382,7 @@ class ShellExecTool(Tool):
         """
         try:
             result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607 — fixed argv; the branch read is the guard's own
                 cwd=self.workspace_root,
                 capture_output=True,
                 text=True,
@@ -618,7 +618,7 @@ class ShellExecTool(Tool):
         started = time.monotonic()
         timed_out = False
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # noqa: S603 — argv passed _validate_argv: whitelist, no metacharacters, inside workspace
                 run_argv,
                 cwd=self.workspace_root,
                 env=env,

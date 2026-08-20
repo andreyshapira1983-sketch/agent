@@ -257,11 +257,11 @@ def test_repeated_mixin_split_uses_unique_base_class(workspace: Path):
             ("splitcheck_core.engine_methods2", second.new_content),
         ):
             module = types.ModuleType(name)
-            exec(compile(content, f"<{name}.py>", "exec"), module.__dict__)
+            exec(compile(content, f"<{name}.py>", "exec"), module.__dict__)  # noqa: S102 — the test runs the module it just generated
             sys.modules[name] = module
         target_src = second.target_content.replace("from core.", "from splitcheck_core.")
         target_module = types.ModuleType("splitcheck_core.engine")
-        exec(compile(target_src, "<engine.py>", "exec"), target_module.__dict__)
+        exec(compile(target_src, "<engine.py>", "exec"), target_module.__dict__)  # noqa: S102 — the test runs the module it just generated
     finally:
         sys.modules.pop("splitcheck_core", None)
         sys.modules.pop("splitcheck_core.engine_methods", None)
@@ -280,7 +280,7 @@ def test_mixin_split_executes_correctly(workspace: Path, tmp_path: Path):
     pkg.__path__ = []  # mark as package
     sys.modules["splitcheck_core"] = pkg
     mixin_mod = types.ModuleType("splitcheck_core.engine_methods")
-    exec(
+    exec(  # noqa: S102 — the test runs the module it just generated
         compile(step.new_content, "<engine_methods.py>", "exec"),
         mixin_mod.__dict__,
     )
@@ -290,7 +290,7 @@ def test_mixin_split_executes_correctly(workspace: Path, tmp_path: Path):
     )
     target_mod = types.ModuleType("splitcheck_core.engine")
     try:
-        exec(compile(target_src, "<engine.py>", "exec"), target_mod.__dict__)
+        exec(compile(target_src, "<engine.py>", "exec"), target_mod.__dict__)  # noqa: S102 — the test runs the module it just generated
         engine = target_mod.Engine()
         assert engine.method_3(1) == 'p1' + str(3)
         assert engine.uses_flag() is True

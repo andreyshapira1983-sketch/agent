@@ -470,7 +470,7 @@ def _value_review_payload(workspace: Path) -> dict[str, Any]:
 def _git_tree_payload(workspace: Path) -> dict[str, Any]:
     try:
         result = subprocess.run(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain"],  # noqa: S607 — fixed argv ['git','status','--porcelain']; no input reaches it
             cwd=str(workspace),
             text=True,
             capture_output=True,

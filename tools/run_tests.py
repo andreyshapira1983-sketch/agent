@@ -151,7 +151,7 @@ class RunTestsTool(Tool):
 
         timed_out = False
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # noqa: S603 — _build_argv validates: workspace-relative paths, no leading dash, ASCII
                 argv,
                 cwd=str(self.workspace_root),
                 env=env,
@@ -299,6 +299,14 @@ class RunTestsTool(Tool):
                 raise ValueError(f"too many paths (max {MAX_PATHS})")
             for i, p in enumerate(paths):
                 require_ascii_identifier(p, role=f"run_tests paths[{i}]")
+                # A leading dash makes pytest read the element as an OPTION,
+                # not a path: `-p <module>` imports arbitrary code. Refused by
+                # shape, because the dangerous set is whatever the installed
+                # pytest accepts.
+                if p.startswith("-"):
+                    raise PermissionError(
+                        f"paths[{i}]={p!r} starts with '-' — refused"
+                    )
                 # Reject any path containing parent-traversal segments.
                 if ".." in Path(p).parts:
                     raise PermissionError(
@@ -321,6 +329,8 @@ class RunTestsTool(Tool):
                     f"pattern too long ({len(pattern)} > {MAX_PATTERN_LEN})"
                 )
             require_ascii_identifier(pattern, role="run_tests pattern")
+            if pattern.startswith("-"):
+                raise PermissionError(f"pattern {pattern!r} starts with '-' — refused")
             argv.extend(["-k", pattern])
 
         argv.extend(cleaned_paths)
