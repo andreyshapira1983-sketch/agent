@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.model_catalog import classify_model, tier_model_for
 from core.task_complexity import (
     _ALWAYS_LIGHT_ROLES,
     _NEVER_LIGHT_TASK_ROLES,
@@ -131,7 +132,6 @@ def test_deep_overrides_light_signal():
 # Verify that the NAMING PATTERN classification works correctly.
 # No specific model version numbers are tested here.
 
-from core.model_catalog import classify_model, tier_model_for
 
 
 def test_classify_haiku_family_is_light():

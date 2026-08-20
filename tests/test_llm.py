@@ -19,7 +19,13 @@ import os
 import pytest
 
 import core.llm as llm_module
-from core.llm import LLM, _default_model
+from core.llm import (
+    _CONTINUE_INSTRUCTION,
+    LLM,
+    _auto_continue_enabled,
+    _default_model,
+    _max_continuations,
+)
 
 
 def _make_planner_prompt(question: str, file_hint: str = "(none)") -> str:
@@ -714,13 +720,7 @@ class TestHuggingFaceFallsBackToComplete:
 # AGENT_MAX_CONTINUATIONS cap. Usage is summed across every leg.
 # ============================================================
 
-import pytest
 
-from core.llm import (
-    _CONTINUE_INSTRUCTION,
-    _auto_continue_enabled,
-    _max_continuations,
-)
 
 
 class _ScriptedAnthropicMessages:
