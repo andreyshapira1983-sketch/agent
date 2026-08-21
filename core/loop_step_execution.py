@@ -326,10 +326,14 @@ class AgentLoopStepExecution:
             kill_switch = getattr(self, "gateway_kill_switch", None)
             if kill_switch is None and ws is not None:
                 kill_switch = BudgetKillSwitch(path=default_path(ws))
+            # The host's dry-run and the current run's are ORed, never
+            # replaced: a task cannot take a host out of simulation (MIR-114).
+            from core.run_context import run_demands_dry_run
+
             gateway = ActuationGateway(
                 self.policy,
                 path=self.gateway_path,
-                dry_run=self.gateway_dry_run,
+                dry_run=bool(self.gateway_dry_run) or run_demands_dry_run(),
                 kill_switch=kill_switch,
                 budget_snapshot=getattr(self, "gateway_budget_snapshot", None),
                 readiness_blockers=getattr(self, "gateway_readiness_blockers", ()),

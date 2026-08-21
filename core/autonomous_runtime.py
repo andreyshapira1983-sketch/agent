@@ -29,6 +29,7 @@ from core.learning_planner import LearningPlanner
 from core.models import ToolCall
 from core.redaction import prepare_text_for_llm_boundary
 from core.reflection import ReflectionConfig, ReflectionEngine
+from core.run_context import run_restrictions
 from core.safe_vcs import SafeVCS
 from core.self_build_memory import recent_self_build_lessons, record_self_build_episode
 from core.self_build_producer import produce_self_apply_proposal
@@ -957,8 +958,6 @@ class AutonomousRuntime:
                 "unblocked": sorted(_UNBLOCKABLE_TOOLS & config.unblock_tools),
             })
         block = has_block_support and bool(to_block)
-        previous_blocked = getattr(policy, "blocked_tools", None) if block else None
-        previous_gateway_dry_run = bool(getattr(self.agent, "gateway_dry_run", False))
         previous_gateway_path: GatewayPath = getattr(self.agent, "gateway_path", "repl")
         previous_gateway_kill_switch = getattr(self.agent, "gateway_kill_switch", None)
         previous_gateway_budget_snapshot = getattr(self.agent, "gateway_budget_snapshot", None)
@@ -973,7 +972,6 @@ class AutonomousRuntime:
         )
         gateway_path = self._gateway_path()
         snapshot = budget_ledger_snapshot(self.workspace)
-        self.agent.gateway_dry_run = bool(config.dry_run)
         self.agent.gateway_path = gateway_path
         self.agent.gateway_kill_switch = BudgetKillSwitch(
             path=default_path(self.workspace)
@@ -1003,8 +1001,6 @@ class AutonomousRuntime:
         )
         if planner_supports_hidden:
             planner.hidden_tools = to_block
-        if block:
-            policy.blocked_tools = policy.blocked_tools | to_block
         self._log(
             "autonomous_goal_gateway",
             {
@@ -1021,9 +1017,18 @@ class AutonomousRuntime:
             # carrying only kind+description. Threading the queue's task id
             # across that boundary belongs to the autonomous write-back step,
             # where it is actually consumed.
-            answer = self.agent.run(user_question=task.description)
+            #
+            # The run's own narrowing lives in the run context, not on the
+            # agent: `run_restrictions` unions the block set and ORs dry-run
+            # with whatever is already in force, so this task cannot lift a
+            # host limit and cannot have its own lifted by a neighbouring run
+            # finishing (MIR-114, proofs 6 and 7).
+            with run_restrictions(
+                blocked_tools=to_block if block else frozenset(),
+                dry_run=bool(config.dry_run),
+            ):
+                answer = self.agent.run(user_question=task.description)
         finally:
-            self.agent.gateway_dry_run = previous_gateway_dry_run
             self.agent.gateway_path = previous_gateway_path
             self.agent.gateway_kill_switch = previous_gateway_kill_switch
             self.agent.gateway_budget_snapshot = previous_gateway_budget_snapshot
@@ -1032,8 +1037,6 @@ class AutonomousRuntime:
             self.agent.suppress_durable_learning_writes = previous_suppress_learning_writes
             if planner_supports_hidden:
                 planner.hidden_tools = previous_hidden
-            if block:
-                policy.blocked_tools = previous_blocked
         replan_exhausted = bool(getattr(self.agent, "last_replan_exhausted", False))
         if replan_exhausted:
             clarify = clarification_for_replan_exhausted()

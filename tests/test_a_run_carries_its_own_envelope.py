@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.autonomous_runtime import (
     AutonomousRuntime,
     AutonomousRuntimeConfig,
@@ -170,20 +168,16 @@ def test_the_monotone_field_is_the_shape_the_others_should_have(
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-21 and banked (MIR-114): a run's envelope "
-        "may only narrow. `suppress_durable_learning_writes` obeys that — it is "
-        "assigned `previous or config.dry_run`. `gateway_dry_run` two lines "
-        "above is assigned `bool(config.dry_run)` outright, so a run started "
-        "with dry_run=False turns OFF a host that was in dry-run. Same block, "
-        "two shapes. Fix unprescribed: make the assignment monotone, or give a "
-        "run an envelope it cannot raise — different designs."
-    ),
-    strict=True,
-)
 def test_a_run_cannot_lift_the_hosts_dry_run(workspace: Path) -> None:
-    """Invariant 6, negative half."""
+    """Invariant 6, the half that was red.
+
+    Banked 2026-08-21 and closed the same day. `gateway_dry_run` used to be
+    assigned `bool(config.dry_run)` outright, so a task configured live turned
+    OFF a host that was in dry-run. The host field is no longer written at all:
+    the run carries its own demand and `core/loop_step_execution.py` ORs the
+    two at the gateway, so the host's dry-run cannot be lowered by anything a
+    task asks for.
+    """
     agent = _agent(workspace)
     agent.gateway_dry_run = True
 
@@ -197,3 +191,51 @@ def test_a_run_cannot_lift_the_hosts_dry_run(workspace: Path) -> None:
         "for the duration of that task — the run raised a host restriction "
         "instead of only lowering its own"
     )
+
+
+def test_a_nested_restriction_cannot_widen_the_one_around_it() -> None:
+    """Invariant 6, the nesting half — found by breaking the mechanism.
+
+    The host-versus-run case above was already pinned. Rewriting
+    `run_restrictions` to REPLACE rather than union left every one of those
+    green, because a single scope that is entered and exited behaves the same
+    either way. The difference only shows when one restricted scope sits inside
+    another, which is what a run started from inside a run actually is.
+    """
+    from core.run_context import (
+        run_blocked_tools,
+        run_demands_dry_run,
+        run_restrictions,
+    )
+
+    with run_restrictions(blocked_tools={"outer_tool"}, dry_run=True):
+        assert run_blocked_tools() == frozenset({"outer_tool"})
+        assert run_demands_dry_run() is True
+
+        with run_restrictions(blocked_tools={"inner_tool"}, dry_run=False):
+            assert run_blocked_tools() == frozenset({"outer_tool", "inner_tool"}), (
+                "the inner scope dropped a restriction the outer one imposed"
+            )
+            assert run_demands_dry_run() is True, (
+                "a nested scope turned OFF the dry-run demanded around it"
+            )
+
+        assert run_blocked_tools() == frozenset({"outer_tool"}), (
+            "leaving the inner scope did not restore the outer restriction"
+        )
+
+    assert run_blocked_tools() == frozenset()
+    assert run_demands_dry_run() is False
+
+
+def test_a_fresh_run_identity_does_not_shed_the_restrictions_around_it() -> None:
+    """The same property for `run_scope`: minting a new run id inside a narrowed
+    scope must not become a way to start clean. Every AgentLoop.run enters one,
+    so this is the path a nested run actually takes."""
+    from core.run_context import run_blocked_tools, run_restrictions, run_scope
+
+    with run_restrictions(blocked_tools={"outer_tool"}, dry_run=True), run_scope("run_probe"):
+        assert run_blocked_tools() == frozenset({"outer_tool"}), (
+            "a new run identity started without the restriction it was born under"
+        )
+

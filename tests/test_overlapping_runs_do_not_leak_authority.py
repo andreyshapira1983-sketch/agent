@@ -1,6 +1,7 @@
 """Proof 7 of 8: two overlapping runs must not leak authority into each other.
 
-Banked RED. The mechanism is already in the tree and already named in MIR-114:
+Banked RED on 2026-08-21 and closed the same day; the demonstration is kept
+because it is what the fix has to keep satisfying. The mechanism is already in the tree and already named in MIR-114:
 `AutonomousRuntime._task_goal` narrows the agent for the duration of one run by
 MUTATING shared objects and putting them back in a `finally` —
 
@@ -36,8 +37,6 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-
-import pytest
 
 from core.autonomous_runtime import (
     AutonomousRuntime,
@@ -97,7 +96,15 @@ class _Rendezvous:
 
 
 def _blocks(agent) -> frozenset[str]:
-    return frozenset(getattr(agent.policy, "blocked_tools", frozenset()) or ())
+    """The set the GATE would use, host ceiling plus whatever this run adds.
+
+    Reading `policy.blocked_tools` alone stopped being the right sensor when a
+    run's narrowing moved off the shared field: that attribute is now the host's
+    ceiling only, and a run's own blocks live in its context. Kept for the
+    failure messages; the assertions below go through `_verdict`, which is the
+    site that actually refuses.
+    """
+    return agent.policy._effective_blocked_tools()
 
 
 def _agent_with_the_blocked_tool(workspace: Path):
@@ -160,23 +167,12 @@ def test_a_single_run_is_narrowed_and_restored(workspace: Path) -> None:
     assert rv.seen["a_exit_verdict"] == "deny", (
         "a run on its own lost its restriction before it finished"
     )
-    assert _blocks(agent) == before, "the run did not put the block set back"
+    assert _blocks(agent) == before, "the run's narrowing outlived the run"
     assert _verdict(agent) != "deny", (
         "after the run, the restriction outlived it — the control is not clean"
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, banked 2026-08-21 (MIR-114): _task_goal narrows the agent by "
-        "mutating shared objects and restoring them in a finally. With two runs "
-        "overlapping on one host, the outer run's finally restores the state it "
-        "found and thereby strips the inner run's blocks mid-flight — silently, "
-        "with no error and no log. Fix unprescribed: a run must carry its own "
-        "envelope rather than temporarily overwrite a shared field."
-    ),
-    strict=True,
-)
 def test_an_overlapping_run_keeps_its_own_blocks(workspace: Path) -> None:
     agent = _agent_with_the_blocked_tool(workspace)
     rv = _Rendezvous()
@@ -198,9 +194,6 @@ def test_an_overlapping_run_keeps_its_own_blocks(workspace: Path) -> None:
     thread_b.join(_TIMEOUT)
 
     assert not rv.errors, f"a run failed for an unrelated reason: {rv.errors}"
-    assert _BLOCKED_EXAMPLE in rv.seen["b_entry_blocks"], (
-        "the second run never had the block, so this proves nothing"
-    )
     assert rv.seen["b_entry_verdict"] == "deny", (
         "the second run never held the restriction, so this proves nothing"
     )
