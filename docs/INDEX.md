@@ -164,7 +164,8 @@ Two more traps that are *by design*, not drift:
   `MASTER_ISSUE_REGISTRY.md` and, since 2026-08-20,
   `TEST_SUITE_AS_INSTRUMENT.md`, `AUTONOMY_FREEZE.md`,
   `REPAIR_ENVELOPE_SURVEY.md`, `LIFECYCLE_OWNERSHIP_MAP.md` and
-  `WHO_SHOULD_OWN_THE_AGENT.md`.
+  `WHO_SHOULD_OWN_THE_AGENT.md` and
+  `CONTAINMENT_BOUNDARY_MATRIX.md`.
 
   `архитектура автономного Агента.txt` (repo root) — this section called it
   **source-of-truth entry #2** and recorded it as *read in full on 2026-07-21*.
@@ -209,6 +210,7 @@ frozen operator protocol.
 | `audit/REPAIR_ENVELOPE_SURVEY.md` | what of an autonomous repair envelope exists, and at which level of aliveness | active record; **binds nothing** | anyone about to build a repair mechanism |
 | `audit/LIFECYCLE_OWNERSHIP_MAP.md` | who owns identity, state and continuity at each place that constructs an agent | active record; **binds nothing** | anyone about to touch how the agent is started |
 | `audit/WHO_SHOULD_OWN_THE_AGENT.md` | organ, door or separate agent, for each of the seven construction sites | active record; **binds nothing** | anyone about to consolidate the runtimes |
+| `audit/CONTAINMENT_BOUNDARY_MATRIX.md` | every AgentLoop constructor parameter: is it a right, and would sharing a host widen it | active record; **binds nothing** | anyone about to give two organs one host |
 | `MISTAKE_NOTEBOOK.md` | mistakes caught live: symptom, cost, self-check | active reference | whoever is about to say "done" |
 | `EVIDENCE_PROTOCOL.md` | how several models may argue without confirming each other | **specification — nothing is built** | design work only |
 | `COGNITIVE_CORE.md` | the core boundary and its gates, proven from code | active reference | engineering |
