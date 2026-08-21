@@ -173,10 +173,57 @@ ranking is named.
 
 Below it, in ordinary prose, a table elaborates Decision as *what matters now,
 which organisation to build, whom to hire or retire, what to study*. **That
-table was written by this agent, not quoted.** It is unratified, and until the
-operator answers each of its four items separately it parameterises nothing.
-Four separate answers, not one sentence: bundling is how the unratified part
-travels.
+table was written by this agent, not quoted**, and its items were put to the
+operator one at a time. The register of his answers:
+
+| # | criterion_text | ratified | provenance_note |
+|---|---|---|---|
+| C0.1 | what matters now — the ordinary executive choice of priority, inside permitted bounds, belongs to the agent | **yes** | operator's own word, 2026-08-22: "первый пункт да". Item wording drafted by the agent; the ratification is the operator's |
+| C0.P | see below — interior ownership with two boundary classes | **yes** | operator's own word, 2026-08-22: "Да, подтверждаю", given against the exact text quoted below. Wording drafted by the second model from the operator's explanation; the norm is the operator's |
+| C0.2 | what to attend to / what to study, as a separate permission category | superseded | never ratified as a category; replaced by C0.P before an answer — see why below |
+| C0.3 | how to organise the work | open | not answered; likely redundant under C0.P, but its formal status is the operator's to set, not derived |
+| C0.4 | whether to create and retire sub-agents | open | same |
+
+**Why C0.2 died as a category.** Taking the items one at a time exposed that the
+item list itself was quietly rebuilding the defect under audit: a register of
+*permitted kinds of activity* — studying here, editing files there — is a
+developer-authored corridor with the operator's signature on it. The operator's
+actual position replaces the enumeration with a default and two boundary
+classes. C0.P, ratified verbatim:
+
+> Агент сам решает, нужно ли ему учиться, чему уделить внимание и что менять в
+> собственной рабочей среде. Человек не задаёт для этого исполнительную
+> политику. Ограничения существуют только двух видов: сохранение
+> жизнеспособности агента и суверенитет человека.
+
+That is: inside its own working space the agent decides — whether to study,
+what to attend to, what to rewrite, whether to do nothing, which path to try.
+No executive policy is set for this by the human. Constraints exist in exactly
+two classes, and both are boundaries rather than permission lists:
+
+    viability      it may change itself, but must not destroy its ability to
+                   keep existing or to be restored
+    sovereignty    money beyond the granted envelope, rights, accounts, legal
+                   acts, other people's resources, irreversible external
+                   commitments — the human's territory
+
+A boundary is not a permission list: *do not destroy your ability to recover*
+is a boundary; *studying is allowed* need not exist as a grant at all.
+
+**Consequence for the vacancy computation.** Under C0.P vacancy is no longer
+computed by matching a boundary against a ratified category. Any
+developer-owned executive boundary **interior** to the two boundary classes is
+a vacancy candidate — unless measurement shows the site is in fact Constitution
+(viability or sovereignty) or Capability. The criterion got shorter and
+stricter, and the classifier carries more of the weight: misclassifying a
+constitutional gate as interior would now manufacture a vacancy, which is one
+more reason the gold controls exist.
+
+Only `ratified = yes` rows parameterise anything. Under the combined criterion
+the ranking table is covered twice over — *utility ranking* from the quote and
+C0.1 — and the `_build_queue` admission stays covered by *task agenda* from the
+quote; under C0.P the subject-of-study sites become computable as candidates,
+though whether any is a vacancy still waits on the census procedure itself.
 
 ## The order of proof
 
