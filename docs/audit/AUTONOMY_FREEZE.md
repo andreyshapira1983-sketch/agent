@@ -144,9 +144,18 @@ instruction or any other pre-written executive choice, that stretch is not yet
 fixed.
 
 One further condition, easy to lose: on a fresh state the agent is under no
-obligation to do anything. It must be able to conclude **no justified action**
-after observing, instead of performing activity that was arranged in advance
-for the sake of activity.
+obligation to perform work that was arranged in advance. It must be able to
+conclude **no justified action** — but only in the narrow sense, and the
+distinction matters enough to spell out:
+
+    means      no justified EXPENSIVE or EFFECTFUL action right now, so
+               observe, wait, and stay cheap
+    NEVER means  no assignment arrived, therefore my activity is over
+
+The first is a subject choosing not to spend. The second is a stop state, and
+building it would reintroduce exactly the dependence on a human hand that this
+freeze exists to remove. Idle is a posture of the running subject, not the end
+of its life; what must never require a human is the decision to leave it.
 
 Until these conditions are met the autonomous mode is not to be started as a
 working mode, and nothing beyond this task is to be built.
@@ -241,7 +250,8 @@ why it created them.
 ### Why the two are one freeze
 
 Fixing only the first — who decides — leaves a subject that reasons
-autonomously and then dies every half hour. Fixing only the second leaves a
+autonomously and whose continuity nothing owns, so each new build has to
+reconstruct it or lose it. Fixing only the second leaves a
 very long-lived executor of somebody else's script, with `_build_queue`, preset
 roles and a priority table intact. Neither property is worth much without the
 other, which is why one freeze covers both.
