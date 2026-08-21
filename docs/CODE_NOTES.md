@@ -3582,3 +3582,51 @@ about pytest's exit codes. It is that any tool which folds "I could not
 measure" into "I measured a failure" will keep producing confident nonsense,
 and the confidence is the part that does the damage.
 
+## The instance was the only way to say "this run may do less"
+
+For a long time a narrower agent meant a second agent. Four organs in one tick,
+each built with its own constructor call, and a comment above them explaining
+that all three build sites must stay identical — the code admitting that it was
+maintaining equivalence between instances because nothing else could carry a
+permission.
+
+Inside a single agent the same problem had a different answer, and a worse one.
+A goal task needed fewer rights than the loop it borrowed, so it took what it
+found, or-ed in its own restrictions, and put the original back in a `finally`.
+Read once, that is careful. Read twice, it is a global variable with good
+manners: correct exactly while one run holds the object.
+
+Two runs were driven into a fixed interleaving with events — no race, the order
+imposed. A enters and installs its blocks. B enters, snapshots what A left, and
+installs its own. A returns, and its cleanup restores the set A had found:
+empty. B is still running. The gate that had answered `deny` for B now answers
+`allow`, and the tool it was forbidden to call is available to it. Nothing
+raised. Nothing logged. The only trace is that the answer changed.
+
+The neighbouring line in the same block already knew better:
+`previous_suppress_learning_writes or config.dry_run` — a run may add
+suppression and can never remove it. Two lines above,
+`gateway_dry_run = bool(config.dry_run)` let a task configured live switch off
+a host that was deliberately in dry-run.
+
+Copying the `or` would have been the cheap fix. It closes that one hole and
+keeps the shape that made the other one: a run still reaches into shared state
+and puts it back afterwards. What changed instead is where a restriction lives.
+The run context was already there, already frozen, already per-execution — it
+carried a run id and a task id and nothing else. It now carries the run's own
+blocked set and its own dry-run demand, entering scopes that union and or, so
+narrowing composes and widening has no expression at all. Effective authority
+is computed where the refusal happens: the host's ceiling intersected with the
+run's own.
+
+Two details are worth keeping. Starting a fresh run identity inside a narrowed
+scope inherits that narrowing — otherwise "begin a new run" would have been a
+way to shed a limit. And the honest sensor moved with the mechanism: tests that
+read `policy.blocked_tools` were reading the host ceiling and seeing an empty
+set, all of them perfectly green while measuring nothing. They ask the gate now.
+
+The gap that mattered most was found by breaking the new code rather than by
+reviewing it. Making `run_restrictions` replace instead of union left every
+proof green, because one scope entered and exited behaves the same either way.
+Only nesting separates them, and nothing tested nesting.
+

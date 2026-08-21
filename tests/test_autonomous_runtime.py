@@ -771,8 +771,35 @@ def test_auto_runtime_queue_skips_a_task_another_consumer_took(workspace: Path):
     assert after.owner_pid == 4242, "our lost claim overwrote the real owner"
 
 
+
+def _effective_blocked(agent) -> frozenset[str]:
+    """What the GATE would refuse right now: the host ceiling plus this run's own.
+
+    These tests used to read `agent.policy.blocked_tools`. A run's narrowing no
+    longer lives on that shared field — it belongs to the run context, so the
+    attribute now shows the host ceiling alone (MIR-114, first run-scoping
+    change). The property each test pins is unchanged; only the place it is
+    observed moved to the site that actually refuses.
+    """
+    return agent.policy._effective_blocked_tools()
+
+
+def _effective_dry_run(agent) -> bool:
+    """Host dry-run OR the current run's — the value the gateway is built with."""
+    from core.run_context import run_demands_dry_run
+
+    return bool(getattr(agent, "gateway_dry_run", False)) or run_demands_dry_run()
+
+
 def test_dry_run_goal_uses_gateway_simulate_and_restores(workspace: Path):
-    """A dry-run goal task must set gateway_dry_run on the parent loop (not
+    """A dry-run goal task must make the gateway simulate effects, and leave
+    nothing behind afterwards.
+
+    The wording changed on 2026-08-21 and the change is deliberate. It used to
+    say the task "must set gateway_dry_run on the parent loop" — a claim about
+    the mechanism, which is now wrong on purpose: the run carries its own demand
+    and the gateway ORs it with the host's, so nothing is written to the loop at
+    all. The property survives the mechanism; the old sentence did not. (was: not
     policy.blocked_tools for effect tools), then restore afterwards."""
     from core.autonomous_runtime import AutonomousTask
 
@@ -781,9 +808,9 @@ def test_dry_run_goal_uses_gateway_simulate_and_restores(workspace: Path):
     seen: dict[str, Any] = {}
 
     def _capture(*, user_question: str) -> str:
-        seen["gateway_dry_run"] = agent.gateway_dry_run
+        seen["gateway_dry_run"] = _effective_dry_run(agent)
         seen["gateway_path"] = agent.gateway_path
-        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        seen["blocked"] = _effective_blocked(agent)
         return "analysis"
 
     agent.run = _capture  # type: ignore[method-assign]
@@ -831,7 +858,7 @@ def test_no_tests_goal_blocks_run_tests_and_restores(workspace: Path):
     seen: dict[str, frozenset[str]] = {}
 
     def _capture(*, user_question: str) -> str:
-        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        seen["blocked"] = _effective_blocked(agent)
         return "analysis"
 
     agent.run = _capture  # type: ignore[method-assign]
@@ -858,7 +885,7 @@ def test_tests_enabled_goal_does_not_block_run_tests(workspace: Path):
     seen: dict[str, frozenset[str]] = {}
 
     def _capture(*, user_question: str) -> str:
-        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        seen["blocked"] = _effective_blocked(agent)
         return "analysis"
 
     agent.run = _capture  # type: ignore[method-assign]
@@ -882,8 +909,8 @@ def test_dry_run_and_no_tests_block_combines_and_restores(workspace: Path):
     seen: dict[str, Any] = {}
 
     def _capture(*, user_question: str) -> str:
-        seen["gateway_dry_run"] = agent.gateway_dry_run
-        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        seen["gateway_dry_run"] = _effective_dry_run(agent)
+        seen["blocked"] = _effective_blocked(agent)
         return "analysis"
 
     agent.run = _capture  # type: ignore[method-assign]
@@ -911,7 +938,7 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
     seen: dict[str, frozenset[str]] = {}
 
     def _capture(*, user_question: str) -> str:
-        seen["blocked"] = frozenset(agent.policy.blocked_tools)
+        seen["blocked"] = _effective_blocked(agent)
         seen["hidden"] = frozenset(agent.planner.hidden_tools)
         return "analysis"
 

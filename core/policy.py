@@ -36,6 +36,18 @@ class PolicyGate:
         # behaviour is unchanged.
         self.escalate_reversible_tools: frozenset[str] = frozenset()
 
+    def _effective_blocked_tools(self) -> frozenset[str]:
+        """The host's block set UNION the current run's own.
+
+        A run may forbid more than the host does and can never forbid less:
+        the union has no subtraction. Before this, a run narrowed the agent by
+        overwriting `blocked_tools` and putting it back in a `finally`, which
+        two overlapping runs turned into silent widening (MIR-114, proof 7).
+        """
+        from core.run_context import run_blocked_tools
+
+        return frozenset(self.blocked_tools) | run_blocked_tools()
+
     def check(self, action: Action) -> PolicyDecision:
         subject = action.tool_name or action.type
 
@@ -68,7 +80,7 @@ class PolicyGate:
                 reasons=[f"tool '{action.tool_name}' not in registry"],
             )
 
-        if action.tool_name in self.blocked_tools:
+        if action.tool_name in self._effective_blocked_tools():
             return PolicyDecision(
                 policy_id=POLICY_ID,
                 subject=action.tool_name,
