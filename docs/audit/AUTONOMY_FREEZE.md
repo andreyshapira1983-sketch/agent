@@ -23,7 +23,54 @@ subagents would execute an imposed organisation more efficiently; better
 self-repair would more efficiently maintain a system still travelling an
 imposed trajectory.
 
-## The invariant this freeze exists to restore
+## The two invariants, and there are only two
+
+Everything else in this document is evidence for these or consequence of them.
+Kept deliberately short, because a freeze that grows a philosophy stops being
+enforceable.
+
+> **I. WHO DECIDES.** Executive decisions that belong to the autonomous agent
+> must not be secretly pre-decided by a developer. Hardcoded code may define
+> safety constraints and generic capabilities; it must not prescribe the
+> director's workforce, task agenda, organisational topology or utility
+> ranking. Every such choice must be traceable to the agent's own
+> deliberation, evidence and retained experience.
+>
+> **II. WHO LIVES.** All production functions must belong to one canonical
+> autonomous agent, not to several independently assembled cognitive
+> instances. Restarting a process recovers that same agent rather than
+> creating a new one.
+
+### An anti-pattern to refuse in advance
+
+**Do not solve lifecycle continuity by preserving a transient implementation
+identifier.** `new_trace_id()` is defined as a random per-session trace
+identifier and it SHOULD keep changing. Writing it to disk and calling identity
+continuity fixed would produce a permanent journal number, not a continuing
+life.
+
+Two layers, and only the first is missing:
+
+    Agent ID   — WHO lived. Not present anywhere today.
+    Trace / run / cycle ID — WHAT it did at a given moment. Present, and must
+                             go on changing so events of one life stay
+                             distinguishable.
+
+Establish first what must be continuous, then choose a representation. For a
+first-level autonomous agent that does not require building a "digital
+subject"; at minimum what has to survive is: this is the same agent, its
+accumulated memory, its unfinished work, its past results, its permissions and
+limits, and its accumulated experience.
+
+### Equivalence is not continuity
+
+`agent_tick.py` defines its memory profile once with the comment that all three
+build sites must stay identical. That sentence is the defect stated plainly: it
+maintains **equivalence between instances** because there is no single owner of
+the configuration. A million identical instances do not add up to one
+continuing agent.
+
+## The first invariant in detail
 
 > Hardcoded code may define safety constraints and generic capabilities, but
 > must not prescribe the director's workforce, task agenda, organisational
@@ -104,20 +151,17 @@ for the sake of activity.
 Until these conditions are met the autonomous mode is not to be started as a
 working mode, and nothing beyond this task is to be built.
 
-## A second invariant: one subject, one runtime, one lifecycle
+## The second invariant in detail
 
 Added 2026-08-20, from the same root. The first invariant is about who decides.
 This one is about who lives.
 
-> **ONE LOGICAL SUBJECT / ONE CANONICAL LIFECYCLE.** At every moment there is
-> one canonical Agent identity that owns its state, intentions, memory,
-> commitments and lifecycle. Restarting a process recovers that same subject
-> rather than creating a new one. Diagnostic and test harnesses may exist, but
-> they are not alternative production identities or autonomous execution roots.
-> A shell, a future desktop window, the HTTP API and any messaging adapter are
-> doors to the same subject, not separate agent instances. A normal owner must
-> not have to choose between auto-run, campaign, work-session, tick and daemon
-> for the autonomous agent to live.
+Two clarifications the invariant carries. Diagnostic and test harnesses may
+exist, but they are not alternative production identities or autonomous
+execution roots: a shell, a future desktop window, the HTTP API and any
+messaging adapter are doors to the same agent. And a normal owner must not have
+to choose between auto-run, campaign, work-session, tick and daemon for the
+autonomous agent to live.
 
 Note what this invariant is NOT. It is not "one Python process never dies" —
 the subject has to survive a reboot, a crash, an update, its own repair and a
@@ -133,6 +177,15 @@ Four places construct an agent of their own: `agent_tick.py`, `api/server.py`,
 `cli/one_shot.py` and `cli/app.py`, all through the shared builder in
 `app/bootstrap.py`. Three more executables delegate rather than construct —
 `main.py`, `app/windows_service.py`, `docker/daemon_loop.py`.
+
+Sharper than the count of sites: **one tick constructs up to three agents** —
+the task-drain agent (`agent_tick.py:946`), the self-build producer
+(`agent_tick.py:680`) and the hygiene agent (`agent_tick.py:1165`) — each with
+its own trace id and its own independent load of every store, and the campaign
+lane builds a fourth (`agent_tick.py:1352`). So the shape today is not one
+agent that drains a queue, keeps house and develops itself; it is several
+temporary cognitive instances working over one heap of shared durable state.
+The full map is in `docs/audit/LIFECYCLE_OWNERSHIP_MAP.md`.
 
 The installed production path is the one that matters most:
 `scripts/install_daemon.ps1` registers a Windows Scheduled Task that runs
@@ -185,7 +238,7 @@ still open, what it was doing and why, which hypothesis it was testing, what
 the owner told it and what it understood from that, which workers exist and
 why it created them.
 
-### The two invariants depend on each other
+### Why the two are one freeze
 
 Fixing only the first — who decides — leaves a subject that reasons
 autonomously and then dies every half hour. Fixing only the second leaves a
