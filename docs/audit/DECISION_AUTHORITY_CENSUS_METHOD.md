@@ -192,6 +192,53 @@ travels.
 `if memory_contains(x): action = y`, which is a developer's mapping from history
 to action wearing the costume of learning.
 
+### `E` needs no archaeology, and is blocked by `D` rather than by the record
+
+The missing provenance tempts a much stronger conclusion than it supports, and
+this document held it for a while: that `E` cannot be proven at all, because the
+history cannot say whose decisions it contains. That is wrong, and the shape of
+the error is the same one recorded throughout — *this corpus cannot answer it*
+turned into *the question is unanswerable*.
+
+A controlled experiment replaces the archaeology:
+
+    t1   measure that the choice at this boundary is the agent's
+         -> retain its result as experience
+    t2   present the same choice, with that experience and without it
+         -> the decisions differ
+
+Authorship is **established by measurement at t1**, not recovered from a log, so
+no old record is consulted and none needs to be built first. `E` therefore does
+not wait on a new provenance mechanism. It waits on `D`: the experiment needs a
+boundary already shown to be the agent's, and that set currently has no members.
+The moment the census finds one, `E` becomes runnable.
+
+What does survive from the provenance gap, and only this: the existing episode
+corpus cannot serve as evidence of **whose** experience it holds. So an
+experiment must **generate its own experience under measured authorship** rather
+than draw on the store.
+
+### Three claims this document previously overstated
+
+**"Autonomy cannot be audited after the fact."** Too broad. What is proven is
+that *this* history lacks the record. A system that records decision authorship
+from the start is retrospectively auditable. The defect is that the trace was
+never written, not that it cannot be.
+
+**"WHO LIVES is meaningless without WHO DECIDES."** Too broad. Whether the same
+subject, memory and obligations persist across a restart is separately
+investigable and does not depend on decision provenance. Only the narrower claim
+does: *it remembers its own biography*. Two questions, kept apart —
+`WHO LIVES` and `WHOSE EXPERIENCE IS THIS`.
+
+**A caution in the other direction, for whenever a provenance record is built.**
+Such a record recovers **authorship**, never **latitude**. An entry reading
+"the agent decided" is fully compatible with the line having been written by
+`priority_table.pick()`. The counterfactual — could it have chosen otherwise —
+does not fit in a log at all; it needs perturbation. So an honest-looking
+authorship journal would close the first question and leave the second exactly
+where it is.
+
 ### Three ways to get a false green on learning
 
     1  developer semantics    memory X -> hardcoded action Y
@@ -257,28 +304,44 @@ the standing grant is deliberately not marked at all, and transient lane
 refusals deliberately leave the item retryable. The defect is in reading the
 token, not in writing it.
 
-    approval lifecycle state        recoverable from the inbox row — PROVEN
-    did the requested move occur    NOT implied by "executed" — refuted by
-                                    counterexample at autonomous_runtime.py:524
-    execution recoverability        operation-specific; needs receipts or run
-                                    reports; not censused
+`executed` is one token over four distinct facts, and it establishes only the
+first:
+
+    approval lifecycle    was the approval consumed or closed   RECOVERABLE
+    actuation             did execution actually begin          producer-specific
+    effect outcome        did the effect persist, or roll back  producer-specific
+    goal completion       did the wider work succeed            producer-specific
+
+`rolled_back` is a counterexample to *the effect persisted*, not to *execution
+occurred* — the lane ran and was then undone. The counterexample to actuation is
+`autonomous_runtime.py:524`, where the token is written before the queue is even
+built.
+
+**And the same operation carries both semantics.** `cli/commands_approval.py`
+refuses anything but `autonomous_runtime.allow_effects` on its path and marks
+the item executed only after `report.status == "completed"`; the runtime marks
+the identical operation executed before any work starts. So `operation + status`
+does not recover one causal meaning either — knowing *what* was requested and
+*what state it reached* is still not enough.
 
 This is MIR-116 one level over: there a mechanism named `ceiling` did not mean
-"do not exceed the ceiling"; here a status named `executed` does not always mean
-"the operation ran", and in one path means it was rolled back.
+"do not exceed the ceiling"; here a status named `executed` does not, by
+itself, prove downstream actuation, a persisting effect, or goal completion.
 
-**So the instrument needs two things, not one.** Every verdict carries its
-scope — that fix is above. And every shared enum read as evidence carries its
-**meaning per producer**, because a durable token written by four call sites for
-four different reasons manufactures a false equivalence no amount of scope
-annotation would catch.
+**So the instrument needs three things, and each was found by the previous one
+failing.** Every verdict carries its **scope**. Every shared enum read as
+evidence carries its **meaning per producer**. And — because one operation was
+found reaching the same write by two paths with opposite temporal semantics —
+the unit of meaning is sometimes neither the producer nor the operation but the
+**causal write path**: not only who wrote the token, but which event licensed
+that particular write.
 
 A run can therefore read `request origin = autonomous_runtime`,
 `verdict = approved`, `status = executed` and still answer none of the four
 questions underneath it: who judged the move worth making, on what grounds, who
 permitted it, and whether it ran. `autonomous_runtime requested it` does not
 mean the agent chose it; `approved` does not name who approved; and `executed`
-does not always mean the operation happened.
+does not by itself prove actuation, a persisting effect, or completion.
 
 **Request origin is fixed by code, not merely constant in the data.**
 `ApprovalInboxItem.requested_by` carries the default `"autonomous_runtime"` and
