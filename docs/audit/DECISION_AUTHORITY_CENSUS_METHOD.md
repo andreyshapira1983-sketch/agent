@@ -233,17 +233,52 @@ the format carries the fix.
 | executive authorship | who judged this move worth making | **no on the inspected surfaces**; system-wide UNKNOWN |
 | evidence origin | who supplied the grounds it was judged on | **no on the inspected surfaces**; system-wide UNKNOWN |
 | review actor | who actually approved or denied this request | **no on the inspected surfaces**; system-wide UNKNOWN |
-| execution | whether the move actually ran | yes on the inbox row |
+| execution | whether the move actually ran | **no — see below**; the inbox row carries a lifecycle token, not an execution proof |
 
 `review actor` is deliberately not called `review authority`. Authority is who
 is *entitled* to permit a crossing, and that may be settled by the constitution
 whether or not anything records the actor. What is missing is the actor. In an
 audit about authority the wrong word here would manufacture a false finding.
 
+### `executed` is four different facts wearing one word
+
+`mark_executed()` is `set_status(item_id, "executed")` and verifies nothing. Its
+four production callers each reach it after something different:
+
+| Call site | What precedes it | What the token then means |
+|---|---|---|
+| `core/autonomous_runtime.py:524` | the config is flipped to `effects_approved` and nothing has run | **a one-shot permission was consumed** |
+| `cli/commands_approval.py:502` | `report.status == "completed"` | the runtime run finished |
+| `cli/commands_approval.py:579` | a subagent result with an execution receipt | the subagent finished |
+| `core/self_apply_bridge.py:401` | a terminal lane status | the lane ended — and `rolled_back` is terminal, so **the work was undone** |
+
+None of this is a bug: the one-shot grant is deliberately consumed on use, while
+the standing grant is deliberately not marked at all, and transient lane
+refusals deliberately leave the item retryable. The defect is in reading the
+token, not in writing it.
+
+    approval lifecycle state        recoverable from the inbox row — PROVEN
+    did the requested move occur    NOT implied by "executed" — refuted by
+                                    counterexample at autonomous_runtime.py:524
+    execution recoverability        operation-specific; needs receipts or run
+                                    reports; not censused
+
+This is MIR-116 one level over: there a mechanism named `ceiling` did not mean
+"do not exceed the ceiling"; here a status named `executed` does not always mean
+"the operation ran", and in one path means it was rolled back.
+
+**So the instrument needs two things, not one.** Every verdict carries its
+scope — that fix is above. And every shared enum read as evidence carries its
+**meaning per producer**, because a durable token written by four call sites for
+four different reasons manufactures a false equivalence no amount of scope
+annotation would catch.
+
 A run can therefore read `request origin = autonomous_runtime`,
-`verdict = approved`, `status = executed` and still leave the two questions that
-matter unanswered. `autonomous_runtime requested it` does not mean the agent
-chose it, and `approved` does not name who approved.
+`verdict = approved`, `status = executed` and still answer none of the four
+questions underneath it: who judged the move worth making, on what grounds, who
+permitted it, and whether it ran. `autonomous_runtime requested it` does not
+mean the agent chose it; `approved` does not name who approved; and `executed`
+does not always mean the operation happened.
 
 **Request origin is fixed by code, not merely constant in the data.**
 `ApprovalInboxItem.requested_by` carries the default `"autonomous_runtime"` and
