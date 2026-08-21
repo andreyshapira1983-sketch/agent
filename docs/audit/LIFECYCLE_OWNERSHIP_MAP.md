@@ -13,17 +13,33 @@ should host one logical subject. Nothing here proposes a runtime.
 | `cli/app.py` | partially | could be subordinated |
 | `cli/one_shot.py` | **starts fresh** | could be subordinated |
 
-## Identity is minted, never loaded
+## There is no canonical agent identity at all
 
-`app/bootstrap.py:103` calls `new_trace_id()` on every build, and
-`core/ids.py:18` makes it from `secrets.token_hex(16)` with no disk read. A
-second identity is minted independently by working memory. **Nothing on disk
-records which identity was "the agent" last time**, so no build can continue
-one. The `session_id` logged at session start on the unattended path is
-literally `None`, because working memory is off there.
+**Corrected 2026-08-21.** An earlier version of this section said identity is
+"minted, never loaded" and that the subject's name is a random hex string. That
+phrasing invites exactly the wrong fix — persisting the hex — so it is replaced
+by the accurate statement.
 
-There is no agent name, no persistent agent id, no role record. The subject's
-name today is a random hex string that lives for one process.
+Only TRANSIENT identifiers exist. `app/bootstrap.py:103` calls
+`new_trace_id()` on every build and `core/ids.py:18` makes it from
+`secrets.token_hex(16)` with no disk read; working memory mints a session id
+independently. **That is correct behaviour**: a trace, a session, a run and a
+cycle each name one episode of activity and must keep changing, or events of
+one life stop being distinguishable.
+
+The defect is the layer ABOVE them. Nothing on disk says which agent those
+traces belonged to, because no such notion exists — no agent name, no
+persistent agent id, no role record. So a build has nothing to continue, not
+because the wrong thing is being minted but because the thing that would be
+continuous was never defined.
+
+    Agent ID   — WHO lived.  Absent.
+    trace / session / run / cycle — WHAT it did at a moment. Present, and
+                                    rightly regenerated every time.
+
+The `session_id` logged at session start on the unattended path is literally
+`None`, because working memory is off there — a second symptom of the same
+absence, not a second identity to preserve.
 
 ## It is not one life per thirty minutes
 
