@@ -217,15 +217,28 @@ form "this is the agent's own experience".
 
 ## Provenance is five axes, not one word
 
-"Who decided" hid five separate facts. Verified in the code on 2026-08-21.
+"Who decided" hid five separate facts. The inspected surfaces on 2026-08-21
+were `EpisodeRecord`, the approval inbox row, the review-outcome row and the
+approval receipt. **The trace and log graph was not walked**, so every "not
+recoverable" below is scoped to those surfaces and never to the system.
 
-| Axis | Question | Recoverable today |
+**Every status cell carries its scope.** A bare yes/no column has nowhere to put
+"not checked at this scope", and the first version of this table duly turned
+*absent on three surfaces* into *absent*. The format produced the overclaim, so
+the format carries the fix.
+
+| Axis | Question | Recoverable, and where |
 |---|---|---|
-| request origin | which subsystem formed the request | yes, but see below |
-| executive authorship | who judged this move worth making | **no** |
-| evidence origin | who supplied the grounds it was judged on | **no** |
-| review authority | who permitted or forbade crossing a boundary | **no** |
-| execution | whether the move actually ran | yes |
+| request origin | which subsystem formed the request | yes on the inbox row — but a code-fixed constant, see below |
+| executive authorship | who judged this move worth making | **no on the inspected surfaces**; system-wide UNKNOWN |
+| evidence origin | who supplied the grounds it was judged on | **no on the inspected surfaces**; system-wide UNKNOWN |
+| review actor | who actually approved or denied this request | **no on the inspected surfaces**; system-wide UNKNOWN |
+| execution | whether the move actually ran | yes on the inbox row |
+
+`review actor` is deliberately not called `review authority`. Authority is who
+is *entitled* to permit a crossing, and that may be settled by the constitution
+whether or not anything records the actor. What is missing is the actor. In an
+audit about authority the wrong word here would manufacture a false finding.
 
 A run can therefore read `request origin = autonomous_runtime`,
 `verdict = approved`, `status = executed` and still leave the two questions that
@@ -256,9 +269,11 @@ holds verdicts only, not executions.
 
 **The evidence axis is the one this audit added.** The intervention rule below
 turns on the difference between a human supplying a fact and a human supplying
-the answer. If nothing records where the grounds came from, those two are
-indistinguishable after the fact, and the rule cannot be audited even when it is
-being followed perfectly.
+the answer. Both look identical from outside — *after human input the agent did
+X* — while the authority differs completely. On the surfaces inspected here,
+nothing records where the grounds came from, so the rule cannot be audited on
+them even when it is followed perfectly. Whether some other surface preserves
+the distinction is UNKNOWN and was not checked.
 
 **On the episode window.** `max_episodes = 200` is a nominal target, not a hard
 cap: episodes carrying a protected tag are never evicted, so a store can stay
@@ -295,7 +310,8 @@ but for that reason and not because a helper grants a new right.
 | no value outside the current repertoire in the live store | local measurement only; the store is not in the repository |
 | the episode record has no decision-author field | proven from code |
 | authorship recoverable from an episode row | no — proven |
-| `requested_by` in the approval inbox is a constant component name | local measurement |
+| `requested_by` is fixed by the current producer path (dataclass default, no `add()` parameter) | proven from code |
+| the live inbox carries that one value in 137 of 137 rows | local measurement |
 | authorship recoverable elsewhere in the trace graph | UNKNOWN — the graph was not walked |
 | the runtime was active during the freeze | local measurement; **not** continuity of one subject |
 | known proven Agent Decision boundaries | 0 |
