@@ -28,10 +28,12 @@ never happen is an organ inheriting the interactive one.
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
+import agent_tick
 from agent_tick import UNATTENDED_MEMORY_PROFILE
 from app.bootstrap import build_agent
 from core.approval import AutoApprover
@@ -55,18 +57,94 @@ def _unattended(workspace: Path):
     return build_agent(workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE)
 
 
-def test_every_unattended_organ_holds_the_same_authority(workspace: Path) -> None:
-    """The queue drain, the self-build producer, hygiene and the campaign lane
-    are one envelope wearing four constructor calls."""
-    organs = {name: probe_authority(_unattended(workspace))
-              for name in ("queue", "self_build", "hygiene", "campaign")}
-    reference = organs["queue"]
-    for name, observed in organs.items():
-        differing = sorted(k for k in reference if observed.get(k) != reference.get(k))
-        assert not differing, (
-            f"organ {name!r} differs from the queue drain on {differing} — the "
-            "four build sites are no longer one envelope, so consolidation can "
-            "no longer preserve 'the' unattended authority"
+#: Every place in `agent_tick.py` that constructs an agent, found by parsing the
+#: file rather than by listing line numbers that rot. The four are the queue
+#: drain, the self-build producer, hygiene and the campaign lane.
+_BUILDER_NAMES = {"build_agent", "_build_agent"}
+
+
+def _production_build_sites() -> list[dict]:
+    """Each real construction site with the keyword arguments it passes.
+
+    This is the half that the behavioural probe cannot see. The probe answers
+    "what does THIS envelope allow"; only reading the call sites answers
+    "is this the envelope the organs are actually given".
+    """
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "agent_tick.py")
+                     .read_text(encoding="utf-8"))
+    sites = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name not in _BUILDER_NAMES:
+            continue
+        keywords = {}
+        unresolved = []
+        for kw in node.keywords:
+            expr = ast.unparse(kw.value)
+            if kw.arg is None:
+                keywords[f"**{expr}"] = expr
+            elif isinstance(kw.value, ast.Constant):
+                keywords[kw.arg] = kw.value.value
+            else:
+                unresolved.append(f"{kw.arg}={expr}")
+        sites.append({"line": node.lineno, "keywords": keywords,
+                      "unresolved": unresolved})
+    return sorted(sites, key=lambda s: s["line"])
+
+
+def test_all_four_production_organs_are_built_the_same_way() -> None:
+    """The membership half: every organ is handed the same envelope.
+
+    An earlier version of this test called one helper four times and labelled
+    the results 'queue', 'self_build', 'hygiene', 'campaign'. It proved that
+    four calls to one helper agree — which is true of any helper — and would
+    have stayed green if a single call site had been changed. This one reads
+    the call sites.
+    """
+    sites = _production_build_sites()
+    assert len(sites) == 4, (
+        f"agent_tick.py now constructs an agent in {len(sites)} places, not 4 "
+        f"(lines {[s['line'] for s in sites]}). A new construction site is a "
+        "new cognitive instance — decide deliberately whether it belongs."
+    )
+    for site in sites:
+        assert not site["unresolved"], (
+            f"the site at line {site['line']} passes {site['unresolved']}, which "
+            "this witness cannot resolve — read it by hand rather than trusting "
+            "a green run"
+        )
+    signatures = {frozenset(s["keywords"].items()) for s in sites}
+    assert len(signatures) == 1, (
+        "the four organs are no longer built alike: "
+        + "; ".join(f"line {s['line']}: {sorted(s['keywords'])}" for s in sites)
+    )
+
+
+def test_what_those_sites_pass_yields_the_unattended_envelope(
+    workspace: Path,
+) -> None:
+    """The behavioural half of the same link: whatever those sites pass must
+    produce the envelope the contract below pins. Reading the arguments is not
+    enough — a renamed profile constant with different contents would pass the
+    membership test and fail this one."""
+    for site in _production_build_sites():
+        kwargs = {}
+        for key, value in site["keywords"].items():
+            if key.startswith("**"):
+                kwargs.update(getattr(agent_tick, key[2:]))
+            else:
+                kwargs[key] = value
+        observed = probe_authority(build_agent(workspace, **kwargs))
+        assert observed["permitted_sinks"] == ("episode", "hygiene"), (
+            f"the organ built at agent_tick.py:{site['line']} holds "
+            f"{observed['permitted_sinks']} — not the unattended envelope"
+        )
+        assert observed["escalation_terminal"] == "refuse:no_provider", (
+            f"the organ built at agent_tick.py:{site['line']} escalates to "
+            f"{observed['escalation_terminal']} — it has acquired a human"
         )
 
 
