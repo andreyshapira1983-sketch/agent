@@ -215,6 +215,57 @@ This does not contaminate levels A–D, which prove ownership by perturbing the
 boundary itself. It bites `E`, retrospective attribution, and every claim of the
 form "this is the agent's own experience".
 
+## Provenance is five axes, not one word
+
+"Who decided" hid five separate facts. Verified in the code on 2026-08-21.
+
+| Axis | Question | Recoverable today |
+|---|---|---|
+| request origin | which subsystem formed the request | yes, but see below |
+| executive authorship | who judged this move worth making | **no** |
+| evidence origin | who supplied the grounds it was judged on | **no** |
+| review authority | who permitted or forbade crossing a boundary | **no** |
+| execution | whether the move actually ran | yes |
+
+A run can therefore read `request origin = autonomous_runtime`,
+`verdict = approved`, `status = executed` and still leave the two questions that
+matter unanswered. `autonomous_runtime requested it` does not mean the agent
+chose it, and `approved` does not name who approved.
+
+**Request origin is fixed by code, not merely constant in the data.**
+`ApprovalInboxItem.requested_by` carries the default `"autonomous_runtime"` and
+`ApprovalInbox.add()` has no parameter for it, so every item written on that path
+takes the default. `from_dict()` accepts an arbitrary persisted string, so the
+persisted surface is wider than the current producer — the familiar shape:
+current producer repertoire of one, persistent acceptance unbounded. Measured:
+137 of 137 rows in the live inbox, `observed = one`.
+
+**Reviewer identity is absent on all three durable surfaces, proven from code.**
+`ApprovalInboxItem` has no reviewer field; `approve()` and `deny()` take a
+`reason` and no actor; the separate review channel written by `_record_outcome()`
+to `data/approval_outcomes.jsonl` carries ts, id, operation, summary, verdict and
+reason — no actor; the approval receipt carries trace, path, operation,
+fingerprints and approval id — no actor. Other CLI and log surfaces were not
+walked, so system-wide recoverability stays UNKNOWN.
+
+Two properties of that review channel matter for reading it later. It is
+deliberately **best-effort** — the write is wrapped and a failure never blocks
+the verdict — so a row proves a review happened while a missing row proves
+nothing. And lifecycle transitions are deliberately excluded as plumbing, so it
+holds verdicts only, not executions.
+
+**The evidence axis is the one this audit added.** The intervention rule below
+turns on the difference between a human supplying a fact and a human supplying
+the answer. If nothing records where the grounds came from, those two are
+indistinguishable after the fact, and the rule cannot be audited even when it is
+being followed perfectly.
+
+**On the episode window.** `max_episodes = 200` is a nominal target, not a hard
+cap: episodes carrying a protected tag are never evicted, so a store can stay
+above 200 if protected history exceeds it. The live count of 200 is a local
+measurement and must not be read as the whole history, nor as a ceiling the code
+guarantees.
+
 ## Human intervention has kinds, and only one of them takes authority
 
 Supplying a resource, a permission, an inaccessible fact or a clarification of
