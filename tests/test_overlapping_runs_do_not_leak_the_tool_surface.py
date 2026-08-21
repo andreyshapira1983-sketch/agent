@@ -16,6 +16,10 @@ is to stop the planner selecting a run-blocked tool and generating noisy
 policy_blocked replans. Measured: 15 tools advertised, 14 after hiding one, and
 the directive appears.
 
+Note what that stated purpose is and is not: it is the reason the directive was
+written, quoted from the code. It is not evidence that removing the directive
+causes anything.
+
 The overlap, driven by events into a fixed order:
 
     A enters, hides the unattended block set
@@ -23,17 +27,27 @@ The overlap, driven by events into a fixed order:
     A returns -> its finally restores what A FOUND: nothing hidden
     B is still running, and is told the full surface again
 
-What this does NOT prove, stated because the first version of the sibling proof
-overclaimed exactly here: the tool does not become callable. The gate still
-answers deny, because `PolicyGate` now computes host | run and no longer lives
-on a shared field. Measured in the same experiment. The damage is narrower and
-real: the planner is told a forbidden tool exists, the directive that exists to
-prevent that is gone, and the run is steered toward a path that will be refused
-downstream — wasted planning and replan churn, not an executed effect.
+WHAT IS PROVEN is exactly this: the advertised surface and the directive change
+under a neighbouring run's cleanup, mid-run. Nothing more.
 
-Worth keeping in view: before the policy axis was moved, this leak coincided
-with that one, so a proposal would have been executed rather than refused. The
-gate holding is defence in depth doing its job, not a reason to leave this.
+WHAT IS NOT PROVEN, and must not be read into the result:
+
+  - that the tool becomes callable. It does not — the gate still answers deny,
+    because `PolicyGate` now computes host | run and no longer lives on a shared
+    field. Measured in the same experiment.
+  - **that any planning is wasted, or that a replan happens at all. UNPROVEN.**
+    This test never calls `Planner.plan`: `agent.run` is replaced by a stub that
+    records the surface and raises, so no plan is produced and no tool is
+    selected. That a wider surface would lead the planner to choose a forbidden
+    tool is a plausible inference from the directive's stated purpose, and an
+    inference is not a measurement. Showing it would need a run that actually
+    plans, and this file does not do that.
+
+Worth keeping in view, also bounded: before the policy axis was moved, this leak
+coincided with that one, so such a proposal would have PASSED THE GATE. Whether
+it would then have executed depends on the gateway, the approval path and the
+tool itself, none of which this experiment touches. The gate holding today is
+defence in depth doing its job, not a reason to leave this.
 
 Banked, not fixed. Which form `hidden_tools` should take is the same decision
 the other axes raised, and it belongs with them.
