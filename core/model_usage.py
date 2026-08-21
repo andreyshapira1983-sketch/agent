@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.budget_ledger import BudgetLedger
-from core.run_context import current_run
+from core.run_context import current_run, run_cost_ceiling
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
 _COST_UNITS_PER_1K_TOKENS = {
@@ -288,6 +288,27 @@ class ModelUsageLedger:
                 f"{est_cost}/{self.limits.max_cost_units} before "
                 f"{role}:{provider}/{model}"
             )
+        # Run-scoped cost envelope (MIR-116): a campaign or any caller may bound
+        # what the session counter can reach WHILE its run is active, so the cap
+        # acts here — before dispatch — instead of between cycles.
+        ceiling = run_cost_ceiling()
+        if ceiling is not None:
+            if totals["cost_units"] >= ceiling:
+                raise ModelBudgetExceeded(
+                    f"run cost envelope exhausted: {totals['cost_units']}/"
+                    f"{ceiling} before {role}:{provider}/{model}",
+                    counter="model_cost_units",
+                    role=role,
+                    provider=provider,
+                    model=model,
+                    used=totals["cost_units"],
+                    limit=ceiling,
+                )
+            if est_cost > 0 and totals["cost_units"] + est_cost > ceiling:
+                raise ModelBudgetExceeded(
+                    f"run cost envelope would exhaust: {totals['cost_units']}+~"
+                    f"{est_cost}/{ceiling} before {role}:{provider}/{model}"
+                )
         if self.budget_ledger is not None:
             # Read-only pre-flight peeks against persistent windows first, so a
             # blocked estimate never records a phantom llm_call.
@@ -426,6 +447,12 @@ class ModelUsageLedger:
             except (TypeError, ValueError):
                 continue
         return loaded
+
+    def session_cost_units(self) -> int:
+        """Cost units this session's records sum to — the counter the run cost
+        envelope bounds, exposed so a caller can compute its ceiling from the
+        same source the gate enforces against."""
+        return _totals(self.records)["cost_units"]
 
     def snapshot(self) -> dict[str, Any]:
         records = self.load_records()

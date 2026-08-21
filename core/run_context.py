@@ -35,6 +35,10 @@ class RunContext:
     blocked_tools: frozenset[str] = frozenset()
     #: True when THIS run must simulate effects. The host may also demand it.
     dry_run: bool = False
+    #: Absolute value the session cost counter may reach while this run is
+    #: active; None = no run-scoped cost bound. Consulted by the model-call
+    #: pre-flight gate, so the bound acts BEFORE the next spend (MIR-116).
+    cost_ceiling_units: int | None = None
 
 
 _RUN_CONTEXT: ContextVar[RunContext | None] = ContextVar(
@@ -57,6 +61,12 @@ def run_demands_dry_run() -> bool:
     """True when the current run requires effects to be simulated."""
     ctx = _RUN_CONTEXT.get()
     return bool(ctx.dry_run) if ctx is not None else False
+
+
+def run_cost_ceiling() -> int | None:
+    """The session-cost total this run may not pass, or None outside one."""
+    ctx = _RUN_CONTEXT.get()
+    return ctx.cost_ceiling_units if ctx is not None else None
 
 
 def identity_provenance(
@@ -99,6 +109,7 @@ def run_scope(run_id: str, task_id: str | None = None) -> Iterator[RunContext]:
         task_id=task_id,
         blocked_tools=outer.blocked_tools if outer else frozenset(),
         dry_run=bool(outer.dry_run) if outer else False,
+        cost_ceiling_units=outer.cost_ceiling_units if outer else None,
     )
     token = _RUN_CONTEXT.set(ctx)
     try:
@@ -125,6 +136,35 @@ def run_restrictions(
         blocked_tools=(outer.blocked_tools if outer else frozenset())
         | frozenset(blocked_tools),
         dry_run=(bool(outer.dry_run) if outer else False) or bool(dry_run),
+        cost_ceiling_units=outer.cost_ceiling_units if outer else None,
+    )
+    token = _RUN_CONTEXT.set(ctx)
+    try:
+        yield ctx
+    finally:
+        _RUN_CONTEXT.reset(token)
+
+
+@contextmanager
+def run_cost_envelope(*, allowed_total_units: int) -> Iterator[RunContext]:
+    """Bound the session cost counter for the duration of the block.
+
+    `allowed_total_units` is the ABSOLUTE value the counter may reach — the
+    caller computes it as "current count + what this run may still spend". A
+    nested envelope takes the MINIMUM of its request and the ceiling already in
+    force, so like `blocked_tools` and `dry_run` the bound can be narrowed and
+    never lifted from inside.
+    """
+    outer = _RUN_CONTEXT.get()
+    requested = int(allowed_total_units)
+    if outer is not None and outer.cost_ceiling_units is not None:
+        requested = min(requested, outer.cost_ceiling_units)
+    ctx = RunContext(
+        run_id=outer.run_id if outer else "unscoped",
+        task_id=outer.task_id if outer else None,
+        blocked_tools=outer.blocked_tools if outer else frozenset(),
+        dry_run=bool(outer.dry_run) if outer else False,
+        cost_ceiling_units=requested,
     )
     token = _RUN_CONTEXT.set(ctx)
     try:

@@ -17,22 +17,23 @@ is not: `llm_calls limit=0 limit_label=unlimited limit_enforced=False`, and no
 cost counter exists inside a cycle at all. A cycle is therefore bounded in
 SHAPE and unbounded in COST.
 
-Practically, `max_cost_units=N` means "N, plus one cycle of whatever that
-cycle costs". Unbounded BY THIS CAP, which is the exact claim: a provider
-quota, the account balance or the budget kill switch may still stop the spend.
-What does not stop it is the number that was given as the bound. For a campaign meant to run for hours that is a footnote. For an
-agent meant to be left alive it is the difference between a budget and a
-suggestion, which is why this is banked rather than quietly accepted.
+Fixed 2026-08-22 at the layer where real money moves, on the operator's word:
+the campaign now hands each cycle its REMAINING budget as a run cost envelope
+(`core/run_context.run_cost_envelope`), and the model-call pre-flight gate
+(`ModelUsageLedger.assert_can_start`) refuses once that ceiling is reached —
+witnessed by `test_the_cost_cap_reaches_the_moment_of_spend.py`.
 
-Nothing here proposes a fix. Bounding a cycle from inside and rewording the
-contract are different decisions, and both belong to the operator.
+What THIS file keeps proving is the loop level, and it is unchanged BY DESIGN:
+the loop learns a cycle's spend only after the cycle returns, so injected
+collaborators that report invented `cost_units_spent` — like the ones below —
+never touch the model gate and stay bounded only by the between-cycle check.
+That is the honest scope line: the envelope bounds spend that passes through
+`assert_can_start`; it cannot bound numbers a fake merely claims.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-
-import pytest
 
 from core.best_next_action import BestNextAction
 from core.campaign import (
@@ -119,22 +120,14 @@ def test_the_overshoot_is_exactly_one_cycle(workspace) -> None:
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-21 on a live run and banked, not fixed: the "
-        "module states that budget caps stop the campaign BEFORE the next spend, "
-        "which read literally means the total never passes the cap. The check is "
-        "at the top of a cycle and the spend is added after it returns, so an "
-        "already-started cycle can cost anything — 63 against a cap of 8 on the "
-        "live run, and unbounded in principle since no cost counter is enforced "
-        "inside a cycle. Fix unprescribed: bounding a cycle from inside and "
-        "rewording the contract are different decisions."
-    ),
-    strict=True,
-)
-def test_total_spend_never_passes_the_cap(workspace) -> None:
+def test_reported_spend_bypasses_the_gate_and_the_loop_counts_it_late(
+    workspace,
+) -> None:
+    """Scope statement, green on purpose. A collaborator that REPORTS spend
+    (rather than passing the model gate) is counted only after its cycle, so
+    the loop total exceeds the cap here even though the real spend path is now
+    bounded pre-dispatch. If this ever starts failing, the loop began trusting
+    reported numbers before the cycle returns — re-examine both layers."""
     result, _ = _run(_CAP, _ONE_CYCLE_COST)
-    assert result.totals["cost_units"] <= _CAP, (
-        f"the campaign spent {result.totals['cost_units']} against a cap of "
-        f"{_CAP} — the cap gates the next cycle, not the next spend"
-    )
+    assert result.totals["cost_units"] == _ONE_CYCLE_COST
+    assert result.totals["cost_units"] > _CAP
