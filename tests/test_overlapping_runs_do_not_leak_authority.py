@@ -44,9 +44,39 @@ from core.autonomous_runtime import (
     AutonomousRuntimeConfig,
     AutonomousTask,
 )
+from core.models import Action
 from tests.test_dry_run_learning_state import _durable_agent
+from tools.base import Tool
 
-_BLOCKED_EXAMPLE = "spawn_subagent"
+#: A name from the real unattended block set (core/autonomous_runtime.py:74)
+#: that is NOT in _UNBLOCKABLE_TOOLS, so no configuration can lift it.
+_BLOCKED_EXAMPLE = "rss_fetch"
+
+
+class _StubBlockedTool(Tool):
+    """A registered, read-only, do-nothing tool carrying a blocked name.
+
+    It exists so the gate's answer has ONE possible cause. `policy.check` says
+    deny both when a run-scoped block is in force and when the tool is simply
+    absent from the registry, and the first version of this file read the second
+    as the first. With the tool registered and read-only, a deny can only be the
+    block, and an allow can only be its removal.
+    """
+
+    name = _BLOCKED_EXAMPLE
+    description = "probe stub: registered so the gate has one reason, never run"
+    risk = "read_only"
+
+    def run(self, **kwargs):  # pragma: no cover - never invoked
+        raise AssertionError("the probe stub must never be executed")
+
+
+def _verdict(agent) -> str:
+    """What the real refusal site says about the blocked name, right now."""
+    return agent.policy.check(
+        Action(step_id="probe", type="tool_call", tool_name=_BLOCKED_EXAMPLE,
+               parameters={})
+    ).decision
 _TIMEOUT = 20.0
 
 
@@ -70,6 +100,14 @@ def _blocks(agent) -> frozenset[str]:
     return frozenset(getattr(agent.policy, "blocked_tools", frozenset()) or ())
 
 
+def _agent_with_the_blocked_tool(workspace: Path):
+    """The fixture agent, plus the stub — so authority is observable, not just
+    state. Registered before any run, so `_verdict` starts at allow."""
+    agent = _durable_agent(workspace)
+    agent.registry.register(_StubBlockedTool())
+    return agent
+
+
 # NOTE on the sensor, because the first version of this file got it wrong.
 # The obvious probe is `policy.check(Action(tool_name="spawn_subagent"))`, and it
 # answers "deny" whether the run-scoped block is in place OR the tool is simply
@@ -81,9 +119,11 @@ def _blocks(agent) -> frozenset[str]:
 def _run_one(runtime, agent, rv: _Rendezvous, who: str, config) -> None:
     def fake_run(*_args, **_kwargs):
         rv.seen[f"{who}_entry_blocks"] = _blocks(agent)
+        rv.seen[f"{who}_entry_verdict"] = _verdict(agent)
         rv.inside[who].set()
         assert rv.release[who].wait(_TIMEOUT), f"run {who} was never released"
         rv.seen[f"{who}_exit_blocks"] = _blocks(agent)
+        rv.seen[f"{who}_exit_verdict"] = _verdict(agent)
         raise _Done()
 
     agent.run = fake_run  # type: ignore[method-assign]
@@ -106,7 +146,7 @@ def _config(**kw) -> AutonomousRuntimeConfig:
 def test_a_single_run_is_narrowed_and_restored(workspace: Path) -> None:
     """Control, and it must stay green: one run at a time works exactly as
     written. If this ever fails, the proof below is measuring something else."""
-    agent = _durable_agent(workspace)
+    agent = _agent_with_the_blocked_tool(workspace)
     runtime = AutonomousRuntime(agent, workspace=workspace)
     before = _blocks(agent)
     rv = _Rendezvous()
@@ -114,10 +154,16 @@ def test_a_single_run_is_narrowed_and_restored(workspace: Path) -> None:
     _run_one(runtime, agent, rv, "a", _config())
 
     assert _BLOCKED_EXAMPLE in rv.seen["a_entry_blocks"]
-    assert _BLOCKED_EXAMPLE in rv.seen["a_exit_blocks"], (
-        "a run on its own lost its block before it finished"
+    assert rv.seen["a_entry_verdict"] == "deny", (
+        "the run did not actually narrow authority, so nothing below means anything"
+    )
+    assert rv.seen["a_exit_verdict"] == "deny", (
+        "a run on its own lost its restriction before it finished"
     )
     assert _blocks(agent) == before, "the run did not put the block set back"
+    assert _verdict(agent) != "deny", (
+        "after the run, the restriction outlived it — the control is not clean"
+    )
 
 
 @pytest.mark.xfail(
@@ -132,7 +178,7 @@ def test_a_single_run_is_narrowed_and_restored(workspace: Path) -> None:
     strict=True,
 )
 def test_an_overlapping_run_keeps_its_own_blocks(workspace: Path) -> None:
-    agent = _durable_agent(workspace)
+    agent = _agent_with_the_blocked_tool(workspace)
     rv = _Rendezvous()
     runtime_a = AutonomousRuntime(agent, workspace=workspace)
     runtime_b = AutonomousRuntime(agent, workspace=workspace)
@@ -155,8 +201,15 @@ def test_an_overlapping_run_keeps_its_own_blocks(workspace: Path) -> None:
     assert _BLOCKED_EXAMPLE in rv.seen["b_entry_blocks"], (
         "the second run never had the block, so this proves nothing"
     )
-    assert _BLOCKED_EXAMPLE in rv.seen["b_exit_blocks"], (
-        "while still running, the second run lost its own block set — the first "
-        f"run's cleanup restored what IT found, leaving {sorted(rv.seen['b_exit_blocks'])}. "
-        "Nothing raised, nothing logged, and the guard the run was given is gone"
+    assert rv.seen["b_entry_verdict"] == "deny", (
+        "the second run never held the restriction, so this proves nothing"
+    )
+    assert rv.seen["b_exit_verdict"] == "deny", (
+        "while still running, the second run's authority WIDENED: the real gate "
+        f"answered {rv.seen['b_entry_verdict']!r} on entry and "
+        f"{rv.seen['b_exit_verdict']!r} after another run's cleanup, with the "
+        f"block set going from {sorted(rv.seen['b_entry_blocks'])} to "
+        f"{sorted(rv.seen['b_exit_blocks'])}. The tool is registered and "
+        "read-only, so deny can only be the block and allow can only be its "
+        "removal. Nothing raised, nothing logged"
     )
