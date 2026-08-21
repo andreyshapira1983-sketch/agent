@@ -18,7 +18,9 @@ cost counter exists inside a cycle at all. A cycle is therefore bounded in
 SHAPE and unbounded in COST.
 
 Practically, `max_cost_units=N` means "N, plus one cycle of whatever that
-cycle costs". For a campaign meant to run for hours that is a footnote. For an
+cycle costs". Unbounded BY THIS CAP, which is the exact claim: a provider
+quota, the account balance or the budget kill switch may still stop the spend.
+What does not stop it is the number that was given as the bound. For a campaign meant to run for hours that is a footnote. For an
 agent meant to be left alive it is the difference between a budget and a
 suggestion, which is why this is banked rather than quietly accepted.
 
