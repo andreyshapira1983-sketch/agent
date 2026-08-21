@@ -3630,3 +3630,33 @@ reviewing it. Making `run_restrictions` replace instead of union left every
 proof green, because one scope entered and exited behaves the same either way.
 Only nesting separates them, and nothing tested nesting.
 
+## The budget that arrived after the money left
+
+`--max-cost-units 8` on a live campaign finished at 63. Nobody's arithmetic was
+wrong: the loop checked its counter at the top of each cycle and learned the
+cycle's spend only after it returned. Inside a cycle the enforced counters were
+structural — cycles, agent runs, learning runs — while the money counter read
+`limit_enforced=False`. A cycle was bounded in shape and unbounded in cost, so
+the cap was a semaphore for the NEXT cycle, not a bound on the next spend
+(MIR-116).
+
+The fix moves the number to where the money actually moves. The campaign
+computes what the session cost counter may reach — its current value plus the
+campaign's remaining budget — and enters `run_cost_envelope` for the cycle; the
+model-call pre-flight (`ModelUsageLedger.assert_can_start`) refuses once that
+ceiling is reached, estimate first when one exists. The envelope rides the same
+ContextVar model as `blocked_tools` and `dry_run`: nesting takes the minimum, a
+fresh run identity inherits it, and there is no way to widen from inside.
+
+Two boundaries worth remembering. The envelope bounds spend that PASSES THE
+GATE: an injected test collaborator that merely reports `cost_units_spent`
+bypasses it, which is why the loop-level characterisation in
+`test_a_campaign_cost_cap_is_not_a_ceiling.py` stays true after the fix — that
+file now states the scope instead of awaiting repair. And the worst overshoot
+is one call's estimation error, not zero: an actual cost may exceed its
+estimate; the following call is refused.
+
+Procedure note, paid for during this fix: break-the-fix mutations were verified
+with `sed` and reverted with `git checkout --`, which also wiped the
+not-yet-committed fix itself from two files. Break after committing, or revert
+the break with the inverse `sed`.

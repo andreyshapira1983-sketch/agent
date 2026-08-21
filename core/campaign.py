@@ -15,8 +15,13 @@ and went nowhere, ask the operator. * The campaign opens NO new effect path.
 A useful cycle runs through the existing
 :class:`~core.autonomous_runtime.AutonomousRuntime`, which already routes
 every effect through PolicyGate + the approval inbox. Dry-run is the
-default. * Budget caps (cycles / llm_calls / cost_units) stop the campaign
-BEFORE the next spend, not after.
+default. * Budgets act at two layers (MIR-116, fixed 2026-08-22): the loop
+checks its counters between cycles, and ``max_cost_units`` additionally
+travels into each useful cycle as a run cost envelope, so the model-call
+pre-flight gate refuses the spend that would pass the cap — the bound acts
+before the next spend, not one cycle later. Injected collaborators that
+merely REPORT spend bypass the gate and are bounded only by the
+between-cycle check.
 
 This module is deliberately split into a *pure loop* (``run_campaign``) plus
 two injectable collaborators (``gather_signals`` and ``execute_action``).
@@ -27,6 +32,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -42,8 +48,38 @@ from core.campaign_ledger import (
     CampaignLedger,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
+from core.run_context import run_cost_envelope
 
 CampaignStatus = Literal["completed", "stopped"]
+
+
+def _session_cost_units(agent: Any) -> int | None:
+    """The session cost counter the run envelope bounds, or None when the host
+    carries no usage ledger to measure it by (injected test agents)."""
+    try:
+        ledger = getattr(agent.model_router, "usage_ledger", None)
+        if ledger is None:
+            return None
+        return int(ledger.session_cost_units())
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _cycle_cost_envelope(agent: Any, config: CampaignConfig, cost_units_used: int):
+    """MIR-116: one useful cycle's spend bound — the session counter's current
+    value plus the campaign's remaining budget — as a run cost envelope, so the
+    cap acts at the model-call gate BEFORE the next spend. Without a cap, or
+    without a usage ledger to measure the session by, a nullcontext leaves the
+    between-cycle check as the only bound (prior behaviour, unchanged)."""
+    if not config.max_cost_units:
+        return nullcontext()
+    session_cost = _session_cost_units(agent)
+    if session_cost is None:
+        return nullcontext()
+    return run_cost_envelope(
+        allowed_total_units=session_cost
+        + (config.max_cost_units - cost_units_used)
+    )
 
 
 def _utc_now() -> datetime:
@@ -264,13 +300,14 @@ def run_campaign(
             streak_repeats = False
             attempted_signatures.add(signature)
             useful_cycles += 1
-            outcome = execute(
-                agent=agent,
-                workspace=workspace,
-                action=action,
-                config=config,
-                approval_inbox=approval_inbox,
-            )
+            with _cycle_cost_envelope(agent, config, cost_units_used):
+                outcome = execute(
+                    agent=agent,
+                    workspace=workspace,
+                    action=action,
+                    config=config,
+                    approval_inbox=approval_inbox,
+                )
             llm_calls_used += max(0, outcome.llm_calls_spent)
             cost_units_used += max(0, outcome.cost_units_spent)
             if outcome.proposal:
