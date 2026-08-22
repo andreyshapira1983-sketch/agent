@@ -66,6 +66,11 @@ _BLOCKED_STATUS: RuntimeTaskStatus = "blocked"
 #: `core/campaign.py:193` writes `budget_exhausted:llm_calls=3/3`.
 _CLOCK_CLEARABLE_STOPS: tuple[str, ...] = ("budget_exhausted", "budget_wait")
 
+#: How many parked rows one reactivation pass may revive. The tick's drain
+#: loop is unbounded, so this is the only thing standing between a backlog and
+#: a salvo that spends the whole refilled window on old debt.
+_REACTIVATION_BATCH = 3
+
 
 def _is_resource_paused(task: RuntimeTask) -> bool:
     """Is this row parked on a resource that refills, rather than on a person?"""
@@ -592,22 +597,37 @@ class TaskQueueStore:
         """
         moment = (now or _now()).astimezone(timezone.utc)
         cutoff_ts = moment.timestamp() - cooldown_minutes * 60
+
+        def _parked_ts(task: RuntimeTask) -> float:
+            try:
+                return _parse_iso(task.updated_at).timestamp()
+            except (ValueError, AttributeError, TypeError):
+                return 0.0  # unparseable → treat as long past
+
         changed: list[RuntimeTask] = []
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
+            due = [
+                t for t in tasks
+                if _is_resource_paused(t) and _parked_ts(t) <= cutoff_ts
+            ]
+            # Batch bound, oldest first: the tick's drain loop runs EVERYTHING
+            # pending in one pass, so an unbounded revival would spend the
+            # refilled window on backlog in one salvo (14 rows were waiting
+            # when this was built). The rest stay paused for later ticks.
+            revivable = [t for t in due if t.attempts < t.max_attempts]
+            revive_ids = {
+                t.id for t in sorted(revivable, key=_parked_ts)[:_REACTIVATION_BATCH]
+            }
             out: list[RuntimeTask] = []
             for task in tasks:
-                if not _is_resource_paused(task):
-                    out.append(task)
-                    continue
-                try:
-                    parked_ts = _parse_iso(task.updated_at).timestamp()
-                except (ValueError, AttributeError, TypeError):
-                    parked_ts = 0.0  # unparseable → treat as long past
-                if parked_ts > cutoff_ts:
-                    out.append(task)  # still cooling down
-                    continue
-                if task.attempts >= task.max_attempts:
+                if task.id in revive_ids:
+                    revived = task.with_updates(
+                        status="pending", run_after=_iso(moment)
+                    )
+                    out.append(revived)
+                    changed.append(revived)
+                elif task in due and task.attempts >= task.max_attempts:
                     spent = task.with_updates(
                         status="failed",
                         last_error=(
@@ -617,10 +637,8 @@ class TaskQueueStore:
                     )
                     out.append(spent)
                     changed.append(spent)
-                    continue
-                revived = task.with_updates(status="pending", run_after=_iso(moment))
-                out.append(revived)
-                changed.append(revived)
+                else:
+                    out.append(task)
             if changed:
                 self._save_unlocked(out)
         return changed

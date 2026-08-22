@@ -262,3 +262,22 @@ def test_the_queue_consumer_can_actually_run_what_reactivation_hands_it() -> Non
         "a re-queued checkpoint must keep the conservative posture it was "
         "parked with"
     )
+
+
+def test_a_backlog_returns_in_bounded_batches(workspace: Path) -> None:
+    """Fourteen live rows are all past their cooldown TODAY, and the tick's
+    drain loop has no bound of its own — so an unbounded reactivation would
+    spend the refilled window on backlog in one salvo, starving fresh work.
+    The backlog must come back a few rows per tick, oldest first."""
+    store = _store(workspace)
+    for i in range(5):
+        _park(store, trace_id=f"tr-{i}")
+
+    revived = reactivate_resumable_work(store, lock=_HeldLock(), cooldown_minutes=0)
+
+    assert len(revived) == 3, (
+        f"one pass revived {len(revived)} rows; a backlog salvo spends the "
+        "whole refilled window on old debt"
+    )
+    assert len(store.pending()) == 3
+    assert len(store.list(status="paused")) == 2, "the rest wait for later ticks"
