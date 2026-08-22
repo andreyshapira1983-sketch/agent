@@ -1357,7 +1357,11 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 | tick `result_status` → `select_best_next_action` | next-action advice | **not poisoned** — `agent_tick.py` keeps a per-task honest verdict deliberately distinct from run status |
 
 - **What is NOT claimed.** The approval burn may be deliberate policy — "an approval is consumed by the attempt" is already the recorded rule for the self-apply lane. The finding is narrower and stays exact: the burn condition is `completed`, `completed` can be hollow, and a `stopped` run keeps its grant while a hollow `completed` one loses it — so the policy, whatever it is meant to be, is currently keyed to a token that does not mean what the condition assumes. Whether to rekey it is a decision, not a measurement.
-- **Status:** `open`. Measured, deliberately unfixed: renaming the token, splitting queue-drained from work-succeeded, and rekeying the approval burn are three different repairs, and choosing among them belongs to the operator.
+- **Operator rulings, 2026-08-22, his own words, recorded on his word ("пока зафиксируй уже сказанное").** Two norms now constrain any repair here:
+  - **A — ratified.** The agent itself must distinguish *processing finished* from *the task actually done*; the distinction is not merely an audit nicety, it is something the agent is required to understand and represent.
+  - **B, the ratified core.** *The request for permission, the permission itself, and the actual execution are three different events and must not merge into one status.* This is exactly the collapse measured above: today one token (`completed` driving `mark_executed`) stands in for all three.
+  - **Explicitly NOT recorded yet,** named by the operator as a separate question: whether one "да" automatically survives failed attempts until success. The retry semantics of a grant awaits his separate word.
+- **Status:** `open`. Measured and now norm-bound, deliberately unfixed: any repair must realise the two rulings above; choosing and ordering the repairs still belongs to the operator.
 
 ### MIR-116 — a campaign cost cap gates the next cycle, not the next spend
 - **Aliases:** none. **Related:** MIR-114 (found during its live verification). **Provenance:** observed on a live run 2026-08-21, then measured deterministically; banked, not fixed.
