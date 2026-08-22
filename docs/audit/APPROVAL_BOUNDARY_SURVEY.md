@@ -125,6 +125,29 @@ gate the happy path does not need. The asymmetry the operator named stands: a
 superfluous boundary costs convenience, a missing one costs sovereignty — so
 removal is his decision, made boundary by boundary, not a cleanup to infer.
 
+**The axis this survey missed — added 2026-08-22 after checking the field.**
+Everything above measures ONE axis: whose authority an operation widens. There
+is a second, orthogonal axis this survey did not apply, and both reviewing
+models missed it together: **who else can steer the agent.** Willison's lethal
+trifecta — private data + untrusted content + an outbound channel — is safe in
+any pair and dangerous as a triple, and the lab's interior holds all three at
+once in effects mode: the agent reads the public web (untrusted content),
+holds the repo and its API keys in-process (private data), and has `web_fetch`
+egress (an exfiltration channel). A subagent that reads the web and reports to
+a file-writing parent is an injection chain that is entirely "interior" under
+C0.P.
+
+So the correction to the survey's own lens: **the C0.P test measures
+authority; the approvals it examined also served as hijack friction** —
+protection against a third party, not against the agent. "Inside the lab" is
+not "inside the trusted": the lab's interior contains the untrusted internet.
+Removing a gate on the authority axis widens the injection blast radius on the
+other, and the field's numbers are not small (ASB: 84.3% max average injection
+success; WASP: 16–86% of injected instructions begin executing). The field's
+defence: keep at least one leg of the trifecta broken on every path. Any
+decision to remove or reshape a gate must therefore answer BOTH axes, not the
+authority axis alone.
+
 **One caveat on the confinement claim.** "Confined to the lab" rests on the
 resolvers holding: `file_write`'s `relative_to` check, `shell_exec`'s
 whitelist, `SafeVCS` having no remote verb. Each is tested elsewhere, but the

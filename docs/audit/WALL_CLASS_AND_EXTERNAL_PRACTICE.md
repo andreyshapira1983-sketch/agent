@@ -84,7 +84,7 @@ Checked against this codebase today:
 |---|---|
 | external known-good state the agent cannot destroy | present — the remote branch; local git history |
 | technical authority envelope: scoped credentials, no production secrets in reach, cannot self-widen | **not met** — keys live in the agent's process env; no principal separation; walls in-process |
-| resources bounded outside, incl. a real cost cap at the point of spend | partially — MIR-116 holds at the spend gate, but in-process; no provider-side cap set by us |
+| resources bounded outside, incl. a real cost cap at the point of spend | partially — MIR-116 holds at the spend gate, but in-process; provider-side hard caps now exist as products (OpenAI Hard Spend Limits, 2026-07; Anthropic workspace caps) and are not yet set — closable from a dashboard, no code |
 | irreversible external world as a separate security domain | met by construction — push/network verbs absent from the tool surface (MIR-118) |
 | independent journal + emergency stop + staged runs | largely present — heartbeat, budget kill switch, bounded campaign flags |
 
