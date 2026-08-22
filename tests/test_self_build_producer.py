@@ -1524,3 +1524,39 @@ def test_selector_keeps_small_split_actionable(workspace: Path, monkeypatch):
 
     selector = mod._default_grounded_selector(workspace)
     assert selector() is split_cand
+
+
+def test_the_report_names_what_the_run_read(workspace: Path):
+    """MIR-121's write side, end to end: the pipeline records its reads at the
+    moment of reading — the target file always, the `memory:` label exactly
+    when recalled lessons were injected into the Builder prompt. The episode
+    writer carries these into `source_labels`, which is what finally lets
+    `_lesson_provenance_disqualified` bite on memory-derived lessons."""
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate(_TARGET, "grounded: split it", "TECH_DEBT.md:7")
+
+    with_lessons = _produce(
+        workspace,
+        llm=FakeLLM([_builder_ok()]),
+        inbox=inbox,
+        grounded_selector=lambda: candidate,
+        lessons_provider=lambda _t: ["self-apply rolled_back: ImportError"],
+    )
+    assert with_lessons.status == "proposed"
+    assert f"file:{_TARGET}" in with_lessons.sources
+    assert "memory:self-build-lessons" in with_lessons.sources, (
+        "recalled memory flowed into the Builder prompt and the report does "
+        "not say so — the laundering channel stays unlabelled"
+    )
+
+    without = _produce(
+        workspace,
+        llm=FakeLLM([_builder_ok()]),
+        inbox=ApprovalInbox(path=None),
+        grounded_selector=lambda: _Candidate(_TARGET, "grounded: split it",
+                                             "TECH_DEBT.md:7"),
+    )
+    assert "memory:self-build-lessons" not in without.sources, (
+        "the memory label must mean memory was actually read, or the guard "
+        "it feeds will quarantine clean lessons"
+    )

@@ -152,12 +152,25 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
     for path in _touched_paths(result):
         tags.append(path)
 
+    # MIR-121's write side: record what the run READ. Until 2026-08-22 every
+    # lesson this writer minted carried no source_labels at all, so «no
+    # web-derived lesson was found» was a statement about the instrument, not
+    # the store — and `_lesson_provenance_disqualified` filtered a `memory:`
+    # label nothing ever wrote. The producer reports its reads in `sources`;
+    # older callers fall back to the target and the files an apply changed.
+    sources = [str(s) for s in (result.get("sources") or []) if str(s).strip()]
+    if not sources:
+        if target:
+            sources.append(f"file:{target}")
+        sources.extend(f"file:{p}" for p in _touched_paths(result))
+
     return EpisodeRecord(
         goal=goal[:500],
         question=kind,
         outcome=outcome,  # type: ignore[arg-type]  # one of success/partial/failed
         summary=summary[:2000],
         tags=tuple(dict.fromkeys(t for t in tags if t)),  # dedup, keep order
+        source_labels=tuple(dict.fromkeys(sources)),
         completion_state=_COMPLETION_BY_OUTCOME.get(  # type: ignore[arg-type]
             outcome, "unknown"
         ),
