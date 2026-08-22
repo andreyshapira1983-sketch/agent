@@ -144,7 +144,6 @@ class ClaimExtractor:
         # would never see in the rendered file. See docs/CODE_NOTES.md,
         # "Concealment, not vocabulary".
         from core.injection_guard import (
-            carries_suspicious_annotation,
             strip_concealed,
             strip_suspicious_annotation,
         )
@@ -155,7 +154,16 @@ class ClaimExtractor:
         # what gets minted from a flagged excerpt is quarantined as `suspect`
         # (stored and auditable, refused by the write policy, never upgraded
         # by corroboration — quarantine, not blunt exclusion).
-        excerpt_flagged = carries_suspicious_annotation(evidence.excerpt)
+        # AUDIT of this repair, 2026-08-22: the first version tainted EVERY
+        # claim from a flagged excerpt. Measured on the live registry, 11% of
+        # sources carry at least one tripping sentence and they hold 22% of
+        # all claims — so document-level taint would have quarantined a fifth
+        # of the agent's knowledge to catch the planted lines. That is the
+        # field's named failure for this shape: scanner false positives
+        # strangle legitimate sources. The taint is per-SENTENCE now: only
+        # text the guard actually pointed at is suspect, and the rest of the
+        # document keeps its ordinary standing.
+        suspect_spans = _suspicious_spans(evidence.excerpt)
 
         # Голос охранника (обёртка annotate_suspicious) — аннотация для
         # синтезатора, не содержимое источника: снимается до нарезки на
@@ -169,7 +177,9 @@ class ClaimExtractor:
             if not self._accept_sentence(sentence):
                 continue
             confidence = rank.final_score if rank is not None else evidence.confidence
-            status = "suspect" if excerpt_flagged else _status_from_rank(rank)
+            tainted = any(span in sentence or sentence in span
+                          for span in suspect_spans)
+            status = "suspect" if tainted else _status_from_rank(rank)
             claims.append(ClaimRecord(
                 id=_claim_id(),
                 source_id=source.id,
@@ -792,6 +802,43 @@ def _is_meaningful_claim(text: str) -> bool:
         "ran `",
     )
     return bool(text and not any(lowered.startswith(prefix) for prefix in generic))
+
+
+def _suspicious_spans(excerpt: str) -> list[str]:
+    """Sentences the injection guard actually pointed at.
+
+    The guard reports each finding with a byte offset, so the taint can follow
+    the evidence instead of the document. Returns the wrapper-stripped
+    sentences containing a finding; empty when the excerpt is clean or was
+    never wrapped.
+    """
+    from core.injection_guard import (
+        carries_suspicious_annotation,
+        scan_for_injection,
+        strip_suspicious_annotation,
+    )
+
+    if not carries_suspicious_annotation(excerpt):
+        return []
+    body = strip_suspicious_annotation(excerpt)
+    result = scan_for_injection(body)
+    offsets = [int(getattr(f, "offset", -1)) for f in result.findings]
+    offsets = [o for o in offsets if o >= 0]
+    if not offsets:
+        # Flagged on our own wrapper but the body scans clean now — treat the
+        # WHOLE body as suspect rather than nothing: losing the reason for a
+        # flag must not silently clear the flag.
+        return _sentences(body)
+    spans: list[str] = []
+    cursor = 0
+    for sentence in _sentences(body):
+        start = body.find(sentence, cursor)
+        if start < 0:
+            continue
+        cursor = start + len(sentence)
+        if any(start <= o < cursor for o in offsets):
+            spans.append(sentence)
+    return spans or _sentences(body)
 
 
 def _status_from_rank(rank: SourceRank | None) -> str:
