@@ -7,6 +7,7 @@ safe for budgeting decisions rather than billing.
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,34 @@ from typing import Any
 from core.budget_ledger import BudgetLedger
 from core.run_context import current_run, run_cost_ceiling
 from core.state_integrity import append_state_jsonl, read_state_jsonl
+
+#: Error-text fragments meaning "this key cannot pay for / is not allowed this
+#: request". Owned HERE beside the ledger that stores the error text; the
+#: router's `_is_switch_key_error` consumes the same tuple, so the two rules
+#: cannot drift apart. Only this class demotes provider health — a flaky
+#: network must never take a provider out of rotation.
+_KEY_CLASS_TEXT_MARKERS: tuple[str, ...] = (
+    "quota",
+    "invalid api key",
+    "incorrect api key",
+    "invalid_api_key",
+    "authentication",
+    "unauthorized",
+    "permission denied",
+    "billing",
+    "payment required",
+    "credit balance",
+    "insufficient funds",
+)
+
+#: Consecutive key-class failures after which a provider is skipped.
+_UNHEALTHY_AFTER = 3
+#: How long the skip lasts after the newest failure. A cooldown, never a ban:
+#: past this the provider gets one probe call again — the operator may have
+#: topped the balance up, and the agent may not retire its own toolkit.
+_UNHEALTHY_COOLDOWN_MINUTES = 120
+#: Bounded tail read for health (MIR-125: this file only grows).
+_TAIL_READ_BYTES = 131072
 
 _COST_UNITS_PER_1K_TOKENS = {
     "free": 0,
@@ -436,6 +465,95 @@ class ModelUsageLedger:
         if self.logger is not None:
             self.logger.log("model_call_end", record.to_dict())
         return record
+
+    def provider_unhealthy(
+        self, provider: str, *, now: datetime | None = None,
+    ) -> str | None:
+        """Reason this provider should be skipped right now, or None.
+
+        Derived from the ledger's own recent records — no new state, no new
+        writer. MIR-132 measured why: **presence of an API key was treated as
+        availability**, and one provider answered "credit balance is too low"
+        391 consecutive times across four days while every fresh process began
+        with it again. Per-call failover rescued the work; nothing remembered.
+
+        Unhealthy means ALL of: the provider's newest records show
+        ``_UNHEALTHY_AFTER`` consecutive key/quota/billing-class failures
+        (`_KEY_CLASS_TEXT_MARKERS` — the same conservatism as the router's
+        switch rule: a flaky network never demotes); no success since; and the
+        newest failure is younger than ``_UNHEALTHY_COOLDOWN_MINUTES`` — past
+        that the provider is probed again, because a cooldown is a delay and a
+        ban would be the agent retiring part of its own toolkit (MIR-131/§9).
+        One success heals everything. No readable history reads as healthy:
+        refusing to work is worse than one wasted probe call.
+        """
+        wanted = (provider or "").strip().lower()
+        if not wanted:
+            return None
+        rows = self._recent_rows_for(wanted)
+        if not rows:
+            return None
+        streak = 0
+        newest_failure: str | None = None
+        for row in reversed(rows):  # newest first
+            status = str(row.get("status") or "")
+            if status == "success":
+                return None
+            error = str(row.get("error") or "").lower()
+            if not any(marker in error for marker in _KEY_CLASS_TEXT_MARKERS):
+                return None  # a non-key error breaks the chain: stay conservative
+            streak += 1
+            if newest_failure is None:
+                newest_failure = str(row.get("completed_at") or "")
+            if streak >= _UNHEALTHY_AFTER:
+                break
+        if streak < _UNHEALTHY_AFTER or not newest_failure:
+            return None
+        try:
+            newest = datetime.fromisoformat(newest_failure)
+        except ValueError:
+            return None
+        moment = now or datetime.now(timezone.utc)
+        age = (moment - newest).total_seconds() / 60.0
+        if age > _UNHEALTHY_COOLDOWN_MINUTES:
+            return None  # stale: time to probe again
+        return f"{streak}_consecutive_key_errors_within_{int(age)}m"
+
+    def _recent_rows_for(self, provider: str, *, limit: int = 40) -> list[dict]:
+        """Newest-last raw rows for *provider*, from a BOUNDED tail read.
+
+        The MIR-125 lesson applied at birth rather than retrofitted: this file
+        only grows, and health needs the last few records, so only the final
+        ``_TAIL_READ_BYTES`` are read and parsed. In-memory session records are
+        already in the file when a path exists; without a path they are the
+        only source.
+        """
+        if self.path is None or not self.path.exists():
+            rows = [r.to_dict() for r in self.records]
+        else:
+            try:
+                with self.path.open("rb") as fh:
+                    fh.seek(0, 2)
+                    size = fh.tell()
+                    fh.seek(max(0, size - _TAIL_READ_BYTES))
+                    chunk = fh.read().decode("utf-8", errors="replace")
+            except OSError:
+                return []
+            lines = chunk.splitlines()
+            if size > _TAIL_READ_BYTES and lines:
+                lines = lines[1:]  # first line may be cut mid-record
+            rows = []
+            for line in lines:
+                try:
+                    raw = json.loads(line)
+                except ValueError:
+                    continue
+                payload = raw.get("payload", raw)
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        out = [r for r in rows
+               if str(r.get("provider") or "").strip().lower() == provider]
+        return out[-limit:]
 
     def load_records(self) -> list[ModelUsageRecord]:
         if self.path is None or not self.path.exists():

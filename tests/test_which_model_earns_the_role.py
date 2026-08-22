@@ -120,9 +120,15 @@ def test_the_router_asks_the_measurement_before_the_tier_map():
 
     from core.model_router import UsageTrackedLLM
 
+    # 2026-08-22: the substitution moved one hop, into `_next_provider_llm`,
+    # when MIR-132's pre-emptive health check began sharing it with the
+    # exception path. The invariant is unchanged — measurement first, tier map
+    # as the floor — so the pin follows the chain instead of the old location.
     source = inspect.getsource(UsageTrackedLLM._failover_llm)
-    assert "substitute_model_with_reason(" in source
-    assert "peer_model_at_same_tier" not in source
+    chain = inspect.getsource(UsageTrackedLLM._next_provider_llm)
+    assert "_next_provider_llm(" in source
+    assert "substitute_model_with_reason(" in chain
+    assert "peer_model_at_same_tier" not in source + chain
 
 
 def test_the_tier_map_still_answers_when_nothing_is_measured():
