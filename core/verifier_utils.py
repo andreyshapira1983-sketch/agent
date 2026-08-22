@@ -273,6 +273,10 @@ def _semantic_nli_check(claim: str, excerpt: str, llm: Any) -> bool:
         prompt = f"Source excerpt:\n{excerpt[:_MAX_EXCERPT_FOR_NLI]}\n\nClaim: {claim[:300]}\n\nDoes the source excerpt support the claim? Answer yes or no."
         answer = llm.complete(system=_NLI_SYSTEM, user=prompt, max_tokens=4, temperature=0.0)
         return answer.strip().lower().startswith("yes")
+    # FAIL CLOSED, deliberately: this is the NLI support check, and an
+    # unreachable model must never be read as "the source supports the
+    # claim". `False` means unsupported, which is the safe verdict —
+    # the opposite default would launder unverified claims on any outage.
     except Exception:  # noqa: BLE001
         return False
 

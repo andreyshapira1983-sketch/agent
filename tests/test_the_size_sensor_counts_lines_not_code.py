@@ -84,3 +84,46 @@ def test_a_small_module_is_not_flagged() -> None:
         [("core/small.py", _module(code_lines=50, prose_lines=50))]
     )
     assert records == []
+
+
+# ── Audit of this closure (docs/audit/CLOSURE_AUDIT_2026-08-22.md) ──────────
+#
+# The field's named failure for AST line counting is that it misreads real
+# Python shapes. Seven were probed — one-liner ifs, multi-line call arguments,
+# big dict literals, chained methods, decorators, trailing comments — and six
+# held. The seventh did not: a multi-line string that is NOT a docstring
+# counted as ONE line, so `core/planner_prompt.py` read as 8 code lines of
+# 553. That is a false-NEGATIVE channel, and the closure's own argument
+# ("errors are one-directional, so counting code cannot newly miss anything")
+# was a property of the tree at that moment, not of the counter.
+
+
+def test_a_module_of_embedded_payload_is_not_invisible() -> None:
+    """An embedded prompt/SQL/template is bulk the module carries — payload,
+    not explanation. Only docstrings and comments are prose."""
+    payload = "SQL = '''\n" + "\n".join(f"SELECT {i}" for i in range(900)) + "\n'''"
+    records, _ = oversized_module_candidates([("core/payload.py", payload)])
+    assert [r.target_path for r in records] == ["split:core/payload.py"], (
+        "a module that is 900 lines of embedded literal reads as one line — "
+        "the old total-lines sensor would have flagged it and this one does not"
+    )
+
+
+def test_a_docstring_is_still_prose_however_long() -> None:
+    """The boundary the repair must not cross: explanation stays free."""
+    doc = '"""' + "\n" + "\n".join("explanatory prose" for _ in range(900)) + "\n" + '"""'
+    code = "\n".join(f"x{i} = {i}" for i in range(50))
+    records, _ = oversized_module_candidates([("core/doc.py", doc + "\n" + code)])
+    assert records == []
+
+
+def test_ordinary_python_shapes_are_not_inflated() -> None:
+    """Six shapes probed in the audit that held, kept as a regression net."""
+    for label, src in (
+        ("one-liner ifs", "\n".join(f"if x{i}: y{i} = {i}" for i in range(700))),
+        ("dict literal", "D = {\n" + ",\n".join(f'  "k{i}": {i}' for i in range(700)) + "\n}"),
+        ("chained calls", "x = (o\n" + "\n".join(f"  .s{i}()" for i in range(700)) + ")"),
+        ("trailing comments", "\n".join(f"x{i} = {i}  # why" for i in range(700))),
+    ):
+        records, _ = oversized_module_candidates([(f"core/{label}.py", src)])
+        assert records == [], f"{label} was flagged below the threshold"

@@ -417,6 +417,10 @@ def catalog_freshness() -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         age_days = _catalog_age_days(data)
+    # A corrupt or unreadable catalog file must degrade to "unreadable"
+    # rather than raise: this is a STATUS query, and callers use it to
+    # decide whether to refresh. Raising here would break the refresh path
+    # that exists to repair exactly this condition.
     except Exception as exc:  # noqa: BLE001
         return {"status": "unreadable", "expired": False, "age_days": None,
                 "ttl_days": _ttl_days(), "path": str(path),

@@ -134,6 +134,10 @@ def _unresolved_task(inbox: Any) -> Any | None:
     """
     try:
         items = inbox.list()
+    # An unreadable inbox means "no pending item found", which is the
+    # CONSERVATIVE answer here: the caller uses it to decide whether a
+    # proposal already exists, and answering "none" makes it check the
+    # other gates rather than skip them.
     except Exception:  # noqa: BLE001
         return None
     for item in items:
@@ -690,6 +694,8 @@ def produce_coding_task(
     selector = task_selector or _default_task_selector(workspace)
     try:
         candidate = selector()
+    # `None` flows into the "no grounded candidate" path below, which reports
+    # itself; crashing here would lose the whole tick over a backlog read.
     except Exception:  # noqa: BLE001
         candidate = None
     if candidate is None:

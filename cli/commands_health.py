@@ -344,6 +344,10 @@ def _cooldown_payload(workspace: Path, now: datetime) -> dict[str, Any]:
         remaining = agent_tick._cooldown_remaining_seconds(
             state or {}, cooldown_hours=hours, now=now
         )
+    # A health READING must never become a health INCIDENT: this block only
+    # computes a cooldown display, and its failure is reported through the
+    # returned status rather than swallowed — `status: unknown` carries the
+    # exception type to the operator.
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "unknown",
@@ -438,6 +442,8 @@ def _grounded_target_payload(workspace: Path) -> dict[str, Any]:
             "mapping_rule": mapping.mapping_rule,
             "mapping_reason": mapping.reason,
         }
+    # Same rule: classification is advisory, and an unclassifiable target is
+    # an honest "unknown" WITH its cause in `reason`, not a crashed command.
     except Exception as exc:  # noqa: BLE001
         return {"classification": "unknown", "reason": type(exc).__name__, "target_path": None}
 
@@ -477,6 +483,10 @@ def _git_tree_payload(workspace: Path) -> dict[str, Any]:
             check=False,
             timeout=5,
         )
+    # Shelling out to git is the one part of this probe that can fail for
+    # environmental reasons (no git, no repo, timeout). The operator gets
+    # `unknown` plus the exception type; the rest of the health report is
+    # worth more than this one line.
     except Exception as exc:  # noqa: BLE001
         return {"status": "unknown", "reason": type(exc).__name__}
     if result.returncode != 0:

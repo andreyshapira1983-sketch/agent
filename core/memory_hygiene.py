@@ -315,6 +315,10 @@ def summarise_memory(
             max_tokens=1024,
             temperature=0.2,
         )
+    # Not silent: the failure is written INTO the report as
+    # `skipped_reason`, so a summarisation that could not run is visible
+    # to the operator instead of looking like a summarisation that found
+    # nothing. Hygiene must not take the caller down with it.
     except Exception as exc:  # noqa: BLE001
         report.skipped_reason = f"llm_error: {type(exc).__name__}: {exc}"
         return report

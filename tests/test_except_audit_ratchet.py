@@ -188,3 +188,41 @@ def test_the_audit_looks_where_the_concern_is() -> None:
             f"the audit sees no files under {root}/ — its clean bill of "
             "health is scoped away from the concern again"
         )
+
+
+def test_a_bare_linter_directive_is_not_a_justification() -> None:
+    """Audit of this audit (docs/audit/CLOSURE_AUDIT_2026-08-22.md).
+
+    The field's named failure for a "zero unexplained" report is that the
+    comments turn out to be fig leaves. Probed: 8 of 127 silent handlers were
+    justified by nothing but `# noqa: BLE001` — a directive that SILENCES the
+    tool asking for a reason — and this instrument counted them as explained,
+    so its zero was false. A directive followed by real prose still counts;
+    the bare marker does not.
+    """
+    from scripts.except_audit import _is_bare_directive
+
+    for bare in ("# noqa: BLE001", "#noqa", "# noqa: BLE001, S110",
+                 "# type: ignore", "# pragma: no cover"):
+        assert _is_bare_directive(bare), bare
+
+    for real in (
+        "# noqa: BLE001 — journaling must never break the caller",
+        "# noqa: BLE001, S110 — the queue entry is best-effort and the run continues",
+        "# fail closed: an unreachable model is not support",
+        "# нельзя ронять ход из-за наблюдателя",
+    ):
+        assert not _is_bare_directive(real), real
+
+
+def test_the_zero_is_not_bought_with_fig_leaves() -> None:
+    """The ratchet's number means nothing unless the instrument refuses
+    directive-only comments. This pins that the two travel together."""
+    from scripts.except_audit import audit, unjustified_silent
+
+    rows = audit()
+    assert rows, "the audit found no handlers at all"
+    assert unjustified_silent(rows) == [], (
+        "a silent handler carries no stated reason — see the audit output for "
+        "file and line"
+    )
