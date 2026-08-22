@@ -172,3 +172,19 @@ def test_log_prefixed_helpers_count_but_login_does_not():
             f"try:\n    x = 1\nexcept Exception as e:\n    {call}\n", "f.py"
         )
         assert rows[0]["kind"] == expected, f"{call} -> {rows[0]['kind']}"
+
+
+def test_the_audit_looks_where_the_concern_is() -> None:
+    """MIR-126: of the nine silent handlers that entry worried about, exactly
+    one was in core/ — the audit walked core/ only and reported a clean bill
+    over the wrong scope. The zero above is only meaningful if app/ and cli/
+    are inside it, so the scope itself is pinned: narrowing it back would keep
+    the ratchet green for the worst reason."""
+    from scripts.except_audit import audit
+
+    files = {r["file"].split("/")[0] for r in audit()}
+    for root in ("core", "cli", "app", "tools"):
+        assert root in files, (
+            f"the audit sees no files under {root}/ — its clean bill of "
+            "health is scoped away from the concern again"
+        )
