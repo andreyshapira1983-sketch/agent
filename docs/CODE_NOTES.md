@@ -3699,3 +3699,45 @@ Scope, stated in the test file too: this closes the path that needs no
 compromise. It does NOT remove credentials from the process environment —
 `os.environ` still holds them and in-process Python still reaches them. That is
 the wall-class gap (MIR-120) and needs a different class of fix.
+
+## A drained queue is not finished work
+
+`AutonomousRuntime` set its queue status to `"completed" if processed` —
+PROCESSED, not SUCCEEDED. A failed task still increments `processed`, so
+`completed` meant "the drain finished and nothing stopped us", never "the work
+happened". Measured as MIR-117; seen live on 2026-08-21 when a campaign whose
+only substantive task was refused pre-flight on budget still recorded
+`result=completed` and counted a useful cycle. The run did nothing and was
+counted as having done something.
+
+The operator ratified the norm behind the repair: *processing finished* and
+*the task was actually done* are different facts, and the AGENT needs the
+distinction for its own behaviour — not so a human can approve each step.
+
+The fix adds a reading, not a source of truth. Every processed task already
+carried its own lifecycle status; the report simply never asked. Four derived
+members (`work_succeeded`, `work_partial`, `succeeded_count`, `failed_count`)
+answer the question, and all four are serialised — a distinction that never
+leaves the process cannot be audited afterwards, which is the whole point of
+the provenance work.
+
+`status` deliberately keeps its old meaning. It is read across the codebase and
+renaming it is a larger, separate change; what was missing was the second fact,
+not a better first one.
+
+Only `done` counts as work performed. `blocked` is the interesting exclusion:
+MIR-039 made it a resting state waiting on a human, and it must not drift into
+the success column merely because nothing crashed.
+
+Two things this does NOT do, stated so the green is not read too widely. It
+does not rekey the approval burn — MIR-118 must first settle whether that
+approval belongs there at all. And it does not touch WHO decided anything:
+executive authorship, evidence origin and reviewer identity are still absent
+from every durable surface.
+
+A witness defect worth remembering. Breaking the fix on purpose is how the test
+file got stronger: hardcoding `"work_succeeded": True` in the serialiser passed
+the first version, because that test only checked a run where work HAD
+succeeded. A test that cannot falsify its own claim — the exact shape this
+project hunts elsewhere — found in my own new test, by breaking the code it
+guards. Both polarities are asserted now.
