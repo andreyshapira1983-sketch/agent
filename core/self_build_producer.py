@@ -188,6 +188,12 @@ class ProducerReport:
     value_flags: list[str] = field(default_factory=list)
     attempts: int = 1
     next_human_action: str = ""
+    #: What the pipeline actually READ (MIR-121's write side): `file:<path>`
+    #: for the target, `memory:self-build-lessons` when recalled lessons were
+    #: injected into the Builder prompt. The episode writer carries these into
+    #: `source_labels`, so lesson provenance is recorded where the reading
+    #: happens rather than reconstructed later.
+    sources: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -201,6 +207,7 @@ class ProducerReport:
             "value_flags": list(self.value_flags),
             "attempts": self.attempts,
             "next_human_action": self.next_human_action,
+            "sources": list(self.sources),
         }
 
 
@@ -1518,6 +1525,11 @@ def produce_self_apply_proposal(
         except Exception:  # noqa: BLE001 — lesson recall must never break producer
             lessons = []
 
+    # What this run READS, recorded at the moment of reading (MIR-121).
+    read_sources = [f"file:{target}"]
+    if lessons:
+        read_sources.append("memory:self-build-lessons")
+
     # ── Researcher ──────────────────────────────────────────────────────────
     researcher = _researcher_gather(reader, target, diagnosis)
     roles.append(researcher)
@@ -1687,6 +1699,7 @@ def produce_self_apply_proposal(
 
         return _record(ProducerReport(
             status="critic_veto",
+            sources=read_sources,
             reason=critic.detail,
             target_path=target,
             checked_gates=gates,
@@ -1711,6 +1724,7 @@ def produce_self_apply_proposal(
     if value.vetoed:
         return _record(ProducerReport(
             status="value_veto",
+            sources=read_sources,
             reason="; ".join(value.veto_reasons) or "no-effect change",
             target_path=target,
             checked_gates=gates,
@@ -1728,6 +1742,7 @@ def produce_self_apply_proposal(
     approval_id = reporter.data["approval_id"]
     return _record(ProducerReport(
         status="proposed",
+        sources=read_sources,
         reason=builder.data.get("reason") or diagnosis,
         target_path=target,
         approval_id=approval_id,
