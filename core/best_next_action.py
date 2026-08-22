@@ -553,7 +553,11 @@ def _candidate_open_self_improvement_issue(
             continue
         fingerprint = str(issue.get("fingerprint") or "unknown")
         raw_evidence = issue.get("evidence") or ()
-        evidence = [f"durable issue {fingerprint} status={status}"]
+        # MIR-035 audit: the class merge caps evidence at 8, so the samples
+        # alone cannot say whether this fired 8 times or 80. Recurrence is the
+        # reason a class earns an investigation, so the count travels with it.
+        seen = max(1, int(issue.get("occurrences") or 1))
+        evidence = [f"durable issue {fingerprint} status={status} seen={seen}x"]
         evidence.extend(str(item)[:300] for item in raw_evidence if str(item).strip())
         files = [str(item) for item in issue.get("related_files") or () if str(item)]
         if files:

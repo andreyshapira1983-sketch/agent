@@ -179,6 +179,44 @@ class _DeclaredMoves(ast.NodeTransformer):
         return node
 
 
+class _DeclaredInsertions(ast.NodeTransformer):
+    """Санкционированные ВСТАВКИ — по одной, поимённо.
+
+    2026-08-22, ревизия починки MIR-026
+    (`docs/audit/CLOSURE_AUDIT_2026-08-22.md`). Правило поля для «проставить
+    статус на выходе»: статус, записанный на ОДНОМ выходе, врёт про остальные.
+    У цикла попыток нет ни одного `return`, но есть один голый `raise` —
+    перевыброс `ModelBudgetExceeded` после сохранения контрольной точки. Он
+    уходил мимо простановки, и Goal/Plan оставались `pending`, что на этом
+    языке значит «не начинался», а не «прерван по бюджету».
+
+    Вставка применяется и к ИСТОРИЧЕСКОМУ телу, чтобы сверка остального
+    осталась посимвольной: объявленная правка, а не расширение допуска.
+    """
+
+    _SETTLE = "self._settle_run_objects(st, 'failed')"
+
+    def __init__(self) -> None:
+        self.inserted = 0
+
+    def _walk_body(self, body: list) -> list:
+        out: list = []
+        for stmt in body:
+            if isinstance(stmt, ast.Raise) and stmt.exc is None:
+                out.append(ast.parse(self._SETTLE).body[0])
+                self.inserted += 1
+            out.append(stmt)
+        return out
+
+    def generic_visit(self, node: ast.AST):
+        node = super().generic_visit(node)
+        for field in ("body", "orelse", "finalbody"):
+            body = getattr(node, field, None)
+            if isinstance(body, list) and any(isinstance(s, ast.stmt) for s in body):
+                setattr(node, field, self._walk_body(body))
+        return node
+
+
 def test_the_loop_moved_under_one_declared_substitution():
     """История + объявленная подстановка = то, что лежит в новом модуле."""
     old_src = _history()
@@ -198,12 +236,19 @@ def test_the_loop_moved_under_one_declared_substitution():
     new_loop = _the_attempt_loop(new_method)
     assert new_loop is not None, "в новом методе должен быть ровно один `while True`"
 
+    insertions = _DeclaredInsertions()
     expected = ast.fix_missing_locations(
-        _DeclaredMoves().visit(
-            _DeclaredDeletions().visit(
-                _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+        insertions.visit(
+            _DeclaredMoves().visit(
+                _DeclaredDeletions().visit(
+                    _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+                )
             )
         )
+    )
+    assert insertions.inserted == 1, (
+        "объявленная вставка рассчитана РОВНО на один голый `raise` в теле "
+        f"цикла, а их {insertions.inserted} — правку надо объявить заново"
     )
     got = ast.parse(ast.unparse(new_loop))
     assert ast.dump(expected) == ast.dump(got), (

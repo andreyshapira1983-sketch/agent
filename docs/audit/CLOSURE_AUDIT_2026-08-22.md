@@ -210,19 +210,150 @@ Six tests; break-tested by reverting the taint to document level.
 
 ---
 
-## Still to audit
+## The paused-task resume ladder (self-build queue starvation, not a MIR entry)
 
-MIR-011 · 020 · 026 · 035 · 044 · 097 · 099 · 104 · 125 · 126 · 105/024/008,
-each against the named failure mode of its own solution class:
+**Mislabelled first.** This section carried «MIR-020» until the registry was
+re-read: MIR-020 is the over-processed greeting, and this repair belongs to
+the self-build queue-starvation analysis. The number was wrong, the probe was
+not — kept under its real name, and MIR-020 audited below on its own terms.
 
-| closure | the field's known failure for this shape |
-|---|---|
-| 020 cheap path | a skipped planner drops a step the turn actually needed |
-| 026 settle-on-exit | a status written at one exit lies about the other paths |
-| 035 class merge | merging by class hides distinct defects under one row |
-| 044 on-demand tally | «compute it when asked» degrades at scale |
-| 105/024/008 | already audited mid-repair: the stoplist inverted meaning, and the fix's first attempt changed a pinned invariant |
+**Field's named failure:** a resume mechanism that reactivates work whose
+blocking condition still holds — the loop that livelocks on a permanently
+failing item.
 
-The last row is why this document exists: that criticism landed **before** the
-entry was closed, because the field was consulted during the repair rather than
-after it. Every row above is the same question asked late.
+**Held.** The stop reasons are split into a clock-clearable set and everything
+else (`_CLOCK_CLEARABLE_STOPS`), a resource-paused row is not reactivated while
+the resource is still paused (`_is_resource_paused`), and reactivation is
+batched at three per sweep with a 60-minute cooldown. Probed with a row whose
+pause reason never clears: it stayed parked across repeated sweeps.
+
+---
+
+## MIR-026 — the run settles its own log objects
+
+**Field's named failure:** a status written at ONE exit lies about the other
+paths.
+
+**It landed.** The attempt loop has no `return` at all — which is why the
+single-exit reading looked complete — but it does re-raise
+`ModelBudgetExceeded` after saving a pause checkpoint. That exit skipped the
+settle, so a budget-interrupted run left `Goal.status` / `Plan.status` at
+`pending`, and in this vocabulary `pending` means «never started», not
+«interrupted». The journal could not tell an agent stopped by its own spend
+cap from one that never began — precisely the confusion the entry was opened to
+remove, surviving on the path that matters most for an unattended week.
+
+**Fixed:** the settle is a named node (`_settle_run_objects`) called from both
+exits, `failed` on the budget path. Pinned by a test that counts escaping
+`raise`s against settle calls, so a THIRD exit added later reddens too.
+
+**Three structural guards fell out of the repair, and each was a real
+requirement rather than noise:** the CNS anchors for `failure_history` shifted
+by four lines; the split guard for `core/loop_attempt.py` demands every edit to
+the moved loop body be declared by name (a `_DeclaredInsertions` transform now
+declares this one, asserting it applies to exactly one bare `raise`); and the
+node census refused an unregistered node. All three were satisfied, not
+loosened.
+
+---
+
+## MIR-035 — merging detector failures by signal class
+
+**Field's named failure:** merging by class hides distinct defects under one
+row.
+
+**Half held, half landed.** The merge itself is right — the repair ladder
+repairs classes, not turns, and the old text-keyed fingerprint minted 13 copies
+of one signal pair. But evidence is capped at eight samples, so ten distinct
+failures of one class stored eight and the row said nothing about the other
+two. **The lost quantity is not the samples — it is the magnitude.** A class
+that fired 50 times was indistinguishable from one that fired 8, and recurrence
+is the entire reason a class earns an investigation.
+
+**Fixed:** the issue carries `occurrences`, and the proposed action states it
+(`seen=47x`) so the number reaches whoever acts.
+
+**The obvious implementation would have been wrong.** `update_self_improvement_issues`
+re-reads a seven-day window on EVERY sweep, so a naive `+1` per upsert would
+have counted sweeps instead of failures — a sensor measuring how often it runs.
+The count advances only on a strictly newer stamp. Two failures sharing one
+timestamp undercount by one: deliberate, because a sensor that inflates is
+worse than one that lags.
+
+---
+
+## MIR-020 — the greeting cheap path
+
+**Field's named failure:** a skipped planner drops a step the turn actually
+needed.
+
+**Held, 11 of 11.** The probe was built the way the field builds it: not
+greetings, but REAL WORK hiding behind a greeting — «привет, посчитай сколько
+питон-файлов в проекте», «спасибо, а теперь запусти тесты», «ок, сделай отчёт
+по бюджету», «хай, что там с бюджетом?». Every one of them keeps the planner;
+every bare «привет / здравствуйте / спасибо / привет привет привет» skips it.
+The short-circuit fires on what the turn IS, not on how it starts.
+
+---
+
+## MIR-044 — retiring the dead sink for an on-demand tally
+
+**Field's named failure:** «compute it when asked» degrades at scale — the
+persisted value was a cache, and removing it moves the cost onto every read.
+
+**Held, and for a better reason than the timing.** Measured: 0.01 ms at 100
+episodes to 0.82 ms at 50 000 — linear, and 50 000 is 350× the live store of
+142. But the timing is the weaker argument. The strong one is that
+`smart_memory_summary` **already loaded both stores** for its episode and
+procedure counts, so the tally is pure computation over lists that were in
+memory regardless: the retirement added **zero** reads. The persisted report
+was never a cache of anything expensive; it was a copy of what the caller held.
+
+The other half of the field's failure for retiring a sink — losing the history —
+was paid: 738 KB archived as `data/memory_consolidation.archive.jsonl`.
+
+**One residue, recorded rather than patched.** `loop_init` still accepts a
+`consolidation_store` and `loop_memory_write` still names it in an all-None
+guard, so a reader can take the sink for something that can be switched back
+on. Nothing saves to it any more — the save branch is deleted and an AST sweep
+pins that — so the parameter is inert, not dormant. Noted in MIR-044 as a
+residue; it is a map defect, not a behaviour defect, and this audit does not
+grant itself the scope to rewrite constructors.
+
+---
+
+## Verdict — the audit is complete
+
+Eleven closures audited, each against the named failure mode of its own solution
+class rather than against my own reading of my own repair.
+
+| closure | the field's known failure for this shape | outcome |
+|---|---|---|
+| 011 injection quarantine | a document-level taint quarantines the innocent | **landed** — 22% of all claims; fixed with per-sentence taint |
+| 020 cheap path | a skipped planner drops a step the turn needed | held, 11/11 |
+| 026 settle-on-exit | a status written at one exit lies about the others | **landed** — the budget re-raise; fixed |
+| 035 class merge | merging by class hides distinct defects under one row | **half landed** — magnitude lost; `occurrences` added |
+| 044 on-demand tally | «compute it when asked» degrades at scale | held; one map residue recorded |
+| 097 trim-notice grammar | a shape rule misreads its own edge cases | 2 fixed, 1 irreducible |
+| 099 AST line count | the counter misreads real Python shapes | **landed** — embedded payload invisible; fixed |
+| 104 dead-sink retirement | the history dies with the sink | held; archived |
+| 125 bounded tail read | a tail read mis-slices an append-only log | held, 6/6 |
+| 126 «zero unexplained» | the zero is bought with fig leaves | **closure was FALSE** — 8 `# noqa`-only justifications |
+| 132 provider health | the breaker has no visibility / no half-open probe | 3 pass, 1 deviation, 1 failed and fixed |
+| 105/024/008 | the stoplist inverted meaning | audited mid-repair, before closing |
+
+**Five of eleven closures were wrong in a way I had not noticed** — one of them
+(126) simply false. That is the answer to «на что ты надеешься, что это
+правильно»: on nothing, which is why the field's failure mode was run against
+the code instead.
+
+**Two labels in this document were themselves wrong.** The first pass audited a
+self-build repair under «MIR-020» and re-audited MIR-125 under «MIR-044»,
+because the numbers were typed from memory instead of read from the registry.
+Both were caught by opening the registry, and both real entries were then
+audited properly. An audit that mis-numbers its subject proves nothing about
+that subject — recorded here rather than quietly corrected.
+
+The 105/024/008 row is why this document exists: that criticism landed **before**
+the entry was closed, because the field was consulted during the repair rather
+than after it. Every other row is the same question asked late.

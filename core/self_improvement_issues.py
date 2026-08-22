@@ -84,6 +84,7 @@ class SelfImprovementIssue:
     related_files: tuple[str, ...]
     related_error_text: str
     suggested_next_action: str
+    occurrences: int = 1
 
     def to_dict(self) -> dict:
         data = dict(self.__dict__)
@@ -107,6 +108,7 @@ class SelfImprovementIssue:
             related_files=tuple(str(x) for x in data.get("related_files") or ()),
             related_error_text=str(data.get("related_error_text") or ""),
             suggested_next_action=str(data.get("suggested_next_action") or ""),
+            occurrences=max(1, int(data.get("occurrences") or 1)),
         )
 
 
@@ -221,6 +223,16 @@ class SelfImprovementIssueRegistry:
                 last_seen=max((current.last_seen, observed_at), key=_stamp),
                 evidence=tuple(dict.fromkeys((*current.evidence, *incoming.evidence)))[-8:],
                 related_error_text=incoming.related_error_text or current.related_error_text,
+                # MIR-035 audit: merging by class keeps the class but LOSES its
+                # magnitude — evidence is capped at 8, so a signal seen 50 times
+                # is indistinguishable from one seen 8. Recurrence is the whole
+                # reason a class is worth investigating, so it is counted.
+                # Counted only on a STRICTLY NEWER stamp, because the producer
+                # re-reads the last 7 days on every sweep: a naive +1 would
+                # count sweeps instead of failures. Two failures sharing one
+                # timestamp undercount by one — conservative on purpose, a
+                # sensor that inflates is worse than one that lags.
+                occurrences=current.occurrences + (1 if newer else 0),
             )
             issues[index] = merged
             self._save(issues)

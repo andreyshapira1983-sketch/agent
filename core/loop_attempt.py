@@ -279,6 +279,10 @@ class AgentLoopAttempt:
                             plan=st.plan,
                             blocked=exc,
                         )
+                        # The other exit (MIR-026 audit): the checkpoint is
+                        # saved and the exception leaves, so settle before it
+                        # does — `pending` would read as «never started».
+                        self._settle_run_objects(st, "failed")
                         raise
                 st.planner_out = force_file_hint_read_when_explicit(
                     st.planner_out,
@@ -550,16 +554,27 @@ class AgentLoopAttempt:
         # MIR-026: the in-run Goal/Plan are LOG objects, and they used to be
         # born `pending` / `in_progress` and die that way — a reader of the
         # journal could not tell a finished run from an abandoned one by its
-        # own objects. Settled here, at the only exit of the attempt loop:
-        # exhaustion is the one failure this loop itself can declare.
-        settled = "failed" if st.replan_exhausted else "done"
-        st.goal.status = settled
+        # own objects.
+        self._settle_run_objects(st, "failed" if st.replan_exhausted else "done")
+
+    def _settle_run_objects(self, st: AttemptState, status: str) -> None:
+        """Write the verdict onto the in-run log objects and journal it.
+
+        Called from BOTH exits. The audit of this repair
+        (`docs/audit/CLOSURE_AUDIT_2026-08-22.md`) applied the field's rule for
+        settle-on-exit — «a status written at one exit lies about the other
+        paths» — and found one: a budget interruption re-raises past the normal
+        end, leaving the objects `pending`, which in this vocabulary means
+        «never started» rather than «interrupted». That is the least honest
+        value available for a run that did work and was cut off.
+        """
+        st.goal.status = status  # type: ignore[assignment]
         if st.plan is not None:
-            st.plan.status = settled
+            st.plan.status = status  # type: ignore[assignment]
         self.log.log("run_objects_settled", {
             "goal_id": st.goal.id,
             "plan_id": st.plan.id if st.plan is not None else None,
-            "status": settled,
+            "status": status,
             "attempts": st.attempt,
         })
 
