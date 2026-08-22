@@ -358,6 +358,17 @@ _GREETING_WORDS: frozenset[str] = frozenset({
     # RU
     "привет", "здравствуй", "здравствуйте", "хай", "добрый", "доброе",
     "день", "вечер", "утро", "спасибо", "благодарю",
+    # Social FILLER only (MIR-020): «Привет, как дела?» and "hello there" each
+    # spent a full planner call to receive an empty plan, because one filler
+    # word broke the all-words rule. Content words never belong here — a
+    # missed skip costs one planner call, a wrong skip could drop a needed
+    # tool step, so the asymmetry stays conservative.
+    # EN filler
+    "how", "are", "doing", "there", "all", "everyone", "night",
+    "bye", "goodbye",
+    # RU filler
+    "как", "дела", "у", "тебя", "вас", "ты", "вы", "всё", "хорошо",
+    "доброй", "ночи", "пока", "до", "свидания", "большое", "приветствую",
 })
 
 # Above this length an input is no longer "trivial chatter"; let the planner run.
@@ -367,9 +378,14 @@ _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def _is_pure_greeting(normalized: str) -> bool:
-    """True when *normalized* is a 1–4 word message of only greeting/thanks words."""
+    """True when *normalized* is a short message of only greeting/thanks words.
+
+    Cap 5, not 4: «привет, как у тебя дела» is five words of pure filler and
+    was paying a planner call (MIR-020). Content words are outside the
+    vocabulary, so longer real questions still fail the all-words rule.
+    """
     words = _WORD_RE.findall(normalized)
-    if not words or len(words) > 4:
+    if not words or len(words) > 5:
         return False
     return all(w in _GREETING_WORDS for w in words)
 
