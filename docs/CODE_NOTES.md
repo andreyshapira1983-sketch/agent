@@ -4199,3 +4199,49 @@ maintenance invoked by the path that needs it. The sweep is journaled
 that silent maintenance is an observability hole — the operator learns what
 happened from the journal, not from consequences. And it is best-effort: a
 broken store logs `episodic_sweep_error` and costs the tick nothing.
+
+
+## The trimmer's voice
+
+Twenty corrupted claims leaked into the source registry over seventeen days:
+sentences ending in `...[truncated]`, `...[tr` (the budget cut its own marker
+in half), and budget notices — text the framework wrote, banked as facts the
+source asserted. On 2026-08-15 one of them manufactured a conflict between a
+sentence and its own truncated twin. A data-only cleanup that day lasted
+exactly 24 hours, because the extractor was untouched: the trimmed excerpt is
+what `ClaimExtractor` slices into sentences, and the trimmer's voice rode
+along. MIR-097.
+
+### Why the grammar lives beside the writers
+
+The closure criterion demanded that an UNSEEN marker of the same class is
+stopped — the fix must not be a blacklist of today's strings. So
+`carries_framework_notice` sits in `core/evidence_budget.py`, next to the
+functions that write the notices, and it is keyed on SHAPE: an ellipsis butted
+directly against a bracket (`...[…]`, `…[…]`, `[... … ...]`), with a
+trailing-unclosed alternative for the marker the budget once bisected. Real
+prose uses ellipses and brackets — `a[i]`, «see [4]», «Он замолчал... потом
+продолжил» — but does not weld them together; the boundary tests hold that
+line. A new notice added to the module is caught by shape without anyone
+remembering to extend a list. Break-tested: narrowing the grammar to the
+literal `...[truncated]` turns seven tests red, including the unseen-form one.
+
+### Refused, not cleaned
+
+`_accept_sentence` refuses the sentence rather than stripping the marker out
+of it. Stripping `«If a command is not here, ...[truncated]»` would leave
+`«If a command is not here, »` — a fragment the source never finished, and half
+a sentence is not a fact. Clean sentences beside a marker still extract; the
+gate must not swallow the document it protects.
+
+### The half that already existed, found by breaking the fix
+
+Break-testing revealed that the `...[truncated]` family was ALREADY refused:
+commit `5656566` (2026-08-16, hours after the last leak) added
+`_is_truncated_text` to `_accept_sentence`. The sweep's morning claim that "the
+fix is confirmed absent" was half false — the probe greped for stripping calls
+and never read the filter to its end. What this repair genuinely closes is the
+budget-notice family (markers ending in `]`, which pass the trailing-ellipsis
+check) and every unseen shape of the class. The four standing corrupted claims
+were removed with a backup; this cleanup can hold because the code now refuses
+what the previous cleanup only deleted.

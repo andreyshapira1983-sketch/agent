@@ -143,6 +143,34 @@ def _split_paragraphs(text: str) -> list[str]:
     return [p for p in paras if p.strip()]
 
 
+# ── the notice grammar ───────────────────────────────────────────────────────
+
+#: Every notice a trimmer in this repository writes shares one SHAPE: an
+#: ellipsis butted directly against a bracket (`...[INTENT-BUDGET: …]`,
+#: `...[N chars omitted]...`, `...[truncated]`, `[... N sections omitted ...]`).
+#: Real prose does not do that — an ellipsis and a bracket occur, but not
+#: welded together. The grammar lives HERE, beside the writers, so a new
+#: notice added to this module is caught by shape without anyone remembering
+#: to extend a blacklist (MIR-097's closure criterion: an unseen marker of the
+#: same class must also be stopped). The trailing-unclosed alternative exists
+#: because the budget once cut a notice itself in half — the live registry
+#: held `...[tr` as claim text (2026-08-04).
+_FRAMEWORK_NOTICE_RE = re.compile(
+    r"(?:\.\.\.|…)\[[^\[\]\n]{0,200}(?:\]|$)"   # ...[NOTICE]  or cut-off ...[NOTI
+    r"|\[\.\.\.[^\[\]\n]{0,200}\]"              # [... N sections omitted ...]
+)
+
+
+def carries_framework_notice(text: str) -> bool:
+    """Did a trimmer's own voice end up inside this text?
+
+    Consumed by the claim extractor: a sentence carrying a notice was never
+    fully written by the source, so it is refused rather than cleaned — half a
+    sentence is not a fact. See docs/CODE_NOTES.md, "The trimmer's voice".
+    """
+    return bool(_FRAMEWORK_NOTICE_RE.search(text or ""))
+
+
 # ── intent-aware extraction ───────────────────────────────────────────────────
 
 #: Appended to every trim notice. The notice used to state THAT content was
