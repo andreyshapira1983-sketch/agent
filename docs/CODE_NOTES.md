@@ -3818,3 +3818,47 @@ host, which chokes on the Russian comments in the source. The file is UTF-8 and
 must be decoded as UTF-8 — the same lesson as needing `PYTHONIOENCODING` for
 Cyrillic output, met again at the subprocess seam. Ten red tests that were not
 about the move at all.
+
+## A lesson may waive failure, not provenance
+
+MIR-115 measured it: `decide_usage_eligibility` returned `True` for anything
+tagged `lesson`, and the machinery writing the content also mints the tag —
+`core/self_build_memory` tags every self-build episode, `core/self_repair`
+likewise. MIR-121 added the threat model from the field: memory injection is a
+mature attack class whose payload survives restarts and defeats LLM-judge
+sanitisation.
+
+The tempting fix was to remove the exemption, and it would have been worse than
+the defect. The exemption exists so a FAILURE can be remembered as a warning,
+and 101 of the 127 lessons in the live store are failures. That is the feature
+working, not the bug.
+
+The real defect was narrower and the function's own docstring named it: it
+promised a lesson is admitted "whatever its OUTCOME" and then waived five axes.
+Three belong to failing — outcome, completion, verified chunks; a run that
+failed confirmed nothing, by definition. Two do not:
+
+  * a `memory:` source label is memory citing itself. That is this repository's
+    own "an echo is not a second witness" rule, and it is exactly the
+    amplification step a poisoning attack needs.
+  * relevance below the measured floor. Nothing about failing makes an
+    off-topic record worth steering by.
+
+Measured before touching the code: of 127 live lessons, ZERO are memory-sourced
+and ZERO fall below the floor. So this closes a door nothing currently walks
+through — prophylaxis on the attack path, not repair of live damage. Which made
+the control tests the important half, and the break-the-fix pass proved it:
+removing the exemption entirely reddens five control cases. A fix that traded a
+real regression for a hypothetical one would have been caught by its own
+witness.
+
+Two boundary decisions worth keeping visible. Relevance exactly AT the floor is
+admitted — the boundary belongs to the record. And an unmeasured relevance
+(`None`) does not convict: absence of a measurement is not a bad measurement,
+and fail-closed there would refuse every lesson written before the field
+existed.
+
+One trap paid for while writing the witness: the disqualification field is
+`defect_signals` carrying values from `DISQUALIFYING_DEFECT_SIGNALS`, not the
+`answer_self_contradiction` flag I invented from memory. Read the constant, do
+not recall it.
