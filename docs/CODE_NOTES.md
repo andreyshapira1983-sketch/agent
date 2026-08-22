@@ -4012,3 +4012,93 @@ Not claimed: that an `operator_goal` decision is the human deciding. The
 operator naming a subject and the operator naming the next move are different
 things; this field records only where grounds came from, never who exercised
 judgement over them.
+
+
+## Rows nothing frees
+
+A queue has resting states, and a resting state nothing leaves is work that has
+silently stopped. This chapter is about the second kind of stranded row, found
+2026-08-22 while asking why the unattended run of 2026-08-16 went quiet on its
+third day.
+
+### What was measured
+
+Fourteen rows in `data/runtime_tasks.jsonl` sat at `status="paused"`. Every one
+carried `last_error="budget_exhausted"` and `attempts=0/1`; the oldest had been
+there since 2026-07-30. `pending()` returns only `status == "pending"`, so the
+scheduler could not see them, and nothing anywhere moved a paused row back.
+`summary()` listed them under a `"resumable"` key — a sensor with no actuator.
+The agent had not broken on 08-18; it had run out of work it was allowed to see.
+
+### The root is a collapsed distinction, not a missing feature
+
+The queue already had a resting state for *waiting on a human*: `blocked`. Its
+own comment (`core/task_queue.py`) says retrying it on a timer cannot help and
+that it leaves by `unblock()` at the operator's word. That is exactly right for
+a human decision.
+
+A budget-parked row waits on something else — a window that refills on a clock.
+Giving both the same human-only exit is what stranded the second kind. So the
+repair is not "add a resume button": **the exit condition must match the entry
+condition.** `reactivate_paused_checkpoints` returns a row parked by a
+replenishing resource, and is narrow on three axes so it cannot creep into the
+territory `blocked` owns:
+
+* only stop reasons a clock can clear (`_CLOCK_CLEARABLE_STOPS`). Note what is
+  NOT there: `budget_kill_switch` is also budget-shaped, and a kill switch is a
+  decision somebody made — waiting does not undo it;
+* only after a cooldown, because these rows carry a single attempt and handing
+  one back while the window is still dry would spend it on a run that cannot
+  finish;
+* never past `max_attempts`. That is MIR-040's lesson applied before it could
+  repeat. A checkpoint with nothing left becomes terminal `failed` rather than
+  staying paused, so it stops advertising itself as resumable.
+
+### Two layers found by not stopping at the first fix
+
+**The growth trap.** A resume that hits the budget again parks its own
+checkpoint, and `retire_paused_checkpoint` only fires on success —
+`tests/test_budget_resume.py::test_resume_that_pauses_again_keeps_the_old_task`
+holds that an unfinished pause may not be retired. So switching reactivation on
+by itself would have turned a static fourteen into unbounded growth: one more
+permanent row per failed retry. `add_paused_checkpoint` now takes `resumed_from`
+and carries the SAME row forward, which keeps that invariant intact — the id
+survives, still paused — while one piece of work keeps exactly one row.
+
+**The consumer could not run what the actuator produced.** `_config_from_task`
+refused every kind but `auto_run`, so a reactivated `resume_checkpoint` would be
+claimed (spending its one attempt), raise `ValueError`, and be buried by the
+exception handler. Reactivation alone would have converted fourteen silently
+stranded rows into fourteen automatically killed ones — worse than the defect.
+Writing a row no consumer accepts is not a safety property; it is a dead end
+that looks like caution.
+
+### Why the automatic path RE-RUNS rather than resuming state
+
+The checkpoint stores the interrupted phase and steps, so exact resumption is
+possible — and it is deliberately left to the human path, `--resume <trace>`,
+whose hint the interactive gateway prints instead of queueing. Every automatic
+retry in this system re-runs with backoff (`classify_run_outcome`), and a
+checkpoint must not be the one place that invents different semantics. The saved
+phase stays in `last_report` for whoever resumes by hand, and the re-queued row
+keeps the conservative posture it was parked with (`dry_run=True`, `limit=1`,
+`learning_limit=1`), so this cannot quietly widen what the interrupted turn was
+allowed to do.
+
+### Also recorded at park time: the gateway
+
+`checkpoint_is_resumable_work` decides by gateway path — the interactive `repl`
+turn is deliberately NOT queued, because the operator is sitting there and will
+retype it — and nothing kept the evidence. All fourteen live rows carry no trace
+of who produced them, so nothing later could judge whether resuming them
+unattended was right. The decision now sits beside its own grounds.
+
+### Where it runs, and why that mattered most
+
+`_free_stranded_rows` in `agent_tick.py` runs both passes at startup under the
+single-instance lock, because reactivating a row while a consumer may hold it in
+flight runs one piece of work twice. Putting it there rather than behind a
+command was the point: MIR-131 measured thirteen maintenance actions that exist
+and can only be reached by a human typing, and the autonomous path is precisely
+the path that generates the rows nothing frees. The call site is pinned by a
+test, so the repair cannot quietly leave the live path.

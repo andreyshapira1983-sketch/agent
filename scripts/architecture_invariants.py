@@ -140,6 +140,16 @@ def check_no_orphaned_modules() -> tuple[list[str], int]:
     ], len(names)
 
 
+#: A token that is part of a FILE NAME is not an environment variable. Documents
+#: name `knowledge/doctrine/future/AGENT_ROLE_CONTRACT.md`, and the bare
+#: `AGENT_[A-Z0-9_]+` rule read its stem as a flag "no code reads" — true of the
+#: filename and meaningless as a claim about the environment. The negative
+#: lookahead drops anything immediately followed by a short extension. Until
+#: 2026-08-22 documents dodged this by escaping the underscores by hand, which
+#: put the workaround in the prose and left the next author to rediscover it.
+_ENV_FLAG_RE = re.compile(r"\bAGENT_[A-Z0-9_]{3,}\b(?!\.[A-Za-z0-9]{1,5})")
+
+
 def check_documented_env_flags() -> tuple[list[str], int]:
     code_text_parts: list[str] = []
     for root in _PRODUCTION_ROOTS:
@@ -162,7 +172,7 @@ def check_documented_env_flags() -> tuple[list[str], int]:
         rel = doc.relative_to(DOCS).as_posix()
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
             lowered = line.lower()
-            for flag in re.findall(r"\bAGENT_[A-Z0-9_]{3,}\b", line):
+            for flag in _ENV_FLAG_RE.findall(line):
                 checked.add(flag)
                 if flag in _ENV_ALLOWLIST or flag in code_text:
                     continue

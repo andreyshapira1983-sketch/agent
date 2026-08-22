@@ -94,7 +94,7 @@ def test_a_checkpoint_that_spent_its_attempts_is_not_resurrected(
     may not run a task one attempt past its cap."""
     store = _store(workspace)
     task = _park(store)
-    store._update_one(  # noqa: SLF001 — the store has no public attempt setter
+    store._update_one(  # the store has no public attempt setter
         task.id, lambda t: t.with_updates(attempts=t.max_attempts)
     )
 
@@ -191,14 +191,37 @@ def test_the_tick_actually_calls_it(workspace: Path) -> None:
     import pathlib
 
     tree = ast.parse(pathlib.Path("agent_tick.py").read_text(encoding="utf-8"))
-    called = {
-        getattr(n.func, "id", None) or getattr(n.func, "attr", None)
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
+
+    def _calls(fn: ast.AST) -> set[str]:
+        return {
+            getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+        }
+
+    def _names(fn: ast.AST) -> set[str]:
+        # References, not calls: the helper dispatches through a variable
+        # (`for ... action in (...): action(...)`), so the function name
+        # appears as a Name load rather than a Call node.
+        return {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)} | {
+            n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)
+        }
+
+    by_name = {
+        n.name: n for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert "reactivate_resumable_work" in called, (
-        "the reactivation pass exists but the tick never calls it — the exact "
-        "shape MIR-131 measured thirteen times over"
+    # The chain, not a name grep: run_tick must reach the reactivation through
+    # whatever helper holds it, so severing either hop fails loudly here
+    # rather than silently orphaning the pass.
+    assert "run_tick" in by_name
+    reachable = _calls(by_name["run_tick"])
+    hop = [n for n in reachable if n in by_name
+           and "reactivate_resumable_work" in _names(by_name[n])]
+    direct = "reactivate_resumable_work" in _calls(by_name["run_tick"])
+    assert direct or hop, (
+        "the reactivation pass exists but run_tick never reaches it — the "
+        "exact shape MIR-131 measured thirteen times over"
     )
 
 
