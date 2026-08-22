@@ -66,6 +66,21 @@ _BLOCKED_STATUS: RuntimeTaskStatus = "blocked"
 #: `core/campaign.py:193` writes `budget_exhausted:llm_calls=3/3`.
 _CLOCK_CLEARABLE_STOPS: tuple[str, ...] = ("budget_exhausted", "budget_wait")
 
+#: Upper bound on how old a parked checkpoint may be and still be resumed.
+#: The ladder had only a LOWER bound (the cooldown), and the live store on
+#: 2026-08-22 showed what that costs: fourteen rows stopped by an exhausted
+#: budget between 2026-07-30 and 2026-08-15, revived oldest-first, three per
+#: pass — so the first hours of an unattended week would have gone to
+#: re-answering July's chat (one goal was literally «Answer the question:
+#: привет»), ahead of any work the agent would have chosen itself, because the
+#: queue step of the tick runs before the self-directed producer.
+#:
+#: The bound is AGE, not content: judging a goal's worth by its text is
+#: guessing, while age is a fact — a checkpoint older than this describes a
+#: world that no longer exists (the files moved, the budget window is another
+#: one, the conversation that produced the question ended weeks ago).
+_MAX_RESUMABLE_AGE_HOURS = 72
+
 #: How many parked rows one reactivation pass may revive. The tick's drain
 #: loop is unbounded, so this is the only thing standing between a backlog and
 #: a salvo that spends the whole refilled window on old debt.
@@ -607,10 +622,17 @@ class TaskQueueStore:
         changed: list[RuntimeTask] = []
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
+            stale_ts = moment.timestamp() - _MAX_RESUMABLE_AGE_HOURS * 3600
             due = [
                 t for t in tasks
                 if _is_resource_paused(t) and _parked_ts(t) <= cutoff_ts
             ]
+            # Too old to mean anything. Terminal rather than left `paused`,
+            # for the same reason the exhausted-attempts branch below is: a row
+            # that will never run again must stop advertising itself as
+            # resumable in `summary()`.
+            stale_ids = {t.id for t in due if _parked_ts(t) < stale_ts}
+            due = [t for t in due if t.id not in stale_ids]
             # Batch bound, oldest first: the tick's drain loop runs EVERYTHING
             # pending in one pass, so an unbounded revival would spend the
             # refilled window on backlog in one salvo (14 rows were waiting
@@ -621,7 +643,17 @@ class TaskQueueStore:
             }
             out: list[RuntimeTask] = []
             for task in tasks:
-                if task.id in revive_ids:
+                if task.id in stale_ids:
+                    expired = task.with_updates(
+                        status="failed",
+                        last_error=(
+                            f"{task.last_error or 'paused'}; stale checkpoint "
+                            f"older than {_MAX_RESUMABLE_AGE_HOURS}h"
+                        ),
+                    )
+                    out.append(expired)
+                    changed.append(expired)
+                elif task.id in revive_ids:
                     revived = task.with_updates(
                         status="pending", run_after=_iso(moment)
                     )

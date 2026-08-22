@@ -4289,3 +4289,26 @@ heals everything. No readable history reads as healthy — fail OPEN, unlike
 admission gates which fail closed, because refusing to work is worse than one
 wasted probe call. And a flaky network never demotes: only the durable class
 counts, the same conservatism `_is_switch_key_error` already chose.
+
+## The request that described a stage that ended
+
+The approval request raised when a run wants effects and holds no permission
+used to read «Autonomous runtime effects are disabled until a human reviews the
+first dry-run reports», with the single reason «non-dry-run autonomous mode is
+not enabled in this MVP».
+
+Both sentences described a stage that ended. The first dry-run reports were
+reviewed long ago, «MVP» names a period the repository has left, and since
+2026-08-16 a standing grant feeds the same path (see «One yes a week») — so the
+branch that emits this text is now reached only when there is neither a per-run
+approval nor an active grant, which is not what the text said.
+
+A request is read at exactly the moment someone has to decide something. Text
+that describes a system which no longer exists teaches the reader the wrong
+rule at the worst possible moment, and it is not cosmetic for the same reason a
+stale status line is not cosmetic: it is an instrument reporting a world that
+is gone. The summary now states the condition that actually holds, and the two
+reasons name the two permissions that were checked and found missing.
+
+Found by the architectural-ballast audit of 2026-08-22
+(`docs/audit/ARCHITECTURAL_BALLAST_AUDIT_2026-08-22.md`, item B6).

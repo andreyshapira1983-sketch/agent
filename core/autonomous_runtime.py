@@ -101,6 +101,14 @@ def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
 #: Журнал потребления стоячих грантов: одна строка — один пропущенный прогон.
 _STANDING_USAGE_FILE = "standing_grant_usage.jsonl"
 
+#: Why an effectful run has no permission. Both gates are named because both
+#: were checked: docs/CODE_NOTES.md, «The request that described a stage that
+#: ended».
+_NO_PERMISSION_REASONS: tuple[str, ...] = (
+    "no per-run approval is pending or executed for this goal",
+    "no standing grant is active (absent, expired, or spent for today)",
+)
+
 
 def _standing_usage_path(workspace: Any) -> Path:
     return Path(workspace or ".") / "data" / _STANDING_USAGE_FILE
@@ -369,11 +377,11 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             item = self.approval_inbox.add(
                 operation="autonomous_runtime.allow_effects",
                 summary=(
-                    "Autonomous runtime effects are disabled until a human "
-                    "reviews the first dry-run reports and explicitly enables them."
+                    "This run wants to apply effects and holds no permission: "
+                    "neither a per-run approval nor an active standing grant."
                 ),
                 risk="irreversible",
-                reasons=("non-dry-run autonomous mode is not enabled in this MVP",),
+                reasons=_NO_PERMISSION_REASONS,
                 payload={
                     "goal": config.goal,
                     "dry_run": False,
