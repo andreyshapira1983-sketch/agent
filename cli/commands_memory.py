@@ -244,15 +244,17 @@ def _handle_memory_consolidate(rest: str, agent: AgentLoop) -> bool:
     if (
         agent.episodic_store is None
         or agent.procedural_store is None
-        or agent.consolidation_store is None
     ):
         print("(smart memory stores are not configured)", file=sys.stderr)
         return True
+    # Computed fresh, PERSISTED NOWHERE — the operator's 2026-07-19 ruling
+    # (MIR-044), executed 2026-08-22: the report is a pure tally of statuses
+    # the procedures already hold, and persisting one per request had bought
+    # 255 reports / 738 KB that only this command's sibling ever displayed.
     report = consolidate_memory(
         episodes=agent.episodic_store.load(),
         procedures=agent.procedural_store.load(),
     )
-    agent.consolidation_store.save(report)
     payload = report.to_dict()
     agent.log.log("memory_consolidation", payload)
     if as_json:

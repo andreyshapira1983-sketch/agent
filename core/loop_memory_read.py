@@ -67,7 +67,6 @@ class AgentLoopMemoryRead:
         persistent_store: Any
         episodic_store: Any
         procedural_store: Any
-        consolidation_store: Any
         retrieval_policy: Any
         knowledge_use_policy: Any
         last_role_context: Any
@@ -440,11 +439,26 @@ class AgentLoopMemoryRead:
         return lines
 
     def smart_memory_summary(self) -> dict[str, Any]:
-        """Return local smart-memory counts for operator CLI commands."""
+        """Return local smart-memory counts for operator CLI commands.
+
+        The consolidation section is computed ON DEMAND from the live stores
+        (MIR-044, the operator's 2026-07-19 retirement ruling executed
+        2026-08-22): the tally was always derivable from what this method has
+        already loaded, and the persisted report history it used to read is
+        archived. `reports` stays in the payload shape for display
+        compatibility; it counts the tallies available now — one, or zero
+        when the stores are absent.
+        """
         episodes = self.episodic_store.load() if self.episodic_store else []
         procedures = self.procedural_store.load() if self.procedural_store else []
-        reports = self.consolidation_store.load() if self.consolidation_store else []
-        last_report = reports[-1].to_dict() if reports else None
+        last_report = None
+        if self.episodic_store is not None and self.procedural_store is not None:
+            from core.smart_memory import consolidate_memory
+
+            last_report = consolidate_memory(
+                episodes=episodes, procedures=procedures
+            ).to_dict()
+        reports = [last_report] if last_report is not None else []
         return {
             "episodic": {
                 "path": str(self.episodic_store.path) if self.episodic_store else None,
@@ -463,7 +477,7 @@ class AgentLoopMemoryRead:
                 },
             },
             "consolidation": {
-                "path": str(self.consolidation_store.path) if self.consolidation_store else None,
+                "path": None,  # computed on demand since 2026-08-22 (MIR-044); history archived
                 "reports": len(reports),
                 "last_report": last_report,
             },

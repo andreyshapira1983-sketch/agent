@@ -641,11 +641,18 @@ def test_agent_loop_records_smart_memory_after_successful_cycle(workspace: Path,
     assert summary["episodic"]["episodes"] == 1
     assert summary["episodic"]["outcomes"]["success"] == 1
     assert summary["procedural"]["procedures"] == 1
+    # MIR-044 (operator ruling 2026-07-19, executed 2026-08-22): the summary's
+    # consolidation section is computed on demand from the live stores; the
+    # per-cycle report and its event are retired.
     assert summary["consolidation"]["reports"] == 1
+    assert summary["consolidation"]["last_report"]["episode_count"] == 1
     events = _events(log_path)
     assert [e["event"] for e in events].count("episodic_memory_write") == 1
     assert [e["event"] for e in events].count("procedural_memory_update") == 1
-    assert [e["event"] for e in events].count("memory_consolidation") == 1
+    assert [e["event"] for e in events].count("memory_consolidation") == 0, (
+        "a cycle persisted/logged a consolidation report — the retired "
+        "per-cycle arm is back"
+    )
 
 
 def test_cheap_path_skips_consolidation_but_still_records_episode(
@@ -671,11 +678,13 @@ def test_cheap_path_skips_consolidation_but_still_records_episode(
     assert "planner_cheap_path" in names
     # Episode is still written (learning preserved).
     assert names.count("episodic_memory_write") == 1
-    # Consolidation was skipped for this turn.
+    # Consolidation is retired per-cycle entirely (MIR-044), so neither the
+    # event nor its cheap-path "skipped" twin may appear on ANY turn — the
+    # skip distinction died with the branch it described.
     assert "memory_consolidation" not in names
-    assert "memory_consolidation_skipped" in names
-    # No consolidation report was produced.
-    assert agent.smart_memory_summary()["consolidation"]["reports"] == 0
+    assert "memory_consolidation_skipped" not in names
+    # The on-demand tally still answers, computed from the live stores.
+    assert agent.smart_memory_summary()["consolidation"]["reports"] == 1
 
 
 def test_experience_memory_is_injected_into_next_planner_call(workspace: Path, monkeypatch) -> None:
@@ -751,7 +760,11 @@ def test_smart_memory_cli_commands(workspace: Path, capsys) -> None:
     assert handle_meta_command(":memory-consolidate --json", agent, workspace) is True
     out = capsys.readouterr()
     assert '"episode_count": 1' in out.err
-    assert agent.consolidation_store.count() == 1
+    # MIR-044: computed fresh, persisted nowhere.
+    store = getattr(agent, "consolidation_store", None)
+    assert store is None or store.count() == 0, (
+        "the retired sink was written by the CLI command"
+    )
 
 
 def test_episodic_store_evicts_oldest_when_over_limit(tmp_path: Path) -> None:
