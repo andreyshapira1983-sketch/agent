@@ -3684,8 +3684,9 @@ RESOLVED relative path, so `docs/../.env` and an absolute route are refused
 alike, and the refusal names the kind without quoting the contents — a refusal
 that leaks what it protects would defeat itself.
 
-Deliberately narrow, with a control that proves it: `environment.md` and
-`tests/test_env_probe.py` must still read. Breaking the gate to refuse
+Deliberately narrow, with a control that proves it: fixture names containing
+"env" — a document called `environment.md`, a test file whose name merely
+carries the substring — must still read. Breaking the gate to refuse
 everything turns that control red, which is the point — a tool that refuses
 everything is not a fix.
 
