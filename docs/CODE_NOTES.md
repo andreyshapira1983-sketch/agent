@@ -3741,3 +3741,38 @@ the first version, because that test only checked a run where work HAD
 succeeded. A test that cannot falsify its own claim — the exact shape this
 project hunts elsewhere — found in my own new test, by breaking the code it
 guards. Both polarities are asserted now.
+
+## A file too large to read produces mistakes
+
+The operator's argument, and it is an engineering one rather than a taste:
+`core/autonomous_runtime.py` had grown to 1668 lines against its own recorded
+aspiration of 1150. A file nobody can read through is a file where errors hide —
+his, mine, and the agent's own when it reads its source to decide what to
+change. The bugs come later; the unreadability comes first.
+
+Measured before moving anything: the 13 lines norm A had just added were not the
+problem. `AutonomousRuntime` alone was 1251 lines, and six data carriers plus
+three type aliases sat beside the orchestrator for no reason but history.
+`core/campaign_types.py` was already the repository's pattern for exactly this.
+
+The move was mechanical on purpose. Class bodies were cut by AST line span and
+never retyped, so nothing could drift in transit — and the one thing I did
+retype, the `Literal` vocabularies, I got WRONG from memory (invented a
+`self_build` kind and a shorter status list). Caught by reading the original
+lines back and copying them verbatim. That is the whole argument for mechanical
+extraction in one paragraph.
+
+`core/autonomous_runtime` re-exports every moved name, with an explicit
+`__all__` rather than a linter suppression: the point is that this is a
+relocation and not an interface change, and the code should say so. Every
+existing `from core.autonomous_runtime import AutonomousTask` still works.
+
+Two guards earned their keep. The anatomy check refused the tree until the new
+module was grouped and described — a new file must state who needs it. And the
+file-size ratchet, which had been raised to 1668 for norm A, came back down to
+1507 with the reason written beside it.
+
+The honest remainder: 1507 is still above the 1150 aspiration, because
+`AutonomousRuntime` is 1251 lines of it — 83% of the file in one class.
+Splitting that class is a different and larger piece of work, and it stays
+named rather than quietly forgotten.
