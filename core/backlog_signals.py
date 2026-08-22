@@ -391,6 +391,52 @@ OVERSIZED_MODULE_SOURCE = "oversized_module"
 _OVERSIZED_MODULE_MIN_LINES = 800
 _MAX_OVERSIZED_RECORDS = 25
 
+
+def _code_line_count(content: str) -> tuple[int, bool]:
+    """Lines that carry code, and whether the module parsed.
+
+    MIR-099: this sensor used to count TOTAL lines, and 5 of its 10 live
+    verdicts flipped when prose was excluded — its first self-chosen proposal
+    targeted a module of 870 lines with only 602 of code. The census rule,
+    applied verbatim: a docstring line or a pure-comment line is prose; a line
+    carrying code plus a trailing comment is CODE. The 275-module census also
+    showed the errors were one-directional (zero modules under the limit in
+    total but over it in code), so counting code removes noise and cannot
+    newly miss anything. On a syntax error the caller falls back to the total
+    — the sensor must not go blind on an unparseable module.
+    """
+    import ast
+    import io
+    import tokenize
+
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return 0, False
+    prose: set[int] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                              ast.AsyncFunctionDef))
+                and ast.get_docstring(node, clean=False) is not None
+                and node.body and isinstance(node.body[0], ast.Expr)):
+            first = node.body[0]
+            for line in range(first.lineno, (first.end_lineno or first.lineno) + 1):
+                prose.add(line)
+    code_lines: set[int] = set()
+    try:
+        lines = content.splitlines()
+        for tok in tokenize.generate_tokens(io.StringIO(content).readline):
+            if tok.type == tokenize.COMMENT:
+                at = tok.start[0]
+                if at - 1 < len(lines) and lines[at - 1].strip().startswith("#"):
+                    prose.add(at)
+            elif tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                                  tokenize.DEDENT, tokenize.ENDMARKER):
+                code_lines.add(tok.start[0])
+    except (tokenize.TokenError, IndentationError):
+        return 0, False
+    return len(code_lines - prose), True
+
 # The emitted target is deliberately abstract (``split:<file>``) so that this
 # module stays a pure detector: it names a structural property, not a file to
 # edit. Resolving it to a concrete module and deciding whether that module may
@@ -414,28 +460,38 @@ def oversized_module_candidates(
     :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``,
     and ``problem_quote`` states the concrete line count.
     """
-    measured: list[tuple[int, str]] = []
+    measured: list[tuple[int, int, bool, str]] = []
     seen: set[str] = set()
     for rel_path, content in files:
         rel = str(rel_path or "").replace("\\", "/").strip()
         if not rel or content is None or rel in seen:
             continue
         seen.add(rel)
-        line_count = content.count("\n") + 1 if content else 0
-        if line_count >= _OVERSIZED_MODULE_MIN_LINES:
-            measured.append((line_count, rel))
+        total = content.count("\n") + 1 if content else 0
+        code, parsed = _code_line_count(content)
+        decisive = code if parsed else total
+        if decisive >= _OVERSIZED_MODULE_MIN_LINES:
+            measured.append((decisive, total, parsed, rel))
 
-    measured.sort(key=lambda pair: (-pair[0], pair[1]))
+    measured.sort(key=lambda item: (-item[0], item[3]))
 
     records: list[SignalRecord] = []
     quotes: list[str] = []
     kept = measured[:_MAX_OVERSIZED_RECORDS]
     count = len(kept)
-    for index, (line_count, rel) in enumerate(kept):
-        quote = (
-            f"{rel} has {line_count} lines (soft limit "
-            f"{_OVERSIZED_MODULE_MIN_LINES}); split into focused modules"
-        )
+    for index, (decisive, total, parsed, rel) in enumerate(kept):
+        if parsed:
+            quote = (
+                f"{rel} has {decisive} code lines of {total} total "
+                f"(soft limit {_OVERSIZED_MODULE_MIN_LINES} code lines; "
+                "docstrings and comments excluded); split into focused modules"
+            )
+        else:
+            quote = (
+                f"{rel} has {total} lines (unparseable, counted as total; "
+                f"soft limit {_OVERSIZED_MODULE_MIN_LINES}); "
+                "split into focused modules"
+            )
         quotes.append(quote)
         records.append(
             SignalRecord(
