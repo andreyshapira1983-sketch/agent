@@ -32,6 +32,17 @@ from core.self_improvement_issues import (
 from core.veto_cause import veto_blames_the_target
 from core.writer_completion import COMPLETION_BY_OUTCOME
 
+#: The four pre-flight gates: they ask «may I start» and run before any
+#: pipeline work, so a run they refused produced NO experience. Such an
+#: episode is a status line — banked once (searchable under its status tag),
+#: never tagged `lesson`, never repeated while an identical row stands.
+#: Measured 2026-08-22: 64 wait-rows held half the protected set, 41 of them
+#: minted by one unanswered approval. Full account: docs/CODE_NOTES.md,
+#: "A blocked gate is not a lesson".
+_GATE_WAIT_STATUSES: frozenset[str] = frozenset({
+    "budget_kill_switch", "budget_wait", "approval_wait", "dirty_tree_wait",
+})
+
 # Map each command status to a coarse episodic outcome the agent already
 # understands (success / partial / failed).
 _OUTCOME_BY_STATUS: dict[str, str] = {
@@ -119,7 +130,11 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
         if veto:
             summary += " | veto: " + "; ".join(str(v) for v in veto)
 
-    tags = ["self-build", "lesson", kind, status, outcome]
+    # `lesson` is what confers eligibility, eviction protection and retrieval
+    # priority (MIR-115) — a pre-flight refusal earns none of that.
+    tags = (["self-build", kind, status, outcome]
+            if status in _GATE_WAIT_STATUSES
+            else ["self-build", "lesson", kind, status, outcome])
     if status == "critic_veto":
         # Which kind of veto this was decides whether the target goes on the
         # cooldown list. Settled here, where the reasons are still in hand.
@@ -163,10 +178,23 @@ def record_self_build_episode(agent: Any, *, kind: str, result: dict[str, Any]) 
         episode = build_self_build_episode(kind, result)
         if episode is None:
             return False
+        # MIR-090's writer half: a producer that hits the same gate twice must
+        # not bank a second identical episode — the unattended tick retried one
+        # blocked gate 32 times on 2026-08-16 and banked all 32. Keyed on
+        # CONTENT, not the status label (label-keyed dedup destroys real
+        # records: ten distinct answers under one question, measured in
+        # docs/audit/MEMORY_CONSOLIDATION_MEASUREMENT.md). Gate waits only —
+        # an identical genuine veto tomorrow may mean "still failing", and
+        # judging that is the hygiene collapser's job, not the writer's.
+        if str(result.get("status") or "") in _GATE_WAIT_STATUSES:
+            key = (episode.goal, episode.question, episode.summary, episode.outcome)
+            for old in store.load():
+                if (old.goal, old.question, old.summary, old.outcome) == key:
+                    return False
         store.save(episode)
-        return True
     except Exception:  # noqa: BLE001 — journaling must never break the caller
         return False
+    return True
 
 
 def _with_untagged_lessons(

@@ -10,8 +10,10 @@ the repair verified clean, so its verdict is constant.
 
 * self-build — ``question`` is one of the four ``kind`` values the writer is
 ever called with, and both ``self-build`` and that same ``kind`` appear in
-the tags, because the writer always emits ``["self-build", "lesson", kind,
-...]`` (`core/self_build_memory.py:103,109`); * self-repair — ``goal ==
+the tags, because the writer always emits ``["self-build", kind, ...]``
+(`lesson` joins them for genuine attempts only, since 2026-08-22 — a
+pre-flight gate refusal is a status line, not a lesson; the classifier here
+never required `lesson`, so the split does not move it); * self-repair — ``goal ==
 "repair"``, both regression tags present, *and* ``outcome == "success"``.
 The constant verdict rests on the invariant that `_write_repair_lesson` runs
 only when the repair re-verified clean (`core/self_repair.py:485`);
