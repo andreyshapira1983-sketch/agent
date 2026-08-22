@@ -59,6 +59,59 @@ records. Reversed by one word from the operator.
 
 ---
 
+## MIR-125 — bounded tail read over an append-only log
+
+**Field's named failures** ([NXLog on rotation](https://nxlog.co/news-and-blog/posts/handle-log-rotation-without-losing-events),
+[Khuong on append semantics](https://pvk.ca/Blog/2021/01/22/appending-to-a-log-an-introduction-to-the-linux-dark-arts/)):
+rotation or truncation between measuring the file and reading it; a partial
+final line from a writer that died mid-append; a concurrent writer moving the
+end underneath the reader; a reader that jumps to the new file and drops the
+unread tail of the old one. The stake here is not latency — `reserve()` decides
+whether money may be spent, and any under-read silently raises the operator's
+ceiling.
+
+| probe | result |
+|---|---|
+| is the ledger ever REWRITTEN rather than appended? | **PASS** — sweep found no rewrite site, so the rotation family cannot arise from our own code |
+| a half-written final line (crashed writer) | **PASS** — the partial record is lost, everything before it still counted |
+| the file truncated to its last 40 lines between fills | **PASS** — every surviving in-window record counted |
+| a STALE size reported to the reader (concurrent append) | **PASS** — the invariant is one-sided: a stale size seeks earlier and over-reads, or lands past the end and falls back to the full read; no ordering undercounts |
+| a file where EVERY record is in-window (the proof can never be satisfied) | **PASS** — terminates on the full read rather than spinning |
+| empty file / unparseable file | **PASS** |
+
+**Nothing changed.** Five probes, five holds; pinned in
+`tests/test_the_bounded_tail_survives_a_hostile_file.py`. One probe was
+rewritten mid-audit: the first concurrent-writer test wrote to the file from
+inside the read on one thread and hit a re-entrant lock — a defect in the
+probe, not the code, since real concurrency is cross-process and the file lock
+serialises it. It was reshaped into the property that actually matters.
+
+---
+
+## MIR-097 — shape-based marker grammar
+
+**Field's named failure:** a rule that strips by SHAPE eats legitimate text —
+the same criticism that landed on stoplists earlier the same day.
+
+**It landed here too.** Tested against real prose forms, four were being
+refused: a bibliographic `...[1998]`, a quotation elision `«...[и]`, a chat log
+`...[typing]`, and `он замолчал…[потом продолжил]`.
+
+**Two are fixed:** bracket content that is a bare number or a single character
+is never one of our markers, and is now exempt. All five live writer shapes
+still caught, pinned in both directions.
+
+**One is IRREDUCIBLE and is recorded rather than argued away:** `...[typing]`
+is structurally identical to `...[truncated]` — one word in brackets after an
+ellipsis — and no shape rule separates them. The residue is left in the safe
+direction deliberately: the cost of this false positive is a REFUSED claim,
+never a corrupted fact, and the harm this entry exists to prevent was a
+corrupted fact manufacturing a false conflict. It is pinned as a passing test
+so the limit lives in the suite, not only in prose — and so a future author who
+believes they solved it has something to turn green.
+
+---
+
 ## Still to audit
 
 MIR-011 · 020 · 026 · 035 · 044 · 097 · 099 · 104 · 125 · 126 · 105/024/008,
@@ -71,9 +124,7 @@ each against the named failure mode of its own solution class:
 | 026 settle-on-exit | a status written at one exit lies about the other paths |
 | 035 class merge | merging by class hides distinct defects under one row |
 | 044 on-demand tally | «compute it when asked» degrades at scale |
-| 097 marker grammar | shape-based stripping eats legitimate text |
 | 099 code-line count | AST counting misreads generated code and one-liners |
-| 125 bounded tail | the coverage proof is false if the file is rewritten, not appended |
 | 126 audit scope | «zero unexplained» becomes zero because comments are fig leaves |
 | 105/024/008 | already audited mid-repair: the stoplist inverted meaning, and the fix's first attempt changed a pinned invariant |
 

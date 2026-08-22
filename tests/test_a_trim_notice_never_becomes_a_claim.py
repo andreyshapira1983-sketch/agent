@@ -112,3 +112,42 @@ def test_clean_sentences_still_extract_beside_a_marker() -> None:
     assert claims, "the marker gate swallowed every claim from the excerpt"
     for claim in claims:
         assert "INTENT-BUDGET" not in claim.text
+
+
+# ── Audit of this closure against the field's criticism ─────────────────────
+#
+# From docs/audit/CLOSURE_AUDIT_2026-08-22.md. Shape-based stripping is
+# criticised for eating legitimate text, and tested against real prose the
+# criticism LANDED: a bibliographic «...[1998]» and a quotation elision
+# «...[и]» were both refused. Both are now exempt — bracket content that is a
+# bare number or a single character is never one of our markers.
+#
+# What is NOT fixed, and is recorded rather than argued away: «user:
+# ...[typing]» is structurally identical to «...[truncated]» — one word in
+# brackets after an ellipsis — and no shape rule can separate them. The cost
+# of that false positive is a REFUSED claim, never a corrupted fact, so the
+# residue is left in the safe direction.
+
+def test_bibliographic_and_elision_brackets_are_not_notices() -> None:
+    for text in (
+        "Smith et al. ...[1998] showed the effect",
+        "«...[и] дальше по тексту» — обычная цитата",
+        "the passage reads ...[а] and continues",
+    ):
+        assert not carries_framework_notice(text), text
+
+
+def test_every_real_marker_still_survives_the_narrowing() -> None:
+    """The narrowing must not open a hole: all five live writer shapes."""
+    for text in _LIVE_MARKERS:
+        assert carries_framework_notice(text), text
+
+
+def test_the_irreducible_false_positive_is_recorded_not_hidden() -> None:
+    """A one-word prose elision cannot be told from a one-word marker. Pinned
+    so the limit is visible in the suite rather than only in prose — and so a
+    future author who thinks they fixed it has something to turn green."""
+    assert carries_framework_notice("user: ...[typing]"), (
+        "if this now passes, a shape rule learned to tell prose from marker — "
+        "record how, and update the audit"
+    )

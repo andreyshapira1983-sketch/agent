@@ -161,6 +161,17 @@ _FRAMEWORK_NOTICE_RE = re.compile(
 )
 
 
+#: Скобочное содержимое, которое НИКОГДА не бывает нашей меткой: чистое
+#: число (библиографическое «...[1998]») и один символ (цитатное усечение
+#: «...[и]»). Найдено ревизией закрытия MIR-097 против названного полем
+#: провала срезки-по-форме — «жёсткое правило по форме съедает живой текст».
+#: Что НЕ устранимо на этом уровне и записано как есть: «...[typing]»
+#: структурно неотличима от «...[truncated]» — одно слово в скобках после
+#: многоточия. Цена ложного срабатывания — отвергнутое утверждение, а не
+#: испорченный факт, поэтому остаток оставлен в безопасную сторону.
+_NOT_A_NOTICE_RE = re.compile(r"^(?:\d+|.)$")
+
+
 def carries_framework_notice(text: str) -> bool:
     """Did a trimmer's own voice end up inside this text?
 
@@ -168,7 +179,12 @@ def carries_framework_notice(text: str) -> bool:
     fully written by the source, so it is refused rather than cleaned — half a
     sentence is not a fact. See docs/CODE_NOTES.md, "The trimmer's voice".
     """
-    return bool(_FRAMEWORK_NOTICE_RE.search(text or ""))
+    for match in _FRAMEWORK_NOTICE_RE.finditer(text or ""):
+        inner = match.group(0).strip(".…[]").strip()
+        if inner and _NOT_A_NOTICE_RE.match(inner):
+            continue  # a bibliographic year or a one-character elision
+        return True
+    return False
 
 
 # ── intent-aware extraction ───────────────────────────────────────────────────
