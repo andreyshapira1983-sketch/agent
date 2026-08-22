@@ -315,12 +315,27 @@ def classify_file(path: Path) -> list[dict]:
     )
 
 
+#: Everything production-shaped. Until 2026-08-22 this audit walked `core/`
+#: only, and MIR-126 measured the cost: of the nine silent handlers it worried
+#: about, exactly ONE was in `core/` — the other eight sat in `app/` and
+#: `cli/`, including all three in `app/budget_guard.py`, the money-adjacent
+#: module its own entry called the worst place for silent degradation. The
+#: instrument worked, reported zero unexplained, and did not look where the
+#: concern was; nothing stated the scope at the point where the number was
+#: read. Same roots as INV-2's production-reachability list.
+_AUDIT_ROOTS: tuple[str, ...] = ("core", "cli", "app", "api", "tools")
+
+
 def audit() -> list[dict]:
     rows: list[dict] = []
-    # rglob: subdirectories under core/ (none today, but the ratchet must not
-    # go blind the day one appears — review round #292).
-    for path in sorted((REPO / "core").rglob("*.py")):
-        rows.extend(classify_file(path))
+    # rglob: subdirectories too (none under core/ today, but the ratchet must
+    # not go blind the day one appears — review round #292).
+    for root in _AUDIT_ROOTS:
+        base = REPO / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            rows.extend(classify_file(path))
     return rows
 
 
@@ -337,7 +352,7 @@ def main() -> int:
 
     kinds = Counter(r["kind"] for r in rows)
     bad = unjustified_silent(rows)
-    print(f"broad except handlers in core/: {len(rows)}")
+    print(f"broad except handlers in production roots (core/cli/app/api/tools): {len(rows)}")
     for kind, count in sorted(kinds.items()):
         print(f"  {kind}: {count}")
     print(f"silent WITHOUT a stated reason (audit target): {len(bad)}")
