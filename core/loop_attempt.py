@@ -547,6 +547,22 @@ class AgentLoopAttempt:
             )
             break
 
+        # MIR-026: the in-run Goal/Plan are LOG objects, and they used to be
+        # born `pending` / `in_progress` and die that way — a reader of the
+        # journal could not tell a finished run from an abandoned one by its
+        # own objects. Settled here, at the only exit of the attempt loop:
+        # exhaustion is the one failure this loop itself can declare.
+        settled = "failed" if st.replan_exhausted else "done"
+        st.goal.status = settled
+        if st.plan is not None:
+            st.plan.status = settled
+        self.log.log("run_objects_settled", {
+            "goal_id": st.goal.id,
+            "plan_id": st.plan.id if st.plan is not None else None,
+            "status": settled,
+            "attempts": st.attempt,
+        })
+
     def _build_plan(self, goal: Goal, sources: list[dict[str, Any]]) -> Plan:
         plan = Plan(goal_id=goal.id)
         for i, src in enumerate(sources, start=1):
