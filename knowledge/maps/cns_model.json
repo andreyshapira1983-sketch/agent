@@ -48,11 +48,11 @@
       "declared_output_note": "AttemptState.OUTPUTS names eight fields and a test guards exactly that set; this is the ninth channel and it is typed as an input ('does not change during the section') while loop_attempt.py:472 extends it. The OUTPUTS test therefore looks like a complete interface contract and is not.",
       "writers": [
         {
-          "site": "core/loop_attempt.py:451",
+          "site": "core/loop_attempt.py:455",
           "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
           "puts": "failures of an ATTEMPT",
           "call": "extend",
-          "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier. | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
+          "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier. | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it."
         },
         {
           "site": "core/loop_verify_replan.py:149",
@@ -109,16 +109,16 @@
           "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"
         },
         {
-          "site": "core/loop_attempt.py:523",
+          "site": "core/loop_attempt.py:527",
           "role": "dead_end",
           "uses": "log line — the codes inside the replan_exhausted ErrorObject message",
-          "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
+          "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it."
         },
         {
-          "site": "core/loop_attempt.py:533",
+          "site": "core/loop_attempt.py:537",
           "role": "dead_end",
           "uses": "log line — the same ErrorObject's context payload",
-          "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
+          "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it."
         },
         {
           "site": "core/loop_attempt.py:164",

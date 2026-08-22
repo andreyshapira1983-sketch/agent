@@ -158,7 +158,8 @@
     "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
     "loop_synthesis_helpers.py::_artifact_blocks": [],
     "loop_synthesis_helpers.py::_log_budget_trim": [],
-    "loop_synthesis_helpers.py::_organ_map": []
+    "loop_synthesis_helpers.py::_organ_map": [],
+    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": []
   },
   "edges": [
     [
@@ -264,6 +265,10 @@
     [
       "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
       "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_attempt.py::AgentLoopAttempt._settle_run_objects"
     ],
     [
       "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
