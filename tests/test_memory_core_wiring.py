@@ -181,7 +181,9 @@ def test_interactive_profile_has_every_memory_store(tmp_path: Path) -> None:
     assert agent.persistent_store is not None, "persistent/semantic memory"
     assert agent.episodic_store is not None, "episodic memory"
     assert agent.procedural_store is not None, "procedural memory"
-    assert agent.consolidation_store is not None, "consolidation"
+    # MIR-044: the consolidation store is retired — the tally is computed on
+    # demand, so no profile constructs one.
+    assert agent.consolidation_store is None, "the retired sink was constructed"
 
 
 # --------------------------------------------------------------------------
@@ -258,7 +260,9 @@ def test_experience_stores_are_independent_of_persistent(tmp_path: Path) -> None
         "experience memory must not depend on persistent memory being enabled"
     )
     assert agent.procedural_store is not None
-    assert agent.consolidation_store is not None
+    # MIR-044: retired — experience memory no longer includes a consolidation
+    # store on any profile.
+    assert agent.consolidation_store is None
     # ...while the other two axes stay off.
     assert agent.persistent_store is None
     assert agent.memory is None

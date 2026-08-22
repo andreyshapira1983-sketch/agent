@@ -655,7 +655,6 @@ class AgentLoop(
             unverified_chunks=verification.unverified_chunks if verification else 0,
             weak_chunks=weak_chunks,
             replan_exhausted=replan_exhausted,
-            skip_consolidation=cheap_path_active,
             # Set by either soft-fail site (`:1625` initial, `:1929` replan).
             # Both write this same local, which is why one flag covers them.
             verifier_failure=verifier_failure,

@@ -211,9 +211,9 @@ def build_agent(
         procedural_store = ProceduralMemoryStore(
             workspace / DEFAULT_PROCEDURAL_MEMORY_PATH
         )
-        consolidation_store = MemoryConsolidationStore(
-            workspace / DEFAULT_MEMORY_CONSOLIDATION_PATH
-        )
+        # consolidation_store deliberately NOT constructed since 2026-08-22
+        # (MIR-044, operator ruling 2026-07-19): the tally is computed on
+        # demand by `:memory-consolidate` / `:smart-memory`; nothing persists.
         from core.causal_store import CausalObservationStore
         causal_store = CausalObservationStore(workspace / DEFAULT_CAUSAL_PATH)
 

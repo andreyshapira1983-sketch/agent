@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any
 from core.run_context import current_run
 from core.smart_memory import (
     admit_for_storage,
-    consolidate_memory,
     episode_from_agent_cycle,
     resolve_used_procedures,
 )
@@ -34,7 +33,8 @@ from core.smart_memory import (
 KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
     "episode",          # episodic_store.save
     "procedure",        # procedural_store.upsert_from_episode
-    "consolidation",    # consolidate_memory -> consolidation_store
+    "consolidation",    # RETIRED 2026-08-22 (MIR-044): no write site names it;
+                        # kept so an old config naming it validates, not typos
     "knowledge",        # knowledge pipeline auto-write / remember batch
     "source_registry",  # source_registry_store
     "profile",          # user_profile_store
@@ -200,7 +200,6 @@ class AgentLoopMemoryWrite:
         unverified_chunks: int,
         replan_exhausted: bool,
         weak_chunks: int = 0,
-        skip_consolidation: bool = False,
         verifier_failure: bool = False,
         declared_completion: str | None = None,
     ) -> None:
@@ -214,8 +213,7 @@ class AgentLoopMemoryWrite:
         # consolidation stay off.
         may_episode = not self._durable_learning_suppressed("episode")
         may_procedure = not self._durable_learning_suppressed("procedure")
-        may_consolidation = not self._durable_learning_suppressed("consolidation")
-        if not (may_episode or may_procedure or may_consolidation):
+        if not (may_episode or may_procedure):
             self.log.log(
                 "durable_learning_writes_skipped",
                 {
@@ -397,34 +395,13 @@ class AgentLoopMemoryWrite:
                     },
                 )
 
-            if (
-                may_consolidation
-                and self.consolidation_store is not None
-                and self.episodic_store is not None
-                and self.procedural_store is not None
-                and not skip_consolidation
-            ):
-                report = consolidate_memory(
-                    episodes=self.episodic_store.load(),
-                    procedures=self.procedural_store.load(),
-                )
-                self.consolidation_store.save(report)
-                self.log.log(
-                    "memory_consolidation",
-                    {
-                        "report_id": report.id,
-                        "episode_count": report.episode_count,
-                        "procedure_count": report.procedure_count,
-                        "active_procedure_ids": list(report.active_procedure_ids),
-                        "needs_review_procedure_ids": list(report.needs_review_procedure_ids),
-                        "notes": list(report.notes),
-                    },
-                )
-            elif skip_consolidation and self.consolidation_store is not None:
-                self.log.log(
-                    "memory_consolidation_skipped",
-                    {"reason": "cheap_path"},
-                )
+            # Per-cycle consolidation RETIRED here 2026-08-22, executing the
+            # operator's ruling of 2026-07-19 (MIR-044): the report is a pure
+            # tally of statuses the procedures already hold, so persisting one
+            # every cycle bought 255 reports / 738 KB that exactly one display
+            # command ever read. The tally is computed ON DEMAND now —
+            # `:memory-consolidate` and `:smart-memory` call
+            # `consolidate_memory` fresh; nothing persists.
         except Exception as exc:  # noqa: BLE001
             self.log.log(
                 "smart_memory_error",

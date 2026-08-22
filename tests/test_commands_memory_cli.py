@@ -376,7 +376,7 @@ def test_consolidate_rejects_unknown_flags(capsys):
     assert "Usage: :memory-consolidate [--json]" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("missing", ["episodic_store", "procedural_store", "consolidation_store"])
+@pytest.mark.parametrize("missing", ["episodic_store", "procedural_store"])
 def test_consolidate_refuses_when_any_store_is_missing(missing, capsys):
     agent = _consolidate_agent(**{missing: None})
 
@@ -410,7 +410,10 @@ def test_consolidate_saves_logs_and_prints_its_notes(capsys, monkeypatch):
     assert _handle_memory_consolidate("", agent) is True
 
     assert seen == {"episodes": ["e1"], "procedures": ["p1"]}
-    assert agent.saved == [report], "the report is persisted, not just printed"
+    # MIR-044, operator ruling 2026-07-19 executed 2026-08-22: computed fresh,
+    # persisted NOWHERE. The old assertion here ("persisted, not just printed")
+    # pinned the dead sink itself.
+    assert agent.saved == [], "the retired sink was written again"
     assert agent.log.kinds() == ["memory_consolidation"]
 
     err = capsys.readouterr().err
@@ -431,4 +434,4 @@ def test_consolidate_json_mode(capsys, monkeypatch):
     assert _handle_memory_consolidate("--json", agent) is True
 
     assert json.loads(capsys.readouterr().err) == {"id": "cons-2"}
-    assert agent.saved == [report]
+    assert agent.saved == [], "the retired sink was written again (MIR-044)"
