@@ -200,3 +200,42 @@ def test_the_tick_actually_calls_it(workspace: Path) -> None:
         "the reactivation pass exists but the tick never calls it — the exact "
         "shape MIR-131 measured thirteen times over"
     )
+
+
+def test_the_queue_consumer_can_actually_run_what_reactivation_hands_it() -> None:
+    """The layer under the layer, and the reason this repair did not stop at
+    making a row runnable.
+
+    `agent_tick` turns every claimed task into a config with
+    `_config_from_task`, which refused any kind but `auto_run` — so a
+    `resume_checkpoint` returned to the queue would be claimed (spending its
+    single attempt), raise `ValueError`, and be buried by the exception handler.
+    Reactivation without this would have converted fourteen silently stranded
+    rows into fourteen automatically killed ones: worse than the defect.
+
+    What the automatic path does with it is deliberately a RE-RUN, not a
+    state-exact resume. Exact resumption is the human path (`--resume`, whose
+    hint the interactive gateway prints); every automatic retry in this system
+    re-runs with backoff, and the checkpoint's saved phase stays in
+    `last_report` for whoever wants it.
+    """
+    from core.autonomous_runtime import _config_from_task
+    from core.task_queue import RuntimeTask
+
+    task = RuntimeTask(
+        kind="resume_checkpoint",
+        goal="Answer the question: what changed in core/loop.py",
+        status="pending",
+        dry_run=True,
+        limit=1,
+        learning_limit=1,
+    )
+    config = _config_from_task(task)
+    assert config.goal == task.goal, (
+        "the consumer cannot execute the kind reactivation produces, so the "
+        "row is claimed, its one attempt spent, and then it dies on ValueError"
+    )
+    assert config.dry_run is True, (
+        "a re-queued checkpoint must keep the conservative posture it was "
+        "parked with"
+    )

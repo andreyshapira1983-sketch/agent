@@ -1053,8 +1053,39 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             log.log(event, payload)
 
 
+#: Queue kinds the runtime can execute. `resume_checkpoint` is here because the
+#: budget guard writes one expressly for the unattended path; leaving it out
+#: meant the queue held rows nothing could ever run.
+_RUNNABLE_TASK_KINDS: frozenset[str] = frozenset({"auto_run", "resume_checkpoint"})
+
+
 def _config_from_task(task: RuntimeTask) -> AutonomousRuntimeConfig:
-    if task.kind != "auto_run":
+    """Turn a claimed queue row into a run configuration.
+
+    ``resume_checkpoint`` is accepted as well as ``auto_run``, and the reason is
+    worth stating because refusing it was not a guard but a dead end. Work
+    interrupted by an exhausted budget is parked as a `resume_checkpoint` by
+    `app/budget_guard.py`, expressly so the unattended path can pick it up
+    again — that module's own comment says the queue feeds the unattended mode.
+    The unattended path then raised here on the kind, so the row could never be
+    executed by anything: fourteen accumulated in the live store between
+    2026-07-30 and 2026-08-19, none ever attempted. Writing a row no consumer
+    accepts is not a safety property.
+
+    **What the automatic path does with it is a RE-RUN, not a state-exact
+    resume, and that is deliberate.** Exact resumption from the saved phase is
+    the HUMAN path — `--resume <trace>`, whose hint the interactive gateway
+    prints instead of queueing. Every automatic retry in this system re-runs
+    with backoff (`core/task_lifecycle.classify_run_outcome`), and a checkpoint
+    should not be the one place that invents different semantics. The saved
+    phase and steps stay in `last_report` for whoever resumes by hand.
+
+    The row keeps the conservative posture it was parked with —
+    `add_paused_checkpoint` sets `dry_run=True`, `limit=1`, `learning_limit=1` —
+    so re-queueing cannot quietly widen what the interrupted turn was allowed
+    to do.
+    """
+    if task.kind not in _RUNNABLE_TASK_KINDS:
         raise ValueError(f"unsupported runtime task kind: {task.kind}")
     return AutonomousRuntimeConfig(
         goal=task.goal,
