@@ -799,6 +799,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from core.task_lifecycle import (
         apply_run_exception,
         apply_run_outcome,
+        reactivate_resumable_work,
         recover_orphaned_tasks,
         task_heartbeat,
     )
@@ -932,6 +933,29 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                     })
             except Exception as exc:  # noqa: BLE001
                 _log_tick(workspace, {"event": "task_recovery_error",
+                                      "error": f"{type(exc).__name__}: {exc}"})
+            # Sibling of the recovery above, same lock and same reason. That one
+            # frees a row abandoned by a dead process; this one frees a row
+            # parked by an exhausted budget, which had no automatic exit at all
+            # — fourteen rows were stranded that way, the oldest since
+            # 2026-07-30, and it is why the unattended run of 2026-08-16 went
+            # quiet on its third day with work still queued.
+            try:
+                _revived = reactivate_resumable_work(
+                    task_store, lock=_consumer_lock
+                )
+                if _revived:
+                    _log_tick(workspace, {
+                        "event": "paused_work_reactivated",
+                        "count": len(_revived),
+                        "tasks": [
+                            {"id": t.id, "status": t.status,
+                             "attempts": t.attempts, "error": t.last_error}
+                            for t in _revived
+                        ],
+                    })
+            except Exception as exc:  # noqa: BLE001
+                _log_tick(workspace, {"event": "task_reactivation_error",
                                       "error": f"{type(exc).__name__}: {exc}"})
             # `pending()` rather than `list(status="pending")`: it honours
             # `run_after`, so a task re-queued behind the retry backoff is not

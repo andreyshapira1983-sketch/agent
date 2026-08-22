@@ -56,6 +56,26 @@ class TaskAlreadyClaimed(RuntimeError):
 #: operator (`:task-unblock` once the approval is resolved). See MIR-039.
 _BLOCKED_STATUS: RuntimeTaskStatus = "blocked"
 
+#: Stop reasons a CLOCK can clear without anyone deciding anything. These are
+#: the only pauses :meth:`TaskQueueStore.reactivate_paused_checkpoints` will
+#: return to the queue, and the list is deliberately short rather than a
+#: `startswith("budget")`: `budget_kill_switch` is also budget-shaped and is
+#: NOT here, because a kill switch is a decision somebody made and waiting does
+#: not undo it. Everything absent from this set keeps the human-only exit.
+#: Matched on prefix because the campaign path appends detail —
+#: `core/campaign.py:193` writes `budget_exhausted:llm_calls=3/3`.
+_CLOCK_CLEARABLE_STOPS: tuple[str, ...] = ("budget_exhausted", "budget_wait")
+
+
+def _is_resource_paused(task: RuntimeTask) -> bool:
+    """Is this row parked on a resource that refills, rather than on a person?"""
+    if task.kind != "resume_checkpoint" or task.status != "paused":
+        return False
+    reason = str(
+        (task.last_report or {}).get("stop_reason") or task.last_error or ""
+    ).strip()
+    return reason.startswith(_CLOCK_CLEARABLE_STOPS)
+
 # Exponential backoff for re-queued failed tasks (OFM-010 / CORE-07): a
 # deterministic failure must not be immediately eligible again on the next tick.
 # attempts is already bumped in mark_running, so the first failure (attempts=1)
@@ -266,7 +286,33 @@ class TaskQueueStore:
         goal: str,
         report: dict,
         priority: int = 1,
+        gateway_path: str | None = None,
+        resumed_from: str | None = None,
     ) -> RuntimeTask:
+        """Park interrupted work so it can be picked up again.
+
+        ``gateway_path`` is stored because :func:`checkpoint_is_resumable_work`
+        decides by it AT PARK TIME and nothing kept the evidence: all fourteen
+        rows in the live store on 2026-08-22 carried no trace of who produced
+        them, so nothing later could judge whether resuming them unattended was
+        right. The decision is recorded beside its own grounds.
+
+        ``resumed_from`` carries the SAME row forward instead of adding a second
+        one. Without it, switching reactivation on turns a static set into
+        unbounded growth: a resume that hits the budget again parks its own
+        checkpoint, and `retire_paused_checkpoint` only fires on success (see
+        `tests/test_budget_resume.py::test_resume_that_pauses_again_keeps_the_old_task`,
+        which holds that an unfinished pause may not be retired). Carrying the
+        row forward keeps that invariant — the id survives, still paused — while
+        one piece of work keeps exactly one row.
+        """
+        payload = dict(report)
+        if gateway_path is not None:
+            payload["gateway_path"] = str(gateway_path)
+        if resumed_from:
+            carried = self._carry_checkpoint_forward(resumed_from, payload)
+            if carried is not None:
+                return carried
         task = RuntimeTask(
             kind="resume_checkpoint",
             goal=goal.strip() or "resume interrupted task",
@@ -277,8 +323,8 @@ class TaskQueueStore:
             include_tests=False,
             limit=1,
             learning_limit=1,
-            last_error=str(report.get("stop_reason") or "budget_exhausted"),
-            last_report=report,
+            last_error=str(payload.get("stop_reason") or "budget_exhausted"),
+            last_report=payload,
         )
         with exclusive_file_lock(self._lock_path):
             tasks = self._load_unlocked()
@@ -286,6 +332,33 @@ class TaskQueueStore:
             self._save_unlocked(tasks)
         self._notify_task_added(task)
         return task
+
+    def _carry_checkpoint_forward(
+        self, resumed_from: str, payload: dict
+    ) -> RuntimeTask | None:
+        """Fold a fresh stop into the paused row it came from, if one exists."""
+        with exclusive_file_lock(self._lock_path):
+            tasks = self._load_unlocked()
+            out: list[RuntimeTask] = []
+            carried: RuntimeTask | None = None
+            for task in tasks:
+                same_work = (
+                    carried is None
+                    and task.kind == "resume_checkpoint"
+                    and task.status == "paused"
+                    and (task.last_report or {}).get("trace_id") == resumed_from
+                )
+                if not same_work:
+                    out.append(task)
+                    continue
+                carried = task.with_updates(
+                    last_report=payload,
+                    last_error=str(payload.get("stop_reason") or task.last_error),
+                )
+                out.append(carried)
+            if carried is not None:
+                self._save_unlocked(out)
+            return carried
 
     def _notify_task_added(self, task: RuntimeTask) -> None:
         """Notify the daemon after a new task is durably visible in the queue."""
@@ -481,6 +554,76 @@ class TaskQueueStore:
 
     def cancel(self, task_id: str) -> RuntimeTask:
         return self._update_one(task_id, lambda task: task.with_updates(status="cancelled"))
+
+    def reactivate_paused_checkpoints(
+        self,
+        *,
+        cooldown_minutes: int = 60,
+        now: datetime | None = None,
+    ) -> list[RuntimeTask]:
+        """Return work parked by a REPLENISHING resource to the queue.
+
+        The queue has two resting states that look alike and are not. `blocked`
+        waits on a human decision: its own comment says retrying it on a timer
+        cannot help, and it leaves by :meth:`unblock` at the operator's word.
+        That is right. A checkpoint parked by an exhausted budget waits on
+        something a clock resolves by itself, and giving it the same human-only
+        exit is what stranded fourteen rows in the live store — the oldest since
+        2026-07-30, every one at `attempts=0/1`, none ever seen by `pending()`
+        again. **The exit condition must match the entry condition.**
+
+        Deliberately narrow, on three axes:
+
+        * only `resume_checkpoint` rows whose stop reason is one a clock can
+          clear (the `budget_` family). A pause for any other reason keeps the
+          human-only exit, so this repair cannot creep into `blocked`'s
+          territory;
+        * only after *cooldown_minutes*, because the single attempt these rows
+          carry must not be spent while the window is still dry;
+        * never past `max_attempts` — MIR-040 was earned when an earlier
+          recovery resurrected a task one attempt beyond its cap. A checkpoint
+          with nothing left becomes terminal `failed` rather than staying
+          paused, because a row that can never run again must not keep
+          advertising itself as resumable in `summary()`.
+
+        Caller contract is `recover_stuck`'s: startup only, under the
+        single-instance lock. :func:`core.task_lifecycle.reactivate_resumable_work`
+        enforces it; call that rather than this.
+        """
+        moment = (now or _now()).astimezone(timezone.utc)
+        cutoff_ts = moment.timestamp() - cooldown_minutes * 60
+        changed: list[RuntimeTask] = []
+        with exclusive_file_lock(self._lock_path):
+            tasks = self._load_unlocked()
+            out: list[RuntimeTask] = []
+            for task in tasks:
+                if not _is_resource_paused(task):
+                    out.append(task)
+                    continue
+                try:
+                    parked_ts = _parse_iso(task.updated_at).timestamp()
+                except (ValueError, AttributeError, TypeError):
+                    parked_ts = 0.0  # unparseable → treat as long past
+                if parked_ts > cutoff_ts:
+                    out.append(task)  # still cooling down
+                    continue
+                if task.attempts >= task.max_attempts:
+                    spent = task.with_updates(
+                        status="failed",
+                        last_error=(
+                            f"{task.last_error or 'paused'}; no attempts left "
+                            f"({task.attempts}/{task.max_attempts})"
+                        ),
+                    )
+                    out.append(spent)
+                    changed.append(spent)
+                    continue
+                revived = task.with_updates(status="pending", run_after=_iso(moment))
+                out.append(revived)
+                changed.append(revived)
+            if changed:
+                self._save_unlocked(out)
+        return changed
 
     def recover_stuck(
         self,

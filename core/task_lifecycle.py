@@ -196,3 +196,38 @@ def recover_orphaned_tasks(
             "can run the same task twice"
         )
     return store.recover_stuck(timeout_minutes=timeout_minutes)
+
+
+#: How long a budget-parked checkpoint waits before it is offered again. The
+#: gated budget window is hourly, and these rows carry a single attempt, so
+#: returning one while the window is still dry would spend that attempt on a
+#: run that cannot finish. Waiting costs a delayed resume; not waiting costs
+#: the only attempt the row has.
+DEFAULT_RESUME_COOLDOWN_MINUTES = 60
+
+
+def reactivate_resumable_work(
+    store: TaskQueueStore,
+    *,
+    lock: Any,
+    cooldown_minutes: int = DEFAULT_RESUME_COOLDOWN_MINUTES,
+) -> list[RuntimeTask]:
+    """Return budget-parked checkpoints to the queue — startup only, under the lock.
+
+    The sibling of :func:`recover_orphaned_tasks`, and it exists for the same
+    reason: a resting state nothing leaves is work that has silently stopped.
+    That function handles a row abandoned by a dead process; this one handles a
+    row parked by an exhausted resource. Measured 2026-08-22, the second kind
+    had no exit at all — fourteen rows, the oldest from 2026-07-30, all at
+    `attempts=0/1`, listed by `summary()` as "resumable" and resumed by nothing.
+
+    Same lock contract, and for the same reason: reactivating a row while a
+    consumer may hold it in flight can run one piece of work twice.
+    """
+    if not getattr(lock, "held", False):
+        raise RuntimeError(
+            "reactivate_resumable_work requires the single-instance lock to be "
+            "held; returning a paused row to the queue while another consumer "
+            "may hold it in flight can run the same work twice"
+        )
+    return store.reactivate_paused_checkpoints(cooldown_minutes=cooldown_minutes)
