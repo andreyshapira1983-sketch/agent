@@ -232,3 +232,51 @@ refills — plus two decisions that are not code at all:
 a two-day run that died of one identified cause. Removing that cause is
 necessary; whether a different limit appears on day four is unknown, because
 nothing here has ever run that long.
+
+
+---
+
+# Addendum 2: what actually launches the agent — measured 2026-08-22
+
+Written while re-verifying MIR-114's claim that the production path is a Windows
+Scheduled Task running `agent_tick.py` every 30 minutes. That is what
+`scripts/install_daemon.ps1` *installs*; it is not what is *installed*.
+
+## Measured state of the scheduler
+
+Of **201** registered scheduled tasks on this host, exactly one invokes this
+project:
+
+    AgentCharterCampaign              DISABLED
+      cmd /c cd /d <workspace> && python.exe agent_tick.py --campaign --charter
+
+    AutonomousAgentTickStopAfter48h   Ready, but SPENT
+      powershell -Command "Disable-ScheduledTask -TaskName 'AutonomousAgentTick'"
+      LastRunTime 2026-07-06 00:57, result 0, NextRunTime empty
+
+    SpaceAgentTask / SpaceManagerTask  Windows system tasks, unrelated
+
+So: **nothing currently schedules the agent.** The one task that would is
+disabled. The second is a kill-switch that already fired on 2026-07-06 and
+disabled a task — `AutonomousAgentTick` — which no longer exists on the host.
+
+This is not a defect; it is the state of the launch mechanism, and it is the
+first thing that must be true before any unattended run. By itself it explains
+nothing about the 08-15..08-19 activity: that work happened, so it was driven
+either by this task while it was still enabled, or by a foreground process.
+Which one is not established here.
+
+## Instrument note, because this nearly went in wrong
+
+`schtasks /query /fo CSV` run through the Bash tool returned **zero rows**, which
+would have been reported as "no scheduled tasks exist". PowerShell
+`Get-ScheduledTask` on the same host returned **201**. The Bash path is not
+usable for this question.
+
+That is the fourth false zero of the day, after the wrong marker string and the
+wrong nesting depth in MIR-097, and the same-file exclusion in MIR-131. Recorded
+together because the pattern is now itself the finding: **every "nothing found"
+in this audit needs its probe proved before its result is believed.** The same
+defect was found in the repository's own instruments on the same day — the
+MIR-058 legacy report converges to zero precisely as the thing it measures gets
+worse.
