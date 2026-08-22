@@ -280,3 +280,27 @@ in this audit needs its probe proved before its result is believed.** The same
 defect was found in the repository's own instruments on the same day — the
 MIR-058 legacy report converges to zero precisely as the thing it measures gets
 worse.
+
+
+---
+
+# Addendum 3: the memory half is repaired — 2026-08-22 evening
+
+Section 4's defect (a blocked gate banked as a permanent lesson) is fixed at
+the writer and in the standing data, commit `ae7134a`:
+
+* gate-wait statuses (`budget_kill_switch`, `budget_wait`, `approval_wait`,
+  `dirty_tree_wait`) are no longer tagged `lesson` — measured first: without
+  the tag the ordinary admission gate refuses them on its own, so the tag was
+  the entire defect;
+* the writer skips a gate-wait whose exact content already stands (MIR-090's
+  named missing test, now written), keyed on content rather than the label;
+* `scripts/demote_gate_wait_lessons.py` demoted the 64 standing wait-lessons
+  (eligibility re-decided under the current rule: 64 → 0) and collapsed 58
+  byte-identical duplicates through the existing hygiene mechanism, with a
+  timestamped backup. Store: 200 → 142 rows; protected 127 → 63; the FIFO has
+  headroom for the first time since measurements began.
+
+Unchanged and still open: the §6 permanent blind spot (three files above the
+single-pass ceiling) and the MIR-131 class (maintenance reachable only from a
+keyboard) — the migration was a one-time script, not an autonomous organ.

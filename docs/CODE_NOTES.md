@@ -4102,3 +4102,67 @@ command was the point: MIR-131 measured thirteen maintenance actions that exist
 and can only be reached by a human typing, and the autonomous path is precisely
 the path that generates the rows nothing frees. The call site is pinned by a
 test, so the repair cannot quietly leave the live path.
+
+
+## A blocked gate is not a lesson
+
+One unanswered approval on 2026-08-16 banked 41 episodes saying *an approval is
+already pending*. The live store held 64 wait-records in all — half of the
+entire protected set — every one `usage_eligible=True`, while genuine lessons
+were evicted around them. Commit `ae7134a`.
+
+### The root was one word
+
+`core/self_build_memory.py` tagged every self-build episode `lesson`,
+unconditionally, with the stated purpose "so the episodic store never evicts
+them". MIR-115 measured what that one token confers: usage eligibility (the
+admission bypass), protection from eviction, and a +50 retrieval boost. All of
+that landed on the sentence *the working tree is not clean*.
+
+The decisive measurement, taken before the fix: **without the tag, the ordinary
+admission gate refuses these episodes on its own** (outcome `partial`, nothing
+verified). So no new gate was needed — the tag was the entire defect, and the
+fix is that the four pre-flight statuses (`budget_kill_switch`, `budget_wait`,
+`approval_wait`, `dirty_tree_wait`) no longer receive it. They are the gates
+MIR-100 classifies as "may I act": a run refused permission to start produced
+no experience a later attempt could learn from.
+
+### The dedup line, and why it is asymmetric
+
+MIR-090 named its own missing half when the collapser was built: *"a producer
+that hits the same gate twice does not bank a second identical episode."* The
+writer now skips a gate-wait whose exact content already stands. Two boundaries
+are deliberate:
+
+* **keyed on content, never on the status label** — the consolidation
+  measurement showed ten distinct answers under one question label, so
+  label-keyed dedup destroys real records while reporting a win;
+* **gate waits only.** A repeated *genuine* veto still banks, because at write
+  time an identical veto tomorrow may mean "still failing", which IS
+  information. Judging that is the hygiene collapser's job (it keeps the newest
+  of an identical group), not the writer's.
+
+### The standing rows, because forward-only repairs are this registry's own trap
+
+MIR-058 and MIR-115 both measured the same failure shape: a gate fixed
+forward-only, over records that are also exempt from eviction, changes a number
+only for rows that do not exist yet. So the repair ships its own answer for the
+existing population: `scripts/demote_gate_wait_lessons.py` (dry-run by default,
+timestamped backup) strips `lesson` from standing wait-rows, re-decides
+eligibility through `admit_for_storage` — replaying the current rule, never
+inventing a verdict by hand, the `completion_backfill` principle — and then
+lets `select_duplicate_episodes`, the MIR-090 mechanism that could never reach
+these rows while they were protected, collapse the byte-identical groups.
+
+Applied 2026-08-22: 64 demoted (eligible 64 → 0), 58 duplicates collapsed,
+store 200 → 142, protected 127 → 63. The FIFO has headroom for the first time
+since measurements began.
+
+### What this deliberately did not do
+
+The first wait is still banked — searchable under its status tag, ageing out
+normally — because "the gate blocked at least once" is a real fact. Genuine
+attempts keep `lesson` untouched: MIR-096 measured how few channels an
+error-born lesson has, and this repair may not close another one. And the
+migration is a one-time script, not an autonomous organ — the MIR-131 class
+(maintenance only a keyboard can reach) stays open and is its own repair.
