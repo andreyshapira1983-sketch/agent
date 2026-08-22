@@ -9,11 +9,35 @@ A durable role is a bounded organisational identity with a declared purpose, aut
 
 This is a target doctrine. It does not assert that durable roles, per-role memory, independent budgets, role-level audit ledgers, or the interfaces described here are implemented.
 
+## Already implemented — read this before the proposals below (2026-08-22, MIR-104)
+
+A reader working top-down from this file used to be taught that the machinery
+below does not exist. Much of it does, and a false self-model that UNDERSTATES
+the system invites rebuilding what is already built:
+
+* **The bounded role contract this document proposes exists at sub-agent
+  scope:** `core/subagent_contract.py` — `CanonicalSubagentContract` with
+  `CanonicalMemoryScope`, `CanonicalToolScope` and `CanonicalBudgetScope`,
+  a bounded office defined by contract rather than by model (§6.3's demand).
+* **The role-performance ledger of §11 exists:** `core/subagent_registry.py`
+  `RoleRecord` persists 19 per-role counters (invocations, successes,
+  failures, vetoes, proposals, commits/rollbacks, value-review counts, cost,
+  trust/usefulness scores, recommendation) — advisory by design, exactly as
+  §11.1 insists: it recommends and never grants authority.
+* **Seven of the "hard invariants" below restate
+  `knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md` §1–§9, where they are
+  marked IMPLEMENTED** — they are the current constitution, not proposals.
+
+What remains genuinely unbuilt — and is this document's real content: durable
+role FAMILIES as named standing offices, assignment contracts with explicit
+closure states, and §11.2's ledger refinements (segmentation by task class and
+risk tier, tamper-evidence, retention policy).
+
 Named repository modules are used only as anchors:
 
 | Module anchor | Known relevance | Capability claim |
 |---|---|---|
-| `core/subagent_registry` | Read-only seed concept for named sub-agent configuration. | Does not establish durable identity, role authority, persistent memory, or enforcement. |
+| `core/subagent_registry` | Persists the per-role performance ledger (`RoleRecord`, 19 counters) — advisory only. | Does not grant role authority or enforcement; recommends, never hires or fires. |
 | `core/subagent_runner` | Current bounded child-loop behavior. | Does not establish independent durable agents; child output remains witness output reviewed by the parent. |
 | `core/team_*` | Current team-oriented planning and execution-related concepts. | Does not establish autonomous organisational coordination. |
 | `core/policy` | Policy-related current mechanism anchor. | Does not establish every target Policy Gate rule in this document. |
