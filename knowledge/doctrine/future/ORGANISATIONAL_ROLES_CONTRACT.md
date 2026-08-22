@@ -3,8 +3,18 @@
 > This document is a proposal for `knowledge/doctrine/future/ORGANISATIONAL_ROLES_CONTRACT.md`.
 > It describes a future organisational-role contract model and does **not** describe
 > a capability implemented in this repository. It must not be read as evidence that
-> autonomous role assignment, persistent per-agent ledgers, independent budgets,
-> durable identities, verification workflows, or multi-agent governance exist today.
+> autonomous role assignment, independent budgets, durable identities,
+> verification workflows, or multi-agent governance exist today.
+>
+> **Corrected 2026-08-22 (MIR-104): two things this banner used to deny DO
+> exist, and understating the system invites rebuilding what is built.** A
+> persistent per-role performance ledger exists — `core/subagent_registry.py`
+> `RoleRecord`, 19 counters, advisory only (it recommends, never grants
+> authority). And a bounded role contract exists at sub-agent scope —
+> `core/subagent_contract.py` `CanonicalSubagentContract` with canonical
+> memory/tool/budget scopes. What this document proposes BEYOND them — durable
+> standing offices, assignment contracts with closure states, ledger
+> segmentation and tamper-evidence — remains unbuilt.
 >
 > The current baseline remains the human-operated central `AgentLoop` described by
 > `ROADMAP.md` and `CENTRAL_AGENT_GOVERNANCE.md`. Current bounded child-loop
