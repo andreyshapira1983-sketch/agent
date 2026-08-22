@@ -35,6 +35,17 @@ _KEY_CLASS_TEXT_MARKERS: tuple[str, ...] = (
     "payment required",
     "credit balance",
     "insufficient funds",
+    # The list above was written from OpenAI's and Anthropic's phrasings, and
+    # the third provider in the fallback order says none of it. Probed against
+    # huggingface's own wording: an exhausted monthly allowance and a rejected
+    # token both read as HEALTHY, so the provider would be greeted on every
+    # call until the month rolled over — the same failure MIR-132 was opened
+    # for, one provider along. The guard against the next such hole is
+    # `tests/test_every_configured_provider_can_be_demoted.py`, which demands
+    # measured evidence for every provider in `_PROVIDER_FALLBACK_ORDER`,
+    # durable AND transient, so coverage can no longer be inherited silently.
+    "included credits",
+    "authorization header is invalid",
 )
 
 #: Consecutive key-class failures after which a provider is skipped.
