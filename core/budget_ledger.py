@@ -11,6 +11,11 @@ from typing import Any
 from core.budget_governor import budget_limit_label as _budget_limit_label
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
+#: Starting size of the per-call bounded tail read (MIR-125). Doubles until
+#: the read provably covers the longest window; the whole file is the last
+#: resort, never the default.
+_TAIL_READ_BYTES = 65536
+
 BudgetLedgerCounter = str
 
 DEFAULT_COUNTERS = (
@@ -172,6 +177,64 @@ class BudgetLedger:
                 continue
         return loaded
 
+    def _records_for_windows(self, now: datetime) -> list[BudgetLedgerRecord]:
+        """Records that can matter to any window — a BOUNDED tail read.
+
+        MIR-125: `reserve()` used to call `load_records()`, re-reading the
+        entire append-only ledger, and MIR-116 wired a reservation into the
+        path of every model call — so the cost gate was O(file size) on a file
+        that only grows, in exactly the long-run scenario it was added for.
+
+        Windows are time-bounded, so only records newer than the longest
+        window's cutoff can count. The asymmetry that shapes this: reading too
+        much is merely slow, while reading too little UNDERCOUNTS usage and
+        lets the agent spend past its limit. So the tail read PROVES its
+        coverage — it doubles until the oldest record it has seen is older
+        than the cutoff, or until it has consumed the whole file — and any
+        read failure falls back to the full read rather than to a guess.
+        """
+        if self.path is None or not self.path.exists():
+            return list(self.records)
+        longest = max((w.seconds for w in self.windows), default=0)
+        if longest <= 0:
+            return self.load_records()
+        cutoff = now - timedelta(seconds=longest)
+        size = self.path.stat().st_size
+        span = _TAIL_READ_BYTES
+        while True:
+            if span >= size:
+                return self.load_records()
+            try:
+                with self.path.open("rb") as fh:
+                    fh.seek(size - span)
+                    chunk = fh.read().decode("utf-8", errors="replace")
+            except OSError:
+                return self.load_records()
+            lines = chunk.splitlines()[1:]  # the first line may be cut in half
+            records: list[BudgetLedgerRecord] = []
+            oldest: datetime | None = None
+            for line in lines:
+                try:
+                    raw = json.loads(line)
+                except ValueError:
+                    continue
+                payload = raw.get("payload", raw)
+                if not isinstance(payload, dict):
+                    continue
+                try:
+                    record = BudgetLedgerRecord.from_dict(payload)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                records.append(record)
+                created = _parse_ts(record.created_at)
+                if created is not None and (oldest is None or created < oldest):
+                    oldest = created
+            # Coverage proof: the tail must reach STRICTLY past the cutoff, so
+            # no in-window record can be sitting just above the read boundary.
+            if oldest is not None and oldest < cutoff:
+                return records
+            span *= 2
+
     def reserve(
         self,
         counter: BudgetLedgerCounter,
@@ -184,7 +247,7 @@ class BudgetLedger:
         if amount < 1:
             raise ValueError("budget amount must be >= 1")
         now = now or _utc_now()
-        records = self.load_records()
+        records = self._records_for_windows(now)
         for window in self.windows:
             limit = window.limit_for(counter)
             if limit <= 0:
@@ -229,7 +292,7 @@ class BudgetLedger:
         if amount < 1:
             raise ValueError("budget amount must be >= 1")
         now = now or _utc_now()
-        records = self.load_records()
+        records = self._records_for_windows(now)
         for window in self.windows:
             limit = window.limit_for(counter)
             if limit <= 0:
