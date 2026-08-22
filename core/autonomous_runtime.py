@@ -334,20 +334,58 @@ class AutonomousQueuedTaskReport:
 
 @dataclass
 class AutonomousQueueRunReport:
+    """Two facts, deliberately not merged (MIR-117; norm A, ratified 2026-08-22).
+
+    ``status`` is the QUEUE lifecycle: ``completed`` means tasks were PROCESSED,
+    which a failed task also satisfies. Kept as-is — the field is read across
+    the codebase. The ``work_*``/``*_count`` members answer what nothing could
+    ask before: did any of it actually work, derived from the per-task statuses
+    already held. Forcing case: a campaign whose only task was refused on budget
+    still recorded ``completed`` and counted a useful cycle.
+    """
+
     status: str
     processed: list[AutonomousQueuedTaskReport]
     stop_reason: str = ""
+
+    #: Only `done` is work performed; `blocked` rests awaiting a human (MIR-039).
+    _SUCCESS_STATUSES = frozenset({"done"})
+
+    @property
+    def succeeded_count(self) -> int:
+        return sum(1 for t in self.processed if t.status in self._SUCCESS_STATUSES)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for t in self.processed if t.status == "failed")
+
+    @property
+    def work_succeeded(self) -> bool:
+        """At least one processed task actually finished its work."""
+        return self.succeeded_count > 0
+
+    @property
+    def work_partial(self) -> bool:
+        """Achieved something AND failed something — what one verdict cannot say."""
+        return self.succeeded_count > 0 and self.failed_count > 0
 
     def to_dict(self) -> dict:
         return {
             "status": self.status,
             "processed": [item.to_dict() for item in self.processed],
             "stop_reason": self.stop_reason,
+            # Serialised: a distinction that never leaves the process is unauditable.
+            "work_succeeded": self.work_succeeded,
+            "work_partial": self.work_partial,
+            "succeeded_count": self.succeeded_count,
+            "failed_count": self.failed_count,
         }
 
     def user_summary(self) -> str:
         parts = [
+            # `processed` alone reads as achievement; the counts prevent that.
             (f"(task-run status={self.status}; processed={len(self.processed)}; "
+            f"succeeded={self.succeeded_count}; failed={self.failed_count}; "
             f"stop={self.stop_reason or '-'})")
         ]
         for item in self.processed:
