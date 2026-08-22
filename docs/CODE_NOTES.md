@@ -4166,3 +4166,36 @@ attempts keep `lesson` untouched: MIR-096 measured how few channels an
 error-born lesson has, and this repair may not close another one. And the
 migration is a one-time script, not an autonomous organ — the MIR-131 class
 (maintenance only a keyboard can reach) stays open and is its own repair.
+
+
+## The sweep the tick owns
+
+MIR-131 measured thirteen maintenance actions whose only caller is a typed
+command, and the bill came due twice in one day: 43 identical `approval_wait`
+episodes accumulated during the unattended run of 2026-08-16 because the
+collapser only ran from `:memory hygiene`, and draining them afterwards took a
+one-time migration script. Commit for this chapter's change: the tick now calls
+`_sweep_episodic_duplicates` in the same startup slot as `_free_stranded_rows`.
+
+### The line, drawn on judgement rather than convenience
+
+Exactly ONE of the thirteen crossed to the unattended path. Duplicate collapse
+is mechanical: it removes byte-identical copies, keeps the newest, and loses
+nothing — there is no opinion in it. The other twelve (staleness pruning,
+archiving, summarising) decide which memories are WORTH keeping. That is the
+resolver-seat hazard MIR-128 records from the field: every consolidation design
+puts a model in the seat that decides which of its own memories survive, and
+that seat needs the judge-discipline this project already demands elsewhere.
+Wiring those twelve is a decision about what the agent may do to its own past,
+and it belongs to the operator. Widening this sweep is a decision, not a
+refactor — the test file says so, and so does the helper's docstring.
+
+### The in-house pattern, applied rather than invented
+
+`ApprovalInbox.expire_stale()` runs on every read of the inbox, expressly so
+the queue does not rot "when the operator goes offline". Same shape here:
+maintenance invoked by the path that needs it. The sweep is journaled
+(`episodic_duplicates_collapsed`, with a count) because MIR-126's lesson is
+that silent maintenance is an observability hole — the operator learns what
+happened from the journal, not from consequences. And it is best-effort: a
+broken store logs `episodic_sweep_error` and costs the tick nothing.
