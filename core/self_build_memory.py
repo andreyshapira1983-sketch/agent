@@ -347,9 +347,9 @@ def _recent_self_improvement_events(
             # caught it (`citation_fabricated`) and nothing durable recorded it,
             # so the defect could never be counted and repetition never noticed.
             signals = [str(s) for s in (getattr(episode, "defect_signals", None) or [])]
-            if signals:
-                add(getattr(episode, "created_at", ""),
-                    f"detectors {', '.join(signals)}: {text}")
+            detector_text = _detector_failure_text(signals, text)
+            if detector_text is not None:
+                add(getattr(episode, "created_at", ""), detector_text)
             elif self_improvement and failed:
                 add(getattr(episode, "created_at", ""), text)
     except Exception:  # noqa: BLE001, S110 — advisory history must never break CLI
@@ -407,6 +407,31 @@ def recent_unresolved_self_improvement_failures(
     ]
     failures.sort(reverse=True)
     return tuple(dict.fromkeys(text for _stamp, text in failures))[: max(1, limit)]
+
+
+#: Sensor families whose firings are MEASURED unreliable and must not mint
+#: durable open defects. `reasoning_action_mismatch`: 71% firing rate,
+#: accusations dominated by its own table defects (MIR-015), and its
+#: escalation-contract default forbids attaching enforcement to the family —
+#: a permanent open issue per firing is enforcement wearing a ledger's
+#: clothes. `user_contract_unrepresented` rides the same prose-vs-plan table.
+#: The verifier-caught signals (`content_refuted`, `citation_fabricated`)
+#: stay first-class: a fabricated citation nothing durable recorded was this
+#: route's founding case (2026-08-14).
+_UNRELIABLE_DETECTOR_SIGNALS: frozenset[str] = frozenset({
+    "reasoning_action_mismatch",
+    "user_contract_unrepresented",
+})
+
+
+def _detector_failure_text(signals: list[str], text: str) -> str | None:
+    """Failure text for the durable registry, or None when nothing reliable
+    fired. Unreliable signals are dropped rather than carried — otherwise they
+    ride into the record on a reliable signal's coat-tails."""
+    reliable = [s for s in signals if s and s not in _UNRELIABLE_DETECTOR_SIGNALS]
+    if not reliable:
+        return None
+    return f"detectors {', '.join(reliable)}: {text}"
 
 
 def sync_self_improvement_issue_registry(
