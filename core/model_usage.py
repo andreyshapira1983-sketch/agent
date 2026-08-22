@@ -519,40 +519,49 @@ class ModelUsageLedger:
             return None  # stale: time to probe again
         return f"{streak}_consecutive_key_errors_within_{int(age)}m"
 
+    def _recent_rows_for_any(self, *, limit: int = 200) -> list[dict]:
+        """Newest raw rows regardless of provider — used by the operator's
+        status line to learn WHICH providers this workspace even uses, so the
+        health report names the real set instead of a hardcoded list."""
+        return self._recent_rows(limit=limit)
+
+    def _recent_rows(self, *, limit: int) -> list[dict]:
+        """Bounded tail of raw rows, newest last (MIR-125's lesson at birth)."""
+        if self.path is None or not self.path.exists():
+            return [r.to_dict() for r in self.records][-limit:]
+        try:
+            with self.path.open("rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - _TAIL_READ_BYTES))
+                chunk = fh.read().decode("utf-8", errors="replace")
+        except OSError:
+            return []
+        lines = chunk.splitlines()
+        if size > _TAIL_READ_BYTES and lines:
+            lines = lines[1:]
+        rows: list[dict] = []
+        for line in lines:
+            try:
+                raw = json.loads(line)
+            except ValueError:
+                continue
+            payload = raw.get("payload", raw)
+            if isinstance(payload, dict):
+                rows.append(payload)
+        return rows[-limit:]
+
     def _recent_rows_for(self, provider: str, *, limit: int = 40) -> list[dict]:
-        """Newest-last raw rows for *provider*, from a BOUNDED tail read.
+        """Newest-last raw rows for *provider*, from the shared bounded tail.
 
         The MIR-125 lesson applied at birth rather than retrofitted: this file
         only grows, and health needs the last few records, so only the final
-        ``_TAIL_READ_BYTES`` are read and parsed. In-memory session records are
-        already in the file when a path exists; without a path they are the
-        only source.
+        ``_TAIL_READ_BYTES`` are read and parsed.
         """
-        if self.path is None or not self.path.exists():
-            rows = [r.to_dict() for r in self.records]
-        else:
-            try:
-                with self.path.open("rb") as fh:
-                    fh.seek(0, 2)
-                    size = fh.tell()
-                    fh.seek(max(0, size - _TAIL_READ_BYTES))
-                    chunk = fh.read().decode("utf-8", errors="replace")
-            except OSError:
-                return []
-            lines = chunk.splitlines()
-            if size > _TAIL_READ_BYTES and lines:
-                lines = lines[1:]  # first line may be cut mid-record
-            rows = []
-            for line in lines:
-                try:
-                    raw = json.loads(line)
-                except ValueError:
-                    continue
-                payload = raw.get("payload", raw)
-                if isinstance(payload, dict):
-                    rows.append(payload)
+        wanted = provider.strip().lower()
+        rows = self._recent_rows(limit=10_000)
         out = [r for r in rows
-               if str(r.get("provider") or "").strip().lower() == provider]
+               if str(r.get("provider") or "").strip().lower() == wanted]
         return out[-limit:]
 
     def load_records(self) -> list[ModelUsageRecord]:

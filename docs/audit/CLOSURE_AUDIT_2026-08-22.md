@@ -1,0 +1,82 @@
+# Audit of the closures — 2026-08-22
+
+WHY THIS EXISTS. The operator, after eleven entries were closed in one day:
+
+> «так просто закрываешь как будто ты никогда не ошибаешься… возможно где-то
+> допустил какую-нибудь ошибку и ты даже это не заметил… эти проблемы уже
+> изучили, а ты их просто прошёл и не заметил».
+
+He is right, and the method that produced the closures cannot answer him. Red
+witness, break-test and a green battery all check **what I thought to check**.
+Nothing in them consults the industry that has been solving these exact classes
+since the 2000s. So this document does one thing per closure: take the FIELD'S
+OWN NAMED FAILURE MODE for that solution class, and run it against our code.
+
+Not «I reasoned it is right». «The field says this shape breaks here — does
+ours».
+
+The rule for entries: a closure that survives is recorded as surviving WITH the
+probe that tested it; a closure that fails is reopened, not explained away.
+
+---
+
+## MIR-132 — provider health / circuit breaker
+
+**Field's named failures** ([Azure](https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker),
+[AWS](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/circuit-breaker.html),
+[groundcover](https://www.groundcover.com/learn/performance/circuit-breaker-pattern)):
+breaker without fallback; coarse granularity demoting a whole service for one
+degraded operation; dumping full traffic on a recovering dependency instead of
+one probe; transient errors treated as durable; **no visibility into trips**
+(«you can't tune thresholds you can't see»).
+
+| probe | result |
+|---|---|
+| no substitute provider credentialed → does it fail open or refuse? | **PASS** — the call proceeds on the configured provider; refusing to work is never the outcome |
+| a model-specific error (`model gpt-x is deprecated`) ×3 | **PASS** — does not demote; only the key/billing class does |
+| OpenAI's real messages: «exceeded your current quota» vs «Rate limit reached … per min» / «tokens per min (TPM)» | **PASS** — the first demotes (it *is* an empty account), the two transient ones do not |
+| after the cooldown expires: one probe, or full traffic? | **DEVIATES** — full traffic. A still-dead provider costs up to 3 fast refusals per window instead of 1 |
+| can the operator SEE a demotion? | **FAILED — and fixed** |
+
+**What the audit changed.** `agent_tick._provider_health_line` now reports every
+provider the workspace actually uses, and names any the router is skipping,
+inside the `--status` block. A demotion nobody can see is indistinguishable
+from a provider that quietly stopped being chosen — precisely the unexplained
+quiet a week-long unattended run must not produce.
+
+**And the fix's own first draft was wrong**, caught by running it against the
+live store rather than a fixture: it printed `anthropic ok` for a provider with
+391 credit refusals and zero successes, because stale failures fall out of the
+2-hour cooldown. «ok» was reporting *not in cooldown right now*, which the
+operator would read as *working*. It reports the last recorded outcome now:
+`anthropic last=error (BadRequestError: …)`. Four tests, break-tested.
+
+**The half-open deviation is recorded, not fixed**, with its grounds: three
+fast refusals per two hours is a smaller cost than the state machine that would
+avoid them, and the measurement that would change the answer is a provider that
+HANGS instead of refusing — which is exactly the residual MIR-132 already
+records. Reversed by one word from the operator.
+
+---
+
+## Still to audit
+
+MIR-011 · 020 · 026 · 035 · 044 · 097 · 099 · 104 · 125 · 126 · 105/024/008,
+each against the named failure mode of its own solution class:
+
+| closure | the field's known failure for this shape |
+|---|---|
+| 011 quarantine | scanner false positives strangle legitimate sources |
+| 020 cheap path | a skipped planner drops a step the turn actually needed |
+| 026 settle-on-exit | a status written at one exit lies about the other paths |
+| 035 class merge | merging by class hides distinct defects under one row |
+| 044 on-demand tally | «compute it when asked» degrades at scale |
+| 097 marker grammar | shape-based stripping eats legitimate text |
+| 099 code-line count | AST counting misreads generated code and one-liners |
+| 125 bounded tail | the coverage proof is false if the file is rewritten, not appended |
+| 126 audit scope | «zero unexplained» becomes zero because comments are fig leaves |
+| 105/024/008 | already audited mid-repair: the stoplist inverted meaning, and the fix's first attempt changed a pinned invariant |
+
+The last row is why this document exists: that criticism landed **before** the
+entry was closed, because the field was consulted during the repair rather than
+after it. Every row above is the same question asked late.

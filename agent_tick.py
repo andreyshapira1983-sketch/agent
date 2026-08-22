@@ -553,6 +553,54 @@ def _self_build_status_lines(
     return lines
 
 
+def _provider_health_line(workspace: Path) -> str:
+    """One line naming any provider the router is currently skipping.
+
+    Found by auditing MIR-132's own closure against the field's named
+    circuit-breaker failures (2026-08-22): every source says a breaker without
+    visibility is untunable and its trips must be observable — and ours was
+    invisible. A demotion that nobody can see is indistinguishable from a
+    provider that simply stopped being chosen, which is exactly the
+    unexplained-quiet the week-long run must not produce.
+    """
+    try:
+        from core.model_usage import ModelUsageLedger, ModelUsageLimits
+
+        ledger = ModelUsageLedger(
+            path=workspace / DATA_DIR / "model_usage.jsonl",
+            limits=ModelUsageLimits(),
+        )
+        seen: list[str] = []
+        for row in ledger._recent_rows_for_any(limit=200):
+            provider = str(row.get("provider") or "").strip().lower()
+            if provider and provider not in seen:
+                seen.append(provider)
+        if not seen:
+            return "no calls recorded"
+        parts = []
+        for provider in seen:
+            reason = ledger.provider_unhealthy(provider)
+            if reason:
+                parts.append(f"{provider} SKIPPED ({reason})")
+                continue
+            # "ok" must not mean "not in cooldown right now". The first draft
+            # of this line reported «anthropic ok» for a provider with 391
+            # credit refusals and zero successes — stale failures fall out of
+            # the cooldown, and the operator would have read a dead key as
+            # healthy. The last recorded outcome is what he actually needs.
+            rows = ledger._recent_rows_for(provider, limit=1)
+            last = str((rows[-1] if rows else {}).get("status") or "?")
+            if last == "success":
+                parts.append(f"{provider} ok")
+            else:
+                err = str((rows[-1] if rows else {}).get("error") or "")[:60]
+                parts.append(f"{provider} last={last} ({err})" if err
+                             else f"{provider} last={last}")
+        return "; ".join(parts)
+    except Exception as exc:  # noqa: BLE001 — operator status must never crash
+        return f"unavailable ({type(exc).__name__})"
+
+
 def _self_build_status_block(
     workspace: Path, heartbeat: dict | None, pending_items: list, inbox: ApprovalInbox
 ) -> list[str]:
@@ -589,6 +637,7 @@ def _self_build_status_block(
             lines.append(f"  subagents: {SubagentRegistry.load(workspace).summary_line()}")
         except Exception:  # noqa: BLE001
             lines.append("  subagents: unavailable")
+        lines.append(f"  providers: {_provider_health_line(workspace)}")
         return lines
     except Exception as exc:  # noqa: BLE001 — operator status must never crash
         return [f"Self-build: status unavailable ({type(exc).__name__})"]
