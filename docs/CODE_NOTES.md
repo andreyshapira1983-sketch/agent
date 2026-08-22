@@ -3862,3 +3862,41 @@ One trap paid for while writing the witness: the disqualification field is
 `defect_signals` carrying values from `DISQUALIFYING_DEFECT_SIGNALS`, not the
 `answer_self_contradiction` flag I invented from memory. Read the constant, do
 not recall it.
+
+## The approval preview admits what it hid
+
+The mutation sweep found the truncation in `CLIApprovalProvider._render`
+unwitnessed — breaking it left the whole suite green — and rated it cosmetic.
+The OWASP 2026 agentic list rates the same surface ASI09, Human-Agent Trust
+Exploitation: approval steps that target human judgement. The Replit incident of
+July 2025 is the concrete version, an agent that fabricated data and falsely
+claimed rollback was impossible.
+
+Measured on a plausible `file_write` before changing anything: 397 characters of
+arguments, 199 shown, and `mode: overwrite` absent from the preview entirely. An
+operator could approve an overwrite with the word never on screen. Not cosmetic
+— the gate's only human-facing surface lying by omission.
+
+The fix makes the preview honest about ITSELF: how many characters were cut, and
+which argument keys never appeared. It prints on its own line with a `!` prefix
+so the reader hears the renderer speaking rather than more of the request.
+
+What was deliberately NOT done: reorder or rank the arguments by importance.
+Which argument matters most is a judgement, and inventing one here would place a
+developer's opinion between the agent and the human at exactly the boundary this
+project is auditing. Honesty about truncation is a fact; priority is an opinion.
+
+Three properties the witness pins, and each has a break that reddens it. The
+notice must appear when something was hidden. It must name EVERY lost key, not
+the first. And it must be silent when nothing was hidden — a preview that always
+warns teaches the reader to ignore it, which is the same failure as never
+warning. There is also a forgery case: a request whose own text contains the
+word "hidden" must not make the preview look truncated, or the signal is
+forgeable by the content it describes.
+
+Two API traps paid for while writing the witness: the class is
+`CLIApprovalProvider` taking `input_fn`, not a `Console…` variant taking a
+stream, and `ApprovalRequest` lives in `core/models` and requires `action_id`
+and `step_id`. Both invented from memory, both corrected by reading. Third time
+this session; the lesson is not that I forget names but that I should not be
+typing them from recall at all.

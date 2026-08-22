@@ -36,6 +36,40 @@ def _classify(raw: str | None) -> tuple[Literal["approve", "deny", "abort"], str
     return "abort", f"unrecognised input='{stripped}'"
 
 
+#: How much of the arguments the operator sees before the preview truncates.
+_PREVIEW_LIMIT = 200
+
+
+def _preview_arguments(arguments: dict) -> tuple[str, str]:
+    """Render the arguments, and say plainly what the rendering hid.
+
+    Measured 2026-08-22 on a plausible `file_write`: 397 characters of
+    arguments, 199 shown, and `mode: overwrite` gone entirely — an operator
+    could approve an overwrite with the word never on screen. An ellipsis says
+    "something is missing"; it does not say "half of it, including the mode".
+
+    Returns `(preview, notice)`. The notice is empty when nothing was hidden,
+    because a preview that always warns teaches the reader to ignore it.
+
+    Deliberately NOT done here: reordering or ranking the arguments by
+    importance. Which argument matters most is a judgement, and inventing one
+    would place a developer's opinion between the agent and the human at
+    exactly the boundary this project is auditing.
+    """
+    full = str(arguments)
+    if len(full) <= _PREVIEW_LIMIT:
+        return full, ""
+    preview = full[: _PREVIEW_LIMIT - 1] + "…"
+    hidden = len(full) - (_PREVIEW_LIMIT - 1)
+    # A key counts as lost when its NAME is absent from the visible text: the
+    # reader has no way to know the argument was passed at all.
+    lost = [str(key) for key in arguments if str(key) not in preview]
+    notice = f"{hidden} characters hidden"
+    if lost:
+        notice += "; arguments not shown at all: " + ", ".join(lost)
+    return preview, notice
+
+
 class ApprovalProvider(ABC):
     """Anything that can answer an ApprovalRequest."""
 
@@ -82,10 +116,12 @@ class CLIApprovalProvider(ApprovalProvider):
         print(f"  tool       : {req.tool_name}", file=self._out)
         print(f"  risk       : {req.risk}", file=self._out)
         if req.arguments:
-            preview = str(req.arguments)
-            if len(preview) > 200:
-                preview = preview[:199] + "…"
+            preview, notice = _preview_arguments(req.arguments)
             print(f"  arguments  : {preview}", file=self._out)
+            if notice:
+                # On its own line and prefixed, so the operator reads it as the
+                # renderer speaking rather than as more of the request.
+                print(f"  ! preview  : {notice}", file=self._out)
         if req.reasons:
             print(f"  reasons    : {'; '.join(req.reasons)}", file=self._out)
         if req.summary:
