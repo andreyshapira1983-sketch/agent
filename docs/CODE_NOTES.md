@@ -4245,3 +4245,47 @@ budget-notice family (markers ending in `]`, which pass the trailing-ellipsis
 check) and every unseen shape of the class. The four standing corrupted claims
 were removed with a backup; this cleanup can hold because the code now refuses
 what the previous cleanup only deleted.
+
+
+## A key is not a balance
+
+The router treated the presence of an API key as the availability of the
+provider, and one empty balance answered "Your credit balance is too low" 391
+consecutive times across four days (MIR-132). Per-call failover rescued the
+work — 214 of 215 affected runs — so the incident cost 291 seconds, not money.
+The cheapness was a property of HOW that provider fails: one of those same
+calls took 152 seconds, and a provider that hangs would charge that per
+attempt, because every fresh process began at the dead provider again. The
+failover switched the object; nothing remembered across processes.
+
+### Health is derived, not stored
+
+`ModelUsageLedger.provider_unhealthy` reads the ledger the router already
+writes — no new state file, no new writer, and a BOUNDED tail read (the
+MIR-125 lesson applied at birth: this file only grows, and health needs the
+last few records, so only the final 128KB are parsed). Unhealthy means: the
+provider's newest records show three consecutive key-class failures, no
+success since, the newest younger than the cooldown. `UsageTrackedLLM` asks
+before the FIRST call of a fresh proxy and switches pre-emptively, recording
+`provider_unhealthy:<provider>:<n>_consecutive_key_errors…-><substitute>` in
+`route_reason` — the decision beside its grounds, because the 2026-08-16 rule
+is that a silent re-route cannot be investigated.
+
+### Two vocabularies on purpose
+
+The switch-error list split into a TRANSIENT class (rate limits — fail over
+this call, never demote: they clear in seconds, and parking a provider for the
+cooldown over a rate limit would dodge a healthy provider) and a DURABLE class
+(empty balance, bad key — fails over AND demotes, because it does not clear by
+itself). The durable tuple is owned beside the ledger and the router's
+`_SWITCH_KEY_TEXT_MARKERS` extends it, so the two rules cannot drift apart.
+
+### The boundaries that make it §9-safe
+
+A cooldown, never a ban: past the window the provider gets one probe call —
+the operator may have topped the balance up, and an autonomous actor may not
+permanently retire part of its own toolkit (the MIR-131 line). One success
+heals everything. No readable history reads as healthy — fail OPEN, unlike
+admission gates which fail closed, because refusing to work is worse than one
+wasted probe call. And a flaky network never demotes: only the durable class
+counts, the same conservatism `_is_switch_key_error` already chose.

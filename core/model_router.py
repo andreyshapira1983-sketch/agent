@@ -13,6 +13,7 @@ from typing import Any
 
 from core.llm import LLM
 from core.model_usage import (
+    _KEY_CLASS_TEXT_MARKERS,
     ModelUsageLedger,
     usage_from_llm_or_estimate,
     utc_now_iso,
@@ -463,6 +464,41 @@ class UsageTrackedLLM:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._llm, name)
 
+    def _provider_unhealthy(self, provider: str) -> str | None:
+        """Ledger-derived health (MIR-132); None when unknown or disabled."""
+        if self._llm_factory is None or not _provider_failover_enabled():
+            return None
+        try:
+            return self.ledger.provider_unhealthy(provider)
+        except Exception:  # noqa: BLE001 — health is advisory, never fatal
+            return None
+
+    def _next_provider_llm(self, tried: Sequence[str]) -> Any | None:
+        """Build the substitute client on the next credentialed provider."""
+        nxt = _next_failover_provider(tried)
+        if nxt is None or self._llm_factory is None:
+            return None
+        try:
+            from core.model_outcomes import substitute_model_with_reason
+
+            model, why = substitute_model_with_reason(
+                role=self.role, provider=nxt, current_model=self.model)
+            self._failover_choice_reason = why
+            return self._llm_factory(nxt, model)
+        except Exception:  # noqa: BLE001 — pragma: no cover - defensive
+            return None
+
+    def _adopt_failover(self, replacement: Any) -> None:
+        """Switch this proxy to the substitute client, repricing the tier."""
+        self._llm = replacement
+        self.provider = getattr(replacement, "provider", None) or ""
+        self.model = getattr(replacement, "model", None) or ""
+        if self._reprice is not None and self.provider:
+            try:
+                self.cost_tier = self._reprice(self.provider, self.model)
+            except Exception:  # noqa: BLE001, S110 — pragma: no cover - defensive
+                pass
+
     def _failover_llm(self, exc: BaseException, tried: Sequence[str]) -> Any | None:
         """Return a replacement LLM on another credentialed provider, or None.
 
@@ -477,21 +513,10 @@ class UsageTrackedLLM:
         )
         if not switchable:
             return None
-        nxt = _next_failover_provider(tried)
-        if nxt is None:
-            return None
-        try:
-            # Замер первым, карта уровней полом (docs/CODE_NOTES.md). Причина
-            # выбора запоминается и едет в route_reason: живой разрыв
-            # 2026-08-16 — молчаливое решение нельзя было расследовать.
-            from core.model_outcomes import substitute_model_with_reason
-
-            model, why = substitute_model_with_reason(
-                role=self.role, provider=nxt, current_model=self.model)
-            self._failover_choice_reason = why
-            return self._llm_factory(nxt, model)
-        except Exception:  # noqa: BLE001 — pragma: no cover - defensive
-            return None
+        # Замер первым, карта уровней полом (docs/CODE_NOTES.md). Причина
+        # выбора запоминается и едет в route_reason: живой разрыв
+        # 2026-08-16 — молчаливое решение нельзя было расследовать.
+        return self._next_provider_llm(tried)
 
     def _call_llm(
         self,
@@ -545,6 +570,22 @@ class UsageTrackedLLM:
         see core/llm.py:384 for the same rule inside LLM) falls back to the
         billed `complete`.
         """
+        # MIR-132, same check as `complete` but strictly PRE-stream: nothing
+        # has reached the screen yet, so switching here does not conflict with
+        # the no-mid-stream-failover rule below.
+        _pre_provider = str(getattr(self._llm, "provider", self.route.provider) or "")
+        _unhealthy = self._provider_unhealthy(_pre_provider)
+        if _unhealthy:
+            _replacement = self._next_provider_llm([_pre_provider])
+            if _replacement is not None:
+                self._adopt_failover(_replacement)
+                self.route = replace(
+                    self.route,
+                    reason=(
+                        f"provider_unhealthy:{_pre_provider}:{_unhealthy}"
+                        f"->{self.provider}"
+                    ),
+                )
         raw_stream = getattr(self._llm, "stream_complete", None)
         if raw_stream is None:
             return self.complete(
@@ -635,6 +676,28 @@ class UsageTrackedLLM:
         while True:
             provider = str(getattr(self._llm, "provider", self.route.provider) or "")
             model = str(getattr(self._llm, "model", self.route.model) or "")
+            # MIR-132: consult the ledger BEFORE the first call. Per-call
+            # failover already rescued the work (214 of 215 runs), but nothing
+            # remembered across processes, so one empty balance was retried 391
+            # times over four days. First iteration only: after a failover the
+            # provider already changed, and re-checking it would loop.
+            if not tried:
+                unhealthy = self._provider_unhealthy(provider)
+                if unhealthy:
+                    tried.append(provider)
+                    replacement = self._next_provider_llm(tried)
+                    if replacement is not None:
+                        self._adopt_failover(replacement)
+                        route_reason = (
+                            f"provider_unhealthy:{provider}:{unhealthy}"
+                            f"->{self.provider}"
+                        )
+                        choice = getattr(self, "_failover_choice_reason", "")
+                        if choice:
+                            route_reason += f"|{choice}"
+                        continue
+                    # No alternative found: proceed with the configured
+                    # provider — refusing to work is worse than one probe call.
             self.ledger.assert_can_start(
                 role=self.role,
                 provider=provider,
@@ -681,16 +744,9 @@ class UsageTrackedLLM:
                 tried.append(provider)
                 replacement = self._failover_llm(exc, tried)
                 if replacement is not None:
-                    self._llm = replacement
-                    self.provider = getattr(replacement, "provider", None) or ""
-                    self.model = getattr(replacement, "model", None) or ""
                     # The substitute is a different model on a different
                     # provider; its price is not the original route's price.
-                    if self._reprice is not None and self.provider:
-                        try:
-                            self.cost_tier = self._reprice(self.provider, self.model)
-                        except Exception:  # noqa: BLE001, S110 — pragma: no cover - defensive
-                            pass
+                    self._adopt_failover(replacement)
                     route_reason = f"provider_failover:{provider}->{self.provider}"
                     choice = getattr(self, "_failover_choice_reason", "")
                     if choice:
@@ -790,24 +846,23 @@ _SWITCH_KEY_NAME_MARKERS: tuple[str, ...] = (
 )
 
 # Error *message* fragments (lower-cased) that indicate a switch-key condition.
-_SWITCH_KEY_TEXT_MARKERS: tuple[str, ...] = (
+# TWO vocabularies on purpose, one extending the other. The DURABLE class
+# (empty balance, bad key — `_KEY_CLASS_TEXT_MARKERS`, owned beside the ledger)
+# both fails over per-call AND demotes provider health (MIR-132): it does not
+# clear by itself, so every fresh process re-greeting it was waste. The
+# TRANSIENT class below (rate limits) fails over per-call but never demotes:
+# it clears in seconds, and parking a provider for the health cooldown over a
+# rate limit would dodge a healthy provider.
+_TRANSIENT_SWITCH_TEXT_MARKERS: tuple[str, ...] = (
     "insufficient_quota",
     "insufficient quota",
     "exceeded your current quota",
     "rate limit",
     "rate_limit",
     "ratelimit",
-    "quota",
-    "invalid api key",
-    "incorrect api key",
-    "invalid_api_key",
-    "authentication",
-    "unauthorized",
-    "permission denied",
-    "billing",
-    "payment required",
-    "credit balance",
-    "insufficient funds",
+)
+_SWITCH_KEY_TEXT_MARKERS: tuple[str, ...] = (
+    _TRANSIENT_SWITCH_TEXT_MARKERS + _KEY_CLASS_TEXT_MARKERS
 )
 
 
