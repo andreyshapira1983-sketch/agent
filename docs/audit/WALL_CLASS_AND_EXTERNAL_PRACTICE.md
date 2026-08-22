@@ -1,8 +1,10 @@
 # The wall-class gap, and what the field actually does — verified 2026-08-22
 
 Recorded on the operator's word. Two things live here: an independent check of
-a second model's survey of external practice (each claim taken to a primary
-source rather than accepted on voice), and the one finding about THIS codebase
+a second model's survey of external practice (primary sources preferred;
+secondary incident records explicitly identified where primary material was
+unavailable — the Replit row rests on press and the AI Incident Database), and
+the one finding about THIS codebase
 that the check sharpened — our containment walls are one class below the walls
 the field's own incidents pushed everyone else toward.
 

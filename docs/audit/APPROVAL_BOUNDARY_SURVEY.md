@@ -131,10 +131,13 @@ is a second, orthogonal axis this survey did not apply, and both reviewing
 models missed it together: **who else can steer the agent.** Willison's lethal
 trifecta — private data + untrusted content + an outbound channel — is safe in
 any pair and dangerous as a triple. **Measured against the production paths
-(falsification pass, same day): the default unattended path already breaks the
-trifecta twice by construction** — `_AUTONOMOUS_GOAL_BLOCKED_TOOLS` blocks the
-web tools AND `spawn_subagent`, and SECRET tool output is deep-redacted before
-it reaches the planner or memory. The assembled triple exists only on paths
+(falsification pass, same day, corrected in review): the default unattended
+path breaks the trifecta at the network/untrusted-content boundary by
+construction** — `_AUTONOMOUS_GOAL_BLOCKED_TOOLS` blocks the web tools,
+severing untrusted ingress and web egress together. SECRET output redaction
+before cognition is defence-in-depth on top, not a second broken leg: the
+private-data leg (the repo, internal documents) is present regardless of what
+the classifier stamps SECRET. The assembled triple exists only on paths
 where web tools are live (interactive sessions), and — the reason this
 paragraph stays — it is the standing cost of exactly the decision this survey
 invites: unblocking web or subagents on the unattended path would re-assemble
