@@ -810,6 +810,33 @@ def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
                                   "tasks": _summarise(freed)})
 
 
+def _sweep_episodic_duplicates(workspace: Path) -> int:
+    """Collapse byte-identical episodes; return how many rows were dropped.
+
+    Exactly ONE of MIR-131's thirteen CLI-only maintenance actions crosses to
+    the unattended path, and the line is drawn on judgement: duplicate collapse
+    is mechanical (keeps the newest of an identical group, loses nothing),
+    while staleness pruning decides which memories are WORTH keeping — the
+    resolver-seat hazard MIR-128 records. Widening this sweep is a decision,
+    not a refactor. Full account: docs/CODE_NOTES.md, "The sweep the tick owns".
+    """
+    try:
+        from core.episodic_hygiene import collapse_duplicate_episodes
+        from core.smart_memory import EpisodicMemoryStore
+
+        store = EpisodicMemoryStore(path=workspace / DATA_DIR / "episodic_memory.jsonl")
+        dropped = collapse_duplicate_episodes(store)
+        if dropped:
+            _log_tick(workspace, {
+                "event": "episodic_duplicates_collapsed", "count": len(dropped),
+            })
+        return len(dropped)
+    except Exception as exc:  # noqa: BLE001 — hygiene must not cost the tick its work
+        _log_tick(workspace, {"event": "episodic_sweep_error",
+                              "error": f"{type(exc).__name__}: {exc}"})
+        return 0
+
+
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     """Execute one daemon tick. Returns exit code (0 = ok, 1 = hard error)."""
     _ensure_env_loaded(workspace)
@@ -941,6 +968,10 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         pending_tasks = []
         if _consumer_lock is not None:
             _free_stranded_rows(task_store, lock=_consumer_lock, workspace=workspace)
+            # Same slot, same reason: the unattended path generates the most
+            # repeats and was the only path that could not clean them up —
+            # 43 identical episodes accumulated here on 2026-08-16 (MIR-131).
+            _sweep_episodic_duplicates(workspace)
             # `pending()` rather than `list(status="pending")`: it honours
             # `run_after`, so a task re-queued behind the retry backoff is not
             # immediately re-run by this consumer.
