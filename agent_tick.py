@@ -781,6 +781,35 @@ def _ensure_env_loaded(workspace: Path) -> None:
 
 # ── main tick ─────────────────────────────────────────────────────────────────
 
+def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
+    """Startup-only, under the lock: return rows nothing else can free.
+
+    Two resting states, one contract — see docs/CODE_NOTES.md, "Rows nothing
+    frees" (MIR-039 / MIR-040 for the orphan half).
+    """
+    from core.task_lifecycle import reactivate_resumable_work, recover_orphaned_tasks
+
+    def _summarise(tasks: list) -> list[dict]:
+        return [{"id": t.id, "status": t.status,
+                 "attempts": t.attempts, "error": t.last_error} for t in tasks]
+
+    for event, error_event, action in (
+        ("tasks_recovered", "task_recovery_error", recover_orphaned_tasks),
+        ("paused_work_reactivated", "task_reactivation_error",
+         reactivate_resumable_work),
+    ):
+        try:
+            freed = action(task_store, lock=lock)
+        except Exception as exc:  # noqa: BLE001 — one pass failing must not
+            _log_tick(workspace, {  # stop the other, nor the tick
+                "event": error_event, "error": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        if freed:
+            _log_tick(workspace, {"event": event, "count": len(freed),
+                                  "tasks": _summarise(freed)})
+
+
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     """Execute one daemon tick. Returns exit code (0 = ok, 1 = hard error)."""
     _ensure_env_loaded(workspace)
@@ -799,8 +828,6 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     from core.task_lifecycle import (
         apply_run_exception,
         apply_run_outcome,
-        reactivate_resumable_work,
-        recover_orphaned_tasks,
         task_heartbeat,
     )
     from core.task_queue import TaskAlreadyClaimed, TaskQueueStore
@@ -913,50 +940,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 
         pending_tasks = []
         if _consumer_lock is not None:
-            # Recovery on start (daemon-progress 4.2): tasks abandoned by a
-            # process that died mid-run. Safe here and only here — the lock
-            # proves no consumer is live, and the heartbeat proves the row is
-            # not merely slow (MIR-039 / MIR-040).
-            try:
-                _orphans = recover_orphaned_tasks(
-                    task_store, lock=_consumer_lock
-                )
-                if _orphans:
-                    _log_tick(workspace, {
-                        "event": "tasks_recovered",
-                        "count": len(_orphans),
-                        "tasks": [
-                            {"id": t.id, "status": t.status,
-                             "attempts": t.attempts, "error": t.last_error}
-                            for t in _orphans
-                        ],
-                    })
-            except Exception as exc:  # noqa: BLE001
-                _log_tick(workspace, {"event": "task_recovery_error",
-                                      "error": f"{type(exc).__name__}: {exc}"})
-            # Sibling of the recovery above, same lock and same reason. That one
-            # frees a row abandoned by a dead process; this one frees a row
-            # parked by an exhausted budget, which had no automatic exit at all
-            # — fourteen rows were stranded that way, the oldest since
-            # 2026-07-30, and it is why the unattended run of 2026-08-16 went
-            # quiet on its third day with work still queued.
-            try:
-                _revived = reactivate_resumable_work(
-                    task_store, lock=_consumer_lock
-                )
-                if _revived:
-                    _log_tick(workspace, {
-                        "event": "paused_work_reactivated",
-                        "count": len(_revived),
-                        "tasks": [
-                            {"id": t.id, "status": t.status,
-                             "attempts": t.attempts, "error": t.last_error}
-                            for t in _revived
-                        ],
-                    })
-            except Exception as exc:  # noqa: BLE001
-                _log_tick(workspace, {"event": "task_reactivation_error",
-                                      "error": f"{type(exc).__name__}: {exc}"})
+            _free_stranded_rows(task_store, lock=_consumer_lock, workspace=workspace)
             # `pending()` rather than `list(status="pending")`: it honours
             # `run_after`, so a task re-queued behind the retry backoff is not
             # immediately re-run by this consumer.
