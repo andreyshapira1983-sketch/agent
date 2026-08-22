@@ -93,7 +93,7 @@ in the file named.
 | Site | What the code decides for the agent |
 |---|---|
 | `core/best_next_action.py:36` | a utility function written as numbers — daemon down 100, tick error 90, failing tests 80, engineering task 59, doctrine document 58, external study 57, self-improvement failure 55, inbox debt 50. The largest weight wins |
-| `core/autonomous_runtime.py:1400` | the autonomous queue always opens with two prescribed tasks — inspect state, then plan and dry-run ingest — before any judgement is made about what is worth doing |
+| `core/autonomous_runtime.py:950` | the autonomous queue always opens with two prescribed tasks — inspect state, then plan and dry-run ingest — before any judgement is made about what is worth doing |
 | `core/learning_planner.py:181` | attention has a fixed price list (100 / 95 / 70 / 55 / 40) and `core/learning_planner.py:366` holds a hardcoded set of core files to study when no focus is given |
 | `core/subagent_registry.py:50` | five roles exist by default. The registry recommends keep / watch / pause / retire and never hires or fires |
 | `core/team_plan.py:233` | a second, separate predefined workforce built from keywords, in which one watcher is added whenever a team is deemed necessary at all |

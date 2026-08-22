@@ -63,7 +63,7 @@ Per shape, 8 sampled at random before any figure was published:
 | `core/source_ranker.py:65` `_FRESHNESS_SCORES` | worth by age — fresh 1.00, stale 0.45, undated 0.35 | same |
 | `core/backlog_selector.py:43` `_SOURCE_BASE_SCORE` | which backlog source ranks higher | vacancy candidate, same family |
 | `core/best_next_action.py:36-53` `_P_*` (11 constants) | which of two admissible actions wins | **Decision — MEASURED** (perturbation changes the winner; recorded earlier) |
-| `core/autonomous_runtime.py:1402` `tasks` | which work opens every run | **Decision — MEASURED** (zero references to `self`) |
+| `core/autonomous_runtime.py:951` `tasks` | which work opens every run | **Decision — MEASURED** (zero references to `self`) |
 | `core/model_router.py:113/122/130` `_QUALITY_SCORE`, `_COST_SCORE`, `_COST_RANK` | quality-versus-cost trade-off per model | **Mixed** — part capability (what exists), part a value judgement about what matters now; needs a split hypothesis |
 | `core/model_router.py:758` `_PROVIDER_FALLBACK_ORDER` | fallback order between providers | Capability (candidate) |
 | `core/confidence_vector.py:46` `_SEVERITY_WEIGHT` | how severity weighs | Mixed |

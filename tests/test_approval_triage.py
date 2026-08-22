@@ -322,7 +322,7 @@ def test_signatureless_proposal_clusters_with_matching_signed_proposal():
     # A legacy signature-less proposal and a freshly-signed proposal describing
     # the same work should land in the SAME cluster (the derived signature must
     # match the runtime's own canonical signature).
-    from core.autonomous_runtime import _proposal_canonical_signature
+    from core.autonomous_runtime_proposals import _proposal_canonical_signature
 
     description = "Add integration tests for source registry claim deduplication"
     signed_sig = _proposal_canonical_signature("tests", description)

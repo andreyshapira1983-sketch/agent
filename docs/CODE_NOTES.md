@@ -3776,3 +3776,45 @@ The honest remainder: 1507 is still above the 1150 aspiration, because
 `AutonomousRuntime` is 1251 lines of it — 83% of the file in one class.
 Splitting that class is a different and larger piece of work, and it stays
 named rather than quietly forgotten.
+
+## Splitting the class nobody could read
+
+The data carriers left first; the class was still 1251 lines. Same rule, second
+application: a file — or a class — too large to read through produces mistakes.
+
+The treatment is the one `core/loop.py` already received here, not an invention:
+a mixin holding ONE coherent concern, bodies moved character-for-character,
+state staying on the composed object, and an AST comparison test pinning the
+move against git history. The concern chosen was proposals and self-build —
+generating self-improvement proposals, parsing the model's answer, fingerprinting
+and de-duplicating against the inbox, driving the producer. Nothing about queues,
+budgets, grants or reflection went with it.
+
+Result: `core/autonomous_runtime.py` 1507 → 1072 lines, the class 1251 → 865,
+and the file's recorded aspiration of 1150 finally met. Suite 8392, unchanged
+behaviour.
+
+Three seams tore during the move and each is worth naming, because a split is
+mostly the seams:
+
+**The patch target.** Six tests monkeypatched `produce_self_apply_proposal` at
+`core.autonomous_runtime`. A re-export does not fix that — patching rebinds a
+name in one module while the moved code looks it up in its own. The addresses
+were repointed at the module where the code now lives, and
+`test_the_patch_seam_lives_where_the_code_does` pins it so the next move
+notices.
+
+**A production consumer.** `core/approval_triage` imported
+`_proposal_canonical_signature` lazily from the old address — a real break, not
+a test artefact, and the kind that a lazy import hides until runtime.
+
+**Line-numbered documentation.** Seven references across four documents pointed
+at line numbers that no longer meant anything. The conformance checker caught
+every one; without it they would have rotted into confident lies.
+
+And the pin caught a defect in itself before it caught anything else: reading
+git history with `text=True` decodes with the locale codec, cp1251 on this
+host, which chokes on the Russian comments in the source. The file is UTF-8 and
+must be decoded as UTF-8 — the same lesson as needing `PYTHONIOENCODING` for
+Cyrillic output, met again at the subprocess seam. Ten red tests that were not
+about the move at all.
