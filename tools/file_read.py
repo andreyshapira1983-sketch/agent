@@ -12,6 +12,42 @@ from tools.base import Tool
 MAX_BYTES = 1_000_000  # 1 MB hard cap for MVP
 _MAX_HINT_ENTRIES = 40  # cap the "did you mean" listing so error stays compact
 
+#: Credential-shaped paths this tool refuses to READ. The self-apply lane
+#: already refused to WRITE these (`core/self_apply_lane._is_denied`); measured
+#: 2026-08-22, nothing consulted a denylist on the read side, so
+#: `file_read(".env")` returned the whole credential file. Same shapes, both
+#: directions. Matching is on the resolved RELATIVE path, so a directory named
+#: `secrets/` is covered wherever it sits inside the workspace.
+_CRED_NAMES = frozenset({
+    "credentials", "credentials.json", "id_rsa", "id_dsa", "id_ecdsa",
+    "id_ed25519", ".netrc", ".npmrc", ".pgpass", ".htpasswd",
+})
+_CRED_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".keystore", ".jks")
+_CRED_DIRS = ("secrets/", ".ssh/", ".gnupg/")
+
+
+def _is_credential_path(rel: str) -> bool:
+    """True when the relative path names a credential store rather than work.
+
+    Deliberately narrow: it must not become a second wall around the workspace.
+    `.env` matches by name or as a prefix (`.env.local`), never as a substring —
+    `environment.md` and `tests/test_env_probe.py` stay readable.
+    """
+    # NOT `lstrip("./")`: lstrip removes CHARACTERS, so it turns ".env" into
+    # "env" and the name check silently misses the very file this gate exists
+    # for. Measured while building this gate, 2026-08-22.
+    lower = rel.replace("\\", "/").lower()
+    while lower.startswith("./"):
+        lower = lower[2:]
+    name = lower.rsplit("/", 1)[-1]
+    if name == ".env" or name.startswith(".env."):
+        return True
+    if name in _CRED_NAMES:
+        return True
+    if any(name.endswith(sfx) for sfx in _CRED_SUFFIXES):
+        return True
+    return any(lower.startswith(d) or f"/{d}" in f"/{lower}" for d in _CRED_DIRS)
+
 
 class FileReadTool(Tool):
     name = "file_read"
@@ -90,6 +126,19 @@ class FileReadTool(Tool):
             if local_path.is_absolute()
             else (self.workspace_root / local_path).resolve()
         )
+        # Credential gate: checked on the RESOLVED path, so `docs/../.env` and an
+        # absolute route to the same file are refused alike. The message names
+        # the kind, never the contents — a refusal that quotes the secret it
+        # protects would defeat itself.
+        try:
+            rel_for_gate = str(target.relative_to(self.workspace_root))
+        except ValueError:
+            rel_for_gate = target.name  # outside: the sandbox check below refuses it
+        if _is_credential_path(rel_for_gate):
+            raise PermissionError(
+                f"refusing to read a credential file: {path!r} — this path names "
+                "a credential store, and the agent's own tools do not fetch keys"
+            )
 
         try:
             target.relative_to(self.workspace_root)

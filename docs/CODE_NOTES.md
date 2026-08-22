@@ -3660,3 +3660,41 @@ Procedure note, paid for during this fix: break-the-fix mutations were verified
 with `sed` and reverted with `git checkout --`, which also wiped the
 not-yet-committed fix itself from two files. Break after committing, or revert
 the break with the inverse `sed`.
+
+## The key the agent could simply ask for
+
+Two 2026 incidents name the same root cause in their own reviews: Hugging Face's
+containment list says "long-lived credentials stored in environment variables",
+and the LiteLLM supply-chain payload paid off because a harvester running
+in-process finds exactly that. So the credential row was first on the repair
+order from both our side and the field's.
+
+Measuring before fixing changed what the fix was. Two of the three feared paths
+were already shut: `shell_exec` hands subprocesses an env ALLOWLIST
+(`_safe_env`: PATH, SystemRoot, PATHEXT, git identity), so a new secret variable
+is excluded by construction rather than by being remembered; and `file_write`
+refuses to write secrets. The open one was embarrassing in its simplicity —
+`file_read(".env")` returned the file. 2918 characters, eight secret-shaped
+lines. No compromise required; the agent had only to ask.
+
+The fix reuses a denylist that already existed rather than inventing one: the
+self-apply lane has refused to WRITE `.env`, `credentials`, `id_rsa`, `.pem`,
+`.key` for months. Same shapes, now both directions. The gate runs on the
+RESOLVED relative path, so `docs/../.env` and an absolute route are refused
+alike, and the refusal names the kind without quoting the contents — a refusal
+that leaks what it protects would defeat itself.
+
+Deliberately narrow, with a control that proves it: `environment.md` and
+`tests/test_env_probe.py` must still read. Breaking the gate to refuse
+everything turns that control red, which is the point — a tool that refuses
+everything is not a fix.
+
+One trap paid for while building it: `lstrip("./")` removes CHARACTERS, not a
+prefix, so it turns `.env` into `env` and the name check misses the very file
+the gate exists for. The witness caught it; the comment now stands where the
+next person would repeat it.
+
+Scope, stated in the test file too: this closes the path that needs no
+compromise. It does NOT remove credentials from the process environment —
+`os.environ` still holds them and in-process Python still reaches them. That is
+the wall-class gap (MIR-120) and needs a different class of fix.
