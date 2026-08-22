@@ -1202,6 +1202,23 @@ def _answer_disqualified(episode: EpisodeRecord) -> bool:
     )
 
 
+def _lesson_provenance_disqualified(episode: EpisodeRecord) -> bool:
+    """The two axes a `lesson` may NOT waive: its sources and its subject.
+
+    Kept beside `_answer_disqualified` because both answer the same shape of
+    question — is this record admissible at all — as opposed to the outcome
+    axes, which ask how the run went.
+    """
+    if any(str(label).startswith("memory:") for label in episode.source_labels):
+        return True
+    from core.verification_summary import _LOW_RELEVANCE
+
+    return (
+        episode.relevance_score is not None
+        and episode.relevance_score < _LOW_RELEVANCE
+    )
+
+
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
@@ -1222,7 +1239,20 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     if _answer_disqualified(episode):
         return False
     if "lesson" in episode.tags:
-        return True
+        # The exemption now waives what it always PROMISED to waive and no
+        # more. Failing legitimately costs an episode its outcome, its
+        # completion and its verified chunks — a run that failed confirmed
+        # nothing — and remembering that failure as a warning is the whole
+        # point of the tag (101 of 127 lessons in the live store are failures).
+        # It does NOT excuse two axes that have nothing to do with failing:
+        #   * a `memory:` source is memory citing itself — an echo is not a
+        #     second witness, and it is the amplification step a memory
+        #     poisoning attack needs (MIR-115 measured the bypass, MIR-121
+        #     the threat class);
+        #   * an off-topic record is off-topic whether or not it failed.
+        # Measured before the change: zero live lessons are affected, so this
+        # is prophylaxis on the attack path rather than repair of live damage.
+        return not _lesson_provenance_disqualified(episode)
     if episode.outcome != "success":
         return False
     # The second axis: `outcome` reports that the claims held up, which a
