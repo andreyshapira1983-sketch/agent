@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from core.evidence import Evidence, ProvenanceChain
+from core.evidence_budget import carries_framework_notice
 from core.memory_policy import MemoryWriteDecision
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
@@ -188,6 +189,14 @@ class ClaimExtractor:
         if len(text) < self.min_chars or len(text) > self.max_chars:
             return False
         if contains_secret(text)[0]:
+            return False
+        # MIR-097: a sentence carrying a trimmer's notice was never fully
+        # written by the source — refused, not cleaned. The grammar lives
+        # beside the writers (`core/evidence_budget.py`), keyed on shape, so an
+        # unseen notice of the same class is refused too. Twenty corrupted
+        # claims leaked over seventeen days, and a data-only cleanup on
+        # 2026-08-15 lasted exactly one day because this line was missing.
+        if carries_framework_notice(text):
             return False
         if text.count("{") + text.count("[") > 4:
             return False
