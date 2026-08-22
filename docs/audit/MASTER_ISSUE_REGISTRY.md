@@ -49,8 +49,8 @@ re-grounded against **current code on `main` @ `f317c4c`**.
 | Status | Count | IDs |
 |---|---|---|
 | fixed | 72 | MIR-001, MIR-002, MIR-003, MIR-004, MIR-005, MIR-010, MIR-011, MIR-017, MIR-027, MIR-028, MIR-035, MIR-036, MIR-037, MIR-039, MIR-040, MIR-041, MIR-043, MIR-044, MIR-046, MIR-047, MIR-048, MIR-049, MIR-051, MIR-052, MIR-054, MIR-055, MIR-056, MIR-057, MIR-059, MIR-062, MIR-063, MIR-064, MIR-065, MIR-066, MIR-068, MIR-070, MIR-072, MIR-073, MIR-075, MIR-076, MIR-077, MIR-079, MIR-080, MIR-081, MIR-082, MIR-083, MIR-084, MIR-085, MIR-086, MIR-087, MIR-088, MIR-089, MIR-090, MIR-091, MIR-092, MIR-093, MIR-094, MIR-095, MIR-097, MIR-099, MIR-101, MIR-102, MIR-104, MIR-107, MIR-108, MIR-109, MIR-111, MIR-112, MIR-113, MIR-116, MIR-126, MIR-132 |
-| open | 32 | MIR-008, MIR-015, MIR-016, MIR-020, MIR-021, MIR-023, MIR-024, MIR-026, MIR-045, MIR-050, MIR-058, MIR-096, MIR-098, MIR-100, MIR-103, MIR-105, MIR-114, MIR-115, MIR-117, MIR-118, MIR-119, MIR-120, MIR-121, MIR-122, MIR-123, MIR-124, MIR-125, MIR-127, MIR-128, MIR-129, MIR-130, MIR-131 |
-| partially_fixed | 10 | MIR-007, MIR-042, MIR-053, MIR-060, MIR-067, MIR-069, MIR-071, MIR-074, MIR-078, MIR-106 |
+| open | 31 | MIR-008, MIR-015, MIR-016, MIR-021, MIR-023, MIR-024, MIR-026, MIR-045, MIR-050, MIR-058, MIR-096, MIR-098, MIR-100, MIR-103, MIR-105, MIR-114, MIR-115, MIR-117, MIR-118, MIR-119, MIR-120, MIR-121, MIR-122, MIR-123, MIR-124, MIR-125, MIR-127, MIR-128, MIR-129, MIR-130, MIR-131 |
+| partially_fixed | 11 | MIR-007, MIR-020, MIR-042, MIR-053, MIR-060, MIR-067, MIR-069, MIR-071, MIR-074, MIR-078, MIR-106 |
 | planned_gap | 8 | MIR-009, MIR-018, MIR-022, MIR-029, MIR-030, MIR-031, MIR-034, MIR-038 |
 | code_fixed_needs_runtime_verification | 4 | MIR-012, MIR-013, MIR-014, MIR-061 |
 | needs_investigation | 4 | MIR-019, MIR-025, MIR-032, MIR-033 |
@@ -999,9 +999,11 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Production path:** strategy classification → full pipeline.
 - **Existing tests:** none.
 - **Missing tests:** a greeting skips verifier/disclaimer via a LIGHT path.
-- **Status:** `open` (low severity).
-- **Evidence:** no greeting/light branch found in `strategy_router.py` at `f317c4c`.
-- **RE-VERIFIED BY EXECUTION 2026-08-22.** Not read — run. `classify_operator_strategy` returns `general_question` with `is_local_strategy() == False` for «привет», «hi» and «спасибо», so all three still take the full pipeline. Checked against a plausible false hope: the router HAS grown a `LOCAL_STRATEGIES` fast-path set of 23 entries since this was written, but every member is an operator command intent (`budget_status`, `best_next_action`, …) and no greeting reaches it. Still `open`, still low.
+- **REPAIRED 2026-08-22 evening, to the extent the entry's cost is real.** The cheap path's greeting vocabulary gained social FILLER only (how/are/doing/there; как/дела/у/тебя…), and the word cap went 4 → 5 («привет, как у тебя дела» is five words of pure filler). Measured live: «Привет, как дела?», «hello there», «спасибо большое», «доброй ночи» now skip the planner call they each used to spend; content-bearing turns («привет, прочитай core/loop.py», «ты кто») still reach it — a wrong skip could drop a needed tool step, so the asymmetry stays conservative. Pinned in `tests/test_task_complexity.py`, break-tested.
+- **The remaining half, closed by DEFAULT under the escalation contract:** the structured answer contract (Conclusion/…/Unverified) still applies to a greeting's synthesizer call, so the reply may carry a ceremonial shape. Ugly, not harmful, and reshaping the answer contract per-turn-class is a design change out of proportion to a cosmetic symptom on a low-severity entry. Reversed by one word from the operator.
+- **Status:** `partially_fixed` (2026-08-22: the cost half repaired; the shape half defaulted).
+- **Evidence:** no greeting/light branch found in `strategy_router.py` at `f317c4c` — historically true and beside the point: the light branch lived in `core/task_complexity.py` all along.
+- **RE-VERIFIED BY EXECUTION 2026-08-22 (morning).** Not read — run. `classify_operator_strategy` returns `general_question` with `is_local_strategy() == False` for «привет», «hi» and «спасибо», so all three still take the full pipeline. **Corrected in the evening pass:** the strategy router was the wrong organ to check — the CHEAP PATH (`can_skip_planner` → `planner_skipped_cheap_path`) already existed and already took «привет»/«hi»/«спасибо» straight to the synthesizer without a planner call; what it missed was the VARIANTS. Checked against a plausible false hope: the router HAS grown a `LOCAL_STRATEGIES` fast-path set of 23 entries since this was written, but every member is an operator command intent (`budget_status`, `best_next_action`, …) and no greeting reaches it. Still `open`, still low.
 
 ### MIR-021 — ODD coverage gap (rocket/hacking under-detected)
 - **Aliases:** LPF-018. **Provenance:** previously_documented (re-framed as coverage gap, not missing classifier).

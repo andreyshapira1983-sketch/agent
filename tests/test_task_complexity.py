@@ -747,3 +747,40 @@ def test_unknown_task_role_is_ignored():
 
 def test_non_string_task_role_is_ignored():
     assert assess_complexity("hi", task_role=123) is ComplexityTier.LIGHT  # type: ignore[arg-type]
+
+
+# ── MIR-020: greeting VARIANTS take the cheap path too ───────────────────────
+#
+# "привет" and "hi" already skipped the planner; the live cost was the
+# variants — "Привет, как дела?", "hello there", "спасибо большое" — each
+# spending a full planner LLM call to receive an empty plan. The vocabulary
+# gains social FILLER only (how/are/doing/there, как/дела/у/тебя), never
+# content words: a missed skip costs one planner call, a wrong skip could
+# drop a needed tool step, so the asymmetry stays conservative.
+
+def test_greeting_variants_skip_the_planner():
+    from core.task_complexity import can_skip_planner
+
+    for text in (
+        "Привет, как дела?",
+        "привет, как у тебя дела",
+        "hello there",
+        "how are you doing",
+        "спасибо большое",
+        "доброй ночи",
+        "до свидания",
+    ):
+        assert can_skip_planner(text, file_hint=None), text
+
+
+def test_content_bearing_turns_still_reach_the_planner():
+    from core.task_complexity import can_skip_planner
+
+    for text in (
+        "привет, прочитай core/loop.py",
+        "как дела с задачей про роутер",
+        "hello, what is the HTTP timeout",
+        "привет агент, найди дефекты",
+        "ты кто",
+    ):
+        assert not can_skip_planner(text, file_hint=None), text
