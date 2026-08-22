@@ -299,3 +299,85 @@ def test_the_report_does_not_overclaim(word: str) -> None:
     text = render(build_report([_episode("ep-1")], [_procedure("p", refs=("ep-1",))]))
 
     assert word not in text.lower()
+
+
+# ==========================================================================
+# MIR-058: the instrument must not read clean because the evidence rotted.
+# ==========================================================================
+#
+# Measured 2026-08-22: the live report printed "0 of 34" while 10 procedures
+# still carried non-zero counters and 70 of their 75 source references (93%)
+# pointed at episodes the FIFO had evicted. `legacy_ids` is built from episodes
+# PRESENT in the store, so an evicted episode cannot be legacy by construction,
+# and `if not legacy_refs: continue` dropped the procedure from the report
+# together with its own `refs_missing` count. The headline converged to zero
+# exactly as the credit became LESS verifiable. A sensor whose reading improves
+# as the thing it measures gets worse is worse than no sensor.
+
+
+def test_evicted_evidence_reads_as_unexaminable_not_as_clean() -> None:
+    """The witness for the live store's exact state: counters whose every
+    source reference points at nothing must appear in the report."""
+    episodes: list = []  # the FIFO already evicted everything
+    procs = [_procedure("p1", refs=("gone-1", "gone-2", "gone-3"), success=5)]
+
+    report = build_report(episodes, procs)
+
+    flagged = report["procedures_with_legacy_refs"]
+    assert flagged, (
+        "a procedure with success=5 and every reference evicted vanished from "
+        "the report — zero-because-evicted read as zero-because-clean"
+    )
+    assert flagged[0]["refs_missing"] == 3
+    assert flagged[0]["refs_legacy"] == 0
+
+
+def test_a_clean_procedure_is_still_not_flagged() -> None:
+    """Zero-because-clean must stay zero: classified, resolvable evidence is
+    exactly what the policy wants, and flagging it would cry wolf."""
+    episodes = [_episode("e1", completion="achieved")]
+    procs = [_procedure("p1", refs=("e1",), success=2)]
+
+    report = build_report(episodes, procs)
+
+    assert report["procedures_with_legacy_refs"] == []
+
+
+def test_the_two_zeros_are_distinguishable_in_the_rendered_text(capsys) -> None:
+    """The number is read by a human; the words must carry the split. A reader
+    of the old report could not tell 'nothing unverifiable' from 'the evidence
+    is gone' — that is the difference the live store fell into."""
+    procs = [_procedure("p1", refs=("gone-1",), success=1)]
+
+    text = render(build_report([], procs))
+
+    # The static prose always mentions "missing", so that word alone proves
+    # nothing (this test first passed unfixed for exactly that reason). The
+    # procedure's own line must be printed, and the headline must carry the
+    # evicted split.
+    assert "tools:p1" in text, (
+        "the affected procedure is not in the rendered report — the reader "
+        "cannot tell zero-because-clean from zero-because-evicted"
+    )
+    assert "evicted" in text.lower()
+
+
+def test_a_mixed_procedure_reports_both_counts() -> None:
+    episodes = [_episode("e1", completion=None)]  # present, unclassified
+    procs = [_procedure("p1", refs=("e1", "gone-1"), success=3)]
+
+    report = build_report(episodes, procs)
+
+    flagged = report["procedures_with_legacy_refs"]
+    assert flagged and flagged[0]["refs_legacy"] == 1
+    assert flagged[0]["refs_missing"] == 1
+
+
+def test_zero_counter_procedures_stay_out_even_with_missing_refs() -> None:
+    """No credit, nothing to verify: the report is about unverifiable STANDING,
+    not about reference hygiene."""
+    procs = [_procedure("p1", refs=("gone-1",), success=0)]
+
+    report = build_report([], procs)
+
+    assert report["procedures_with_legacy_refs"] == []

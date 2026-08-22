@@ -125,7 +125,16 @@ def build_report(episodes: list[EpisodeRecord], procedures: list[ProcedureRecord
     for proc in procedures:
         refs = list(proc.source_episode_ids)
         legacy_refs = [r for r in refs if r in legacy_ids]
-        if not legacy_refs:
+        missing_refs = [r for r in refs if r not in live_ids]
+        # MIR-058, the inversion this instrument shipped with: `legacy_ids` is
+        # built from episodes PRESENT in the store, so an evicted episode could
+        # never be legacy, and a procedure whose evidence had all rotted away
+        # left the report entirely — taking its own `refs_missing` count with
+        # it. The headline converged to zero exactly as the credit became LESS
+        # verifiable (measured live: "0 of 34" printed while 70 of 75
+        # references pointed at nothing). A reference that resolves to nothing
+        # is UNEXAMINABLE, not clean.
+        if not legacy_refs and not missing_refs:
             continue
         if (proc.success_count + proc.failure_count) == 0:
             continue
@@ -206,13 +215,18 @@ def render(report: dict) -> str:
 
     touched = report["procedures_with_legacy_refs"]
     add("\nLEGACY-UNVERIFIABLE PROCEDURAL CREDIT")
-    add(f"    procedures with non-zero counters and legacy source references: "
+    total_missing = sum(p["refs_missing"] for p in touched)
+    total_legacy = sum(p["refs_legacy"] for p in touched)
+    add(f"    procedures with non-zero counters and unverifiable sources: "
         f"{len(touched)} of {report['procedures']}")
+    if touched:
+        add(f"    (unclassified legacy refs: {total_legacy}; "
+            f"references to evicted episodes: {total_missing})")
     if touched:
         add(f"    aggregate success={sum(p['success'] for p in touched)} "
             f"failure={sum(p['failure'] for p in touched)}")
-        add("    legacy-source coverage per procedure "
-            "(legacy refs / total refs / refs no longer in store):")
+        add("    source coverage per procedure "
+            "(legacy refs / total refs / refs evicted from the store):")
         for p in sorted(touched, key=lambda p: -p["refs_legacy"])[:12]:
             add(f"      {p['workflow_key'][:44]:<46} "
                 f"{p['refs_legacy']:>3}/{p['refs_total']:<3} "
