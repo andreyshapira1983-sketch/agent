@@ -130,12 +130,15 @@ Everything above measures ONE axis: whose authority an operation widens. There
 is a second, orthogonal axis this survey did not apply, and both reviewing
 models missed it together: **who else can steer the agent.** Willison's lethal
 trifecta — private data + untrusted content + an outbound channel — is safe in
-any pair and dangerous as a triple, and the lab's interior holds all three at
-once in effects mode: the agent reads the public web (untrusted content),
-holds the repo and its API keys in-process (private data), and has `web_fetch`
-egress (an exfiltration channel). A subagent that reads the web and reports to
-a file-writing parent is an injection chain that is entirely "interior" under
-C0.P.
+any pair and dangerous as a triple. **Measured against the production paths
+(falsification pass, same day): the default unattended path already breaks the
+trifecta twice by construction** — `_AUTONOMOUS_GOAL_BLOCKED_TOOLS` blocks the
+web tools AND `spawn_subagent`, and SECRET tool output is deep-redacted before
+it reaches the planner or memory. The assembled triple exists only on paths
+where web tools are live (interactive sessions), and — the reason this
+paragraph stays — it is the standing cost of exactly the decision this survey
+invites: unblocking web or subagents on the unattended path would re-assemble
+the trifecta there.
 
 So the correction to the survey's own lens: **the C0.P test measures
 authority; the approvals it examined also served as hijack friction** —
