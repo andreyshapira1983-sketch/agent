@@ -406,6 +406,17 @@ _SUSPICIOUS_WRAPPER_RE = re.compile(
 )
 
 
+def carries_suspicious_annotation(text: str) -> bool:
+    """Did the guard flag this content on its way in? (MIR-011)
+
+    The wrapper was the verdict's ONLY carrier, and the claim extractor
+    strips it — correctly, its text was becoming "facts" — so the verdict
+    died at the strip point. Detection lives beside the wrapper it detects:
+    the extractor asks BEFORE stripping and quarantines what it mints.
+    """
+    return bool(_SUSPICIOUS_WRAPPER_RE.search(text or ""))
+
+
 def strip_suspicious_annotation(text: str) -> str:
     """Снять обёртку `annotate_suspicious` — голос охранника, не содержимое."""
     return _SUSPICIOUS_WRAPPER_RE.sub("", text)
