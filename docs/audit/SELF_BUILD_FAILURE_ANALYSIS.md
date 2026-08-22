@@ -214,6 +214,20 @@ refills — plus two decisions that are not code at all:
    08-16 grant already implied by limiting the agent to «предложения в очередь»,
    and what §3 above measured as 41 wait-records from one unanswered item.
 
+   **CORRECTION, 2026-08-22 — this section first said the block lasts for the
+   rest of the run, and that is wrong.** `ApprovalInbox.expire_stale()` enforces
+   a **24-hour TTL** and runs on every read of the inbox
+   (`core/approval_inbox.py:225`), so an unanswered item aborts itself after a
+   day and self-build resumes. Confirmed on the live data: 6 items have status
+   `aborted`, among them the `self_apply_lane.run` created 2026-08-16T17:30 that
+   expired 2026-08-17T17:30 — which is exactly why the 32 waits on 08-16 and 9
+   on 08-17 stop there, and why a fresh proposal appears on 08-19. So this is
+   not a deadlock. The real shape is a **throughput ceiling of roughly one
+   self-apply proposal per 24 hours**, each one expiring unapplied, and 41
+   memory records banked while it waits. Over a week that is about seven
+   proposals, all auto-aborted, nothing applied — which is a coherent outcome to
+   choose deliberately, but must not be mistaken for a week of work.
+
 **Not claimed:** that closing these three delivers a week. The only evidence is
 a two-day run that died of one identified cause. Removing that cause is
 necessary; whether a different limit appears on day four is unknown, because
