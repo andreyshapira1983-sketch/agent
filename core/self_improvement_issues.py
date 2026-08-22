@@ -39,11 +39,32 @@ def _stamp(value: str) -> datetime:
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
+#: Text prefix the detector route writes (`core/self_build_memory.py`).
+_DETECTOR_PREFIX = "detectors "
+
+
+def _detector_signals(text: str) -> tuple[str, ...]:
+    """Signal names from a detector-route failure text, or () for other texts."""
+    lowered = str(text or "").casefold()
+    if not lowered.startswith(_DETECTOR_PREFIX):
+        return ()
+    head = lowered[len(_DETECTOR_PREFIX):].split(":", 1)[0]
+    return tuple(sorted(s.strip() for s in head.split(",") if s.strip()))
+
+
 def failure_fingerprint(text: str) -> str:
     """Stable fingerprint for equivalent failure evidence."""
     lowered = str(text or "").casefold()
     if "duplicate base class" in lowered or ("duplicate" in lowered and "mixin" in lowered):
         key = _DUPLICATE_MIXIN_KEY
+    elif signals := _detector_signals(text):
+        # MIR-035: a detector-minted issue is identified by its SIGNAL CLASS,
+        # never by the turn's text. The old key hashed the full failure text —
+        # which embeds the campaign question — so one detector class on N
+        # questions minted N permanent open issues (13 copies of one signal
+        # pair measured live). The repair ladder repairs classes, not turns;
+        # instances accumulate as evidence on one issue instead.
+        key = "detector-class:" + ",".join(signals)
     else:
         key = re.sub(r"\b(?:ain|run|ep)_[a-f0-9]+\b", "<id>", lowered)
         key = re.sub(r"\b\d+\b", "#", key)
@@ -141,6 +162,13 @@ def issue_from_failure(text: str, observed_at: str) -> SelfImprovementIssue:
         action = "repair_incremental_splitter_duplicate_mixin"
         files = ("core/incremental_splitter.py", "tests/test_incremental_splitter.py")
         suggested = "inspect core/incremental_splitter.py tests/test_incremental_splitter.py"
+    elif signals := _detector_signals(text):
+        joined = ", ".join(signals)
+        title = f"Investigate recurring detector signal: {joined}"
+        action = "investigate_detector_signal"
+        files = tuple(dict.fromkeys(re.findall(r"[A-Za-z0-9_./-]+\.py", text)))[:6]
+        suggested = (f"count occurrences of {joined} across recent episodes, "
+                     "then decide whether the defect is in the answer or the detector")
     else:
         title = "Turn the self-improvement failure into a bounded repair"
         action = "improve_failure_to_idea_pipeline"
