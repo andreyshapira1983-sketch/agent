@@ -34,6 +34,7 @@ from core.dlp import contains_pii
 from core.doc_routing import is_broad_project_self_knowledge_question
 from core.models import MemoryRecord
 from core.secret_scanner import contains_secret
+from core.topic_tokens import STOPWORDS as _TOPIC_STOPWORDS
 
 # `core.hygiene` is imported lazily inside `decide` to avoid an import cycle
 # when `core/hygiene.py` later wants to reach into models / policies.
@@ -280,22 +281,9 @@ class MemoryWritePolicy:
 # ============================================================
 
 # Words that add no signal to keyword overlap scoring.
-_STOPWORDS: frozenset[str] = frozenset(
-    {
-        # English
-        "a", "an", "the", "and", "or", "but", "is", "are", "was", "were",
-        "be", "to", "of", "in", "on", "at", "for", "with", "as", "by",
-        "this", "that", "these", "those", "it", "its", "what", "which",
-        "who", "whom", "how", "when", "where", "why", "do", "does", "did",
-        "i", "you", "he", "she", "we", "they", "me", "us", "them", "my",
-        "your", "their", "our", "from", "about",
-        # Russian
-        "и", "или", "но", "не", "что", "как", "это", "так", "же",
-        "в", "на", "с", "по", "из", "у", "к", "о", "за", "от", "до",
-        "ли", "бы", "был", "была", "было", "были", "есть", "быть",
-        "мой", "моя", "мое", "мои", "твой", "твоя", "ваш", "наш",
-    }
-)
+#: Один словарь на обе подсистемы: перенесён в `core/topic_tokens.py`
+#: 2026-08-22 (MIR-008) — расхождение было именно здесь.
+_STOPWORDS: frozenset[str] = _TOPIC_STOPWORDS
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
 
