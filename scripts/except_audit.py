@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import io
+import re
 import tokenize
 from pathlib import Path
 
@@ -92,13 +93,43 @@ def _broad(handler_type: ast.expr | None) -> bool:
     return False
 
 
+#: A linter directive is not a justification — it is the opposite: silencing
+#: the tool that asked for one. Found 2026-08-22 auditing this audit against
+#: the field's named failure for "zero unexplained" reports («the comments
+#: turn out to be fig leaves»): 8 of 127 silent handlers were justified by
+#: nothing but `# noqa: BLE001`, and this instrument counted them as
+#: explained. A directive followed by real prose still counts — it is the
+#: BARE directive that says nothing.
+_DIRECTIVE_ONLY_RE = re.compile(
+    r"^#\s*(?:noqa|type:|pragma|pylint:|mypy:|ruff:)[^#]*$", re.IGNORECASE
+)
+
+
+def _is_bare_directive(text: str) -> bool:
+    """True when a comment carries only tool directives, no reason.
+
+    A directive with an em-dash explanation after it («noqa: BLE001 — memory
+    journaling is optional») is a real justification and is kept: the split is
+    on whether a human wrote WHY, not on whether a marker is present.
+    """
+    stripped = text.strip()
+    if not _DIRECTIVE_ONLY_RE.match(stripped):
+        return False
+    remainder = re.sub(
+        r"(?i)(?:noqa|type|pragma|pylint|mypy|ruff)\s*:?\s*[A-Z]*\d*[,\s]*", "",
+        stripped.lstrip("#").strip(),
+    )
+    return len(re.sub(r"[^\wЀ-ӿ]+", "", remainder)) < 12
+
+
 def _comment_lines(src: str) -> set[int]:
     """1-based line numbers that carry a REAL comment token — a '#' inside a
-    string literal is not a comment (review round #292)."""
+    string literal is not a comment (review round #292), and a bare linter
+    directive is not a reason (2026-08-22)."""
     out: set[int] = set()
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-            if tok.type == tokenize.COMMENT:
+            if tok.type == tokenize.COMMENT and not _is_bare_directive(tok.string):
                 out.add(tok.start[0])
     except (tokenize.TokenError, IndentationError):  # pragma: no cover — unparseable snippets
         pass

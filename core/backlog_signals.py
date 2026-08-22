@@ -430,6 +430,16 @@ def _code_line_count(content: str) -> tuple[int, bool]:
                 at = tok.start[0]
                 if at - 1 < len(lines) and lines[at - 1].strip().startswith("#"):
                     prose.add(at)
+            elif tok.type == tokenize.STRING:
+                # A multi-line literal that is NOT a docstring is payload, not
+                # explanation: an embedded prompt, SQL or template is bulk the
+                # module carries. Counting only its FIRST line made
+                # `core/planner_prompt.py` read as 8 code lines of 553 —
+                # measured while auditing this sensor's own closure, and it is
+                # a false-NEGATIVE channel: the old total-lines counter would
+                # have flagged such a module and this one would not.
+                for line in range(tok.start[0], tok.end[0] + 1):
+                    code_lines.add(line)
             elif tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
                                   tokenize.DEDENT, tokenize.ENDMARKER):
                 code_lines.add(tok.start[0])

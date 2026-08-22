@@ -112,6 +112,70 @@ believes they solved it has something to turn green.
 
 ---
 
+## MIR-099 — counting code lines by AST
+
+**Field's named failure:** an AST/token line count misreads real Python shapes.
+
+Seven shapes probed. **Six held** — one-liner `if`s, multi-line call arguments,
+big dict literals, chained method calls, decorators, trailing comments: all
+counted honestly, none inflated or deflated.
+
+**The seventh did not.** A multi-line string that is NOT a docstring counted as
+ONE line, because a STRING token reports only its starting line. Measured on
+the live tree: `core/planner_prompt.py` read as **8 code lines of 553** — 482
+lines of embedded prompt invisible to the sensor. `core/answer_format.py` hid
+149 the same way.
+
+**Why this matters more than a wrong number.** The closure's own argument was
+«the errors are one-directional, so counting code removes noise and cannot
+newly miss anything» — and that was a property of the TREE at that moment, not
+of the counter. A literal-heavy module growing past the threshold would now be
+missed where the old total-lines sensor would have flagged it. A false negative
+in a sensor is worse than a false positive: nobody investigates silence.
+
+**Fixed:** a non-docstring multi-line literal counts every line it spans —
+payload the module carries, not explanation. `planner_prompt` now reads 541 of
+553. Flagged count unchanged at 5, so no noise returned. Three tests, including
+the boundary that a long docstring stays free.
+
+---
+
+## MIR-126 — «zero unexplained» in the exception audit
+
+**Field's named failure:** the zero is bought with fig leaves — the comments
+that justify the silence turn out to say nothing.
+
+**It landed, and the closure was FALSE.** Of 127 silent handlers, **8 were
+justified by nothing but `# noqa: BLE001`** — a directive that SILENCES the
+tool asking for a reason, counted by this instrument as a stated reason. The
+audit's zero, and the closure built on it, were bought exactly the way the
+field predicts.
+
+**Fixed in both halves.** The instrument refuses a directive-only comment
+(`_is_bare_directive`; a directive followed by real prose still counts — the
+split is on whether a human wrote WHY). That turned the report from 0 to 8. All
+eight then received real reasons, and each is a genuine argument rather than a
+label:
+
+* three in `cli/commands_health.py` — a health READING must not become a health
+  INCIDENT, and each returns `unknown` carrying the exception type, so the
+  failure is reported rather than swallowed;
+* two in `core/self_task_producer.py` — `None` is the CONSERVATIVE answer
+  (it makes the caller check the other gates instead of skipping them), and a
+  selector failure must not cost the whole tick;
+* `core/memory_hygiene.py` — not silent at all: the failure is written into the
+  report as `skipped_reason`, so «could not summarise» is distinguishable from
+  «found nothing»;
+* `core/model_catalog.py` — raising would break the refresh path that exists to
+  repair exactly this condition;
+* `core/verifier_utils.py` — **fail closed, deliberately**: an unreachable model
+  must never read as «the source supports the claim».
+
+Two tests now travel together: the instrument must refuse bare directives, AND
+the count must be zero. Either alone is the defect this audit found.
+
+---
+
 ## Still to audit
 
 MIR-011 · 020 · 026 · 035 · 044 · 097 · 099 · 104 · 125 · 126 · 105/024/008,
@@ -124,8 +188,6 @@ each against the named failure mode of its own solution class:
 | 026 settle-on-exit | a status written at one exit lies about the other paths |
 | 035 class merge | merging by class hides distinct defects under one row |
 | 044 on-demand tally | «compute it when asked» degrades at scale |
-| 099 code-line count | AST counting misreads generated code and one-liners |
-| 126 audit scope | «zero unexplained» becomes zero because comments are fig leaves |
 | 105/024/008 | already audited mid-repair: the stoplist inverted meaning, and the fix's first attempt changed a pinned invariant |
 
 The last row is why this document exists: that criticism landed **before** the
