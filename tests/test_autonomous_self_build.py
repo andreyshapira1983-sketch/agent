@@ -6,7 +6,7 @@ own tick while a human still approves before anything is applied.
 """
 from __future__ import annotations
 
-import core.autonomous_runtime as ar
+import core.autonomous_runtime_proposals as prop_mod
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 
@@ -59,7 +59,7 @@ def test_proposal_records_episode_on_success(monkeypatch, tmp_path) -> None:
             "veto_reasons": [],
         })
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _fake_produce)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
     store = _FakeStore()
     rt = _runtime(_FakeAgent(store), tmp_path)
 
@@ -82,7 +82,7 @@ def test_proposal_records_veto_reason(monkeypatch, tmp_path) -> None:
             "veto_reasons": ["empty generated content"],
         })
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _fake_produce)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
     store = _FakeStore()
     rt = _runtime(_FakeAgent(store), tmp_path)
 
@@ -100,7 +100,7 @@ def test_proposal_skipped_in_dry_run(monkeypatch, tmp_path) -> None:
         called["n"] += 1
         return _FakeReport({"status": "proposed"})
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _fake_produce)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
     rt = _runtime(_FakeAgent(_FakeStore()), tmp_path)
 
     # Default config is dry_run=True.
@@ -115,7 +115,7 @@ def test_proposal_skipped_when_pending_exists(monkeypatch, tmp_path) -> None:
         called["n"] += 1
         return _FakeReport({"status": "proposed"})
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _fake_produce)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
     inbox = ApprovalInbox()
     inbox.add(
         operation="self_apply_lane.run",
@@ -135,7 +135,7 @@ def test_proposal_skipped_without_llm(monkeypatch, tmp_path) -> None:
         called["n"] += 1
         return _FakeReport({"status": "proposed"})
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _fake_produce)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
     rt = _runtime(_FakeAgent(_FakeStore(), has_llm=False), tmp_path)
 
     assert rt._run_self_build_proposal(_real_run_config()) is None
@@ -146,7 +146,7 @@ def test_proposal_swallows_producer_errors(monkeypatch, tmp_path) -> None:
     def _boom(**kwargs):
         raise RuntimeError("producer exploded")
 
-    monkeypatch.setattr(ar, "produce_self_apply_proposal", _boom)
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _boom)
     rt = _runtime(_FakeAgent(_FakeStore()), tmp_path)
 
     # Must never raise back into the run path.

@@ -76,7 +76,9 @@ WATCH: dict[str, int] = {
     "core/completion_obligation.py:evaluate_completion_obligations": 189,  # +8 (2026-08-10): непокрытые единицы задания перечисляются поимённо и доходят до вердикта — жалоба оператора о раздроблённой задаче.  # +8 (2026-08-10): источник `intent` читает ТРЕБУЮЩУЮ часть запроса одной функцией с контрактом — запрет перестал заводить долг, который запрещает.  # +2: покрытие контракта оператора доводится до вердикта.
     "core/self_apply_bridge.py:run_approved_self_apply": 170,
     "core/self_repair.py:SelfRepairController._execute_tool": 170,
-    "core/autonomous_runtime.py:AutonomousRuntime._task_propose": 167,
+    # Уехал в миксин 2026-08-22 вместе со всем кластером предложений; тело
+    # перенесено дословно, потолок опущен 167 → 160 по факту переезда.
+    "core/autonomous_runtime_proposals.py:AutonomousRuntimeProposals._task_propose": 160,
     "core/memory_policy.py:MemoryWritePolicy.decide": 167,
     "core/self_task_producer.py:produce_coding_task": 177,  # +2 (2026-08-15): второй источник улик — verified_diagnosis. У самонайденных дефектов агента нет красного теста, и ремонтник им честно отказывает (no_failing_tests); их лента — Stage A: сначала падающий тест, благословлённый человеком (docs/CODE_NOTES.md «A diagnosis earns a test, not a patch»). Рост — сам контракт: параметр и его проброс. +7 (2026-08-17): квитанции впрыска уроков — доставка после ухода промпта и действие при рождении заявки (lesson_provenance, «строй квитанцию впрыска»). +1 (2026-08-17): рука критика-измерителя — _record_critic_measurement после вердикта («строй писаря measured»).
     "core/role_router.py:RoleRouter.route": 163,

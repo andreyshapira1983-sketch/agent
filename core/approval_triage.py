@@ -69,7 +69,7 @@ def _signature_of(item: ApprovalInboxItem) -> str:
         if description.strip():
             # Lazy import: keeps this module light and avoids an import cycle
             # with the heavy autonomous_runtime module at load time.
-            from core.autonomous_runtime import _proposal_canonical_signature
+            from core.autonomous_runtime_proposals import _proposal_canonical_signature
 
             return _proposal_canonical_signature(kind, description)
     return item.operation or "unknown"
