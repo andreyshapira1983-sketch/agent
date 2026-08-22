@@ -143,7 +143,19 @@ class ClaimExtractor:
         # table, while every one of them sat in an HTML comment the operator
         # would never see in the rendered file. See docs/CODE_NOTES.md,
         # "Concealment, not vocabulary".
-        from core.injection_guard import strip_concealed, strip_suspicious_annotation
+        from core.injection_guard import (
+            carries_suspicious_annotation,
+            strip_concealed,
+            strip_suspicious_annotation,
+        )
+
+        # MIR-011: the guard's verdict used to live ONLY in the wrapper, and
+        # the strip below destroyed it — a sentence from scanner-flagged
+        # content was indistinguishable from clean. Detect BEFORE stripping;
+        # what gets minted from a flagged excerpt is quarantined as `suspect`
+        # (stored and auditable, refused by the write policy, never upgraded
+        # by corroboration — quarantine, not blunt exclusion).
+        excerpt_flagged = carries_suspicious_annotation(evidence.excerpt)
 
         # Голос охранника (обёртка annotate_suspicious) — аннотация для
         # синтезатора, не содержимое источника: снимается до нарезки на
@@ -157,7 +169,7 @@ class ClaimExtractor:
             if not self._accept_sentence(sentence):
                 continue
             confidence = rank.final_score if rank is not None else evidence.confidence
-            status = _status_from_rank(rank)
+            status = "suspect" if excerpt_flagged else _status_from_rank(rank)
             claims.append(ClaimRecord(
                 id=_claim_id(),
                 source_id=source.id,
@@ -458,6 +470,15 @@ class KnowledgeWritePolicy:
                      "assertion by the source (source words live in the "
                      "excerpt)"),
                 ),
+            )
+        if claim.status == "suspect":
+            # MIR-011 quarantine: the injection guard flagged the content this
+            # claim was extracted from. It stays in the registry for audit and
+            # review, and never becomes durable knowledge.
+            return KnowledgeWriteDecision(
+                "reject",
+                (("claim was extracted from scanner-flagged content "
+                  "(injection guard: suspicious) — quarantined, not knowledge"),),
             )
         if claim.status in {"unverified", "conflicted"}:
             return KnowledgeWriteDecision("reject", (f"claim status is {claim.status}",))

@@ -41,6 +41,10 @@ ClaimStatus = Literal[
     "verified",
     "conflicted",
     "unverified",
+    # MIR-011: extracted from content the injection guard flagged `suspicious`.
+    # Stored (visible, auditable), refused by the memory write policy, never
+    # upgraded by corroboration — quarantine, not blunt exclusion.
+    "suspect",
 ]
 
 
