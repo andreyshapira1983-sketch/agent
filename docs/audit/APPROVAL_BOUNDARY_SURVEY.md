@@ -51,22 +51,36 @@ row most worth his decision.
 
 ## 2. `launch_subagent`
 
-**What it is.** A helper drawn from already-permitted capabilities, running
-under a contract whose `allowed_tools` / `forbidden_tools` scope it — and a
-subagent's tool surface is bounded by the contract, not widened past the
-parent. Under C0.P a helper for interior work is interior work.
+**Correction, 2026-08-22, caught in review against the code.** The first
+version of this survey said the operation "cannot reach the network or money".
+That is false: the child's permitted tool set is a subset of `file_read,
+list_dir, web_search, web_fetch, rss_fetch, semantic_scholar_search, run_tests,
+read_logs, diff_file` (`tools/spawn_subagent.py:107`), so a subagent reads the
+public internet, and its cognition runs through the model router, so it spends
+the API budget. A helper is not offline and not free.
 
-**The one thing that is NOT interior:** concurrency itself. A helper does not
-grant a new right, but it amplifies throughput, resource draw and blast radius
-over time — a viability/safety property, hence constitutional. So the C0.P
-boundary here is not "approve this subagent" but "the number of concurrent
-workers is bounded", set once as an envelope, not asked per helper.
+**The claim that IS true, and it is the survey's real lens:** the operation
+grants **no new authority beyond the parent's already-delegated envelope**.
+Spawn is never in a child registry (no recursion), `shell_exec` and
+`file_write` are always blocked from children, and the contract's
+`allowed_tools` / budget scope can only narrow. The child USES what the
+operator already delegated — the API budget, the public-internet read access,
+the read-only tool set — and can WIDEN none of it.
 
-Candidate reading: the per-launch approval may be the wrong shape — a talon
-where a constitutional concurrency cap belongs. Whether an individual launch
-still deserves a checkpoint is the operator's call; the measurement only says
-the launch itself does not cross a sovereignty line, while the aggregate count
-does.
+That is the distinction the whole survey turns on: **using a delegated
+resource is interior executive territory; widening the resource or the right
+is the human boundary.** "It spends money" and "it expands its own right to
+spend money" are different sentences, and only the second crosses C0.P.
+
+**What is still not interior:** concurrency itself. Helpers amplify
+throughput, resource draw and blast radius over time — constitutional, an
+envelope (a cap set once), not a per-launch ask.
+
+Candidate reading, unchanged by the correction: the per-launch approval may be
+the wrong shape — a talon where a constitutional concurrency cap belongs —
+PROVIDED the worker cap, budget and tool surface are already bounded by
+envelope. Whether an individual launch still deserves a checkpoint is the
+operator's call.
 
 ## 3. `self_apply_lane.run`
 
@@ -91,11 +105,16 @@ that should not exist is not the thing to repair.
 
 ## What the survey establishes, and what it does not
 
-**Established, from code:** all three operations' effect paths are confined to
-the workspace/local-repo lab, reversible, and unable to reach the network,
-money, rights, or accounts. The real sovereignty boundary — push, spend,
-external commitment, new credentials — lies outside all three and is already
-absent from their surfaces by construction.
+**Established, from code — stated per operation, because the first version
+overclaimed it as one sentence:** none of the three operations grants reach
+beyond the envelope the operator has already delegated. `allow_effects` adds
+exactly workspace-confined writes and local git on top of what dry-run already
+has (model spend and web reads exist in dry-run too — the switch does not add
+them). `launch_subagent` adds concurrent use of already-delegated read/web/model
+resources, and nothing else. `self_apply_lane.run` adds local commits with
+rollback. What none of them can do is WIDEN the envelope: no push, no new
+credential, no new access class, no raising of its own budget — those lie
+outside all three surfaces by construction.
 
 **Not established, and reserved to the operator:** whether each approval should
 therefore be removed, kept as defence-in-depth, or reshaped (per-launch →
