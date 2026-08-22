@@ -18,7 +18,7 @@ order, so the same signals always yield the same advice.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from core.approval_triage import TriageReport
@@ -90,6 +90,18 @@ class BestNextAction:
     risk: str = "read_only"
     recommended_command: str | None = None
     confidence: float = 0.0
+    #: HOW this action was selected — a fact derived at the selection site, not
+    #: a judgement. One of `no_candidate` (nothing was admissible),
+    #: `sole_candidate` (one was active, so no selection occurred) or
+    #: `priority_table` (two or more competed and the developer's `_P_*`
+    #: literals picked the winner). Deliberately no `agent_deliberation` value:
+    #: the census measured zero agent-owned decision boundaries, and a label
+    #: without a mechanism behind it is ceremony (MIR-117, MIR-119).
+    decided_by: str = "unrecorded"
+    #: How many candidates were still in the race when the winner was taken —
+    #: the count describes the race that happened, so a suppressed candidate is
+    #: not counted as a competitor.
+    candidates_considered: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -103,6 +115,8 @@ class BestNextAction:
             "risk": self.risk,
             "recommended_command": self.recommended_command,
             "confidence": self.confidence,
+            "decided_by": self.decided_by,
+            "candidates_considered": self.candidates_considered,
         }
 
 
@@ -310,13 +324,25 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     suppressed = [c for c in candidates if _is_suppressed(c, acknowledged)]
 
     if not active:
-        return _candidate_observe(
+        fallback = _candidate_observe(
             tests_health, result_status, inbox_pending, suppressed=suppressed
         )
+        return replace(fallback, decided_by="no_candidate",
+                       candidates_considered=0)
 
     # Deterministic: highest priority wins; ties keep first-appended (which is
     # already the intended severity order above).
-    return max(active, key=lambda c: c.priority)
+    winner = max(active, key=lambda c: c.priority)
+    # Provenance recorded HERE because this is where the selection happens, and
+    # it is derived rather than asserted: one active candidate means no choice
+    # was made at all; two or more means the developer's `_P_*` numbers settled
+    # it. Writing that down is what lets a later post-mortem tell the agent's
+    # mistake from a developer's (MIR-117, the first of three empty axes).
+    return replace(
+        winner,
+        decided_by="sole_candidate" if len(active) == 1 else "priority_table",
+        candidates_considered=len(active),
+    )
 
 
 def _is_suppressed(
