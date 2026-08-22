@@ -72,6 +72,12 @@ class ApprovalInboxItem:
     reasons: tuple[str, ...] = ()
     payload: dict = field(default_factory=dict)
     requested_by: str = "autonomous_runtime"
+    #: WHO gave the verdict. `unattributed` is the honest default: assuming the
+    #: operator when nobody said so is how a record starts lying comfortably,
+    #: and this is the one field whose purpose is to support a claim about the
+    #: human (§9). A RECORD of who claimed the verdict, never authentication —
+    #: a caller saying "operator" is believed.
+    decided_by: str = "unattributed"
     expires_at: str | None = None
     id: str = field(default_factory=lambda: new_id("ain"))
     status: ApprovalInboxStatus = "pending"
@@ -87,6 +93,7 @@ class ApprovalInboxItem:
             "reasons": list(self.reasons),
             "payload": self.payload,
             "requested_by": self.requested_by,
+            "decided_by": self.decided_by,
             "expires_at": self.expires_at,
             "status": self.status,
             "created_at": self.created_at,
@@ -113,6 +120,7 @@ class ApprovalInboxItem:
             reasons=tuple(str(reason) for reason in reasons),
             payload=payload,
             requested_by=str(data.get("requested_by") or "autonomous_runtime"),
+            decided_by=str(data.get("decided_by") or "unattributed"),
             expires_at=str(data.get("expires_at")) if data.get("expires_at") else None,
             status=status,  # type: ignore[arg-type]
             created_at=str(data.get("created_at") or _now_iso()),
@@ -222,14 +230,25 @@ class ApprovalInbox:
             return list(self.items)
         return [item for item in self.items if item.status == status]
 
-    def approve(self, item_id: str, *, reason: str = "") -> ApprovalInboxItem:
-        item = self.set_status(item_id, "approved")
-        self._record_outcome(item, "approved", reason)
-        return item
+    def approve(
+        self, item_id: str, *, reason: str = "", actor: str = "",
+    ) -> ApprovalInboxItem:
+        return self._verdict(item_id, "approved", reason, actor)
 
-    def deny(self, item_id: str, *, reason: str = "") -> ApprovalInboxItem:
-        item = self.set_status(item_id, "denied")
-        self._record_outcome(item, "denied", reason)
+    def deny(
+        self, item_id: str, *, reason: str = "", actor: str = "",
+    ) -> ApprovalInboxItem:
+        return self._verdict(item_id, "denied", reason, actor)
+
+    def _verdict(
+        self, item_id: str, status: str, reason: str, actor: str,
+    ) -> ApprovalInboxItem:
+        """One path for both verdicts, so the actor cannot be recorded on one
+        and forgotten on the other."""
+        item = self.set_status(
+            item_id, status, decided_by=str(actor).strip() or "unattributed",
+        )
+        self._record_outcome(item, status, reason)
         return item
 
     def _record_outcome(
@@ -254,6 +273,7 @@ class ApprovalInbox:
                 "summary": item.summary,
                 "verdict": verdict,
                 "reason": str(reason or ""),
+                "decided_by": item.decided_by,
             }])
         except Exception:  # noqa: BLE001, S110 — мост не роняет вердикт;
             pass           # недоставленная запись хуже, чем упавший approve? нет
@@ -270,14 +290,26 @@ class ApprovalInbox:
                 return item
         return None
 
-    def set_status(self, item_id: str, status: ApprovalInboxStatus) -> ApprovalInboxItem:
+    def set_status(
+        self,
+        item_id: str,
+        status: ApprovalInboxStatus,
+        *,
+        decided_by: str | None = None,
+    ) -> ApprovalInboxItem:
+        """`decided_by` is written only by the verdict path. Lifecycle moves
+        (executed/aborted) leave it alone: they are plumbing, not review, and
+        stamping an actor on them would attribute a verdict nobody gave."""
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid approval status: {status}")
         updated: ApprovalInboxItem | None = None
         out: list[ApprovalInboxItem] = []
         for item in self.items:
             if item.id == item_id:
-                updated = replace(item, status=status, updated_at=_now_iso())
+                updated = replace(
+                    item, status=status, updated_at=_now_iso(),
+                    **({"decided_by": decided_by} if decided_by else {}),
+                )
                 out.append(updated)
             else:
                 out.append(item)

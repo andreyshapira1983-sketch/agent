@@ -3943,3 +3943,38 @@ Scope: this is ONE of the three empty axes. Evidence origin and reviewer
 identity live on different surfaces and remain unrecorded. And `sole_candidate`
 is the honest word for a run where nothing was chosen — calling that a decision
 would inflate the record exactly where it must not.
+
+## An approval now names who gave it
+
+The second of the three empty provenance axes, and the one that touches §9
+directly: approval of an irreversible action belongs to the human, and the
+record could not name the approver. It could say a request was made and that a
+verdict happened — never by whom.
+
+Measuring it corrected the premise. The axis was NOT uniformly empty:
+`ApprovalDecision` has carried `responder` (user / auto / timeout) all along, so
+the in-process verdict object could always distinguish a person from a policy.
+What was missing was the DURABLE side — the inbox item and its outcome row, the
+137 live rows, recorded no actor at all. So the fix went there, and the
+already-working half got a test instead of a duplicate field beside it. Two
+sources for one truth would have been the worse outcome.
+
+`unattributed` is the honest default. Filling in "operator" when nobody said so
+is how a record starts lying comfortably, and this is the one field whose whole
+purpose is to support a claim about the human. The break-the-fix pass earned
+that: break 2 was exactly "default to operator", and it reddens its case.
+
+`decided_by` is written only by the verdict path. Lifecycle moves — executed,
+aborted — leave it alone, because they are plumbing rather than review, and
+stamping an actor on them would attribute a verdict nobody gave. That is norm B
+in one keyword argument: the request, the permission and the execution are
+three events, and so are their authors.
+
+Stated in the tests so a later reader cannot mistake it: this is a RECORD of who
+CLAIMED the verdict, never authentication. A caller saying "operator" is
+believed.
+
+Fourth API name invented from memory this session (`add()` takes keyword
+arguments, not an item), and the fourth corrected by reading. The pattern is
+stable enough now to state as a rule rather than an apology: I should not be
+typing this repository's signatures from recall at all.
