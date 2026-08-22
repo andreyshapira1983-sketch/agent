@@ -3978,3 +3978,37 @@ Fourth API name invented from memory this session (`add()` takes keyword
 arguments, not an item), and the fourth corrected by reading. The pattern is
 stable enough now to state as a rule rather than an apology: I should not be
 typing this repository's signatures from recall at all.
+
+## Where the grounds came from — the last empty axis
+
+Three of MIR-117's five axes were unrecorded. This closes the third: not how
+the action was chosen, not who approved it, but WHERE ITS GROUNDS CAME FROM.
+
+It is the axis that makes the human-deferred-authorship path detectable — a
+human choosing at t1, the choice stored, the outcome changing at t2, and the
+whole thing reading as the agent learning. It is also the axis the operator's
+ratified rule turns on: supplying a fact leaves the executive choice with the
+agent, naming the next move does not. Without the field those two are
+indistinguishable once the run is over.
+
+Three origins, and the split is mechanical rather than assigned — measured
+first: of twelve candidate generators, three take `goal` and nine take signals.
+
+    operator_goal    the grounds are the operator's own text
+    observed_state   live signals — heartbeat, tests, inbox, streaks
+    retained_record  durable state carried from earlier runs
+
+The tagging happens at ONE place, the admission helper, because that is where
+the input a candidate read is visible. Tagging inside twelve generators would
+have scattered the derivation and invited it to drift apart.
+
+`retained_record` is the one that pays later. "Did experience change this
+decision" is unanswerable unless the record says the grounds were carried from
+before — the D-before-E ordering this investigation established. Break 1 of the
+break-the-fix pass was exactly relabelling memory as observation, which is how
+the influence of the past would go invisible, and it reddens its case.
+
+Not claimed: that an `operator_goal` decision is the human deciding. The
+operator naming a subject and the operator naming the next move are different
+things; this field records only where grounds came from, never who exercised
+judgement over them.

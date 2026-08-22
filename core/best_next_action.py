@@ -98,6 +98,14 @@ class BestNextAction:
     #: the census measured zero agent-owned decision boundaries, and a label
     #: without a mechanism behind it is ceremony (MIR-117, MIR-119).
     decided_by: str = "unrecorded"
+    #: WHERE the grounds came from — derived from which input the candidate
+    #: read, so it is a fact rather than an assignment. `operator_goal` (the
+    #: operator's own text), `observed_state` (live signals) or
+    #: `retained_record` (durable state carried from earlier runs). The third
+    #: is what makes "did experience change this decision" answerable at all,
+    #: and what lets a post-mortem separate the agent's own grounds from ones
+    #: a human supplied (MIR-117, the human-deferred-authorship path).
+    grounds: str = "unrecorded"
     #: How many candidates were still in the race when the winner was taken —
     #: the count describes the race that happened, so a suppressed candidate is
     #: not counted as a competitor.
@@ -116,6 +124,7 @@ class BestNextAction:
             "recommended_command": self.recommended_command,
             "confidence": self.confidence,
             "decided_by": self.decided_by,
+            "grounds": self.grounds,
             "candidates_considered": self.candidates_considered,
         }
 
@@ -273,49 +282,42 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     """
     candidates: list[BestNextAction] = []
 
-    engineering = _candidate_engineering_task(goal)
-    if engineering is not None:
-        candidates.append(engineering)
+    def admit(candidate: BestNextAction | None, grounds: str) -> None:
+        """Tag the candidate with WHERE its grounds came from, at the one place
+        where the input it read is visible. Derived, never assigned: a
+        generator taking `goal` rests on the operator's text, one taking live
+        signals on observation, one reading the durable registry on records
+        carried from earlier runs."""
+        if candidate is not None:
+            candidates.append(replace(candidate, grounds=grounds))
 
-    document = _candidate_charter_document(goal)
-    if document is not None:
-        candidates.append(document)
+    admit(_candidate_engineering_task(goal), "operator_goal")
+    admit(_candidate_charter_document(goal), "operator_goal")
+    admit(_candidate_external_study(goal), "operator_goal")
 
-    study = _candidate_external_study(goal)
-    if study is not None:
-        candidates.append(study)
+    admit(
+        _candidate_daemon(heartbeat_missing, heartbeat_stale,
+                          heartbeat_age_seconds, last_event),
+        "observed_state",
+    )
+    admit(_candidate_tick_error(tick_error), "observed_state")
+    admit(_candidate_tests(tests_health, result_status, failed_tests),
+          "observed_state")
 
-    daemon = _candidate_daemon(heartbeat_missing, heartbeat_stale, heartbeat_age_seconds, last_event)
-    if daemon is not None:
-        candidates.append(daemon)
-
-    err = _candidate_tick_error(tick_error)
-    if err is not None:
-        candidates.append(err)
-
-    tests = _candidate_tests(tests_health, result_status, failed_tests)
-    if tests is not None:
-        candidates.append(tests)
-
+    # Both branches read state carried from EARLIER runs — the durable issue
+    # registry, or recent failures reconstructed from episodes. That is a
+    # different provenance from a live signal, and it is the one that makes the
+    # memory-influence question answerable later.
     improvement = _candidate_open_self_improvement_issue(open_self_improvement_issues)
     if improvement is None and not self_improvement_registry_available:
         improvement = _candidate_self_improvement_failure(
             recent_self_improvement_failures
         )
-    if improvement is not None:
-        candidates.append(improvement)
+    admit(improvement, "retained_record")
 
-    debt = _candidate_inbox_debt(triage)
-    if debt is not None:
-        candidates.append(debt)
-
-    stuck = _candidate_dry_run_stuck(dry_run_streak)
-    if stuck is not None:
-        candidates.append(stuck)
-
-    backlog = _candidate_inbox_backlog(triage, inbox_pending)
-    if backlog is not None:
-        candidates.append(backlog)
+    admit(_candidate_inbox_debt(triage), "observed_state")
+    admit(_candidate_dry_run_stuck(dry_run_streak), "observed_state")
+    admit(_candidate_inbox_backlog(triage, inbox_pending), "observed_state")
 
     # Partition: an acknowledged advisory alert (medium/low) leaves the race so
     # the next genuine action surfaces. A critical/high candidate is NEVER
@@ -327,8 +329,10 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
         fallback = _candidate_observe(
             tests_health, result_status, inbox_pending, suppressed=suppressed
         )
+        # The observe fallback reads live signals to say the world looks
+        # healthy — observation, like any other reading of the present.
         return replace(fallback, decided_by="no_candidate",
-                       candidates_considered=0)
+                       candidates_considered=0, grounds="observed_state")
 
     # Deterministic: highest priority wins; ties keep first-appended (which is
     # already the intended severity order above).
