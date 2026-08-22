@@ -16,7 +16,13 @@ from core.state_integrity import (
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
-from core.topic_tokens import FLAT, TokenSalience, topic_tokens
+from core.topic_tokens import (
+    FLAT,
+    STOPWORDS,
+    TokenSalience,
+    discriminating_tokens,
+    topic_tokens,
+)
 
 EpisodeOutcome = Literal["success", "partial", "failed"]
 
@@ -583,10 +589,17 @@ class EpisodicMemoryStore:
             )
         scored: list[tuple[int, EpisodeRecord]] = []
         no_overlap = 0
+        q_content = q_tokens - STOPWORDS
         for ep in episodes:
             haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
-            score = len(q_tokens & _tokens(haystack))
-            if score:
+            hay_tokens = _tokens(haystack)
+            score = len(q_tokens & hay_tokens)
+            # MIR-105/024/008: a match made of function words is not a match.
+            # Scoring still counts every shared token (order unchanged); only
+            # ELIGIBILITY requires at least one discriminating word — measured
+            # 2026-08-22, filler alone retrieved 17 of 34 procedures, and a
+            # launch and a deletion scored as one question.
+            if score and (q_content & hay_tokens):
                 # Boost protected episodes (lessons, bug-fixes) so they surface
                 # above ordinary episodes when there is any token overlap.
                 if self.PROTECTED_TAGS & set(ep.tags):
@@ -629,13 +642,19 @@ class EpisodicMemoryStore:
         and not «is this topic familiar?». A candidate with a low
         ``answer_quality_score`` gets the threshold lowered by 0.10.
         """
-        q_tokens = _tokens(query)
+        # MIR-024: the frame is not the question. Similarity is computed over
+        # DISCRIMINATING words only — «Я хочу ЗАПУСТИТЬ АГЕНТА, что мне
+        # сделать?» and «Я хочу УДАЛИТЬ ВСЕ ЛОГИ, что мне сделать?» scored
+        # 0.400 (the threshold) on the shared frame alone, so a launch was
+        # annotated to the planner as a repeat of a deletion. A question made
+        # entirely of filler has nothing to compare and matches nothing.
+        q_tokens = discriminating_tokens(query)
         if not q_tokens:
             return None, 0.0
         best_ep: EpisodeRecord | None = None
         best_score: float = 0.0
         for ep in self.load():
-            ep_tokens = _tokens(ep.question)
+            ep_tokens = discriminating_tokens(ep.question)
             if not ep_tokens:
                 continue
             union = q_tokens | ep_tokens
@@ -890,6 +909,7 @@ class ProceduralMemoryStore:
         """
         procedures = self.load()
         q_tokens = _tokens(query)
+        q_content = q_tokens - STOPWORDS
         if not q_tokens:
             return ProcedureSearchResult(
                 procedures=[],
@@ -908,8 +928,9 @@ class ProceduralMemoryStore:
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
             # Взвешенно, а не штуками: три служебных слова не должны обходить
             # одно имя сигнала. Без корпуса вес плоский и счёт прежний.
-            score = salience.overlap(q_tokens, _tokens(haystack))
-            if score:
+            hay_tokens = _tokens(haystack)
+            score = salience.overlap(q_tokens, hay_tokens)
+            if score and (q_content & hay_tokens):
                 scored.append((score, 0 if proc.status == "candidate" else 1, proc))
             else:
                 no_overlap += 1

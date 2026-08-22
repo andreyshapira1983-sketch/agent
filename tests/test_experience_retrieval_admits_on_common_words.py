@@ -30,8 +30,6 @@ a stopword floor for unseen tokens, or several. Recorded as MIR-105.
 """
 from __future__ import annotations
 
-import pytest
-
 from core.smart_memory import ProceduralMemoryStore, ProcedureRecord
 from core.topic_tokens import build_salience
 
@@ -69,19 +67,17 @@ def test_the_relevant_question_finds_it(tmp_path) -> None:
     assert [p.id for p in found.procedures] == ["proc_split"]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured live 2026-08-20 and banked rather than fixed "
-        "(MIR-105): an unrelated question retrieves the procedure anyway. The "
-        "salience corpus is the agent's own command names, so an ordinary word "
-        "it never saw scores like a unique identifier, and the store admits on "
-        "any non-zero overlap. The invariant: a question sharing only common "
-        "words with a procedure must not retrieve it. Fix deliberately "
-        "unprescribed — corpus population, threshold, or both."
-    ),
-    strict=True,
-)
 def test_an_unrelated_question_retrieves_nothing(tmp_path) -> None:
+    """CLOSED 2026-08-22 — was a strict xfail from 2026-08-20 (MIR-105).
+
+    What closed it, recorded as the convention requires: not the corpus and
+    not a score threshold (both were left unprescribed on purpose), but a
+    third mechanism — ELIGIBILITY now requires at least one DISCRIMINATING
+    shared token. Scoring is untouched; a match made only of function words
+    is simply not a match. One stopword vocabulary now serves both memory
+    subsystems (moved to `core/topic_tokens.py`, MIR-008's divergence), and
+    it was extended from the live measurement that produced this very gap.
+    """
     found = _store(tmp_path).search_with_report(
         "what is the HTTP timeout for the web fetch tool?",
         limit=3,
