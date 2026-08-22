@@ -89,9 +89,7 @@ solvable problem.
   this project and it is Disabled; a second is a spent kill-switch that disabled
   a task no longer present on the host. See `SELF_BUILD_FAILURE_ANALYSIS.md`
   Addendum 2.
-- **A budget-exhausted task never resumes.** `add_paused_checkpoint` parks it as
-  `paused`; `pending()` returns only `pending`; `summary()` lists it under
-  `resumable` and resumes nothing. Fourteen tasks have been parked since 2026-07-30.
+- **A budget-exhausted task never resumes — REPAIRED 2026-08-22, the same day, four commits** (`f325077`, `c0ae871`, `85136d3`, `b88651a`). The repair went four layers down rather than one: (1) `reactivate_paused_checkpoints` returns clock-clearable pauses to the queue — narrow on stop reason (a kill switch is a decision, not a timer), on cooldown (a single attempt must not be spent into a dry window), and on `max_attempts` (MIR-040); wired into the tick beside `recover_orphaned_tasks`, same lock, call chain pinned by test. (2) The consumer itself refused the kind: `_config_from_task` raised on `resume_checkpoint`, so reactivation alone would have claimed, spent and killed all fourteen rows — the queue had been holding rows nothing could ever run. It re-runs them now (state-exact resume stays the human `--resume` path). (3) A re-park carries the SAME row forward (`resumed_from`), else every failed retry would mint one more permanent row. (4) The batch is bounded at 3, oldest first, else the backlog would salvo the whole refilled window. Eleven tests, each guard break-tested red. The fourteen live rows will drain at 3 per tick once a tick runs.
 - **Thirteen maintenance actions run only from a typed command** (MIR-131), so
   the autonomous path is the one path that cannot clean up after itself — which
   is why 43 identical episodes accumulated on 08-16.
