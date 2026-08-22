@@ -3900,3 +3900,46 @@ stream, and `ApprovalRequest` lives in `core/models` and requires `action_id`
 and `step_id`. Both invented from memory, both corrected by reading. Third time
 this session; the lesson is not that I forget names but that I should not be
 typing them from recall at all.
+
+## The decision now says who chose it
+
+MIR-117 measured five provenance axes and found three empty: executive
+authorship, evidence origin, reviewer identity. The consequence is blunt —
+after a run, a defect cannot be attributed. The record cannot tell the agent's
+mistake from a developer's, and that is the difference the whole WHO DECIDES
+investigation exists to see.
+
+It also blocks the learning question. E (does experience change a later
+decision) is only meaningful after D (whose decision is it), established
+earlier here, and D had no field to be written into.
+
+The first axis is now recorded, and deliberately as a FACT rather than a
+judgement. `select_best_next_action` builds candidates that observation
+activates, then takes `max(active, key=priority)` over developer-authored
+`_P_*` literals. Exactly one of three things happened, each derivable at the
+selection site itself:
+
+    no_candidate     nothing was admissible; the observe fallback answered
+    sole_candidate   one candidate was active — no selection occurred at all
+    priority_table   two or more competed and the developer's numbers picked
+
+Live, on a world with a dead daemon and failing tests: `decided_by=
+'priority_table', candidates_considered=2`. The record now says, in the run's
+own journal, that a developer decided — which is exactly what the census
+measured, made visible at runtime instead of only in an audit document.
+
+There is deliberately NO `agent_deliberation` value. The census measured zero
+agent-owned decision boundaries, and a label without a mechanism behind it is
+the ceremony this project keeps finding elsewhere — `expected_effect` is
+written by the producer and read by nothing. A test pins the absence: no input
+may produce a record claiming the agent deliberated.
+
+The break-the-fix pass earned that test. Break 2 was "credit the agent" —
+setting `decided_by='agent_deliberation'` — and it reddens four cases. A future
+change that quietly inflates the record has to get past a test written
+specifically to stop it.
+
+Scope: this is ONE of the three empty axes. Evidence origin and reviewer
+identity live on different surfaces and remain unrecorded. And `sole_candidate`
+is the honest word for a run where nothing was chosen — calling that a decision
+would inflate the record exactly where it must not.
