@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -261,6 +262,44 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     )
 
 
+#: Тело страницы-заглушки: сервер ответил 200, а содержимым отдал ошибку, форму
+#: входа, капчу или объявление о продаже домена. Исторический класс H-01 —
+#: Ariane 501 (1996): отказавший блок выставил ДИАГНОСТИКУ на шину данных, и
+#: бортовой компьютер отработал по ней как по полётным данным. Отказ был
+#: честным; неотличимость диагностики от данных — нет.
+_ERROR_PAGE_MARKERS: tuple[str, ...] = (
+    "404 not found", "not found", "403 forbidden", "forbidden",
+    "service unavailable", "internal server error", "bad gateway",
+    "access denied", "sign in to continue", "you must be logged in",
+    "log in to continue", "verify you are human", "enable javascript",
+    "checking your browser", "this domain is parked", "domain for sale",
+    "rate limit", "too many requests",
+    "страница не найдена", "не найдена", "доступ запрещ",
+    "войдите в систему", "включите javascript", "слишком много запросов",
+)
+
+#: Форма заглушки, а не её длина. Порог по одной длине оказался подгонкой:
+#: настоящая статья про soft-404 уложилась в 581 символ и была бы отвергнута.
+#: Различает их доля, которую маркер занимает в теле — у заглушки он и есть всё
+#: содержимое, у статьи это одно упоминание среди многих предложений. Поэтому
+#: два условия сразу: тело коротко И состоит из считанных предложений.
+_ERROR_PAGE_MAX_CHARS = 600
+_ERROR_PAGE_MAX_SENTENCES = 3
+_SENTENCE_BREAK = re.compile(r"[.!?" + chr(92) + "n]+")
+
+
+def looks_like_error_page(text: str) -> bool:
+    """Является ли тело страницы служебной заглушкой, а не содержимым."""
+    body = (text or "").strip()
+    if not body or len(body) > _ERROR_PAGE_MAX_CHARS:
+        return False
+    sentences = [p for p in re.split(_SENTENCE_BREAK, body) if p.strip()]
+    if len(sentences) > _ERROR_PAGE_MAX_SENTENCES:
+        return False
+    lowered = body.lower()
+    return any(marker in lowered for marker in _ERROR_PAGE_MARKERS)
+
+
 def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
     *,
     tool_name: str,
@@ -333,6 +372,13 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         url = str(output.get("url") or args.get("url", "<unknown>"))
         text = output.get("text", "")
         if not isinstance(text, str) or not text:
+            return None
+        # H-01: тело — служебная заглушка, а не содержимое. Отсекается ЗДЕСЬ, у
+        # производителя: судить утверждение — работа цепочки гейтов
+        # верификатора, и второй судья над той же областью спорил бы с первым.
+        # Страница-ошибка не источник ни для какого утверждения, кем бы оно ни
+        # было, поэтому решение принадлежит границе фабрики улик.
+        if looks_like_error_page(text):
             return None
         ch = output.get("content_hash")
         # Trust the tool's own hash when present — it covers more bytes
