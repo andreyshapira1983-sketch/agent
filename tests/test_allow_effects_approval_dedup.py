@@ -118,7 +118,7 @@ def test_a_decided_item_stops_deduping(tmp_path):
     rt = _runtime(tmp_path)
     first = _run_blocked(rt, "project health")
     item_id = first.stop_reason.split(": ", 1)[1]
-    rt.approval_inbox.deny(item_id)
+    rt.approval_inbox.deny(item_id, reason="решено: этот прогон не нужен")
     again = _run_blocked(rt, "project health")
     assert again.stop_reason != first.stop_reason, (
         "после решения оператора новый запуск вправе спросить заново"

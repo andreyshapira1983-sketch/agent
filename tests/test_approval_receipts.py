@@ -56,7 +56,7 @@ def test_transitions_write_receipts(workspace: Path) -> None:
 
     inbox.approve(a.id)
     inbox.mark_executed(a.id)
-    inbox.deny(b.id)
+    inbox.deny(b.id, reason="отклонено ради квитанции")
     inbox.abort(c.id)
     inbox.set_status(d.id, "approved")
 

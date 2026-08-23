@@ -55,12 +55,17 @@ def test_an_approval_is_a_record_too(tmp_path: Path) -> None:
     assert "invariants" in rows[-1]["reason"]
 
 
-def test_a_reasonless_verdict_still_lands(tmp_path: Path) -> None:
+def test_a_reasonless_APPROVAL_still_lands(tmp_path: Path) -> None:
+    """Раньше этот тест закреплял, что БЕЗ причины ложится любой вердикт, и
+    примером брал отказ. С 2026-08-23 отказ без причины отвергается: у него
+    нет содержания нигде, кроме причины. Одобрение — другое дело, и граница
+    здесь: «да, как предложено» полностью описано самой заявкой, поэтому
+    пустая причина у одобрения остаётся законной и по-прежнему доезжает."""
     inbox = _inbox(tmp_path)
     item = inbox.add(operation="x", summary="s")
-    inbox.deny(item.id)
+    inbox.approve(item.id)
     rows = _outcomes(tmp_path)
-    assert rows and rows[-1]["verdict"] == "denied"
+    assert rows and rows[-1]["verdict"] == "approved"
     assert rows[-1]["reason"] == ""
 
 
@@ -77,7 +82,7 @@ def test_lifecycle_transitions_are_not_verdicts(tmp_path: Path) -> None:
 def test_an_in_memory_inbox_does_not_crash(tmp_path: Path) -> None:
     inbox = ApprovalInbox(path=None)
     item = inbox.add(operation="x", summary="s")
-    inbox.deny(item.id)  # nowhere to write — must simply not raise
+    inbox.deny(item.id, reason="некуда писать")  # nowhere to write — must simply not raise
 
 
 # ── the reader: the charter selector sees the fate of past work ─────────────

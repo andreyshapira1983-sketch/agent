@@ -2347,7 +2347,7 @@ Produce a patch proposal for the routing bug.
         assert handle_meta_command(f":approval-approve {first.id}", agent, workspace) is True
 
         second = inbox.add(operation="manual.check", summary="Manual check")
-        assert handle_meta_command(f":approval-deny {second.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-deny {second.id} не нужно", agent, workspace) is True
         assert handle_meta_command(":approval-list all", agent, workspace) is True
 
         out = capsys.readouterr()
@@ -2365,7 +2365,7 @@ Produce a patch proposal for the routing bug.
         item = inbox.pending()[0]
 
         assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
-        assert handle_meta_command(f":approval-deny {item.id}", agent, workspace) is True
+        assert handle_meta_command(f":approval-deny {item.id} не нужно", agent, workspace) is True
         assert handle_meta_command(f":approval-run {item.id}", agent, workspace) is True
 
         out = capsys.readouterr()

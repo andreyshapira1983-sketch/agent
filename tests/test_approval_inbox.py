@@ -56,7 +56,7 @@ def test_approval_inbox_approve_and_deny_persist_status(workspace):
     denied = inbox.add(operation="deny-me", summary="Deny me")
 
     assert inbox.approve(approved.id).status == "approved"
-    assert inbox.deny(denied.id).status == "denied"
+    assert inbox.deny(denied.id, reason="не подходит").status == "denied"
 
     reloaded = ApprovalInbox(path=path)
     assert reloaded.list(status="approved")[0].id == approved.id
@@ -218,7 +218,7 @@ class TestApprovalInboxDedup:
         first = inbox.add(
             operation="proposed_task", summary="task", dedup_key="k:t"
         )
-        inbox.deny(first.id)  # no longer pending
+        inbox.deny(first.id, reason="решено")  # no longer pending
         second = inbox.add(
             operation="proposed_task", summary="task again", dedup_key="k:t"
         )

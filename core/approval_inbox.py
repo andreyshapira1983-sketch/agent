@@ -238,6 +238,27 @@ class ApprovalInbox:
     def deny(
         self, item_id: str, *, reason: str = "", actor: str = "",
     ) -> ApprovalInboxItem:
+        """Refuse an item. The reason is REQUIRED, unlike on `approve`.
+
+        An approval says «yes, as proposed» — its content is the item itself.
+        A denial has no content anywhere except the reason: without it the
+        record says that something was wrong and never what. Measured
+        2026-08-23: work the agent chose for itself is denied at 55–60%
+        (`self_build_task.approve` 3 of 5, and not one ever executed), against
+        19% for permission to run work a human directed. That refusal rate IS
+        the gate nothing automated performs, and the verdict bridge
+        (`data/approval_outcomes.jsonl` → `core.charter_goal._recent_verdicts`)
+        already carries it back into goal selection. The channel existed and
+        could be silently emptied at the one moment it is for.
+
+        Raised BEFORE any status change, so a refused denial leaves the item
+        pending rather than half-decided.
+        """
+        if not str(reason or "").strip():
+            raise ValueError(
+                "a denial must carry a reason — it is the only content the "
+                "refusal has, and the author of the proposal reads it"
+            )
         return self._verdict(item_id, "denied", reason, actor)
 
     def _verdict(
