@@ -131,6 +131,38 @@ def _subject_tokens(text: str) -> set[str]:
     return {t for t in discriminating_tokens(text) if not t.isdigit()}
 
 
+#: Словарь МЕТА-утверждений: слова не про мир, а про сами улики и действия над
+#: ними — «both files agree», «the three values sum to 6», «в отчёте сказано».
+#: У такого куска содержательных слов о предмете нет вовсе, и расхождение с
+#: выдержкой ничего не значит: судить его — работа вычисляющего гейта или
+#: человека, но не сравнения слов.
+_META_VOCABULARY: frozenset[str] = frozenset({
+    "file", "files", "value", "values", "sum", "sums", "total", "count",
+    "contains", "contain", "agree", "agrees", "report", "reports", "test",
+    "tests", "output", "line", "lines", "key", "keys", "entry", "entries",
+    "source", "sources", "evidence", "result", "results", "both", "three",
+    "two", "all", "each", "same", "differ", "differs", "match", "matches",
+    "shows", "show", "states", "state", "passed", "failed",
+    "файл", "файла", "файлы", "файлов", "значение", "значения", "значений",
+    "сумма", "сумму", "сумме", "итог", "счёт", "содержит", "содержат",
+    "совпадают", "совпадает", "отчёт", "отчёте", "тест", "тесты", "тестов",
+    "вывод", "строка", "строки", "строк", "ключ", "ключи", "ключей",
+    "запись", "записи", "источник", "источника", "источники", "улика",
+    "улики", "результат", "результата", "оба", "обе", "все", "каждый",
+    "совпали", "различаются", "показывает", "сказано",
+})
+
+
+#: Префиксы, чья улика — ПРОЗА. Сравнение слов имеет смысл только против
+#: прозы: у файла, прогона тестов, лога, диффа и вывода оболочки выдержка
+#: состоит из кода и структурированных строк, и отсутствие общих слов с
+#: предложением ничего не доказывает. Замерено: без этого сужения гейт
+#: демотировал три существующие фикстуры и, хуже того, ПЕРЕХВАТЫВАЛ вердикт у
+#: более точного гейта (кусок, у которого нет квитанции, получал topic-only
+#: вместо receipt_missing).
+_PROSE_PREFIXES: frozenset[str] = frozenset({"web", "search"})
+
+
 def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     """Причина демоции, если разрешённая цитата НЕ ПРО это утверждение.
 
@@ -148,7 +180,7 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     одно общее слово. Гейт может только снять ложное `verified`, никогда не
     создать его.
     """
-    if prefix in {"user", "memory", "general-knowledge"}:
+    if prefix not in _PROSE_PREFIXES:
         return None
     excerpt_raw = ev.excerpt or ""
     # Та же оговорка, что у четвёртого гейта (R8): усечённая бюджетом улика не
@@ -166,11 +198,16 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     # («Both files agree»), где слова про отношение, а выдержка — содержимое.
     # Число делает утверждение проверяемым и обязывает его быть про свой
     # источник; без числа судить не о чем, и молчание честнее.
-    from .verifier_utils import extract_statistical_figures
-
-    if not extract_statistical_figures(chunk_text):
-        return None
+    # ПРОБА: требование числа снято
     claim_tokens = _subject_tokens(_CITATION_TOKEN_RE.sub(" ", chunk_text))
+    # Кусок ПРО САМИ УЛИКИ, а не про мир: «both files agree», «the three values
+    # sum to 6». Слова такого куска описывают действие над выдержкой, а не её
+    # предмет, поэтому отсутствие общих слов ничего не доказывает. Замерено:
+    # без этой оговорки гейт демотировал шесть существующих фикстур, среди них
+    # верное производное утверждение, у которого есть СВОЙ судья.
+    if claim_tokens and claim_tokens <= _META_VOCABULARY:
+        return None
+    claim_tokens = claim_tokens - _META_VOCABULARY
     if len(claim_tokens) < _OFF_TOPIC_MIN_TOKENS:
         return None
     # РАЗНЫЕ АЛФАВИТЫ — не разные предметы. Замерено 2026-08-23, через час

@@ -261,7 +261,11 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 # литералы код-образной формы; замер дал по оси темы J = 0.00.
                 # Шестой гейт, понижение БЕЗ обвинения:
                 # docs/CODE_NOTES.md, «A citation that is not about the claim».
-                if off_topic_reason(chunk_text, ev, c.prefix) is not None:
+                # Уступает вычисляющему гейту: если он ПОДТВЕРДИЛ форму, кусок
+                # говорит об улике арифметически, и сравнение слов тут не судья.
+                if arith.outcome != "supports" and off_topic_reason(
+                    chunk_text, ev, c.prefix
+                ) is not None:
                     strict_ok = False
                 # Девятый гейт: ссылка на улику, объявленную неверной, не может
                 # быть поддержкой. Понижение, не обвинение — маркер лексический.
