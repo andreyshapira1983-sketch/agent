@@ -16,6 +16,7 @@ from .verifier_absence import (
     absence_certifiable,
     absence_reason,
     absent_literal_reason,
+    denies_own_evidence_reason,
     off_topic_reason,
 )
 from .verifier_models import ClaimChunk, ClaimReason, VerificationReport
@@ -260,6 +261,10 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 # Шестой гейт, понижение БЕЗ обвинения:
                 # docs/CODE_NOTES.md, «A citation that is not about the claim».
                 if off_topic_reason(chunk_text, ev, c.prefix) is not None:
+                    strict_ok = False
+                # Девятый гейт: ссылка на улику, объявленную неверной, не может
+                # быть поддержкой. Понижение, не обвинение — маркер лексический.
+                if denies_own_evidence_reason(chunk_text, ev, c.prefix) is not None:
                     strict_ok = False
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
