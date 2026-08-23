@@ -74,7 +74,7 @@ def test_a_denied_request_is_not_a_yes(tmp_path: Path):
     """Улов не отдан: отказ обязан остаться отказом."""
     inbox = _inbox(tmp_path)
     item = _ask(inbox, _GOAL)
-    inbox.deny(item.id)
+    inbox.deny(item.id, reason="нет, эффекты не разрешены")
 
     assert _runtime(inbox)._granted_effects_approval(
         AutonomousRuntimeConfig(goal=_GOAL, dry_run=False)

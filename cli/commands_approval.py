@@ -395,6 +395,29 @@ def _handle_approval_decision(
         if decision == "approve":
             item = inbox.approve(item_id, reason=reason)
         elif decision == "deny":
+            if not reason:
+                # Требование причины живёт в инбоксе; здесь оно объясняется
+                # человеку, а не падает трассой стека.
+                print(
+                    "Отказ обязан нести причину: "
+                    f":approval-deny {item_id} <почему>",
+                    file=sys.stderr,
+                )
+                print(
+                    "  Одобрение говорит «да, как предложено» — его содержание "
+                    "в самой заявке.",
+                    file=sys.stderr,
+                )
+                print(
+                    "  У отказа содержания нет нигде, кроме причины, и её "
+                    "читает автор предложения",
+                    file=sys.stderr,
+                )
+                print(
+                    "  (data/approval_outcomes.jsonl -> выбор следующей цели).",
+                    file=sys.stderr,
+                )
+                return True
             item = inbox.deny(item_id, reason=reason)
         else:
             raise ValueError(f"unknown approval decision: {decision}")

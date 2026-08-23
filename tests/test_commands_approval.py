@@ -219,10 +219,19 @@ def test_decision_without_an_id_prints_usage(agent, workspace, capsys, decision)
     assert f"Usage: :approval-{decision}" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("decision,past", [("approve", "approved"), ("deny", "denied")])
-def test_decision_updates_the_item_and_logs_it(agent, workspace, capsys, decision, past):
+@pytest.mark.parametrize(
+    "decision,past,rest",
+    [("approve", "approved", ""), ("deny", "denied", " причина отказа")],
+)
+def test_decision_updates_the_item_and_logs_it(
+    agent, workspace, capsys, decision, past, rest
+):
+    """С 2026-08-23 отказ обязан нести причину, одобрение — нет, поэтому
+    параметризация несёт остаток строки, а не только слово решения."""
     item = add_item(agent, workspace)
-    assert _handle_approval_decision(item.id, agent, workspace, decision=decision) is True
+    assert _handle_approval_decision(
+        item.id + rest, agent, workspace, decision=decision
+    ) is True
 
     assert _approval_inbox_for(agent, workspace).get(item.id).status == past
     assert "approval_inbox_decision" in agent.log.kinds()
@@ -809,3 +818,12 @@ def test_issue_registry_failure_does_not_break_the_advice(agent, workspace, caps
     assert _handle_best_next_action("", agent, workspace) is True
     assert "best_next_action" in agent.log.kinds()
     assert capsys.readouterr().err.strip()
+
+
+def test_a_reasonless_deny_explains_instead_of_crashing(agent, workspace, capsys):
+    """Требование живёт в инбоксе; CLI обязан объяснить, а не показать трассу."""
+    item = add_item(agent, workspace)
+    assert _handle_approval_decision(item.id, agent, workspace, decision="deny") is True
+    err = capsys.readouterr().err
+    assert "Отказ обязан нести причину" in err
+    assert _approval_inbox_for(agent, workspace).get(item.id).status == "pending"
