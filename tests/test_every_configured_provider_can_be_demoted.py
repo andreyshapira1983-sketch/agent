@@ -7,8 +7,10 @@
 потому что ничего не помнило исход между процессами.
 
 ПРИМЕНИМОСТЬ. Починка MIR-132 завела словарь долговечных отказов по фразам
-OpenAI и Anthropic. В цепочке отката три провайдера, и у всех трёх ключ задан.
-Третий — huggingface — говорит другими словами.
+OpenAI и Anthropic. В цепочке отката четыре провайдера, и у всех задан ключ.
+Третий — huggingface — говорит другими словами. Четвёртый, `local`, добавлен
+2026-08-23 и отвечает на тот же вопрос иначе: его отказы не долговечны в
+смысле этого словаря, потому что чинятся снаружи и ничего не стоят.
 
 ЗАМЕР ДО ПОЧИНКИ. «You have exceeded your monthly included credits» и
 «Authorization header is invalid» не совпадали ни с одним маркером: провайдер
@@ -45,6 +47,15 @@ CASES: tuple[tuple[str, str, bool], ...] = (
     ("huggingface", "You have exceeded your monthly included credits for Inference Providers. Subscribe to PRO to get 20x more monthly included credits.", True),
     ("huggingface", "Authorization header is invalid, use 'Bearer API_TOKEN'", True),
     ("huggingface", "Model is currently loading, estimated time 20s", False),
+    # `local` — последнее средство в цепочке, и для него ответ на тот же
+    # вопрос ДРУГОЙ. Ни один его отказ не должен демотировать провайдера:
+    # сервер поднимают снаружи (scripts/start_local_llm.ps1), денег он не
+    # стоит, а двухчасовой отдых снял бы единственный оставшийся вариант
+    # ровно тогда, когда все платные ключи уже мертвы. «Отказаться работать
+    # хуже, чем один лишний пробный вызов» — здесь это правило сильнее всего.
+    ("local", "Connection refused: http://127.0.0.1:8080", False),
+    ("local", "model 'qwen2.5-coder' not found, try pulling it first", False),
+    ("local", "500 Internal Server Error from llama.cpp", False),
 )
 
 
