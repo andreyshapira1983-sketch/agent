@@ -101,6 +101,19 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
 _OFF_TOPIC_MIN_TOKENS = 3
 
 
+def _dominant_script(text: str) -> str:
+    """`cyrillic`, `latin` или `none` — какой алфавит преобладает в тексте."""
+    cyr = sum(1 for ch in text if "\u0400" <= ch <= "\u04ff")
+    lat = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+    if cyr == 0 and lat == 0:
+        return "none"
+    if cyr > lat:
+        return "cyrillic"
+    if lat > cyr:
+        return "latin"
+    return "none"
+
+
 def _subject_tokens(text: str) -> set[str]:
     """Содержательные слова БЕЗ голых чисел.
 
@@ -108,9 +121,14 @@ def _subject_tokens(text: str) -> set[str]:
     «Задержка составила 20 миллисекунд» делят токен `20` и не делят ничего
     больше. Это тот же урок, что и в MIR-141 — цифра не есть тема.
     """
-    from .topic_tokens import topic_tokens
+    from .topic_tokens import discriminating_tokens
 
-    return {t for t in topic_tokens(text) if not t.isdigit()}
+    # `discriminating_tokens`, а не `topic_tokens`: стоп-лист применяет только
+    # первая. Замерено — со второй английские артикли и связки («the», «was»)
+    # считались общим предметом, и гейт молчал на любом англоязычном
+    # расхождении: «The share price rose by 20 percent» делило с уликой про
+    # задержку ровно «the» и проезжало как подтверждённое.
+    return {t for t in discriminating_tokens(text) if not t.isdigit()}
 
 
 def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
@@ -155,6 +173,15 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     claim_tokens = _subject_tokens(_CITATION_TOKEN_RE.sub(" ", chunk_text))
     if len(claim_tokens) < _OFF_TOPIC_MIN_TOKENS:
         return None
+    # РАЗНЫЕ АЛФАВИТЫ — не разные предметы. Замерено 2026-08-23, через час
+    # после того, как этот гейт был поставлен: два из трёх ВЕРНЫХ русских
+    # утверждений по английской улике оказались демотированы, а это ежедневная
+    # форма работы агента — он читает по-английски и отвечает по-русски.
+    # Требование числа, на которое я тогда положился, от этого не спасает:
+    # число как раз и включает гейт. Совпадения слов между языками не бывает,
+    # поэтому судить здесь нельзя вовсе.
+    if _dominant_script(chunk_text) != _dominant_script(excerpt_raw):
+        return None
     known = _subject_tokens(excerpt_raw) | _subject_tokens(ev.source_id or "")
     if claim_tokens & known:
         return None
@@ -167,6 +194,70 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
         explanation=(
             "цитата разрешилась, но улика не про это утверждение: "
             "ни одного общего содержательного слова"
+        ),
+        computed_from=ev.source_id or "",
+    )
+
+
+#: МЕТА-ОТРИЦАНИЕ: отрицание пропозиции ЦЕЛИКОМ, а не члена предложения.
+#: «не превысила», «не менее», «а не 30» — обычные отрицания, они спорят с
+#: числом или с альтернативой, но не с источником. Здесь перечислены только
+#: обороты, которыми утверждение объявляет НЕВЕРНЫМ то, на что ссылается.
+#: Это лексикон, а не вывод — тот же приём, каким `claim_arithmetic` узнаёт
+#: свои формы, и по той же причине: судить по сходству нельзя.
+_META_DENIAL_RE = re.compile(
+    r"(?:\bневерн\w*"
+    r"|\bэто\s+не\s+так\b"
+    r"|\bна\s+самом\s+деле\s+(?:это\s+)?не\s+так\b"
+    r"|\bне\s+соответству\w*\s+действительности"
+    r"|\bошибочн\w*"
+    r"|\bis\s+not\s+true\b"
+    r"|\bis\s+false\b"
+    r"|\b(?:which|that)\s+is\s+(?:not\s+true|false|incorrect)\b"
+    r"|\bincorrect\b)",
+    re.IGNORECASE,
+)
+
+
+def denies_own_evidence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
+    """Причина демоции, если утверждение объявляет неверной СВОЮ ЖЕ улику.
+
+    Девятый гейт. Замер 2026-08-23 дал по оси полярности J = 0.00:
+    предложение, повторяющее источник и добавляющее «— неверно, это не так»,
+    принималось как подтверждённое в 100 % случаев.
+
+    Полярность считается У ОБОИХ. Если улика сама несёт отрицание, утверждение
+    его лишь передаёт, и спора нет — поэтому маркер ищется не в одном тексте,
+    а сравнивается между текстами. Без этого правило демотировало бы честный
+    пересказ отрицательного источника.
+    """
+    if prefix in {"user", "memory", "general-knowledge"}:
+        return None
+    excerpt_raw = ev.excerpt or ""
+    if not excerpt_raw.strip():
+        return None
+    # Разные алфавиты: лексикон отрицания языкозависим, и отрицание в улике на
+    # другом языке этот гейт просто не увидит — молчание честнее догадки.
+    if _dominant_script(chunk_text) != _dominant_script(excerpt_raw):
+        return None
+    body = _CITATION_TOKEN_RE.sub(" ", chunk_text)
+    if not _META_DENIAL_RE.search(body):
+        return None
+    if _META_DENIAL_RE.search(excerpt_raw):
+        return None  # улика сама отрицает — утверждение её передаёт
+    # Спор бывает только о том, что улика утверждает: без общего предмета это
+    # вопрос седьмого гейта, а не этого.
+    if not (_subject_tokens(body) & _subject_tokens(excerpt_raw)):
+        return None
+    from .verifier_models import ClaimReason
+
+    return ClaimReason(
+        code="claim_denies_its_evidence",
+        expected="улика утверждает то, что кусок объявляет неверным",
+        actual=_META_DENIAL_RE.search(body).group(0),
+        explanation=(
+            "утверждение ссылается на улику и одновременно объявляет её "
+            "неверной: такая ссылка не может быть его поддержкой"
         ),
         computed_from=ev.source_id or "",
     )
