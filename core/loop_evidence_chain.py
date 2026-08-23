@@ -22,6 +22,23 @@ class CatalogueResult:
     knowledge: KnowledgePipelineResult
 
 
+#: Виды улик, которые НЕ приходят от инструментов: они уже были у агента до
+#: хода. Каталогизировать их незачем, и хуже — вредно: своя же память,
+#: записанная как новое знание, есть самоподтверждение (доктрина MIR-046 —
+#: собственная запись не независимый свидетель).
+_NON_TOOL_EVIDENCE_KINDS: frozenset[str] = frozenset({
+    "memory", "user_explicit", "session_dialogue", "llm_claim", "runtime",
+})
+
+
+def chain_has_tool_evidence(chain: Any) -> bool:
+    """Появилось ли на этом ходе хоть что-то, добытое инструментом."""
+    return any(
+        getattr(ev, "kind", "") not in _NON_TOOL_EVIDENCE_KINDS
+        for ev in getattr(chain, "evidences", ())
+    )
+
+
 class AgentLoopEvidenceChain:
     """Досборка цепочки: память, рабочие артефакты, диалог."""
 
@@ -236,20 +253,34 @@ class AgentLoopEvidenceChain:
                 "chain": chain.to_log_payload(),
             },
         )
-        if cheap_path_active:
-            # Cheap path: the chain is empty (no tools ran) so the knowledge
-            # pipeline and source-registry build have nothing to catalog.
-            # Skip them to avoid the per-turn cost the user flagged, and keep
-            # the empty registry reset at the top of run().
+        if cheap_path_active and not chain_has_tool_evidence(chain):
+            # Cheap path: nothing was FETCHED this turn, so the knowledge
+            # pipeline and source-registry build have nothing new to catalog.
+            #
+            # H-05 (Therac-25 class, docs/audit/HISTORICAL_FAILURE_LEDGER.md).
+            # This used to read «the chain is empty (no tools ran)» and decide
+            # on the cheap-path flag alone. Measured end-to-end on the turn
+            # «привет» with one persistent record: the flag is set and the
+            # chain holds ONE `memory` evidence — memory is folded in
+            # (`_fold_evidence_chain`) BEFORE this decision. The premise was
+            # false while the behaviour was right, which is exactly the shape
+            # that killed the Therac patients: the machine's statement about
+            # itself diverged from what it was.
+            #
+            # Behaviour is deliberately unchanged. Running the pipeline over a
+            # memory-only chain would bank the agent's own record as new
+            # knowledge — self-confirmation, the doctrine MIR-046 states. What
+            # changed is that the condition now checks the thing it claims, so
+            # the two cannot drift apart silently.
             # Ranked all the same: the event is what tells a reader the chain
-            # was empty rather than unexamined.
+            # carried nothing new rather than went unexamined.
             source_ranking = rank_chain(chain, question=user_question)
             self.last_source_ranking = source_ranking
             self.log.log("source_ranking", source_ranking.to_log_payload())
             source_registry = self.last_source_registry
             self.log.log(
                 "knowledge_pipeline_skipped",
-                {"reason": "cheap_path", "chain_size": len(chain)},
+                {"reason": "cheap_path_no_tool_evidence", "chain_size": len(chain)},
             )
         else:
             catalogued = self._catalogue_chain(

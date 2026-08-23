@@ -239,8 +239,14 @@ def test_the_first_caller_still_skips_the_pipeline_on_the_cheap_path():
     """
     body = _evidence_chain_source()
 
-    assert "if cheap_path_active:" in body
-    cheap_branch = body[body.index("if cheap_path_active:"):body.index("else:")]
+    # Условие ветки перестало быть буквой `if cheap_path_active:` 2026-08-23:
+    # исторический класс H-05 (Therac-25) показал, что ветка обосновывалась
+    # пустотой цепочки, в которой лежала память. Теперь она проверяет то, что
+    # и означала — отсутствие улик ОТ ИНСТРУМЕНТОВ. Смысл этого теста от того
+    # не изменился, и три утверждения ниже держат его целиком; сопоставление
+    # по букве прежнего условия держало лишь формулировку.
+    assert "if cheap_path_active" in body
+    cheap_branch = body[body.index("if cheap_path_active"):body.index("else:")]
     assert "_catalogue_chain(" not in cheap_branch, (
         "the cheap path now runs the pipeline it exists to skip"
     )

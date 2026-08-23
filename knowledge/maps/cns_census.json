@@ -159,7 +159,8 @@
     "loop_synthesis_helpers.py::_artifact_blocks": [],
     "loop_synthesis_helpers.py::_log_budget_trim": [],
     "loop_synthesis_helpers.py::_organ_map": [],
-    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": []
+    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": [],
+    "loop_evidence_chain.py::chain_has_tool_evidence": []
   },
   "edges": [
     [

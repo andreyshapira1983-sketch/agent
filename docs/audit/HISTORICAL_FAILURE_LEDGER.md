@@ -28,7 +28,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-02 | 1999 | unit mismatch across a module boundary | Mars Climate Orbiter MIB (NASA, 1999) | one side produced pound-seconds, the other consumed newton-seconds; no end-to-end check ever compared them | every `*_seconds`/`*_minutes`/`*_hours`/`*_days`/`*_ms` parameter in `core`, `app`, `cli`, `agent_tick` | (a) AST sweep for a value whose name carries a DIFFERENT unit than the parameter; (b) literals and defaults whose MAGNITUDE is implausible for the declared unit | 76 unit-carrying parameters swept; **0 name mismatches, 0 implausible magnitudes** | ALREADY PROTECTED (naming convention holds) | the deeper MCO lesson — nobody compares end to end — is not disproved by this; a semantic double-conversion would pass both probes |
 | H-03 | 1994 | a computing unit silently wrong on rare inputs | Intel Pentium FDIV erratum; Nicely (1994) | the divider was wrong on a sparse input set; nothing recomputed independently, so it stayed invisible until an outsider checked | `core/claim_arithmetic.evaluate` — the gate that COMPUTES verdicts | differential test against independent recomputation, random inputs, both shapes taught on 2026-08-23 | **1400 cases, 0 disagreements — and coverage proved: 700 `supports` + 700 `refutes`, ZERO `silent`** | ALREADY PROTECTED | probe kept; extend when new shapes are taught |
 | H-04 | 1997 | watchdog reset loop with no diagnosis | Mars Pathfinder flight-software postmortem (Reeves, 1997) | priority inversion blocked a high-priority task; the watchdog reset repeatedly; the craft looked alive and did no work | `recover_stuck`, `reactivate_resumable_work`, daemon heartbeat | can recovery itself loop, and does a recovery record why it fired? | not yet run | queued | overlaps MIR-135 (a crash-looping daemon reports `alive`) |
-| H-05 | 1985-87 | operator-invisible state + fast-path race | Therac-25 (Leveson & Turner, 1993) | a fast operator path skipped a state transition the interlock depended on; the console showed a state the machine was not in | the cheap path (`can_skip_planner`) and the gates it bypasses | enumerate gates on the slow path and check which are absent on the cheap path | not yet run | queued | MIR-020's audit covered routing, not gate parity |
+| H-05 | 1985-87 | a fast path justified by a state that is not true | Therac-25 (Leveson & Turner, 1993) | a fast operator path skipped a transition the interlock depended on, and the console showed a state the machine was not in. The danger was the DIVERGENCE between what the system said about itself and what it was | `_rank_and_catalog_evidence`, the cheap-path skip branch | end-to-end run of «привет» with one persistent record; read the cheap-path flag and the chain size together | **flag set AND chain non-empty (one `memory` evidence) — the branch's stated premise «the chain is empty (no tools ran)» was false** | **LOCALLY REPRODUCED → FIXED (premise, not behaviour)** | see below |
 
 ---
 
@@ -38,13 +38,13 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 3 |
+| classes examined | 4 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 2 (H-02, H-03) |
 | UNKNOWN | 0 |
-| LOCALLY REPRODUCED | 1 (H-01) |
-| fixes completed | 1 (H-01) |
-| queued, not yet run | 2 (H-04, H-05) + the chronological list below |
+| LOCALLY REPRODUCED | 2 (H-01, H-05) |
+| fixes completed | 2 (H-01, H-05) |
+| queued, not yet run | 1 (H-04) + the chronological list below |
 
 **Highest autonomous blast radius so far — H-01.** It is not a display defect.
 An error page becoming evidence lets the agent (a) **observe false state**,
@@ -66,6 +66,25 @@ has since become a login wall would resolve the citation and RAISE acceptance.
 | minimal fix | reject at the PRODUCER boundary: an error-page body does not become evidence. Not at the claim side — the verifier's gate ladder already owns claim verdicts, and a second judge there would argue with the first |
 | regression proof | `tests/test_an_error_page_is_not_evidence.py` — 8 stub bodies (RU+EN), a real page, a LONG article about errors, a SHORT article about errors, and the end-to-end verdict. Both halves break-tested |
 | a tuning caught and undone | the first rule judged by LENGTH alone, and a genuine soft-404 article came in at 581 chars — i.e. the threshold was fitted to the fixture. The rule now judges SHAPE: short **and** at most three sentences, so the marker has to BE the content rather than appear in it. A second, shorter article pins that the length rule cannot return |
+
+
+### H-05 — the fix that deliberately changes nothing
+
+| stage | evidence |
+|---|---|
+| external claim | Therac-25: the machine's self-report diverged from its state; the fast path was not itself the defect |
+| local applicability | the cheap path skips the knowledge pipeline and source-registry catalogue, justified in a comment by the chain being empty |
+| local reproduction | end-to-end on «привет» with one persistent record: `planner_cheap_path` fired **and** `evidence_collected` reported **1** evidence of kind `memory`. Memory is folded into the chain (`_fold_evidence_chain`, `core/loop.py:475`) BEFORE the catalogue decision (`:484`) |
+| causal mechanism | the branch decided on the cheap-path FLAG and described a different condition — chain emptiness — that nothing checked |
+| why the behaviour is still right | running the pipeline over a memory-only chain would bank the agent's own record as new knowledge. That is self-confirmation, and the doctrine already exists (MIR-046: one's own memory is not an independent witness). **The skip is correct; only its reason was false** |
+| minimal fix | the condition now tests what it claims: `cheap_path_active and not chain_has_tool_evidence(chain)`. On the cheap path no tool evidence exists by construction, so behaviour is unchanged and the premise became true |
+| regression proof | `tests/test_the_cheap_path_states_a_true_premise.py` — memory-only and user-explicit chains stay skippable, any tool-derived kind does not, and the branch must not return to deciding on the flag alone. Break-tested |
+| two test corrections, both recorded | my own new assertion first banned the PHRASE «the chain is empty» and failed on the comment that quotes it as history — banning the citation of a past error erases its explanation, so it now pins the logged reason instead. And an existing fixture matched the literal `if cheap_path_active:`; its three real assertions (pipeline not called, skip event present, ranking preserved) carry the invariant, so the literal was repointed rather than the invariant weakened |
+
+**Autonomous blast radius: low, and stated as low.** No verdict changed and no
+answer changed. What was closed is a divergence between a stated premise and a
+checked condition — the specific thing that makes the NEXT change dangerous,
+because the next reader would have trusted the comment.
 
 ## Queue (chronological, not yet reached)
 
