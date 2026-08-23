@@ -78,6 +78,22 @@ for i in range(N):
     run("E. полярность совпадает с источником", "invalid",
         f"{excerpt.rstrip('.')} — неверно, это не так. [web:{url}]", ch)
 
+# ── F, G: формы, которые судит ВЫЧИСЛЯЮЩИЙ гейт (MIR-143) ─────────────────
+RUN_EXCERPT = "tests_total=120\ntests_failed=3\nversion=2.11.0\ncoverage=0.82"
+for i in range(N):
+    ch = _chain(f"https://example.org/run/{i}", RUN_EXCERPT)
+    run("F. производное число (120-3)", "valid",
+        f"117 tests passed [web:https://example.org/run/{i}]", ch)
+    # 117 — верный ответ (120-3), поэтому именно его в «невалидные» брать
+    # нельзя: иначе замер обвинил бы гейт в собственной ошибке генератора.
+    wrong = 100 + i + (1 if 100 + i == 117 else 0)
+    run("F. производное число (120-3)", "invalid",
+        f"{wrong} tests passed [web:https://example.org/run/{i}]", ch)
+    run("G. сравнение версии с границей", "valid",
+        f"The report records a version below 3.0 [web:https://example.org/run/{i}]", ch)
+    run("G. сравнение версии с границей", "invalid",
+        f"The report records a version above 3.0 [web:https://example.org/run/{i}]", ch)
+
 print("=== ДИСКРИМИНАЦИЯ ВЕРИФИКАТОРА (структурный проход, без LLM) ===")
 print(f"    {N} пар на класс, валидный = дословный пересказ источника\n")
 print(f"{'класс':<40}{'принят валидный':>16}{'принят НЕвалидный':>19}{'J':>8}")
