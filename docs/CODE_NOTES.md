@@ -4312,3 +4312,43 @@ reasons name the two permissions that were checked and found missing.
 
 Found by the architectural-ballast audit of 2026-08-22
 (`docs/audit/ARCHITECTURAL_BALLAST_AUDIT_2026-08-22.md`, item B6).
+
+## A citation that is not about the claim
+
+Measuring verifier discrimination (MIR-141) put a number on a blindness the
+registry had only named: on the axis «is the claim about the chain's topic»,
+J was **0.00** — a claim about a share price, cited to a source about latency
+in milliseconds, verified 100% of the time.
+
+The ladder of content gates already existed — arithmetic, absent literals,
+absence assertions, statistical figures — and every one of them was silent
+here, for a structural reason: `_SALIENT_LITERAL_RE` recognises only
+code-shaped literals (snake_case, hashes, versions, filenames). A claim about
+the world has no distinctive literal in that sense at all. The gates were
+built for engineering claims about files and identifiers.
+
+**Two design decisions, both bought with measurements.**
+
+*It demotes without accusing.* The first version returned a `ClaimReason`, and
+in this ladder a reason means REFUTED — proven false. A citation that is not
+about the claim does not make the claim false; it merely fails to support it.
+Seventeen existing verifier fixtures turned `refuted` before that was fixed.
+The chunk goes to topic-only instead.
+
+*It judges only QUANTITATIVE claims.* The first rule — demote on zero shared
+content words — was correct in the artificial case and wrong on the corpus. It
+demoted two legitimate classes: a Russian claim citing an English excerpt,
+where the words differ by language rather than by subject (and that is how this
+agent works every day — it reads English and answers in Russian), and a
+meta-claim about the evidence («Both files agree»), whose words are about a
+relationship while the excerpt is content. Requiring a statistical figure
+narrows the gate to claims that are concrete enough to owe their source
+something. Claims without a number are left alone, and that gap is banked
+explicitly in `tests/test_a_resolved_citation_must_be_about_the_claim.py`
+rather than pretended away: judging them deterministically is not possible
+here, and the honest alternative is a semantic check — a model call, therefore
+money, therefore the operator's decision.
+
+The measurement is repeatable: `scripts/measure_verifier_discrimination.py`.
+After the gate, the topic axis reads J = +1.00 with valid acceptance unchanged
+at 100%.
