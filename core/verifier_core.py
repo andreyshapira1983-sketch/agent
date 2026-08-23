@@ -16,6 +16,7 @@ from .verifier_absence import (
     absence_certifiable,
     absence_reason,
     absent_literal_reason,
+    off_topic_reason,
 )
 from .verifier_models import ClaimChunk, ClaimReason, VerificationReport
 from .verifier_patterns import (
@@ -253,6 +254,13 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 if _abs is not None:
                     strict_ok = False
                     chunk_reason = chunk_reason or _abs
+                # MIR-060 (f) / MIR-141: шестой гейт — цитата обязана быть ПРО
+                # это утверждение. Пятеро выше немы на прозе, потому что судят
+                # литералы код-образной формы; замер дал по оси темы J = 0.00.
+                # Шестой гейт, понижение БЕЗ обвинения:
+                # docs/CODE_NOTES.md, «A citation that is not about the claim».
+                if off_topic_reason(chunk_text, ev, c.prefix) is not None:
+                    strict_ok = False
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
