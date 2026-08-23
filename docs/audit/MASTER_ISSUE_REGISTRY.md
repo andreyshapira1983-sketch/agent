@@ -2224,3 +2224,18 @@ re-grounded against code on `main` @ `f317c4c`. Evidence = code reading +
 test-file existence; suite not executed, live agent not run (see limitations).
 Code > this register; where they disagree, code wins and this file must be
 corrected. Nothing was fixed or deleted producing it.*
+
+- **THE COMPUTING GATE TAUGHT, 2026-08-23 (operator: «научи вычисляющий гейт этим формам»).** Two shapes added to `core/claim_arithmetic.py`, both as LEXICON rather than inference — the module's own standing rule, and the reason it refuses to judge by resemblance:
+  1. **The run difference**, `passed = total − failed`. Named words and named keys, not «some pair whose difference matches»: `_PASSED_RE` recognises «117 tests passed», «Прошло 117 тестов», «reports 117 passed», and it computes only when both a total and a failed key are present. Absent either, it stays SILENT rather than guessing.
+  2. **Comparison against a LITERAL**, `version below 3.0`, `coverage is above 0.5`, «версия ниже 3.0». The neighbouring `_CMP_RE` compares key against key; this compares a key against a bound the claim names.
+- **The trap that shape carries, and its own test.** A version must not be compared as a float: `2.11.0` against `2.9.0` reads 2.11 < 2.9 — TRUE where the truth is the opposite. Versions are parsed into component tuples and compared component-wise, zero-padded — the same reasoning `verifier_absence` already records («триплет — не число, а имя»). Pinned by `test_a_version_is_not_compared_as_a_float`.
+- **Measured after teaching** (`scripts/measure_verifier_discrimination.py`, which now carries both shapes as classes F and G):
+
+  | class | accepts valid | accepts INVALID | J |
+  |---|---|---|---|
+  | F. derived number (120−3) | 100% | 0% | **+1.00** |
+  | G. version against a bound | 100% | 0% | **+1.00** |
+
+  Before the lesson both were `silent`, so a wrong derived number and a false version comparison verified at 100%. The capability bench is unchanged at **29 verdicts / 17 reasons** — the gain is bought without paying capability, which is exactly what the reverted presence rule could not do.
+- **One measurement artifact caught and fixed in the probe itself**: class F first read J = +0.97, and the 2% was one pair where the generator's «invalid» value happened to equal 117, the correct answer. The probe now skips that collision. A measurement that blames the instrument for its own generator is worse than no measurement.
+- **What remains on this axis:** class A of the original probe is still +0.25, and correctly so — «Выручка … 999 миллионов рублей» is not a derived or comparative shape, it is a plain quotation, and quotations are the presence question this entry's anti-requirement rules out. Closing A needs either a new named shape or a semantic check; it does not need a second judge.
