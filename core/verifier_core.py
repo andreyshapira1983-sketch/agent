@@ -18,6 +18,7 @@ from .verifier_absence import (
     absent_literal_reason,
     denies_own_evidence_reason,
     off_topic_reason,
+    restated_number_reason,
 )
 from .verifier_models import ClaimChunk, ClaimReason, VerificationReport
 from .verifier_patterns import (
@@ -266,11 +267,20 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 # быть поддержкой. Понижение, не обвинение — маркер лексический.
                 if denies_own_evidence_reason(chunk_text, ev, c.prefix) is not None:
                     strict_ok = False
+                # Десятый гейт: дословный пересказ не вправе менять число.
+                _restated = restated_number_reason(chunk_text, ev, c.prefix)
+                if _restated is not None:
+                    strict_ok = False
+                    chunk_reason = chunk_reason or _restated
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
                     excerpt = ev.excerpt or ""
                     if stat_figures:
+                        from .verifier_absence import _APPROXIMATION_RE
                         from .verifier_utils import _excerpt_supports_figures
-                        if not _excerpt_supports_figures(excerpt, stat_figures):
+                        if not _excerpt_supports_figures(
+                            excerpt, stat_figures,
+                            approximate=bool(_APPROXIMATION_RE.search(chunk_text)),
+                        ):
                             strict_ok = False
                     elif ev.kind == "web_search_hit":
                         strict_ok = False

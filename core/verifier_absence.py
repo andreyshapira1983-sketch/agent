@@ -263,6 +263,93 @@ def denies_own_evidence_reason(chunk_text: str, ev: Evidence, prefix: str) -> An
     )
 
 
+#: Приближение — не подмена: «около 20» при 19.8 остаётся верным, и число в
+#: улике искать бессмысленно.
+_BARE_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+#: Точка между цифрами — десятичный разделитель, а не конец предложения.
+#: Замерено: без этого «19.8» распадалось на «19» и «8», предложение улики
+#: не находилось, и гейт молчал на любой улике с десятичным числом.
+_SENTENCE_SPLIT = re.compile(r"(?<![0-9])[.!?]+(?![0-9])|" + chr(10) + "+")
+
+_APPROXIMATION_RE = re.compile(
+    r"(?:\bоколо\b|\bпримерно\b|\bприблизительно\b|\bпорядка\b|~"
+    r"|\bapproximately\b|\babout\b|\broughly\b|\bcirca\b)",
+    re.IGNORECASE,
+)
+
+#: Какая доля содержательных слов утверждения должна найтись в предложении
+#: улики, чтобы считать кусок ДОСЛОВНЫМ пересказом именно его. Не половина и
+#: не «похоже»: форма судит только там, где расхождение сведено к числу.
+_RESTATEMENT_OVERLAP = 0.8
+
+
+def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
+    """Причина демоции, если кусок повторяет предложение улики, изменив число.
+
+    Десятый гейт. Замер 2026-08-23 дал по оси «число соответствует источнику»
+    J = +0.25: «Выручка за квартал составила 999 миллионов рублей» при улике с
+    20 принималось как подтверждённое.
+
+    ЭТО НЕ ПРАВИЛО ПРИСУТСТВИЯ, и различие проверяется границами. Правило
+    «всякое число обязано найтись в улике» было построено, дало по этой оси
+    +1.00 и уронило стенд способностей с 29 до 27: 117 в «117 tests passed»
+    ВЫЧИСЛЕНО из 120−3, а 3.0 в «версия ниже 3.0» есть ГРАНИЦА сравнения, и оба
+    законно отсутствуют (анти-требование в MIR-143). Здесь форма именованная:
+    утверждение почти дословно повторяет предложение улики, и тогда число —
+    единственное, что оно добавляет от себя. Производное, сравнительное и любой
+    пересказ другими словами под форму не подходят и не судятся.
+    """
+    if prefix in {"user", "memory", "general-knowledge"}:
+        return None
+    excerpt_raw = ev.excerpt or ""
+    if not excerpt_raw.strip():
+        return None
+    if ("[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw
+            or excerpt_raw.rstrip().endswith("...[truncated]")):
+        return None
+    body = _CITATION_TOKEN_RE.sub(" ", chunk_text)
+    if _APPROXIMATION_RE.search(body):
+        return None
+    if _dominant_script(body) != _dominant_script(excerpt_raw):
+        return None
+    claim_words = _subject_tokens(body)
+    if len(claim_words) < 3:
+        return None
+    claimed = {m.group(0) for m in _BARE_NUMBER_RE.finditer(body)}
+    if not claimed:
+        return None
+
+    for sentence in _SENTENCE_SPLIT.split(excerpt_raw):
+        if not sentence.strip():
+            continue
+        words = _subject_tokens(sentence)
+        if not words:
+            continue
+        shared = len(claim_words & words) / len(claim_words)
+        if shared < _RESTATEMENT_OVERLAP:
+            continue
+        # Это предложение кусок и повторяет. Его числа — единственная
+        # оставшаяся разница.
+        known = {m.group(0) for m in _BARE_NUMBER_RE.finditer(sentence)}
+        missing = {n for n in claimed if not any(n == k or n in k for k in known)}
+        if not missing:
+            return None
+        from .verifier_models import ClaimReason
+
+        return ClaimReason(
+            code="restated_number_changed",
+            expected=", ".join(sorted(known)[:3]) or "(в предложении нет чисел)",
+            actual=", ".join(sorted(missing)[:3]),
+            explanation=(
+                "кусок повторяет предложение улики и расходится с ним только "
+                "числом"
+            ),
+            computed_from=ev.source_id or "",
+        )
+    return None
+
+
 #: Утверждение ОБ ОТСУТСТВИИ: «нет X», «X отсутствует», «не найдено X»,
 #: «not implemented», «no X exists». Маркер ищется по всему куску, а не в
 #: начале: отрицание в русском и английском стоит где угодно.

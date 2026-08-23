@@ -75,13 +75,52 @@ def is_statistical_claim(text: str) -> bool:
     return bool(text and _STAT_TRIGGER_RE.search(text))
 
 
-def _excerpt_supports_figures(excerpt: str, figures: list[str]) -> bool:
+#: Допуск для ПРИБЛИЖЁННОГО числа: «около 20» при 19.8 в улике — верно, а
+#: буквального «20» там нет. Освобождать приближения целиком было бы пропуском
+#: («около 20» при 500 обязано ловиться), поэтому вместо освобождения —
+#: считаемый допуск.
+_APPROXIMATION_TOLERANCE = 0.1
+
+
+def _numbers_in(text: str) -> list[float]:
+    out: list[float] = []
+    for match in re.finditer(r"\d+(?:[.,]\d+)?", text or ""):
+        try:
+            out.append(float(match.group(0).replace(",", ".")))
+        except ValueError:
+            continue
+    return out
+
+
+def _approximately_supported(excerpt: str, figure: str) -> bool:
+    """Есть ли в улике число в пределах допуска от заявленного."""
+    claimed = _numbers_in(figure)
+    if not claimed:
+        return False
+    target = claimed[0]
+    if target == 0:
+        return any(abs(value) <= _APPROXIMATION_TOLERANCE for value in _numbers_in(excerpt))
+    return any(
+        abs(value - target) / abs(target) <= _APPROXIMATION_TOLERANCE
+        for value in _numbers_in(excerpt)
+    )
+
+
+def _excerpt_supports_figures(
+    excerpt: str, figures: list[str], *, approximate: bool = False
+) -> bool:
     if not figures:
         return True
     if not excerpt:
         return False
     excerpt_norm = _normalise_figure(excerpt)
-    return all(_normalise_figure(f) in excerpt_norm for f in figures)
+    for figure in figures:
+        if _normalise_figure(figure) in excerpt_norm:
+            continue
+        if approximate and _approximately_supported(excerpt, figure):
+            continue
+        return False
+    return True
 
 
 def _output_contract_header_name(text: str) -> str | None:
