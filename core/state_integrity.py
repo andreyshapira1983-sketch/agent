@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -209,11 +210,33 @@ def _payload_hash(payload: dict[str, Any]) -> str:
 
 
 def _atomic_write_lines(path: Path, lines: list[str]) -> None:
+    """Replace *path* with *lines*, durably.
+
+    H-06 in `docs/audit/HISTORICAL_FAILURE_LEDGER.md` — the crash-consistency
+    class (ext3/ext4 rename semantics; Pillai et al., «All File Systems Are
+    Not Created Equal», OSDI 2014). Temp-then-rename buys atomicity of the
+    DIRECTORY ENTRY; it does not by itself guarantee the file's DATA reached
+    the disk. On a host crash or power loss the renamed file can be empty or
+    partially written — and an empty state file is the worst outcome here,
+    because it reads as a legitimately empty store: no tasks, no memory,
+    nothing to check. The per-row checksums cannot help; there is nothing
+    left to checksum.
+
+    Measured cost of the barrier on this machine: +1.3–1.7 ms per write at
+    142 / 1000 / 5155 rows, against a tick that spends seconds in provider
+    calls. A refused `fsync` is not fatal — the write stays atomic in the
+    directory sense, which is exactly what we had before.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         for line in lines:
             fh.write(line + "\n")
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:  # pragma: no cover — filesystem refuses the barrier
+            pass
     tmp.replace(path)
 
 
