@@ -27,8 +27,10 @@ blocker; otherwise it is registered and the queue resumes.
 | H-01 | 1996 | diagnostic payload consumed as valid data | Ariane 501 Inquiry Board (Lions, 1996) | after the IRS faulted it put a **diagnostic bit pattern** on the databus; the flight computer read it as flight data and steered on it. The sensor failed honestly — the indistinguishability did the damage | `evidence_from_tool_result`, `web_fetch` branch | feed bodies that are error pages / login walls / captchas through the evidence factory, then verify a claim citing them | **soft-404 became `web_page` evidence at 0.75, and a Russian claim citing an English error page came back `verified`** | **LOCALLY REPRODUCED → FIXED** | see below |
 | H-02 | 1999 | unit mismatch across a module boundary | Mars Climate Orbiter MIB (NASA, 1999) | one side produced pound-seconds, the other consumed newton-seconds; no end-to-end check ever compared them | every `*_seconds`/`*_minutes`/`*_hours`/`*_days`/`*_ms` parameter in `core`, `app`, `cli`, `agent_tick` | (a) AST sweep for a value whose name carries a DIFFERENT unit than the parameter; (b) literals and defaults whose MAGNITUDE is implausible for the declared unit | 76 unit-carrying parameters swept; **0 name mismatches, 0 implausible magnitudes** | ALREADY PROTECTED (naming convention holds) | the deeper MCO lesson — nobody compares end to end — is not disproved by this; a semantic double-conversion would pass both probes |
 | H-03 | 1994 | a computing unit silently wrong on rare inputs | Intel Pentium FDIV erratum; Nicely (1994) | the divider was wrong on a sparse input set; nothing recomputed independently, so it stayed invisible until an outsider checked | `core/claim_arithmetic.evaluate` — the gate that COMPUTES verdicts | differential test against independent recomputation, random inputs, both shapes taught on 2026-08-23 | **1400 cases, 0 disagreements — and coverage proved: 700 `supports` + 700 `refutes`, ZERO `silent`** | ALREADY PROTECTED | probe kept; extend when new shapes are taught |
-| H-04 | 1997 | watchdog reset loop with no diagnosis | Mars Pathfinder flight-software postmortem (Reeves, 1997) | priority inversion blocked a high-priority task; the watchdog reset repeatedly; the craft looked alive and did no work | `recover_stuck`, `reactivate_resumable_work`, daemon heartbeat | can recovery itself loop, and does a recovery record why it fired? | not yet run | queued | overlaps MIR-135 (a crash-looping daemon reports `alive`) |
+| H-04 | 1997 | watchdog reset loop with no diagnosis | Mars Pathfinder postmortem (Reeves, 1997) | priority inversion blocked a high-priority task; the watchdog reset repeatedly; the craft looked alive and did no work | `recover_stuck` + the failure policy | drive claim→recover→claim in a loop and read `attempts` each cycle | **recovery increments `attempts` (1/3, 2/3, 3/3) and the third pass makes the row terminal `failed` — the loop cannot sustain itself** | ALREADY PROTECTED | the OTHER half of Pathfinder — looking alive while doing nothing — is MIR-135 and remains open |
 | H-05 | 1985-87 | a fast path justified by a state that is not true | Therac-25 (Leveson & Turner, 1993) | a fast operator path skipped a transition the interlock depended on, and the console showed a state the machine was not in. The danger was the DIVERGENCE between what the system said about itself and what it was | `_rank_and_catalog_evidence`, the cheap-path skip branch | end-to-end run of «привет» with one persistent record; read the cheap-path flag and the chain size together | **flag set AND chain non-empty (one `memory` evidence) — the branch's stated premise «the chain is empty (no tools ran)» was false** | **LOCALLY REPRODUCED → FIXED (premise, not behaviour)** | see below |
+| H-06 | 2005-2014 | crash consistency: temp+rename without a durability barrier | ext3/ext4 rename semantics; Pillai et al., «All File Systems Are Not Created Equal», OSDI 2014 | rename gives atomicity of the DIRECTORY ENTRY, not of the file's DATA. After a host crash the renamed file can be empty or partial | `core/state_integrity._atomic_write_lines`, and the lock discipline around every `*_unlocked` writer | (a) AST check that every `_save_unlocked` caller sits inside a lock; (b) leave a stale `.tmp` and read; (c) inspect for a barrier before `replace` | (a) **11 of 11 production callers locked, 0 unlocked**; (b) a stale `.tmp` neither breaks the read nor survives the next write; (c) **no `flush`, no `fsync`** | **(a),(b) ALREADY PROTECTED · (c) mechanism confirmed by inspection, effect NOT reproducible in-process → fixed anyway** | an empty state file after a power cut would read as a legitimately empty store, and per-row checksums cannot help — there is nothing left to check |
+| H-07 | 2012 | wall-clock deadlines under a clock step | leap-second kernel livelock (2012); NTP step corrections; dead-CMOS boots | deadlines computed as `now - stamp` misbehave when the clock moves; monotonic clocks are immune but do not survive a restart | `provider_unhealthy` (120 min), `recover_stuck` (30 min), `reactivate_paused_checkpoints` (60 min / 72 h), approval TTL, grant expiry | recompute each deadline with `now` stepped backwards by an hour and by a year | **provider stays parked (True/True/True); `recover_stuck` reclaims 0 instead of 1** | **LOCALLY REPRODUCED — and every direction is fail-SAFE** | registered, deliberately NOT fixed; see below |
 
 ---
 
@@ -38,13 +40,20 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 4 |
+| classes examined | 7 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 2 (H-02, H-03) |
+| ALREADY PROTECTED | 4 (H-02, H-03, H-04, H-06 a/b) |
 | UNKNOWN | 0 |
-| LOCALLY REPRODUCED | 2 (H-01, H-05) |
-| fixes completed | 2 (H-01, H-05) |
-| queued, not yet run | 1 (H-04) + the chronological list below |
+| LOCALLY REPRODUCED | 3 (H-01, H-05, H-07) |
+| fixes completed | 3 (H-01, H-05, H-06c) |
+| reproduced and deliberately NOT fixed | 1 (H-07 — fail-safe in every direction) |
+| queued, not yet run | the chronological list below |
+
+**Blast-radius ranking of what reproduced.** H-01 highest: false state → false
+success → learning from an incorrect result → later decisions on earlier
+corruption. H-06c next, but only under host crash: an empty state file reads as
+an empty store. H-05 and H-07 lowest: one was a false premise with correct
+behaviour, the other fails safe in every measured direction.
 
 **Highest autonomous blast radius so far — H-01.** It is not a display defect.
 An error page becoming evidence lets the agent (a) **observe false state**,
@@ -85,6 +94,41 @@ has since become a login wall would resolve the citation and RAISE acceptance.
 answer changed. What was closed is a divergence between a stated premise and a
 checked condition — the specific thing that makes the NEXT change dangerous,
 because the next reader would have trusted the comment.
+
+
+### H-07 — reproduced, fail-safe, and deliberately left alone
+
+Wall-clock arithmetic is **correct** for these deadlines and monotonic time
+would be wrong: a cooldown, a TTL and a grant expiry must survive a process
+restart, and a monotonic clock resets with the process. So the finding is not
+«should have used monotonic».
+
+What a backward step actually does, measured: an unhealthy provider **stays**
+parked, and `recover_stuck` reclaims **nothing** instead of reclaiming a live
+task. Both directions are conservative — the system never double-executes and
+never un-parks a dead key because the clock moved. The cost is a **silent
+stall**: with the clock an hour behind (a resumed VM, a dead CMOS battery
+booting at 2000-01-01, an NTP step), every cooldown is frozen until wall time
+catches up, and nothing says so.
+
+**No fix, on purpose.** The reproduced failure does not demonstrate that new
+machinery is necessary: clamping a negative age changes no outcome, and making
+the deadlines aggressive on a negative age would re-open the double-execution
+class that MIR-033 measured closed. What is recorded instead is the one
+condition under which it would matter — a backward step lasting hours during an
+unattended week freezes cooldowns and orphan recovery — so a future stall has a
+named suspect instead of a mystery.
+
+### H-06 — the barrier that cannot be tested by its effect
+
+The lock discipline and the stale-`.tmp` behaviour are genuinely protected, and
+both were measured rather than assumed. The third part is different: the
+absence of `fsync` is only observable on a **host crash or power loss**, which
+no in-process test can produce. The barrier was added anyway — measured cost
++1.3–1.7 ms per write at 142 / 1000 / 5155 rows against a tick that spends
+seconds in provider calls — and the test pins the **presence and the order** of
+the barrier, saying plainly that it does not pin the effect. That distinction is
+the honest form of «mechanism confirmed, effect not reproduced».
 
 ## Queue (chronological, not yet reached)
 

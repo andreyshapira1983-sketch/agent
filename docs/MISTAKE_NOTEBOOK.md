@@ -907,7 +907,7 @@ The "Where handled" column is history, not status: **defect status is owned by
 | # | File:line | What is there | Found by | Where handled |
 |---|---|---|---|---|
 | 3 | [core/self_build_memory.py:105](../core/self_build_memory.py#L105) | rejection lesson: the veto cause is not distinguished ("bad candidate" vs "broken pipeline") | assistant, 2026-08-04 | MIR-083 |
-| 2 | [core/state_integrity.py:49](../core/state_integrity.py#L49) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
+| 2 | [core/state_integrity.py:45](../core/state_integrity.py#L45) | episodes are written wrapped in `{_integrity, payload}` — a top-level search returns a false zero | assistant, 2026-08-04 | reading trap, not a defect |
 | 3 | [core/self_build_memory.py:236](../core/self_build_memory.py#L236) | avoid list: also filled by tool breakages — 4 of 5 live vetoes punished the target for our own failure | assistant, 2026-08-04 | MIR-083 |
 | 4 | [core/plan_parsing.py:242](../core/plan_parsing.py#L242) | rescuing JSON from a lone `\` — an example of how to fix this class | assistant, 2026-08-04 | PR #303 |
 | 5 | [core/builder_reply_diagnosis.py:17](../core/builder_reply_diagnosis.py#L17) | a rejection now names the cause, the position and the fragment (moved out of the producer by MIR-084) | assistant, 2026-08-04 | PR #303 |
