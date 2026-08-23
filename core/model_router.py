@@ -811,7 +811,22 @@ def _coerce_role(role: ModelRole | str) -> str:
 # Preference order for auto-selecting a credentialed provider when the routed
 # provider cannot authenticate. ``mock`` is intentionally excluded — it is only
 # used as a fallback when explicitly allowed via ``AGENT_ALLOW_MOCK_ROUTING``.
-_PROVIDER_FALLBACK_ORDER: tuple[str, ...] = ("openai", "anthropic", "huggingface")
+#
+# ``local`` is LAST and was missing entirely until 2026-08-23. The provider was
+# fully built — declared in ``_DEFAULT_PROVIDER_ENV``, implemented across six
+# branches of ``core/llm.py``, with install and start scripts in ``scripts/`` —
+# and its variables are set in this machine's own ``.env``. It simply was never
+# added to this tuple, and the comment above explains the exclusion of ``mock``
+# while saying nothing about it, which is how an omission reads as a decision.
+#
+# The consequence was the operator's point: with every paid key dead the agent
+# had an option running on its own machine and no way to reach it. Last place,
+# not first — a local model is a last resort, never a preference over a paid
+# provider — and it still earns its place only by having both of its variables
+# set, so an unconfigured host behaves exactly as before.
+_PROVIDER_FALLBACK_ORDER: tuple[str, ...] = (
+    "openai", "anthropic", "huggingface", "local",
+)
 
 
 def _first_credentialed_provider() -> str | None:
