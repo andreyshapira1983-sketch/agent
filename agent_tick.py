@@ -312,6 +312,14 @@ def _quarantine_status_lines(workspace: Path) -> list[str]:
     return lines
 
 
+#: Отметки пульса, означающие «тик кончился отказом». Подстрокой, а не точным
+#: списком: события такого рода заводятся по мере надобности, и новый
+#: `*_error` не должен молча вернуть строке слово «alive» (H-38).
+def _is_failure_event(event: object) -> bool:
+    text = str(event or "").lower()
+    return "error" in text or "exception" in text or "fail" in text
+
+
 def _print_status(workspace: Path) -> int:
     """Print pending inbox items and exit. No agent is created."""
     from core.approval_inbox import ApprovalInbox
@@ -330,6 +338,19 @@ def _print_status(workspace: Path) -> int:
                 f"(event={last_event}); expected every "
                 f"{EXPECTED_TICK_INTERVAL_SECONDS // 60} min. "
                 "Daemon may not be running.",
+                file=sys.stderr,
+            )
+        elif _is_failure_event(last_event):
+            # H-38: пульс пишется и на ветке ОТКАЗА, поэтому свежесть отметки
+            # говорила «жив», а правда лежала в скобках после неё. Замер
+            # 2026-08-24: три подряд упавших тика печатали
+            # «Daemon: alive — last tick 0.0 min ago (event=tick_error)».
+            # Оператор, глянувший за неделю одну строку, читает первое слово.
+            # Решение о вечном повторе не меняется (MIR-135, открыт отдельно) —
+            # меняется СЛОВО, которым строка ведёт.
+            print(
+                f"Daemon: FAILING — last tick {age_min:.1f} min ago ended in "
+                f"{last_event}. The clock is ticking and no work is landing.",
                 file=sys.stderr,
             )
         else:
