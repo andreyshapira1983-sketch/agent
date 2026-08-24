@@ -51,6 +51,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-29 | 2005- | corruption detected, and silently LESS data returned | ZFS end-to-end checksums vs silent bit rot; the wider detect-but-don't-tell family | the checksum catches the bad block and the reader still gets a short answer it cannot distinguish from a complete one | `read_state_jsonl` quarantine path, and every store that BOUNDS something | exhaust a 3-call daily cap, corrupt one budget row, re-read, and ask for a fourth call | **the fourth call is ALLOWED — one corrupted row restores spending room, with no warning, no log and no reader of `.quarantine` anywhere in the repo** | **LOCALLY REPRODUCED → the silence closed, the decision left to the operator** | live quarantine empty across all stores in four weeks |
 | H-30 | 2008 | identifiers unique only in appearance | Debian OpenSSL entropy CVE-2008-0166; the wider weak-source family | the generator looks right and the key space is tiny, so collisions arrive by design rather than by chance | `core/ids.new_id` and every minting site in `core`, `app`, `cli`, `api`, `tools`, `agent_tick` | (a) AST sweep for `random.*` / `uuid1` at any minting site; (b) count real id collisions across every live store | (a) **0 weak sources against 64 strong minting sites, detector proved on `random.randint` and `uuid.uuid1`**; (b) **2439 ids, and both apparent collisions are references, not keys — 254 versions of one profile, 3 outcomes of one approval** | ALREADY PROTECTED (`secrets.token_hex(16)`, 128 bits) | the collision count needed decomposition before it meant anything |
 | H-31 | 2012 | old code meets new data and ACTS on it | Knight Capital deploy skew (2012) | part of the fleet ran the new build and part the old; the loss came not from the skew but from the old half acting on data it misread | `importlib` use in the running process, the self-apply lane's clean-tree gate, and the shared state format `INTEGRITY_MARKER` | (a) sweep for live module reloading; (b) write a row from a FUTURE format and read it with today's reader | (a) **no `importlib.reload` anywhere — one process, one code version**; (b) **the future row is not ignored: it is quarantined and the LIVE FILE is rewritten without it** | **mechanism real, not currently reachable (only v1 exists) → tripwire, not machinery** | the destruction half is what makes a future bump dangerous |
+| H-32 | 2011 | recovery itself becomes the load | AWS EBS re-mirroring storm (2011); the wider retry-avalanche family | the repair path is unthrottled, so everything that was waiting fires at once and the recovery outlasts the outage | `reactivate_paused_checkpoints`, the tick's drain loop, and every producer of `pending` rows | (a) read the revival bound; (b) read the drain bound; (c) enumerate every producer of pending rows | (a) **batch of 3, oldest first, with the EBS reasoning written in the code already**; (b) **the drain is UNBOUNDED by count and the tick has no time budget — only the money caps hold it**; (c) **two producers only: a human CLI add, and one row per due schedule, of which zero are registered** | ALREADY PROTECTED, by producer enumeration rather than by assumption | the residual is named below |
 
 ---
 
@@ -699,3 +700,27 @@ runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
 Чего растяжка НЕ делает: она не запрещает менять формат. Она говорит тому, кто
 меняет (включая самого агента через self-apply), что смена обязана приехать
 вместе с читателем, принимающим обе версии.
+
+### H-32 — защищено не тем, чем кажется, и остаток назван
+
+Оживление припаркованных строк ограничено партией в три, и урок EBS записан в
+самом коде: «сток тика выполняет ВСЁ, что pending, за один проход, поэтому
+неограниченное оживление потратило бы обновлённое окно на долг одним залпом».
+Это уже понято и уже сделано.
+
+Но граница стоит на оживлении, а не на стоке. Сам сток — `for task in
+pending_tasks` без предела, и времени тик не считает вовсе: ни бюджета секунд,
+ни проверки срока. Держат его только денежные потолки.
+
+Поэтому вопрос был не «ограничен ли сток», а «есть ли чем его затопить», и он
+решался перечислением, а не допущением. Производителей строк ровно два:
+добавление руками через CLI и планировщик расписаний, который заводит РОВНО ОДНУ
+задачу на сработавшее расписание. Расписаний в живом хранилище ноль. Плюс партия
+оживления в три. Затопить нечем.
+
+**Остаток, названный явно.** Условие защиты — малое число расписаний, а не
+свойство стока. Если когда-нибудь появится флот расписаний, неограниченный сток
+станет достижим, и тогда всплывёт вторая половина: у тика нет предела по
+времени, а внешний ограничитель времени выполнения убьёт процесс посреди
+работы — то есть класс H-27(a), прерванный платный вызов. Здесь ничего не
+строится: условие ещё не наступило. Записано, чтобы наступление заметили.
