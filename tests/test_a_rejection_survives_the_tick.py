@@ -126,16 +126,21 @@ def test_pre_goal_failures_are_recorded_without_a_goal(tmp_path: Path) -> None:
     assert rows[-1]["goal"] == ""
 
 
-def test_the_ledger_rides_the_charter_path() -> None:
+def test_the_ledger_rides_the_charter_path(tmp_path: Path) -> None:
     """#5: agent_tick's charter router must carry the usage ledger — the
-    hidden-spend hole (from_env() bare at agent_tick.py:1500)."""
+    hidden-spend hole (from_env() bare at agent_tick.py:1500).
+
+    Спрашивается у САМОЙ связки, а не у окна текста вокруг вызова: 2026-08-24
+    построение переехало в `_charter_goal_router`, и текстовая проба потеряла
+    цель, хотя инвариант был цел. Проба, которую ломает переезд, меряет адрес,
+    а не свойство. Вторую половину — видимость для ПОТОЛКА — держит
+    tests/test_the_charter_goal_call_meets_the_money_cap.py.
+    """
     import agent_tick
 
-    src = Path(agent_tick.__file__).read_text(encoding="utf-8")
-    idx = src.find("propose_charter_goal(")
-    assert idx != -1
-    window = src[max(0, idx - 600):idx + 200]
-    assert "usage_ledger" in window, (
+    (tmp_path / "data").mkdir()
+    router = agent_tick._charter_goal_router(tmp_path)
+    assert router.usage_ledger is not None, (
         "the charter path builds ModelRouter.from_env() without a usage "
         "ledger — Sol's charter calls are real spend invisible to the books"
     )

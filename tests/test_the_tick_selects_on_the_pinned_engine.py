@@ -45,7 +45,16 @@ def test_the_charter_block_loads_env_before_building_the_router() -> None:
     loaded, or the pinned engine silently degrades to the default."""
     src = Path(agent_tick.__file__).read_text(encoding="utf-8")
     charter_at = src.find("if args.campaign and args.charter:")
-    router_at = src.find("ModelRouter.from_env(", charter_at)
+    # Строитель зовётся по имени с 2026-08-24 (`_charter_goal_router`); до
+    # того `ModelRouter.from_env(` стоял здесь же строкой. Ищутся оба, чтобы
+    # проба меряла ПОРЯДОК, а не то, где сегодня живёт построение.
+    router_at = min(
+        (at for at in (
+            src.find("_charter_goal_router(", charter_at),
+            src.find("ModelRouter.from_env(", charter_at),
+        ) if at != -1),
+        default=-1,
+    )
     load_at = src.find("_ensure_env_loaded(", charter_at)
     assert charter_at != -1 and router_at != -1
     assert load_at != -1, "the charter block does not load .env at all"

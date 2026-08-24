@@ -46,6 +46,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-21 | 1985- | a state machine that accepts a transition its diagram does not have | Therac-25 (Leveson & Turner, 1993) and the wider control-system literature | the state changes by a path the design never drew, and every later decision reasons about a world that did not happen | the task queue's terminal statuses | drive the FULL transition matrix over settled tasks, not one case | **only `mark_running` was guarded. `done→failed`, `done→cancelled`, `failed→done`, `failed→cancelled`, `cancelled→done`, `cancelled→failed` were all accepted** | **LOCALLY REPRODUCED → FIXED** | `failed→done` is literally «falsely report success» |
 | H-25 | 1999/2000 | two conventions with no end-to-end check, in the TIME domain | Mars Climate Orbiter (H-02) restated for timestamps; the Y2K epoch family | a value carries no unit, each side assumes its own, and nothing ever compares them | every `fromisoformat` site in `core/` | (a) count naive stamps in live state; (b) parse a naive stamp and read the instant it becomes | (a) **12 472 stamps, all timezone-aware, zero naive**; (b) **a naive stamp was read as LOCAL time — 10:00 became 07:00Z on this machine, a silent three-hour shift** | **mechanism live, data clean → FIXED at the two silent sites** | 7 sites did not normalise; 5 raise loudly, 2 shifted silently |
 | H-26 | 2005- | parser differential: two gates read one input and disagree | HTTP request-smuggling literature; the wider filter-vs-consumer family | the danger is not strictness or leniency but that the disagreement is undeclared, so a value passes the gate that judges it one way and reaches the consumer that judges it another | `secret_scanner.scan` vs `contains_secret(keywords)` vs `redact_dlp_text` vs the two durable stores | run one text through every boundary and compare verdicts | **«My password is hunter2»: 0 patterns, keyword TRUE, persistent memory REJECTS, redaction cuts nothing, and the episodic store keeps it verbatim** | **differential real, NOT reproduced in data → declared, not equalised** | 0 hits of either class across 6 426 live rows |
+| H-27 | 1970s- | an external effect happens, its accounting does not | double-entry bookkeeping; two-phase commit; the duplicate-charge family in payment postmortems | the money moved and the write that was supposed to count it never ran, or ran through a path that never reached the ledger; the cap then guards a number that is not the spend | `assert_can_start` / `record` around the paid model call, and every construction site of `ModelUsageLedger` | (a) interrupt between reserve and record and read what survives; (b) reconcile live `llm_calls` reservations against live usage rows | (a) the CALL count survives, tokens and cost do not — realistic loss over an unattended week ~0.1-0.4% of the weekly cap, so no machinery is owed; (b) **1364 reservations against 1379 usage rows — 15 paid calls, all openai, all on 19-20 Aug, invisible to the daily and weekly cap** | **LOCALLY REPRODUCED → FIXED (b); (a) measured and declined** | see below |
 
 ---
 
@@ -567,3 +568,39 @@ SolarWinds supply chain (2020) · Rowhammer as data corruption class.
 2022-2026: Atlassian multi-day outage (2022) · Rogers routing (2022) ·
 CrowdStrike channel-file parser (2024) · xz-utils backdoor (2024) · agent
 runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
+
+### H-27 — почему первая починка этого же места закрыла половину
+
+Гипотеза шла на класс «прерывание между внешним эффектом и его учётом». Она
+воспроизвелась: между `assert_can_start` и `record` переживает только счёт
+вызовов, а токены и стоимость — нет. Но чинить это нечем дёшево. Учёт сегодня
+**точный, по данным провайдера** (984 успешных строки из 984 с `estimated=False`),
+а преполётная оценка сама объявлена «нарочно грубой, не биллинговой». Резерв
+оценки заменил бы точность грубостью; поправочная запись потребовала бы
+разрешить УМЕНЬШЕНИЕ счётчика, то есть снять монотонность — само свойство
+безопасности. Реальная цена дыры: медиана вызова 12 единиц, пять убийств
+процесса за неделю — 60 из 15000, то есть 0,4 %. Машинерия не заслужена.
+
+Зато сверка, построенная ради этой гипотезы, нашла другое и живое. Резервов
+`llm_calls` — 1364, строк расхода — 1379. Разрыв НЕ объясняется историей: строк
+старше первого резерва ноль. Он весь в openai (659 против 644) и весь в двух
+днях — 19 августа (+13) и 20-го (+2). Переключение провайдера ни при чём:
+отказов anthropic в те дни ноль, а 14-17 августа, при 391 отказе, счета сошлись
+точь-в-точь. Те же 15 строк отсутствуют и среди `model_cost_units`.
+
+Причина: `agent_tick` строил леджер для выбора цели от хартии своей строкой,
+мимо `app/bootstrap.py`. И резерв, и запись стоимости стоят под
+`if self.budget_ledger is not None`, поэтому вызов оставлял строку расхода и
+оставался невидим для суточного и недельного потолка. Заодно конструктор вместо
+`from_env` обнулял и сессионные лимиты.
+
+Отдельный урок в том, ПОЧЕМУ это пережило починку. Комментарий на месте правки
+называет вскрытие 19 августа: тогда нашли вызовы вовсе без леджера и подключили
+леджер расхода. Мерили видимость в учёте — её и починили. Вторую половину,
+видимость для потолка, никто не мерил, и она осталась. Класс «покрытие списали
+у соседа»: у первого варианта полное, у следующего дыра ровно в той детали,
+которую не измеряли.
+
+Побочный вывод о методе: обе текстовые пробы, закреплявшие прежнюю починку,
+покраснели от ПЕРЕЕЗДА построения, а не от потери свойства. Проба, которую
+ломает переезд, меряет адрес, а не свойство; обе переписаны на инвариант.
