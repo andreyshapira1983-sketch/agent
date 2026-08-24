@@ -38,7 +38,25 @@ def _iso(dt: datetime | None = None) -> str:
 
 
 def _parse_iso(value: str) -> datetime:
-    return datetime.fromisoformat(value).astimezone(timezone.utc)
+    """Отметку без зоны считать UTC, а не местным временем.
+
+    H-25 в docs/audit/HISTORICAL_FAILURE_LEDGER.md — класс «две конвенции, ни
+    одной сквозной проверки» (Mars Climate Orbiter, только во времени).
+    `datetime.fromisoformat("2026-08-24T10:00:00").astimezone(utc)` трактует
+    наивное значение как МЕСТНОЕ и на этой машине даёт 07:00Z — тихий сдвиг на
+    три часа. При сроке сиротства в 30 минут это значит, что живая задача
+    мгновенно «осиротела», то есть открывается класс двойного исполнения,
+    который MIR-033 измерил закрытым.
+
+    В живом состоянии таких отметок нет: замер 2026-08-24 — 12 472 отметки, все
+    с зоной. Механизм при этом жив, а все писатели репозитория пишут UTC,
+    поэтому наивное значение приводится к UTC вместо местного: тихая ошибка
+    становится нулевой, и ни одно чтение не падает на правке файла руками.
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _status(value: object, *, default: str = "active") -> str:
