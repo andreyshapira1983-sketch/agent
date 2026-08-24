@@ -158,6 +158,20 @@ def redact_payload(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         redacted = [redact_payload(x) for x in obj]
         return tuple(redacted) if isinstance(obj, tuple) else redacted
+    # H-34: множества и байты доходили до `logs/*.jsonl` СЫРЫМИ. Логгер их
+    # принимает — несериализуемое он приводит к строке, — а обход в них не
+    # заходил, и §7 объявляет при этом, что эти поверхности НИКОГДА не получают
+    # сырых секретов. Замер сквозной, по файлу, а не по коду.
+    if isinstance(obj, (set, frozenset)):
+        # Список, а не множество: после редакции два разных секрета дают одну и
+        # ту же метку, и множество молча потеряло бы один из элементов. В
+        # журнале лучше видеть две одинаковые метки, чем недосчитаться записи.
+        return [redact_payload(x) for x in sorted(obj, key=repr)]
+    if isinstance(obj, (bytes, bytearray)):
+        # Тип меняется на строку намеренно: значение, которое нельзя показать
+        # безопасно, стоит меньше, чем показанное безопасно. Декодируется с
+        # заменой, потому что журналу нужен читаемый след, а не точный байт.
+        return redact_payload(bytes(obj).decode("utf-8", errors="replace"))
     return obj
 
 

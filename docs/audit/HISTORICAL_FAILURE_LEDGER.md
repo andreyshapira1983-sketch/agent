@@ -53,6 +53,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-31 | 2012 | old code meets new data and ACTS on it | Knight Capital deploy skew (2012) | part of the fleet ran the new build and part the old; the loss came not from the skew but from the old half acting on data it misread | `importlib` use in the running process, the self-apply lane's clean-tree gate, and the shared state format `INTEGRITY_MARKER` | (a) sweep for live module reloading; (b) write a row from a FUTURE format and read it with today's reader | (a) **no `importlib.reload` anywhere — one process, one code version**; (b) **the future row is not ignored: it is quarantined and the LIVE FILE is rewritten without it** | **mechanism real, not currently reachable (only v1 exists) → tripwire, not machinery** | the destruction half is what makes a future bump dangerous |
 | H-32 | 2011 | recovery itself becomes the load | AWS EBS re-mirroring storm (2011); the wider retry-avalanche family | the repair path is unthrottled, so everything that was waiting fires at once and the recovery outlasts the outage | `reactivate_paused_checkpoints`, the tick's drain loop, and every producer of `pending` rows | (a) read the revival bound; (b) read the drain bound; (c) enumerate every producer of pending rows | (a) **batch of 3, oldest first, with the EBS reasoning written in the code already**; (b) **the drain is UNBOUNDED by count and the tick has no time budget — only the money caps hold it**; (c) **two producers only: a human CLI add, and one row per due schedule, of which zero are registered** | ALREADY PROTECTED, by producer enumeration rather than by assumption | the residual is named below |
 | H-33 | 2021 | the protective mechanism removes protection when IT fails | Facebook BGP withdrawal (2021); the fail-open family | the thing meant to keep the system safe took the system off the map when it failed | `.env`, the provider chain, and `config/budget_limits.json` | (a) run with no `.env`; (b) run with no keys; (c) run with the limits file absent | (a) **proceeds on defaults, does not raise**; (b) **the chain ends at the local provider and fails with a connection error — a stop, not silent garbage**; (c) **NO CAP AT ALL: 500 reservations allowed in a row, silently, while the same file CORRUPTED raises** | **LOCALLY REPRODUCED → FIXED at the process entry** | the placement took three attempts, and both wrong ones were red for good reasons |
+| H-34 | 2014 | the boundary is checked for some shapes of input, not all | Heartbleed (2014); the wider partial-boundary family | the reply carried more than was asked because one request shape skipped the length check | `redact_payload` and the three surfaces §7 declares safe | push a secret through every payload shape the logger accepts, then read the FILE | **a secret inside a set or inside bytes reached `logs/*.jsonl` raw — the logger accepts both (it stringifies) and the traversal did not enter them** | **LOCALLY REPRODUCED → FIXED for sets and bytes; the dict-key decision upheld after testing its premise** | 0 occurrences live: no sets, no bytes in 6489 rows; 0 key-shaped strings in 1269 files |
 
 ---
 
@@ -755,3 +756,33 @@ pending_tasks` без предела, и времени тик не считае
 случай «зелёные тесты ≠ подключено». Тест переписан на запуск модуля
 подпроцессом и проверяет не только код возврата, но и ПРИЧИНУ отказа — иначе он
 закрепил бы любое чужое падение.
+
+### H-34 — одно решение оспорено замером, другое подтверждено тем же замером
+
+Проба нашла три протекающие формы: КЛЮЧ словаря, множество и байты. Разница
+между ними и есть содержание записи.
+
+**Ключи трогать не стал.** В докстринге `redact_payload` записано решение:
+ключи описывают схему, переписать их — потерять журнал. Спорить следовало не с
+решением, а с его посылкой, и посылка проверяема: 739 различных ключей в 6489
+живых строках — все до одного имена полей или переменных окружения, ни одного
+«данными». Посылка держится, решение остаётся, а тест на границу закрепляет
+именно её: если ключи однажды начнут редактироваться, это должно быть отдельным
+осознанным решением с новым замером, а не побочным следствием правки обхода.
+
+**Множества и байты закрыты.** Для них решения не было — обход просто в них не
+заходил, а логгер их принимает, приводя к строке. §7 при этом объявляет
+инвариант АБСОЛЮТНЫМ: три поверхности никогда не получают сырых секретов. Он
+был ложен, и починка стоит нескольких строк, ничем не оплаченных.
+
+Две частности, за которые пришлось отвечать. Множество после редакции
+возвращается СПИСКОМ: два разных секрета дают одну метку, и множество молча
+потеряло бы элемент — в журнале лучше две одинаковые метки, чем недосчёт.
+Байты становятся строкой намеренно: значение, которое нельзя показать
+безопасно, стоит меньше, чем показанное безопасно.
+
+**Проба искала по файлу, а не по коду.** Прочие тесты сериализуют payload так
+же, как логгер, и потому доказывают редактор, но не проводку. Отдельный тест
+пишет настоящий журнал и читает настоящий файл — дефект был найден именно так,
+и закрепляется там же. Ломка сделана по каждой ветке отдельно: обезвреживание
+любой из двух краснит ровно свою форму.
