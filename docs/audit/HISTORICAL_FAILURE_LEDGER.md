@@ -57,6 +57,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-35 | 2014 | data read as instruction | Shellshock (2014); for an agent the same class is prompt injection | a value crossed a boundary where it stopped being data and started being a command | the classic form: `shell=True` / `os.system` / `eval`; the agent form: `scan_for_injection` and the tool-output path | (a) sweep for shell and eval execution; (b) attack the guard with SEVEN unseen forms of the same class, not the one it grew on | (a) **none — no `shell=True`, no `os.system`, no raw eval; `ast.literal_eval` only**; (b) **1 of 7 caught: only the canonical English phrasing. Russian polite, quoted-regulation, tool-shaped, operator-impersonating, deferred and negated forms all read `clean` and pass UNANNOTATED** | **coverage measured and weak; the intake is closed elsewhere → recorded, not patched** | the severity answer is the blocked-tool set, below |
 | H-36 | 2017 | a destructive command aimed at the wrong target | GitLab database deletion (2017) | one wrong path removed production, and the second half was that the backups did not restore | `compensation._apply_action` (`delete_path_if_created`); the backup half is H-12 | ask the rollback to remove `data`, `logs` and `.git` | **all three removed, status `ok` — the only guard was `_resolve_inside`, and everything valuable lives INSIDE the workspace** | **LOCALLY REPRODUCED → FIXED (protected roots refused)** | the code's own comment claimed an ownership invariant it did not enforce |
 | H-37 | 2021 | a harmless-looking field is EXPANDED somewhere downstream | log4shell (2021) | a logged string was parsed as a lookup and reached the network; the field never looked dangerous at the place it was written | every `.format()` / `Template.substitute` site, and any stored field that could trigger egress | (a) AST sweep for expansion sites, detector proved on `.format` and `.substitute`; (b) trace whether any expanded template is DATA rather than a code constant; (c) look for a stored `url` field that anything auto-fetches | (a) **3 sites only, and the two `%` hits are arithmetic**; (b) **`SourceLibraryEntry.search_template` is the one data-shaped template, and `resolve_source_library` selects only from 13 hardcoded entries — none carries a placeholder besides `{topic}`**; (c) **none: egress tools are planner-invoked and blocked on the unattended path (H-35)** | NOT APPLICABLE, proved by tracing rather than assumed | the dangerous shape would be a template loaded from data |
+| H-38 | 2024 | a DATA update, not a code change, kills every consumer | CrowdStrike channel-file parser (2024) | the binaries were untouched; a content file shipped and every machine that parsed it went down simultaneously | `config/budget_limits.json` against the real tick, and the heartbeat that reports on it | run the tick end to end (keys stripped, so nothing can be spent) with the limits file valid, then corrupt | **the corrupt file exits 1 with a NAMED error and no traceback — handled. But three consecutive failures later `--status` prints `Daemon: alive — last tick 0.0 min ago (event=tick_error)`** | **LOCALLY REPRODUCED → the word fixed, the decision left where it belongs** | the failing tick is correct behaviour (H-33); the lie was the word `alive` |
 
 ---
 
@@ -870,3 +871,29 @@ log4shell опасен не подстановкой как таковой, а �
 библиотека источников когда-нибудь начнёт читаться из `data/`, шаблон станет
 данными, и `.format` над ним станет тем самым разворачиванием. Записано, чтобы
 это заметили в момент, а не после.
+
+### H-38 — проба нацелена на СВОЮ ЖЕ правку, сделанную часом раньше
+
+H-33 научил безнадзорный вход отказываться работать без денежного потолка. Это
+правильно, но ровно такая правка и создаёт форму CrowdStrike: файл ДАННЫХ,
+который роняет каждого потребителя. Поэтому класс проверялся не на чужом коде, а
+на собственном свежем.
+
+Проба гоняла настоящий тик подпроцессом со СНЯТЫМИ ключами — иначе замер сам
+потратил бы деньги, а мерить ценой измеряемого нельзя.
+
+Результат двойной. Падение обработано: код возврата 1, названная причина, без
+трассы. Но после трёх подряд отказов строка состояния печатала
+«Daemon: alive — last tick 0.0 min ago (event=tick_error)»: пульс пишется и на
+ветке отказа, свежесть отметки ведёт словом «жив», а правда лежит в скобках.
+Оператор, глянувший за неделю одну строку, читает первое слово.
+
+Разделение сделано намеренно. Вечный повтор — это MIR-135, он открыт по
+отдельному решению, и здесь оно не пересматривается. Испорченный конфиг обязан
+ронять тик — это H-33 и это про деньги. Изменено ровно одно: СЛОВО. Строка,
+у которой в руках уже есть `event=tick_error`, больше не имеет права вести
+словом «alive».
+
+Признак отказа опознаётся подстрокой (`error`/`exception`/`fail`), а не точным
+списком: события такого рода заводятся по мере надобности, и новый `*_error` не
+должен молча вернуть строке прежнее слово.
