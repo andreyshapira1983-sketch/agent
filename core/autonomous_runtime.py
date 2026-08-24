@@ -194,6 +194,37 @@ __all__ = [
 ]
 
 
+def _grant_is_live(expires_at: str | None, now: datetime) -> bool:
+    """Действует ли ОДОБРЕННОЕ разрешение по своему сроку.
+
+    H-41 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Разрешение на НЕОБРАТИМЫЕ
+    эффекты искалось среди `list(status="approved")`, а этот читатель истёкшие
+    не отсекает: `expire_stale` трогает только `pending`. Замер 2026-08-24 —
+    заявка со сроком, прошедшим тридцать дней назад, невидима для `pending()` и
+    полностью видима здесь, то есть продолжает разрешать.
+
+    Смысл поля не выдуман: сосед по файлу, `_active_standing_grant`, уже читает
+    `expires_at` у одобренной заявки как срок действия гранта и пропускает
+    истёкшие. Два механизма разрешения расходились ровно на защите; здесь
+    второй приводится к первому.
+
+    Отсутствие срока — по-прежнему «бессрочно»: так ведёт себя разрешение,
+    заведённое без даты, и менять ЭТО значило бы вводить политику, а политика
+    о необратимом принадлежит оператору. Нечитаемая отметка — отказ: пропустить
+    необратимое действие по непрочитанному сроку хуже, чем попросить новое
+    одобрение.
+    """
+    if not expires_at:
+        return True
+    try:
+        deadline = datetime.fromisoformat(str(expires_at))
+    except (TypeError, ValueError):
+        return False
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    return deadline > now
+
+
 class AutonomousRuntime(AutonomousRuntimeProposals):
     """Run a bounded autonomous project-health pass."""
 
@@ -941,10 +972,12 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         разрешает цель B. Берётся самое старое подходящее.
         """
         key = self._effects_dedup_key(config.goal)
+        now = datetime.now(timezone.utc)
         return next(
             (i for i in self.approval_inbox.list(status="approved")
              if i.operation == "autonomous_runtime.allow_effects"
-             and (i.payload or {}).get("dedup_key") == key),
+             and (i.payload or {}).get("dedup_key") == key
+             and _grant_is_live(i.expires_at, now)),
             None,
         )
 
