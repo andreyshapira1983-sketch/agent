@@ -498,12 +498,27 @@ Terminal outcomes are now write-once: repeating the SAME outcome stays
 idempotent (callers rely on it), `blocked` and `paused` stay rewritable because
 neither is terminal — one waits on a human, the other on a clock.
 
-**One weakness in this entry's evidence, stated rather than hidden.** The
-mutation probe for this guard was not run — the operator interrupted it and
-asked to move on. So the guard is supported by six red-then-green cases and the
-full battery at 8740, but NOT by a demonstration that removing it reddens them.
-Every other fix in this ledger carries that demonstration; this one does not
-yet.
+**Пробел в уликах этой записи закрыт 2026-08-24.** Он был назван вслух, а не
+спрятан: ломочная пробa не прогонялась — оператор прервал вызов и попросил идти
+дальше, — и запись честно говорила, что этот сторож единственный в журнале без
+демонстрации. Оператор вернул к нему через двенадцать классов, и проба
+прогнана.
+
+Прогнана ПОВЕТОЧНО, и оказалась сильнее обычной ломки. Сторож стоит тремя
+вызовами — в `mark_done`, `mark_failed` и `cancel`, — и каждый несёт свою долю
+матрицы:
+
+| снято | результат |
+|---|---|
+| `mark_done` | 2 из 10 краснеют |
+| `mark_failed` | 2 из 10 краснеют |
+| `cancel` | 2 из 10 краснеют |
+| все три | **6 из 10 краснеют** — вся матрица переходов |
+
+Ни один вызов не оказался декоративным: каждый держит ровно две клетки, шесть
+клеток покрыты без пересечений, а оставшиеся четыре теста — границы
+(идемпотентный повтор того же исхода и переписываемый `blocked`) — остаются
+зелёными при любой ломке, как и положено границам.
 
 
 ### H-25 — a clean measurement and a live mechanism, kept apart
