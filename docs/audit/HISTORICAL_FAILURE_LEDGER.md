@@ -45,6 +45,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-20 | 2026 | commitment drift vs binding drift | «The LLM Proposes, the Executive Disposes» (4 Aug 2026), supplied by the operator | two different losses: the agent stops carrying the goal at all, or it keeps the goal and loses its link to the concrete referent. Their ablation raised goal-abandonment 0.00 → 1.00 when the external commitment store was removed, while binding-error stayed 0.00 | the durable task queue and `BestNextAction` | (a) park a checkpoint, reopen the store in a fresh object, read the goal; (b) ask the decision object for the file its own reason named | (a) **commitment survives verbatim** across a store reopen; (b) **binding was lost: `_PY_TARGET_RE` matched the filename, classified the goal as engineering, and DISCARDED the match** | **(a) ALREADY PROTECTED · (b) LOCALLY REPRODUCED → FIXED** | our binding-error was the axis their ablation kept at zero |
 | H-21 | 1985- | a state machine that accepts a transition its diagram does not have | Therac-25 (Leveson & Turner, 1993) and the wider control-system literature | the state changes by a path the design never drew, and every later decision reasons about a world that did not happen | the task queue's terminal statuses | drive the FULL transition matrix over settled tasks, not one case | **only `mark_running` was guarded. `done→failed`, `done→cancelled`, `failed→done`, `failed→cancelled`, `cancelled→done`, `cancelled→failed` were all accepted** | **LOCALLY REPRODUCED → FIXED** | `failed→done` is literally «falsely report success» |
 | H-25 | 1999/2000 | two conventions with no end-to-end check, in the TIME domain | Mars Climate Orbiter (H-02) restated for timestamps; the Y2K epoch family | a value carries no unit, each side assumes its own, and nothing ever compares them | every `fromisoformat` site in `core/` | (a) count naive stamps in live state; (b) parse a naive stamp and read the instant it becomes | (a) **12 472 stamps, all timezone-aware, zero naive**; (b) **a naive stamp was read as LOCAL time — 10:00 became 07:00Z on this machine, a silent three-hour shift** | **mechanism live, data clean → FIXED at the two silent sites** | 7 sites did not normalise; 5 raise loudly, 2 shifted silently |
+| H-26 | 2005- | parser differential: two gates read one input and disagree | HTTP request-smuggling literature; the wider filter-vs-consumer family | the danger is not strictness or leniency but that the disagreement is undeclared, so a value passes the gate that judges it one way and reaches the consumer that judges it another | `secret_scanner.scan` vs `contains_secret(keywords)` vs `redact_dlp_text` vs the two durable stores | run one text through every boundary and compare verdicts | **«My password is hunter2»: 0 patterns, keyword TRUE, persistent memory REJECTS, redaction cuts nothing, and the episodic store keeps it verbatim** | **differential real, NOT reproduced in data → declared, not equalised** | 0 hits of either class across 6 426 live rows |
 
 ---
 
@@ -54,10 +55,10 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 21 |
+| classes examined | 22 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 12 (H-18, H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
-| UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
+| UNKNOWN → measured | 2 (H-12 what each backup restores; H-26 the declared differential) |
 | LOCALLY REPRODUCED | 9 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift, H-20 binding, H-21) |
 | fixes completed | 9 (H-25, H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20, H-21*) |
 | *fixes without a mutation probe | 1 (H-21 — probe interrupted) |
@@ -514,6 +515,34 @@ UTC. Refusing to read such a file would stop the queue entirely over one edit;
 reading it as UTC turns a silent error into no error. An explicit non-UTC
 offset is still honoured — pinned, so the fix cannot become «everything is
 UTC».
+
+
+### H-26 — the two boundaries differ by CAPABILITY, not by strictness
+
+One text, «My password is hunter2», is refused by the persistent-memory policy
+and kept verbatim by the episodic store. That looks like an inconsistency to be
+equalised, and equalising it would be the wrong move.
+
+The keyword class **finds no span**. It says «this text is about a password»,
+not «the password runs from character 12 to 19». A redactor needs a span; there
+is nothing to cut, so it cannot act on the keyword class even in principle. A
+boundary that decides about the WHOLE record — write it or refuse it — can use
+the class, and does. The asymmetry follows from what each boundary is able to
+do.
+
+**No gate was added to the episodic path**, and the reason is measured rather
+than argued: across 6 426 live rows (episodes, persistent memory, source
+registry, write journal) there are **zero** hits of either class. Rejecting
+episodes on a keyword would discard the record of any run that discussed
+password handling — a false-rejection cost paid against a measured frequency of
+zero.
+
+What changed is that the difference is now **declared**: its root is pinned
+separately from its effect, the pattern class is pinned as caught by BOTH
+boundaries (so the tolerance stays narrow), and the zero measurement is re-taken
+by the test rather than remembered. If the frequency ever stops being zero, the
+decision not to build a gate has to be made again — and the test says so in its
+own failure message.
 
 ## Queue (chronological, not yet reached)
 
