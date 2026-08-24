@@ -110,6 +110,13 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
         lines.append(f"commit: {result.get('commit_hash')}")
     if result.get("rejected_files"):
         lines.append(f"rejected_files: {result.get('rejected_files')}")
+    # MIR-139: риски печатаются, и печатаются ПЕРЕД строкой «next». До
+    # 2026-08-24 поле заполнялось и не выводилось вовсе — а раскрытие, до
+    # которого не доходит взгляд, равно молчанию. Здесь среди прочего приезжает
+    # единственный факт, которого человеку не хватало на решении о СЛИЯНИИ:
+    # что патч изменил и политику, и её судью одним актом, и в какую сторону.
+    for risk in result.get("risks") or ():
+        lines.append(f"risk: {risk}")
     lines.append(f"next: {result.get('next_human_action')}")
     print("\n".join(lines), file=sys.stderr)
     return True

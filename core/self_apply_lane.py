@@ -23,6 +23,7 @@ unit-testable with fakes — no real provider/network/LLM call ever happens here
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -186,6 +187,91 @@ def _is_allowed(rel: str) -> bool:
     if top == "docs":
         return True
     return bool(lower.endswith(".md"))
+
+
+#: Каталоги, где живёт ПОЛИТИКА — то, что патч меняет по существу.
+_POLICY_DIRS: tuple[str, ...] = ("core/", "cli/", "tools/", "app/", "api/")
+
+
+def _test_surface(source: str) -> tuple[int, int] | None:
+    """(тестов, проверок) в исходнике, или None, если его не разобрать.
+
+    Считаются функции с именем `test_*` (включая методы) и операторы `assert`.
+    Это грубая мерка судьи НАРОЧНО: её задача — заметить, что судья стал
+    меньше, а не оценить качество набора.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    tests = 0
+    asserts = 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                tests += 1
+        elif isinstance(node, ast.Assert):
+            asserts += 1
+    return tests, asserts
+
+
+def judge_change_risks(
+    files: tuple[FileChange, ...] | list[FileChange], *, workspace: Path,
+) -> list[str]:
+    """Назвать риск, если патч меняет политику и ОСЛАБЛЯЕТ её судью одним актом.
+
+    MIR-139. Поле разделяет не по «трогать тесты», а по «менять политику и её
+    судью одновременно»: честная работа тесты трогает — Stage A обязан сперва
+    написать ПАДАЮЩИЙ приёмочный тест, а починки правят существующие. Опасна
+    именно та половина, где судья становится МЕНЬШЕ, потому что добавленной
+    проверкой самооценку не поднять.
+
+    Это не второй судья и не ужесточение собственного набора — анти-требование
+    записи запрещает и то, и другое: более строгий самописный аршин остаётся
+    самописным. Решение остаётся у человека в ящике одобрений (§9); здесь
+    закрывается ровно то, чего ему не хватало — что судья изменился и куда.
+
+    Считать надо ДО применения патча: после него «до» уже негде взять.
+    """
+    changes = list(files)
+    policy_touched = [
+        rel for rel in (_normalize_rel(c.path) for c in changes)
+        if rel and rel.startswith(_POLICY_DIRS)
+    ]
+    if not policy_touched:
+        return []
+
+    risks: list[str] = []
+    for change in changes:
+        rel = _normalize_rel(change.path)
+        if rel is None or not rel.startswith("tests/"):
+            continue
+        existing = Path(workspace) / rel
+        if not existing.exists():
+            # Новый файл тестов — прибавка к судье, а не убавка.
+            continue
+        try:
+            before_src = existing.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        before = _test_surface(before_src)
+        after = _test_surface(change.content)
+        if before is None or after is None:
+            risks.append(
+                f"judge {rel} changed in the same patch as policy, and the "
+                f"change could NOT be measured (unparseable source) — read the "
+                f"diff before approving"
+            )
+            continue
+        if after[0] < before[0] or after[1] < before[1]:
+            risks.append(
+                f"judge {rel} was WEAKENED in the same patch as policy "
+                f"({', '.join(policy_touched[:3])}): "
+                f"tests {before[0]} -> {after[0]}, asserts {before[1]} -> "
+                f"{after[1]}. The green suite below was produced BY this "
+                f"weakened judge and is not independent evidence (MIR-139)"
+            )
+    return risks
 
 
 def classify_patch_risk(
@@ -434,6 +520,10 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
         "acceptable."
     )
 
+    # MIR-139: мерка судьи снимается ЗДЕСЬ — после проверки чистого дерева и
+    # ДО применения патча. Позже «до» уже негде взять: на диске новое.
+    judge_risks = judge_change_risks(proposal.files, workspace=Path(workspace))
+
     def _rollback() -> str:
         try:
             vcs.reset_hard()
@@ -535,7 +625,8 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
         commit_hash=commit_hash,
         risks=[
             ("change is committed locally only — not pushed, not merged; a human "
-            "must review before it reaches the base branch")
+            "must review before it reaches the base branch"),
+            *judge_risks,
         ],
         next_human_action=next_human,
     )
