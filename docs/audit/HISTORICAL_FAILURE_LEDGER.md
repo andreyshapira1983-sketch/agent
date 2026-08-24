@@ -37,6 +37,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-14 | 2024 | a configuration file that takes the whole system down | CrowdStrike Falcon channel file 291, 19 July 2024 | a kernel-level component parsed a config channel file and crashed millions of hosts. Config is an input as dangerous as the network | `config/*.json` against `build_agent` | corrupt each file four ways, with a CONTROL run on healthy files first | control survives; `budget_limits.json` and `model_registry.json` **kill the build** on every corruption; `model_catalog.json` survives (it has a fallback) | **LOCALLY REPRODUCED — and the direction is CORRECT** | fail-closed pinned; the compound with MIR-135 recorded |
 | H-13 | 2021 | data interpreted by a formatting layer | log4shell, CVE-2021-44228 | a logging library resolved `${jndi:...}` inside data it was merely formatting, turning a log line into remote code execution | every non-literal format template; then the adjacent reachable form — a topic interpolated next to a `site:` operator | (a) AST sweep for format templates that are not literals; (b) craft topics that escape the `site:` restriction; (c) run classic domain-gate bypasses | (a) **2 non-literal templates, both module constants — not reachable from outside**; (b) escape into the QUERY works; (c) the second layer holds — 6 of 7, incl. suffix and user-info bypasses | ALREADY PROTECTED (layered) · **one false rejection found and fixed** | the gate compared `netloc`, so a legitimate port was rejected |
 | H-15 | 2017 | adjacent data leaking into output | Cloudbleed (Cloudflare, Feb 2017) | an HTML-parser bug emitted NEIGHBOURING memory into responses; other users' cookies and messages ended up in search-engine caches | `core/secret_scanner` / `redact_dlp_text`, which cleans logs, receipts and quarantine files | run seven real secret shapes through the scanner and check what survives verbatim | **two passed through: the AWS SECRET beside a caught `AKIA…`, and `https://user:pass@host` — nothing at all** | **LOCALLY REPRODUCED → FIXED** | one limit kept deliberately and pinned as a limit |
+| H-12 | 2017 | backups that exist and were never restored | GitLab.com database incident, 31 Jan 2017 (public postmortem) | the primary database directory was removed during recovery, and of **five** configured backup/replication methods **none** worked — some misconfigured, some untested for a year. A backup nobody has restored from is an assumption | the nine `*.bak` files in `data/` and the migrations that write them | run every backup through the REAL state loader, then compare identity against the live store using each store's own identity field | **9 of 9 load.** But identity comparison shows three are REPLACEMENTS, not repairs — `persistent_memory.jsonl.20260731…` shares **0 of 814** rows with the live store | **ALREADY PROTECTED (readability) · UNKNOWN → now measured (what each backup IS)** | drill made repeatable; see below |
 
 ---
 
@@ -46,10 +47,10 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 13 |
+| classes examined | 14 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 7 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-13) |
-| UNKNOWN | 0 |
+| ALREADY PROTECTED | 8 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13) |
+| UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
 | LOCALLY REPRODUCED | 6 (H-01, H-05, H-07, H-11, H-14, H-15) |
 | fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
@@ -262,6 +263,44 @@ broke it anyway. The patterns were restored from the scratch script and the
 break-tests were redone by inverse edit. Recorded because the second-order
 lesson is that a break-test procedure which can delete the fix is itself a
 defect in the method, not just a slip.
+
+
+### H-12 — the backups load; what they MEAN was the unmeasured part
+
+GitLab's failure was untested backups. Ours are testable and all nine pass:
+every `*.bak` in `data/` loads through the same `read_state_jsonl` that reads
+the live files, with checksums and quarantine active. That is the drill GitLab
+lacked, and it is now green.
+
+The finding is one layer along. A backup that loads still answers nothing about
+**what restoring it would do**, and the identity comparison splits them:
+
+| backup | rows | restoring it would be |
+|---|---|---|
+| `runtime_tasks…20260822` | 21 | a repair — 21 of 21 shared |
+| `persistent_memory…pre-injection-cleanup` | 94 | a repair — 89 of 94 |
+| `episodic_memory…pre-gate-wait-demotion` | 200 | a repair — 142 of 200 |
+| `self_improvement_issues…pre-echo-collapse` | 106 | **a replacement** — 16 of 106 |
+| `episodic_memory…20260730` | 22 | **a replacement** — 10 of 22 |
+| `persistent_memory…20260731` | 814 | **a replacement** — **0 of 814** |
+
+The last one is the sharp case: 814 rows sharing nothing with today's 125.
+Restoring it during an incident would not repair the store, it would replace a
+month of state — and it sits in the same directory, with the same suffix,
+looking exactly like the backups that WOULD repair.
+
+Nothing is deleted and no policy is added: what was missing is the reading, so
+`scripts/restore_drill.py` produces it on demand, and
+`tests/test_every_backup_can_be_restored.py` keeps the readability half green
+with a control that proves the drill can still catch a corrupt backup — a green
+drill over zero backups would mean nothing.
+
+**Probe artefacts caught before they became findings.** The first comparison
+used `id` for every store and reported «0 unique on both sides» for
+`self_improvement_issues` and `source_registry`. Neither has an `id` field —
+the sets were `{None}` on both sides. The drill now picks the identity field
+per store and says «unknown» where there is none, instead of inventing a
+number.
 
 ## Queue (chronological, not yet reached)
 
