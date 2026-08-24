@@ -42,6 +42,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-17 | 2021 | an action inside your own authority removes the path that repairs you | Facebook/Meta global outage, 4 Oct 2021 | a routine capacity check withdrew the BGP routes, taking down the service AND the tools needed to fix it — internal DNS, remote access, reportedly even door badges | `_ALLOWED_CODE_DIRS` in the self-apply lane, against the launcher, bootstrap, installers and ratchets | ask the risk classifier whether the agent may edit each of those paths | **`agent_tick.py`, `main.py`, `app/`, `scripts/`, `.git/`, and every config are OUT of reach** | ALREADY PROTECTED — and now pinned | the property rests on one four-string tuple |
 | H-19 | 2018-2015 | information reaching a channel not built to carry it | Meltdown / Spectre (2018); Rowhammer (Kim et al., 2014) | a side channel leaks what no interface exposed — cache timing, adjacent DRAM rows. The general shape: data crosses a boundary through a path nobody designed as a path | every durable surface a fetched page can reach: chain log payload, knowledge pipeline, memory write policy, source registry, the answer itself | plant a real secret in a fetched page and follow it through each surface | **chain log payload carries no excerpt; knowledge pipeline refuses; memory write policy rejects all three shapes; outbound redaction catches all three; 0 hits across 5 151 live source-registry rows** | ALREADY PROTECTED, in depth | yesterday's H-15 patterns propagated here on their own |
 | H-18 | 2022 | a repair path that does not scale to the size of the incident | Atlassian, April 2022 (883 sites deleted; public incident review) | restores were per-tenant and largely manual, so recovery ran for up to two weeks. The damage was instant and the repair was serial | the approval inbox against a week of unattended ticks | simulate 336 ticks (48/day x 7) and read both the file and the queue | **two independent bounds, and they are not interchangeable**: the dedup key collapses IDENTICAL proposals to one row (612 bytes), and the in-flight gate refuses while any Stage-A item is `pending` OR `approved`-but-unexecuted | ALREADY PROTECTED — and now pinned | the dedup key alone would do nothing against 336 DIFFERENT proposals |
+| H-20 | 2026 | commitment drift vs binding drift | «The LLM Proposes, the Executive Disposes» (4 Aug 2026), supplied by the operator | two different losses: the agent stops carrying the goal at all, or it keeps the goal and loses its link to the concrete referent. Their ablation raised goal-abandonment 0.00 → 1.00 when the external commitment store was removed, while binding-error stayed 0.00 | the durable task queue and `BestNextAction` | (a) park a checkpoint, reopen the store in a fresh object, read the goal; (b) ask the decision object for the file its own reason named | (a) **commitment survives verbatim** across a store reopen; (b) **binding was lost: `_PY_TARGET_RE` matched the filename, classified the goal as engineering, and DISCARDED the match** | **(a) ALREADY PROTECTED · (b) LOCALLY REPRODUCED → FIXED** | our binding-error was the axis their ablation kept at zero |
 
 ---
 
@@ -51,12 +52,12 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 18 |
+| classes examined | 19 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 12 (H-18, H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
-| LOCALLY REPRODUCED | 7 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift) |
-| fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
+| LOCALLY REPRODUCED | 8 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift, H-20 binding) |
+| fixes completed | 7 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
 | queued, not yet run | the chronological list below |
@@ -419,6 +420,42 @@ read: the gate holds on `pending`, holds on `approved`-but-unexecuted, and
 releases on both `denied` and `executed` — the release matters as much, since a
 gate that never opens after one refusal would stop the producer for the whole
 week.
+
+
+### H-20 — the two drifts are not one thing, and only one of them was ours
+
+The paper's distinction earns its keep here, because the two halves gave
+opposite answers.
+
+**Commitment holds.** A checkpoint parked with a goal, then read back through a
+freshly constructed store object, returns the goal byte-for-byte, with its kind
+and status. The obligation survives the interruption because it lives in a file
+rather than in a process — which is precisely what their ablation removed to
+send goal-abandonment from 0.00 to 1.00.
+
+**Binding did not.** `_candidate_engineering_task` classifies a goal as
+engineering partly BECAUSE `_PY_TARGET_RE` finds a `.py` filename in it — and
+then throws the match away. The decision object had no field for a target, so
+the filename survived only inside `evidence`, as a verbatim echo of the goal
+text. A consumer could read the sentence; it could not read the file.
+
+That is binding drift exactly as defined, on the axis their ablation held at
+zero. Fixed by making the decision carry what its own reason named:
+`_named_target()` returns the match instead of a yes/no, and `target_path`
+holds it. `None` means «the reason named no object», not «the object is
+unknown» — the H-11 lesson about defaults that assert a past they never had.
+
+The banked xfail is converted into an enforced test, and strengthened past what
+it asked: it now checks the FIELD exists **and** that the value is in it, since
+an empty field is the same loss with a column added. It also checks the reverse
+— a goal naming no file must leave `target_path` at `None`, because inventing a
+target would be a fabricated link rather than a preserved one.
+
+**The other half stays banked, and honestly so.** `test_some_machine_road_hands_the_producer_a_target`
+still xfails: no machine caller passes a target to the producer, so the producer
+re-selects its own backlog candidate. This repair gives the decision something
+to hand over; it does not build the road. Those are different claims and the
+ledger keeps them apart.
 
 ## Queue (chronological, not yet reached)
 

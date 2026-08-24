@@ -122,18 +122,19 @@ def test_some_machine_road_hands_the_producer_a_target() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, the other half of the same class: the head's decision "
-        "object cannot name a target even when the goal text contains one. "
-        "_candidate_engineering_task() matches a .py filename to classify "
-        "the goal as engineering and then discards the match. The "
-        "invariant: a decision that was made BECAUSE a file was named must "
-        "be able to carry that file. Field name is not prescribed."
-    ),
-    strict=True,
-)
 def test_the_head_decision_can_name_a_target() -> None:
+    """ПРОБЕЛ ЗАКРЫТ 2026-08-24; до того здесь стоял строгий xfail.
+
+    Класс назван в исторической сводке оператора и в журнале как H-20 —
+    binding drift: обязательство переживает перерыв и при этом теряет связь с
+    конкретным предметом. Замер показал ровно это: `_PY_TARGET_RE` находил имя
+    файла, по нему цель признавалась инженерной, и совпадение ВЫБРАСЫВАЛОСЬ —
+    имя оставалось лишь внутри `evidence`, дословным эхом текста цели, откуда
+    машине его не взять.
+
+    Проверяется и структура, и поведение: поле без значения было бы той же
+    потерей связи, только с графой.
+    """
     src = (_REPO / "core" / "best_next_action.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     fields: set[str] = set()
@@ -147,3 +148,20 @@ def test_the_head_decision_can_name_a_target() -> None:
     assert fields & {"target", "target_path", "targets"}, (
         f"BestNextAction carries no target field; it has {sorted(fields)}"
     )
+
+    from core.best_next_action import _candidate_engineering_task
+
+    decided = _candidate_engineering_task(
+        "Починить сенсор размера в core/backlog_signals.py"
+    )
+    assert decided is not None
+    assert decided.target_path == "core/backlog_signals.py", (
+        "поле есть, а объект в нём не лежит — связь потеряна там же, где была"
+    )
+
+    unnamed = _candidate_engineering_task("Отрефакторить архитектуру памяти")
+    if unnamed is not None:
+        assert unnamed.target_path is None, (
+            "объект назван там, где основание его не называло — это выдумка, "
+            "а не связь"
+        )
