@@ -70,7 +70,27 @@ _PROMOTION_MIN_SUCCESSES = 2
 PROCEDURE_STATUSES: tuple[str, ...] = ProcedureStatus.__args__
 
 
-def _procedure_status_for(success_count: int, confidence: float) -> ProcedureStatus:
+def _procedure_status_for(
+    success_count: int, confidence: float, *, failure_count: int = 0,
+) -> ProcedureStatus:
+    """Статус процедуры по её опыту. Незнание — не приговор.
+
+    H-44 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Прежняя редакция смотрела
+    только на уверенность и потому сваливала «ещё не проверено» и «проверено и
+    не годится» в один исход. У ни разу не запускавшейся процедуры уверенность
+    — это ПРИОР (0.5), а не результат, и `needs_review` для неё означал бы
+    приговор без суда.
+
+    Цена измерена, а не предположена: `needs_review` исключается из выдачи, а
+    `candidate` используется. В живой памяти 24 процедуры из 34 — ровно
+    новорождённые, и проход-починка по прежнему правилу отключил бы 71 %
+    процедурной памяти, при том что ни один факт о них не изменился.
+
+    `failure_count` с умолчанием: старые вызывающие продолжают работать, а
+    послабление действует только там, где ОБА счётчика нулевые.
+    """
+    if success_count == 0 and failure_count == 0:
+        return "candidate"
     if confidence < 0.6:
         return "needs_review"
     if success_count < _PROMOTION_MIN_SUCCESSES:
@@ -389,7 +409,9 @@ class ProcedureRecord:
             success_count=success_count,
             failure_count=failure_count,
             confidence=confidence,
-            status=_procedure_status_for(success_count, confidence),
+            status=_procedure_status_for(
+                success_count, confidence, failure_count=failure_count,
+            ),
             updated_at=_now_iso(),
         )
 
@@ -850,7 +872,14 @@ class ProceduralMemoryStore:
             report["corrected"] += 1
             if not dry_run:
                 row["confidence"] = expected
-                row["status"] = "active" if expected >= 0.6 else "needs_review"
+                # H-44: у поля была ТРЕТЬЯ власть — эта строка знала только
+                # `active`/`needs_review` и `candidate` не производила вовсе,
+                # поэтому проход по новорождённым переименовал бы их все.
+                row["status"] = _procedure_status_for(
+                    int(row.get("success_count") or 0),
+                    expected,
+                    failure_count=int(row.get("failure_count") or 0),
+                )
                 changed = True
 
         report["after_distribution"] = _dist(
