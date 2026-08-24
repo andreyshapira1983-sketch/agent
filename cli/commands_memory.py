@@ -176,6 +176,18 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"threshold={rep.threshold}, min_age_days={rep.min_age_days}",
             file=sys.stderr,
         )
+        # F-2 (docs/audit/FIELD_CHECK_QUEUE.md): правило MIR-074 назвало это
+        # «отодвинем подальше» — dormant, not destroyed. Сон осмыслен, только
+        # если из него можно разбудить, а `load_archive()` не имеет ни одного
+        # вызывающего: ни в агенте, ни в CLI, ни в тике. Живой замер
+        # 2026-08-24: 125 записей активны, 778 в архиве. Цена архивации
+        # называется здесь, чтобы «подальше» не читалось как «на время».
+        if not dry_run and rep.archived:
+            print(
+                "  they now live in data/persistent_memory.archive.jsonl, which "
+                "no command reads back — recoverable by hand only (MIR-138)",
+                file=sys.stderr,
+            )
         return True
 
     print(f"(unknown :hygiene subcommand: '{sub}')", file=sys.stderr)
