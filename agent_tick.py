@@ -830,6 +830,39 @@ def _ensure_env_loaded(workspace: Path) -> None:
 
 # ── main tick ─────────────────────────────────────────────────────────────────
 
+def _charter_goal_router(workspace: Path) -> Any:
+    """Роутер, которым агент выбирает цель от хартии.
+
+    Отдельной функцией, а не строкой внутри `main`, потому что этот путь уже
+    один раз потерял бухгалтерию и терял её молча.
+    """
+    from app.bootstrap import (
+        DEFAULT_BUDGET_LEDGER_PATH,
+        DEFAULT_MODEL_USAGE_PATH,
+    )
+    from core.budget_ledger import BudgetLedger
+    from core.model_router import ModelRouter
+    from core.model_usage import ModelUsageLedger
+
+    # Две правки одного места, вторая — потому что первой хватило наполовину.
+    # 2026-08-19: `from_env()` шёл БЕЗ леджера, и вызовы Sol на выбор цели были
+    # деньгами, невидимыми в учёте; тогда подключили леджер расхода.
+    # 2026-08-24: замер показал 15 вызовов, видимых в расходе и невидимых для
+    # ПОТОЛКА — резерв и запись стоимости стоят под `budget_ledger is not None`.
+    # Поэтому здесь строится ровно та же связка, что в `app/bootstrap.py`:
+    # `from_env` за сессионными лимитами и бюджет за суточным и недельным.
+    budget_ledger = BudgetLedger.from_env(
+        path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
+        config_path=workspace / "config" / "budget_limits.json",
+    )
+    return ModelRouter.from_env(
+        usage_ledger=ModelUsageLedger.from_env(
+            path=workspace / DEFAULT_MODEL_USAGE_PATH,
+            budget_ledger=budget_ledger,
+        ),
+    )
+
+
 def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
     """Startup-only, under the lock: return rows nothing else can free.
 
@@ -1596,14 +1629,8 @@ if __name__ == "__main__":
         # цель на модели по умолчанию вместо закреплённой (вскрытие 19:31).
         _ensure_env_loaded(ws)
         from core.charter_goal import propose_charter_goal
-        from core.model_router import ModelRouter
-        from core.model_usage import ModelUsageLedger
 
-        # Скрытый расход 2026-08-19: from_env() без леджера — вызовы Sol на
-        # выбор цели были настоящими деньгами, невидимыми для бухгалтерии.
-        _charter_router = ModelRouter.from_env(
-            usage_ledger=ModelUsageLedger(ws / "data" / "model_usage.jsonl"),
-        )
+        _charter_router = _charter_goal_router(ws)
         pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
         if pick.status != "proposed":
             print(f"[CHARTER] no goal: {pick.reason}")
