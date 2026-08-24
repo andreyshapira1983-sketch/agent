@@ -5,11 +5,17 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Protocol
 
 from core.models import MemoryRecord
 
 DEFAULT_DEDUP_THRESHOLD = 0.85
+
+#: Потолок числа слов в сравнении ПОРЯДКА. `SequenceMatcher` квадратичен в
+#: худшем случае, а тексты памяти приходят извне; ограничение делает стоимость
+#: сравнения предсказуемой, не меняя исхода на реальных записях.
+_ORDER_TOKEN_CAP = 400
 
 _WS_RE = re.compile(r"\s+")
 
@@ -17,8 +23,23 @@ def _normalise(text: str) -> str:
     """Case-insensitive, whitespace-collapsed comparison key."""
     return _WS_RE.sub(" ", (text or "").strip().lower())
 
-def _similarity(a: str, b: str) -> float:
-    """Cheap Jaccard over word sets, then boosted by substring containment."""
+def _similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
+    """Cheap Jaccard over word sets, then boosted by substring containment.
+
+    `order_sensitive` разводит ДВУХ потребителей с противоположной ценой ошибки,
+    и разводит явно, а не молчанием (F-2 в docs/audit/FIELD_CHECK_QUEUE.md):
+
+    * ворота записи (`find_duplicate`) отвергают дубликат, поэтому ложное
+      слияние ТЕРЯЕТ ПОПРАВКУ. Перестановка слов должна их настораживать —
+      `True`, и это дефолт, чтобы будущий потребитель по умолчанию получал
+      осторожную половину;
+    * антитело эха ловит, как агент ПОВТОРЯЕТ САМ СЕБЯ. Пересказ теми же
+      словами в другом порядке — это и есть эхо, и пропустить его значит
+      разрешить петлю. Оно передаёт `False` осознанно.
+
+    Одна реализация на обоих нарочно: комментарий в антителе прямо называет
+    причину — иначе меры разойдутся молча.
+    """
     na, nb = _normalise(a), _normalise(b)
     if not na or not nb:
         return 0.0
@@ -29,6 +50,26 @@ def _similarity(a: str, b: str) -> float:
     tokens_b = set(nb.split())
     if not tokens_a or not tokens_b:
         return 0.0
+    if order_sensitive and tokens_a == tokens_b:
+        # ПЕРЕСТАНОВКА: те же слова, другой порядок. Жаккар по множествам даёт
+        # здесь 1.00 и не различает «openai падает, anthropic работает» от
+        # обратного, а на записи дубликат ОТВЕРГАЕТСЯ — то есть поправка,
+        # меняющая роли местами, в память не попадала (F-2 в
+        # docs/audit/FIELD_CHECK_QUEUE.md).
+        #
+        # Порогом это не лечится: развёртка 0.70…1.00 показала, что ложные
+        # слияния стоят ровно на 1.00 и не отсекаются ничем ниже единицы, а
+        # порог 1.00 оставляет их и роняет верные слияния с 75% до 50%. Менять
+        # надо МЕРУ, и только для этого случая.
+        #
+        # Порядок меряется по последовательности слов. Русский порядок слов
+        # свободен, поэтому перестановка ЧАСТО безобидна — и цена ошибки
+        # несимметрична: лишняя запись в памяти стоит мало, потерянная
+        # поправка стоит дорого. Ошибаться здесь положено в сторону «сохранить».
+        return SequenceMatcher(
+            None, na.split()[:_ORDER_TOKEN_CAP], nb.split()[:_ORDER_TOKEN_CAP]
+        ).ratio()
+
     intersection = tokens_a & tokens_b
     union = tokens_a | tokens_b
     jaccard = len(intersection) / len(union)

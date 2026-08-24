@@ -218,7 +218,11 @@ def detect_memory_echo(
                 matched_hash=event.content_hash,
                 similarity=1.0,
             )
-        sim = _text_similarity(text, event.content)
+        # order_sensitive=False ОСОЗНАННО: антитело ловит повтор агента за
+        # самим собой, и пересказ теми же словами в другом порядке — это эхо,
+        # а не другой факт. У ворот записи цена ошибки обратная, и там дефолт
+        # `True` (F-2 в docs/audit/FIELD_CHECK_QUEUE.md).
+        sim = _text_similarity(text, event.content, order_sensitive=False)
         if sim > best_sim:
             best_sim = sim
             best_hash = event.content_hash or None
