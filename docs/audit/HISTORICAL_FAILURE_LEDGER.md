@@ -59,6 +59,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-37 | 2021 | a harmless-looking field is EXPANDED somewhere downstream | log4shell (2021) | a logged string was parsed as a lookup and reached the network; the field never looked dangerous at the place it was written | every `.format()` / `Template.substitute` site, and any stored field that could trigger egress | (a) AST sweep for expansion sites, detector proved on `.format` and `.substitute`; (b) trace whether any expanded template is DATA rather than a code constant; (c) look for a stored `url` field that anything auto-fetches | (a) **3 sites only, and the two `%` hits are arithmetic**; (b) **`SourceLibraryEntry.search_template` is the one data-shaped template, and `resolve_source_library` selects only from 13 hardcoded entries — none carries a placeholder besides `{topic}`**; (c) **none: egress tools are planner-invoked and blocked on the unattended path (H-35)** | NOT APPLICABLE, proved by tracing rather than assumed | the dangerous shape would be a template loaded from data |
 | H-38 | 2024 | a DATA update, not a code change, kills every consumer | CrowdStrike channel-file parser (2024) | the binaries were untouched; a content file shipped and every machine that parsed it went down simultaneously | `config/budget_limits.json` against the real tick, and the heartbeat that reports on it | run the tick end to end (keys stripped, so nothing can be spent) with the limits file valid, then corrupt | **the corrupt file exits 1 with a NAMED error and no traceback — handled. But three consecutive failures later `--status` prints `Daemon: alive — last tick 0.0 min ago (event=tick_error)`** | **LOCALLY REPRODUCED → the word fixed, the decision left where it belongs** | the failing tick is correct behaviour (H-33); the lie was the word `alive` |
 | H-39 | 2020/2024 | the dependency itself is the attack | SolarWinds (2020); xz-utils backdoor (2024) | the artifact was legitimately released and correctly signed — pinning a hash would not have helped, because the hash was right | `requirements.lock`, the self-apply deny list, and any runtime install path | (a) count hash coverage per package; (b) ask whether the agent may edit the lock; (c) look for `pip install` on a live path | (a) **36 packages, 0 without a hash, median 2 hashes each**; (b) **denied — `.lock` by suffix, `requirements.txt` by name, `config/`, `.git/` and `.github/` by prefix**; (c) **none: every hit is prose in a prompt or an error message addressed to a human** | ALREADY PROTECTED on all three axes | the xz lesson is not about hashes, and the residual is MIR-139 |
+| H-40 | 2000s | узлы расходятся во времени, и каждый прав | византийский разброс часов; семейство «время как единственный свидетель» | решение принимается по отметке времени, а отметка приходит от часов, которые могут разойтись или прыгнуть | окно бюджета (`_used_in_window`), определение осиротевшей задачи (`recover_stuck`), остывание | (а) сдвинуть часы назад и вперёд у исчерпанного потолка; (б) сдвинуть вперёд при ЖИВОЙ захваченной задаче | (а) **назад — потолок НЕ открывается**, вперёд открывает законно (новые сутки); (б) **сдвиг на 45 мин вперёд делает живую задачу осиротевшей** — но санкционированный путь требует удерживаемого замка, и это исполнено в коде и закреплено тестом | ALREADY PROTECTED, механизм назван в обе стороны | асимметрия окна здесь безопасная, а у лестницы оживления та же форма была дефектом |
 
 ---
 
@@ -585,7 +586,7 @@ own failure message.
 ### 2000-е
 - [ ] Y2K-подобные переполнения эпохи → закрыто H-25 (временная ось)
 - [ ] **TCP incast** — синхронный залп ответов кладёт узкое место
-- [ ] **византийский разброс часов** — узлы расходятся во времени, каждый прав
+- [x] византийский разброс часов → H-40 (местная форма: часы ДВИГАЮТСЯ)
 - [ ] **коллизии MD5 в решениях о доверии** — слабый хеш как удостоверение
 - [ ] **SQL-инъекция как расхождение разборщиков** — часть класса закрыта H-26
 - [x] Therac-класс: обход блокировки в планировщике → H-21
@@ -977,3 +978,38 @@ H-33 научил безнадзорный вход отказываться р�
 не путь, а процедура: всякая правка ленты проходит через одобрение, тесты и
 историю git, а `.git/` закрыт. Замер добавлен вторым ОСЬЮ в MIR-139, а не заведён
 отдельной сущностью: дверь одна, объекты за ней разные.
+
+### H-40 — одна форма, два противоположных последствия
+
+Между узлами расходиться нечему: писателей состояния много, часы одни —
+`datetime.now(timezone.utc)` локальной машины. Поэтому проверялась местная форма
+класса: часы одной машины ДВИГАЮТСЯ — правкой NTP, вручную, после сна.
+
+**Окно бюджета устояло, и причина названа, а не угадана.** `_used_in_window`
+отбрасывает записи по НИЖНЕЙ границе (`created < cutoff`) и не имеет верхней,
+поэтому расход, помеченный «будущим» после отвода часов назад, продолжает
+считаться. Потолок не открывается. Сдвиг вперёд открывает окно — но это законно:
+наступили новые сутки.
+
+**Та же форма у лестницы оживления была ДЕФЕКТОМ.** Там нижняя граница без
+верхней означала, что июльская строка живёт вечно (MIR-136). Здесь нижняя
+граница без верхней означает, что расход не забывается. Форма одна,
+последствия противоположны, и решает не форма, а направление вреда: у потолка
+опасно ЗАБЫТЬ, у лестницы опасно ПОМНИТЬ.
+
+**Определение осиротевшей задачи верит только часам.** `owner_pid` и
+`owner_host` попадают лишь в текст ошибки; живость владельца не спрашивается.
+Замер: сдвиг на 45 минут вперёд — и живая, только что захваченная задача
+признаётся осиротевшей, то есть открывается класс двойного исполнения, который
+MIR-033 мерил закрытым.
+
+**Но санкционированный путь этого не допускает, и это проверено, а не принято на
+слово.** `recover_orphaned_tasks` отказывается работать без удерживаемого замка
+одиночного экземпляра — не в докстринге, а `raise RuntimeError` в коде, и
+закреплено тестом (`tests/test_task_lifecycle.py:175`). Сегодня трижды
+оказывалось, что комментарий обещает больше кода; здесь наоборот.
+
+**Остаток назван.** `recover_stuck` остаётся публичным и предлагает этот переход
+любому будущему вызывающему, а исполнение договора живёт слоем выше — в отличие
+от H-21, где запрет был перенесён туда, где живёт сам переход. Машинерия не
+строится: путь один, он закрыт, и цена переноса выше цены записи.
