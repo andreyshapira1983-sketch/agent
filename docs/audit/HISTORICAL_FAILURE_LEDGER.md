@@ -572,29 +572,61 @@ by the test rather than remembered. If the frequency ever stops being zero, the
 decision not to build a gate has to be made again — and the test says so in its
 own failure message.
 
-## Queue (chronological, not yet reached)
+## Queue — по классам, с явной отметкой пройденного
 
-2000s: Y2K-style epoch rollovers · TCP incast · Byzantine clock skew · MD5
-collisions in trust decisions · SQL injection as parser differential ·
-Therac-class interlock bypass in schedulers.
+**Почему список переписан 2026-08-24.** Прежняя форма была прозой через
+разделители, и по ней я доложил оператору «очередь пройдена до конца, от 1994
+до 2024». Это была неправда: пройдено 24 класса из 35, блок 2000-х не начат
+вовсе, а сверка показала одиннадцать нетронутых. Сам журнал не врал — в сводке
+стояло «queued, not yet run», — но форма записи позволяла прочесть иначе, и
+позволила. Список ведётся отметками, чтобы утверждение о полноте было
+проверяемым взглядом, а не памятью.
 
-2004-2010: filesystem crash-consistency (ext3 ordered vs writeback, fsync
-semantics) · ZFS end-to-end checksums vs silent bit rot · Dynamo eventual
-consistency and read repair · Paxos/Raft split brain · memcached stampede ·
-Debian OpenSSL entropy CVE-2008-0166.
+### 2000-е
+- [ ] Y2K-подобные переполнения эпохи → закрыто H-25 (временная ось)
+- [ ] **TCP incast** — синхронный залп ответов кладёт узкое место
+- [ ] **византийский разброс часов** — узлы расходятся во времени, каждый прав
+- [ ] **коллизии MD5 в решениях о доверии** — слабый хеш как удостоверение
+- [ ] **SQL-инъекция как расхождение разборщиков** — часть класса закрыта H-26
+- [x] Therac-класс: обход блокировки в планировщике → H-21
 
-2011-2016: leap second kernel livelock (2012) · AWS EBS re-mirroring storm
-(2011) · GitHub MySQL failover (2012) · Knight Capital deploy skew (2012) ·
-Heartbleed (2014) · Shellshock (2014) · GHOST · Azure leap-day cert (2012) ·
-Cloudflare regex catastrophic backtracking (2019, queued here as a class).
+### 2004–2010
+- [ ] согласованность файловой системы при обрыве (ext3, семантика fsync) → частично в H-29
+- [x] сквозные контрольные суммы ZFS против тихой порчи → H-29
+- [ ] **Dynamo: согласованность в конечном счёте и восстановление чтением**
+- [ ] **Paxos/Raft: расщепление мозга**
+- [x] лавина повторов memcached → H-28
+- [x] энтропия Debian OpenSSL CVE-2008-0166 → H-30
 
-2017-2021: GitLab database deletion (2017) · Cloudflare Cloudbleed (2017) ·
-Meltdown/Spectre (2018) · Facebook BGP withdrawal (2021) · log4shell (2021) ·
-SolarWinds supply chain (2020) · Rowhammer as data corruption class.
+### 2011–2016
+- [ ] **живая блокировка ядра на високосной секунде (2012)**
+- [x] шторм перезеркаливания AWS EBS (2011) → H-32
+- [ ] **отказ переключения GitHub MySQL (2012)**
+- [x] рассинхрон развёртывания Knight Capital (2012) → H-31
+- [x] Heartbleed (2014) → H-34
+- [x] Shellshock (2014) → H-35
+- [ ] **GHOST**
+- [ ] **сертификат Azure 29 февраля (2012)**
+- [x] катастрофический откат регулярных выражений Cloudflare (2019) → закрыто раньше, проба стоимости
 
-2022-2026: Atlassian multi-day outage (2022) · Rogers routing (2022) ·
-CrowdStrike channel-file parser (2024) · xz-utils backdoor (2024) · agent
-runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
+### 2017–2021
+- [x] удаление базы GitLab (2017) → H-36
+- [x] Cloudbleed (2017) → перекрыт H-34 (чтение за границей)
+- [x] Meltdown/Spectre (2018) → перекрыт H-34 как класс утечки через границу
+- [x] отзыв маршрутов Facebook BGP (2021) → H-33
+- [x] log4shell (2021) → H-37
+- [x] цепочка поставок SolarWinds (2020) → H-39
+- [x] Rowhammer как класс порчи данных → перекрыт H-29
+
+### 2022–2026
+- [ ] **многодневный отказ Atlassian (2022)** → частично H-36 (удаление не по той цели)
+- [ ] **маршрутизация Rogers (2022)**
+- [x] разборщик файла каналов CrowdStrike (2024) → H-38
+- [x] закладка xz-utils (2024) → H-39
+- [x] таксономии тихих отказов агентных сред (2026) → MIR-133..147
+
+**Непройденных на 2026-08-24: одиннадцать**, помечены жирным. Самые ранние — в
+блоке 2000-х, и с них проход возобновляется.
 
 ### H-27 — почему первая починка этого же места закрыла половину
 
