@@ -84,6 +84,9 @@ class SelfImprovementIssue:
     related_files: tuple[str, ...]
     related_error_text: str
     suggested_next_action: str
+    #: НИЖНЯЯ ГРАНИЦА числа срабатываний класса, а не точный счёт: он ведётся
+    #: с того момента, как поле появилось (2026-08-22), поэтому у записей
+    #: старше этой даты он занижен. Потребитель обязан показывать `>=`.
     occurrences: int = 1
 
     def to_dict(self) -> dict:

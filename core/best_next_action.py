@@ -556,8 +556,15 @@ def _candidate_open_self_improvement_issue(
         # MIR-035 audit: the class merge caps evidence at 8, so the samples
         # alone cannot say whether this fired 8 times or 80. Recurrence is the
         # reason a class earns an investigation, so the count travels with it.
+        # НИЖНЯЯ ГРАНИЦА, а не точный счёт. H-11 (Knight Capital, 2012):
+        # старое состояние, прочитанное новым кодом, получает умолчание, и
+        # умолчание УТВЕРЖДАЕТ про прошлое то, чего в нём не было. Замер живого
+        # хранилища: 25 записей, заведённых до появления счётчика, приходят с
+        # `occurrences=1` — притом что MIR-035 измерил 13 копий одного
+        # сигнального класса. Счёт ведётся с момента, когда поле появилось, и
+        # для таких рядов он занижен по построению. Знак `>=` говорит ровно это.
         seen = max(1, int(issue.get("occurrences") or 1))
-        evidence = [f"durable issue {fingerprint} status={status} seen={seen}x"]
+        evidence = [f"durable issue {fingerprint} status={status} seen>={seen}x"]
         evidence.extend(str(item)[:300] for item in raw_evidence if str(item).strip())
         files = [str(item) for item in issue.get("related_files") or () if str(item)]
         if files:
