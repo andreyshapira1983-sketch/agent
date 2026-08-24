@@ -52,6 +52,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-30 | 2008 | identifiers unique only in appearance | Debian OpenSSL entropy CVE-2008-0166; the wider weak-source family | the generator looks right and the key space is tiny, so collisions arrive by design rather than by chance | `core/ids.new_id` and every minting site in `core`, `app`, `cli`, `api`, `tools`, `agent_tick` | (a) AST sweep for `random.*` / `uuid1` at any minting site; (b) count real id collisions across every live store | (a) **0 weak sources against 64 strong minting sites, detector proved on `random.randint` and `uuid.uuid1`**; (b) **2439 ids, and both apparent collisions are references, not keys — 254 versions of one profile, 3 outcomes of one approval** | ALREADY PROTECTED (`secrets.token_hex(16)`, 128 bits) | the collision count needed decomposition before it meant anything |
 | H-31 | 2012 | old code meets new data and ACTS on it | Knight Capital deploy skew (2012) | part of the fleet ran the new build and part the old; the loss came not from the skew but from the old half acting on data it misread | `importlib` use in the running process, the self-apply lane's clean-tree gate, and the shared state format `INTEGRITY_MARKER` | (a) sweep for live module reloading; (b) write a row from a FUTURE format and read it with today's reader | (a) **no `importlib.reload` anywhere — one process, one code version**; (b) **the future row is not ignored: it is quarantined and the LIVE FILE is rewritten without it** | **mechanism real, not currently reachable (only v1 exists) → tripwire, not machinery** | the destruction half is what makes a future bump dangerous |
 | H-32 | 2011 | recovery itself becomes the load | AWS EBS re-mirroring storm (2011); the wider retry-avalanche family | the repair path is unthrottled, so everything that was waiting fires at once and the recovery outlasts the outage | `reactivate_paused_checkpoints`, the tick's drain loop, and every producer of `pending` rows | (a) read the revival bound; (b) read the drain bound; (c) enumerate every producer of pending rows | (a) **batch of 3, oldest first, with the EBS reasoning written in the code already**; (b) **the drain is UNBOUNDED by count and the tick has no time budget — only the money caps hold it**; (c) **two producers only: a human CLI add, and one row per due schedule, of which zero are registered** | ALREADY PROTECTED, by producer enumeration rather than by assumption | the residual is named below |
+| H-33 | 2021 | the protective mechanism removes protection when IT fails | Facebook BGP withdrawal (2021); the fail-open family | the thing meant to keep the system safe took the system off the map when it failed | `.env`, the provider chain, and `config/budget_limits.json` | (a) run with no `.env`; (b) run with no keys; (c) run with the limits file absent | (a) **proceeds on defaults, does not raise**; (b) **the chain ends at the local provider and fails with a connection error — a stop, not silent garbage**; (c) **NO CAP AT ALL: 500 reservations allowed in a row, silently, while the same file CORRUPTED raises** | **LOCALLY REPRODUCED → FIXED at the process entry** | the placement took three attempts, and both wrong ones were red for good reasons |
 
 ---
 
@@ -724,3 +725,33 @@ pending_tasks` без предела, и времени тик не считае
 времени, а внешний ограничитель времени выполнения убьёт процесс посреди
 работы — то есть класс H-27(a), прерванный платный вызов. Здесь ничего не
 строится: условие ещё не наступило. Записано, чтобы наступление заметили.
+
+### H-33 — из двух ошибок настройки молча проходила та, что снимает потолок
+
+Живой замер: `config/budget_limits.json` существует, а лимитов в окружении нет
+ни одного. Значит весь денежный потолок агента держится на ОДНОМ файле. Убрать
+его — и окна остаются с нулевыми пределами, а нулевой предел читается кодом как
+«ограничения нет», а не как «тратить нельзя»: 500 резервов подряд, молча.
+Тот же файл с испорченным содержимым при этом бросает `ValueError`. Одно место,
+два противоположных ответа, и тихо проходит ровно опасный.
+
+**Место починки искалось трижды, и оба промаха были содержательны.**
+
+Первая попытка запрещала расхождение «назван, но отсутствует» в самом
+`budget_ledger` — покраснело 168 тестов. Посылка была неверна: путь к конфигу
+называют ВСЕ вызывающие по умолчанию, поэтому «назван» там не значит «оператор
+его завёл».
+
+Вторая ставила проверку в `run_tick` — покраснело 17 тестов, гоняющих тик на
+временных папках. Попытка сузить условием «есть ключ» не помогла: ключ живёт в
+оболочке разработчика, и тесты его наследуют.
+
+Третья нашла настоящую границу — ВХОД ПРОЦЕССА. Плановый безнадзорный тик
+приходит только через `python agent_tick.py`; тесты зовут `run_tick` внутри
+себя. Разделяет то, что разделяет реальность, а не то, что удобно назвать.
+
+**Проводка доказана процессом, а не вызовом.** Первая ломка не покраснела:
+тесты звали функцию напрямую, и снятие её с пути ничего не меняло. Это ровно
+случай «зелёные тесты ≠ подключено». Тест переписан на запуск модуля
+подпроцессом и проверяет не только код возврата, но и ПРИЧИНУ отказа — иначе он
+закрепил бы любое чужое падение.
