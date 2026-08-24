@@ -868,10 +868,17 @@ _SWITCH_KEY_NAME_MARKERS: tuple[str, ...] = (
 # TRANSIENT class below (rate limits) fails over per-call but never demotes:
 # it clears in seconds, and parking a provider for the health cooldown over a
 # rate limit would dodge a healthy provider.
+# Замер 2026-08-25 (H-47): три квотных маркера жили здесь и не могли сработать
+# НИКОГДА — в стойком списке ниже стоит голая подстрока «quota», и она их
+# поглощает. Они убраны, а не «расшторены», потому что поглощение ВЕРНО:
+# `insufficient_quota` у OpenAI означает исчерпанный счёт, а не минутный лимит,
+# и понижать за него правильно. Сузить стойкий список значило бы вернуть класс
+# MIR-132 — один пустой баланс, повторённый 391 раз за четыре дня.
+#
+# Живьём: 391 ошибка провайдеров про баланс и НИ ОДНОЙ со словом «quota», то
+# есть поглощение никому не навредило; вредил только текст, обещавший
+# поведение, которого нет.
 _TRANSIENT_SWITCH_TEXT_MARKERS: tuple[str, ...] = (
-    "insufficient_quota",
-    "insufficient quota",
-    "exceeded your current quota",
     "rate limit",
     "rate_limit",
     "ratelimit",
