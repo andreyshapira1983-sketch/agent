@@ -89,6 +89,15 @@ class BestNextAction:
     unknowns: tuple[str, ...] = ()
     risk: str = "read_only"
     recommended_command: str | None = None
+    #: Объект, НАЗВАННЫЙ в основании решения, когда основание его называет.
+    #: H-20 (binding drift) в docs/audit/HISTORICAL_FAILURE_LEDGER.md:
+    #: обязательство может пережить перерыв и при этом потерять связь с
+    #: конкретным предметом. Здесь так и было — `_PY_TARGET_RE` находил имя
+    #: файла, по нему цель признавалась инженерной, и совпадение
+    #: ВЫБРАСЫВАЛОСЬ: имя оставалось только внутри `evidence`, дословным
+    #: эхом текста цели, откуда потребителю его не взять. `None` значит
+    #: «основание не называло объекта», а не «объект неизвестен».
+    target_path: str | None = None
     confidence: float = 0.0
     #: HOW this action was selected — a fact derived at the selection site, not
     #: a judgement. One of `no_candidate` (nothing was admissible),
@@ -206,6 +215,17 @@ def _is_engineering_goal(text: str) -> bool:
     return bool(_PY_TARGET_RE.search(text) and _ENGINEERING_CONTEXT_RE.search(text))
 
 
+def _named_target(text: str) -> str | None:
+    """Файл, названный в тексте цели, если он там назван.
+
+    Отдельная функция, а не второй разбор внутри решения: тот же `_PY_TARGET_RE`,
+    которым цель признаётся инженерной, отдаёт СОВПАДЕНИЕ, а не только «да».
+    Решение, принятое ПОТОМУ ЧТО файл назван, обязано этот файл унести.
+    """
+    match = _PY_TARGET_RE.search(text or "")
+    return match.group(0) if match else None
+
+
 def _candidate_engineering_task(goal: str) -> BestNextAction | None:
     """Дорога от хартии к бэклогу (2026-08-19): цель, просящая инженерную
     работу, рождает self-build/Stage A ЗАЯВКУ — язык и провод, не права."""
@@ -227,6 +247,7 @@ def _candidate_engineering_task(goal: str) -> BestNextAction | None:
         risk="reversible",
         recommended_command=None,
         confidence=0.7,
+        target_path=_named_target(text),
     )
 
 
