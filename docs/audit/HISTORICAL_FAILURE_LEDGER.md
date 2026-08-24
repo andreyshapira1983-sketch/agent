@@ -38,6 +38,8 @@ blocker; otherwise it is registered and the queue resumes.
 | H-13 | 2021 | data interpreted by a formatting layer | log4shell, CVE-2021-44228 | a logging library resolved `${jndi:...}` inside data it was merely formatting, turning a log line into remote code execution | every non-literal format template; then the adjacent reachable form — a topic interpolated next to a `site:` operator | (a) AST sweep for format templates that are not literals; (b) craft topics that escape the `site:` restriction; (c) run classic domain-gate bypasses | (a) **2 non-literal templates, both module constants — not reachable from outside**; (b) escape into the QUERY works; (c) the second layer holds — 6 of 7, incl. suffix and user-info bypasses | ALREADY PROTECTED (layered) · **one false rejection found and fixed** | the gate compared `netloc`, so a legitimate port was rejected |
 | H-15 | 2017 | adjacent data leaking into output | Cloudbleed (Cloudflare, Feb 2017) | an HTML-parser bug emitted NEIGHBOURING memory into responses; other users' cookies and messages ended up in search-engine caches | `core/secret_scanner` / `redact_dlp_text`, which cleans logs, receipts and quarantine files | run seven real secret shapes through the scanner and check what survives verbatim | **two passed through: the AWS SECRET beside a caught `AKIA…`, and `https://user:pass@host` — nothing at all** | **LOCALLY REPRODUCED → FIXED** | one limit kept deliberately and pinned as a limit |
 | H-12 | 2017 | backups that exist and were never restored | GitLab.com database incident, 31 Jan 2017 (public postmortem) | the primary database directory was removed during recovery, and of **five** configured backup/replication methods **none** worked — some misconfigured, some untested for a year. A backup nobody has restored from is an assumption | the nine `*.bak` files in `data/` and the migrations that write them | run every backup through the REAL state loader, then compare identity against the live store using each store's own identity field | **9 of 9 load.** But identity comparison shows three are REPLACEMENTS, not repairs — `persistent_memory.jsonl.20260731…` shares **0 of 814** rows with the live store | **ALREADY PROTECTED (readability) · UNKNOWN → now measured (what each backup IS)** | drill made repeatable; see below |
+| H-16 | 2024 | what RUNS differs from what was reviewed | xz-utils backdoor, CVE-2024-3094 (Mar 2024) | the payload shipped in release tarballs and was absent from the git repo; the build system activated it. The precondition is the gap between reviewed source and running artefact, not malice in a dependency | `requirements.lock`, `requirements.txt`, and the installed environment | (a) does every locked package carry a hash; (b) does the INSTALLED set match the lock | (a) **36 packages, 662 sha256 hashes, none missing**; (b) **2 packages drift: `anthropic` locked 0.102.0 / installed 0.121.0, `click` 8.4.1 / 8.4.2** | **LOCALLY REPRODUCED (drift) — reported, deliberately not "fixed"** | hashes protect an install that goes through them and say nothing about one that went around |
+| H-17 | 2021 | an action inside your own authority removes the path that repairs you | Facebook/Meta global outage, 4 Oct 2021 | a routine capacity check withdrew the BGP routes, taking down the service AND the tools needed to fix it — internal DNS, remote access, reportedly even door badges | `_ALLOWED_CODE_DIRS` in the self-apply lane, against the launcher, bootstrap, installers and ratchets | ask the risk classifier whether the agent may edit each of those paths | **`agent_tick.py`, `main.py`, `app/`, `scripts/`, `.git/`, and every config are OUT of reach** | ALREADY PROTECTED — and now pinned | the property rests on one four-string tuple |
 
 ---
 
@@ -47,11 +49,11 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 14 |
+| classes examined | 16 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 8 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13) |
+| ALREADY PROTECTED | 10 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
-| LOCALLY REPRODUCED | 6 (H-01, H-05, H-07, H-11, H-14, H-15) |
+| LOCALLY REPRODUCED | 7 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift) |
 | fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
@@ -301,6 +303,52 @@ used `id` for every store and reported «0 unique on both sides» for
 the sets were `{None}` on both sides. The drill now picks the identity field
 per store and says «unknown» where there is none, instead of inventing a
 number.
+
+
+### H-17 — the outer boundary holds, and it rests on four strings
+
+The agent cannot edit what starts it. `_ALLOWED_CODE_DIRS = ("core", "cli",
+"tools", "tests")` leaves `agent_tick.py`, `main.py`, `app/bootstrap.py`, the
+whole of `scripts/` (installer, restore drill, ratchet baselines) and every
+config outside; `.git/` is separately denylisted, so history — and with it the
+ability to revert — is out of reach too. That is Facebook's lesson honoured at
+the outer layer.
+
+It is pinned now because of how thin the guarantee is: adding `app` or
+`scripts` to that tuple would read as a harmless widening («let it fix its own
+scripts too»), the full battery would not notice, and the agent would gain the
+right to rewrite its own launch. Thirteen paths are asserted out of reach and
+five ordinary ones asserted still editable, so the ban cannot quietly become
+either wider or narrower. Break-tested by adding the two directories — five
+cases redden.
+
+**What this does NOT claim.** `core/self_apply_lane.py` IS editable, so the
+agent can modify the lane that applies its own patches. That is MIR-139 and it
+stays open. This entry covers only the outer contour: the paths whose change
+would remove the ability to start and to roll back.
+
+### H-16 — the lock is complete; the environment left it anyway
+
+Two questions, two different answers, kept apart.
+
+The lock itself is sound: 36 packages, 662 `--hash=sha256:` entries, and not one
+package pinned by version alone. A version-only pin would accept any archive
+bearing that number, which is precisely the reviewed-vs-running gap xz used, so
+that property is now pinned by a test.
+
+The environment is another matter: **`anthropic` is locked at 0.102.0 and
+installed at 0.121.0**, nineteen minor versions along, and `click` drifts by a
+patch. Hashes protect an installation that goes THROUGH them; they are silent
+about one that went around. Nothing was comparing the two, so the drift was
+invisible — and the code that would run for an unattended week is not the code
+the lock, a fresh install, or CI describes.
+
+**Reported, not fixed, and the distinction is deliberate.** Installing to close
+the gap would change the agent's working environment, and dependencies are the
+operator's to move. `scripts/dependency_drift.py` prints the comparison and
+exits 1; the completeness of the lock is a code property and is tested, while
+the drift is a machine property and is not — a suite that reddens because
+someone installed a package on their laptop would be a false rejection.
 
 ## Queue (chronological, not yet reached)
 
