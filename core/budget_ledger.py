@@ -441,6 +441,12 @@ def _budget_config_path(config_path: Path | None) -> Path | None:
 
 def _load_budget_config(config_path: Path | None) -> dict[str, Any]:
     if config_path is None or not config_path.exists():
+        # Отсутствие файла НЕ ошибка на этом слое: путь называют все
+        # вызывающие по умолчанию, поэтому «назван» не значит «оператор его
+        # завёл» — попытка различить их здесь покраснила 168 тестов, и
+        # правильно сделала. Ожидание «потолок настроен» принадлежит живому
+        # входу, и проверяется в `agent_tick._require_budget_config`
+        # (H-33 в docs/audit/HISTORICAL_FAILURE_LEDGER.md).
         return {}
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))

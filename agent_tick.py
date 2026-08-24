@@ -959,6 +959,52 @@ def _sweep_episodic_duplicates(workspace: Path) -> int:
         return 0
 
 
+class BudgetConfigMissing(RuntimeError):
+    """Живой тик запущен там, где денежного потолка нет вовсе."""
+
+
+def _require_budget_config(workspace: Path) -> None:
+    """Отказать безнадзорному тику, если файла лимитов нет.
+
+    H-33 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Замер 2026-08-24: весь
+    денежный потолок агента держится на ОДНОМ файле — лимитов в окружении нет
+    ни одного, — и при его отсутствии окна остаются с нулевыми пределами:
+    `reserve` пропускает 500 вызовов подряд, молча. Тот же файл с ПОРЧЕНЫМ
+    содержимым бросает. То есть из двух ошибок настройки тихо проходила ровно
+    та, что СНИМАЕТ ограничение.
+
+    Проверка стоит здесь, а не в `budget_ledger`: путь к конфигу называют все
+    вызывающие по умолчанию, поэтому «назван» там не значит «оператор его
+    завёл» — попытка различить это на слое библиотеки покраснила 168 тестов и
+    правильно сделала. Ожидание «потолок настроен» принадлежит живому входу.
+
+    Переменная `AGENT_BUDGET_CONFIG_PATH` уважается: она и есть законный
+    способ держать лимиты в другом месте.
+
+    ГДЕ ОНА СТОИТ, и это третья попытка. Слой библиотеки отпал: путь к конфигу
+    называют все вызывающие, и различение «назван/существует» покраснило
+    168 тестов. `run_tick` отпал: его зовут напрямую 17 тестов на временных
+    папках. Условие «есть ключ» отпало тоже — ключ живёт в оболочке
+    разработчика, и тесты его наследуют.
+
+    Настоящая граница — ВХОД ПРОЦЕССА. Плановый безнадзорный тик всегда
+    приходит через `main()`; тесты зовут `run_tick` внутри себя. Проверка
+    поэтому стоит в `main()`, и разделяет она ровно то, что разделяет
+    реальность, а не то, что удобно назвать.
+    """
+    named = os.environ.get("AGENT_BUDGET_CONFIG_PATH", "").strip()
+    path = Path(named) if named else workspace / BUDGET_CONFIG_PATH
+    if path.exists():
+        return
+    raise BudgetConfigMissing(
+        f"budget limits file not found at {path}. An unattended tick refuses "
+        f"to run without a spending cap: with no file and no AGENT_BUDGET_* "
+        f"limits, every window's limit is zero, which reads as NO limit rather "
+        f"than as no spending. Restore the file or point "
+        f"AGENT_BUDGET_CONFIG_PATH at it."
+    )
+
+
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     """Execute one daemon tick. Returns exit code (0 = ok, 1 = hard error)."""
     _ensure_env_loaded(workspace)
@@ -1654,6 +1700,8 @@ if __name__ == "__main__":
 
     if args.status:
         sys.exit(_print_status(ws))
+
+    _require_budget_config(ws)
 
     dry = not args.allow_effects
     # Respect env var override too
