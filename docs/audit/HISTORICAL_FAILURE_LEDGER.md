@@ -43,6 +43,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-19 | 2018-2015 | information reaching a channel not built to carry it | Meltdown / Spectre (2018); Rowhammer (Kim et al., 2014) | a side channel leaks what no interface exposed — cache timing, adjacent DRAM rows. The general shape: data crosses a boundary through a path nobody designed as a path | every durable surface a fetched page can reach: chain log payload, knowledge pipeline, memory write policy, source registry, the answer itself | plant a real secret in a fetched page and follow it through each surface | **chain log payload carries no excerpt; knowledge pipeline refuses; memory write policy rejects all three shapes; outbound redaction catches all three; 0 hits across 5 151 live source-registry rows** | ALREADY PROTECTED, in depth | yesterday's H-15 patterns propagated here on their own |
 | H-18 | 2022 | a repair path that does not scale to the size of the incident | Atlassian, April 2022 (883 sites deleted; public incident review) | restores were per-tenant and largely manual, so recovery ran for up to two weeks. The damage was instant and the repair was serial | the approval inbox against a week of unattended ticks | simulate 336 ticks (48/day x 7) and read both the file and the queue | **two independent bounds, and they are not interchangeable**: the dedup key collapses IDENTICAL proposals to one row (612 bytes), and the in-flight gate refuses while any Stage-A item is `pending` OR `approved`-but-unexecuted | ALREADY PROTECTED — and now pinned | the dedup key alone would do nothing against 336 DIFFERENT proposals |
 | H-20 | 2026 | commitment drift vs binding drift | «The LLM Proposes, the Executive Disposes» (4 Aug 2026), supplied by the operator | two different losses: the agent stops carrying the goal at all, or it keeps the goal and loses its link to the concrete referent. Their ablation raised goal-abandonment 0.00 → 1.00 when the external commitment store was removed, while binding-error stayed 0.00 | the durable task queue and `BestNextAction` | (a) park a checkpoint, reopen the store in a fresh object, read the goal; (b) ask the decision object for the file its own reason named | (a) **commitment survives verbatim** across a store reopen; (b) **binding was lost: `_PY_TARGET_RE` matched the filename, classified the goal as engineering, and DISCARDED the match** | **(a) ALREADY PROTECTED · (b) LOCALLY REPRODUCED → FIXED** | our binding-error was the axis their ablation kept at zero |
+| H-21 | 1985- | a state machine that accepts a transition its diagram does not have | Therac-25 (Leveson & Turner, 1993) and the wider control-system literature | the state changes by a path the design never drew, and every later decision reasons about a world that did not happen | the task queue's terminal statuses | drive the FULL transition matrix over settled tasks, not one case | **only `mark_running` was guarded. `done→failed`, `done→cancelled`, `failed→done`, `failed→cancelled`, `cancelled→done`, `cancelled→failed` were all accepted** | **LOCALLY REPRODUCED → FIXED** | `failed→done` is literally «falsely report success» |
 
 ---
 
@@ -52,12 +53,13 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 19 |
+| classes examined | 20 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 12 (H-18, H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
-| LOCALLY REPRODUCED | 8 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift, H-20 binding) |
-| fixes completed | 7 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20) |
+| LOCALLY REPRODUCED | 9 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift, H-20 binding, H-21) |
+| fixes completed | 8 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20, H-21*) |
+| *fixes without a mutation probe | 1 (H-21 — probe interrupted) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
 | queued, not yet run | the chronological list below |
@@ -456,6 +458,37 @@ still xfails: no machine caller passes a target to the producer, so the producer
 re-selects its own backlog candidate. This repair gives the decision something
 to hand over; it does not build the road. Those are different claims and the
 ledger keeps them apart.
+
+
+### H-21 — the matrix found five more than the first case did
+
+The first probe asked one question («can a done task be marked failed?») and
+got «yes». Taking the whole matrix instead turned one finding into six: every
+terminal state could become any other, and only `mark_running` was protected —
+by the claim check, which exists for a different reason entirely.
+
+`failed → done` is the one that matters. A row whose work failed becomes a
+success after the fact, and everything counting by status — the cycle report,
+useful-cycles, the capability bench — counts the rewrite rather than the run.
+That is the «falsely report success» bullet, reachable through the store rather
+than through any reasoning error.
+
+**Reachability, stated narrowly.** In the tick there is one settle per task
+(`apply_run_outcome`), so a double-settle needs an exception AFTER a successful
+settle, with the outer handler settling again. Narrow — but the store offers
+the move to every caller, including future ones, and the refusal belongs where
+the transition lives rather than in each caller's discipline.
+
+Terminal outcomes are now write-once: repeating the SAME outcome stays
+idempotent (callers rely on it), `blocked` and `paused` stay rewritable because
+neither is terminal — one waits on a human, the other on a clock.
+
+**One weakness in this entry's evidence, stated rather than hidden.** The
+mutation probe for this guard was not run — the operator interrupted it and
+asked to move on. So the guard is supported by six red-then-green cases and the
+full battery at 8740, but NOT by a demonstration that removing it reddens them.
+Every other fix in this ledger carries that demonstration; this one does not
+yet.
 
 ## Queue (chronological, not yet reached)
 
