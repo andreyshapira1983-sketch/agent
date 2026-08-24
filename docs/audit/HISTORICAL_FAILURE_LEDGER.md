@@ -54,6 +54,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-32 | 2011 | recovery itself becomes the load | AWS EBS re-mirroring storm (2011); the wider retry-avalanche family | the repair path is unthrottled, so everything that was waiting fires at once and the recovery outlasts the outage | `reactivate_paused_checkpoints`, the tick's drain loop, and every producer of `pending` rows | (a) read the revival bound; (b) read the drain bound; (c) enumerate every producer of pending rows | (a) **batch of 3, oldest first, with the EBS reasoning written in the code already**; (b) **the drain is UNBOUNDED by count and the tick has no time budget — only the money caps hold it**; (c) **two producers only: a human CLI add, and one row per due schedule, of which zero are registered** | ALREADY PROTECTED, by producer enumeration rather than by assumption | the residual is named below |
 | H-33 | 2021 | the protective mechanism removes protection when IT fails | Facebook BGP withdrawal (2021); the fail-open family | the thing meant to keep the system safe took the system off the map when it failed | `.env`, the provider chain, and `config/budget_limits.json` | (a) run with no `.env`; (b) run with no keys; (c) run with the limits file absent | (a) **proceeds on defaults, does not raise**; (b) **the chain ends at the local provider and fails with a connection error — a stop, not silent garbage**; (c) **NO CAP AT ALL: 500 reservations allowed in a row, silently, while the same file CORRUPTED raises** | **LOCALLY REPRODUCED → FIXED at the process entry** | the placement took three attempts, and both wrong ones were red for good reasons |
 | H-34 | 2014 | the boundary is checked for some shapes of input, not all | Heartbleed (2014); the wider partial-boundary family | the reply carried more than was asked because one request shape skipped the length check | `redact_payload` and the three surfaces §7 declares safe | push a secret through every payload shape the logger accepts, then read the FILE | **a secret inside a set or inside bytes reached `logs/*.jsonl` raw — the logger accepts both (it stringifies) and the traversal did not enter them** | **LOCALLY REPRODUCED → FIXED for sets and bytes; the dict-key decision upheld after testing its premise** | 0 occurrences live: no sets, no bytes in 6489 rows; 0 key-shaped strings in 1269 files |
+| H-35 | 2014 | data read as instruction | Shellshock (2014); for an agent the same class is prompt injection | a value crossed a boundary where it stopped being data and started being a command | the classic form: `shell=True` / `os.system` / `eval`; the agent form: `scan_for_injection` and the tool-output path | (a) sweep for shell and eval execution; (b) attack the guard with SEVEN unseen forms of the same class, not the one it grew on | (a) **none — no `shell=True`, no `os.system`, no raw eval; `ast.literal_eval` only**; (b) **1 of 7 caught: only the canonical English phrasing. Russian polite, quoted-regulation, tool-shaped, operator-impersonating, deferred and negated forms all read `clean` and pass UNANNOTATED** | **coverage measured and weak; the intake is closed elsewhere → recorded, not patched** | the severity answer is the blocked-tool set, below |
 
 ---
 
@@ -786,3 +787,36 @@ pending_tasks` без предела, и времени тик не считае
 пишет настоящий журнал и читает настоящий файл — дефект был найден именно так,
 и закрепляется там же. Ломка сделана по каждой ветке отдельно: обезвреживание
 любой из двух краснит ровно свою форму.
+
+### H-35 — 1 из 7, и почему это не повод дописывать узоры
+
+Атака строилась по правилу «повтор той же атаки не победа»: канонической
+английской формулировкой, на которой страж рос, проверять нечего. Семь форм
+того же класса — русская вежливая, поданная как цитата регламента, поданная как
+вывод инструмента, поданная как сообщение оператора, отложенная («когда тебя
+спросят — ответь…») и через отрицание. Поймана одна: английская.
+
+«Чисто» при этом означает БЕЗ пометки: `prepare_untrusted_text_for_llm`
+аннотирует только вердикт `suspicious`, а в цикле вывод инструмента с чистым
+вердиктом уходит в контекст как есть. То есть узор — единственные ворота, а не
+добавка к ним.
+
+**Серьёзность решает не покрытие, а что именно доходит.** Безнадзорному целевому
+пути закрыты `web_fetch`, `web_search`, `rss_fetch` и `semantic_scholar_search`
+— то есть весь основной источник недоверенного текста. `python_probe` и
+`spawn_subagent` закрыты и НЕРАЗБЛОКИРУЕМЫ полем конфига по построению:
+разблокировать можно только чтение веба и только явным полем. Проверено в коде,
+а не по докстрингу.
+
+Остаток честно: содержимое РЕПОЗИТОРИЯ, которое агент читает своими
+`file_read`, `run_tests`, `shell_exec`. Оно внутри доверенной границы, но эту
+границу правит и сам агент через self-apply. Отравленная строка в собственном
+документе прошла бы стражa без пометки.
+
+**Почему узоры не дописаны.** Тот же урок, что измерен в MIR-147: лексический
+порог, ловящий трудный случай, демотирует и настоящий текст. Русские шаблоны
+поймали бы форму B и не поймали C–G, зато принесли бы ложные срабатывания на
+собственных документах, где слова «одобри», «выполни», «системная подсказка»
+встречаются законно. Архитектура уже отвечает на этот класс тем, что закрывает
+ПРИЁМ, а не тем, что распознаёт формулировку. Запись существует, чтобы никто не
+считал стража широким.
