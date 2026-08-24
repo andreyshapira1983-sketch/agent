@@ -47,6 +47,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-25 | 1999/2000 | two conventions with no end-to-end check, in the TIME domain | Mars Climate Orbiter (H-02) restated for timestamps; the Y2K epoch family | a value carries no unit, each side assumes its own, and nothing ever compares them | every `fromisoformat` site in `core/` | (a) count naive stamps in live state; (b) parse a naive stamp and read the instant it becomes | (a) **12 472 stamps, all timezone-aware, zero naive**; (b) **a naive stamp was read as LOCAL time — 10:00 became 07:00Z on this machine, a silent three-hour shift** | **mechanism live, data clean → FIXED at the two silent sites** | 7 sites did not normalise; 5 raise loudly, 2 shifted silently |
 | H-26 | 2005- | parser differential: two gates read one input and disagree | HTTP request-smuggling literature; the wider filter-vs-consumer family | the danger is not strictness or leniency but that the disagreement is undeclared, so a value passes the gate that judges it one way and reaches the consumer that judges it another | `secret_scanner.scan` vs `contains_secret(keywords)` vs `redact_dlp_text` vs the two durable stores | run one text through every boundary and compare verdicts | **«My password is hunter2»: 0 patterns, keyword TRUE, persistent memory REJECTS, redaction cuts nothing, and the episodic store keeps it verbatim** | **differential real, NOT reproduced in data → declared, not equalised** | 0 hits of either class across 6 426 live rows |
 | H-27 | 1970s- | an external effect happens, its accounting does not | double-entry bookkeeping; two-phase commit; the duplicate-charge family in payment postmortems | the money moved and the write that was supposed to count it never ran, or ran through a path that never reached the ledger; the cap then guards a number that is not the spend | `assert_can_start` / `record` around the paid model call, and every construction site of `ModelUsageLedger` | (a) interrupt between reserve and record and read what survives; (b) reconcile live `llm_calls` reservations against live usage rows | (a) the CALL count survives, tokens and cost do not — realistic loss over an unattended week ~0.1-0.4% of the weekly cap, so no machinery is owed; (b) **1364 reservations against 1379 usage rows — 15 paid calls, all openai, all on 19-20 Aug, invisible to the daily and weekly cap** | **LOCALLY REPRODUCED → FIXED (b); (a) measured and declined** | see below |
+| H-28 | 2004- | the same expensive work paid for twice | memcached cache stampede; Knight Capital deploy skew (2012) as the duplicate-execution family | N workers ask one expensive question at once, or one path runs the same costly action again, and the accounting shows one | the campaign cycle (`core/campaign.py`), the replan loop, and the live `model_usage.jsonl` | (a) cluster live successful calls by identical (role, model, input_tokens) inside 10 minutes; (b) read the gap distribution; (c) attribute campaign spend by outcome | (a) **86 repeats, 8.7% of all successful calls, clusters up to 8**; (b) **median gap 70 s, only 2 pairs under 10 s — a cadence, not a retry loop, and replan explains 10 events, not 86**; (c) **idle 30, repeat 39, blocked 82 all genuinely zero, with `completed` at 386 calls / 2871 units as the control** | **ALREADY PROTECTED at the campaign boundary; prompt identity UNKNOWN and unauditable by design** | see below |
 
 ---
 
@@ -604,3 +605,33 @@ runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
 Побочный вывод о методе: обе текстовые пробы, закреплявшие прежнюю починку,
 покраснели от ПЕРЕЕЗДА построения, а не от потери свойства. Проба, которую
 ломает переезд, меряет адрес, а не свойство; обе переписаны на инвариант.
+
+### H-28 — три сенсора, и последний упирается в границу, поставленную нарочно
+
+Класс дублирующейся оплаченной работы проверялся тремя способами, потому что
+первый сенсор был косвенным.
+
+**Первый — кластеры одинакового входа.** 86 повторов, 8,7 % всех успешных
+вызовов, кластерами до восьми. Само по себе это ничего не доказывает:
+одинаковое ЧИСЛО токенов входа не есть одинаковый запрос.
+
+**Второй — разрывы внутри кластеров.** Медиана 70 с, теснее 10 с всего две
+пары. Это ритм, а не петля повторов. Гипотеза «повтор после отказа» проверена
+отдельно: событий `replan_attempt` в 128 файлах трасс — **десять**, а не 86.
+Первое объяснение умерло.
+
+**Третий — деньги по исходам кампании.** Холостых 30, повторных 39,
+заблокированных 82 — у всех ноль трат, и это правда, а не пустое поле:
+`repeat` и `idle` решаются правилами (сборщик сигналов читает файлы состояния и
+зовёт `select_best_next_action`, без модели), а `blocked` приходит через
+ИЗМЕРЕННУЮ ветку, где трата считается дельтой до и после. Контроль, без
+которого зелёный результат ничего бы не значил: тем же сенсором `completed`
+показывает 386 вызовов и 2871 единицу. Сенсор умеет видеть положительное.
+
+**Что осталось неизвестным, и почему это не дыра в аудите.** Доказать, что
+восемь вызовов подряд несли ОДИН И ТОТ ЖЕ запрос, нельзя: запросы не хранятся.
+Это не упущение, а граница, поставленная нарочно — сохранённый запрос нёс бы
+секреты, и весь слой редакции существует ради обратного. Класс поэтому не
+«защищён» и не «воспроизведён», а **неаудируем изнутри по решению, которое
+дороже самого класса**. Названо здесь, чтобы следующий проход не считал
+молчание защитой.
