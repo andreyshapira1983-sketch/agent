@@ -40,6 +40,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-12 | 2017 | backups that exist and were never restored | GitLab.com database incident, 31 Jan 2017 (public postmortem) | the primary database directory was removed during recovery, and of **five** configured backup/replication methods **none** worked — some misconfigured, some untested for a year. A backup nobody has restored from is an assumption | the nine `*.bak` files in `data/` and the migrations that write them | run every backup through the REAL state loader, then compare identity against the live store using each store's own identity field | **9 of 9 load.** But identity comparison shows three are REPLACEMENTS, not repairs — `persistent_memory.jsonl.20260731…` shares **0 of 814** rows with the live store | **ALREADY PROTECTED (readability) · UNKNOWN → now measured (what each backup IS)** | drill made repeatable; see below |
 | H-16 | 2024 | what RUNS differs from what was reviewed | xz-utils backdoor, CVE-2024-3094 (Mar 2024) | the payload shipped in release tarballs and was absent from the git repo; the build system activated it. The precondition is the gap between reviewed source and running artefact, not malice in a dependency | `requirements.lock`, `requirements.txt`, and the installed environment | (a) does every locked package carry a hash; (b) does the INSTALLED set match the lock | (a) **36 packages, 662 sha256 hashes, none missing**; (b) **2 packages drift: `anthropic` locked 0.102.0 / installed 0.121.0, `click` 8.4.1 / 8.4.2** | **LOCALLY REPRODUCED (drift) — reported, deliberately not "fixed"** | hashes protect an install that goes through them and say nothing about one that went around |
 | H-17 | 2021 | an action inside your own authority removes the path that repairs you | Facebook/Meta global outage, 4 Oct 2021 | a routine capacity check withdrew the BGP routes, taking down the service AND the tools needed to fix it — internal DNS, remote access, reportedly even door badges | `_ALLOWED_CODE_DIRS` in the self-apply lane, against the launcher, bootstrap, installers and ratchets | ask the risk classifier whether the agent may edit each of those paths | **`agent_tick.py`, `main.py`, `app/`, `scripts/`, `.git/`, and every config are OUT of reach** | ALREADY PROTECTED — and now pinned | the property rests on one four-string tuple |
+| H-19 | 2018-2015 | information reaching a channel not built to carry it | Meltdown / Spectre (2018); Rowhammer (Kim et al., 2014) | a side channel leaks what no interface exposed — cache timing, adjacent DRAM rows. The general shape: data crosses a boundary through a path nobody designed as a path | every durable surface a fetched page can reach: chain log payload, knowledge pipeline, memory write policy, source registry, the answer itself | plant a real secret in a fetched page and follow it through each surface | **chain log payload carries no excerpt; knowledge pipeline refuses; memory write policy rejects all three shapes; outbound redaction catches all three; 0 hits across 5 151 live source-registry rows** | ALREADY PROTECTED, in depth | yesterday's H-15 patterns propagated here on their own |
 
 ---
 
@@ -49,9 +50,9 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 16 |
+| classes examined | 17 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 10 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17) |
+| ALREADY PROTECTED | 11 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
 | LOCALLY REPRODUCED | 7 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift) |
 | fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
@@ -363,6 +364,36 @@ dependencies are the operator's to move. `scripts/dependency_drift.py` prints th
 exits 1; the completeness of the lock is a code property and is tested, while
 the drift is a machine property and is not — a suite that reddens because
 someone installed a package on their laptop would be a false rejection.
+
+
+### H-19 — five surfaces, five separate answers
+
+A secret planted in a fetched page was followed rather than assumed, because
+«the scanner exists» is not «the scanner is on this path»:
+
+| surface | result |
+|---|---|
+| evidence excerpt | **carries the secret** — it is the raw page text, by design |
+| chain log payload | does not carry excerpts at all, so nothing reaches the trace |
+| knowledge pipeline | refuses the sentence (`contains_secret`) |
+| memory write policy | rejects — `openai-key`, `url-credentials`, `aws-secret-key` |
+| outbound answer redaction | replaces all three with `[REDACTED:<kind>]` |
+| live source registry | **0 scanner hits across 5 151 rows** |
+
+The excerpt holding the secret is not a defect: it is the fetched page, and the
+verifier must see what the page actually said. What matters is that every path
+OUT of it is closed, and each was checked separately.
+
+**Yesterday's fix propagated without being wired.** The `url-credentials` and
+`aws-secret-key` patterns added for H-15 are now enforced at the memory
+boundary and in the outbound redaction, because both delegate to the scanner
+rather than keeping their own list. That is the difference between a fix and a
+patch: one place learned, three boundaries got stricter.
+
+**A distinction kept:** the stores THEMSELVES accept a secret when written
+directly — `EpisodicMemoryStore.save` and `PersistentMemoryStore.save` have no
+opinion about content. The protection is the policy in front of them, not the
+store. Recorded so nobody later «simplifies» by writing straight to a store.
 
 ## Queue (chronological, not yet reached)
 
