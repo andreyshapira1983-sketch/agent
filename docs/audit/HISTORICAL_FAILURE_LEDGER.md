@@ -58,6 +58,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-36 | 2017 | a destructive command aimed at the wrong target | GitLab database deletion (2017) | one wrong path removed production, and the second half was that the backups did not restore | `compensation._apply_action` (`delete_path_if_created`); the backup half is H-12 | ask the rollback to remove `data`, `logs` and `.git` | **all three removed, status `ok` — the only guard was `_resolve_inside`, and everything valuable lives INSIDE the workspace** | **LOCALLY REPRODUCED → FIXED (protected roots refused)** | the code's own comment claimed an ownership invariant it did not enforce |
 | H-37 | 2021 | a harmless-looking field is EXPANDED somewhere downstream | log4shell (2021) | a logged string was parsed as a lookup and reached the network; the field never looked dangerous at the place it was written | every `.format()` / `Template.substitute` site, and any stored field that could trigger egress | (a) AST sweep for expansion sites, detector proved on `.format` and `.substitute`; (b) trace whether any expanded template is DATA rather than a code constant; (c) look for a stored `url` field that anything auto-fetches | (a) **3 sites only, and the two `%` hits are arithmetic**; (b) **`SourceLibraryEntry.search_template` is the one data-shaped template, and `resolve_source_library` selects only from 13 hardcoded entries — none carries a placeholder besides `{topic}`**; (c) **none: egress tools are planner-invoked and blocked on the unattended path (H-35)** | NOT APPLICABLE, proved by tracing rather than assumed | the dangerous shape would be a template loaded from data |
 | H-38 | 2024 | a DATA update, not a code change, kills every consumer | CrowdStrike channel-file parser (2024) | the binaries were untouched; a content file shipped and every machine that parsed it went down simultaneously | `config/budget_limits.json` against the real tick, and the heartbeat that reports on it | run the tick end to end (keys stripped, so nothing can be spent) with the limits file valid, then corrupt | **the corrupt file exits 1 with a NAMED error and no traceback — handled. But three consecutive failures later `--status` prints `Daemon: alive — last tick 0.0 min ago (event=tick_error)`** | **LOCALLY REPRODUCED → the word fixed, the decision left where it belongs** | the failing tick is correct behaviour (H-33); the lie was the word `alive` |
+| H-39 | 2020/2024 | the dependency itself is the attack | SolarWinds (2020); xz-utils backdoor (2024) | the artifact was legitimately released and correctly signed — pinning a hash would not have helped, because the hash was right | `requirements.lock`, the self-apply deny list, and any runtime install path | (a) count hash coverage per package; (b) ask whether the agent may edit the lock; (c) look for `pip install` on a live path | (a) **36 packages, 0 without a hash, median 2 hashes each**; (b) **denied — `.lock` by suffix, `requirements.txt` by name, `config/`, `.git/` and `.github/` by prefix**; (c) **none: every hit is prose in a prompt or an error message addressed to a human** | ALREADY PROTECTED on all three axes | the xz lesson is not about hashes, and the residual is MIR-139 |
 
 ---
 
@@ -897,3 +898,28 @@ H-33 научил безнадзорный вход отказываться р�
 Признак отказа опознаётся подстрокой (`error`/`exception`/`fail`), а не точным
 списком: события такого рода заводятся по мере надобности, и новый `*_error` не
 должен молча вернуть строке прежнее слово.
+
+### H-39 — три оси закрыты, и остаток лежит не там, где ищут
+
+Хеши полны: 36 пакетов, ни одного без хеша, медиана два на пакет. Замок и
+`requirements.txt` лента править не может, `config/`, `.git/` и `.github/`
+закрыты префиксом, а CI отдельно проверяет `pip install --require-hashes`.
+Установок на ходу нет: все совпадения по `pip install` — текст в подсказках и
+сообщения об ошибке, адресованные человеку.
+
+Но урок xz-utils НЕ про хеши. Закладка приехала в законно выпущенном артефакте
+с верной подписью; закрепление хеша не помогло бы, потому что хеш был правильный.
+Помогает другое: не обновляться вслепую, читать, что меняется, и держать
+поверхность зависимостей маленькой.
+
+**Поэтому проба пошла дальше и спросила, что вообще может изменить сам агент.**
+`_is_allowed` отвечает: `core/`, `cli/`, `tools/`, `tests/` и `docs/` — да;
+замок, конфиги, `.git/`, `.github/` и ратчет размеров — нет. Закладке не нужна
+новая зависимость, ей достаточно правки кода, и эта дверь открыта по
+построению. Она же и есть MIR-139.
+
+**Побочный улов, доведённый до места.** Разрешён и `docs/audit/` — то есть
+записи о собственных дефектах. Подсудимый может править дело. Ограничитель тут
+не путь, а процедура: всякая правка ленты проходит через одобрение, тесты и
+историю git, а `.git/` закрыт. Замер добавлен вторым ОСЬЮ в MIR-139, а не заведён
+отдельной сущностью: дверь одна, объекты за ней разные.
