@@ -50,6 +50,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-28 | 2004- | the same expensive work paid for twice | memcached cache stampede; Knight Capital deploy skew (2012) as the duplicate-execution family | N workers ask one expensive question at once, or one path runs the same costly action again, and the accounting shows one | the campaign cycle (`core/campaign.py`), the replan loop, and the live `model_usage.jsonl` | (a) cluster live successful calls by identical (role, model, input_tokens) inside 10 minutes; (b) read the gap distribution; (c) attribute campaign spend by outcome | (a) **86 repeats, 8.7% of all successful calls, clusters up to 8**; (b) **median gap 70 s, only 2 pairs under 10 s — a cadence, not a retry loop, and replan explains 10 events, not 86**; (c) **idle 30, repeat 39, blocked 82 all genuinely zero, with `completed` at 386 calls / 2871 units as the control** | **ALREADY PROTECTED at the campaign boundary; prompt identity UNKNOWN and unauditable by design** | see below |
 | H-29 | 2005- | corruption detected, and silently LESS data returned | ZFS end-to-end checksums vs silent bit rot; the wider detect-but-don't-tell family | the checksum catches the bad block and the reader still gets a short answer it cannot distinguish from a complete one | `read_state_jsonl` quarantine path, and every store that BOUNDS something | exhaust a 3-call daily cap, corrupt one budget row, re-read, and ask for a fourth call | **the fourth call is ALLOWED — one corrupted row restores spending room, with no warning, no log and no reader of `.quarantine` anywhere in the repo** | **LOCALLY REPRODUCED → the silence closed, the decision left to the operator** | live quarantine empty across all stores in four weeks |
 | H-30 | 2008 | identifiers unique only in appearance | Debian OpenSSL entropy CVE-2008-0166; the wider weak-source family | the generator looks right and the key space is tiny, so collisions arrive by design rather than by chance | `core/ids.new_id` and every minting site in `core`, `app`, `cli`, `api`, `tools`, `agent_tick` | (a) AST sweep for `random.*` / `uuid1` at any minting site; (b) count real id collisions across every live store | (a) **0 weak sources against 64 strong minting sites, detector proved on `random.randint` and `uuid.uuid1`**; (b) **2439 ids, and both apparent collisions are references, not keys — 254 versions of one profile, 3 outcomes of one approval** | ALREADY PROTECTED (`secrets.token_hex(16)`, 128 bits) | the collision count needed decomposition before it meant anything |
+| H-31 | 2012 | old code meets new data and ACTS on it | Knight Capital deploy skew (2012) | part of the fleet ran the new build and part the old; the loss came not from the skew but from the old half acting on data it misread | `importlib` use in the running process, the self-apply lane's clean-tree gate, and the shared state format `INTEGRITY_MARKER` | (a) sweep for live module reloading; (b) write a row from a FUTURE format and read it with today's reader | (a) **no `importlib.reload` anywhere — one process, one code version**; (b) **the future row is not ignored: it is quarantined and the LIVE FILE is rewritten without it** | **mechanism real, not currently reachable (only v1 exists) → tripwire, not machinery** | the destruction half is what makes a future bump dangerous |
 
 ---
 
@@ -674,3 +675,27 @@ runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
 потерянных строк по максимальной виденной цене (оценка поверх испорченных
 данных). Записано здесь, а не только в чате, потому что через месяц вопрос
 «кто это выбрал» должен иметь ответ в репозитории.
+
+### H-31 — растяжка вместо машинерии, потому что дефекта ещё нет
+
+Внутри одного процесса подмены кода нет: `importlib.reload` не встречается
+нигде, модули загружены один раз. Но процессов бывает два — плановый демон и
+запущенный руками тик, — а лента самоприменения правит тот же репозиторий.
+Общее у них состояние на диске, и там нашлось неприятное.
+
+Строка с чужим форматом не игнорируется. Она признаётся повреждённой, уезжает в
+карантин, и живой файл ПЕРЕПИСЫВАЕТСЯ без неё. То есть процесс на старом коде,
+один раз прочитав хранилище, стирает из живого файла всё, что записал процесс на
+новом. Это ровно форма Knight Capital: убыток делает не рассинхрон, а то, что
+старая половина действует.
+
+Дефекта сегодня нет: формат один, версии два не существует, случаев ноль.
+Поэтому здесь не строится ни совместимость, ни переговоры о версиях — оба
+решения оплачивались бы сейчас за опасность, которой пока нет. Вместо этого
+поставлена растяжка на константу формата, и она несёт доказательство внутри:
+второй тест показывает само стирание. Проверено ломкой — поднятие константы до
+`v2` краснит оба теста.
+
+Чего растяжка НЕ делает: она не запрещает менять формат. Она говорит тому, кто
+меняет (включая самого агента через self-apply), что смена обязана приехать
+вместе с читателем, принимающим обе версии.
