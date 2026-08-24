@@ -274,6 +274,44 @@ def _classify_test_health(tests_result: dict | None) -> str:
 
 # ── status-only mode ──────────────────────────────────────────────────────────
 
+def _quarantine_status_lines(workspace: Path) -> list[str]:
+    """Строки о потерянных строках состояния — или пусто, когда терять нечего.
+
+    H-29 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Порченая строка уезжает в
+    `.quarantine`, файл переписывается без неё, и читатель получает список
+    короче, ничем не отличая его от полного. У обычного журнала это потеря
+    памяти; у СЧЁТЧИКА-ПОТОЛКА это выданное разрешение — замер показал, что
+    исчерпанный суточный потолок после порчи одной строки снова разрешает
+    тратить. Решение (разрешать или отказывать) здесь не меняется: оно про
+    деньги и принадлежит оператору. Закрывается молчание.
+
+    Только чтение и никогда не бросает: строка состояния обязана печататься
+    даже на повреждённом дереве.
+    """
+    from core.state_integrity import quarantine_dir_for
+
+    lines: list[str] = []
+    try:
+        qdir = quarantine_dir_for(workspace / DATA_DIR / "x.jsonl")
+        if not qdir.exists():
+            return lines
+        entries = sorted(f for f in qdir.iterdir() if f.is_file())
+        if not entries:
+            return lines
+        lines.append(
+            f"State integrity: {len(entries)} quarantined row file(s) — "
+            f"rows dropped from state stores, and a dropped row in a CAP "
+            f"store reads as spending room:"
+        )
+        for f in entries[:10]:
+            lines.append(f"  {f.name}")
+        if len(entries) > 10:
+            lines.append(f"  ... and {len(entries) - 10} more")
+    except OSError:
+        return []
+    return lines
+
+
 def _print_status(workspace: Path) -> int:
     """Print pending inbox items and exit. No agent is created."""
     from core.approval_inbox import ApprovalInbox
@@ -324,6 +362,8 @@ def _print_status(workspace: Path) -> int:
 
     # Self-build producer visibility (TD-027) — read-only, never raises.
     for line in _self_build_status_block(workspace, heartbeat, pending, inbox):
+        print(line, file=sys.stderr)
+    for line in _quarantine_status_lines(workspace):
         print(line, file=sys.stderr)
     return 0
 
