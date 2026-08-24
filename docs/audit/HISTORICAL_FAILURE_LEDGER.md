@@ -55,6 +55,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-33 | 2021 | the protective mechanism removes protection when IT fails | Facebook BGP withdrawal (2021); the fail-open family | the thing meant to keep the system safe took the system off the map when it failed | `.env`, the provider chain, and `config/budget_limits.json` | (a) run with no `.env`; (b) run with no keys; (c) run with the limits file absent | (a) **proceeds on defaults, does not raise**; (b) **the chain ends at the local provider and fails with a connection error — a stop, not silent garbage**; (c) **NO CAP AT ALL: 500 reservations allowed in a row, silently, while the same file CORRUPTED raises** | **LOCALLY REPRODUCED → FIXED at the process entry** | the placement took three attempts, and both wrong ones were red for good reasons |
 | H-34 | 2014 | the boundary is checked for some shapes of input, not all | Heartbleed (2014); the wider partial-boundary family | the reply carried more than was asked because one request shape skipped the length check | `redact_payload` and the three surfaces §7 declares safe | push a secret through every payload shape the logger accepts, then read the FILE | **a secret inside a set or inside bytes reached `logs/*.jsonl` raw — the logger accepts both (it stringifies) and the traversal did not enter them** | **LOCALLY REPRODUCED → FIXED for sets and bytes; the dict-key decision upheld after testing its premise** | 0 occurrences live: no sets, no bytes in 6489 rows; 0 key-shaped strings in 1269 files |
 | H-35 | 2014 | data read as instruction | Shellshock (2014); for an agent the same class is prompt injection | a value crossed a boundary where it stopped being data and started being a command | the classic form: `shell=True` / `os.system` / `eval`; the agent form: `scan_for_injection` and the tool-output path | (a) sweep for shell and eval execution; (b) attack the guard with SEVEN unseen forms of the same class, not the one it grew on | (a) **none — no `shell=True`, no `os.system`, no raw eval; `ast.literal_eval` only**; (b) **1 of 7 caught: only the canonical English phrasing. Russian polite, quoted-regulation, tool-shaped, operator-impersonating, deferred and negated forms all read `clean` and pass UNANNOTATED** | **coverage measured and weak; the intake is closed elsewhere → recorded, not patched** | the severity answer is the blocked-tool set, below |
+| H-36 | 2017 | a destructive command aimed at the wrong target | GitLab database deletion (2017) | one wrong path removed production, and the second half was that the backups did not restore | `compensation._apply_action` (`delete_path_if_created`); the backup half is H-12 | ask the rollback to remove `data`, `logs` and `.git` | **all three removed, status `ok` — the only guard was `_resolve_inside`, and everything valuable lives INSIDE the workspace** | **LOCALLY REPRODUCED → FIXED (protected roots refused)** | the code's own comment claimed an ownership invariant it did not enforce |
 
 ---
 
@@ -820,3 +821,27 @@ pending_tasks` без предела, и времени тик не считае
 встречаются законно. Архитектура уже отвечает на этот класс тем, что закрывает
 ПРИЁМ, а не тем, что распознаёт формулировку. Запись существует, чтобы никто не
 считал стража широким.
+
+### H-36 — комментарий утверждал инвариант, которого не было
+
+Строка гласила: «rmtree is fine — we own the path (tool created it)». Владение
+ничем не проверялось. Единственным стражем был `_resolve_inside` — «путь не
+выходит за рабочее место», — а состояние, улики и история лежат ВНУТРИ него.
+Заявка `delete_path_if_created` с путём `data`, `logs` или `.git` проходила со
+статусом `ok`.
+
+Цена промаха неравна цене остальных находок этого дня: `.git` сегодня несёт
+190 коммитов, ни один из которых не отправлен на удалённый репозиторий.
+
+Починено ровно то утверждение: защищённые КОРНИ отклоняются, и после этого
+фраза «путь наш» становится правдой, а не пожеланием. Граница проведена по
+корням, а не по поддеревьям: `data/scratch/созданное.json` по-прежнему
+откатывается, иначе откат перестал бы делать то, ради чего заведён. Прежний
+страж не заменён, а дополнен — отдельный тест держит и его.
+
+Отказ ГРОМКИЙ (`status="error"`), а не тихий: молчаливый пропуск читался бы
+вызывающим как выполненный откат, и это была бы вторая ошибка поверх первой.
+
+Вторая половина класса GitLab — «копии не восстанавливались» — закрыта
+отдельно в H-12, где проверялось не наличие копий, а что именно они
+восстанавливают.
