@@ -33,6 +33,8 @@ blocker; otherwise it is registered and the queue resumes.
 | H-07 | 2012 | wall-clock deadlines under a clock step | leap-second kernel livelock (2012); NTP step corrections; dead-CMOS boots | deadlines computed as `now - stamp` misbehave when the clock moves; monotonic clocks are immune but do not survive a restart | `provider_unhealthy` (120 min), `recover_stuck` (30 min), `reactivate_paused_checkpoints` (60 min / 72 h), approval TTL, grant expiry | recompute each deadline with `now` stepped backwards by an hour and by a year | **provider stays parked (True/True/True); `recover_stuck` reclaims 0 instead of 1** | **LOCALLY REPRODUCED — and every direction is fail-SAFE** | registered, deliberately NOT fixed; see below |
 | H-08 | 2008 | a silently weakened entropy source that still looks random | Debian OpenSSL, CVE-2008-0166 | a cleanup patch removed the uninitialised-memory mix; key generation was predictable for **two years**, and nobody noticed because the output still had the right shape and no repeats | `core/ids.new_id`, used as the default for every `id` field | (a) 200 000 ids, count collisions; (b) seed `random` and check whether ids become reproducible | (a) **0 collisions**, `secrets.token_hex(16)`, 128 bits; (b) not reproducible — but **no test pinned the SOURCE**: format and uniqueness both survive a swap to `random` | ALREADY PROTECTED (source) · **pinning gap closed** | the two existing tests would have passed after the exact Debian-shaped downgrade |
 | H-10 | 2019 | regex cost multiplied by attacker-supplied input | Cloudflare global outage, 2 July 2019 | one WAF regex with catastrophic backtracking consumed CPU across the edge. The lesson is not «regexes are dangerous» but «cost × input size, and the input comes from outside» | 155 compiled patterns in `core/`, and the fetched-page text they see | sweep all patterns against pathological inputs; then measure SCALING to tell backtracking from polynomial cost | **14 patterns slower than 50 ms; the worst three scale ×4 per doubling — quadratic, not exponential** (52 → 206 → 836 → 3381 ms over 1250 → 10000 chars) | ALREADY PROTECTED — **incidentally**, and now pinned | protection is `MAX_EXCERPT_CHARS = 800`, a memory-size cap, not a parse-cost decision |
+| H-11 | 2012 | old state read by new code, where a default asserts something the past never held | Knight Capital, 1 Aug 2012 (SEC 34-70694) | a repurposed flag activated dead code on one of eight servers; the deploy was partial and nobody could tell which meaning was live | every typed loader over the live stores | round-trip 15 588 live rows through the envelope, then through the TYPED loaders, and diff | envelope: **0 rows changed**; typed: **0 values changed**, but **162 rows GAIN a defaulted field** — `occurrences=1` on 25 issues and `decided_by='unattributed'` on 137 inbox items | **LOCALLY REPRODUCED (one of the two defaults) → FIXED** | `decided_by='unattributed'` is honest; `occurrences=1` was not |
+| H-14 | 2024 | a configuration file that takes the whole system down | CrowdStrike Falcon channel file 291, 19 July 2024 | a kernel-level component parsed a config channel file and crashed millions of hosts. Config is an input as dangerous as the network | `config/*.json` against `build_agent` | corrupt each file four ways, with a CONTROL run on healthy files first | control survives; `budget_limits.json` and `model_registry.json` **kill the build** on every corruption; `model_catalog.json` survives (it has a fallback) | **LOCALLY REPRODUCED — and the direction is CORRECT** | fail-closed pinned; the compound with MIR-135 recorded |
 
 ---
 
@@ -42,14 +44,14 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 9 |
+| classes examined | 11 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 6 (H-02, H-03, H-04, H-06 a/b, H-08, H-10) |
 | UNKNOWN | 0 |
-| LOCALLY REPRODUCED | 3 (H-01, H-05, H-07) |
-| fixes completed | 3 (H-01, H-05, H-06c) |
+| LOCALLY REPRODUCED | 5 (H-01, H-05, H-07, H-11, H-14) |
+| fixes completed | 4 (H-01, H-05, H-06c, H-11) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
-| reproduced and deliberately NOT fixed | 1 (H-07 — fail-safe in every direction) |
+| reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
 | queued, not yet run | the chronological list below |
 
 **A pattern worth naming after nine classes.** Twice now the code was correct
@@ -166,6 +168,48 @@ looking right.
 Closed behaviourally rather than by grepping for the word `secrets`: seed
 `random`, draw ids, re-seed, draw again, and require that they differ. Break-
 tested by performing the downgrade — the new test reddens, the old two do not.
+
+
+### H-11 — the default that claimed a past it never had
+
+The envelope round-trip was clean and the typed round-trip changed no value, so
+the dangerous Knight direction — a field whose MEANING silently differs — is
+absent. What the probe did surface is the subtler half: **a new field's default
+asserts something about rows written before it existed.**
+
+Two defaults, and they are not equal:
+
+* `decided_by = 'unattributed'` on 137 inbox items — **honest**. "We do not know
+  who decided" is exactly what the old rows contain.
+* `occurrences = 1` on 25 issues — **not honest, and it was mine**, added
+  2026-08-22 for MIR-035. Those rows predate the counter, so their true count is
+  unknown; and MIR-035 measured **13 copies of one signal class**, i.e. exactly
+  those rows are the ones known to have recurred. The mechanism built to surface
+  magnitude was reporting `1` for the records that motivated it.
+
+Fixed without a migration and without a new field, because the count already IS
+a lower bound — it starts when the field was introduced. The consumer now says
+`seen>=N` instead of `seen=Nx`, and the field carries that in its own comment.
+Pinned by a test that strips `occurrences` from a row the way the store hands it
+over, and requires the `>=`.
+
+### H-14 — reproduced, and the behaviour is right
+
+With a proved control (healthy configs build fine), corrupting
+`budget_limits.json` or `model_registry.json` by truncation, garbage or
+emptying kills `build_agent` every time. `model_catalog.json` survives — it has
+a fallback.
+
+**This is not fixed by making the parser lenient**, and that is the finding.
+For a spend limit, refusing to run IS the correct direction: a lenient reader
+("could not read it, so assume no limits") turns file corruption into unbounded
+spending. What is pinned is therefore the DIRECTION of the failure — closed,
+never open — break-tested by making the parser return `{}` instead of raising.
+
+**The compound belongs to MIR-135 and is recorded there, not here.** The crash
+happens at BUILD time, i.e. after the `tick_start` heartbeat is written, so a
+daemon with a corrupt config would die every tick while reading `alive`. That
+is a second defect meeting this one, and it stays with the entry that owns it.
 
 ## Queue (chronological, not yet reached)
 

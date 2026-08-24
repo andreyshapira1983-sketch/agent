@@ -60,4 +60,30 @@ def test_the_proposed_action_states_the_count(tmp_path: Path) -> None:
         tuple(i.to_dict() for i in reg.unresolved())
     )
     assert action is not None
-    assert any("seen=10x" in e for e in action.evidence), action.evidence
+    assert any("seen>=10x" in e for e in action.evidence), action.evidence
+
+
+def test_the_count_is_shown_as_a_lower_bound(tmp_path: Path) -> None:
+    """H-11 (Knight Capital): умолчание не должно утверждать про прошлое.
+
+    Замер живого хранилища 2026-08-24: 25 записей, заведённых до появления
+    счётчика, читаются новым кодом с `occurrences=1` — при том что MIR-035
+    измерил 13 копий одного сигнального класса. Счёт ведётся с момента
+    появления поля, значит он занижен по построению, и показывать его как
+    точный — ложный отчёт о собственном прошлом.
+    """
+    from core.best_next_action import _candidate_open_self_improvement_issue
+
+    reg = SelfImprovementIssueRegistry(tmp_path / "issues.jsonl")
+    _sweep(reg, 3)
+    # ряд без поля — как он приходит из хранилища, записанного старым кодом
+    rows = [dict(i.to_dict()) for i in reg.unresolved()]
+    for row in rows:
+        row.pop("occurrences", None)
+
+    action = _candidate_open_self_improvement_issue(tuple(rows))
+
+    assert action is not None
+    assert any("seen>=" in e for e in action.evidence), (
+        "счёт показан как точный, хотя для старых рядов он занижен"
+    )
