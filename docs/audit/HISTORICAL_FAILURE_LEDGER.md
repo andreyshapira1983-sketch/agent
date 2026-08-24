@@ -48,6 +48,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-26 | 2005- | parser differential: two gates read one input and disagree | HTTP request-smuggling literature; the wider filter-vs-consumer family | the danger is not strictness or leniency but that the disagreement is undeclared, so a value passes the gate that judges it one way and reaches the consumer that judges it another | `secret_scanner.scan` vs `contains_secret(keywords)` vs `redact_dlp_text` vs the two durable stores | run one text through every boundary and compare verdicts | **«My password is hunter2»: 0 patterns, keyword TRUE, persistent memory REJECTS, redaction cuts nothing, and the episodic store keeps it verbatim** | **differential real, NOT reproduced in data → declared, not equalised** | 0 hits of either class across 6 426 live rows |
 | H-27 | 1970s- | an external effect happens, its accounting does not | double-entry bookkeeping; two-phase commit; the duplicate-charge family in payment postmortems | the money moved and the write that was supposed to count it never ran, or ran through a path that never reached the ledger; the cap then guards a number that is not the spend | `assert_can_start` / `record` around the paid model call, and every construction site of `ModelUsageLedger` | (a) interrupt between reserve and record and read what survives; (b) reconcile live `llm_calls` reservations against live usage rows | (a) the CALL count survives, tokens and cost do not — realistic loss over an unattended week ~0.1-0.4% of the weekly cap, so no machinery is owed; (b) **1364 reservations against 1379 usage rows — 15 paid calls, all openai, all on 19-20 Aug, invisible to the daily and weekly cap** | **LOCALLY REPRODUCED → FIXED (b); (a) measured and declined** | see below |
 | H-28 | 2004- | the same expensive work paid for twice | memcached cache stampede; Knight Capital deploy skew (2012) as the duplicate-execution family | N workers ask one expensive question at once, or one path runs the same costly action again, and the accounting shows one | the campaign cycle (`core/campaign.py`), the replan loop, and the live `model_usage.jsonl` | (a) cluster live successful calls by identical (role, model, input_tokens) inside 10 minutes; (b) read the gap distribution; (c) attribute campaign spend by outcome | (a) **86 repeats, 8.7% of all successful calls, clusters up to 8**; (b) **median gap 70 s, only 2 pairs under 10 s — a cadence, not a retry loop, and replan explains 10 events, not 86**; (c) **idle 30, repeat 39, blocked 82 all genuinely zero, with `completed` at 386 calls / 2871 units as the control** | **ALREADY PROTECTED at the campaign boundary; prompt identity UNKNOWN and unauditable by design** | see below |
+| H-29 | 2005- | corruption detected, and silently LESS data returned | ZFS end-to-end checksums vs silent bit rot; the wider detect-but-don't-tell family | the checksum catches the bad block and the reader still gets a short answer it cannot distinguish from a complete one | `read_state_jsonl` quarantine path, and every store that BOUNDS something | exhaust a 3-call daily cap, corrupt one budget row, re-read, and ask for a fourth call | **the fourth call is ALLOWED — one corrupted row restores spending room, with no warning, no log and no reader of `.quarantine` anywhere in the repo** | **LOCALLY REPRODUCED → the silence closed, the decision left to the operator** | live quarantine empty across all stores in four weeks |
 
 ---
 
@@ -635,3 +636,33 @@ runtime silent-failure taxonomies (2026, already partly used in MIR-133..147).
 «защищён» и не «воспроизведён», а **неаудируем изнутри по решению, которое
 дороже самого класса**. Названо здесь, чтобы следующий проход не считал
 молчание защитой.
+
+### H-29 — половина урока была соблюдена, и именно вторая половина стоит денег
+
+Порчу репозиторий ЗАМЕЧАЕТ: строка с несошедшимся хешем уезжает в
+`.quarantine`, файл переписывается без неё, улика цела. Это первая половина
+урока ZFS, и она сделана хорошо. Вторая половина — не отдать молча МЕНЬШЕ
+данных — не сделана: `read_state_jsonl` возвращает список короче, и вызывающий
+ничем не отличает его от полного.
+
+Для большинства хранилищ это терпимо: потеряна одна запись памяти. Асимметрия в
+том, что у СЧЁТЧИКА-ПОТОЛКА потеря строки работает в сторону РАЗРЕШЕНИЯ. Замер:
+суточный потолок в три вызова исчерпан, четвёртый отвергнут; порча одной строки
+— и четвёртый разрешён. Ни предупреждения, ни события, а читателя у
+`.quarantine` нет нигде в репозитории.
+
+Проба доказана до того, как ей поверили. Первый вариант «порчи» добавлял пробел
+и хеш не ломал: вызов оставался отвергнут, и это читалось бы как «защита
+держит». Настоящая подмена значения дала обратный ответ. Зелёный результат
+непроверенной пробы здесь был бы прямо противоположен истине.
+
+Живых случаев нет: карантин пуст по всем хранилищам за четыре недели. Поэтому
+РЕШЕНИЕ не менялось — «отказывать при нечитаемых книгах» останавливает агента
+на неделю и стоит денег, а деньги принадлежат оператору. Закрыто ровно
+молчание, и закрыто на поверхности, которую оператор и так читает
+(`--status`), а не ещё одним журналом без читателя — этот класс уже
+зарегистрирован как MIR-138 и повторять его было бы странно.
+
+Свидетель самой опасности оставлен зелёным нарочно: он фиксирует ФАКТ, что у
+потолка потеря строки открывает трату. Если поведение станет fail-closed, тест
+обязан покраснеть и потребовать переписать эту запись, а не подгонки.
