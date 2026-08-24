@@ -49,6 +49,23 @@ class TaskAlreadyClaimed(RuntimeError):
     """Raised when a claim loses the race — the task is no longer `pending`."""
 
 
+class TerminalOutcomeRewrite(RuntimeError):
+    """Raised when a settled outcome would be replaced by a DIFFERENT one.
+
+    H-21 in `docs/audit/HISTORICAL_FAILURE_LEDGER.md` — the state machine that
+    accepts a transition its own diagram does not have. Measured 2026-08-24:
+    every terminal state could become any other, so `failed -> done` silently
+    turned a failure into a success and everything counting by status —
+    the cycle report, useful-cycles, the capability bench — counted the
+    rewrite. Repeating the SAME outcome stays idempotent; callers rely on it.
+    """
+
+
+#: Исходы, после которых работа кончилась. `blocked` ждёт человека, `paused` —
+#: часов; оба не терминальны и обязаны оставаться переписываемыми.
+_TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "failed", "cancelled"})
+
+
 #: A run that stopped because a human must approve something is neither a
 #: success nor a failure — retrying it on a timer cannot help, and burning the
 #: attempt budget on it hides the real reason. `blocked` is its own resting
@@ -543,7 +560,20 @@ class TaskQueueStore:
 
         return self._update_one(task_id, update)
 
+    def _refuse_terminal_rewrite(self, task_id: str, wanted: str) -> None:
+        """Отказать, если исход уже записан и он ДРУГОЙ."""
+        for task in self.list():
+            if task.id != task_id:
+                continue
+            if task.status in _TERMINAL_STATUSES and task.status != wanted:
+                raise TerminalOutcomeRewrite(
+                    f"task {task_id} already settled as {task.status}; "
+                    f"refusing to rewrite it as {wanted}"
+                )
+            return
+
     def mark_done(self, task_id: str, *, report: dict | None = None) -> RuntimeTask:
+        self._refuse_terminal_rewrite(task_id, "done")
         return self._update_one(
             task_id,
             lambda task: task.with_updates(
@@ -561,6 +591,7 @@ class TaskQueueStore:
         report: dict | None = None,
         now: datetime | None = None,
     ) -> RuntimeTask:
+        self._refuse_terminal_rewrite(task_id, "failed")
         retry_from = (now or _now()).astimezone(timezone.utc)
         # Exponential backoff so a deterministic failure does not hot-retry
         # every tick (OFM-010 / CORE-07); shared with recovery so the retry cap
@@ -573,6 +604,7 @@ class TaskQueueStore:
         )
 
     def cancel(self, task_id: str) -> RuntimeTask:
+        self._refuse_terminal_rewrite(task_id, "cancelled")
         return self._update_one(task_id, lambda task: task.with_updates(status="cancelled"))
 
     def reactivate_paused_checkpoints(
