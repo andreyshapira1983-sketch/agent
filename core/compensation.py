@@ -207,6 +207,29 @@ def apply_compensation_plan(
     return report
 
 
+#: Корни, которые откат не сносит НИКОГДА. Замер 2026-08-24: единственным
+#: стражем было «путь не выходит за рабочее место», а всё ценное лежит ВНУТРИ
+#: него — заявка с путём `data`, `logs` или `.git` проходила со статусом `ok` и
+#: сносила состояние, улики и всю историю коммитов. Запрещены именно КОРНИ:
+#: работа под ними остаётся откатываемой, иначе откат перестал бы работать.
+_PROTECTED_ROOTS: frozenset[str] = frozenset({
+    ".git", "data", "logs", "config", "core", "tools", "cli", "app", "api",
+    "tests", "scripts", "docs",
+})
+
+
+def _protected_root(workspace_root: Path, target: Path) -> str | None:
+    """Имя защищённого корня, если цель — он сам. Иначе None."""
+    try:
+        rel = target.resolve().relative_to(Path(workspace_root).resolve())
+    except (ValueError, OSError):
+        return None
+    parts = rel.parts
+    if len(parts) == 1 and parts[0] in _PROTECTED_ROOTS:
+        return parts[0]
+    return None
+
+
 def _apply_action(action: CompensationAction, workspace_root: Path) -> CompensationOutcome:
     if action.kind == "noop":
         return CompensationOutcome(action, status="noop", detail="no state change")
@@ -217,12 +240,21 @@ def _apply_action(action: CompensationAction, workspace_root: Path) -> Compensat
             return CompensationOutcome(
                 action, status="error", detail="path escapes workspace"
             )
+        protected = _protected_root(workspace_root, target)
+        if protected is not None:
+            return CompensationOutcome(
+                action, status="error",
+                detail=f"refusing to remove protected root {protected!r}",
+            )
         if not target.exists():
             return CompensationOutcome(
                 action, status="noop", detail="path already absent"
             )
         if target.is_dir():
-            # rmtree is fine — we own the path (tool created it).
+            # rmtree is fine — the path is ours: everything above is refused by
+            # `_protected_root`, so what remains was created by a tool inside a
+            # working area. Until 2026-08-24 that sentence was a comment and
+            # nothing more (H-36).
             shutil.rmtree(target)
         else:
             target.unlink()
