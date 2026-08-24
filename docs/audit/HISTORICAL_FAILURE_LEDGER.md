@@ -44,6 +44,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-18 | 2022 | a repair path that does not scale to the size of the incident | Atlassian, April 2022 (883 sites deleted; public incident review) | restores were per-tenant and largely manual, so recovery ran for up to two weeks. The damage was instant and the repair was serial | the approval inbox against a week of unattended ticks | simulate 336 ticks (48/day x 7) and read both the file and the queue | **two independent bounds, and they are not interchangeable**: the dedup key collapses IDENTICAL proposals to one row (612 bytes), and the in-flight gate refuses while any Stage-A item is `pending` OR `approved`-but-unexecuted | ALREADY PROTECTED — and now pinned | the dedup key alone would do nothing against 336 DIFFERENT proposals |
 | H-20 | 2026 | commitment drift vs binding drift | «The LLM Proposes, the Executive Disposes» (4 Aug 2026), supplied by the operator | two different losses: the agent stops carrying the goal at all, or it keeps the goal and loses its link to the concrete referent. Their ablation raised goal-abandonment 0.00 → 1.00 when the external commitment store was removed, while binding-error stayed 0.00 | the durable task queue and `BestNextAction` | (a) park a checkpoint, reopen the store in a fresh object, read the goal; (b) ask the decision object for the file its own reason named | (a) **commitment survives verbatim** across a store reopen; (b) **binding was lost: `_PY_TARGET_RE` matched the filename, classified the goal as engineering, and DISCARDED the match** | **(a) ALREADY PROTECTED · (b) LOCALLY REPRODUCED → FIXED** | our binding-error was the axis their ablation kept at zero |
 | H-21 | 1985- | a state machine that accepts a transition its diagram does not have | Therac-25 (Leveson & Turner, 1993) and the wider control-system literature | the state changes by a path the design never drew, and every later decision reasons about a world that did not happen | the task queue's terminal statuses | drive the FULL transition matrix over settled tasks, not one case | **only `mark_running` was guarded. `done→failed`, `done→cancelled`, `failed→done`, `failed→cancelled`, `cancelled→done`, `cancelled→failed` were all accepted** | **LOCALLY REPRODUCED → FIXED** | `failed→done` is literally «falsely report success» |
+| H-25 | 1999/2000 | two conventions with no end-to-end check, in the TIME domain | Mars Climate Orbiter (H-02) restated for timestamps; the Y2K epoch family | a value carries no unit, each side assumes its own, and nothing ever compares them | every `fromisoformat` site in `core/` | (a) count naive stamps in live state; (b) parse a naive stamp and read the instant it becomes | (a) **12 472 stamps, all timezone-aware, zero naive**; (b) **a naive stamp was read as LOCAL time — 10:00 became 07:00Z on this machine, a silent three-hour shift** | **mechanism live, data clean → FIXED at the two silent sites** | 7 sites did not normalise; 5 raise loudly, 2 shifted silently |
 
 ---
 
@@ -53,12 +54,12 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 20 |
+| classes examined | 21 |
 | NOT APPLICABLE | 0 |
 | ALREADY PROTECTED | 12 (H-18, H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
 | LOCALLY REPRODUCED | 9 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift, H-20 binding, H-21) |
-| fixes completed | 8 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20, H-21*) |
+| fixes completed | 9 (H-25, H-01, H-05, H-06c, H-11, H-13 false rejection, H-15, H-20, H-21*) |
 | *fixes without a mutation probe | 1 (H-21 — probe interrupted) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
@@ -489,6 +490,30 @@ asked to move on. So the guard is supported by six red-then-green cases and the
 full battery at 8740, but NOT by a demonstration that removing it reddens them.
 Every other fix in this ledger carries that demonstration; this one does not
 yet.
+
+
+### H-25 — a clean measurement and a live mechanism, kept apart
+
+The data is clean: 12 472 timestamps across every store, all timezone-aware,
+not one naive. So this class is **not reproduced in the data** and the entry
+says so.
+
+The mechanism was live anyway. `datetime.fromisoformat("2026-08-24T10:00:00")`
+returns a naive value, and `.astimezone(utc)` then treats it as LOCAL time — on
+this machine 10:00 becomes 07:00Z, a silent three-hour shift. Against a
+30-minute orphan timeout that means a live task reads as orphaned the moment it
+is written, which re-opens the double-execution class MIR-033 measured closed.
+
+Of seven parse sites that did not normalise, five compare against an aware
+`now` and would raise `TypeError` — loud, and acceptable. Two shifted silently:
+`task_queue` and `scheduler`. Only those two were changed.
+
+**Why UTC rather than refusal.** Every writer in this repository emits UTC, so
+a naive value can only come from a hand edit or a future writer, and both mean
+UTC. Refusing to read such a file would stop the queue entirely over one edit;
+reading it as UTC turns a silent error into no error. An explicit non-UTC
+offset is still honoured — pinned, so the fix cannot become «everything is
+UTC».
 
 ## Queue (chronological, not yet reached)
 
