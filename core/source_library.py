@@ -248,7 +248,17 @@ def resolve_source_library(selection: str | Iterable[str] | None = None) -> tupl
 
 
 def _domain(url: str) -> str:
+    """Имя узла адреса, в нижнем регистре, без `www.`.
+
+    Берётся `hostname`, а не `netloc`: последний несёт ещё user-info и ПОРТ.
+    Из-за этого законный `https://wikipedia.org:8443/x` отвергался воротами
+    домена (ложный отказ), а побег через user-info
+    `https://wikipedia.org@evil.example/` блокировался лишь по совпадению —
+    строка просто не оканчивалась на разрешённый домен. `hostname` возвращает
+    `evil.example`, то есть тот же случай становится верным по построению.
+    Исторический класс H-13, docs/audit/HISTORICAL_FAILURE_LEDGER.md.
+    """
     parsed = urlparse(url)
-    host = parsed.netloc or parsed.path.split("/", 1)[0]
+    host = parsed.hostname or parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
     return host.removeprefix("www.")
