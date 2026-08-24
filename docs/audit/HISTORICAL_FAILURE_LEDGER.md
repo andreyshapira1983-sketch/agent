@@ -56,6 +56,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-34 | 2014 | the boundary is checked for some shapes of input, not all | Heartbleed (2014); the wider partial-boundary family | the reply carried more than was asked because one request shape skipped the length check | `redact_payload` and the three surfaces §7 declares safe | push a secret through every payload shape the logger accepts, then read the FILE | **a secret inside a set or inside bytes reached `logs/*.jsonl` raw — the logger accepts both (it stringifies) and the traversal did not enter them** | **LOCALLY REPRODUCED → FIXED for sets and bytes; the dict-key decision upheld after testing its premise** | 0 occurrences live: no sets, no bytes in 6489 rows; 0 key-shaped strings in 1269 files |
 | H-35 | 2014 | data read as instruction | Shellshock (2014); for an agent the same class is prompt injection | a value crossed a boundary where it stopped being data and started being a command | the classic form: `shell=True` / `os.system` / `eval`; the agent form: `scan_for_injection` and the tool-output path | (a) sweep for shell and eval execution; (b) attack the guard with SEVEN unseen forms of the same class, not the one it grew on | (a) **none — no `shell=True`, no `os.system`, no raw eval; `ast.literal_eval` only**; (b) **1 of 7 caught: only the canonical English phrasing. Russian polite, quoted-regulation, tool-shaped, operator-impersonating, deferred and negated forms all read `clean` and pass UNANNOTATED** | **coverage measured and weak; the intake is closed elsewhere → recorded, not patched** | the severity answer is the blocked-tool set, below |
 | H-36 | 2017 | a destructive command aimed at the wrong target | GitLab database deletion (2017) | one wrong path removed production, and the second half was that the backups did not restore | `compensation._apply_action` (`delete_path_if_created`); the backup half is H-12 | ask the rollback to remove `data`, `logs` and `.git` | **all three removed, status `ok` — the only guard was `_resolve_inside`, and everything valuable lives INSIDE the workspace** | **LOCALLY REPRODUCED → FIXED (protected roots refused)** | the code's own comment claimed an ownership invariant it did not enforce |
+| H-37 | 2021 | a harmless-looking field is EXPANDED somewhere downstream | log4shell (2021) | a logged string was parsed as a lookup and reached the network; the field never looked dangerous at the place it was written | every `.format()` / `Template.substitute` site, and any stored field that could trigger egress | (a) AST sweep for expansion sites, detector proved on `.format` and `.substitute`; (b) trace whether any expanded template is DATA rather than a code constant; (c) look for a stored `url` field that anything auto-fetches | (a) **3 sites only, and the two `%` hits are arithmetic**; (b) **`SourceLibraryEntry.search_template` is the one data-shaped template, and `resolve_source_library` selects only from 13 hardcoded entries — none carries a placeholder besides `{topic}`**; (c) **none: egress tools are planner-invoked and blocked on the unattended path (H-35)** | NOT APPLICABLE, proved by tracing rather than assumed | the dangerous shape would be a template loaded from data |
 
 ---
 
@@ -845,3 +846,27 @@ pending_tasks` без предела, и времени тик не считае
 Вторая половина класса GitLab — «копии не восстанавливались» — закрыта
 отдельно в H-12, где проверялось не наличие копий, а что именно они
 восстанавливают.
+
+### H-37 — отрицательный результат, у которого названо условие превращения
+
+log4shell опасен не подстановкой как таковой, а тем, что поле, безобидное в
+месте записи, разворачивается в месте чтения. В Python эта форма существует:
+`шаблон.format(topic=...)`, где ШАБЛОН — данные, даёт через `{topic.__class__}`
+дорогу к чужим объектам. Поэтому проверялся не факт наличия `.format`, а
+происхождение строки, которую он разворачивает.
+
+Мест разворачивания три. Два безопасны по построению (шаблон — константа
+модуля, наружу идёт аргумент). Третье — `SourceLibraryEntry.search_template` —
+единственное, чей шаблон в принципе мог бы приехать из данных. Прослежено:
+`resolve_source_library` выбирает ТОЛЬКО по идентификатору из 13 записей,
+заданных в коде; пути «построить запись из строки JSONL» не существует. Ни у
+одной из 13 нет плейсхолдера, кроме `{topic}`.
+
+Вторая половина класса — «поле приводит к запросу вовне» — у нас отсутствует:
+сохранённый `url` никто не выбирает автоматически, а инструменты выхода в сеть
+зовёт планировщик и на безнадзорном пути они закрыты (H-35).
+
+**Условие, при котором запись перестаёт быть верной**, названо явно: если
+библиотека источников когда-нибудь начнёт читаться из `data/`, шаблон станет
+данными, и `.format` над ним станет тем самым разворачиванием. Записано, чтобы
+это заметили в момент, а не после.
