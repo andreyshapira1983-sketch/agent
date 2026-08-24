@@ -31,6 +31,8 @@ blocker; otherwise it is registered and the queue resumes.
 | H-05 | 1985-87 | a fast path justified by a state that is not true | Therac-25 (Leveson & Turner, 1993) | a fast operator path skipped a transition the interlock depended on, and the console showed a state the machine was not in. The danger was the DIVERGENCE between what the system said about itself and what it was | `_rank_and_catalog_evidence`, the cheap-path skip branch | end-to-end run of «привет» with one persistent record; read the cheap-path flag and the chain size together | **flag set AND chain non-empty (one `memory` evidence) — the branch's stated premise «the chain is empty (no tools ran)» was false** | **LOCALLY REPRODUCED → FIXED (premise, not behaviour)** | see below |
 | H-06 | 2005-2014 | crash consistency: temp+rename without a durability barrier | ext3/ext4 rename semantics; Pillai et al., «All File Systems Are Not Created Equal», OSDI 2014 | rename gives atomicity of the DIRECTORY ENTRY, not of the file's DATA. After a host crash the renamed file can be empty or partial | `core/state_integrity._atomic_write_lines`, and the lock discipline around every `*_unlocked` writer | (a) AST check that every `_save_unlocked` caller sits inside a lock; (b) leave a stale `.tmp` and read; (c) inspect for a barrier before `replace` | (a) **11 of 11 production callers locked, 0 unlocked**; (b) a stale `.tmp` neither breaks the read nor survives the next write; (c) **no `flush`, no `fsync`** | **(a),(b) ALREADY PROTECTED · (c) mechanism confirmed by inspection, effect NOT reproducible in-process → fixed anyway** | an empty state file after a power cut would read as a legitimately empty store, and per-row checksums cannot help — there is nothing left to check |
 | H-07 | 2012 | wall-clock deadlines under a clock step | leap-second kernel livelock (2012); NTP step corrections; dead-CMOS boots | deadlines computed as `now - stamp` misbehave when the clock moves; monotonic clocks are immune but do not survive a restart | `provider_unhealthy` (120 min), `recover_stuck` (30 min), `reactivate_paused_checkpoints` (60 min / 72 h), approval TTL, grant expiry | recompute each deadline with `now` stepped backwards by an hour and by a year | **provider stays parked (True/True/True); `recover_stuck` reclaims 0 instead of 1** | **LOCALLY REPRODUCED — and every direction is fail-SAFE** | registered, deliberately NOT fixed; see below |
+| H-08 | 2008 | a silently weakened entropy source that still looks random | Debian OpenSSL, CVE-2008-0166 | a cleanup patch removed the uninitialised-memory mix; key generation was predictable for **two years**, and nobody noticed because the output still had the right shape and no repeats | `core/ids.new_id`, used as the default for every `id` field | (a) 200 000 ids, count collisions; (b) seed `random` and check whether ids become reproducible | (a) **0 collisions**, `secrets.token_hex(16)`, 128 bits; (b) not reproducible — but **no test pinned the SOURCE**: format and uniqueness both survive a swap to `random` | ALREADY PROTECTED (source) · **pinning gap closed** | the two existing tests would have passed after the exact Debian-shaped downgrade |
+| H-10 | 2019 | regex cost multiplied by attacker-supplied input | Cloudflare global outage, 2 July 2019 | one WAF regex with catastrophic backtracking consumed CPU across the edge. The lesson is not «regexes are dangerous» but «cost × input size, and the input comes from outside» | 155 compiled patterns in `core/`, and the fetched-page text they see | sweep all patterns against pathological inputs; then measure SCALING to tell backtracking from polynomial cost | **14 patterns slower than 50 ms; the worst three scale ×4 per doubling — quadratic, not exponential** (52 → 206 → 836 → 3381 ms over 1250 → 10000 chars) | ALREADY PROTECTED — **incidentally**, and now pinned | protection is `MAX_EXCERPT_CHARS = 800`, a memory-size cap, not a parse-cost decision |
 
 ---
 
@@ -40,14 +42,21 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 7 |
+| classes examined | 9 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 4 (H-02, H-03, H-04, H-06 a/b) |
+| ALREADY PROTECTED | 6 (H-02, H-03, H-04, H-06 a/b, H-08, H-10) |
 | UNKNOWN | 0 |
 | LOCALLY REPRODUCED | 3 (H-01, H-05, H-07) |
 | fixes completed | 3 (H-01, H-05, H-06c) |
+| **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 1 (H-07 — fail-safe in every direction) |
 | queued, not yet run | the chronological list below |
+
+**A pattern worth naming after nine classes.** Twice now the code was correct
+and the *proof* was missing: H-08's entropy source and H-10's cost bound were
+both protected by something no test named. Neither would have been found by
+asking «is there a defect»; both were found by asking «what exactly is holding
+this up, and would I notice if it moved».
 
 **Blast-radius ranking of what reproduced.** H-01 highest: false state → false
 success → learning from an incorrect result → later decisions on earlier
@@ -129,6 +138,34 @@ no in-process test can produce. The barrier was added anyway — measured cost
 seconds in provider calls — and the test pins the **presence and the order** of
 the barrier, saying plainly that it does not pin the effect. That distinction is
 the honest form of «mechanism confirmed, effect not reproduced».
+
+
+### H-10 — protected by something that was not protecting it on purpose
+
+The quadratic patterns are real: `_STAT_TRIGGER_RE` costs 3.4 seconds on a
+10 000-character digit run. What keeps that unreachable is `make_evidence`
+truncating every excerpt to **800 characters**, so anything running after
+evidence creation sees at most that — worst case **7–21 ms**.
+
+That cap exists for memory size, not for parse cost. It protects this by
+coincidence, which means a future change that raises it for «fuller excerpts»
+would look harmless and quadruple the cost per doubling. So the incidental
+protection is now **explicit**: `tests/test_a_quadratic_regex_is_bounded_by_the_excerpt_cap.py`
+pins the worst case at the current cap and pins that truncation is actually
+applied. Break-tested by raising the cap 4× — two of three tests redden.
+
+### H-08 — the two tests that would have passed the Debian downgrade
+
+`new_id` uses `secrets.token_hex(16)` and 200 000 draws produced no collisions,
+so the source is right. The finding is about the **pinning**, and it is the
+Debian shape exactly: the existing tests check the FORMAT (`^[a-z]+_[0-9a-f]{32}$`)
+and UNIQUENESS in a tight loop, and a swap to `random.getrandbits(128)` passes
+both. The 2008 patch survived two years for the same reason — the output kept
+looking right.
+
+Closed behaviourally rather than by grepping for the word `secrets`: seed
+`random`, draw ids, re-seed, draw again, and require that they differ. Break-
+tested by performing the downgrade — the new test reddens, the old two do not.
 
 ## Queue (chronological, not yet reached)
 
