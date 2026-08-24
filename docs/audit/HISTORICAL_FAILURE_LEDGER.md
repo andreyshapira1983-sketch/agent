@@ -41,6 +41,7 @@ blocker; otherwise it is registered and the queue resumes.
 | H-16 | 2024 | what RUNS differs from what was reviewed | xz-utils backdoor, CVE-2024-3094 (Mar 2024) | the payload shipped in release tarballs and was absent from the git repo; the build system activated it. The precondition is the gap between reviewed source and running artefact, not malice in a dependency | `requirements.lock`, `requirements.txt`, and the installed environment | (a) does every locked package carry a hash; (b) does the INSTALLED set match the lock | (a) **36 packages, 662 sha256 hashes, none missing**; (b) **2 packages drift: `anthropic` locked 0.102.0 / installed 0.121.0, `click` 8.4.1 / 8.4.2** | **LOCALLY REPRODUCED (drift) — reported, deliberately not "fixed"** | hashes protect an install that goes through them and say nothing about one that went around |
 | H-17 | 2021 | an action inside your own authority removes the path that repairs you | Facebook/Meta global outage, 4 Oct 2021 | a routine capacity check withdrew the BGP routes, taking down the service AND the tools needed to fix it — internal DNS, remote access, reportedly even door badges | `_ALLOWED_CODE_DIRS` in the self-apply lane, against the launcher, bootstrap, installers and ratchets | ask the risk classifier whether the agent may edit each of those paths | **`agent_tick.py`, `main.py`, `app/`, `scripts/`, `.git/`, and every config are OUT of reach** | ALREADY PROTECTED — and now pinned | the property rests on one four-string tuple |
 | H-19 | 2018-2015 | information reaching a channel not built to carry it | Meltdown / Spectre (2018); Rowhammer (Kim et al., 2014) | a side channel leaks what no interface exposed — cache timing, adjacent DRAM rows. The general shape: data crosses a boundary through a path nobody designed as a path | every durable surface a fetched page can reach: chain log payload, knowledge pipeline, memory write policy, source registry, the answer itself | plant a real secret in a fetched page and follow it through each surface | **chain log payload carries no excerpt; knowledge pipeline refuses; memory write policy rejects all three shapes; outbound redaction catches all three; 0 hits across 5 151 live source-registry rows** | ALREADY PROTECTED, in depth | yesterday's H-15 patterns propagated here on their own |
+| H-18 | 2022 | a repair path that does not scale to the size of the incident | Atlassian, April 2022 (883 sites deleted; public incident review) | restores were per-tenant and largely manual, so recovery ran for up to two weeks. The damage was instant and the repair was serial | the approval inbox against a week of unattended ticks | simulate 336 ticks (48/day x 7) and read both the file and the queue | **two independent bounds, and they are not interchangeable**: the dedup key collapses IDENTICAL proposals to one row (612 bytes), and the in-flight gate refuses while any Stage-A item is `pending` OR `approved`-but-unexecuted | ALREADY PROTECTED — and now pinned | the dedup key alone would do nothing against 336 DIFFERENT proposals |
 
 ---
 
@@ -50,9 +51,9 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 17 |
+| classes examined | 18 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 11 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
+| ALREADY PROTECTED | 12 (H-18, H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-12 readability, H-13, H-16 lock, H-17, H-19) |
 | UNKNOWN → measured | 1 (H-12: what each backup is a restore point FOR) |
 | LOCALLY REPRODUCED | 7 (H-01, H-05, H-07, H-11, H-14, H-15, H-16 drift) |
 | fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
@@ -394,6 +395,30 @@ patch: one place learned, three boundaries got stricter.
 directly — `EpisodicMemoryStore.save` and `PersistentMemoryStore.save` have no
 opinion about content. The protection is the policy in front of them, not the
 store. Recorded so nobody later «simplifies» by writing straight to a store.
+
+
+### H-18 — two bounds, and only one of them is the real one
+
+Atlassian's incident was not a backup failure; it was a throughput mismatch —
+damage arrives at once, repair proceeds one item at a time. Locally the same
+shape would be the producer filling a queue only a human empties: 48 ticks a
+day for seven days is 336 chances to propose.
+
+Two mechanisms bound it, and the probe separated them because they answer
+different questions:
+
+* the **dedup key** collapses proposals that are the SAME — 336 additions with
+  one key leave a single 612-byte row. Without a key: 336 rows, 336 pending;
+* the **in-flight gate** (`_unresolved_task`) refuses while any Stage-A item is
+  unresolved, counting `approved`-but-unexecuted as unresolved.
+
+The second is the real bound. The dedup key would do nothing against 336
+*different* proposals, and an agent looking for work every half hour would
+certainly find different things to propose. Measured behaviourally rather than
+read: the gate holds on `pending`, holds on `approved`-but-unexecuted, and
+releases on both `denied` and `executed` — the release matters as much, since a
+gate that never opens after one refusal would stop the producer for the whole
+week.
 
 ## Queue (chronological, not yet reached)
 
