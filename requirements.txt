@@ -2,7 +2,7 @@
 # Source intent lives in requirements.in.
 # Optional HTTP server extras (api/server.py) are NOT part of the core
 # hash-locked set and are installed separately: pip install fastapi uvicorn[standard]
-anthropic==0.102.0
+anthropic==0.121.0
 openai==2.36.0
 pydantic==2.13.4
 python-dotenv==1.2.2

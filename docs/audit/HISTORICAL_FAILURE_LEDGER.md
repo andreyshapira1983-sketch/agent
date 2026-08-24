@@ -343,9 +343,23 @@ about one that went around. Nothing was comparing the two, so the drift was
 invisible — and the code that would run for an unattended week is not the code
 the lock, a fresh install, or CI describes.
 
-**Reported, not fixed, and the distinction is deliberate.** Installing to close
-the gap would change the agent's working environment, and dependencies are the
-operator's to move. `scripts/dependency_drift.py` prints the comparison and
+**RESOLVED 2026-08-24 on the operator's word: the lock was updated to the
+installed set**, which lifts the standing «hash-locks untouched» constraint for
+this named scope only. Two entries changed, thirty-four left byte-identical —
+regenerating the whole lock would have churned transitive pins nobody asked to
+move. Digests came from PyPI's metadata API, and then the lock lines themselves
+were **verified by a real download under hash checking**: pip fetched both
+distributions and accepted them.
+
+That verification was then PROVED SENSITIVE, and the first attempt at proving it
+was wrong. Corrupting one of `anthropic`'s two hashes still succeeded — pip
+legitimately fell back to the sdist, whose hash matched — which almost read as
+«the check does nothing». Corrupting BOTH produces
+«THESE PACKAGES DO NOT MATCH THE HASHES» and exit 1. Drift is now 0 of 36.
+
+The distinction the entry was built on still stands for everything else:
+installing to close a gap changes the agent's working environment, and
+dependencies are the operator's to move. `scripts/dependency_drift.py` prints the comparison and
 exits 1; the completeness of the lock is a code property and is tested, while
 the drift is a machine property and is not — a suite that reddens because
 someone installed a package on their laptop would be a false rejection.
