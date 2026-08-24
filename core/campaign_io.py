@@ -177,6 +177,8 @@ def _propose_repair_from_diagnosis(
             test_pattern=prop.test_pattern,
             origin="campaign_diagnosis",
         )
+        dedup_key = f"self_apply:{prop.path}:campaign_diagnosis"
+        collision = _dedup_verdict(approval_inbox, dedup_key)
         item = approval_inbox.add(
             operation="self_apply_lane.run",
             summary=f"campaign repair proposal for {prop.path}",
@@ -184,11 +186,15 @@ def _propose_repair_from_diagnosis(
             reasons=(f"diagnosis verified {verified}/{examined}",
                      f"target={prop.path}"),
             payload=payload,
-            dedup_key=f"self_apply:{prop.path}:campaign_diagnosis",
+            dedup_key=dedup_key,
         )
-        _log(agent, "campaign_repair_proposed", {
+        # F-1: при столкновении в ящике остаётся ПРЕЖНЯЯ заявка, и назвать это
+        # предложением значило бы записать работу, которой не было.
+        _log(agent, "campaign_repair_superseded" if collision
+             else "campaign_repair_proposed", {
             "approval_id": item.id, "target": prop.path,
             "confidence": gen.confidence,
+            **({"collision": collision} if collision else {}),
         })
     except Exception as exc:  # noqa: BLE001 — провод не вправе ронять кампанию
         _log(agent, "campaign_repair_proposal_failed", {
@@ -196,6 +202,8 @@ def _propose_repair_from_diagnosis(
         })
         return None
     else:
+        if collision:
+            return f"repair_{collision}"
         return f"repair_proposed:{item.id}"
 
 
@@ -209,6 +217,24 @@ def _unwrap_outer_fence(text: str) -> str:
     if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
         return "\n".join(lines[1:-1]).strip()
     return text
+
+
+def _dedup_verdict(approval_inbox, dedup_key: str) -> str | None:
+    """Строка о СТОЛКНОВЕНИИ, если заявка с таким ключом уже ждёт человека.
+
+    F-1 в docs/audit/FIELD_CHECK_QUEUE.md. `add` при совпадении ключа молча
+    возвращает существующую заявку, и кампания писала в журнал «предложено» с
+    длиной своего нового текста, тогда как в ящике лежал старый. Потеря второго
+    черновика ограничена сроком жизни заявки; ложь в журнале не ограничена
+    ничем, и чинится именно она.
+    """
+    try:
+        existing = approval_inbox.find_pending_by_dedup_key(dedup_key)
+    except AttributeError:  # ящик без этого метода — старый вызывающий
+        return None
+    if existing is None:
+        return None
+    return f"superseded_by_existing:{existing.id}"
 
 
 def _propose_engineering_step(
@@ -323,17 +349,25 @@ def _propose_doctrine_draft(
         test_pattern=None,
         origin="campaign_doctrine_draft",
     )
+    dedup_key = f"self_apply:{target}:campaign_doctrine_draft"
+    collision = _dedup_verdict(approval_inbox, dedup_key)
     item = approval_inbox.add(
         operation="self_apply_lane.run",
         summary=f"doctrine draft for {target}",
         risk="reversible",
         reasons=(f"goal-driven doctrine draft, {len(draft)} chars",),
         payload=payload,
-        dedup_key=f"self_apply:{target}:campaign_doctrine_draft",
+        dedup_key=dedup_key,
     )
-    _log(agent, "campaign_doc_draft_proposed", {
+    # F-1: `chars` описывал НОВЫЙ черновик, а в ящике при столкновении лежал
+    # старый — запись говорила о предложении, которого не было.
+    _log(agent, "campaign_doc_draft_superseded" if collision
+         else "campaign_doc_draft_proposed", {
         "approval_id": item.id, "target": target, "chars": len(draft),
+        **({"collision": collision} if collision else {}),
     })
+    if collision:
+        return f"doc_draft_{collision}"
     return f"doc_draft_proposed:{item.id}"
 
 
