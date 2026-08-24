@@ -113,6 +113,24 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     )),
     ("huggingface-token",  re.compile(r"(?<![A-Za-z0-9_-])hf_[A-Za-z0-9]{20,}")),
     ("aws-access-key",     re.compile(r"AKIA[0-9A-Z]{16}")),
+    # H-15 (Cloudbleed class, docs/audit/HISTORICAL_FAILURE_LEDGER.md).
+    # Измерено 2026-08-24: `AKIA…` ловился, а СЕКРЕТ рядом с ним проходил
+    # целиком — а публичен как раз идентификатор, опасна вторая половина.
+    # Ловится ПОМЕЧЕННАЯ форма (конфиги, дампы окружения); голый
+    # 40-символьный base64 без метки не ловится намеренно: он неотличим от
+    # хеша, и правило по одной длине давало бы ложные срабатывания на
+    # каждом sha и идентификаторе. Предел замерен и записан в журнале.
+    ("aws-secret-key",     re.compile(
+        r"(?i)aws[_-]?secret[_-]?(?:access[_-]?)?key[\"']?\s*[=:]\s*"
+        r"[\"']?[A-Za-z0-9/+=]{40}"
+    )),
+    # Учётные данные ВНУТРИ адреса. Соседнее правило `mongodb-uri` знало
+    # эту форму, но только для одной схемы; `https://user:pass@host`
+    # не находился вовсе, хотя именно такие адреса агент и скачивает.
+    ("url-credentials",    re.compile(
+        r"(?:https?|ftp|ssh|redis|postgres(?:ql)?|mysql|amqp)://"
+        r"[^:/?#\s@]+:[^@/?#\s]+@"
+    )),
     ("bearer-token",       re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}")),
     # PEM block start marker alone is enough — pasting only the header is
     # already a leak. The END marker is optional in match.

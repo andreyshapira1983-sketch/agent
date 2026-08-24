@@ -35,6 +35,8 @@ blocker; otherwise it is registered and the queue resumes.
 | H-10 | 2019 | regex cost multiplied by attacker-supplied input | Cloudflare global outage, 2 July 2019 | one WAF regex with catastrophic backtracking consumed CPU across the edge. The lesson is not «regexes are dangerous» but «cost × input size, and the input comes from outside» | 155 compiled patterns in `core/`, and the fetched-page text they see | sweep all patterns against pathological inputs; then measure SCALING to tell backtracking from polynomial cost | **14 patterns slower than 50 ms; the worst three scale ×4 per doubling — quadratic, not exponential** (52 → 206 → 836 → 3381 ms over 1250 → 10000 chars) | ALREADY PROTECTED — **incidentally**, and now pinned | protection is `MAX_EXCERPT_CHARS = 800`, a memory-size cap, not a parse-cost decision |
 | H-11 | 2012 | old state read by new code, where a default asserts something the past never held | Knight Capital, 1 Aug 2012 (SEC 34-70694) | a repurposed flag activated dead code on one of eight servers; the deploy was partial and nobody could tell which meaning was live | every typed loader over the live stores | round-trip 15 588 live rows through the envelope, then through the TYPED loaders, and diff | envelope: **0 rows changed**; typed: **0 values changed**, but **162 rows GAIN a defaulted field** — `occurrences=1` on 25 self-improvement rows and `decided_by='unattributed'` on 137 inbox items | **LOCALLY REPRODUCED (one of the two defaults) → FIXED** | `decided_by='unattributed'` is honest; `occurrences=1` was not |
 | H-14 | 2024 | a configuration file that takes the whole system down | CrowdStrike Falcon channel file 291, 19 July 2024 | a kernel-level component parsed a config channel file and crashed millions of hosts. Config is an input as dangerous as the network | `config/*.json` against `build_agent` | corrupt each file four ways, with a CONTROL run on healthy files first | control survives; `budget_limits.json` and `model_registry.json` **kill the build** on every corruption; `model_catalog.json` survives (it has a fallback) | **LOCALLY REPRODUCED — and the direction is CORRECT** | fail-closed pinned; the compound with MIR-135 recorded |
+| H-13 | 2021 | data interpreted by a formatting layer | log4shell, CVE-2021-44228 | a logging library resolved `${jndi:...}` inside data it was merely formatting, turning a log line into remote code execution | every non-literal format template; then the adjacent reachable form — a topic interpolated next to a `site:` operator | (a) AST sweep for format templates that are not literals; (b) craft topics that escape the `site:` restriction; (c) run classic domain-gate bypasses | (a) **2 non-literal templates, both module constants — not reachable from outside**; (b) escape into the QUERY works; (c) the second layer holds — 6 of 7, incl. suffix and user-info bypasses | ALREADY PROTECTED (layered) · **one false rejection found and fixed** | the gate compared `netloc`, so a legitimate port was rejected |
+| H-15 | 2017 | adjacent data leaking into output | Cloudbleed (Cloudflare, Feb 2017) | an HTML-parser bug emitted NEIGHBOURING memory into responses; other users' cookies and messages ended up in search-engine caches | `core/secret_scanner` / `redact_dlp_text`, which cleans logs, receipts and quarantine files | run seven real secret shapes through the scanner and check what survives verbatim | **two passed through: the AWS SECRET beside a caught `AKIA…`, and `https://user:pass@host` — nothing at all** | **LOCALLY REPRODUCED → FIXED** | one limit kept deliberately and pinned as a limit |
 
 ---
 
@@ -44,12 +46,12 @@ blocker; otherwise it is registered and the queue resumes.
 
 | metric | count |
 |---|---|
-| classes examined | 11 |
+| classes examined | 13 |
 | NOT APPLICABLE | 0 |
-| ALREADY PROTECTED | 6 (H-02, H-03, H-04, H-06 a/b, H-08, H-10) |
+| ALREADY PROTECTED | 7 (H-02, H-03, H-04, H-06 a/b, H-08, H-10, H-13) |
 | UNKNOWN | 0 |
-| LOCALLY REPRODUCED | 5 (H-01, H-05, H-07, H-11, H-14) |
-| fixes completed | 4 (H-01, H-05, H-06c, H-11) |
+| LOCALLY REPRODUCED | 6 (H-01, H-05, H-07, H-11, H-14, H-15) |
+| fixes completed | 6 (H-01, H-05, H-06c, H-11, H-13 false rejection, H-15) |
 | **pinning gaps closed on already-correct behaviour** | 2 (H-08, H-10) |
 | reproduced and deliberately NOT fixed | 2 (H-07 fail-safe; H-14 already fails in the correct direction) |
 | queued, not yet run | the chronological list below |
@@ -210,6 +212,56 @@ never open — break-tested by making the parser return `{}` instead of raising.
 happens at BUILD time, i.e. after the `tick_start` heartbeat is written, so a
 daemon with a corrupt config would die every tick while reading `alive`. That
 is a second defect meeting this one, and it stays with the entry that owns it.
+
+
+### H-13 — the class does not reach us, but probing it found a false rejection
+
+The log4shell mechanism proper is absent: the only two non-literal format
+templates are module constants, so no outside data becomes a template. The
+adjacent form is reachable — a topic is interpolated beside a `site:` operator,
+and a crafted topic does reach the query string intact. The **second** layer is
+what protects, and it holds against the classic bypasses: suffix confusion
+(`wikipedia.org.evil.example`), user-info (`wikipedia.org@evil.example`), and
+the domain appearing only in a query parameter.
+
+What the probe found was the opposite of a hole: `_domain` read `netloc`, which
+carries user-info **and the port**, so a legitimate `https://wikipedia.org:8443/x`
+was **rejected**. It now reads `hostname`, which fixes the port and makes the
+user-info case correct **by construction** rather than by the accident of a
+string not ending in the allowed domain. Eight cases pinned, bypasses included.
+
+### H-15 — the dangerous half of a pair
+
+Seven secret shapes measured; two survived redaction verbatim:
+
+* the **AWS secret** sitting beside an `AKIA…` that WAS caught — and the caught
+  half is the public one;
+* `https://user:p4ssw0rd@example.org/x`, where nothing matched at all, although
+  the neighbouring `mongodb-uri` rule already knew this exact shape for one
+  scheme. Fetching URLs is the agent's daily work.
+
+Both are reachable through `redact_dlp_text`, which cleans logs, receipts and
+quarantine files — the artefacts that OUTLIVE the run.
+
+Two patterns added, and five clean strings pinned as must-stay-silent (a plain
+URL, a URL with a port, a bare sha, a base64 hash, a colon inside a path),
+because a redactor that quarantines innocent content is its own defect.
+
+**A measured limit, pinned AS a limit.** A bare 40-character AWS secret with no
+label is still not caught, deliberately: such a string is indistinguishable from
+a hash, and a length-only rule would fire on every sha. The test asserts that it
+stays uncaught, so that a future length-based rule reddens and has to justify
+itself.
+
+### A process failure of mine, recorded
+
+Break-testing these two patterns, I reverted the break with `git checkout --`
+while the FIX was still uncommitted, and destroyed both patterns. My own memory
+carries this exact rule — commit first, or revert with the inverse edit — and I
+broke it anyway. The patterns were restored from the scratch script and the
+break-tests were redone by inverse edit. Recorded because the second-order
+lesson is that a break-test procedure which can delete the fix is itself a
+defect in the method, not just a slip.
 
 ## Queue (chronological, not yet reached)
 
