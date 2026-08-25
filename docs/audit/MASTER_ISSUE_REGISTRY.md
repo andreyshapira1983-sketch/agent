@@ -2179,6 +2179,22 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 - **Status:** `open` as a FRAME, not as new work. It adds no repair of its own: the actionable defect is MIR-060, which already exists and is already banked with a test. What this entry contributes is why MIR-060 matters more than its severity suggested — it is not one gate being lenient, it is the thing that makes our only verify-repair loop an acceptance-raising machine.
 - **Anti-requirement.** Do not import VRR-Stop's estimator. It needs verifier false-accept / false-reject rates we have never measured, and the paper itself says that when discrimination approaches zero the estimate can flip the stopping sign. Measuring discrimination comes first; a stopping rule built on unmeasured parameters would be a control in appearance only.
 
+- **ТЕНЬ ПРОЧИТАНА 2026-08-25, и она отвечает на вопрос оператора от 27 июля.** Тогда было решено: сигнал застоя (`TerminationGuard`, MAST FM-1.5) записывает, ГДЕ остановка произошла бы, и НЕ останавливает — чтобы сперва узнать, что она стоила бы или сберегла. Месяц собранные улики никто не читал; ответ лежал в журналах.
+
+  Тень сработала **три раза**, и во всех трёх `artifacts_at_detection` пуст:
+
+  | попытка | коды отказа | было в руках |
+  |---|---|---|
+  | 2 | `plan_parse_failed` ×2 | — |
+  | 2 | `plan_parse_failed` ×2 | — |
+  | 3 | `verify_failed` ×2 | — |
+
+  **Остановка не стоила бы ничего и не сберегла бы ничего.** Работы в руках не было ни разу, а бюджеты по видам отказов остановили цикл на ТОЙ ЖЕ попытке во всех трёх случаях: у `plan_parse_failed` и `verify_failed` потолок 2, глобальный потолок 3.
+
+- **Поэтому сигнал НЕ повышен до управляющего, и это измерение, а не осторожность.** Новое поле (Bayesian Partner Modelling, 19 августа; ScienceFlow/ESTRA, 14 августа) убедительно показывает, что ценность даёт переход управления, а не знание: у Bayesian триггер по противоречию дал 2 перепланирования против 43/169/119 у прочих при сопоставимой награде. Но у нас такой триггер уже есть — им служат бюджеты по ВИДАМ отказов, то есть «этот вид ремонта не работает — стоп», и повышение тени завело бы вторую власть над решением, которым владеет `ReplanPolicy.decide`. Граница закреплена `tests/test_the_stagnation_signal_is_still_observational.py`, и ломка проверена: `break` по сигналу застоя краснит тест.
+
+- **Свежий замер живого распределения, 2026-08-25.** Цепочек перепланирования 11, из них **10 закончились исчерпанием**; в **7 из 10** один и тот же код отказа встречался дважды. То есть наше правило остановки на деле и есть «тот же отказ повторился — стоп», выраженное счётчиками: `plan_parse_failed: 2`, `verify_failed: 2`, `unresolved_citation: 2` (×4), `file_not_found: 1`, `injection_blocked: 1`. Отдельного правила по ожидаемому приросту строить не из чего — оно совпало бы с уже действующим.
+
 ### MIR-141 — verifier discrimination measured: perfect on form, blind on content, and one false-rejection channel found and fixed
 - **Aliases:** none. **Provenance:** operator instruction 2026-08-23 («мерь дискриминацию верификатора»), which MIR-140 named as the prerequisite before any stopping rule. **Related:** MIR-060 (this is its number), MIR-140, MIR-016.
 - **Method.** Paired probes, the shape the field uses: for each class a VALID answer and its INVALID twin differing in exactly one element, the valid one a verbatim restatement of the source with a correct citation. 40 pairs per class, structural pass only (`llm=None`), so the measurement is deterministic and costs nothing. Discrimination reported as J = accept-rate(valid) − accept-rate(invalid).
