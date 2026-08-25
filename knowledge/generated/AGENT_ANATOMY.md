@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 204 modules across 12 groups._
+_Total: 205 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -286,6 +286,7 @@ _Subagent proposals, registry, execution, teams._
 | `core/subagent_contract` | Canonical subagent contract bridge. |
 | `core/subagent_contract_audit` | Pure post-run audit policy for canonical subagent contracts. |
 | `core/subagent_memory_scope` | MVP-18.1  Autonomous Subagent Proposal Contract. |
+| `core/subagent_quarantine` | Карантин находок субагента: запись есть, права влиять — нет. |
 | `core/subagent_registry` | Subagent role performance ledger (TD-028). |
 | `core/subagent_runner` | SubAgent Runner — executes one bounded sub-agent contract using AgentLoop. |
 | `core/team_executor` | Executor for bounded subagent contracts. |

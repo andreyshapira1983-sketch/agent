@@ -454,6 +454,10 @@ def _print_status(workspace: Path) -> int:
 
     for line in charter_status_lines(workspace):
         print(line, file=sys.stderr)
+    from core.subagent_quarantine import quarantine_status_lines
+
+    for line in quarantine_status_lines(workspace):
+        print(line, file=sys.stderr)
     return 0
 
 
