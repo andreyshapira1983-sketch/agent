@@ -172,15 +172,14 @@ class AgentLoopMemoryRead:
         return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
 
     def _question_salience(self) -> TokenSalience:
-        """Насколько редко оператор произносит слово — по его же вопросам.
+        """Редкость слова по вопросам памяти опыта — НЕ по речи оператора.
 
-        Корпус здесь, а не в хранилище процедур, потому что редкость меряется
-        по речи, а процедур слишком мало, чтобы речь по ним узнать: живой замер
-        2026-08-15 показал, что по тридцати одной записи «это» и «где» выходят
-        РЕДКИМИ. Ответы в корпус не идут — их писала модель, и её обороты
-        сделали бы обыденными как раз те слова, которыми она объясняет.
+        Прежняя строка обещала речь оператора; живой замер 2026-08-25 показал,
+        что 100 вопросов из 142 — ярлыки задач самого агента (`self…`,
+        `campaign…`), то есть корпус в основном свой собственный.
 
-        Замер и отвергнутые варианты: docs/CODE_NOTES.md, «Resolving power».
+        Замер, отвергнутые варианты и границы: MIR-105 в
+        docs/audit/MASTER_ISSUE_REGISTRY.md; docs/CODE_NOTES.md, «Resolving power».
         """
         store = getattr(self, "episodic_store", None)
         if store is None:
@@ -337,9 +336,10 @@ class AgentLoopMemoryRead:
         self._last_procedure_records = list(procedures)
 
         # ── Re-ask detection ──────────────────────────────────────────
-        # Jaccard similarity on the question tokens only (not goal/summary).
-        # High overlap (≥ 0.40) means the user is asking the SAME question
-        # again — a strong signal that the previous answer was insufficient.
+        # Jaccard по различающим словам вопроса. 0.40 — НЕ рабочий порог:
+        # у кандидата с неизмеренным качеством он падает до 0.30, а измеренного
+        # качества нет ни у одного из 142 живых эпизодов (замер 2026-08-25).
+        # Замер и границы: MIR-024 в docs/audit/MASTER_ISSUE_REGISTRY.md.
         _REPEAT_THRESHOLD = 0.40
         if self.episodic_store is not None:
             try:
