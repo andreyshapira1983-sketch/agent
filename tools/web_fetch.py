@@ -281,18 +281,17 @@ class WebFetchTool(Tool):
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _validate_url(url: Any) -> None:
-        NetworkSafetyPolicy(
-            tool_name="web_fetch",
-            allowed_schemes=ALLOWED_SCHEMES,
-            max_url_len=MAX_URL_LEN,
-            resolve_dns=False,
-        ).validate_url(url, role="web_fetch url")
-
-    @staticmethod
-    def _check_host_not_local(hostname: str | None) -> None:
-        NetworkSafetyPolicy(tool_name="web_fetch", resolve_dns=False).validate_host(hostname)
+    # F-7 (docs/audit/FIELD_CHECK_QUEUE.md), 2026-08-25: здесь лежали два
+    # СТАТИЧЕСКИХ дубликата живой проверки — `_validate_url` и
+    # `_check_host_not_local`. Их не звал никто (сплошной разбор: ни вызова, ни
+    # ссылки) и не держал ни один тест, а политику они собирали СВОЮ, с иными
+    # настройками, чем `self._network_policy`, собранная в `__init__`.
+    #
+    # Опасны они были не бездействием, а тем, что следующий читатель позвал бы
+    # их, считая живой проверкой, и получил бы другие настройки — порода
+    # «покрытие списали у соседа». Живой путь проверяет URL дважды: до запроса
+    # и ПОВТОРНО после перенаправления; обе проверки на месте и закреплены
+    # tests/test_no_dead_copy_of_a_live_guard.py.
 
     @staticmethod
     def _check_content_type(content_type: str) -> None:

@@ -212,18 +212,13 @@ class RssFetchTool(Tool):
                 warnings.append(f"entry[{idx}] has neither title nor url")
         return True, warnings
 
-    @staticmethod
-    def _validate_url(url: Any) -> None:
-        NetworkSafetyPolicy(
-            tool_name="rss_fetch",
-            allowed_schemes=ALLOWED_SCHEMES,
-            max_url_len=MAX_URL_LEN,
-            resolve_dns=False,
-        ).validate_url(url, role="rss_fetch url")
-
-    @staticmethod
-    def _check_host_not_local(hostname: str | None) -> None:
-        NetworkSafetyPolicy(tool_name="rss_fetch", resolve_dns=False).validate_host(hostname)
+    # F-7 (docs/audit/FIELD_CHECK_QUEUE.md), 2026-08-25: та же пара мёртвых
+    # дубликатов, что и в `web_fetch` — буквально скопированная. Ни вызова, ни
+    # ссылки, ни теста; политику собирали свою, отличную от
+    # `self._network_policy` из `__init__`. Живой путь проверяет URL дважды: до
+    # запроса и ПОВТОРНО после перенаправления. Опасность была в том, что
+    # следующий читатель позвал бы дубликат как живую проверку и получил другие
+    # настройки.
 
     @staticmethod
     def _check_content_type(content_type: str) -> None:
