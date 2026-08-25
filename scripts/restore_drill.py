@@ -54,9 +54,22 @@ def _identity(rows: list[dict]) -> str | None:
 
 
 def _backups_for(data: pathlib.Path, store: pathlib.Path) -> list[pathlib.Path]:
-    """Копии, относящиеся к этому хранилищу, от новых к старым."""
+    """Копии, относящиеся к этому хранилищу, от новых к старым.
+
+    Считаются ОБА источника восстановления: разовые `.bak`, снимаемые перед
+    рискованной правкой, и суточные снимки `data/snapshots/<дата>/`, заведённые
+    решением оператора 2026-08-25. Учитывать только первый источник значило бы
+    оставить прибор врущим ровно в тот день, когда второй появился, — а именно
+    ложь прибора и была находкой H-51.
+    """
     prefix = store.name.split(".jsonl")[0]
     found = [b for b in data.glob("*.bak") if b.name.split(".jsonl")[0] == prefix]
+    snapshots = data / "snapshots"
+    if snapshots.is_dir():
+        found += [
+            copy for generation in snapshots.iterdir() if generation.is_dir()
+            for copy in [generation / store.name] if copy.exists()
+        ]
     return sorted(found, key=lambda b: b.stat().st_mtime, reverse=True)
 
 
