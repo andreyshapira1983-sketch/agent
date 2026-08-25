@@ -81,8 +81,18 @@ def _default_gather_signals(
     # REPL — то есть путь, где человек и так смотрит.
     # Зачем: docs/CODE_NOTES.md, «The unattended path was the blind one».
     open_issues, registry_available = _open_self_improvement_issues(ws)
+    # Предмет цели разрешается ЗДЕСЬ: файловая система знает рабочую область,
+    # а таблица решений остаётся чистой (MIR-158).
+    from pathlib import Path as _Path
+
+    from core.best_next_action import resolve_goal_subject
+
+    _root = _Path(ws)
     action = select_best_next_action(
         goal=goal,
+        goal_subject=resolve_goal_subject(
+            goal, exists=lambda rel: (_root / rel).is_file()
+        ),
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
         dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),

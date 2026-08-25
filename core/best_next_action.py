@@ -215,6 +215,25 @@ def _is_engineering_goal(text: str) -> bool:
     return bool(_PY_TARGET_RE.search(text) and _ENGINEERING_CONTEXT_RE.search(text))
 
 
+#: Токен, похожий на путь: минимум один разделитель каталогов. Голое слово
+#: путём не считается — иначе предметом цели становилась бы любая фраза.
+_SUBJECT_TOKEN_RE = re.compile(r"[\w.-]+(?:[/\\][\w.-]+)+")
+
+
+def resolve_goal_subject(text: str, *, exists) -> str | None:
+    """Артефакт, О КОТОРОМ цель, — по существованию, а не по суффиксу.
+
+    Замер, отвергнутые варианты и границы: MIR-158 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    `exists` внедряется, чтобы решающая таблица осталась чистой функцией.
+    """
+    for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
+        token = raw.replace("\\", "/").strip("`'\",.;:()[]")
+        for candidate in (token, f"{token}.py"):
+            if candidate and exists(candidate):
+                return candidate
+    return None
+
+
 def _named_target(text: str) -> str | None:
     """Файл, названный в тексте цели, если он там назван.
 
@@ -275,6 +294,10 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
 def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
     goal: str = "",
+    #: Артефакт, О КОТОРОМ цель, — разрешает ВЫЗЫВАЮЩИЙ (`resolve_goal_subject`),
+    #: потому что разрешение требует файловой системы, а таблица решений чистая.
+    #: `None` значит «цель предмета не назвала», и тогда она ничего не сужает.
+    goal_subject: str | None = None,
     result_status: str = "none",
     tests_health: str = "none",
     dry_run_streak: int = 0,
@@ -345,10 +368,32 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     # suppressible even if its name was acknowledged.
     active = [c for c in candidates if not _is_suppressed(c, acknowledged)]
     suppressed = [c for c in candidates if _is_suppressed(c, acknowledged)]
+    off_subject: list[BestNextAction] = []
+
+    # Цель СУЖАЕТ допустимое, а не просто добавляет кандидата. Без этого её
+    # влияние было нулевым: живой прогон 2026-08-25 выбрал цель про
+    # `core/subagent_registry`, её генераторы не дали ни одного кандидата, и
+    # `max(priority)` отдал цикл единственному оставшемуся делу про ЧУЖОЙ файл.
+    # Объективная поломка (critical/high) под сужение не попадает никогда:
+    # иначе цель стала бы способом отвести взгляд от сломанных тестов.
+    if goal_subject:
+        def _on_subject(candidate: BestNextAction) -> bool:
+            return (
+                candidate.severity in ("critical", "high")
+                or candidate.target_path == goal_subject
+                or candidate.grounds == "operator_goal"
+            )
+
+        on_subject = [c for c in active if _on_subject(c)]
+        # Отведённое НЕ удаляется и НЕ сваливается к заглушённому: у них разные
+        # основания, и запасной вариант обязан называть верное.
+        off_subject = [c for c in active if not _on_subject(c)]
+        active = on_subject
 
     if not active:
         fallback = _candidate_observe(
-            tests_health, result_status, inbox_pending, suppressed=suppressed
+            tests_health, result_status, inbox_pending, suppressed=suppressed,
+            off_subject=off_subject, goal_subject=goal_subject,
         )
         # The observe fallback reads live signals to say the world looks
         # healthy — observation, like any other reading of the present.
@@ -605,6 +650,11 @@ def _candidate_open_self_improvement_issue(
             ),
             risk="read_only",
             recommended_command=str(issue.get("suggested_next_action") or "") or None,
+            # Предмет, названный самой записью, УНОСИТСЯ, а не оседает в тексте
+            # улики: без него решение нельзя сопоставить с предметом цели, и
+            # ровно так дефект побеждал цель, которая была про другой файл
+            # (H-20, MIR-158).
+            target_path=files[0] if files else None,
             confidence=0.75,
         )
     return None
@@ -664,13 +714,39 @@ def _candidate_observe(
     inbox_pending: int,
     *,
     suppressed: list[BestNextAction] | None = None,
+    off_subject: list[BestNextAction] | None = None,
+    goal_subject: str | None = None,
 ) -> BestNextAction:
     suppressed = suppressed or []
+    off_subject = off_subject or []
     evidence = [
         f"tests_health={tests_health}, result_status={result_status}",
         f"{int(inbox_pending or 0)} pending approval item(s)",
     ]
     unknowns = ["whether a problem exists that no current signal exposes"]
+    if off_subject:
+        # Отдельная причина, а не общий мешок: отведённое ПО ПРЕДМЕТУ никто не
+        # подтверждал, и назвать его подтверждённым значило бы соврать
+        # оператору о причине простоя (MIR-158).
+        names = ", ".join(sorted({c.action for c in off_subject}))
+        reason = (
+            f"Nothing admissible for the chosen goal: the active candidate(s) "
+            f"are about another subject than {goal_subject or 'the goal'}."
+        )
+        evidence.append(f"set aside as off-subject: {names}")
+        unknowns.append(
+            "whether the goal's subject deserves work that no current signal proposes"
+        )
+        return BestNextAction(
+            action="observe",
+            title="Observe: nothing on the goal's subject warrants action",
+            severity="none",
+            priority=_P_OBSERVE,
+            reason=reason,
+            evidence=tuple(evidence),
+            unknowns=tuple(unknowns),
+            target_path=goal_subject,
+        )
     if suppressed:
         names = ", ".join(sorted({c.action for c in suppressed}))
         reason = (
