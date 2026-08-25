@@ -6,10 +6,11 @@ sources are worth feeding into that tool for a learning goal.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from core.doc_routing import (
     CONFIDENCE_EVIDENCE_SOURCE_PATHS,
@@ -20,7 +21,16 @@ from core.doc_routing import (
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
 
 if TYPE_CHECKING:
-    from core.source_registry import SourceRegistry
+    from core.source_registry import SourceRecord
+
+
+class _SourceLookup(Protocol):
+    """Единственное требование окна свежести — ответ на `get_source`.
+
+    Замер и отвергнутые варианты: MIR-152 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    """
+
+    def get_source(self, source_id: str) -> SourceRecord | None: ...
 
 # Files ingested within this window are considered fresh and get a score penalty.
 _STALE_HOURS: float = 6.0
@@ -70,7 +80,7 @@ class LearningPlanner:
         goal: str = "",
         root: str = ".",
         limit: int = DEFAULT_PROJECT_LIMIT,
-        source_registry: SourceRegistry | None = None,
+        source_registry: _SourceLookup | None = None,
         stale_hours: float = _STALE_HOURS,
     ) -> LearningPlan:
         if limit < 1:
@@ -88,6 +98,7 @@ class LearningPlanner:
         if named:
             candidates += _named_candidates(workspace, named)
         seen: set[Path] = set()
+        read_last_read = _staleness_reader(source_registry)
         for path in candidates:
             try:
                 path = path.resolve()
@@ -109,7 +120,8 @@ class LearningPlanner:
                 continue
             rel_path = _rel(workspace, path)
             score = _apply_staleness(
-                score, rel_path, source_registry=source_registry, stale_hours=stale_hours
+                score, rel_path, last_read=read_last_read(rel_path),
+                stale_hours=stale_hours,
             )
             scored.append((score, rel_path.casefold(), path, reasons))
 
@@ -327,21 +339,49 @@ def _goal_terms(goal: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(terms))
 
 
+def _staleness_reader(
+    source_registry: _SourceLookup | None,
+) -> Callable[[str], str | None]:
+    """Один проход по складу за план вместо вопроса на каждый файл.
+
+    Замер и отвергнутые варианты: MIR-153 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    """
+    if source_registry is None:
+        return lambda _rel: None
+    bulk = getattr(source_registry, "load_sources", None)
+    if callable(bulk):
+        try:
+            records = bulk()
+        except Exception:  # noqa: BLE001 — не умеет пачкой, спросим поштучно
+            records = None
+        # Проверяется ВОЗВРАЩЁННОЕ, а не наличие имени: заглушка отвечает на
+        # любой вызов и отдала пустую последовательность, из-за чего пустой
+        # указатель был принят за «свежих записей нет» и понижение молча
+        # исчезло. Список настоящих записей ни с чем не спутать.
+        if isinstance(records, list) and all(hasattr(r, "id") for r in records):
+            index = {
+                r.id: r.last_read_at
+                for r in records
+                if getattr(r, "last_read_at", None)
+            }
+            return lambda rel: index.get(f"file:{rel}")
+
+    def _one(rel: str) -> str | None:
+        record = source_registry.get_source(f"file:{rel}")
+        return getattr(record, "last_read_at", None) if record is not None else None
+
+    return _one
+
+
 def _apply_staleness(
     score: int,
     rel_path: str,
     *,
-    source_registry: SourceRegistry | None,
+    last_read: str | None,
     stale_hours: float,
 ) -> int:
     """Reduce score for files ingested recently; leave score unchanged if no registry."""
-    if source_registry is None or stale_hours <= 0:
-        return score
-    record = source_registry.get_source(f"file:{rel_path}")
-    if record is None:
-        return score
-    last_read = record.last_read_at
-    if not last_read:
+    if stale_hours <= 0 or not last_read:
         return score
     try:
         ts = datetime.fromisoformat(last_read.rstrip("Z")).replace(tzinfo=timezone.utc)
