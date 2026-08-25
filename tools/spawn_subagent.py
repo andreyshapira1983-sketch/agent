@@ -126,6 +126,14 @@ class SpawnSubagentTool(Tool):
             allowed_tools=validated_tools,
         )
 
+        # Карантин: находка получает долговременную запись с происхождением и
+        # явным `authority: none`. Она НЕ становится памятью и никого ни к
+        # чему не обязывает — путь продвижения должен быть сперва виден и
+        # измерим (MIR-157).
+        from core.subagent_quarantine import quarantine_finding
+
+        quarantine_finding(self.workspace_root, result)
+
         # Return evidence text — the parent loop stores this as the tool
         # output and the synthesiser cites it via [subagent:<name>].
         return result.to_evidence_text()

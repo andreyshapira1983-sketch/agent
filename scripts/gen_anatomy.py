@@ -110,7 +110,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Multi-Agent / Subagents (§6)", "Subagent proposals, registry, execution, teams.", [
         "subagent_contract", "subagent_contract_audit", "subagent_memory_scope",
-        "subagent_registry", "subagent_runner", "team_executor", "team_plan",
+        "subagent_quarantine", "subagent_registry", "subagent_runner",
+        "team_executor", "team_plan",
     ]),
     ("Cross-Cutting: Data Models & LLM (§12)", "Core data models and the LLM client wrapper.", [
         "models", "llm",
