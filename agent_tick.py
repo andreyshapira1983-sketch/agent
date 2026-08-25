@@ -364,11 +364,17 @@ def _print_status(workspace: Path) -> int:
     if heartbeat is not None:
         mode = heartbeat.get("mode", "?")
         effects = heartbeat.get("effects", "?")
-        processed = heartbeat.get("processed_effects", "?")
         streak = heartbeat.get("dry_run_streak", "?")
+        # F-5 (docs/audit/FIELD_CHECK_QUEUE.md): `processed_effects` убрано из
+        # строки. Оно передаётся ЖЁСТКИМ НУЛЁМ в обоих местах записи пульса, то
+        # есть постоянная, а в строке читалось как счётчик применённых эффектов.
+        # Обоснование в докстринге («живой путь упирается в ящик одобрений»)
+        # неполно: при выданном разрешении (H-41) тик применяет эффекты сам и
+        # поле всё равно показывает ноль. Из пульса поле НЕ убрано — схему
+        # парсят кампания и память; убрано только оттуда, где число попадает
+        # человеку на глаза и выглядит измерением.
         print(
-            f"Mode: {mode} (effects={effects}, processed_effects={processed}, "
-            f"dry_run_streak={streak})",
+            f"Mode: {mode} (effects={effects}, dry_run_streak={streak})",
             file=sys.stderr,
         )
 
