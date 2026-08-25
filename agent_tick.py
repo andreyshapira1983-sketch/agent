@@ -274,6 +274,79 @@ def _classify_test_health(tests_result: dict | None) -> str:
 
 # ── status-only mode ──────────────────────────────────────────────────────────
 
+#: Сколько одинаковых действий по одной цели подряд считать траекторией-петлёй.
+#: Не порог суждения, а порог ВНИМАНИЯ: строка ничего не запрещает, она зовёт
+#: посмотреть. Три — потому что два повтора бывают у любой честной работы, а
+#: живая петля была 150.
+_TRAJECTORY_REPEAT_MIN = 3
+
+#: Окно, за которым петля считается прошедшей. Наблюдённая шла 27 часов.
+_TRAJECTORY_WINDOW_HOURS = 48
+
+
+def _trajectory_status_lines(workspace: Path) -> list[str]:
+    """Строки о повторяющейся траектории — или пусто, если её нет.
+
+    ПОЛЕ 2026-08-25 («Ontological Trust in Long-Horizon Agents», 18 августа):
+    проверять каждое действие локально недостаточно — все шаги могут быть
+    допустимыми, а траектория уже стала другой задачей. Пошаговые метрики там
+    дают максимум 73,49 % AUC против >93 % на уровне траектории.
+
+    ЗАМЕР НА НАШИХ ДАННЫХ. Цель «найди в своём коде дефект и докажи чтением»
+    дала 150 циклов ОДНОГО действия за 27 часов — 300 вызовов модели и 1773
+    единицы, 59 % всех денег кампаний, — и произвела 6 различных текстов.
+    Траекторный страж у нас есть (исход `repeat`), но его память живёт ОДИН
+    запуск, а 146 из 150 циклов были циклом №1 свежего запуска.
+
+    ПОЧЕМУ ЗДЕСЬ ЧТЕНИЕ, А НЕ ВОРОТА. Расширить память стража на всю цель
+    нельзя без различителя: то же правило заблокировало бы `observe` (18 раз за
+    сутки — это сенсор) и `study_external_source` (10 раз). Единственный
+    найденный различитель числовой, а выводить порог из восьми живых пар значит
+    настроить его на случаи, которые его породили. Поэтому траектория делается
+    ВИДИМОЙ, а решение остаётся у человека.
+
+    Только чтение и никогда не бросает.
+    """
+    lines: list[str] = []
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from core.state_integrity import read_state_jsonl
+
+        path = workspace / DATA_DIR / "campaign_ledger.jsonl"
+        if not path.exists():
+            return lines
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            hours=_TRAJECTORY_WINDOW_HOURS
+        )
+        groups: dict[tuple[str, str], list[dict]] = {}
+        for row in read_state_jsonl(path):
+            try:
+                when = datetime.fromisoformat(str(row.get("ts")))
+            except (TypeError, ValueError):
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when < cutoff:
+                continue
+            key = (str(row.get("goal") or ""), str(row.get("action") or ""))
+            groups.setdefault(key, []).append(row)
+    except (OSError, ValueError):  # pragma: no cover — чтение не вправе ронять строку
+        return []
+
+    for (goal, action), rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        if len(rows) < _TRAJECTORY_REPEAT_MIN or not action:
+            continue
+        cost = sum(int(r.get("cost_units_spent") or 0) for r in rows)
+        calls = sum(int(r.get("llm_calls_spent") or 0) for r in rows)
+        lines.append(
+            f"Trajectory: {len(rows)} cycles of ONE action "
+            f"'{action}' in {_TRAJECTORY_WINDOW_HOURS}h — {calls} model call(s), "
+            f"{cost} cost unit(s) — goal: {goal[:60]!r}"
+        )
+    return lines[:3]
+
+
 def _quarantine_status_lines(workspace: Path) -> list[str]:
     """Строки о потерянных строках состояния — или пусто, когда терять нечего.
 
@@ -391,6 +464,8 @@ def _print_status(workspace: Path) -> int:
     for line in _self_build_status_block(workspace, heartbeat, pending, inbox):
         print(line, file=sys.stderr)
     for line in _quarantine_status_lines(workspace):
+        print(line, file=sys.stderr)
+    for line in _trajectory_status_lines(workspace):
         print(line, file=sys.stderr)
     return 0
 
