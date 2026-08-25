@@ -517,11 +517,35 @@ def concealed_spans(text: str) -> list[str]:
 
 
 def strip_concealed(text: str) -> str:
-    """*text* with every concealed run removed.
+    """*text* с удалением скрытых прогонов ДВУХ описанных видов.
 
     Used before claim extraction: hidden text can then never become a durable
     fact whatever it says. That is the half wording cannot dodge — an attacker
     chooses the sentence, not whether the operator can see it.
+
+    ЧТО ПОКРЫТО, замерено 2026-08-25 проходом по породе «слова сильнее кода»:
+
+      знаки нулевой ширины   U+200B, U+200C, U+200D, U+202E, U+FEFF, U+2060 —
+                             удаляются все шесть
+      комментарии HTML       `<!-- … -->` — удаляются
+
+    ЧТО НЕ ПОКРЫТО, и названо здесь вместо прежнего «every concealed run»:
+
+      сокрытие стилем        `<span style="color:#fff">…</span>`,
+                             `display:none`, `visibility:hidden`, `font-size:0`,
+                             `opacity:0` — текст остаётся
+      мягкий перенос U+00AD  остаётся; сам по себе он ничего не прячет, только
+                             склеивает слова визуально
+
+    Прежний докстринг обещал «every concealed run removed», то есть полноту по
+    КРИТЕРИЮ («чего читатель отрисованного документа не увидит»), а покрывал
+    словарь. Гнаться за всеми способами сокрытия стилем — гонка вооружений с
+    известной ценой (MIR-147: лексическое правило, ловящее трудный случай,
+    бьёт и по настоящему тексту). Поэтому здесь исправлены СЛОВА, а решение
+    расширять словарь остаётся отдельным и осознанным.
+
+    Достижимость непокрытого ограничена: HTML приходит через инструменты
+    выхода в сеть, а они закрыты для безнадзорного пути (H-35).
     """
     return _CONCEALED_RE.sub(" ", text or "")
 
