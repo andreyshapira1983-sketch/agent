@@ -278,13 +278,17 @@ class SubAgentRunner:
                 f"contract {contract.contract_id} requires human approval"
             )
 
+        # Право ЧИТАТЬ и право ПИСАТЬ — разные полномочия, и выданы они
+        # по-разному: чтение исполняется проекцией, запись по-прежнему
+        # отказана, потому что путь «находка -> проверка -> продвижение» не
+        # построен (MIR-156).
         memory_scope = contract.memory_scope
-        if memory_scope is not None and (
-            memory_scope.read_tags or memory_scope.write_tags
-        ):
+        if memory_scope is not None and memory_scope.write_tags:
             raise SubagentContractRefused(
-                "persistent memory scope is not supported by SubAgentRunner"
+                "memory write scope is not supported by SubAgentRunner: a "
+                "subagent may be granted reading, not writing"
             )
+        context = self._with_granted_memory(context, memory_scope)
 
         if contract.budget_scope.max_iterations != 1:
             raise SubagentContractRefused(
@@ -325,6 +329,30 @@ class SubAgentRunner:
             execution_receipt=receipt,
             contract_audit=audit_subagent_execution(contract, receipt),
         )
+
+    def _with_granted_memory(self, context: str, memory_scope) -> str:
+        """Добавить к контексту ТОЛЬКО ту память, что названа в контракте.
+
+        Замер, отвергнутые варианты и границы: MIR-156 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+        Отдаётся текстом, а не складом: чего нет в строке, ребёнок не прочтёт.
+        """
+        read_tags = getattr(memory_scope, "read_tags", ()) or ()
+        if not read_tags:
+            return context
+        from core.persistent_memory import PersistentMemoryStore
+        from core.subagent_memory_scope import project_memory
+
+        path = self.workspace_root / "data" / "persistent_memory.jsonl"
+        try:
+            records = PersistentMemoryStore(path).load()
+        except (OSError, ValueError):
+            # Нечитаемая память — это НЕ разрешение показать всё; субагент
+            # остаётся беспамятным, а причина уходит в журнал вызывающего.
+            return context
+        block, _audit = project_memory(records, read_tags)
+        if not block:
+            return context
+        return f"{context}\n\n{block}" if context else block
 
     def run(
         self,

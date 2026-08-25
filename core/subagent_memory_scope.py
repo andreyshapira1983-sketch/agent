@@ -450,3 +450,70 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
 def _emit(logger: Any, event: str, payload: Any) -> None:
     if logger is not None:
         logger.log(event, payload)
+
+
+#: Потолки проекции. Память субагенту передаётся ТЕКСТОМ, а не складом: склад
+#: пришлось бы урезать обещанием («он не позовёт лишний метод»), а текст режет
+#: физически — того, чего нет в строке, ребёнок прочитать не может.
+PROJECTION_MAX_RECORDS = 20
+PROJECTION_MAX_CHARS = 4000
+
+
+def project_memory(
+    records: Any,
+    read_tags: Any,
+    *,
+    max_records: int = PROJECTION_MAX_RECORDS,
+    max_chars: int = PROJECTION_MAX_CHARS,
+) -> tuple[str, dict[str, Any]]:
+    """Проекция памяти под задачу: только записи с разрешёнными метками.
+
+    Замер, отвергнутые варианты и границы: MIR-156 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    """
+    granted = {str(t).strip().casefold() for t in (read_tags or ()) if str(t).strip()}
+    audit: dict[str, Any] = {
+        "granted_tags": sorted(granted),
+        "records_seen": 0,
+        "records_projected": 0,
+        "truncated": False,
+    }
+    if not granted:
+        return "", audit
+
+    picked: list[Any] = []
+    for record in records or ():
+        audit["records_seen"] += 1
+        tags = {str(t).strip().casefold() for t in (getattr(record, "tags", None) or ())}
+        if tags & granted:
+            picked.append(record)
+
+    lines: list[str] = []
+    used = 0
+    for record in picked[:max_records]:
+        content = getattr(record, "content", "")
+        text = content if isinstance(content, str) else str(content)
+        entry = f"- [{getattr(record, 'id', '?')}] {text.strip()}"
+        if used + len(entry) > max_chars:
+            audit["truncated"] = True
+            break
+        lines.append(entry)
+        used += len(entry)
+        audit["records_projected"] += 1
+    if len(picked) > len(lines):
+        audit["truncated"] = True
+
+    if not lines:
+        return "", audit
+
+    header = (
+        "<granted_memory tags=\"" + ", ".join(sorted(granted)) + "\">" + "\n"
+        + "Это ВСЯ память, к которой у тебя есть доступ. Другой у тебя нет."
+    )
+    tail = "</granted_memory>"
+    if audit["truncated"]:
+        # Умолчание об урезании читалось бы как «это вся выданная память».
+        tail = (
+            f"[показаны первые {audit['records_projected']} из {len(picked)} "
+            f"разрешённых записей]" + "\n" + tail
+        )
+    return "\n".join([header, *lines, tail]), audit
