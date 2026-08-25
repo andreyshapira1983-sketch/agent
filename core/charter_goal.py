@@ -299,6 +299,28 @@ def _ask(
         return None
 
 
+
+#: Список отзывов, написанный ЧЕЛОВЕКОМ: одна цель или один предмет работы в
+#: строке, `#` — заметка. Живёт в `config/`, потому что туда не дотягивается ни
+#: гигиена памяти, ни лента самоправки (MIR-154).
+VETO_RELPATH = "config/vetoed_goals.txt"
+
+
+def _operator_vetoes(root: Path) -> tuple[str, ...] | None:
+    """Строки отзыва. `None` — список есть, но прочитать его не удалось."""
+    path = root / VETO_RELPATH
+    if not path.exists():
+        return ()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return tuple(
+        line.strip() for line in raw.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    )
+
+
 def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     """Одна цель от хартии — или отказ, называющий, какие ворота не пройдены."""
     root = Path(workspace)
@@ -316,6 +338,13 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     def _declined(reason: str, goal_text: str = "") -> CharterGoalReport:
         _record_decision(root, status="declined", goal=goal_text, reason=reason)
         return _decline(reason)
+
+    # Читается ДО обращения к модели: отзыв, потерянный из-за сбоя чтения,
+    # вернул бы отозванную работу без ведома человека, поэтому нечитаемый
+    # список отказывает названно и бесплатно.
+    vetoes = _operator_vetoes(root)
+    if vetoes is None:
+        return _declined(f"operator veto list unreadable: {VETO_RELPATH}")
 
     parsed = _ask(
         llm, charter, anchors, recent, _recent_declined(root),
@@ -345,6 +374,15 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
             "(fabricated anchor)", goal,
         )
     quote = anchors[anchor_id]
+    # Слово человека связывает так же, как своя история, и тем же правилом:
+    # судится ПРЕДМЕТ работы, потому что формулировку модель каждый раз даёт
+    # новую.
+    vetoed = _repeats_recent(goal, vetoes)
+    if vetoed:
+        return _declined(
+            f"goal is vetoed by the operator ({VETO_RELPATH}): {vetoed[:80]!r}",
+            goal,
+        )
     repeated = _repeats_recent(goal, recent)
     if repeated:
         return _declined(
@@ -358,3 +396,42 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         status="proposed", goal=goal, charter_quote=quote,
         why_now=why_now, success_check=check,
     )
+
+
+def charter_status_lines(workspace: Path) -> list[str]:
+    """Строка о том, почему выбор цели отказал — или пусто, если он работает.
+
+    Замер и отвергнутые варианты: MIR-154 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    Только чтение и никогда не бросает.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from core.state_integrity import read_state_jsonl
+
+    try:
+        path = Path(workspace) / DECISIONS_RELPATH
+        if not path.exists():
+            return []
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        recent = []
+        for row in read_state_jsonl(path):
+            payload = row.get("payload", row)
+            try:
+                when = datetime.fromisoformat(str(payload.get("ts")))
+            except (TypeError, ValueError):
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when >= cutoff:
+                recent.append(payload)
+        declined = [r for r in recent if str(r.get("status")) == "declined"]
+        if not declined or len(declined) < len(recent):
+            return []
+        reason = str(declined[-1].get("reason") or "")
+        line = (
+            f"[CHARTER] goal choice declined {len(declined)}x in 24h, "
+            f"nothing proposed: {reason[:90]}"
+        )
+    except Exception:  # noqa: BLE001 — строка состояния не стоит тика
+        return []
+    return [line]

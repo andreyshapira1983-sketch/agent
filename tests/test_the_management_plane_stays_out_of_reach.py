@@ -19,6 +19,7 @@ _MANAGEMENT_PLANE = [
     ("scripts/check_ceo_file_baseline.py", "ратчет размеров"),
     (".github/workflows/ci.yml", "проверка в CI"),
     ("config/budget_limits.json", "денежный потолок"),
+    ("config/vetoed_goals.txt", "список целей, отозванных оператором"),
 ]
 
 

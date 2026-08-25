@@ -7,9 +7,10 @@ Both consumers then went off to do the same work.
 
 `mark_running` never checked the task was still `pending` — `_update_one` only
 raises `KeyError` for a missing id — so nothing anywhere refused the second
-claim. `agent_tick.py:929` even carries `except Exception: continue  # another
+claim. `agent_tick.py` even carried `except Exception: continue  # another
 process already claimed it`, guarding against an exception that was never
-raised. And the two operator-facing entry points, `:task-run` and
+raised — that guard was removed with this fix and is kept only as a recorded
+mistake. And the two operator-facing entry points, `:task-run` and
 `:schedule-tick --run` (`app/task_scheduler_cli.py:179`, `:385`), drain the
 queue without the single-instance lock that `agent_tick` takes.
 
