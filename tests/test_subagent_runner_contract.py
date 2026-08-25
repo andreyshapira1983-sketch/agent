@@ -162,10 +162,14 @@ def test_malformed_child_trace_degrades_observations_to_unknown(tmp_path: Path) 
     "contract, message",
     [
         (
+            # Право ПИСАТЬ в память по-прежнему не выдаётся: путь «находка ->
+            # проверка -> продвижение» не построен (MIR-156). Право ЧИТАТЬ с
+            # 2026-08-25 исполняется проекцией, и его отказ отсюда убран
+            # ОСОЗНАННО — см. tests/test_a_subagent_sees_only_its_granted_memory.py.
             _contract(
-                memory_scope=CanonicalMemoryScope(read_tags=("project",))
+                memory_scope=CanonicalMemoryScope(write_tags=("project",))
             ),
-            "persistent memory scope",
+            "memory write scope",
         ),
         (
             _contract(
