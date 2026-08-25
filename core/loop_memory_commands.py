@@ -44,12 +44,17 @@ class AgentLoopMemoryCommands:
         self,
         content: str,
         tags: list[str] | None = None,
-        source: str = "user-explicit",
+        *,
+        source: str,
         record_type: str = "semantic",
         owner: str = "user",
         existing: list[MemoryRecord] | None = None,
     ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
         """Run a `:remember`-style write through the Write Policy.
+
+        `source` is required on purpose: it is the record's ORIGIN, and only
+        `user-explicit` later counts as independent evidence (MIR-150). A
+        default here would hand the human's voice to whoever forgot the field.
 
         Returns the decision plus the saved record (or None on reject).
         The store must be wired; otherwise a reject decision is returned.
