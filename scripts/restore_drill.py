@@ -17,6 +17,13 @@ GitLab.com, 31 января 2017: во время восстановления �
                состояние и поставит другое. Это не запрет, это предупреждение;
   «неизвестно» — у хранилища нет поля тождества, сравнивать нечем.
 
+ОХВАТ, добавлен 2026-08-25 (H-51, класс Atlassian). Скрипт перебирал КОПИИ и
+потому не мог задать вопрос «у чего копий нет». Замер: 19 живых хранилищ из 24
+не имели ни одной копии — среди них журнал бюджета, ящик одобрений и расход
+моделей, — а учение при этом показывало девять зелёных строк. Каталог `data/`
+исключён из git, поэтому версионный контроль запасным путём здесь не является.
+Теперь перебор идёт по ХРАНИЛИЩАМ, и непокрытые называются первыми.
+
 Замер 2026-08-24 на девяти копиях: читаются все девять. Копия постоянной
 памяти от 31 июля пересекается с живым файлом на НОЛЬ записей — то есть она
 замена, а выглядит как обычная копия рядом с остальными.
@@ -46,9 +53,32 @@ def _identity(rows: list[dict]) -> str | None:
     return next((field for field in _IDENTITY_FIELDS if field in keys), None)
 
 
+def _backups_for(data: pathlib.Path, store: pathlib.Path) -> list[pathlib.Path]:
+    """Копии, относящиеся к этому хранилищу, от новых к старым."""
+    prefix = store.name.split(".jsonl")[0]
+    found = [b for b in data.glob("*.bak") if b.name.split(".jsonl")[0] == prefix]
+    return sorted(found, key=lambda b: b.stat().st_mtime, reverse=True)
+
+
 def main() -> int:
     data = pathlib.Path("data")
     backups = sorted(data.glob("*.bak"))
+    stores = sorted(p for p in data.glob("*.jsonl") if not p.name.endswith(".bak"))
+
+    # H-51: раньше перебирались КОПИИ, и потому вопрос «у чего копий нет» не
+    # задавался вовсе. Замер 2026-08-25: 19 живых хранилищ из 24 — включая
+    # журнал бюджета, ящик одобрений и расход моделей — не имели ни одной
+    # копии, а учение показывало девять зелёных строк. Каталог `data/`
+    # исключён из git, так что версионный контроль здесь не запасной путь.
+    uncovered = [s for s in stores if not _backups_for(data, s)]
+    covered = len(stores) - len(uncovered)
+    print(f"живых хранилищ: {len(stores)}, из них с копией: {covered}")
+    if uncovered:
+        print(f"БЕЗ ЕДИНОЙ КОПИИ: {len(uncovered)} — восстанавливать не из чего:")
+        for store in uncovered:
+            print(f"    {store.name}")
+    print()
+
     if not backups:
         print("резервных копий не найдено")
         return 0
