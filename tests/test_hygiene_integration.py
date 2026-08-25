@@ -90,6 +90,7 @@ class TestRememberWriteDedup:
         d1, rec1 = agent.remember(
             content="I prefer concise Russian answers and JSON output",
             tags=["preference", "fact"],
+            source="user-explicit",
         )
         assert d1.decision == "save"
         assert rec1 is not None
@@ -99,6 +100,7 @@ class TestRememberWriteDedup:
         d2, rec2 = agent.remember(
             content="I prefer concise Russian answers and JSON output",
             tags=["preference", "fact"],
+            source="user-explicit",
         )
         assert d2.decision == "reject"
         assert rec2 is None
@@ -116,8 +118,14 @@ class TestRememberWriteDedup:
         self, workspace: Path
     ):
         agent, _, store, _ = _build_agent(workspace)
-        a = agent.remember(content="The deploy script lives in ops/deploy.sh", tags=["fact"])
-        b = agent.remember(content="The deploy script lives in ops/deploy.sh.", tags=["fact"])
+        a = agent.remember(
+            content="The deploy script lives in ops/deploy.sh",
+            tags=["fact"], source="user-explicit",
+        )
+        b = agent.remember(
+            content="The deploy script lives in ops/deploy.sh.",
+            tags=["fact"], source="user-explicit",
+        )
         assert a[0].decision == "save"
         assert b[0].decision == "reject"
         assert len(store.load()) == 1
