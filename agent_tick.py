@@ -1026,9 +1026,39 @@ def _require_budget_config(workspace: Path) -> None:
     )
 
 
+def _take_daily_snapshot(workspace: Path) -> None:
+    """Снять суточный снимок состояния, если сегодняшнего ещё нет.
+
+    H-51 в docs/audit/HISTORICAL_FAILURE_LEDGER.md, решение оператора
+    2026-08-25. Замер того дня: 19 живых хранилищ из 24 не имели НИ ОДНОЙ
+    копии — среди них журнал бюджета и ящик одобрений, — а `data/` исключён из
+    git, то есть версионный контроль запасным путём не является.
+
+    Зовётся КАЖДЫЙ тик, а работает раз в сутки: идемпотентность живёт в самом
+    снимке, а не в расписании, потому что расписание — ещё одно место, где
+    можно ошибиться.
+
+    Никогда не роняет тик. Снимок — страховка; страховка, способная остановить
+    работу, хуже её отсутствия.
+    """
+    try:
+        from scripts.snapshot_state import take_snapshot
+
+        target, copied, pruned = take_snapshot(workspace)
+    except Exception as exc:  # noqa: BLE001 — страховка не вправе ронять тик
+        _log_tick(workspace, {"event": "state_snapshot_failed",
+                              "error": f"{type(exc).__name__}: {exc}"[:200]})
+        return
+    if target is not None:
+        _log_tick(workspace, {"event": "state_snapshot",
+                              "path": str(target), "files": copied,
+                              "pruned": pruned})
+
+
 def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     """Execute one daemon tick. Returns exit code (0 = ok, 1 = hard error)."""
     _ensure_env_loaded(workspace)
+    _take_daily_snapshot(workspace)
 
     # Full-suite budget; the basis lives with DEFAULT_TIMEOUT_SECONDS in
     # tools/run_tests.py. RunTestsTool reads this when given no explicit value.
