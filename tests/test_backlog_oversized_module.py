@@ -14,6 +14,7 @@ from core.backlog_signals import (
     _MAX_OVERSIZED_RECORDS,
     _OVERSIZED_MODULE_MIN_LINES,
     OVERSIZED_MODULE_SOURCE,
+    _code_line_count,
     oversized_module_candidates,
 )
 
@@ -107,8 +108,19 @@ def test_real_repo_surfaces_the_largest_module_first() -> None:
     assert oversized, "expected at least one oversized module in this repo"
 
     def _lines(candidate) -> int:
+        """Та же величина, которой ранжирует ОРГАН: строки кода, не всего.
+
+        Раньше здесь считались все строки файла, и порядок сверялся не по тому
+        числу, по которому сигнал сортирует. Расхождение спало, пока код и
+        общий счёт совпадали по рангу, и вскрылось 2026-08-26, когда файл
+        подрос пояснениями: 1764 всего против 1757 у соседа при меньшем коде.
+        Орган прав по существу — мягкий потолок у него на КОД, и файл,
+        потяжелевший от комментариев, не становится первым на разрезание.
+        """
         rel = candidate.target_path.removeprefix("split:")
-        return len((REPO_ROOT / rel).read_text(encoding="utf-8").splitlines())
+        content = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        code, parsed = _code_line_count(content)
+        return code if parsed else content.count("\n") + 1
 
     sizes = [_lines(c) for c in oversized]
     assert sizes == sorted(sizes, reverse=True), (
