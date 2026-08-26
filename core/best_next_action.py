@@ -343,6 +343,33 @@ def _candidate_goal_names_missing(
     )
 
 
+def _partition_by_subject(
+    active: list[BestNextAction], goal_subject: str,
+) -> tuple[list[BestNextAction], list[BestNextAction], list[BestNextAction]]:
+    """Разложить кандидатов на «по предмету», «про другой», «предмет неизвестен».
+
+    Замер, отвергнутые варианты и границы: MIR-162 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    Третий класс существует потому, что «не знаю, про что» — не то же самое,
+    что «знаю, что про другое»; сваливать их в одну кучу значит выдавать
+    незнание за знание.
+    """
+    on: list[BestNextAction] = []
+    off: list[BestNextAction] = []
+    unknown: list[BestNextAction] = []
+    for candidate in active:
+        if (
+            candidate.severity in ("critical", "high")
+            or candidate.target_path == goal_subject
+            or candidate.grounds == "operator_goal"
+        ):
+            on.append(candidate)
+        elif candidate.target_path is None:
+            unknown.append(candidate)
+        else:
+            off.append(candidate)
+    return on, off, unknown
+
+
 def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
     goal: str = "",
@@ -427,6 +454,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     active = [c for c in candidates if not _is_suppressed(c, acknowledged)]
     suppressed = [c for c in candidates if _is_suppressed(c, acknowledged)]
     off_subject: list[BestNextAction] = []
+    unknown_subject: list[BestNextAction] = []
 
     # Цель СУЖАЕТ допустимое, а не просто добавляет кандидата. Без этого её
     # влияние было нулевым: живой прогон 2026-08-25 выбрал цель про
@@ -441,23 +469,15 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
         return missing
 
     if goal_subject:
-        def _on_subject(candidate: BestNextAction) -> bool:
-            return (
-                candidate.severity in ("critical", "high")
-                or candidate.target_path == goal_subject
-                or candidate.grounds == "operator_goal"
-            )
-
-        on_subject = [c for c in active if _on_subject(c)]
-        # Отведённое НЕ удаляется и НЕ сваливается к заглушённому: у них разные
-        # основания, и запасной вариант обязан называть верное.
-        off_subject = [c for c in active if not _on_subject(c)]
-        active = on_subject
+        active, off_subject, unknown_subject = _partition_by_subject(
+            active, goal_subject,
+        )
 
     if not active:
         fallback = _candidate_observe(
             tests_health, result_status, inbox_pending, suppressed=suppressed,
-            off_subject=off_subject, goal_subject=goal_subject,
+            off_subject=off_subject, unknown_subject=unknown_subject,
+            goal_subject=goal_subject,
         )
         # The observe fallback reads live signals to say the world looks
         # healthy — observation, like any other reading of the present.
@@ -798,25 +818,43 @@ def _candidate_observe(
     *,
     suppressed: list[BestNextAction] | None = None,
     off_subject: list[BestNextAction] | None = None,
+    unknown_subject: list[BestNextAction] | None = None,
     goal_subject: str | None = None,
 ) -> BestNextAction:
     suppressed = suppressed or []
     off_subject = off_subject or []
+    unknown_subject = unknown_subject or []
     evidence = [
         f"tests_health={tests_health}, result_status={result_status}",
         f"{int(inbox_pending or 0)} pending approval item(s)",
     ]
     unknowns = ["whether a problem exists that no current signal exposes"]
-    if off_subject:
+    if off_subject or unknown_subject:
         # Отдельная причина, а не общий мешок: отведённое ПО ПРЕДМЕТУ никто не
         # подтверждал, и назвать его подтверждённым значило бы соврать
         # оператору о причине простоя (MIR-158).
-        names = ", ".join(sorted({c.action for c in off_subject}))
+        subject = goal_subject or "the goal"
+        parts: list[str] = []
+        if off_subject:
+            parts.append(f"{len(off_subject)} about another subject")
+        if unknown_subject:
+            # «Предмет неизвестен» — не «предмет другой». На живых данных это
+            # большинство: 21 запись дефектов из 29 не называет файла вовсе.
+            parts.append(f"{len(unknown_subject)} naming no subject at all")
         reason = (
-            f"Nothing admissible for the chosen goal: the active candidate(s) "
-            f"are about another subject than {goal_subject or 'the goal'}."
+            f"Nothing admissible for the chosen goal ({subject}): "
+            + ", ".join(parts) + "."
         )
-        evidence.append(f"set aside as off-subject: {names}")
+        if off_subject:
+            evidence.append(
+                "set aside as off-subject: "
+                + ", ".join(sorted({c.action for c in off_subject}))
+            )
+        if unknown_subject:
+            evidence.append(
+                "set aside with unknown subject: "
+                + ", ".join(sorted({c.action for c in unknown_subject}))
+            )
         unknowns.append(
             "whether the goal's subject deserves work that no current signal proposes"
         )
