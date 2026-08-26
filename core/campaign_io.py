@@ -248,7 +248,7 @@ def _dedup_verdict(approval_inbox, dedup_key: str) -> str | None:
 
 
 def _propose_engineering_step(
-    *, agent: Any, workspace: Any, approval_inbox: Any,
+    *, agent: Any, workspace: Any, approval_inbox: Any, target: str | None = None,
 ) -> str:
     """Turn the top real backlog candidate into a self-build lane proposal.
 
@@ -274,6 +274,9 @@ def _propose_engineering_step(
             vcs=SafeVCS(workspace=_Path(workspace)),
             kill_switch=kill_state,
             max_builder_attempts=2,
+            # Дорога головы к рукам (MIR-159). `None` значит «цель предмета не
+            # называла» — тогда производитель выбирает сам, как и раньше.
+            candidate_targets=(target,) if target else None,
         )
     except Exception as exc:  # noqa: BLE001 — отказ именуется, не прячется
         _log(agent, "campaign_engineering_error", {
@@ -660,8 +663,17 @@ def _default_execute_action(
     # Инженерные руки: дорога хартия → бэклог (2026-08-19). Продукт — заявка
     # ленты, все ворота ниже по течению стоят как стояли.
     if action.action == "propose_engineering_task" and not config.dry_run:
+        # Предмет берётся из РЕШЕНИЯ, а если решение его не назвало — из цели
+        # тем же существованием в рабочей области (MIR-158/159). Голова и руки
+        # связаны значением, а не совпадением тика.
+        from core.best_next_action import resolve_goal_subject
+
+        _ws = Path(workspace)
         engineered = _propose_engineering_step(
             agent=agent, workspace=workspace, approval_inbox=approval_inbox,
+            target=action.target_path or resolve_goal_subject(
+                config.goal, exists=lambda rel: (_ws / rel).is_file()
+            ),
         )
         if engineered:
             proposal = f"{proposal}; {engineered}" if proposal else engineered
