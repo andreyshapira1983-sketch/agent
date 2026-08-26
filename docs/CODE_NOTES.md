@@ -4436,3 +4436,45 @@ to leave it in.
 
 Measurement: `scripts/measure_experience_retrieval_discrimination.py`.
 Registry: MIR-105 (measured, one option eliminated), MIR-165 (the witness).
+
+
+## A status page that was 84% file bodies
+
+`:auto-status` printed 1,873,000 bytes. Broken down: 685 KB in `content` fields,
+890 KB in `content_b64` — the same text a second time in another encoding — and
+288 KB of everything else, that last figure including the session banner. So the
+status a human reads to decide what to do next was, by weight, mostly the bodies
+of proposed files, each carried twice.
+
+The path was short. `AutonomousRuntime.status()` embedded
+`ApprovalInbox.snapshot()`, and `snapshot()` returns `items` — every row of the
+inbox, all 137 of them, payloads included, and a self-build proposal's payload is
+the file it wants to write.
+
+What made the fix obvious was asking who reads it. Every consumer of that view —
+four call sites in `app/operator_status.py` — takes `pending` and `total` and
+nothing else. Not one of them touches `items`. A megabyte and a half with no
+reader at all: the same shape as MIR-138, seen from the other side.
+
+Two zeros were measured rather than assumed, because a finding is worth what its
+boundaries are worth. It does not reach the tick journal — `content_b64` appears
+zero times in `logs/daemon_tick.jsonl`, which holds 244 KB across 736 ticks. And
+it does not reach a model: all three commands built on this payload print it.
+This was unreadability, not money, and saying so keeps the finding its true size.
+
+The cut is at the presentation boundary, not at the source. `snapshot()` is
+untouched because duplicate detection runs on it, and the comment beside that
+call already warns that an empty snapshot does not merely lose information — it
+switches duplicate detection off for the cycle, so the next proposal passes as
+new. A separate `digest()` returns counts, pending broken down by operation, and
+the headers of pending items: id, operation, risk, expiry, and the first 160
+characters of the summary. Truncation past twenty announces itself in
+`pending_not_listed`, because a silent "not everything is shown" reads as "this
+is everything".
+
+Printing only numbers was considered and rejected: an operator cannot approve an
+item whose id they cannot see, and looking up what awaits a decision is the most
+common reason to open the status at all.
+
+Result: 1,873,000 → 21,927 bytes, no file bodies, and what remains is mostly the
+startup banner. Registry: MIR-167.

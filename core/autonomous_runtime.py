@@ -559,7 +559,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
     def status(self) -> dict:
         return {
-            "approval_inbox": self.approval_inbox.snapshot(),
+            "approval_inbox": self.approval_inbox.digest(),
             "source_registry": self._source_counts(),
             "persistent_memory_records": self._memory_count(),
         }
