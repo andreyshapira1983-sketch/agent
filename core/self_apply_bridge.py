@@ -27,6 +27,7 @@ from core.self_apply_lane import (
     SelfApplyProposal,
     SelfApplyReport,
     classify_patch_risk,
+    file_base_sha256,
     run_self_apply_lane,
 )
 
@@ -61,6 +62,7 @@ def build_self_apply_payload(
     test_pattern: str | None = None,
     origin: str = "manual",
     rollback: str = DEFAULT_ROLLBACK,
+    workspace: Path | None = None,
 ) -> dict:
     """Build a well-formed ``self_apply_lane.run`` inbox payload.
 
@@ -68,7 +70,7 @@ def build_self_apply_payload(
     diff-only entry is rejected). Validating here means producers
     (repair / supervisor / manual) and the runtime agree on one shape.
     """
-    normalized = _normalize_files(files)
+    normalized = _stamp_base_state(_normalize_files(files), workspace)
     payload: dict[str, Any] = {
         "files": normalized,
         "reason": str(reason or ""),
@@ -79,6 +81,29 @@ def build_self_apply_payload(
         "rollback": str(rollback or DEFAULT_ROLLBACK),
     }
     return payload
+
+
+def _stamp_base_state(files: list[dict], workspace: Path | None) -> list[dict]:
+    """Записать, НА ЧЁМ построено предложение, пока пред-образ ещё под рукой.
+
+    Без рабочей папки отметка не ставится вовсе, и это отдельное состояние:
+    «не смотрели» — не то же самое, что «сошлось». Зачем: MIR-168.
+    """
+    if workspace is None:
+        return files
+    root = Path(workspace)
+    for entry in files:
+        target = root / str(entry["path"])
+        try:
+            before = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # Файла нет (или он не текст) — пустой хеш при поднятом флаге и
+            # означает «в тот момент файла не было».
+            entry["base_sha256"] = ""
+        else:
+            entry["base_sha256"] = file_base_sha256(before)
+        entry["base_checked"] = True
+    return files
 
 
 def _normalize_files(files: Any) -> list[dict]:
@@ -123,7 +148,14 @@ def _normalize_files(files: Any) -> list[dict]:
                     f"file change for {path!r} must carry string 'content'"
                 )
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-        out.append({"path": path, "content": content, "content_b64": encoded})
+        change = {"path": path, "content": content, "content_b64": encoded}
+        # Отметка состояния переносится, а не пересоздаётся: пересобрать её
+        # здесь значило бы снять хеш с СЕГОДНЯШНЕГО файла и объявить сходство
+        # там, где его никто не проверял (MIR-168).
+        if entry.get("base_checked"):
+            change["base_sha256"] = str(entry.get("base_sha256") or "")
+            change["base_checked"] = True
+        out.append(change)
     return out
 
 
@@ -136,7 +168,15 @@ def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
     if not isinstance(payload, dict):
         raise InvalidProposalError("proposal payload must be an object")
     normalized = _normalize_files(payload.get("files"))
-    changes = tuple(FileChange(path=f["path"], content=f["content"]) for f in normalized)
+    changes = tuple(
+        FileChange(
+            path=f["path"],
+            content=f["content"],
+            base_sha256=str(f.get("base_sha256") or ""),
+            base_checked=bool(f.get("base_checked")),
+        )
+        for f in normalized
+    )
     test_paths_raw = payload.get("test_paths") or ("tests",)
     if not isinstance(test_paths_raw, (list, tuple)) or not test_paths_raw:
         raise InvalidProposalError("proposal 'test_paths' must be a non-empty list")

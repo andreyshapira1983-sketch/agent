@@ -16,7 +16,8 @@ Hard safety gates (checked before any file is touched, first trip wins):
   2. hour budget near-exhaustion -> status="budget_wait"
   3. pending approvals           -> status="approval_wait"
   4. patch not classified low-risk / denylisted -> status="rejected"
-  5. workspace not clean         -> status="rejected"
+  5. target changed since proposal -> status="stale_proposal"
+  6. workspace not clean         -> status="rejected"
 
 The heavy dependencies (git, test runner) are injected so the whole lane is
 unit-testable with fakes — no real provider/network/LLM call ever happens here.
@@ -24,6 +25,7 @@ unit-testable with fakes — no real provider/network/LLM call ever happens here
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -83,6 +85,11 @@ class FileChange:
 
     path: str
     content: str
+    #: Состояние файла в момент ПОДАЧИ предложения. Три различимых случая, а не
+    #: два: `base_checked=False` — не смотрели; `True` с пустым хешем — файла не
+    #: было; `True` с хешем — файл был таким. Зачем: MIR-168.
+    base_sha256: str = ""
+    base_checked: bool = False
 
 
 @dataclass(frozen=True)
@@ -348,6 +355,62 @@ def _failure_detail(result: Any) -> str:
     return "; ".join(parts)[:400]
 
 
+def file_base_sha256(text: str) -> str:
+    """Отметка состояния файла — одна формула на снятие и на сверку (MIR-168)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _base_state_gate(
+    workspace: Path, changes
+) -> tuple[SelfApplyReport | None, list[str]]:
+    """Отказ, если файл уже не тот, плюс оговорка, если отметки не было.
+
+    Второе возвращаемое — не украшение: «отметку не снимали» не равно «отметка
+    сошлась», и непроверенное обязано называться непроверенным (MIR-168).
+    """
+    unverified = [] if all(c.base_checked for c in changes) else ["base_unverified"]
+    stale = _stale_changes(workspace, changes)
+    if not stale:
+        return None, unverified
+    return SelfApplyReport(
+        status="stale_proposal",
+        reason=(
+            "the proposal was built on a different version of "
+            f"{', '.join(stale)}; refusing to overwrite newer work"
+        ),
+        rejected_files=stale,
+        risks=["stale_proposal"],
+        next_human_action=(
+            "Rebuild the proposal against the current file, then approve the "
+            "fresh one."
+        ),
+    ), unverified
+
+
+def _stale_changes(workspace: Path, changes) -> list[str]:
+    """Пути, чей файл на диске уже не тот, на котором предложение построено.
+
+    Не сверяется молча то, чего не мерили: запись без отметки пропускается
+    здесь и объявляется отдельно. Замер и границы: MIR-168.
+    """
+    stale: list[str] = []
+    for change in changes:
+        if not change.base_checked:
+            continue
+        target = Path(workspace) / change.path
+        try:
+            current = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # Файла нет. Это совпадает с предложением только если его не было
+            # и в момент подачи.
+            if change.base_sha256:
+                stale.append(change.path)
+            continue
+        if not change.base_sha256 or file_base_sha256(current) != change.base_sha256:
+            stale.append(change.path)
+    return stale
+
+
 def _write_file(workspace: Path, rel: str, content: str) -> None:
     target = (workspace / rel).resolve()
     root = workspace.resolve()
@@ -493,9 +556,14 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
             ),
         )
 
+    # 5. the file the patch was built on must still be the file on disk ------
+    stale_report, base_risks = _base_state_gate(workspace, proposal.files)
+    if stale_report is not None:
+        return stale_report
+
     files_changed = [_normalize_rel(c.path) or c.path for c in proposal.files]
 
-    # 5. require a clean working tree ----------------------------------------
+    # 6. require a clean working tree ----------------------------------------
     try:
         if not vcs.is_clean():
             return SelfApplyReport(
@@ -627,6 +695,7 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
             ("change is committed locally only — not pushed, not merged; a human "
             "must review before it reaches the base branch"),
             *judge_risks,
+            *base_risks,
         ],
         next_human_action=next_human,
     )
