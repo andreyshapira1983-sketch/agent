@@ -102,3 +102,25 @@ def test_both_kinds_still_stay_out_of_the_race() -> None:
     assert _pick((_NO_SUBJECT,)).action == "observe"
     assert _pick((_OTHER_SUBJECT,)).action == "observe"
     assert _pick((_NO_SUBJECT, _OTHER_SUBJECT)).action == "observe"
+
+
+def test_an_idle_caused_by_the_goal_is_grounded_in_the_goal() -> None:
+    """Кто опустошил гонку, тот и основание простоя.
+
+    Иначе цикл, где именно ЦЕЛЬ всех отвела, считался бы как «цель не вела
+    работу», и счётчик `goal_drove` (MIR-163) врал бы о себе.
+    """
+    by_goal = _pick((_NO_SUBJECT,))
+    by_world = select_best_next_action(
+        goal=_GOAL,
+        goal_subject=resolve_goal_subject(_GOAL, exists=_exists),
+        goal_names_missing=unresolved_goal_targets(_GOAL, exists=_exists),
+        result_status="ok",
+        tests_health="ok",
+        open_self_improvement_issues=(),
+        self_improvement_registry_available=True,
+    )
+
+    assert by_goal.grounds == "operator_goal"
+    assert by_world.grounds == "observed_state"
+

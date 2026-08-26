@@ -28,6 +28,14 @@ class CampaignCycleRecord:
     proposal: str | None = None
     artifact: str | None = None
     next_check_at: str | None = None
+    #: ЧЕМ решение обосновано и КАК выбрано. Решение это знает
+    #: (`BestNextAction.grounds` / `.decided_by`) и до 2026-08-26 выбрасывало,
+    #: поэтому вопрос «вела ли цель работу» приходилось пересчитывать заново
+    #: по 267 циклам (MIR-163). `unrecorded` значит «не записано», а не
+    #: «основания не было».
+    grounds: str = "unrecorded"
+    decided_by: str = "unrecorded"
+
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +55,8 @@ class CampaignCycleRecord:
             "proposal": self.proposal,
             "artifact": self.artifact,
             "next_check_at": self.next_check_at,
+            "grounds": self.grounds,
+            "decided_by": self.decided_by,
         }
 
     def user_summary(self) -> str:

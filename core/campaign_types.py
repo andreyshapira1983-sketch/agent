@@ -89,7 +89,8 @@ class CampaignResult:
                 f"llm_calls={self.totals.get('llm_calls', 0)}  "
                 f"cost_units={self.totals.get('cost_units', 0)}  "
                 f"proposals={self.totals.get('proposals', 0)}  "
-                f"artifacts={self.totals.get('artifacts', 0)}"
+                f"artifacts={self.totals.get('artifacts', 0)}  "
+                f"goal_drove={self.totals.get('goal_drove_cycles', 0)}"
             ),
         ]
         for record in self.records:
