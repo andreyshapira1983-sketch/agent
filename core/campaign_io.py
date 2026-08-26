@@ -192,6 +192,7 @@ def _propose_repair_from_diagnosis(
             test_paths=tuple(prop.test_paths or ("tests",)),
             test_pattern=prop.test_pattern,
             origin="campaign_diagnosis",
+            workspace=workspace,
         )
         dedup_key = f"self_apply:{prop.path}:campaign_diagnosis"
         collision = _dedup_verdict(approval_inbox, dedup_key)
@@ -367,6 +368,7 @@ def _propose_doctrine_draft(
         test_paths=("tests",),
         test_pattern=None,
         origin="campaign_doctrine_draft",
+        workspace=workspace,
     )
     dedup_key = f"self_apply:{target}:campaign_doctrine_draft"
     collision = _dedup_verdict(approval_inbox, dedup_key)

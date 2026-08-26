@@ -1162,6 +1162,7 @@ def _reporter_publish(
     target: str,
     build: dict[str, Any],
     evidence: list[str],
+    workspace: Any = None,
 ) -> RoleOutput:
     """Create exactly one approval inbox item for the TD-024 bridge."""
     content = build["content"]
@@ -1177,6 +1178,7 @@ def _reporter_publish(
         test_pattern=build.get("test_pattern"),
         origin=PRODUCER_ORIGIN,
         rollback=DEFAULT_ROLLBACK,
+        workspace=workspace,
     )
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
     dedup_key = f"self_apply:{target}:{digest}"
@@ -1254,6 +1256,7 @@ def publish_incremental_split_step(
         evidence=evidence,
         test_paths=test_paths,
         origin=INCREMENTAL_SPLIT_ORIGIN,
+        workspace=workspace,
     )
     digest = hashlib.sha256(step.target_content.encode("utf-8")).hexdigest()[:12]
     item = inbox.add(
@@ -1737,7 +1740,7 @@ def produce_self_apply_proposal(
         evidence.extend(f"value-flag: {flag}" for flag in value.flags)
 
     # ── Reporter ────────────────────────────────────────────────────────────
-    reporter = _reporter_publish(inbox, target, builder.data, evidence)
+    reporter = _reporter_publish(inbox, target, builder.data, evidence, workspace)
     roles.append(reporter)
     approval_id = reporter.data["approval_id"]
     return _record(ProducerReport(

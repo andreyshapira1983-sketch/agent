@@ -193,6 +193,7 @@ def _impl_reporter_publish(
     frozen_test: str,
     build: dict[str, Any],
     evidence: list[str],
+    workspace: Any = None,
 ) -> RoleOutput:
     """Publish exactly one ``self_apply_lane.run`` proposal (impl + frozen test)."""
     content = build["content"]
@@ -206,6 +207,7 @@ def _impl_reporter_publish(
         test_paths=[test_path],
         test_pattern=None,
         origin=TASK_BUILD_ORIGIN,
+        workspace=workspace,
     )
     digest = hashlib.sha256(
         (impl_path + "\n" + content + "\n" + frozen_test).encode("utf-8")
@@ -403,6 +405,7 @@ def build_coding_task(
         frozen_test=frozen_test,
         build=builder.data,
         evidence=evidence,
+        workspace=workspace,
     )
     roles.append(reporter)
     new_id = reporter.data["approval_id"]
