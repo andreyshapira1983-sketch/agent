@@ -352,7 +352,9 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     # registry, or recent failures reconstructed from episodes. That is a
     # different provenance from a live signal, and it is the one that makes the
     # memory-influence question answerable later.
-    improvement = _candidate_open_self_improvement_issue(open_self_improvement_issues)
+    improvement = _candidate_open_self_improvement_issue(
+        open_self_improvement_issues, subject=goal_subject,
+    )
     if improvement is None and not self_improvement_registry_available:
         improvement = _candidate_self_improvement_failure(
             recent_self_improvement_failures
@@ -608,10 +610,22 @@ def _candidate_self_improvement_failure(
 
 def _candidate_open_self_improvement_issue(
     issues: tuple[dict, ...],
+    *,
+    subject: str | None = None,
 ) -> BestNextAction | None:
-    dominant = suppress_generic_issue_duplicates(
+    dominant = list(suppress_generic_issue_duplicates(
         SelfImprovementIssue.from_dict(issue) for issue in issues
-    )
+    ))
+    if subject:
+        # Предмет цели ВЫБИРАЕТ запись, а не отсеивает выбранную. Живой замер
+        # 2026-08-26: из 29 открытых дефектов решению предлагался ровно один —
+        # первый по порядку ЗАПИСИ В ФАЙЛ, — поэтому цель про
+        # `core/loop_synthesis.py` уходила в простой, хотя открытый дефект
+        # ровно про этот файл лежал в том же бэклоге (MIR-160). Сортировка
+        # устойчива: не совпавшие сохраняют прежний порядок.
+        dominant.sort(
+            key=lambda m: 0 if subject in (m.to_dict().get("related_files") or ()) else 1
+        )
     for model in dominant:
         issue = model.to_dict()
         status = str(issue.get("status") or "open")
@@ -654,7 +668,14 @@ def _candidate_open_self_improvement_issue(
             # улики: без него решение нельзя сопоставить с предметом цели, и
             # ровно так дефект побеждал цель, которая была про другой файл
             # (H-20, MIR-158).
-            target_path=files[0] if files else None,
+            # Предметом решения становится ФАЙЛ, ПО КОТОРОМУ совпало, а не
+            # первый из списка: запись дефекта часто называет несколько, и
+            # привязка к первому отвергала цель про второй (замер 2026-08-26 на
+            # живом бэклоге: `core/evidence_budget.py` уходил в простой).
+            target_path=(
+                subject if subject and subject in files
+                else (files[0] if files else None)
+            ),
             confidence=0.75,
         )
     return None
