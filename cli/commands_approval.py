@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -370,6 +370,64 @@ def _handle_alert_ack_clear(rest: str, agent: AgentLoop, workspace: Path) -> boo
         agent.log.log("alert_ack_cleared", {"action": action, "removed": removed})
     else:
         print(f"(no active acknowledgement found for '{action}')", file=sys.stderr)
+    return True
+
+
+#: Операция стоячего гранта. Автомат её ЧИТАЕТ
+#: (`AutonomousRuntime._active_standing_grant`); до MIR-166 её не заводил
+#: никакой боевой путь, только тест.
+STANDING_GRANT_OPERATION = "autonomous_runtime.standing_grant"
+
+
+def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """`:standing-grant <прогонов в сутки> [часов]` — ПОЛОЖИТЬ заявку.
+
+    Кладёт, а не выдаёт: просьба и разрешение — разные события (MIR-117,
+    правило B, ратифицировано оператором). Открывает грант отдельное слово
+    через `:approval-approve`.
+    """
+    tokens = rest.split()
+    usage = "Usage: :standing-grant <прогонов в сутки> [часов, по умолчанию 48]"
+    if not tokens:
+        print(usage, file=sys.stderr)
+        return True
+    try:
+        runs_per_day = int(tokens[0])
+        hours = int(tokens[1]) if len(tokens) > 1 else 48
+    except ValueError:
+        print(usage, file=sys.stderr)
+        return True
+    if runs_per_day <= 0 or hours <= 0:
+        # Ноль прогонов автомат читает как «гранта нет», а нулевой срок — как
+        # истёкший. Молча завести мёртвую заявку хуже, чем отказать.
+        print(
+            "Границы обязательны: и прогонов в сутки, и часов должно быть больше нуля.",
+            file=sys.stderr,
+        )
+        return True
+
+    inbox = _approval_inbox_for(agent, workspace)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=hours)
+    ).isoformat()
+    item = inbox.add(
+        operation=STANDING_GRANT_OPERATION,
+        summary=(
+            f"Стоячий грант на автономные прогоны с эффектами: "
+            f"{runs_per_day} в сутки, {hours} ч."
+        ),
+        risk="irreversible",
+        reasons=(
+            "запрошен оператором командой :standing-grant",
+            "без гранта каждое срабатывание расписания упирается в ворота",
+            f"границы: {runs_per_day} прогонов в сутки, срок {hours} ч",
+        ),
+        payload={"max_runs_per_day": runs_per_day},
+        expires_at=expires_at,
+    )
+    print(f"Заявка положена: {item.id}")
+    print(f"  {runs_per_day} прогонов в сутки, истекает {item.expires_at}")
+    print(f"  Открыть грант: :approval-approve {item.id} <причина>")
     return True
 
 

@@ -301,6 +301,15 @@ COMMANDS_OPS: tuple[CommandSpec, ...] = (
         in_startup_summary=True,
     ),
     CommandSpec(
+        canonical=":standing-grant",
+        description="file a standing-grant request for unattended runs (does not grant)",
+        category="Approvals & alerts",
+        handler_key="standing_grant",
+        aliases=(":grant",),
+        usage="<runs/day> [h]",
+        in_startup_summary=True,
+    ),
+    CommandSpec(
         canonical=":approval-triage",
         description="read-only triage: clusters/duplicates/stale + advice",
         category="Approvals & alerts",

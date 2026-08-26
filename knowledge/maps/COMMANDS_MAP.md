@@ -90,6 +90,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:deny \| :approval-deny <id>` | Deny an inbox item. |
 | `:approval-run <id>` | Run an approved item. |
 | `:approval-abort <id>` | Abort an approval. |
+| `:standing-grant \| :grant` | Кладёт заявку на стоячий грант (`<прогонов в сутки> [часов]`) для безнадзорных прогонов. Кладёт, а не выдаёт: открывает грант отдельное слово через `:approval-approve`. |
 | `:approval-triage \| :triage` | Read-only triage of the inbox. |
 | `:ack \| :acknowledge <action>` | Acknowledge an advisory alert. |
 | `:ack-list \| :acks` | List acknowledged alerts. |
