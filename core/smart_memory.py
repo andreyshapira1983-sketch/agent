@@ -595,6 +595,31 @@ class EpisodicMemoryStore:
         """The matching episodes. Delegates so there is one decision, not two."""
         return self.search_with_report(query, limit=limit).episodes
 
+    @staticmethod
+    def _signal_standing(ep: EpisodeRecord) -> int:
+        """2 — подтверждено, 1 — улик не было вовсе, 0 — измеряли, не сошлось.
+
+        Три состояния, а не два: «не измеряли» — это незнание, и приравнять его
+        к провалу значило бы выдать незнание за приговор. Замер: MIR-164.
+        """
+        if (ep.verified_chunks or 0) > 0:
+            return 2
+        return 0 if (ep.unverified_chunks or 0) + (ep.weak_chunks or 0) else 1
+
+    def _rank(self, score: int, ep: EpisodeRecord) -> tuple:
+        """Порядок выдачи: релевантность → метка → сигнал проверки → свежесть.
+
+        Метка даёт право ВЫЖИТЬ и право идти первым ПРИ РАВНОЙ релевантности,
+        но не право отменять релевантность: прежняя прибавка +50 была больше
+        любого перекрытия. Подробности и замер: MIR-164.
+        """
+        return (
+            score,
+            1 if self.PROTECTED_TAGS & set(ep.tags) else 0,
+            self._signal_standing(ep),
+            ep.created_at,
+        )
+
     def search_with_report(self, query: str, *, limit: int = 3) -> EpisodeSearchResult:
         """`search`, plus why the rest of the store did not come back.
 
@@ -622,14 +647,10 @@ class EpisodicMemoryStore:
             # 2026-08-22, filler alone retrieved 17 of 34 procedures, and a
             # launch and a deletion scored as one question.
             if score and (q_content & hay_tokens):
-                # Boost protected episodes (lessons, bug-fixes) so they surface
-                # above ordinary episodes when there is any token overlap.
-                if self.PROTECTED_TAGS & set(ep.tags):
-                    score += 50
                 scored.append((score, ep))
             else:
                 no_overlap += 1
-        scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
+        scored.sort(key=lambda item: self._rank(*item), reverse=True)
         selected = [ep for _score, ep in scored[:limit]]
         rejected_by = {
             k: v for k, v in (

@@ -4352,3 +4352,45 @@ money, therefore the operator's decision.
 The measurement is repeatable: `scripts/measure_verifier_discrimination.py`.
 After the gate, the topic axis reads J = +1.00 with valid acceptance unchanged
 at 100%.
+
+
+## A tag bought two rights with one token
+
+`PROTECTED_TAGS` (`lesson`, `bug-fix`, `regression-guard`) governed two entirely
+different things through a single membership test: whether a record SURVIVES the
+store's cap, and whether it comes back FIRST from a search. The two were written
+years apart in intent but read from the same set, and only the first was ever
+witnessed by a test.
+
+The retrieval half was a flat `score += 50`. Overlap scores are small — a query
+and a record share a handful of discriminating words — so +50 was not a
+tie-breaker, it was an override. Measured on the live store of 142 episodes: a
+verified record asked with ITS OWN words lost to a machine-minted lesson nine
+times out of nine, and in the case examined the winners shared **two** words with
+the query while records sharing **forty-one** ranked below them. Retrieval had
+stopped being about relevance.
+
+The population made it worse. `core/self_build_memory.py` stamps `lesson` on
+almost every self-build episode, so the rare curated lesson the boost was written
+for had been flooded: of 73 records admitted to retrieval, 64 carried no
+verification at all, and every one of those 64 had entered by the tag.
+
+The fix keeps both rights but separates them. Ranking is now
+`relevance → tag → verifier signal → recency`: the tag still wins a tie and still
+protects a record from eviction, but it can no longer overrule what was asked.
+
+Two things this deliberately does NOT do. It does not close the admission
+exemption — a lesson from a FAILED run reaches a reader through that door and
+nothing else does (MIR-096/121); an unverified record is still retrieved when it
+genuinely is the best match. And it does not read a missing signal as a bad one.
+`verified_chunks == 0` means two different things — «no evidence was ever
+gathered» and «evidence was gathered and did not hold» — and on the live store
+all 64 unverified records are the first kind. `_signal_standing` therefore
+returns three values, not a boolean, and ignorance sorts above failure rather
+than with it. The first version of this change got that wrong and was caught by
+an existing test, `test_search_boosts_lesson_episodes`, which encodes an earlier
+decision about lessons; the earlier decision was kept rather than overwritten.
+
+Measurements: `scripts/memguard_axis_probe.py` (the population and the
+head-to-head), `scripts/memguard_axis_control.py` (one contest broken down, old
+formula against relevance alone). Registry: MIR-164.
