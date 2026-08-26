@@ -479,10 +479,17 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             off_subject=off_subject, unknown_subject=unknown_subject,
             goal_subject=goal_subject,
         )
-        # The observe fallback reads live signals to say the world looks
-        # healthy — observation, like any other reading of the present.
-        return replace(fallback, decided_by="no_candidate",
-                       candidates_considered=0, grounds="observed_state")
+        # Основание простоя — ФАКТ о том, кто его вызвал. Если гонку опустошила
+        # ЦЕЛЬ (отвела всех по предмету), основанием стоит она, иначе — живые
+        # сигналы. Иначе цикл, где именно цель всё и отвела, считался бы как
+        # «цель не вела работу», и новый счётчик (MIR-163) врал бы о себе.
+        emptied_by_goal = bool(off_subject or unknown_subject)
+        return replace(
+            fallback,
+            decided_by="no_candidate",
+            candidates_considered=0,
+            grounds="operator_goal" if emptied_by_goal else "observed_state",
+        )
 
     # Deterministic: highest priority wins; ties keep first-appended (which is
     # already the intended severity order above).

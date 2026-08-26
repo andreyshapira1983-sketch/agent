@@ -132,6 +132,7 @@ def run_campaign(
     artifacts = 0
     idle_cycles = 0
     useful_cycles = 0
+    goal_drove_cycles = 0
     repeat_cycles = 0
     error_cycles = 0
     consecutive_errors = 0
@@ -154,6 +155,7 @@ def run_campaign(
             "llm_calls": llm_calls_used,
             "cost_units": cost_units_used,
             "useful_cycles": useful_cycles,
+            "goal_drove_cycles": goal_drove_cycles,
             "idle_cycles": idle_cycles,
             "repeat_cycles": repeat_cycles,
             "error_cycles": error_cycles,
@@ -208,6 +210,7 @@ def run_campaign(
             except TypeError:
                 signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
+            goal_drove_cycles += int(action.grounds == "operator_goal")  # MIR-163
             now = now_fn()
 
             if action.priority <= 0:
@@ -230,6 +233,8 @@ def run_campaign(
                     severity=action.severity,
                     priority=action.priority,
                     risk=action.risk,
+                    grounds=action.grounds,
+                    decided_by=action.decided_by,
                     idle=True,
                     llm_calls_spent=0,
                     cost_units_spent=0,
@@ -275,6 +280,8 @@ def run_campaign(
                     severity=action.severity,
                     priority=action.priority,
                     risk=action.risk,
+                    grounds=action.grounds,
+                    decided_by=action.decided_by,
                     idle=False,
                     llm_calls_spent=0,
                     cost_units_spent=0,
@@ -324,6 +331,8 @@ def run_campaign(
                 severity=action.severity,
                 priority=action.priority,
                 risk=action.risk,
+                grounds=action.grounds,
+                decided_by=action.decided_by,
                 idle=False,
                 llm_calls_spent=max(0, outcome.llm_calls_spent),
                 cost_units_spent=max(0, outcome.cost_units_spent),
