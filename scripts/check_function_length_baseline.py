@@ -46,7 +46,7 @@ WATCH: dict[str, int] = {
     "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 161,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале. +3 (2026-08-13): вердикт применимости улик передаётся композитору сводки — иначе хвост объявлял «нулевую уверенность» ходу, которому улики не полагались.  # +1 (2026-08-15): седьмой решатель — раскрытие подмены модели. Рост это сам контракт: ответ обязан говорить, кем он написан, когда его написал не выбранный маршрутом поставщик (docs/CODE_NOTES.md, «The answer was not written by the model you chose»).
     "core/self_build_producer.py:produce_self_apply_proposal": 375,
     "core/campaign.py:run_campaign": 367,  # +7 (2026-08-15): цель кампании передаётся сборщику сигналов (документная цель видима выбирателю действий; терпимость к старым 3-аргументным сборщикам). См. CODE_NOTES «The head chose, the hands didn't know how».
-    "cli/command_dispatch.py:handle_meta_command": 349,
+    "cli/command_dispatch.py:handle_meta_command": 351,  # +2 (2026-08-26): :standing-grant. Забанковано, а не срезано, и это единственный банк за неделю: диспетчер — плоская таблица, где КАЖДАЯ команда стоит две-три строки, и храповик здесь ловит не разрастание обязанностей, а прибавление строки в таблицу. Настоящее лекарство — диспетчеризация по словарю, а не дробление таблицы пополам.
     "core/evidence.py:evidence_from_tool_result": 321,
     # 2026-08-05, MIR-060 (b): 283 -> 298. The third content gate — the one
     # that COMPUTES rather than asking whose evidence this is — sits beside

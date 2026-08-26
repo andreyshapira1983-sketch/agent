@@ -376,11 +376,16 @@ def test_recorded_surface_sizes():
     72 -> 73 (2026-08-15): `:causal` — водитель причинной лестницы. Виден в
     баннере намеренно: подъём начинается с гипотез, а выдвигает их сегодня
     только оператор, и команда, которой нет на виду, не будет вызвана.
+
+    73 -> 74 (2026-08-26): `:standing-grant`. Автомат ЧИТАЛ стоячий грант, а
+    завести его не мог никто — читатель без писателя (MIR-166). Команда,
+    которой нет на виду, не будет вызвана тем более, если без неё безнадзорная
+    работа невозможна вовсе.
     """
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
-    assert in_banner == 73
-    assert len(reg.COMMANDS) == 93
-    assert len(reg.all_tokens()) == 142
+    assert in_banner == 74
+    assert len(reg.COMMANDS) == 94
+    assert len(reg.all_tokens()) == 144
 
 
 # ── deliberate exclusions ────────────────────────────────────────────────────

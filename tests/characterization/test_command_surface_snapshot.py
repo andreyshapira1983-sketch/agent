@@ -49,19 +49,21 @@ _REAL_STDIN_READER = repl_module._StdinLineReader
 # table to match.
 FROZEN = {
     # 141 -> 142 (2026-08-15): `:causal`, водитель причинной лестницы.
-    "dispatched": 142,
+    # 142 -> 144 (2026-08-26): `:standing-grant` и её сокращение `:grant`.
+    # Автомат ЧИТАЛ стоячий грант, а завести его не мог никто (MIR-166).
+    "dispatched": 144,
     "pre_dotenv_fast_paths": 2,
     "repl_control_tokens": 4,
     # 96 at 9daa9bf; 98 after the two documented help gaps were closed
     # (`:refresh-models` and `:help` itself were added to the page).
-    "help_tokens": 100,  # +1: :causal (2026-08-15)
+    "help_tokens": 101,  # +1: :standing-grant (2026-08-26)
     # One printed token (`:task-begin`) is a REPL block token rather than a
     # dispatched command — see the divergence tests below.
     # 72/71 -> 73/72 (2026-08-13): `:refresh-models` joined the banner beside
     # its read-only sibling — the visible half of the catalog pair had steered
     # the operator to a usage refusal while the catalog stayed expired (R7).
-    "startup_tokens": 74,  # +1: :causal (2026-08-15)
-    "startup_dispatched_tokens": 73,  # +1: :causal (2026-08-15)
+    "startup_tokens": 75,  # +1: :standing-grant (2026-08-26)
+    "startup_dispatched_tokens": 74,  # +1: :standing-grant (2026-08-26)
     "nl_intent_kinds": 23,
 }
 
@@ -244,7 +246,9 @@ def test_commands_absent_from_the_help_page_are_aliases(tmp_path, capsys):
     missing = _dispatched() - _help_tokens(tmp_path, capsys)
     assert {":memory-status", ":reset", ":kill-switch", ":assumption-log"} <= missing
     # 48 at 9daa9bf; 46 after `:refresh-models` and `:help` were added to the page.
-    assert len(missing) == 46
+    # 46 -> 47 (2026-08-26): `:grant` — сокращение `:standing-grant`; на
+    # странице справки стоит только каноническое имя, как и у прочих.
+    assert len(missing) == 47
 
 
 def test_question_mark_is_a_help_alias_outside_the_colon_namespace():

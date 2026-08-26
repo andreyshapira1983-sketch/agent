@@ -63,6 +63,7 @@ from cli.commands_approval import (
     _handle_approval_triage,
     _handle_best_next_action,
     _handle_self_issue_verify,
+    _handle_standing_grant,
 )
 from cli.commands_audit import (
     _handle_architecture_audit,
@@ -369,6 +370,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
 
     if head in {":team-run", ":team-execute", ":subagents-run"}:
         return _handle_team_run(rest.strip(), agent, workspace)
+
+    if head in {":standing-grant", ":grant"}:
+        return _handle_standing_grant(rest.strip(), agent, workspace)
 
     if head == ":approval-list":
         return _handle_approval_list(rest.strip(), agent, workspace)

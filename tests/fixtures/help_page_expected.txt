@@ -69,6 +69,7 @@ Commands:
   :release-audit [--json]         inspect release artifact hygiene exclusions
   :supply-chain-audit [--json]   inspect pinned deps and CI release gates
   :approval-list [status|all]     list pending/approved/denied approval items
+  :standing-grant <runs/day> [h]  file a standing-grant request for unattended runs (does not grant)
   :approval-triage                read-only triage: clusters/duplicates/stale + advice
   :best-next-action [--json]      choose the single most important next action (advisory)
   :self-issue-verify <fingerprint> run the issue's fixed targeted verifier and resolve on green
