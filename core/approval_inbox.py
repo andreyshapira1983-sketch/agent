@@ -383,6 +383,36 @@ class ApprovalInbox:
         except Exception:  # noqa: BLE001, S110 — reason stated above
             pass  # receipts must never break approval-inbox operations
 
+    def digest(self, *, max_pending: int = 20) -> dict:
+        """Сводка для ЧЕЛОВЕКА: числа и заголовки, без тел заявок.
+
+        Отдельный вид, а не урезанный `snapshot`: на снимке с целыми записями
+        стоит распознавание дубликатов, и обеднить его значило бы выключить
+        распознавание. Замер и границы: MIR-167.
+        """
+        pending = self.pending()
+        by_operation: dict[str, int] = {}
+        for item in pending:
+            by_operation[item.operation] = by_operation.get(item.operation, 0) + 1
+        return {
+            "total": len(self.items),
+            "pending": len(pending),
+            "pending_by_operation": by_operation,
+            "pending_items": [
+                {
+                    "id": item.id,
+                    "operation": item.operation,
+                    "risk": item.risk,
+                    "expires_at": item.expires_at,
+                    "summary": item.summary[:160],
+                }
+                for item in pending[:max_pending]
+            ],
+            # Обрезание объявляется: молчаливое «показано не всё» читается как
+            # «это всё», и оператор решает по неполному списку.
+            "pending_not_listed": max(0, len(pending) - max_pending),
+        }
+
     def snapshot(self) -> dict:
         pending = self.pending()
         return {
