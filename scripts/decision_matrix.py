@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.best_next_action import (
     resolve_goal_subject,
     select_best_next_action,
+    unresolved_goal_targets,
 )
 
 #: Живой репозиторий как источник истины о существовании файлов: предмет цели
@@ -108,7 +109,11 @@ def run() -> list[dict[str, object]]:
     for name, varied, overrides in SCENARIOS:
         goal = str(overrides.get("goal") or "")
         subject = resolve_goal_subject(goal, exists=_exists)
-        kwargs = {**_BASE, **overrides, "goal_subject": subject}
+        kwargs = {
+            **_BASE, **overrides,
+            "goal_subject": subject,
+            "goal_names_missing": unresolved_goal_targets(goal, exists=_exists),
+        }
         picked = select_best_next_action(**kwargs)  # type: ignore[arg-type]
         rows.append({
             "scenario": name,

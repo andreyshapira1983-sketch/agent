@@ -234,6 +234,21 @@ def resolve_goal_subject(text: str, *, exists) -> str | None:
     return None
 
 
+def unresolved_goal_targets(text: str, *, exists) -> tuple[str, ...]:
+    """Пути, НАЗВАННЫЕ целью и не существующие в рабочей области.
+
+    Замер, отвергнутые варианты и границы: MIR-161 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    Нужна, чтобы отказ разрешения не был неотличим от отсутствия имени.
+    """
+    out: list[str] = []
+    for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
+        token = raw.replace("\\", "/").strip("`'\",.;:()[]")
+        if not token or exists(token) or exists(f"{token}.py"):
+            continue
+        out.append(token)
+    return tuple(dict.fromkeys(out))
+
+
 def _named_target(text: str) -> str | None:
     """Файл, названный в тексте цели, если он там назван.
 
@@ -291,6 +306,43 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
     )
 
 
+def _candidate_goal_names_missing(
+    goal: str,
+    goal_subject: str | None,
+    goal_names_missing: tuple[str, ...] | None,
+    active: list[BestNextAction],
+) -> BestNextAction | None:
+    """Названный отказ, когда цель зовёт то, чего в рабочей области нет.
+
+    Замер, отвергнутые варианты и границы: MIR-161 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+    Молчание здесь означало бы работу по чужому делу под именем этой цели.
+    """
+    if goal_subject or not goal_names_missing:
+        return None
+    if _DRAFT_VERB_RE.search(str(goal or "")):
+        return None  # цель просит СОЗДАТЬ файл — это законно
+    if [c for c in active if c.severity in ("critical", "high")]:
+        return None  # поломка сильнее цели всегда
+    names = ", ".join(goal_names_missing[:3])
+    return BestNextAction(
+        action="observe",
+        title="Observe: the goal names something the workspace does not have",
+        severity="none",
+        priority=_P_OBSERVE,
+        reason=(
+            f"Nothing admissible: the goal names {names}, which does not "
+            f"exist in the workspace, so it binds no work."
+        ),
+        evidence=(
+            f"named but missing: {names}",
+            f"{len(active)} candidate(s) set aside as unrelated to the goal",
+        ),
+        unknowns=("whether the goal meant a different path, or one not yet created",),
+        decided_by="no_candidate",
+        grounds="operator_goal",
+    )
+
+
 def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
     goal: str = "",
@@ -298,6 +350,10 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     #: потому что разрешение требует файловой системы, а таблица решений чистая.
     #: `None` значит «цель предмета не назвала», и тогда она ничего не сужает.
     goal_subject: str | None = None,
+    #: Пути, названные целью и НЕ существующие. Разрешает вызывающий
+    #: (`unresolved_goal_targets`) — отказ разрешения не должен быть
+    #: неотличим от отсутствия имени (MIR-161).
+    goal_names_missing: tuple[str, ...] | None = None,
     result_status: str = "none",
     tests_health: str = "none",
     dry_run_streak: int = 0,
@@ -378,6 +434,12 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     # `max(priority)` отдал цикл единственному оставшемуся делу про ЧУЖОЙ файл.
     # Объективная поломка (critical/high) под сужение не попадает никогда:
     # иначе цель стала бы способом отвести взгляд от сломанных тестов.
+    missing = _candidate_goal_names_missing(
+        goal, goal_subject, goal_names_missing, active,
+    )
+    if missing is not None:
+        return missing
+
     if goal_subject:
         def _on_subject(candidate: BestNextAction) -> bool:
             return (
