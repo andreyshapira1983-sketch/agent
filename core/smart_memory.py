@@ -346,6 +346,9 @@ class ProcedureRecord:
     # run left no honest material.
     lessons: tuple[str, ...] = ()
     source_episode_ids: tuple[str, ...] = ()
+    #: Вопросы, из которых процедура сделана — НЕЗАВИСИМО от эпизодов, которые
+    #: гигиена вытесняет, и НЕ участвуя в подборе. Зачем: MIR-165.
+    source_questions: tuple[str, ...] = ()
     success_count: int = 0
     failure_count: int = 0
     confidence: float = 0.5
@@ -363,6 +366,7 @@ class ProcedureRecord:
             "steps": list(self.steps),
             "lessons": list(self.lessons),
             "source_episode_ids": list(self.source_episode_ids),
+            "source_questions": list(self.source_questions),
             "success_count": self.success_count,
             "failure_count": self.failure_count,
             "confidence": self.confidence,
@@ -388,6 +392,9 @@ class ProcedureRecord:
             steps=tuple(str(x) for x in data.get("steps") or ()),
             lessons=_capped_lessons(str(x) for x in data.get("lessons") or ()),
             source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
+            source_questions=_capped_source_questions(
+                str(x) for x in data.get("source_questions") or ()
+            ),
             success_count=max(0, int(data.get("success_count") or 0)),
             failure_count=max(0, int(data.get("failure_count") or 0)),
             confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.5))),
@@ -405,6 +412,9 @@ class ProcedureRecord:
             self,
             source_episode_ids=tuple(
                 dict.fromkeys([*self.source_episode_ids, episode.id])
+            ),
+            source_questions=_capped_source_questions(
+                [*self.source_questions, episode.question]
             ),
             success_count=success_count,
             failure_count=failure_count,
@@ -431,6 +441,9 @@ class ProcedureRecord:
         return replace(
             self,
             source_episode_ids=episode_ids,
+            source_questions=_capped_source_questions(
+                [*self.source_questions, episode.question]
+            ),
             lessons=lessons,
             updated_at=_now_iso(),
         )
@@ -1551,6 +1564,9 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
 # token matches every query. The most RECENT lessons are kept.
 _MAX_LESSONS = 12
 _MAX_TRIGGER_TAGS = 40
+#: Сколько вопросов-происхождений держит одна процедура. Запись уходит в
+#: подсказки планировщика, поэтому ограничено всё, что в ней копится.
+_MAX_SOURCE_QUESTIONS = 5
 #: Evidence labels shown in one line, before a "+N more" summary. Shared by the
 #: lesson and the step so the two cannot drift apart.
 _MAX_SHOWN_LABELS = 3
@@ -1559,6 +1575,16 @@ _MAX_SHOWN_LABELS = 3
 def _capped_lessons(lessons: Iterable[str]) -> tuple[str, ...]:
     deduped = tuple(dict.fromkeys(x for x in lessons if x))
     return deduped[-_MAX_LESSONS:]
+
+
+def _capped_source_questions(questions: Iterable[str]) -> tuple[str, ...]:
+    """ПЕРВЫЕ пять, а не последние: вытесняем поздние приросты, не происхождение.
+
+    Обратное правило `_capped_lessons` (последние N) здесь было бы порчей: урок
+    тем ценнее, чем свежее, а вопрос-происхождение — тем, что он первый.
+    """
+    deduped = tuple(dict.fromkeys(_clean_text(x, max_chars=200) for x in questions if x))
+    return tuple(x for x in deduped if x)[:_MAX_SOURCE_QUESTIONS]
 
 
 def _summarise_labels(labels: tuple[str, ...]) -> str:
@@ -1635,6 +1661,10 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
         steps=tuple(steps),
         lessons=(lesson,) if lesson else (),
         source_episode_ids=(),
+        # Полный вопрос, а не 60-знаковый `subject` из шагов: тот обрезан и
+        # лежит внутри стога подбора, поэтому свидетелем происхождения быть
+        # не может (MIR-165).
+        source_questions=_capped_source_questions((episode.question,)),
         success_count=0,
         failure_count=0,
         confidence=0.5,

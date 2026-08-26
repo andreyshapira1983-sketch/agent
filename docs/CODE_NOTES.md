@@ -4394,3 +4394,45 @@ decision about lessons; the earlier decision was kept rather than overwritten.
 Measurements: `scripts/memguard_axis_probe.py` (the population and the
 head-to-head), `scripts/memguard_axis_control.py` (one contest broken down, old
 formula against relevance alone). Registry: MIR-164.
+
+
+## The witness that lived inside the haystack
+
+Experience retrieval admits a procedure when the query shares any one
+discriminating word with it. Measured on the live store — 142 questions, 32
+procedures — that admits a median of TEN procedures per question, all 32 in the
+worst case, and 73% of the 2089 admissions rest on exactly ONE shared word. The
+planner is then handed the top three of those ten as relevant experience.
+
+Which three depends on salience weights, and MIR-105 left open whether to fix
+this with a floor for unseen tokens or a threshold on the score. The measurement
+settles half of it: a floor cannot touch the noise at all. Admission has no
+threshold, so any positive weight admits — dropping the unseen weight ninefold
+(4.96 → 0.57) leaves the admission count at exactly 2089 and reorders the
+planner's three for only 11 of 142 questions. Whatever reduces this noise, it is
+not a re-weighting.
+
+The first attempt at that measurement was wrong in a way worth recording: the
+corpus was built from the same questions used to query it, so no query word was
+ever unseen and the floor was unreachable by construction. Held out one question
+at a time, the picture splits by speaker — the agent's own task labels carry 2%
+unseen topic words, the operator's questions 26%.
+
+Choosing the threshold constant needs labelled pairs, and that is where the real
+find was. A procedure records `source_episode_ids`, but hygiene evicts episodes:
+29 of 34 procedures point at records that no longer exist. What survives of the
+origin question survives in the WRONG place — sixty characters of it in
+`steps[0]`, its tokens in `trigger_tags` — which is to say, inside the very text
+retrieval scores against. Ground truth taken from there measures retrieval with
+itself.
+
+So `source_questions` was added: the full origin question, first five, written at
+all three fold-in points, and deliberately excluded from the haystack. A test
+pins that exclusion, because a witness that drifts into the haystack stops being
+a witness. The measurement script reads the new field where it exists and falls
+back to the episode lookup where it does not. Nothing about today's numbers
+changes — the field fills as procedures are minted — and that is the honest state
+to leave it in.
+
+Measurement: `scripts/measure_experience_retrieval_discrimination.py`.
+Registry: MIR-105 (measured, one option eliminated), MIR-165 (the witness).
