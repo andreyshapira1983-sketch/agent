@@ -44,13 +44,22 @@ Deliberately unprescribed: whether the fix is a `target` field on the
 action, a goal-derived `candidate_targets`, or a refusal when the goal
 names a module the backlog does not rank. The invariant is only that the
 head's choice must be able to reach the hands.
+
+CASHED 2026-08-26 (MIR-159). The road now carries the choice: the charter
+step passes `candidate_targets` built from the decision's own
+`target_path`, falling back to the goal's subject resolved BY EXISTENCE in
+the workspace (MIR-158) rather than by a `.py` spelling. A goal naming no
+module still leaves the producer free — that half was never the defect.
+
+The xfail is removed rather than left to XPASS, and the AST check below is
+no longer the whole guard: it can only see the keyword, and a keyword
+carrying `None` forever would satisfy it. What the value actually IS lives
+in tests/test_the_goal_named_target_reaches_the_producer.py.
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-
-import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 _PRODUCER = "produce_self_apply_proposal"
@@ -102,17 +111,6 @@ def test_the_producer_can_be_told_which_target_to_take() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured live 2026-08-19 23:31 and banked rather than "
-        "fixed: every machine caller of the self-build producer leaves both "
-        "target sockets empty, so the producer re-selects its own top "
-        "backlog candidate with no knowledge of the goal the head just "
-        "chose. The invariant: at least one machine road must be able to "
-        "hand the producer the target its own goal named."
-    ),
-    strict=True,
-)
 def test_some_machine_road_hands_the_producer_a_target() -> None:
     sites = _producer_call_sites()
     binding = [s for s in sites if {"candidate_targets", "grounded_selector"} & s[2]]
