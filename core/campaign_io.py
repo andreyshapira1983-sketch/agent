@@ -85,14 +85,20 @@ def _default_gather_signals(
     # а таблица решений остаётся чистой (MIR-158).
     from pathlib import Path as _Path
 
-    from core.best_next_action import resolve_goal_subject
+    from core.best_next_action import (
+        resolve_goal_subject,
+        unresolved_goal_targets,
+    )
 
     _root = _Path(ws)
+
+    def _here(rel: str) -> bool:
+        return (_root / rel).is_file()
+
     action = select_best_next_action(
         goal=goal,
-        goal_subject=resolve_goal_subject(
-            goal, exists=lambda rel: (_root / rel).is_file()
-        ),
+        goal_subject=resolve_goal_subject(goal, exists=_here),
+        goal_names_missing=unresolved_goal_targets(goal, exists=_here),
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
         dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),
