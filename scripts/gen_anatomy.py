@@ -39,6 +39,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("Perception & Adversarial Defense (§2)", "Input handling and injection/exfiltration defense.", [
         "injection_guard", "redaction", "data_classifier", "dlp", "secret_scanner",
         "repo_provenance",
+        "rule_approved_apply",
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
         "loop", "loop_step_execution", "loop_sensor",

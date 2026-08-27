@@ -411,6 +411,49 @@ def _stale_changes(workspace: Path, changes) -> list[str]:
     return stale
 
 
+#: Документы, которые КОД читает как власть или как маршрут. Документ здесь
+#: бывает не текстом, а решением: хартия выбирает агенту цели и лежит в той же
+#: папке, куда он пишет черновики. Правило «только создание» их и так не
+#: пропустит — запрет назван отдельно, чтобы не опираться на побочный эффект.
+_AUTHORITY_DOCUMENTS: frozenset[str] = frozenset({
+    "knowledge/doctrine/future/CORPORATE_MODEL.md",
+    "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
+    "knowledge/doctrine/ROADMAP.md",
+    "knowledge/generated/AGENT_ANATOMY.md",
+    "knowledge/maps/COMMANDS_MAP.md",
+})
+
+
+def autonomous_execution_verdict(proposal: SelfApplyProposal) -> tuple[bool, str]:
+    """Можно ли применить это предложение БЕЗ человека, и если нет — почему.
+
+    Правило не даёт новых полномочий. Создавать файлы агент уже вправе через
+    `file_write` — без тестов и без отката; полоса делает то же самое с
+    прицельными тестами, полной батареей и откатом, то есть добавляет проверку
+    к уже разрешённому действию. Всё, что шире, остаётся за человеком.
+
+    Три условия, и каждое отсекает свой класс вреда: файла не должно было
+    существовать (перезапись необратима, I-1); это должен быть документ (новый
+    тест — это новый судья, а приёмка идёт той же батареей, MIR-139); и он не
+    должен быть документом, который код читает как власть.
+
+    Замер и отвергнутые варианты: MIR-173.
+    """
+    if not proposal.files:
+        return False, "no files in the proposal"
+    for change in proposal.files:
+        path = (change.path or "").replace("\\", "/").strip()
+        if not change.base_checked:
+            return False, f"unstamped origin for {path!r}: not checked is not permission"
+        if change.base_sha256:
+            return False, f"{path!r} existed when the proposal was made; an overwrite is the operator's"
+        if not path.lower().endswith(".md"):
+            return False, f"{path!r} is not a document; code and tests stay with the operator"
+        if path in _AUTHORITY_DOCUMENTS:
+            return False, f"{path!r} is read by code as authority"
+    return True, "creates documents only, none of them read as authority"
+
+
 def _write_file(workspace: Path, rel: str, content: str) -> None:
     target = (workspace / rel).resolve()
     root = workspace.resolve()

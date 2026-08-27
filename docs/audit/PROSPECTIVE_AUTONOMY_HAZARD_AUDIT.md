@@ -39,10 +39,16 @@ them». So the prerequisites were measured first, against the tree at `b0cbee2`.
 | self-modification (own code applied) | **NO** | `run_approved_self_apply` has exactly one caller: `cli/commands_self_apply.py`. `agent_tick.py:747` only COUNTS such items |
 | code promotion (push / merge) | **NO** | `core/safe_vcs.py` defines zero `push`/`fetch`/`pull`/`remote` methods; the lane commits to a temp branch only |
 | multiple agents | **NO** autonomously | `launch_subagent` is created in `cli/commands_proposals.py` and executed in `cli/commands_approval.py`; no autonomous caller |
+| autonomous application of its OWN proposals | **yes, since 2026-08-27**, narrowly | only proposals that CREATE documents: no overwrite, no code, no tests, and none of the five documents code reads as authority. Two gates: effects on AND an active standing grant. See MIR-173 |
 | model-generated configuration | **partial** | the charter `knowledge/doctrine/future/CORPORATE_MODEL.md` steers goal choice and is an `.md` the agent may PROPOSE; it may not overwrite it (I-1) |
 
 **The one-sentence denominator.** The agent's autonomous effect surface today is
-*creating new files inside the workspace* — nothing else. Everything wider is
+*creating new files inside the workspace* — nothing else. Since 2026-08-27 it may
+also APPLY its own proposals of that same shape (new documents only) through the
+lane, which adds targeted tests, the full battery and automatic rollback to an
+effect it could already perform bare. The single genuinely new capability is a
+commit to a temporary branch without a human; it never touches the base branch
+and is undone by deleting that branch. Everything wider is
 either gated to a human or absent from the code.
 
 ---
