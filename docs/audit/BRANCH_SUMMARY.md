@@ -69,7 +69,7 @@ The runtime could READ a standing grant and nothing shipped could CREATE one —
 the mechanism for unattended operation existed in code and was reachable by no
 operator action. Related work made every registry entry name its provenance, gave
 the operator a goal veto, and made a cycle record remember whether the goal
-actually drove the choice (measured: it did in 14% of 267 cycles).
+actually drove the choice. **The number first published here was wrong and is corrected in MIR-163**: «14% of 267 cycles» divided by every ledger row, and 255 of 275 predate the field entirely, so «not recorded» was being counted as «the goal did not drive». Recorded grounds exist on 8 rows so far. The same denominator error produced a «3% of goals name a subject» figure; measured properly it is 9 of the 20 cycles that record a goal at all, and the cause was never vague goals — see MIR-174.
 
 ### The self-apply lane
 A proposal carries a whole file and used to write it back without asking whether
