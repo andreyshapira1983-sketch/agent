@@ -176,17 +176,16 @@ def _map_split_candidate(
     # output-token ceiling. A module far above this line budget cannot be split in
     # one pass (the reply truncates and parses to nothing), so it stays
     # report-only — like a critical file — until an incremental splitter exists.
-    line_count = read.text.count("\n") + 1
-    if line_count > SPLIT_ONE_SHOT_MAX_LINES:
-        return TargetMappingResult(
-            "no_target",
-            (
-                f"split target {rel!r} is too large for a single-pass split "
-                f"({line_count} lines > {SPLIT_ONE_SHOT_MAX_LINES}); needs an "
-                "incremental splitter"
-            ),
-            target_path=target,
-        )
+    # Прежде здесь стоял отказ для файлов длиннее SPLIT_ONE_SHOT_MAX_LINES со
+    # словами «needs an incremental splitter» — написанный, КОГДА расщепителя не
+    # было. Он давно есть: затвор масштаба производителя (>900 строк,
+    # `_split_target_too_large`) сам маршрутизирует к
+    # `_deterministic_split_report`, и это закреплено тестом «Site 2». Отказ
+    # делал ту ветку недостижимой — картограф говорил «нет того, что уже есть»,
+    # и за одни сутки безнадзорной работы это стоило 234 единицы на циклы со
+    # структурно невозможным продуктом (MIR-179). Теперь картограф отдаёт
+    # конкретный файл, а КАК его колоть — одним выстрелом или инкрементально —
+    # решает производитель по своему затвору масштаба.
     mapped = _copy_candidate(candidate, target_path=rel, mapping_rule="split_module")
     return TargetMappingResult(
         "mapped",

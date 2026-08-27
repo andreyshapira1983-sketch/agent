@@ -1210,16 +1210,17 @@ def _oversized_split_cand(target_rel):
 
 
 def test_oversized_split_manager_refusal_does_not_publish_refactor(workspace, monkeypatch):
-    # Regression: a mapper-refused split (the real core/loop.py failure mode) is
-    # not a proven defect and must not become a deterministic refactor proposal.
-    import core.backlog_target_mapper as btm
+    # Regression, re-premised 2026-08-27 (MIR-179): the size-based mapper
+    # refusal this test used to force is GONE — the incremental splitter it
+    # said was missing exists, and large split targets now map through to the
+    # producer's own scale gate ("Site 2" below). What this test still
+    # protects, on a live premise: a split whose target the mapper cannot
+    # ground AT ALL (the file is missing) must not become a deterministic
+    # refactor proposal, and the splitter must never run for it.
     import core.incremental_splitter as isp
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
-    target_rel = "core/huge_mod.py"
-    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
-    # Force the mapper to treat this small file as "too large for one pass".
-    monkeypatch.setattr(btm, "SPLIT_ONE_SHOT_MAX_LINES", 2)
+    target_rel = "core/huge_mod.py"  # deliberately never written to disk
     def _must_not_plan(*args, **kwargs):
         raise AssertionError("incremental splitter must not run for no_target")
 

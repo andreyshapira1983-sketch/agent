@@ -125,7 +125,16 @@ def test_mapper_refuses_non_python_split_target(workspace: Path):
     assert result.decision == "no_target"
 
 
-def test_mapper_refuses_split_target_too_large_for_one_shot(workspace: Path):
+def test_mapper_maps_split_target_above_the_one_shot_budget(workspace: Path):
+    """Перевёрнутый пин: прежний отказ держался на умершей предпосылке (MIR-179).
+
+    Отказ «needs an incremental splitter» был написан, когда расщепителя не
+    было. Расщепитель давно есть, и затвор масштаба производителя (>900 строк)
+    сам маршрутизирует к нему — но ветка была недостижима: картограф отказывал
+    РАНЬШЕ, ровно с причиной «нет того, что уже есть». Цена за одни сутки
+    безнадзорной работы: 234 единицы на циклы со структурно невозможным
+    продуктом.
+    """
     from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
 
     (workspace / "core").mkdir(parents=True, exist_ok=True)
@@ -134,8 +143,9 @@ def test_mapper_refuses_split_target_too_large_for_one_shot(workspace: Path):
     result = map_backlog_candidate(
         _candidate("split:core/huge_mod.py"), workspace=workspace
     )
-    assert result.decision == "no_target"
-    assert "too large for a single-pass split" in result.reason
+    assert result.decision == "mapped", result.reason
+    assert result.candidate is not None
+    assert result.candidate.target_path == "core/huge_mod.py"
 
 
 def test_mapper_allows_split_target_within_one_shot_budget(workspace: Path):
