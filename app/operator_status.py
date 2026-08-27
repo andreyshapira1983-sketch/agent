@@ -185,24 +185,10 @@ def _handle_operator_budget(rest: str, agent: AgentLoop, workspace: Path) -> boo
 
 
 def _spend_mirror_lines(workspace: Path) -> list[str]:
-    """Строки зеркала из живых журналов; сбой чтения — пустота, не падение."""
-    from core.spend_report import spend_report_lines
-    from core.state_integrity import read_state_jsonl
+    """Тонкий вызов: загрузка и свод живут в `core/spend_report` (MIR-177)."""
+    from core.spend_report import load_spend_rows, spend_report_lines
 
-    try:
-        usage = read_state_jsonl(workspace / "data" / "model_usage.jsonl")
-    except Exception:  # noqa: BLE001 — зеркало не вправе ронять команду
-        usage = []
-    ledger_path = workspace / "data" / "campaign_ledger.jsonl"
-    ledger: list[dict] = []
-    try:
-        for raw in ledger_path.read_text(encoding="utf-8").splitlines():
-            if raw.strip():
-                ledger.append(json.loads(raw))
-    except Exception:  # noqa: BLE001 — зеркало трат читает журнал по пути
-        # ЛУЧШИХ УСИЛИЙ: отсутствующая или битая лента не вправе ронять
-        # команду бюджета, а пустой отчёт честно показывает пустоту.
-        ledger = []
+    usage, ledger = load_spend_rows(workspace)
     return spend_report_lines(usage_rows=usage, ledger_rows=ledger)
 
 

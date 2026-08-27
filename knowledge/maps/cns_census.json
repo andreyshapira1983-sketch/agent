@@ -41,6 +41,7 @@
     "loop_context.py::AgentLoopContext._maybe_resolve_referent": [],
     "loop_context.py::AgentLoopContext._open_run": [],
     "loop_context.py::AgentLoopContext._retrieve_turn_context": [],
+    "loop_context.py::AgentLoopContext._spend_mirror": [],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain": [],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain": [
       "discovery",
@@ -306,11 +307,19 @@
     ],
     [
       "loop_context.py::AgentLoopContext._retrieve_turn_context",
+      "loop_context.py::AgentLoopContext._spend_mirror"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._retrieve_turn_context",
       "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory"
     ],
     [
       "loop_context.py::AgentLoopContext._retrieve_turn_context",
       "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._spend_mirror",
+      "loop.py::AgentLoop._file_read_workspace_root"
     ],
     [
       "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain",

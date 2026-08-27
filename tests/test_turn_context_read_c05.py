@@ -170,7 +170,7 @@ def test_a_local_critique_turn_withholds_memory_blocks(
         "otherwise the assertions below prove nothing"
     )
 
-    _hist, critique_on, persistent_block, experience_block = (
+    _hist, critique_on, persistent_block, experience_block, _spend_block = (
         agent._retrieve_turn_context(critique_question, file_hint=None)
     )
 
@@ -194,7 +194,7 @@ def test_an_ordinary_turn_still_receives_the_memory_blocks(
     agent = _agent(tmp_path)
     _seed_persistent(agent)
 
-    _hist, critique_on, persistent_block, _experience = (
+    _hist, critique_on, persistent_block, _experience, _spend = (
         agent._retrieve_turn_context(QUESTION, file_hint=None)
     )
 

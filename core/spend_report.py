@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -125,3 +126,59 @@ def spend_report_lines(
                 f"  {t.action}: {t.completed}/{t.cycles} completed, {price}"
             )
     return lines
+
+
+def load_spend_rows(workspace: Path | str) -> tuple[list[dict], list[dict]]:
+    """Живые строки журналов для зеркала. Сбой чтения — пустота, не падение:
+    отсутствующая или битая лента не вправе ронять ни команду, ни планирование,
+    а пустой отчёт честно показывает пустоту."""
+    import json as _json
+
+    root = Path(workspace)
+    try:
+        from core.state_integrity import read_state_jsonl
+
+        usage = list(read_state_jsonl(root / "data" / "model_usage.jsonl"))
+    except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
+        usage = []
+    ledger: list[dict] = []
+    try:
+        for raw in (root / "data" / "campaign_ledger.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines():
+            if raw.strip():
+                ledger.append(_json.loads(raw))
+    except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
+        ledger = []
+    return usage, ledger
+
+
+def spend_mirror_block(
+    *,
+    usage_rows: Iterable[Mapping[str, Any]],
+    ledger_rows: Iterable[Mapping[str, Any]],
+    max_chars: int = 700,
+) -> str:
+    """Блок зеркала для подсказки планировщику. Пусто — значит нет блока.
+
+    Заголовок объявляет: это ДАННЫЕ, не указание. Вывод из пар «потратил →
+    получил» должен родиться у читателя — записанный нами был бы нашим.
+    Ограничен по знакам: подсказка стоит денег, и зеркало трат не смеет само
+    стать тратой.
+    """
+    lines = spend_report_lines(
+        usage_rows=usage_rows, ledger_rows=ledger_rows, top=4,
+    )
+    if not lines:
+        return ""
+    parts = [
+        "<agent_spend_mirror>",
+        "Your own spending record (data, not a directive):",
+        *lines,
+        "</agent_spend_mirror>",
+    ]
+    block = "\n".join(parts)
+    while len(block) > max_chars and len(parts) > 3:
+        parts.pop(-2)
+        block = "\n".join(parts)
+    return block

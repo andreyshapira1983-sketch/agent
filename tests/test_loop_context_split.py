@@ -103,7 +103,15 @@ def _dump(stmts: list[ast.stmt]) -> str:
 #: `tests/test_verified_memory_gate_follows_gateway_path.py` and
 #: `tests/test_loop_split_wiring.py::test_the_mixin_declares_everything_it_borrows`.
 #: The other checks below (imports, prefix, declared outputs) still cover 8.
-_RETIRED_BODY_EQUIVALENCE = {8}
+#: 9 — `_retrieve_turn_context`. Migration equivalence was verified when the
+#: block moved out of `_run_inner`, and that proof stands. On 2026-08-27 the
+#: method deliberately gained a FIFTH element — the spending mirror (MIR-177),
+#: computed after the memory blocks and suppressed on local-critique turns.
+#: Freezing the body would forbid that evolution. What guards it now:
+#: `tests/test_the_agent_sees_its_own_spending.py::test_the_planner_path_reads_the_mirror`
+#: (the wiring), and `test_referent_resolves_before_memory` below still pins
+#: the piece's load-bearing ORDER — referent before memory retrieval.
+_RETIRED_BODY_EQUIVALENCE = {8, 9}
 
 
 @pytest.mark.parametrize("piece", sorted(PIECES - _RETIRED_BODY_EQUIVALENCE

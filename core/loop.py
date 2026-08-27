@@ -336,6 +336,7 @@ class AgentLoop(
             local_critique_active,
             persistent_block,
             experience_block,
+            spend_block,
         ) = self._retrieve_turn_context(user_question, file_hint=file_hint)
 
         _decided = self._episodic_fast_path(
@@ -353,7 +354,7 @@ class AgentLoop(
         # but kept out of `history` so `<conversation_history>` stays a
         # strict marker for actual prior dialogue.
         planner_history = "\n\n".join(
-            part for part in (persistent_block, experience_block, history) if part.strip()
+            p for p in (persistent_block, experience_block, spend_block, history) if p.strip()
         )
         multi_file = prepare_multi_file_review(
             user_question,

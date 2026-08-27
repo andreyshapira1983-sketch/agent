@@ -130,3 +130,57 @@ def test_the_organ_speaks_the_producers_vocabulary() -> None:
 
     assert model_spend(invented)[0].ok_calls == 0
     assert model_spend(real)[0].ok_calls == 1
+
+
+def test_the_mirror_becomes_a_planner_block() -> None:
+    """Красный свидетель: зеркало доходит до планировщика тем же путём, что опыт.
+
+    Блок — ДАННЫЕ, не указание: он обязан сам называть себя записью, из которой
+    вывод делает читатель. Записанный нами вывод был бы нашим, а не его.
+    """
+    from core.spend_report import spend_mirror_block
+
+    block = spend_mirror_block(
+        usage_rows=[_call("cheap", units=5)],
+        ledger_rows=[_cycle("study", units=72)],
+    )
+
+    assert block.startswith("<agent_spend_mirror>")
+    assert block.rstrip().endswith("</agent_spend_mirror>")
+    assert "per 100 units" in block
+    assert "data, not a directive" in block
+
+
+def test_an_empty_record_yields_no_block_at_all() -> None:
+    """Пустые журналы — нет блока: пустое зеркало не занимает подсказку."""
+    from core.spend_report import spend_mirror_block
+
+    assert spend_mirror_block(usage_rows=[], ledger_rows=[]) == ""
+
+
+def test_the_block_is_bounded() -> None:
+    """Подсказка стоит денег: зеркало трат не смеет само стать тратой."""
+    from core.spend_report import spend_mirror_block
+
+    rows = [_call(f"model-{i}", units=7) for i in range(200)]
+    block = spend_mirror_block(usage_rows=rows, ledger_rows=[], max_chars=700)
+
+    assert len(block) <= 700
+
+
+def test_the_planner_path_reads_the_mirror() -> None:
+    """Проводка в чтение контекста хода — рядом с блоком опыта, не внутри.
+
+    Пин по смыслу: имя связано в модуле и вызвано в горячем пути.
+    """
+    import inspect
+
+    from core import loop_context as mod
+
+    # Первая проводка подмешивала зеркало в БЛОК ОПЫТА и уронила шестнадцать
+    # тестов его контракта. Зеркало — пятый элемент контекста хода, и пин
+    # следует за этим решением.
+    assert callable(getattr(mod, "spend_mirror_block", None))
+    src = inspect.getsource(mod.AgentLoopContext._retrieve_turn_context)
+    assert "_spend_mirror" in src
+    assert "spend_mirror_block" in inspect.getsource(mod.AgentLoopContext._spend_mirror)

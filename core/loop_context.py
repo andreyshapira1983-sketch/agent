@@ -52,6 +52,7 @@ from core.referent_resolver import (
     is_show_only_directive,
     referent_resolver_mode,
 )
+from core.spend_report import load_spend_rows, spend_mirror_block
 
 
 class AgentLoopContext:
@@ -91,8 +92,8 @@ class AgentLoopContext:
         user_question: str,
         *,
         file_hint: str | None,
-    ) -> tuple[str, bool, str, str]:
-        """История, признак локальной критики, блоки долгой и опытной памяти.
+    ) -> tuple[str, bool, str, str, str]:
+        """История, критика, блоки долгой и опытной памяти, зеркало трат.
 
         Порядок здесь — часть контракта: референт разрешается ДО выборки
         памяти, потому что именно его вердикт решает, подмешивать её вообще
@@ -163,7 +164,25 @@ class AgentLoopContext:
             persistent_block = self._retrieve_persistent(user_question)
             experience_block = self._retrieve_experience_memory(user_question)
 
-        return history, local_critique_active, persistent_block, experience_block
+        # Зеркало трат (MIR-177) — ПЯТЫЙ элемент, а не примесь к блоку опыта:
+        # у того свой контракт и свои тесты, и первая проводка, подмешавшая
+        # зеркало внутрь, уронила шестнадцать. Собственные пары «потратил →
+        # получил», данные, не указание; пустые журналы не занимают подсказку.
+        # На витке локальной критики подавляется вместе с остальной памятью.
+        spend_block = "" if local_critique_active else self._spend_mirror()
+
+        return history, local_critique_active, persistent_block, experience_block, spend_block
+
+    def _spend_mirror(self) -> str:
+        """Блок зеркала из живых журналов; без рабочей папки — пустота."""
+        try:
+            usage_rows, ledger_rows = load_spend_rows(self._file_read_workspace_root())
+            return spend_mirror_block(usage_rows=usage_rows, ledger_rows=ledger_rows)
+        except Exception as exc:  # noqa: BLE001 — зеркало не вправе ронять ход
+            # Молчать нельзя (храповик тишины журнала): оператор, читающий
+            # логи, должен видеть, что зеркала не было и почему.
+            self.log.log("spend_mirror_unavailable", {"error": repr(exc)[:200]})
+            return ""
 
     def _maybe_resolve_referent(
         self,
