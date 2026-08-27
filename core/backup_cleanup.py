@@ -10,6 +10,18 @@ from pathlib import Path
 # Captures group 1 = the target filename, group 2 = the timestamp.
 BACKUP_NAME_RE = re.compile(r"^(?P<target>.+)\.bak\.(?P<ts>\d{8}T\d{6}Z)$")
 
+# Живые семьи имён по перемеру 2026-08-27 (MIR-125): разовые миграции пишут
+# три ДРУГИХ формата, и ни один не узнавался — data/ удвоился их мусором.
+# Порядок важен: формы с меткой времени раньше бессрочной. Возраст бессрочной
+# берётся из mtime файла. Неузнанное имя по-прежнему не трогается.
+_BACKUP_NAME_RES: tuple[re.Pattern[str], ...] = (
+    BACKUP_NAME_RE,                                                  # t.bak.<ts>
+    re.compile(r"^(?P<target>.+)\.(?P<ts>\d{8}T\d{6}Z)\.bak$"),      # t.<ts>.bak
+    re.compile(                                                      # t.pre-<slug>-<ts>.bak
+        r"^(?P<target>.+)\.pre-[A-Za-z0-9_-]+-(?P<ts>\d{8}T\d{6}Z)\.bak$"),
+    re.compile(r"^(?P<target>.+)\.pre-[A-Za-z0-9_.-]+\.bak$"),       # t.pre-<slug>.bak (без метки)
+)
+
 # Retention defaults — conservative on purpose. Even a very old single
 # backup is preserved by the `keep_last` floor, because a sole backup is
 # usually the most valuable kind.
@@ -52,27 +64,44 @@ def _parse_backup_ts(stem: str) -> datetime | None:
     except ValueError:
         return None
 
-def _scan_backups(workspace_root: Path) -> list[BackupCandidate]:
-    """Walk the workspace and collect every `.bak.<ts>` file we recognise.
+def _candidate_from_name(path: Path) -> BackupCandidate | None:
+    """Узнать файл по одной из живых семей имён; неузнанное — None."""
+    for pattern in _BACKUP_NAME_RES:
+        m = pattern.match(path.name)
+        if not m:
+            continue
+        raw_ts = m.groupdict().get("ts")
+        if raw_ts is not None:
+            ts = _parse_backup_ts(raw_ts)
+            if ts is None:
+                return None
+        else:
+            try:
+                ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                return None
+        return BackupCandidate(path=path, target_name=m.group("target"), ts=ts)
+    return None
 
-    Files whose suffix doesn't parse are ignored — we never touch a file
-    we don't fully understand.
+
+def _scan_backups(workspace_root: Path) -> list[BackupCandidate]:
+    """Walk the workspace and collect every backup file we recognise.
+
+    Files whose name doesn't parse as a known backup family are ignored —
+    we never touch a file we don't fully understand.
     """
     out: list[BackupCandidate] = []
     if not workspace_root.exists():
         return out
-    for path in workspace_root.rglob("*.bak.*"):
-        if not path.is_file():
-            continue
-        m = BACKUP_NAME_RE.match(path.name)
-        if not m:
-            continue
-        ts = _parse_backup_ts(m.group("ts"))
-        if ts is None:
-            continue
-        out.append(
-            BackupCandidate(path=path, target_name=m.group("target"), ts=ts)
-        )
+    seen: set[Path] = set()
+    for glob in ("*.bak.*", "*.bak"):
+        for path in workspace_root.rglob(glob):
+            if not path.is_file() or path in seen:
+                continue
+            seen.add(path)
+            candidate = _candidate_from_name(path)
+            if candidate is not None:
+                out.append(candidate)
     return out
 
 def cleanup_backups(
