@@ -586,6 +586,7 @@ def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
         llm_calls_spent=0,
         cost_units_spent=0,
         artifact=artifact,
+        work_done=True,
     )
 
 
@@ -689,10 +690,14 @@ def _default_execute_action(
         )
         if engineered:
             proposal = f"{proposal}; {engineered}" if proposal else engineered
+    # MIR-117 (норма A): токен жизненного цикла очереди не копируется в исход
+    # цикла — прогон, чью единственную задачу отвергли, писал «completed».
+    semantic, work_done = report.semantic_result()
     return CampaignActionOutcome(
-        result=report.status,
+        result=semantic,
         llm_calls_spent=max(0, llm_after - llm_before),
         cost_units_spent=max(0, cost_after - cost_before),
         proposal=proposal,
         artifact=artifact,
+        work_done=work_done,
     )

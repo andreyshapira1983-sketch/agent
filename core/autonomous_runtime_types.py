@@ -115,6 +115,22 @@ class AutonomousRunReport:
             "reflection": self.reflection,
         }
 
+    def semantic_result(self) -> tuple[str, bool]:
+        """(result, work_done) — исход, а не жизненный цикл (MIR-117, норма A).
+
+        ``status='completed'`` чеканится по «дочерпали», и прогон, чью
+        единственную задачу отверг ценовой конверт, носил его как достижение.
+        Здесь слово следует за работой: сделана = хотя бы одна задача ``done``.
+        """
+        work = any(t.status == "done" for t in self.tasks)
+        if self.status in ("stopped", "blocked"):
+            return self.status, work
+        if work:
+            return "completed", True
+        if any(t.status == "failed" for t in self.tasks):
+            return "failed", False
+        return "empty", False
+
     def user_summary(self) -> str:
         parts = [
             (f"(auto-run status={self.status} dry_run={self.dry_run} "
@@ -191,6 +207,22 @@ class AutonomousQueueRunReport:
     def work_partial(self) -> bool:
         """Achieved something AND failed something — what one verdict cannot say."""
         return self.succeeded_count > 0 and self.failed_count > 0
+
+    def semantic_result(self) -> tuple[str, bool]:
+        """(result, work_done) for consumers that mean OUTCOME, not lifecycle.
+
+        MIR-117: the campaign cycle copied ``status`` verbatim, so a run whose
+        only task was refused pre-flight recorded ``completed``. Here the word
+        follows the work: hollow ``completed`` becomes ``failed``; a stopped
+        run that achieved something still admits the work happened.
+        """
+        if self.status == "stopped":
+            return "stopped", self.work_succeeded
+        if self.work_succeeded:
+            return "completed", True
+        if self.failed_count > 0:
+            return "failed", False
+        return self.status, False
 
     def to_dict(self) -> dict:
         return {

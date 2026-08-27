@@ -216,7 +216,9 @@ class TestIdleStall:
         gather = _ScriptedGather([
             _useful("fix_a"), _useful("fix_a"), _observe(), _observe(),
         ])
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
             agent=SimpleNamespace(log=None),
@@ -286,7 +288,7 @@ class TestCompletedRun:
         # Distinct actions so each cycle is a genuinely-new useful pass.
         gather = _ScriptedGather([_useful("fix_a"), _useful("fix_b"), _useful("fix_c")])
         execute = _RecordingExecute(
-            CampaignActionOutcome(result="completed", llm_calls_spent=0)
+            CampaignActionOutcome(result="completed", llm_calls_spent=0, work_done=True)
         )
         result = run_campaign(
             CampaignConfig(max_cycles=3, max_llm_calls=0),
@@ -314,7 +316,7 @@ class TestRepeatDedup:
         # stall — proving the campaign does NOT spin on one signal.
         gather = _ScriptedGather([_useful("restore_daemon_liveness")])
         execute = _RecordingExecute(
-            CampaignActionOutcome(result="completed", llm_calls_spent=2, cost_units_spent=6)
+            CampaignActionOutcome(result="completed", llm_calls_spent=2, cost_units_spent=6, work_done=True)
         )
         result = run_campaign(
             CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
@@ -340,7 +342,9 @@ class TestRepeatDedup:
         events: list[tuple[str, dict]] = []
         agent = SimpleNamespace(log=SimpleNamespace(log=lambda e, p: events.append((e, p))))
         gather = _ScriptedGather([_useful("review_dry_run_stall")])
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=10, max_idle_streak=2, max_llm_calls=0),
             agent=agent,
@@ -368,7 +372,9 @@ class TestRepeatDedup:
             _useful("fix_a"), _useful("fix_a"),
             _useful("fix_b"), _useful("fix_b"), _useful("fix_b"),
         ])
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=10, max_idle_streak=3, max_llm_calls=0),
             agent=SimpleNamespace(log=None),
@@ -620,14 +626,20 @@ class TestActionFocusedGoal:
                 captured["goal"] = config.goal
                 captured["include_goal"] = config.include_goal
                 captured["dry_run"] = config.dry_run
+                from core.autonomous_runtime_types import AutonomousRunReport
+
                 goal_task = SimpleNamespace(
                     task=SimpleNamespace(kind="goal"),
+                    status="done",
                     details={"answer": "Inspect the last failed tick error and report the cause."},
                 )
-                return SimpleNamespace(
-                    status="completed",
+                # Настоящий тип отчёта, не SimpleNamespace: боевой код читает
+                # semantic_result(), и заглушка-соглашашка спрятала бы обрыв
+                # ([[a-mock-agrees-to-anything]] — она его и вскрыла).
+                return AutonomousRunReport(
+                    status="completed", dry_run=True, goal="g",
+                    tasks=[goal_task], budget={}, circuit={},
                     approvals={"pending": 0},
-                    tasks=[goal_task],
                 )
 
         monkeypatch.setattr(ar, "AutonomousRuntime", _FakeRuntime)
@@ -709,7 +721,9 @@ class TestWallClockPacing:
     def test_pause_happens_between_cycles_never_before_first(self):
         clock = _FakeClock()
         gather = _ScriptedGather(_distinct_useful(3))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=3, max_idle_streak=9, cycle_pause_seconds=5
@@ -730,7 +744,9 @@ class TestWallClockPacing:
     def test_default_is_back_to_back_no_sleep(self):
         clock = _FakeClock()
         gather = _ScriptedGather(_distinct_useful(3))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         run_campaign(
             CampaignConfig(max_cycles=3, max_idle_streak=9),  # pause defaults to 0
             agent=SimpleNamespace(log=None),
@@ -746,7 +762,9 @@ class TestWallClockPacing:
     def test_wall_clock_budget_stops_before_next_work(self):
         clock = _FakeClock()
         gather = _ScriptedGather(_distinct_useful(10))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=10,
@@ -771,7 +789,9 @@ class TestWallClockPacing:
     def test_pause_is_capped_to_remaining_wall_clock(self):
         clock = _FakeClock()
         gather = _ScriptedGather(_distinct_useful(10))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=10,
@@ -801,7 +821,9 @@ class TestOnCycleHook:
     def test_hook_fires_once_per_recorded_cycle(self):
         seen: list[dict] = []
         gather = _ScriptedGather(_distinct_useful(3))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=3, max_idle_streak=9),
             agent=SimpleNamespace(log=None),
@@ -837,7 +859,9 @@ class TestOnCycleHook:
 
     def test_default_no_hook_is_a_noop(self):
         gather = _ScriptedGather(_distinct_useful(2))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         # No on_cycle passed -> must not raise and must still run normally.
         result = run_campaign(
             CampaignConfig(max_cycles=2, max_idle_streak=9),
@@ -885,7 +909,9 @@ class TestPerCycleResilience:
     def test_single_cycle_error_does_not_end_the_campaign(self):
         # Cycle 2 raises; cycles 1, 3, 4 are normal useful cycles.
         gather = _FlakyGather(raise_on={2})
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=4, max_idle_streak=99, max_consecutive_errors=3),
             agent=SimpleNamespace(log=None),
@@ -926,7 +952,9 @@ class TestPerCycleResilience:
     def test_a_good_cycle_resets_the_error_streak(self):
         # err, err, good, err, err, good -> never 3 in a row -> survives all 6.
         gather = _FlakyGather(raise_on={1, 2, 4, 5})
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=6, max_idle_streak=99, max_consecutive_errors=3),
             agent=SimpleNamespace(log=None),
@@ -944,7 +972,9 @@ class TestPerCycleResilience:
     def test_error_cycles_surface_in_the_on_cycle_snapshot(self):
         seen: list[dict] = []
         gather = _FlakyGather(raise_on={2})
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         run_campaign(
             CampaignConfig(max_cycles=3, max_idle_streak=99, max_consecutive_errors=3),
             agent=SimpleNamespace(log=None),
@@ -1017,7 +1047,9 @@ class TestLoopSuspected:
         # Each cycle executes a NEW action but produces no artifact/proposal and
         # the same result_status -> movement without progress -> loop_suspected.
         gather = _NewActionGather()
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
@@ -1101,7 +1133,9 @@ class TestLoopSuspected:
     def test_loop_suspected_logs_a_report_for_the_operator(self):
         events: list[tuple[str, dict]] = []
         agent = SimpleNamespace(log=SimpleNamespace(log=lambda e, p: events.append((e, p))))
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         run_campaign(
             CampaignConfig(
                 max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
@@ -1157,7 +1191,9 @@ class TestLoopSuspected:
         # Default config (max_unproductive_streak=0) must never stop on
         # loop_suspected — backward compatible with the pure loop.
         gather = _NewActionGather()
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(max_cycles=6, max_idle_streak=99),  # streak defaults 0=off
             agent=SimpleNamespace(log=None),
@@ -1174,7 +1210,9 @@ class TestLoopSuspected:
     def test_loop_suspected_switches_into_clarify_mode(self):
         # The stuck campaign must hand the operator a question and forbid the
         # chaos actions — режим переспроса, not more building.
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
@@ -1203,7 +1241,9 @@ class TestLoopSuspected:
             assert action in clar["forbidden_actions"]
 
     def test_clarify_question_appears_in_user_summary(self):
-        execute = _RecordingExecute(CampaignActionOutcome(result="completed"))
+        execute = _RecordingExecute(
+            # MIR-117: исполнено без трат — работа объявляется словом производителя.
+            CampaignActionOutcome(result="completed", work_done=True))
         result = run_campaign(
             CampaignConfig(
                 max_cycles=20, max_idle_streak=99, max_unproductive_streak=3
