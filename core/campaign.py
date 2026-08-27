@@ -138,7 +138,6 @@ def run_campaign(
     consecutive_errors = 0
     unproductive_streak = 0
     unproductive_cycles = 0
-    prev_exec_result: str | None = None
     recent_actions: list[str] = []
     clarification: dict[str, Any] | None = None
     stop_reason = ""
@@ -305,8 +304,6 @@ def run_campaign(
 
             idle_streak = 0
             streak_repeats = False
-            attempted_signatures.add(signature)
-            useful_cycles += 1
             with _cycle_cost_envelope(agent, config, cost_units_used):
                 outcome = execute(
                     agent=agent,
@@ -321,6 +318,14 @@ def run_campaign(
                 proposals += 1
             if outcome.artifact:
                 artifacts += 1
+
+            # MIR-117 (норма A): подпись банится ПОПЫТКОЙ — отказ до старта
+            # (0 трат, 0 продукта) не запрещает повторить; полезным цикл
+            # зовётся только когда работа сделана, а не когда очередь дочерпана.
+            if outcome.ran:
+                attempted_signatures.add(signature)
+            if outcome.did_work:
+                useful_cycles += 1
 
             record = CampaignCycleRecord(
                 cycle=cycle,
@@ -348,12 +353,11 @@ def run_campaign(
             consecutive_errors = 0
 
             recent_actions.append(action.action)
-            productive = (
-                outcome.artifact is not None
-                or outcome.proposal is not None
-                or (prev_exec_result is not None and outcome.result != prev_exec_result)
-            )
-            prev_exec_result = outcome.result
+            # Продуктивность — про видимое ИЗМЕНЕНИЕ (продукт), не про занятость:
+            # работа без продуктов двадцать циклов подряд — подозрение на петлю.
+            # Третья нога «строка результата сменилась» удалена (MIR-117): смена
+            # слова — не прогресс.
+            productive = outcome.artifact is not None or outcome.proposal is not None
             if productive:
                 unproductive_streak = 0
             else:

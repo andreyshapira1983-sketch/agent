@@ -53,6 +53,23 @@ class CampaignActionOutcome:
     cost_units_spent: int = 0
     proposal: str | None = None
     artifact: str | None = None
+    #: Слово производителя «работа сделана» — для исходов без продукта
+    #: (MIR-117, норма A). Продукт говорит сам за себя через did_work.
+    work_done: bool = False
+
+    @property
+    def did_work(self) -> bool:
+        """Работа сделана: продукт существует или производитель сказал сам."""
+        return self.work_done or self.proposal is not None or self.artifact is not None
+
+    @property
+    def ran(self) -> bool:
+        """Попытка была: что-то потрачено или что-то сделано.
+
+        Отказ до старта (0 трат, 0 продукта) попыткой НЕ является — банить его
+        подпись значило бы лгать «прежний проход не снял сигнал» (MIR-117).
+        """
+        return self.did_work or self.llm_calls_spent > 0 or self.cost_units_spent > 0
 
 
 @dataclass
