@@ -630,6 +630,10 @@ class EpisodicMemoryStore:
             score,
             1 if self.PROTECTED_TAGS & set(ep.tags) else 0,
             self._signal_standing(ep),
+            # Впустить частичное — не значит уравнять его с завершённым: иначе
+            # свежая частичная запись обходила бы полную по одной свежести
+            # (MIR-169).
+            1 if effective_completion(ep) == "achieved" else 0,
             ep.created_at,
         )
 
@@ -1303,6 +1307,13 @@ def _lesson_provenance_disqualified(episode: EpisodeRecord) -> bool:
     )
 
 
+#: Завершённости, при которых запись вообще может править работой. Частичная
+#: здесь потому, что подтверждение всё равно требуется ниже: послабление даёт
+#: СИГНАЛ, а не слово «частично». Провал, блокировка и `unknown` остаются
+#: снаружи — незнание не суждение. Замер: MIR-169.
+_ADMISSIBLE_COMPLETIONS = frozenset({"achieved", "partially_achieved"})
+
+
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
@@ -1344,7 +1355,15 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     # substitutes for the other — and this one only ever subtracts permission.
     # Read from the FROZEN state through the shared accessor, never from
     # `declared_completion`.
-    if effective_completion(episode) != "achieved":
+    completion = effective_completion(episode)
+    if completion not in _ADMISSIBLE_COMPLETIONS:
+        return False
+    # «Частично» бывает ДВУХ происхождений, и различитель уже в записи.
+    # Собственная честная оценка прогона — одно; принудительное понижение,
+    # когда авторитетный сигнал вытеснил его утверждение, — другое. Второе
+    # разжаловано по правилу оператора, и впускать его как честную частичность
+    # значило бы отменить это правило (MIR-169).
+    if completion != "achieved" and episode.completion_override is not None:
         return False
     if any(str(label).startswith("memory:") for label in episode.source_labels):
         return False

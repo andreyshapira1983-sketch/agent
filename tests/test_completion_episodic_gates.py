@@ -302,12 +302,36 @@ def test_achieved_with_a_bad_outcome_is_still_refused(outcome: str) -> None:
 # ==========================================================================
 @pytest.mark.parametrize(
     "completion",
-    ["partially_achieved", "blocked", "refused", "failed", "cancelled", "unknown", None],
+    ["blocked", "refused", "failed", "cancelled", "unknown", None],
 )
 def test_no_other_completion_state_admits_an_ordinary_episode(completion) -> None:
     episode = _episode(completion=completion)
 
     assert decide_usage_eligibility(episode) is False
+    assert _fast_path_pure(episode) is False
+
+
+def test_a_verified_partial_run_may_inform_but_not_be_replayed() -> None:
+    """Одна ось несла ДВА права, и частичная работа заслужила только первое.
+
+    Вред, ради которого ось заводили (MIR-057), — заблокированный НЕ-ОТВЕТ,
+    прочитанный как успех. Он остаётся закрытым: `blocked` отвергается обеими
+    проверками. Но честно объявленная ЧАСТИЧНАЯ работа с подтверждённой уликой
+    — не не-ответ, и запрещать ей подсказывать планировщику значило наказывать
+    за честность.
+
+    Замер 2026-08-27 по 144 живым записям: из 65 подтверждённых в память
+    попадали 10, из 79 неподтверждённых — 65. Живой случай той же ночи: прогон
+    собрал шесть подтверждённых кусков улики, объявил цель достигнутой частично
+    и был отвергнут, а соседний эпизод без единого подтверждения вошёл меткой.
+
+    Дословное ПЕРЕИГРЫВАНИЕ по-прежнему требует полного «достигнуто»: выдать
+    частичный ответ за ответ — ровно тот вред, что описан выше. Подробности:
+    MIR-169.
+    """
+    episode = _episode(completion="partially_achieved")
+
+    assert decide_usage_eligibility(episode) is True
     assert _fast_path_pure(episode) is False
 
 
