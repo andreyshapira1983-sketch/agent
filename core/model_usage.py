@@ -66,6 +66,12 @@ _COST_UNITS_PER_1K_TOKENS = {
 }
 
 
+def cost_units_per_1k(tier: str) -> int:
+    """Публичное чтение тарифа. Одна таблица на весь проект: вторая копия
+    разошлась бы с первой (класс H-26 проспективного аудита; MIR-176)."""
+    return _COST_UNITS_PER_1K_TOKENS.get(str(tier or "unknown"), _COST_UNITS_PER_1K_TOKENS["unknown"])
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
