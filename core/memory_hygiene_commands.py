@@ -34,6 +34,7 @@ def run_maintenance_pass(
     suppressed_reason: str | None,
     dry_run: bool = True,
     workspace: Any = None,
+    procedural_store: Any = None,
 ) -> dict:
     """One bounded hygiene pass: expire → dedupe → prune episodes → archive.
 
@@ -59,8 +60,12 @@ def run_maintenance_pass(
         )
         report["deduped"] = len(getattr(dedup, "deleted", []) or [])
 
+        # MIR-128: опоры зачёта процедур считаются здесь же и не выносятся.
+        protected = cited_episode_ids(procedural_store, episodic_store)
+        report["episodes_protected_by_citation"] = len(protected)
         pruned = prune_episodic(
-            log=log, episodic_store=episodic_store, dry_run=dry_run
+            log=log, episodic_store=episodic_store, dry_run=dry_run,
+            keep_ids=protected,
         )
         report["episodes_pruned"] = len(pruned or [])
 
@@ -217,6 +222,28 @@ def dedupe_persistent(
     return report
 
 
+#: Потолок защиты опор: защита не смеет снова сжать окно — MIR-096 однажды
+#: видел 127 неизымаемых строк из 200. 60 = 30 % окна; новейшие цитируемые
+#: побеждают, улика старейших уходит, и зачёт следует за ней (MIR-058).
+_MAX_CITED_PROTECTED = 60
+
+
+def cited_episode_ids(procedural_store: Any, episodic_store: Any) -> frozenset[str]:
+    """Эпизоды-опоры зачёта процедур, существующие в хранилище (MIR-128).
+
+    Механика без суждения: id из `source_episode_ids`, пересечённые с живыми
+    эпизодами, новейшие `_MAX_CITED_PROTECTED` по `created_at`.
+    """
+    if procedural_store is None or episodic_store is None:
+        return frozenset()
+    cited: set[str] = set()
+    for proc in procedural_store.load():
+        cited.update(proc.source_episode_ids)
+    alive = [ep for ep in episodic_store.load() if ep.id in cited]
+    alive.sort(key=lambda ep: ep.created_at, reverse=True)
+    return frozenset(ep.id for ep in alive[:_MAX_CITED_PROTECTED])
+
+
 def prune_episodic(
     *,
     log: Any,
@@ -225,6 +252,7 @@ def prune_episodic(
     min_quality: float = 0.4,
     staleness_threshold: float = 1.5,
     dry_run: bool = False,
+    keep_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Evict old, low-quality, non-protected episodes from episodic memory."""
     if episodic_store is None:
@@ -238,6 +266,7 @@ def prune_episodic(
         min_quality=min_quality,
         staleness_threshold=staleness_threshold,
         dry_run=dry_run,
+        keep_ids=keep_ids,
     )
     log.log(
         "episodic_memory_prune",

@@ -47,6 +47,8 @@ class AgentLoopHygiene:
             dry_run=dry_run,
             # MIR-125: проход метёт и .bak-мусор миграций; тень только считает.
             workspace=self._file_read_workspace_root(),
+            # MIR-128: уборка знает, на чём стоит зачёт процедур.
+            procedural_store=getattr(self, "procedural_store", None),
         )
 
     def compact_assumptions(self, *, dry_run: bool = False) -> dict:

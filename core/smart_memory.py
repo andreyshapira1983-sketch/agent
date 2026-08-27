@@ -747,11 +747,13 @@ class EpisodicMemoryStore:
         min_quality: float = 0.4,
         staleness_threshold: float = 1.5,
         dry_run: bool = False,
+        keep_ids: frozenset[str] = frozenset(),
     ) -> list[str]:
         """Remove old, low-quality, non-protected episodes.
 
         Wraps :func:`core.episodic_hygiene.prune_stale_episodes`.
-        Returns the IDs of evicted episodes.
+        Returns the IDs of evicted episodes. ``keep_ids`` — эпизоды-опоры
+        зачёта процедур, уборке не отдаются (MIR-128).
         """
         # Local import: keeps episodic_hygiene out of the tight import
         # graph of smart_memory.
@@ -763,6 +765,7 @@ class EpisodicMemoryStore:
             min_quality=min_quality,
             staleness_threshold=staleness_threshold,
             dry_run=dry_run,
+            keep_ids=keep_ids,
         )
 
 

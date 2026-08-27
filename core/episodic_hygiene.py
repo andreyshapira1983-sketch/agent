@@ -149,6 +149,7 @@ def prune_stale_episodes(
     staleness_threshold: float = _DEFAULT_STALENESS_THRESHOLD,
     dry_run: bool = False,
     now: datetime | None = None,
+    keep_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Apply :func:`select_for_pruning` to ``store`` and remove the selected
     episodes. Returns the IDs of episodes that were (or, in dry-run mode,
@@ -178,6 +179,10 @@ def prune_stale_episodes(
             staleness_threshold=staleness_threshold,
             now=now,
         )
+        # MIR-128: эпизод-опора зачёта процедур уборке не отдаётся — проход
+        # обслуживания однажды вынес 47 опор, и уверенность пережила улику.
+        if keep_ids:
+            victims = [ep for ep in victims if ep.id not in keep_ids]
         victim_ids = {ep.id for ep in victims}
         if dry_run or not victim_ids:
             return [ep.id for ep in victims]
