@@ -174,6 +174,7 @@ def _anchor_lines(charter: str) -> tuple[str, ...]:
 
 def _record_decision(
     root: Path, *, status: str, goal: str, reason: str = "",
+    mentor_questions_shown: int = 0,
 ) -> None:
     """Append one decision row; a failure to record must not fail the pick."""
     from datetime import datetime, timezone
@@ -186,6 +187,11 @@ def _record_decision(
             "status": status,
             "goal": goal,
             "reason": reason,
+            # Отсутствие ключа = ноль, как у всех причинных ключей. Без этой
+            # записи «видел вопрос и отклонил» неотличимо от «не видел» —
+            # ровно тишина, пойманная тиком 15:31 (MIR-178).
+            **({"mentor_questions_shown": mentor_questions_shown}
+               if mentor_questions_shown else {}),
         }])
     except Exception:  # noqa: BLE001, S110 — журнал решений не роняет выбор;
         pass           # молчание здесь стоит дешевле, чем упавший тик хартии
@@ -353,10 +359,11 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     if vetoes is None:
         return _declined(f"operator veto list unreadable: {VETO_RELPATH}")
 
+    mentor_qs = open_questions(root)
     parsed = _ask(
         llm, charter, anchors, recent, _recent_declined(root),
         _backlog_lines(root), _recent_verdicts(root),
-        mentor_questions=mentor_block(open_questions(root)),
+        mentor_questions=mentor_block(mentor_qs),
     )
     if not parsed:
         return _declined("the model returned no parseable goal")
@@ -399,7 +406,8 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         return _declined(
             "success_check is empty — a goal without a check is a wish", goal)
 
-    _record_decision(root, status="proposed", goal=goal)
+    _record_decision(root, status="proposed", goal=goal,
+                     mentor_questions_shown=len(mentor_qs))
     return CharterGoalReport(
         status="proposed", goal=goal, charter_quote=quote,
         why_now=why_now, success_check=check,

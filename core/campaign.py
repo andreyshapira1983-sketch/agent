@@ -438,6 +438,8 @@ def run_campaign(
         "repeat_cycles": repeat_cycles,
         "error_cycles": error_cycles,
         "unproductive_cycles": unproductive_cycles,
+        # Считалось с MIR-163, в итог не попадало: сводка печатала умолчание.
+        "goal_drove_cycles": goal_drove_cycles,
         "proposals": proposals,
         "artifacts": artifacts,
         "wall_clock_seconds": round((now_fn() - started_at).total_seconds(), 1),

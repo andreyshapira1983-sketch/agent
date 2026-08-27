@@ -1239,3 +1239,35 @@ class TestLoopSuspected:
         assert result.clarification is None
         assert "режим вопроса" not in result.user_summary()
 
+
+
+class TestGoalDroveReachesTheSummary:
+    def test_the_counted_fact_reaches_totals_and_the_summary(self):
+        """Красный свидетель: счётчик считал, а итог не носил ключа вовсе.
+
+        Живой прогон 2026-08-27 15:31: в ленте `grounds: operator_goal`, в
+        сводке того же прогона `goal_drove=0`. Причина — `goal_drove_cycles`
+        инкрементировался в локальную переменную, а итоговый словарь totals
+        собирался БЕЗ этого ключа, и сводка печатала умолчание. Тот же класс,
+        что чинил сам MIR-163: знание есть в момент решения и не доносится до
+        записи — на этот раз внутри его же починки.
+        """
+        from dataclasses import replace
+
+        driven = replace(_useful(), grounds="operator_goal")
+        gather = _ScriptedGather([driven, _observe(), _observe(), _observe()])
+        result = run_campaign(
+            CampaignConfig(max_cycles=4, max_idle_streak=3),
+            agent=SimpleNamespace(log=None),
+            workspace="/tmp/ws",
+            gather_signals=gather,
+            execute_action=_RecordingExecute(
+                CampaignActionOutcome(result="completed", llm_calls_spent=1,
+                                      cost_units_spent=3)
+            ),
+            ledger=CampaignLedger(),
+            now_fn=_fixed_now,
+        )
+
+        assert result.totals.get("goal_drove_cycles") == 1
+        assert "goal_drove=1" in result.user_summary()
