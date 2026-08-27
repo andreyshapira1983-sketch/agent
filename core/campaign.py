@@ -46,6 +46,8 @@ from core.campaign_io import (
 from core.campaign_ledger import (
     CampaignCycleRecord,
     CampaignLedger,
+    load_ledger_rows,
+    spent_units_by_action,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 from core.run_context import run_cost_envelope
@@ -79,6 +81,41 @@ def _cycle_cost_envelope(agent: Any, config: CampaignConfig, cost_units_used: in
     return run_cost_envelope(
         allowed_total_units=session_cost
         + (config.max_cost_units - cost_units_used)
+    )
+
+
+def _cross_run_signature_spend(ledger: CampaignLedger | None) -> dict[str, int]:
+    """Траты по сигнатурам за все прежние запуски; без файла — пустая память."""
+    if ledger is None or ledger.path is None:
+        return {}
+    try:
+        return spent_units_by_action(load_ledger_rows(ledger.path))
+    except OSError:
+        return {}
+
+
+def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
+                     spent: int, cap: int) -> CampaignCycleRecord:
+    """Строка эскалации MIR-149: потолок пал — исполнение становится вопросом.
+
+    Потолок — бюджетная политика (число 400 одобрено оператором 2026-08-27),
+    не выведенный различитель: классификатор из восьми живых пар был бы
+    подгонкой под породившие его случаи. Нулевые по цене сигнатуры (observe)
+    сюда не попадают по построению.
+    """
+    return CampaignCycleRecord(
+        cycle=cycle, ts=ts, goal=goal,
+        action=action.action, action_title=action.title,
+        severity=action.severity, priority=action.priority,
+        risk=action.risk, grounds=action.grounds, decided_by=action.decided_by,
+        idle=False, llm_calls_spent=0, cost_units_spent=0,
+        result="cost_cap",
+        reason=(
+            f"сигнатура '{action.action}' потратила {spent} единиц за все "
+            f"запуски при потолке {cap}; исполнение остановлено — нужно слово "
+            f"оператора: поднять потолок (max_cost_units_per_signature) или "
+            f"закрыть сигнал иначе"
+        ),
     )
 
 
@@ -119,6 +156,9 @@ def run_campaign(
 
     records: list[CampaignCycleRecord] = []
     attempted_signatures: set[str] = set()
+    # MIR-149: единственная память, переживающая запуски, — леджер; страж
+    # повторов слеп к траектории (146 из 150 циклов были циклом №1).
+    signature_spend = _cross_run_signature_spend(ledger)
     idle_streak = 0
     # Does the current no-progress streak contain repeat cycles? A streak of
     # pure priority-0 observations means the world was checked and found
@@ -302,6 +342,26 @@ def run_campaign(
                     break
                 continue
 
+            spent_before = signature_spend.get(signature, 0)
+            if (config.max_cost_units_per_signature
+                    and spent_before >= config.max_cost_units_per_signature):
+                record = _cost_cap_record(
+                    cycle=cycle, ts=now.isoformat(), goal=config.goal,
+                    action=action, spent=spent_before,
+                    cap=config.max_cost_units_per_signature)
+                ledger.append(record)
+                records.append(record)
+                _log(agent, "campaign_cost_cap", record.to_dict())
+                _emit_cycle(record)
+                consecutive_errors = 0
+                idle_streak += 1
+                streak_repeats = True
+                if idle_streak >= config.max_idle_streak:
+                    stop_reason = f"cost_cap_stall:{idle_streak}_cycles_awaiting_operator"
+                    status = "stopped"
+                    break
+                continue
+
             idle_streak = 0
             streak_repeats = False
             with _cycle_cost_envelope(agent, config, cost_units_used):
@@ -324,6 +384,8 @@ def run_campaign(
                 attempted_signatures.add(signature)
             if outcome.did_work:
                 useful_cycles += 1
+            # MIR-149: межзапусковая память цены пополняется и внутри запуска.
+            signature_spend[signature] = spent_before + max(0, outcome.cost_units_spent)
 
             record = CampaignCycleRecord(
                 cycle=cycle,

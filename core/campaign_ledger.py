@@ -104,6 +104,26 @@ def load_ledger_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def spent_units_by_action(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Траты по сигнатуре действия за ВСЕ записанные запуски (MIR-149).
+
+    Основание межзапускового потолка: память стража повторов живёт один запуск
+    (146 из 150 циклов патологической траектории были циклом №1 свежего
+    запуска), а леджер — единственная память, переживающая запуски. Нулевые
+    и битые строки не считаются: отсутствие цены — не цена.
+    """
+    spent: dict[str, int] = {}
+    for row in rows:
+        action = row.get("action")
+        try:
+            units = int(row.get("cost_units_spent") or 0)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(action, str) and action and units > 0:
+            spent[action] = spent.get(action, 0) + units
+    return spent
+
+
 def _format_ledger_row(row: dict[str, Any]) -> str:
     cycle = row.get("cycle", "?")
     action = row.get("action", "?")

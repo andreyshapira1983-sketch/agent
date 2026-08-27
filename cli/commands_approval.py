@@ -579,7 +579,11 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         workspace=workspace,
         approval_inbox=inbox,
     ).run(config)
-    if report.status == "completed":
+    # MIR-117 (слово оператора 2026-08-27): «да» сгорает ПОПЫТКОЙ — правило
+    # полосы. Прежний ключ `status == "completed"` был токеном «очередь
+    # дочерпана»: прогон, отвергнутый до старта, жёг одобрение, а
+    # остановленный ПОСЛЕ сделанной работы — сохранял его. Обе стороны лгали.
+    if report.attempted():
         executed = inbox.mark_executed(item.id)
         agent.log.log("approval_inbox_executed", executed.to_dict())
     print(report.user_summary(), file=sys.stderr)

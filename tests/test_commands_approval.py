@@ -169,22 +169,29 @@ class FakeRuntime:
 
     def run(self, config):
         FakeRuntime.last_config = config
-        return SimpleNamespace(status=self.status, user_summary=lambda: f"RUN-{self.status}")
+        return SimpleNamespace(
+            status=self.status,
+            attempted=lambda: self.was_attempted,
+            user_summary=lambda: f"RUN-{self.status}",
+        )
 
 
-def _runtime_factory(status: str):
+def _runtime_factory(status: str, *, attempted: bool = True):
     def _make(agent, *, workspace, approval_inbox):
         rt = FakeRuntime(agent, workspace=workspace, approval_inbox=approval_inbox)
         rt.status = status
+        rt.was_attempted = attempted
         return rt
     return _make
 
 
-def test_completed_run_marks_the_item_executed(agent, workspace, capsys, monkeypatch):
+def test_an_attempted_run_burns_the_approval(agent, workspace, capsys, monkeypatch):
+    """«Да» сгорает попыткой (MIR-117, слово оператора 2026-08-27)."""
     item = add_item(agent, workspace, payload={"goal": "tidy", "limit": 2, "include_tests": "no"})
     inbox = _approval_inbox_for(agent, workspace)
     inbox.approve(item.id)
-    monkeypatch.setattr(mod, "AutonomousRuntime", _runtime_factory("completed"))
+    monkeypatch.setattr(mod, "AutonomousRuntime",
+                        _runtime_factory("completed", attempted=True))
 
     assert _handle_approval_run(item.id, agent, workspace) is True
 
@@ -197,17 +204,32 @@ def test_completed_run_marks_the_item_executed(agent, workspace, capsys, monkeyp
     assert cfg.dry_run is False and cfg.effects_approved is True
 
 
-def test_unfinished_run_leaves_the_item_unexecuted(agent, workspace, capsys, monkeypatch):
-    """Nothing may look done that did not finish."""
+def test_a_preflight_refused_run_keeps_the_approval(agent, workspace, capsys, monkeypatch):
+    """Пустой «completed» (MIR-116: отказ до старта) больше НЕ жжёт одобрение."""
     item = add_item(agent, workspace)
     inbox = _approval_inbox_for(agent, workspace)
     inbox.approve(item.id)
-    monkeypatch.setattr(mod, "AutonomousRuntime", _runtime_factory("stopped"))
+    monkeypatch.setattr(mod, "AutonomousRuntime",
+                        _runtime_factory("completed", attempted=False))
 
     assert _handle_approval_run(item.id, agent, workspace) is True
 
     assert inbox.get(item.id).status == "approved"
     assert "approval_inbox_executed" not in agent.log.kinds()
+    assert "RUN-completed" in capsys.readouterr().err
+
+
+def test_a_stopped_run_that_attempted_burns_too(agent, workspace, capsys, monkeypatch):
+    """Обратная сторона прежнего ключа: остановленный ПОСЛЕ попытки — сгорел."""
+    item = add_item(agent, workspace)
+    inbox = _approval_inbox_for(agent, workspace)
+    inbox.approve(item.id)
+    monkeypatch.setattr(mod, "AutonomousRuntime",
+                        _runtime_factory("stopped", attempted=True))
+
+    assert _handle_approval_run(item.id, agent, workspace) is True
+
+    assert inbox.get(item.id).status == "executed"
     assert "RUN-stopped" in capsys.readouterr().err
 
 
