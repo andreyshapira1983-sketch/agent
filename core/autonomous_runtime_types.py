@@ -115,6 +115,18 @@ class AutonomousRunReport:
             "reflection": self.reflection,
         }
 
+    def attempted(self) -> bool:
+        """Была ли ПОПЫТКА: что-то началось или что-то потрачено.
+
+        Ключ сжигания одноразового «да» (MIR-117, слово оператора 2026-08-27):
+        одобрение сгорает попыткой, но отказ до старта — задачи skipped/failed
+        при нуле трат — попыткой не является, и грант остаётся жить.
+        """
+        if any(t.status in ("done", "clarify", "inconclusive") for t in self.tasks):
+            return True
+        used = self.budget.get("used", {}) if isinstance(self.budget, dict) else {}
+        return int(used.get("llm_calls") or 0) > 0 or int(used.get("web_fetches") or 0) > 0
+
     def semantic_result(self) -> tuple[str, bool]:
         """(result, work_done) — исход, а не жизненный цикл (MIR-117, норма A).
 

@@ -22,6 +22,10 @@ class CampaignConfig:
     cycle_pause_seconds: int = 0
     max_consecutive_errors: int = 3
     max_unproductive_streak: int = 0
+    #: Межзапусковый потолок трат на ОДНУ сигнатуру действия (MIR-149).
+    #: 400 = два дневных прогона гранта; число одобрено оператором 2026-08-27.
+    #: Превышение — не молчаливое исполнение, а вопрос ему (result="cost_cap").
+    max_cost_units_per_signature: int = 400
 
     def __post_init__(self) -> None:
         if self.max_cycles < 1:
@@ -44,6 +48,8 @@ class CampaignConfig:
             raise ValueError("max_consecutive_errors must be >= 1")
         if self.max_unproductive_streak < 0:
             raise ValueError("max_unproductive_streak must be >= 0 (0 = off)")
+        if self.max_cost_units_per_signature < 0:
+            raise ValueError("max_cost_units_per_signature must be >= 0 (0 = off)")
 
 
 @dataclass(frozen=True)
