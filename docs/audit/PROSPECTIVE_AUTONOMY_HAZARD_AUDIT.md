@@ -110,9 +110,77 @@ than silently omitted; a class with no row has no verdict.
 
 ---
 
+## 6. LIVE_OBSERVED — the guard blinds the agent to its own institutional memory
+
+Found while building the §5 witness, in the live journal of the agent's own
+first unattended run.
+
+**The observation.** `logs/trace_860bd9e6…jsonl`, **2026-08-27T00:31:55Z** —
+during the unattended tick, `file_read` on
+`docs/audit/MASTER_ISSUE_REGISTRY.md` produced `injection_blocked`. The agent
+was refused its own defect registry by its own defence.
+
+**Reproducible on demand**, measured 2026-08-27 against the current tree:
+
+| document | verdict | findings |
+|---|---|---|
+| `docs/audit/MASTER_ISSUE_REGISTRY.md` — the defect registry | **blocked** | 263 |
+| `docs/CODE_NOTES.md` — the reasoning book | **blocked** | 126 |
+| `docs/audit/HISTORICAL_FAILURE_LEDGER.md` | suspicious | 19 |
+| `README.md` | suspicious | 3 |
+
+**The mechanism, and it is a loop.** The guard blocks text that reads like an
+instruction to an agent. The registry and the notes are where injection findings
+are *documented*, quoting the payloads so the finding can be checked. Quoting a
+payload makes the document trip the scanner. So the more carefully this project
+documents its own injection work, the less of its institutional memory the agent
+can read. The loop closed on the auditor too: the witness written today for §5 is
+itself `blocked`, and so is the 2026-08-14 witness that preceded it.
+
+**Why this is the dangerous half.** §5 is a channel an attacker might use. This
+one is already costing the agent something on every run: the two documents that
+hold every measured defect, every rejected alternative and every named boundary
+are exactly the two it cannot read. An agent that cannot read its own registry
+re-derives what is already known, and cannot check whether a defect it is about
+to report has been recorded — the failure mode this repository has spent months
+trying to remove.
+
+**What is NOT claimed.** That last night's `no_grounded_target` outcome was
+CAUSED by this block. The block and the outcome are both in the same run; the
+causal link is not established and is not assumed.
+
+**Classification: LIVE_OBSERVED.** Occurred in a real unattended run, and
+reproduces on demand.
+
+**Why no fix is applied in this pass.** The obvious repair is the premise this
+project already disproved: on 2026-08-14 `file_read` was removed from the
+exemption precisely because «workspace content is inside the trusted boundary»
+is false. Re-granting docs a pass would restore that error. The real options are
+a design decision, not a patch:
+
+* **A** — exempt the repo's own audit documents. Rejected on sight: it rebuilds
+  the 2026-08-14 mistake, and `docs/` is writable by ingestion.
+* **B** — stop quoting payloads in documentation. A process rule, no code; costs
+  the checkability that makes those findings worth anything.
+* **C** — neutralise quoted payloads where they are written (a documented
+  escaping convention), so a quotation stops reading as an instruction. Keeps
+  both the quotation and the guard, and costs a convention nobody enforces yet.
+* **D** — keep the verdict but change its EFFECT for repo-internal reads:
+  annotate rather than block, so the text arrives marked instead of missing.
+
+The choice belongs to the operator: it trades the agent's access to its own
+memory against the strength of a defence that is currently working correctly.
+
+---
+
 ## 4. Summaries (as of the first batch)
 
-**1. Current reproduced defects.** None found by this pass. The two defects fixed
+**1. Current reproduced defects.** One, LIVE_OBSERVED (§6): the injection guard
+blocks the agent from reading its own defect registry and reasoning book — 263
+and 126 findings respectively — observed during the unattended run of
+2026-08-27T00:31:55Z and reproducible on demand. No fix applied: the repair is a
+design choice with four named options, and the obvious one restores a mistake
+this project already corrected. The two defects fixed
 today (MIR-169, MIR-170) came from the live run and the battery, not from this
 audit.
 
