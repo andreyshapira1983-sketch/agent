@@ -225,6 +225,32 @@ def _grant_is_live(expires_at: str | None, now: datetime) -> bool:
     return deadline > now
 
 
+def active_standing_grant(approval_inbox, workspace, *, log=None):
+    """Одна проверка гранта на весь проект: вторая разошлась бы с первой.
+
+    Вынесена, чтобы тик спрашивал о том же разрешении (класс H-26 аудита).
+    """
+    now = datetime.now(timezone.utc)
+    for item in approval_inbox.list(status="approved"):
+        if item.operation != "autonomous_runtime.standing_grant":
+            continue
+        expires = str(item.expires_at or "")
+        try:
+            if expires and datetime.fromisoformat(expires) <= now:
+                continue
+        except ValueError:
+            continue
+        cap = int((item.payload or {}).get("max_runs_per_day") or 0)
+        if cap <= 0:
+            continue
+        if standing_runs_today(workspace, item.id) >= cap:
+            if log is not None:
+                log("standing_grant_exhausted", {"approval_id": item.id, "cap": cap})
+            continue
+        return item
+    return None
+
+
 class AutonomousRuntime(AutonomousRuntimeProposals):
     """Run a bounded autonomous project-health pass."""
 
@@ -944,26 +970,10 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
     def _active_standing_grant(self):
         """Действующий стоячий грант с остатком на сегодня, или None."""
-        now = datetime.now(timezone.utc)
-        for item in self.approval_inbox.list(status="approved"):
-            if item.operation != "autonomous_runtime.standing_grant":
-                continue
-            expires = str(item.expires_at or "")
-            try:
-                if expires and datetime.fromisoformat(expires) <= now:
-                    continue
-            except ValueError:
-                continue
-            cap = int((item.payload or {}).get("max_runs_per_day") or 0)
-            if cap <= 0:
-                continue
-            if standing_runs_today(self.workspace, item.id) >= cap:
-                self._log("standing_grant_exhausted", {
-                    "approval_id": item.id, "cap": cap,
-                })
-                continue
-            return item
-        return None
+        return active_standing_grant(
+            self.approval_inbox, self.workspace, log=self._log
+        )
+
 
     def _granted_effects_approval(self, config: AutonomousRuntimeConfig):
         """Одобренное разрешение ДЛЯ ЭТОЙ ЖЕ цели, или None.

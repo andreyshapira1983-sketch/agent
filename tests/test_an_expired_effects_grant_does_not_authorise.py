@@ -99,9 +99,13 @@ def test_the_standing_grant_already_did_this(tmp_path) -> None:
     """
     import inspect
 
-    from core.autonomous_runtime import AutonomousRuntime
+    from core.autonomous_runtime import active_standing_grant
 
-    src = inspect.getsource(AutonomousRuntime._active_standing_grant)
+    # Смотрим ФУНКЦИЮ, где проверка живёт, а не метод, который к ней сводится:
+    # 2026-08-27 условия гранта вынесли в одно общее место, чтобы тик спрашивал
+    # о том же разрешении и не завёл вторую расходящуюся проверку. Пин следует
+    # за свойством, а не за адресом.
+    src = inspect.getsource(active_standing_grant)
     assert "expires" in src and "continue" in src, (
         "стоячий грант больше не проверяет срок — основание для правки "
         "разрешения на эффекты исчезло, перечитайте H-41"

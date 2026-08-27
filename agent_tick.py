@@ -1501,6 +1501,17 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             _log_tick(workspace, {"event": "maintenance_error",
                                   "error": type(exc).__name__})
 
+    try:
+        from core.rule_approved_apply import drain_rule_approved_proposals
+
+        summary["rule_approved"] = drain_rule_approved_proposals(
+            workspace, dry_run=dry_run,
+            log=lambda e, p: _log_tick(workspace, {"event": e, **p}),
+        )
+    except Exception as exc:  # noqa: BLE001 — замыкание петли не вправе ронять тик
+        _log_tick(workspace, {"event": "rule_approval_error",
+                              "error": type(exc).__name__})
+
     _log_tick(workspace, {"event": "tick_complete", **summary})
 
     # Heartbeat #2: record successful completion with the honest health verdict.
