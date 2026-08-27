@@ -80,10 +80,12 @@ def test_the_blocked_branch_consults_provenance(repo: Path) -> None:
     # Смотрим МОДУЛЬ, а не одну функцию: первая версия пина держалась за имя
     # `_execute_step` и покраснела, как только обработку блокировки вынесли в
     # помощника. Пин обязан переживать перестановку, иначе он охраняет форму,
-    # а не свойство.
+    # а не свойство. Имя предиката тоже сменилось — с `is_committed_source` на
+    # `block_may_be_annotated`, когда к «своим» добавился вывод собственного
+    # набора тестов; пин следует за СМЫСЛОМ, а не за прежним словом.
     src = inspect.getsource(mod)
 
-    assert "is_committed_source" in src
+    assert "block_may_be_annotated" in src
     assert "injection_blocked_downgraded" in src
     assert "_blocked_output_or_replan" in inspect.getsource(
         mod.AgentLoopStepExecution._execute_step
@@ -92,4 +94,4 @@ def test_the_blocked_branch_consults_provenance(repo: Path) -> None:
     # когда имя стояло в коде, а импорта не было: в бою это дало бы NameError
     # на первом же заблокированном чтении. Свидетель обязан требовать
     # СВЯЗАННОГО имени, а не совпадения строки.
-    assert callable(getattr(mod, "is_committed_source", None))
+    assert callable(getattr(mod, "block_may_be_annotated", None))

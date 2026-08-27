@@ -58,3 +58,25 @@ def is_committed_source(source_label: str, workspace: Path | str) -> bool:
     if not rel or rel.startswith("/") or ".." in rel.split("/"):
         return False
     return rel in _tracked_paths(Path(workspace))
+
+
+#: Инструменты, чей вывод порождён СОБСТВЕННЫМ зафиксированным деревом. Их
+#: блокировка смягчается по тому же основанию, что и у документа: материал наш.
+#: `run_tests` печатает исходник падающего теста, а в репозитории есть файлы, где
+#: образцы инъекций процитированы намеренно — свидетели. Блокировать такой вывод
+#: значило бы ослепить агента на его же красных тестах (MIR-171, тот же дефект).
+_REPO_DERIVED_TOOLS = frozenset({"run_tests"})
+
+
+def block_may_be_annotated(
+    tool_name: str | None, source_label: str, workspace: Path | str
+) -> bool:
+    """Пометить вместо того, чтобы отнять, — только для СВОЕГО материала.
+
+    Своим считается либо файл, лежащий в истории репозитория, либо вывод
+    инструмента, порождённого этим же зафиксированным деревом. Подложенное имя
+    файла не наше ни по одному из двух признаков — и отводится, как прежде.
+    """
+    if (tool_name or "") in _REPO_DERIVED_TOOLS:
+        return True
+    return is_committed_source(source_label, workspace)

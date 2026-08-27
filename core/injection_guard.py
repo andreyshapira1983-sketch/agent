@@ -476,6 +476,10 @@ def _to_text(output: Any) -> str:
 # envelope: their entire output IS the untrusted payload and is scanned whole.
 _UNTRUSTED_OUTPUT_FIELDS: dict[str, tuple[str, ...]] = {
     "shell_exec": ("stdout", "stderr"),
+    # Хвост вывода pytest — это текст ФАЙЛОВ (падающий тест печатает исходник).
+    # Счётчики, argv и длительность в конверте сделаны каркасом и сканирования
+    # не требуют; сужение и есть то, ради чего исключение когда-то завели.
+    "run_tests": ("stdout_tail", "stderr_tail"),
 }
 
 # ---------------------------------------------------------------------------
