@@ -162,7 +162,8 @@ class _RefusesEverything:
         return "NO"
 
 
-@pytest.mark.xfail(strict=True, reason=_MIR_060 + " (resolution short-circuits evaluation)")
+@pytest.mark.xfail(strict=True, reason=_MIR_060 + " (resolution short-circuits evaluation) "
+                   "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]")
 def test_the_semantic_check_is_consulted_for_a_resolved_citation():
     """`_find_semantic_support` is reachable only when nothing matched.
 

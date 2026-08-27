@@ -56,7 +56,9 @@ _ORPHAN_ALLOWLIST: dict[str, str] = {
     # ast-разбором БЕЗ импорта (правило скрипта «не исполнять код агента»), а
     # _sync_anatomy_groups в core/self_build_producer.py читает его текстом.
     # «Не импортируется» здесь означает «литерал», а не «мёртв».
-    "anatomy_groups": "data literal, parsed not imported; readers named above",
+    "anatomy_groups": ("standing: data literal, parsed not imported; readers "
+                       "named above — постоянна по замыслу, пока таблица групп "
+                       "остаётся данными без импортёров"),
 }
 
 #: Env vars a document names deliberately without the code having them yet.

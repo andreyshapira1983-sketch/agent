@@ -72,6 +72,9 @@ _TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
 # будет. `read_logs` оставлен НАМЕРЕННО: его куски защита сохранила как улику, и
 # проверять их на входе значит отнимать разбор собственных инцидентов; лечение
 # там на стороне записи. Разбор: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §5.
+# Условия затычек (MIR-181): рамочные исключения — standing: вывод делает каркас;
+# read_logs — until: обезвреживание кусков на СТОРОНЕ ЗАПИСИ сторожа ложится в
+# код (оставшийся кусок аудита §5) — тогда исключение снимается.
 _INJECTION_SCAN_EXEMPT: frozenset[str] = frozenset({
     "read_logs",
 })

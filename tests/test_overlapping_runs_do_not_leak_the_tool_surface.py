@@ -153,7 +153,8 @@ def test_a_single_run_hides_and_then_restores_the_surface(workspace: Path) -> No
         "run — still executing — is advertised the full tool surface again, without "
         "the UNAVAILABLE_TOOLS directive. The gate still denies, so nothing becomes "
         "callable; what leaks is what the planner is told. Fix unprescribed: this "
-        "axis takes the same decision as the other 26."
+        "axis takes the same decision as the other 26. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

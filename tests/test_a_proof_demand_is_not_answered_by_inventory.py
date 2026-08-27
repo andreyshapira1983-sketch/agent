@@ -41,6 +41,7 @@ _EXAM = "скажи что ты умеешь делать и докажи что
         "(«докажи», «продемонстрируй», «покажи на практике») turns the "
         "completion contract into claim -> demonstration -> evidence, which "
         "no out-of-loop inventory can satisfy."
+        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )
@@ -58,6 +59,7 @@ def test_a_proof_demand_does_not_take_the_inventory_shortcut() -> None:
         "«покажи» reads as a critique directive. Same family as the R6 "
         "cross-time intercept: a contract demanding demonstration must not "
         "ride a tool-less route."
+        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

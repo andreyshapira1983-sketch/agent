@@ -59,8 +59,8 @@ if TYPE_CHECKING:
 WORKSPACE_DEFAULT = Path(os.environ.get("AGENT_WORKSPACE", Path(__file__).parent)).resolve()
 
 DATA_DIR           = "data"
+# Tick-journal path is owned by core/heartbeat_io.py (writer+reader, MIR-135).
 LOGS_DIR           = "logs"
-TICK_LOG_FILE      = "daemon_tick.jsonl"
 APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 # ONE queue, and it is the one the operator writes to. Until 2026-08-05 the
@@ -132,7 +132,7 @@ def _now_iso() -> str:
 
 
 def _log_tick(workspace: Path, payload: dict) -> None:
-    log_path = workspace / LOGS_DIR / TICK_LOG_FILE
+    log_path = _hb.tick_log_path(workspace)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"ts": _now_iso(), **payload}, ensure_ascii=False) + "\n")

@@ -80,7 +80,8 @@ def test_the_falsehood_list_still_stops_minting() -> None:
         "merely decorate. Implementation unprescribed: NOT a demand to "
         "swallow reasoning_action_mismatch into the falsehood list (that "
         "would re-fight the 2026-08-10 unification for the wrong boundary), "
-        "and NOT a prescribed field name."
+        "and NOT a prescribed field name. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )
