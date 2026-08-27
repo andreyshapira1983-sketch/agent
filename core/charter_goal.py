@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.mentor_channel import mentor_block, open_questions
+
 CHARTER_RELPATH = Path("knowledge") / "doctrine" / "future" / "CORPORATE_MODEL.md"
 
 #: Решения хартии — граждане памяти (2026-08-19, «день сурка»): отказ,
@@ -242,6 +244,7 @@ def _ask(
     declined: tuple[tuple[str, str], ...] = (),
     backlog: tuple[str, ...] = (),
     verdicts: tuple[tuple[str, str, str], ...] = (),
+    mentor_questions: str = "",
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
@@ -288,6 +291,10 @@ def _ask(
                 for v, s, r in verdicts
             )
         )
+    if mentor_questions:
+        # Канал наставника (MIR-178): вопросы, не приказы. Власть названа в
+        # самом блоке — совещательно, отклонить можно, отказ тоже ответ.
+        user += "\n\n" + mentor_questions
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
     except Exception:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
@@ -349,6 +356,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     parsed = _ask(
         llm, charter, anchors, recent, _recent_declined(root),
         _backlog_lines(root), _recent_verdicts(root),
+        mentor_questions=mentor_block(open_questions(root)),
     )
     if not parsed:
         return _declined("the model returned no parseable goal")
