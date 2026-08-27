@@ -36,6 +36,7 @@ from core.models import (
 from core.redaction import collect_pii_findings, redact_payload, scan
 from core.replan import FailureType as ReplanCode
 from core.replan import ReplanTrigger
+from core.repo_provenance import is_committed_source
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -152,6 +153,44 @@ class AgentLoopStepExecution:
         except Exception as exc:  # noqa: BLE001 — считаем НЕ read_only (безопасная сторона)
             self._risk_probe_failed(tool_name, "risk_for_raised", exc)
             return False
+
+    def _blocked_output_or_replan(
+        self, inj: Any, step: PlanStep, action: Action, tool_name: Any,
+        arguments: Any, source_label: str, flat_output: str,
+    ) -> str | None:
+        """Помеченный вывод, если документ НАШ; иначе перепланирование и None.
+
+        Живьём 2026-08-27T00:31:55Z агент был заблокирован на СОБСТВЕННОМ
+        реестре дефектов: там процитированы образцы инъекций, и цитата
+        срабатывает как приказ. Вердикт защиты остаётся — меняется последствие,
+        и только для источника, зафиксированного в истории репозитория.
+        Замер, три отвергнутых варианта и то, на каком инварианте держится
+        признак «наш»: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md, §6.
+        """
+        if is_committed_source(source_label, self._file_read_workspace_root()):
+            self.log.log(
+                "injection_blocked_downgraded",
+                {
+                    "label": source_label,
+                    "tool": action.tool_name,
+                    "findings": len(inj.findings),
+                    "reason": "source is committed to this repository",
+                },
+            )
+            return annotate_suspicious(flat_output, source_label)
+        _step_trigger_tls.step_trigger = ReplanTrigger(
+            code="injection_blocked",
+            step_id=step.id,
+            tool_name=tool_name,
+            arguments=arguments,
+            reason=(
+                "Tool output blocked by injection guard "
+                f"({len(inj.findings)} finding(s)). "
+                "Try a different source or query."
+            ),
+            attempt=self._current_attempt,
+        )
+        return None
 
     def _risk_probe_failed(self, tool_name: str, reason: str, exc: BaseException) -> None:
         """A7: fail safe AND say so — they are different jobs.
@@ -670,19 +709,13 @@ class AgentLoopStepExecution:
                     },
                 )
             if inj is not None and inj.is_blocked:
-                _step_trigger_tls.step_trigger = ReplanTrigger(
-                    code="injection_blocked",
-                    step_id=step.id,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    reason=(
-                        "Tool output blocked by injection guard "
-                        f"({len(inj.findings)} finding(s)). "
-                        "Try a different source or query."
-                    ),
-                    attempt=self._current_attempt,
+                annotated = self._blocked_output_or_replan(
+                    inj, step, action, tool_name, arguments, source_label, flat_output
                 )
-                return None
+                if annotated is None:
+                    return None
+                result = result.model_copy(update={"output": annotated})
+                flat_output = annotated
             if inj is not None and inj.verdict == "suspicious":
                 # Wrap the output with a trust-warning annotation so the
                 # synthesizer knows the content may be adversarial.
