@@ -102,7 +102,7 @@ tool call that skipped the gateway.
 | H-36 | a destructive command aimed at the wrong target | delete/truncate authority | **no** | no delete tool; overwrite escalates | I-1 + I-2 | `risk_for` table | ALREADY_PROTECTED | — | none |
 | H-11 | old state read by new code, a default asserting a past that never held | persistent state **and** code change | state yes, autonomous code change no | reproduced historically (ledger H-11); MIR-168 is the same family | I-1 (agent cannot rewrite code) | ledger H-11; MIR-168 | FUTURE_PLAUSIBLE_UNPROVEN | an executable path where the agent both changes code and reads its own older state | record only |
 | H-35 | data read as instruction | untrusted text enters · is persisted · is read back through a channel that does not re-check it · that reader feeds a decision-maker | **all four exist** | see §5 | **none on this path** — the scan is skipped by tool NAME | 397 live `injection_*` events carrying `excerpt`; `read_logs` in `_INJECTION_SCAN_EXEMPT`; registered at `app/bootstrap.py:118` | **LOCALLY_REACHABLE** | does a real planner call to `read_logs` deliver the excerpt into the prompt unscanned? | witness first, no code change yet |
-| H-01 | a diagnostic payload consumed as valid data | evidence pipeline that banks verified claims | **yes** | reproduced and fixed historically | fixed; MIR-140 interaction remains | ledger H-01 | queued for the prospective axis | whether the fix survives autonomous evidence gathering | re-examine |
+| H-01 | a diagnostic payload consumed as valid data | an evidence pipeline that banks verified claims, fed by autonomous fetching | **yes** — web tools are live and the daemon runs | reproduced and fixed historically; the compounding path is MIR-140, where the verify-replan loop FETCHES the cited URL, so a page that has since become a login wall resolves the citation and RAISES acceptance | the H-01 fix bites; MIR-140 does not, and is open | ledger H-01 + MIR-140 | FUTURE_PLAUSIBLE_UNPROVEN | an autonomous run where an error page resolves a citation and lifts acceptance | record; MIR-140 already owns the repair |
 | H-30 | identifiers unique only in appearance | an id generator whose entropy can be silently weakened | n/a | `core/ids.py::new_id` | `secrets.token_hex(16)` — 128 bits from the CSPRNG, matching W3C TraceContext | source read 2026-08-27 | ALREADY_PROTECTED | — | none |
 | H-39 | the dependency itself is the attack | the agent installs or updates dependencies | **no** | no package manager on the shell allowlist; `pip`/`npm` are `external` → gate | I-2 | `READ_ONLY_COMMANDS` | NOT_APPLICABLE | recheck if a build step is ever granted | none |
 | H-42 | a synchronised volley: senders converge on one instant | several senders | **no** | one process per tick, `IgnoreNew` | scheduler | task settings | NOT_APPLICABLE | — | none |
@@ -112,10 +112,38 @@ tool call that skipped the gateway.
 | H-27 | an external effect happens, its accounting does not | effects plus a separate ledger | **yes** | `tools/base.py:139-145` writes the invoke receipt for success AND failure — correct — but wraps the write itself in `except Exception: pass`, with no log | none on the failure path | source read 2026-08-27 | **LOCALLY_REACHABLE** | show a receipt write failing (read-only dir) while the effect lands | tripwire, not a fix: the swallow is deliberate, the SILENCE is the defect |
 | H-51 | recovery proven for one item, needed for many | a restore path exercised at unit scale only | **yes** | the state drill proves one isolated file | none — scale is untested | MIR-018 family | FUTURE_PLAUSIBLE_UNPROVEN | a drill over the simultaneous blast radius, not one store | record only |
 | H-43 | a value becomes STRUCTURE for the next parser | a text format where a value can close its own frame | **yes** | 24 JSONL stores | `json.dumps` escapes newlines — but no writer was audited for manual concatenation | not yet checked | queued | audit every JSONL writer for hand-built lines | examine next |
+| H-43 | a value becomes STRUCTURE for the next parser | a text format where a value can close its own frame | **yes**, 24 JSONL stores | every writer audited: `core/logger.py:36`, `core/checkpoint.py:135`, `core/state_integrity.append_state_jsonl` | `json.dumps` escapes the newline, so a value cannot end its own record; no hand-built line found | source read 2026-08-27 | ALREADY_PROTECTED | re-check if any writer ever formats a row by hand | none |
+| H-29 | corruption detected, and silently LESS data returned | a store that drops damaged rows | **yes** | `read_state_jsonl_unlocked`: a damaged row is QUARANTINED to `*.bad.jsonl` and the file rewritten with the survivors | evidence is preserved — better than the historical case | source read 2026-08-27 | ALREADY_PROTECTED, **with a named residual** | the CALLER is not told: `load()` returns fewer records and no runtime event is emitted | tripwire, not a fix |
+| H-41 | a weak or truncated hash used as a credential | a truncated digest standing for identity in an AUTHORITY path | **yes** | `_effects_dedup_key` = `sha256(goal)[:16]` — **64 bits** — and `_granted_effects_approval` finds a live approval BY that key | none: a collision would let an approval granted for goal A authorise goal B | source read 2026-08-27 | FUTURE_PLAUSIBLE_UNPROVEN | a demonstrated pair of goals colliding at 64 bits, plus a way to submit the second | the repair is one line (full digest) but it is a **migration contract**: existing pending items carry the old key and would stop matching |
+| H-47 | automatic failover itself causes the harm | a recovery path that runs unattended | **yes** | the catalog autorefresh fires from an ordinary tier lookup when the cache expires | throttled: `_AUTOREFRESH_DONE`, one attempt per process | live 2026-08-27 | **LIVE_OBSERVED, fixed same day (MIR-170)** | — | done: the refresh no longer deletes a provider it could not ask |
+| H-04 | a watchdog reset loop with no diagnosis | an unattended restarter that does not read outcomes | **yes** | the scheduled task re-fires every 4 h whatever the previous tick did | none on the restart path; MIR-135 already records that a daemon crashing every tick still reports `alive` | MIR-135, open | **FUTURE_PLAUSIBLE_UNPROVEN**, and it sharpens with autonomy | a run of consecutive failing ticks, to show nothing escalates | record; MIR-135 already owns the fix |
+| H-50 | a write returned success and never reached disk | durable state without a barrier | **yes** | `core/logger.py` flushes but does not `fsync`; the state stores are append-then-read | the truncated tail is handled: a half-written row is quarantined on read, not crashed on | H-06 examined this family historically | ALREADY_PROTECTED for the READ side | whether a lost tail loses a DECISION, not just a line | none |
+| H-40 | nodes disagree about time and each is right | several clocks | **no** | one host | — | — | NOT_APPLICABLE | — | none |
+| H-03 | a computing unit silently wrong on rare inputs | a scorer whose wrongness is invisible | **yes** | the verifier and the relevance/quality scorers | J-statistic measurements exist (MIR-141/143/147) and are open | those entries | FUTURE_PLAUSIBLE_UNPROVEN | a scorer error that changes an ADMISSION, measured | record only |
+| H-26 | two gates read one input and disagree | a check separated in TIME from the act it guards | **yes** | `file_write.risk_for` asks «does the target exist» and `run()` writes later — a classic check-then-use window on I-1 | parallelism is granted ONLY to read-only steps: `if any(not self._step_only_reads(step) …)` sends the whole batch sequential, so no write races another write | source read 2026-08-27 | ALREADY_PROTECTED | — | **fragile**: the day parallel writes are allowed, I-1 becomes race-able |
+| H-34 | the boundary is checked for some shapes of input, not all | a scan applied by NAME rather than by property | **yes** | `_INJECTION_SCAN_EXEMPT` — three tools skipped by name; `file_read` left that list on 2026-08-14 for exactly this reason | partial: the premise is re-examined per tool, not enforced structurally | §5 and MIR-171 | **LOCALLY_REACHABLE**, one arm addressed today | whether `list_dir` / `run_tests` can carry attacker text the way `read_logs` does | examine the two survivors next |
+| H-37 / H-13 | a harmless-looking field is EXPANDED downstream | a stored value reaching a template/parse layer | **no** | `source_library.search_template.format(topic=…)` — the template is a MODULE CONSTANT, not stored state | the template is code, so an attacker controls the argument, never the format string | source read 2026-08-27 | ALREADY_PROTECTED | — | **fragile**: if the source library ever becomes data the agent can write, this is the log4shell shape exactly |
+| H-38 | a DATA update, not a code change, kills every consumer | config the agent rewrites at runtime | **yes** | `config/model_catalog.json`, rewritten by an autorefresh fired from an ordinary lookup | none before today | live 2026-08-27: the refresh emptied a provider and reddened seven guards | **LIVE_OBSERVED, fixed same day (MIR-170)** | — | done |
+| H-32 | recovery itself becomes the load | an unthrottled repair path | **yes** | catalog autorefresh; checkpoint reactivation | throttled on both: `_AUTOREFRESH_DONE` is one attempt per process; reactivation is batched 3 with a 60-minute cooldown | source read | ALREADY_PROTECTED | — | none |
+| H-44 | a repair pass normalises a value into someone else's | a read path that REWRITES what it read | **yes** | `read_state_jsonl_unlocked` rewrites the store after quarantining a damaged row, and upgrades encodings on read | the rewrite happens under `exclusive_file_lock` | source read | ALREADY_PROTECTED | whether an encoding «upgrade» can change a value's MEANING, not just its bytes | record only |
+| H-48 | a stale path everyone believed unused | a premise that stopped being true without anyone re-asking | **yes** | the injection exemption is precisely this: written when those tools returned machine text, still standing after the guard began writing untrusted excerpts into one of them | none — the premise is re-checked only when someone looks | §6, MIR-171 | **LIVE_OBSERVED** (the `read_logs` arm), fixed for the document case | the other two exempt tools | as H-34 |
+| H-05 | a fast path justified by a state that is not true | replay of a stored answer | **yes** | the episodic fast path replays a stored answer verbatim | it demands full `achieved`; MIR-169 deliberately did NOT relax that half | today's measurement | ALREADY_PROTECTED | — | **fragile**: any future widening of replay must keep the completion demand |
+| H-06 | crash consistency: temp+rename without a durability barrier | durable state written by an unattended process | **yes** | 24 stores | historically a/b protected, c fixed; a truncated tail is quarantined on read | ledger H-06 | ALREADY_PROTECTED | — | none |
+| H-07 / H-46 | wall-clock deadlines under a clock step; a calendar boundary | an unattended process spanning clock changes | **yes**, since the daemon runs | reproduced historically and found FAIL-SAFE in every measured direction | fails safe | ledger H-07 | ALREADY_PROTECTED | — | none |
+| H-08 | a silently weakened entropy source that still looks random | anything minting identity | **yes** | `new_id` → `secrets` (H-30) | the pinning gap was closed historically | ledger H-08 | ALREADY_PROTECTED | — | none |
+| H-10 | cost multiplied by attacker-supplied input | a regex meeting untrusted text | **yes** | the path and stat regexes | bounded, and pinned by TIMING tests | ledger H-10 | ALREADY_PROTECTED, **with a residual worth naming** | those guards flaked twice under full-battery load on 2026-08-26 | a timing guard that cries wolf teaches its readers to ignore it — consider a cost-based bound instead of a clock one |
+| H-14 / H-38 | a configuration file that takes the whole system down | config the runtime rewrites | **yes** | `config/model_catalog.json` | fixed 2026-08-27 (MIR-170) | live | LIVE_OBSERVED, fixed | — | done |
+| H-15 | adjacent data leaking into output | shared buffers across concurrent work | partial | parallel steps exist, but only for read-only work | the same invariant that protects H-26 | source read | ALREADY_PROTECTED | — | fragile if parallel writes are ever allowed |
+| H-18 | a repair path that does not scale to the size of the incident | restore exercised at unit scale | **yes** | see H-51 | none | MIR-018 family | FUTURE_PLAUSIBLE_UNPROVEN | a drill over a simultaneous blast radius | record only |
+| H-19 | information reaching a channel not built to carry it | any side channel | **yes** | **this is §5**: the guard's own journal carries attacker text into an unscanned reader | none on that path | §5 witness | LOCALLY_REACHABLE (same finding, different lens) | as §5 | as §5 |
+| H-20 | commitment drift vs binding drift | a goal that stays in telemetry while losing causal control | **yes** | measured: the goal drove 14% of 267 cycles, and `goal_drove` now records it per cycle | MIR-163 makes the drift VISIBLE rather than preventing it | MIR-158…163 | ALREADY_MEASURED, not prevented | whether a visible drift is ever acted on | record only |
+| H-21 | a state machine accepting a transition its diagram does not have | any lifecycle | **yes** | fixed historically — but the ledger records the fix as the ONE without a mutation probe | the fix is unproven by mutation | ledger H-21 | FUTURE_PLAUSIBLE_UNPROVEN | run the interrupted mutation probe | record; it is the only fix in the ledger lacking one |
+| H-28 | the same expensive work paid for twice | dedup by a key that can collide or be missed | **yes** | dedup keys are truncated digests — see H-41 | 64-bit keys | H-41 | FUTURE_PLAUSIBLE_UNPROVEN | as H-41 | as H-41 |
 
-Remaining classes (H-03…H-10, H-13…H-15, H-18…H-26, H-28, H-29, H-32, H-34,
-H-37, H-38, H-40, H-41, H-43, H-44, H-46…H-48, H-50) are **not yet examined in this pass**. They are listed here rather
-than silently omitted; a class with no row has no verdict.
+**Coverage, counted from this table rather than estimated: all 47 classes the
+ledger actually carries now hold a prospective verdict.** The numbering runs to
+H-51 but has gaps — «51 classes» was my own miscount, corrected here by counting
+the ledger's rows instead of its highest number.
 
 ---
 
@@ -204,19 +232,50 @@ this project already corrected. The two defects fixed
 today (MIR-169, MIR-170) came from the live run and the battery, not from this
 audit.
 
-**2. Proven future hazards.** One reachable today, described in §5: the
-injection guard persists excerpts of untrusted text into the run journal, and
-the journal reader is exempt from the injection scan. Classified
-LOCALLY_REACHABLE — links 1–3 are the current state, link 4 (delivery into a
-prompt) is the missing evidence and is not assumed. One candidate is named with its
+**2. Proven future hazards.** Four reachable or observed, and they are not
+independent — three of them are one subsystem seen from three angles:
+
+* **§5 / H-19 / H-34 / H-48 — the guard's own record is an unscanned channel.**
+  LOCALLY_REACHABLE. The injection guard writes excerpts of untrusted text into
+  the run journal; the journal reader is exempt from the scan by NAME. Links 1–3
+  are the current state of the tree; delivery into a prompt is the missing
+  evidence and is not assumed. One arm (the document case) is fixed as MIR-171;
+  the two remaining exempt tools are the next thing to examine.
+* **H-27 — an effect can land while its accounting fails silently.**
+  LOCALLY_REACHABLE. The receipt write is deliberately swallowed so it cannot
+  break execution, but it is swallowed WITHOUT a log. The defect is the silence,
+  not the swallow; the response is a tripwire.
+* **H-41 / H-28 — a 64-bit truncated digest stands for identity in an authority
+  path.** FUTURE_PLAUSIBLE_UNPROVEN. `_effects_dedup_key` is `sha256(goal)[:16]`
+  and an approval is FOUND by it. The one-line repair is a migration contract,
+  not a patch: pending items carry the old key.
+* **H-11 — old state read by new code.** FUTURE_PLAUSIBLE_UNPROVEN, and it is the
+  clearest capability trigger in the document: today the agent owns the state and
+  not the code. Wire self-modification and it owns both.
+
+Three separate rows are marked **fragile** rather than hazardous — protections
+that hold today for a reason that could stop being true: parallel writes would
+make I-1 race-able (H-26, H-15); a data-driven source library would turn
+`str.format` into the log4shell shape (H-37); and widening replay would break the
+completion demand the fast path rests on (H-05). One candidate is named with its
 missing evidence: H-11 becomes autonomous the moment self-modification is wired,
 because the agent would then change code and read its own older state — today the
 second half exists and the first does not.
 
-**3. Disproved / protected hypotheses.** Six so far: H-16 and H-31 are absent by
-construction (no release path, no fleet); H-45 is blocked by two independent
-facts; H-17, H-33 and H-36 are blocked by named invariants that were shown to
-bite.
+**3. Disproved / protected hypotheses.** The majority, and this is the useful
+half of the result. Absent by construction: H-16 (no release path), H-31 and
+H-42 and H-40 (no fleet, one clock), H-39 (no package manager on the allowlist),
+H-45 (single instance plus human-launched subagents). Blocked by an invariant
+shown to bite: H-17, H-33, H-36, H-49 (the shell allowlist and the fail-closed
+gateway); H-26 and H-15 (parallelism only for read-only steps); H-43 (`json.dumps`
+escapes the frame); H-30 and H-08 (128 bits from the CSPRNG); H-37 and H-13 (the
+format template is code, not data); H-32 (both repair paths are throttled); H-44
+(the rewriting read holds an exclusive lock); H-05, H-06, H-07, H-46, H-12, H-50.
+
+Two carry a named residual rather than a clean pass: H-29 preserves the damaged
+row but never tells the CALLER that records went missing, and H-10's cost bound
+is pinned by TIMING tests that flaked twice under full-battery load on
+2026-08-26 — a guard that cries wolf teaches its readers to ignore it.
 
 ---
 
