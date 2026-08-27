@@ -62,7 +62,8 @@ def test_pruning_still_enforces_the_cap_when_rows_are_evictable(
         "tagged `lesson` and `lesson` is protected, the protected set grows "
         "without a ceiling. Fix unprescribed: cap the protected set, expire "
         "protection, or stop granting it automatically — three different "
-        "policies about what the agent may keep."
+        "policies about what the agent may keep. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

@@ -64,7 +64,8 @@ def test_a_path_shaped_phantom_is_refused_before_it_becomes_a_goal() -> None:
         "the same five sources as naming no weak spot at all, and as a "
         "nonsense topic. Recorded honestly since today (learning_grounding -> "
         "'unresolvable'), but no policy chosen: refuse, study anyway and say "
-        "so, or treat an unresolvable self-diagnosis as its own defect signal."
+        "so, or treat an unresolvable self-diagnosis as its own defect signal. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

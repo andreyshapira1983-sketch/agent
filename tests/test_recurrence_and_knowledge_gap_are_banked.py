@@ -69,7 +69,8 @@ def _machine_sources() -> dict[str, str]:
         "attached to a claim on the ladder and a measurement that can kill "
         "them — initiated by the machine, not by the operator typing "
         ":causal. Reading lists do not satisfy it. The implementation is "
-        "deliberately unprescribed."
+        "deliberately unprescribed. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )
@@ -103,7 +104,8 @@ def test_recurrence_opens_a_machine_investigation() -> None:
         "LearningPlan, any KnowledgeGapDetector class, or a competence "
         "formula (three similar successes must NOT mint an expert). The "
         "token 'knowledge_gap' here is a name-marker, not a design: whoever "
-        "closes this renames freely — the distinction matters, not the word."
+        "closes this renames freely — the distinction matters, not the word. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

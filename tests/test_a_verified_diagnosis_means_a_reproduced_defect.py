@@ -61,6 +61,7 @@ def test_a_reproduced_defect_is_a_verified_diagnosis() -> None:
         "definition is unprescribed — reproduce-the-named-failure, a "
         "citation-verified diagnosis, or a named failing test are different "
         "policies and the choice belongs to the operator."
+        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

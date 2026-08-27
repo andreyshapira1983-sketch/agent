@@ -21,6 +21,7 @@ from core.backlog_target_mapper import map_backlog_candidate
 from core.budget_kill_switch import BudgetKillSwitch
 from core.budget_kill_switch import default_path as kill_switch_path
 from core.budget_ledger import DEFAULT_COUNTERS, BudgetLedger
+from core.heartbeat_io import CRASH_LOOP_THRESHOLD, error_tick_streak
 from core.self_build_producer import DEFAULT_CANDIDATE_TARGETS
 from core.state_integrity import StateIntegrityError, decode_state_row
 from core.value_review import VALID_VERDICTS
@@ -146,6 +147,10 @@ def _daemon_payload(workspace: Path, now: datetime) -> dict[str, Any]:
             "event": heartbeat.get("event") if isinstance(heartbeat, dict) else None,
             "last_tick_at": last_tick_at,
             "staleness_threshold_seconds": threshold,
+            # Freshness alone cannot see a crash loop: the heartbeat is written
+            # BEFORE the tick's work, so a daemon failing every tick stays
+            # forever fresh. The streak is the missing half (MIR-135).
+            "error_streak": error_tick_streak(workspace),
             "path": str(workspace / agent_tick.HEARTBEAT_PATH),
         }
     except Exception as exc:  # noqa: BLE001 - status must not crash
@@ -171,7 +176,10 @@ def _daemon_interpretation(
     daemon_status: str,
     *,
     scheduler: dict[str, Any],
+    error_streak: int = 0,
 ) -> str:
+    if daemon_status == "alive" and error_streak >= CRASH_LOOP_THRESHOLD:
+        return "crash_loop_suspected"
     if daemon_status == "alive":
         return "scheduled_daemon_recent_tick"
     if daemon_status == "unknown":
@@ -188,7 +196,11 @@ def _enrich_daemon_payload(
 ) -> dict[str, Any]:
     out = dict(daemon)
     status = str(daemon.get("status") or "unknown")
-    out["interpretation"] = _daemon_interpretation(status, scheduler=scheduler)
+    out["interpretation"] = _daemon_interpretation(
+        status,
+        scheduler=scheduler,
+        error_streak=int(daemon.get("error_streak") or 0),
+    )
     return out
 
 
@@ -198,7 +210,9 @@ def _daemon_blocks_next_action(daemon: dict[str, Any]) -> bool:
         return True
     if status == "stale":
         return daemon.get("interpretation") != "expected_without_scheduled_daemon"
-    return False
+    # Alive-and-failing blocks too: «everything fine, next action X» over a
+    # crash loop is the exact lie the streak exists to end (MIR-135).
+    return daemon.get("interpretation") == "crash_loop_suspected"
 
 
 def _scheduler_due(workspace: Path, now: datetime) -> dict[str, Any]:

@@ -176,7 +176,8 @@ def test_a_broken_reasoning_check_loses_a_durable_defect_signal(tmp_path: Path) 
                     "KNOWN GAP, measured 2026-08-09 and banked rather than "
                     "fixed: core/loop_attempt.py:359 swallows the failure whole. "
                     "The neighbouring handler eleven lines below reports through "
-                    "_sensor_failed. When this XPASSes, replace the marker."
+                    "_sensor_failed. When this XPASSes, replace the marker. "
+                    "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]"
                 ),
             ),
         ),
@@ -187,7 +188,8 @@ def test_a_broken_reasoning_check_loses_a_durable_defect_signal(tmp_path: Path) 
                 reason=(
                     "KNOWN GAP, measured 2026-08-09 and banked rather than "
                     "fixed: core/loop_attempt.py:335 swallows the failure whole, "
-                    "and the signal it drops is banked with the episode."
+                    "and the signal it drops is banked with the episode. "
+                    "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]"
                 ),
             ),
         ),

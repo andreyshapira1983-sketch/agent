@@ -71,3 +71,48 @@ def is_stale(age_seconds: float | None) -> bool:
     if age_seconds is None:
         return True
     return age_seconds > EXPECTED_TICK_INTERVAL_SECONDS * STALENESS_FACTOR
+
+
+#: Location of the append-only per-tick outcome journal, relative to the
+#: workspace. Owned here so writer (agent_tick._log_tick) and reader
+#: (error_tick_streak) share one path — two spellings would rot apart.
+TICK_LOG_RELPATH = Path("logs") / "daemon_tick.jsonl"
+
+#: Consecutive `tick_error` ticks that constitute a suspected crash loop.
+#: 3 on the 4-hour schedule = 12 hours of failing while the heartbeat stays
+#: fresh — the heartbeat is written BEFORE the tick's work, so a daemon that
+#: crashes every tick reports `alive` forever without this counter (MIR-135).
+CRASH_LOOP_THRESHOLD = 3
+
+
+def tick_log_path(workspace: Path) -> Path:
+    return Path(workspace) / TICK_LOG_RELPATH
+
+
+def error_tick_streak(workspace: Path) -> int:
+    """Consecutive most-recent ticks that ended in `tick_error`.
+
+    `tick_complete` and `budget_kill_switch` reset the streak: the first is a
+    healthy tick, the second is deliberate throttling, not failure. A missing
+    journal is 0 — no record is not a crash loop — and a broken line is
+    skipped, not counted either way.
+    """
+    path = tick_log_path(workspace)
+    if not path.is_file():
+        return 0
+    streak = 0
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                event = json.loads(raw).get("event")
+            except ValueError:
+                continue
+            if event == "tick_error":
+                streak += 1
+            elif event in ("tick_complete", "budget_kill_switch"):
+                streak = 0
+    except OSError:
+        return 0
+    return streak

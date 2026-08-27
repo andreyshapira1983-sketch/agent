@@ -107,7 +107,8 @@ def test_a_silent_answer_is_still_caught_either_way() -> None:
         "failure_history, so a policy denial occurring in that attempt can "
         "never reach `blocked_and_disclosed`. When this XPASSes the loop "
         "started carrying the trigger — replace the marker with a plain "
-        "assertion and record which mechanism closed it."
+        "assertion and record which mechanism closed it. "
+        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
 )
 def test_a_refusal_is_classified_as_a_refusal_wherever_it_happens() -> None:
