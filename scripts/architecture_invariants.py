@@ -48,7 +48,16 @@ _PRODUCTION_FILES = ("agent_tick.py", "main.py")
 
 #: Modules exempt from INV-2 with a stated reason. Keep this list short and
 #: argued — every entry is a mechanism that cannot run.
-_ORPHAN_ALLOWLIST: dict[str, str] = {}
+_ORPHAN_ALLOWLIST: dict[str, str] = {
+    # ДАННЫЕ, не решатель: таблица групп анатомии, вынесенная в core НАМЕРЕННО
+    # (MIR-180) — полоса вправе менять core/*.py и не вправе scripts/, а без
+    # строки группировки каждый инкрементальный раскол откатывался сторожем.
+    # Потребители существуют и названы: scripts/gen_anatomy.py читает файл
+    # ast-разбором БЕЗ импорта (правило скрипта «не исполнять код агента»), а
+    # _sync_anatomy_groups в core/self_build_producer.py читает его текстом.
+    # «Не импортируется» здесь означает «литерал», а не «мёртв».
+    "anatomy_groups": "data literal, parsed not imported; readers named above",
+}
 
 #: Env vars a document names deliberately without the code having them yet.
 #: Each entry states why; a flag that merely got renamed does NOT belong here.

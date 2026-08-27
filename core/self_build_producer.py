@@ -1092,6 +1092,47 @@ def _new_core_module_stems(files: list[dict[str, Any]]) -> list[str]:
     return stems
 
 
+#: Таблица групп карты анатомии — лежит в core НАМЕРЕННО (MIR-180): полоса
+#: вправе менять core/*.py и не вправе scripts/, а без строки группировки
+#: каждый инкрементальный раскол откатывался анатомическим сторожем.
+_ANATOMY_GROUPS_PATH = "core/anatomy_groups.py"
+
+
+def _sync_anatomy_groups(
+    build: dict[str, Any], target: str, reader: Callable[[str], str | None]
+) -> None:
+    """Вложить строку группировки нового core-модуля в само предложение.
+
+    Правило наследования детерминированное: новый модуль встаёт в группу
+    своего ИСХОДНИКА — семантику расщепитель знать не может, происхождение
+    знает точно. Исходника нет в таблице — строку не выдумываем: анатомический
+    сторож поймает пропуск и назовёт его, а выдуманная группа лгала бы карте.
+    """
+    files = build.get("files") or []
+    target_norm = str(target or "").replace("\\", "/").strip()
+    if not target_norm.startswith("core/"):
+        return
+    target_stem = target_norm[len("core/"):-len(".py")]
+    new_stems = [s for s in _new_core_module_stems(files) if s != target_stem]
+    if not new_stems:
+        return
+    groups_src = reader(_ANATOMY_GROUPS_PATH)
+    if not groups_src or f'"{target_stem}"' not in groups_src:
+        return
+    anchor = f'"{target_stem}",'
+    if anchor not in groups_src:
+        return
+    insertion = "".join(
+        f'\n        "{stem}",' for stem in new_stems
+        if f'"{stem}"' not in groups_src
+    )
+    if not insertion:
+        return
+    updated = groups_src.replace(anchor, anchor + insertion, 1)
+    files.append({"path": _ANATOMY_GROUPS_PATH, "content": updated})
+    build["files"] = files
+
+
 def _sync_anatomy_index(
     build: dict[str, Any], target: str, reader: Callable[[str], str | None]
 ) -> None:
@@ -1240,6 +1281,10 @@ def publish_incremental_split_step(
         _sync_anatomy_index(build, step.target, reader or _default_file_reader(workspace))
     except Exception:  # noqa: BLE001, S110 — doc sync is best-effort; lane catches drift
         pass
+    try:
+        _sync_anatomy_groups(build, step.target, reader or _default_file_reader(workspace))
+    except Exception:  # noqa: BLE001, S110 — как выше: сторож анатомии поймает
+        pass           # пропуск и откатит, молча уронить публикацию хуже
     test_paths = _incremental_split_test_paths(workspace, step.target)
     evidence = [
         f"mode={step.mode}",
