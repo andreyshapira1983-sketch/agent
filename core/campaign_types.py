@@ -90,7 +90,11 @@ class CampaignResult:
                 f"cost_units={self.totals.get('cost_units', 0)}  "
                 f"proposals={self.totals.get('proposals', 0)}  "
                 f"artifacts={self.totals.get('artifacts', 0)}  "
-                f"goal_drove={self.totals.get('goal_drove_cycles', 0)}"
+                f"goal_drove={self.totals.get('goal_drove_cycles', 0)}  "
+                # Цена полезного цикла — всегда видимое зеркало трат (MIR-177).
+                # «-» при нуле полезных: неопределённость не ноль и не бесконечность.
+                f"units_per_useful="
+                f"{round(self.totals.get('cost_units', 0) / u, 1) if (u := self.totals.get('useful_cycles', 0)) else '-'}"
             ),
         ]
         for record in self.records:
