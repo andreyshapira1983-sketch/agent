@@ -33,6 +33,7 @@ def run_maintenance_pass(
     assumption_store: Any,
     suppressed_reason: str | None,
     dry_run: bool = True,
+    workspace: Any = None,
 ) -> dict:
     """One bounded hygiene pass: expire → dedupe → prune episodes → archive.
 
@@ -86,6 +87,20 @@ def run_maintenance_pass(
             {"error": type(exc).__name__, "detail": str(exc)[:200]},
         )
         report["error"] = type(exc).__name__
+
+    # Отдельный try: провал памяти не отменяет уборку диска, и наоборот.
+    # MIR-125: .bak-мусор разовых миграций удвоил data/ за пять дней, а метла
+    # ходила только за клавиатурой. dry_run (тень) считает и не удаляет.
+    if workspace is not None:
+        try:
+            from core.backup_cleanup import cleanup_backups
+
+            sweep = cleanup_backups(workspace, dry_run=dry_run)
+            report["backups_deleted"] = len(sweep.deleted)
+            report["backups_kept"] = len(sweep.kept)
+        except Exception as exc:  # noqa: BLE001 — та же граница, что выше
+            log.log("backup_sweep_error", {"error": type(exc).__name__})
+            report["backup_sweep_error"] = type(exc).__name__
 
     log.log("maintenance_pass", report)
     _explain(log=log, report=report, persistent_store=persistent_store, dry_run=dry_run)

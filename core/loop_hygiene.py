@@ -24,6 +24,8 @@ class AgentLoopHygiene:
         # модулями обязана быть записана, иначе её видно только на прогоне.
         model_router: Any
 
+        def _file_read_workspace_root(self) -> Any: ...
+
     def _hygiene_suppressed_reason(self) -> str | None:
         """Почему писать нельзя, или `None` если можно."""
         if not self._durable_learning_suppressed("hygiene"):
@@ -43,6 +45,8 @@ class AgentLoopHygiene:
             assumption_store=getattr(self, "assumption_store", None),
             suppressed_reason=self._hygiene_suppressed_reason(),
             dry_run=dry_run,
+            # MIR-125: проход метёт и .bak-мусор миграций; тень только считает.
+            workspace=self._file_read_workspace_root(),
         )
 
     def compact_assumptions(self, *, dry_run: bool = False) -> dict:
