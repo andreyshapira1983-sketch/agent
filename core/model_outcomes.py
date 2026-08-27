@@ -6,7 +6,7 @@ from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.model_catalog import offered_models, peer_model_at_same_tier
+from core.model_catalog import classify_model, offered_models, peer_model_at_same_tier
 
 #: Ниже этого числа прогонов доля — шум, а не свидетельство. Восемь потому, что
 #: на живых данных 2026-08-15 столько набирали лишь модели, работавшие не один
@@ -91,6 +91,30 @@ def measure_model_outcomes(
     )
 
 
+#: Насколько доли подтверждённых считаются «неотличимыми». Меньше шага одной
+#: ошибки при MIN_RUNS: на минимуме прогонов равенство означает точное
+#: равенство, и вниз по качеству за дешевизну не меняют.
+_COST_TOLERANCE = 0.05
+
+
+#: Мост словарей: классификатор говорит light/standard/deep, таблица цен —
+#: low/medium/high. Первая версия оси не переводила, и ОБЕ модели молча падали
+#: в «unknown» — те же два словаря одного понятия, что в MIR-174. Полноту моста
+#: держит тест: новый уровень не провалится в «unknown» незамеченным.
+_TIER_TO_COST: dict[str, str] = {
+    "light": "low",
+    "standard": "medium",
+    "deep": "high",
+}
+
+
+def _cost_units(model: str) -> int:
+    """Тариф уровня модели — из ЕДИНОЙ таблицы, не из копии."""
+    from core.model_usage import cost_units_per_1k
+
+    return cost_units_per_1k(_TIER_TO_COST.get(classify_model(model).value, "unknown"))
+
+
 def preferred_model(
     outcomes: Iterable[ModelOutcome],
     *,
@@ -108,8 +132,17 @@ def preferred_model(
     ]
     if not ranked:
         return None
-    ranked.sort(key=lambda o: (o.verified_share, -o.defect_share, o.runs), reverse=True)
-    return ranked[0].model
+    # Ось стоимости (MIR-176; дайджест, записи 6–7). Среди моделей, чьё
+    # качество НЕОТЛИЧИМО от лучшего, побеждает дешёвый тариф. Допуск меньше
+    # шага одной ошибки при MIN_RUNS=8 (1/8 = 0.125), поэтому измеримо худшее
+    # дешевизной не покупается никогда — болезнь спуска, уже чиненная у
+    # failover (73 спуска за сутки, 2026-08-15), сюда не возвращается.
+    best_share = max(o.verified_share for o in ranked)
+    bar = [o for o in ranked if best_share - o.verified_share <= _COST_TOLERANCE]
+    bar.sort(key=lambda o: (
+        _cost_units(o.model), -o.verified_share, o.defect_share, -o.runs,
+    ))
+    return bar[0].model
 
 
 #: Каждый четвёртый прогон таблицы отдаёт следующее решение разведчику: хватает,
