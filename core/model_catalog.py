@@ -31,10 +31,15 @@ Cache file: config/model_catalog.json
         "providers": {
           "anthropic": {
             "models": [{"id": "...", "tier": "light|standard|deep"}, ...],
-            "tier_best": {"light": "...", "standard": "...", "deep": "..."}
+            "tier_best": {"light": "...", "standard": "...", "deep": "..."},
+            # Only when this provider could not be ASKED this time and its
+            # previous models were kept rather than dropped (MIR-170):
+            "carried_over": true, "carried_reason": "...", "carried_from": "..."
           },
           ...
-        }
+        },
+        # Only when at least one provider could not be asked:
+        "unreachable": {"anthropic": "AuthenticationError: ..."}
       }
 
 The "best" model per tier is the one with the highest lexicographic id
@@ -258,10 +263,16 @@ def discover_catalog(
 
     IMPORTANT: querying a provider's model list is a metadata-only, non-
     inference provider call — it runs no LLM inference and generates no
-    completion — but it is still a real network/provider call. It must only
-    be triggered by an explicit operator request (e.g. a dry-run discovery
-    command), never on a normal run, and should be recorded as provider
-    metadata access rather than an LLM inference call.
+    completion — but it is still a real network/provider call, and it should be
+    recorded as provider metadata access rather than an LLM inference call.
+
+    This paragraph used to promise that only an explicit operator request could
+    trigger it. That was untrue: ``ensure_fresh_catalog`` fires this from an
+    ordinary tier lookup once the cache expires — once per process, gated by
+    AGENT_CATALOG_AUTOREFRESH. The behaviour is deliberate (a dead catalog
+    silently downgrades every failover), so the promise was corrected rather
+    than the code. Worth knowing, because it is how a read-looking call reached
+    the network and rewrote config while MIR-170 was being measured.
     """
     providers = providers or list(_FETCHERS.keys())
     api_keys  = api_keys or {}
@@ -270,6 +281,9 @@ def discover_catalog(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "providers":  {},
     }
+    #: Поставщики, которых спросить НЕ УДАЛОСЬ, и почему. Отсутствие ключа
+    #: означает «все спрошенные ответили», а не «никого не спрашивали».
+    unreachable: dict[str, str] = {}
 
     for provider in providers:
         fetcher = _FETCHERS.get(provider)
@@ -280,6 +294,9 @@ def discover_catalog(
             model_ids = fetcher(api_keys.get(provider))
         except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
             logger.warning("model fetch failed for %s: %s", provider, exc)
+            # «Не смогли спросить» — не «ответил пусто». Раньше поставщик просто
+            # пропускался, и сохранение объявляло его безмодельным (MIR-170).
+            unreachable[provider] = f"{type(exc).__name__}: {exc}"[:200]
             continue
 
         classified = [
@@ -303,6 +320,8 @@ def discover_catalog(
             provider, len(classified), tier_best,
         )
 
+    if unreachable:
+        catalog["unreachable"] = unreachable
     return catalog
 
 
@@ -319,8 +338,55 @@ def refresh_catalog(
     discover/refresh split.
     """
     catalog = discover_catalog(providers, api_keys=api_keys)
+    _carry_over_unreachable(catalog)
     _save_catalog(catalog)
     return catalog
+
+
+def _read_catalog_file() -> dict[str, Any]:
+    """Каталог с диска НЕЗАВИСИМО от срока годности.
+
+    `_load_catalog` намеренно отдаёт пустоту просроченному — но перенос нужен
+    ровно тогда, когда каталог просрочен и потому обновляется. Просроченные
+    сведения о недоступном поставщике лучше, чем объявление его пустым.
+    """
+    path = _catalog_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001 — перенос не вправе ронять обновление
+        logger.warning("model_catalog carry-over read failed: %s", exc)
+        return {}
+
+
+def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
+    """Сохранить прежние модели поставщика, которого не смогли спросить.
+
+    Переносится ТОЛЬКО при ошибке запроса. Честный пустой ответ — это ответ, и
+    он записывается как есть, иначе поставщик, снявший все модели, остался бы в
+    каталоге навсегда. Замер: MIR-170.
+    """
+    unreachable = catalog.get("unreachable") or {}
+    if not unreachable:
+        return
+    previous = _read_catalog_file()
+    prior_providers = previous.get("providers") or {}
+    for provider, reason in unreachable.items():
+        prior = prior_providers.get(provider) or {}
+        if not prior.get("models"):
+            continue
+        entry = dict(prior)
+        entry["carried_over"] = True
+        entry["carried_reason"] = reason
+        # Дата ПЕРВОГО переноса, а не последнего: иначе запись молодела бы с
+        # каждым обновлением и выглядела свежее, чем она есть.
+        entry.setdefault("carried_from", previous.get("updated_at"))
+        catalog["providers"][provider] = entry
+        logger.warning(
+            "model_catalog carried over provider=%s models=%d reason=%s",
+            provider, len(entry.get("models") or ()), reason,
+        )
 
 
 # ── autorefresh: обновление прежде подстройки ─────────────────────────────────
