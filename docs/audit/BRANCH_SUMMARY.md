@@ -18,10 +18,12 @@ finding is not considered closed until its measurement, its rejected
 alternatives and its boundary are written down where the next reader will hit
 them.
 
-**What grew.** The defect registry went from 99 entries to 173, every one
+**What grew.** The defect registry went from 99 entries to 181, every one
 carrying its own measurement and provenance. The test suite went from 529 files
-to 664, and the full battery stands at 9023 passing with 13 deliberate xfails.
-Lint debt is held at exactly 113 by a ratchet that forbids growth.
+to 669, and the full battery stands at 9058 passing with 13 deliberate xfails.
+Lint debt is held at exactly 113 by a ratchet that forbids growth. (These
+figures are as of 2026-08-27 evening, 293 commits; earlier snapshots in this
+file's history carry their own dates.)
 
 ---
 
@@ -123,3 +125,68 @@ the code they describe.
 Three entries are `code_fixed_needs_runtime_verification`: their evidence is due
 from the next unattended tick's journal, and the exact event to look for is
 written into each. Nothing about them is claimed until it appears.
+
+
+---
+
+## Day two — the agent went live, and the loop closed
+
+Everything above was built while the agent was OFF. On 2026-08-26 the operator
+approved a standing grant (the instrument to create one had to be built first —
+nothing shipped could), the scheduler was re-enabled, and the next day became
+the first day of genuinely unattended operation: five grant-consumed runs,
+predictions registered before each tick, journals read after.
+
+**What the live runs confirmed.** The loop-closure drain showed both modes
+(nothing to apply; a real proposal considered and refused in the rule's own
+name — code stays with the human). Goal-subject resolution drove a live choice.
+The spending mirror's `units_per_useful` printed in a real summary. The mentor
+channel's visibility landed in the charter decision row.
+
+**What the live runs exposed.** Each tick was compared against pre-registered
+predictions, and the misses became fixes the same day: the loop closure was
+first wired into an artery the scheduled path never executes (found because the
+predicted events did not appear); the goal-drove counter counted into a local
+that the totals never carried; «saw the mentor's question and declined» was
+indistinguishable from «never saw it»; the charter promised module splits while
+the target mapper refused them with «needs an incremental splitter» — a reason
+written before the splitter existed, at a measured cost of 234 units in one day
+for structurally impossible work.
+
+**The first product.** At 19:31 the repaired chain fired end to end: the mapper
+grounded the top oversized module, the deterministic splitter planned one
+provably-safe extraction (11 functions, 71 lines, verbatim AST slice) and
+published the first `incremental_splitter` proposal in the agent's history. The
+operator approved; the lane applied it on a temp branch, the anatomy guards
+went red, and it ROLLED BACK CLEAN — which exposed the last structural war:
+the guard demands every new core module be grouped, and the grouping table
+lived in `scripts/`, which the lane is forbidden to touch. The table now lives
+in `core/anatomy_groups.py` as a pure literal (parsed, never imported), and a
+split proposal carries its own grouping line, inheriting the source module's
+group.
+
+**The economics organs.** Thirty years of resource-rational-agent literature
+was read first and digested with per-entry verdicts
+(`ECONOMIC_AGENT_RESEARCH_DIGEST.md`); the decisive negative — even the 2026
+formal frameworks have no internal cost-per-outcome mechanism — meant the gap
+measured here is the field's open edge. The model chooser now reads the price
+of success (equally-capable models resolve to the cheaper tier; measurably
+worse is never bought). A spending mirror lays the agent's own «spent → got»
+pairs, always per-unit, before the operator, the run summary, and the
+planner's prompt. A mentor channel carries QUESTIONS with advisory authority
+into goal choice — never orders — and the first live question, built from the
+agent's own mirror, was visibly seen by the next goal choice, which then chose
+the first economics goal in the agent's history. Recorded as correlation, not
+causation.
+
+**The corrections column.** This branch's discipline cut against its own
+author repeatedly, and those entries are in the registry by name: a published
+«3% of goals name a subject» figure divided by rows that predate the field; a
+mirror that showed zero successes for every model because its author invented
+a status word the producer never writes; three pins in one day that guarded an
+address rather than a property. Each correction states what was wrong, how it
+was caught, and what now prevents the recurrence.
+
+State at this tip: battery 9058 passed / 13 xfailed, lint 113, all ratchets
+clean, three registry entries awaiting their named runtime confirmation from
+the next unattended ticks.
