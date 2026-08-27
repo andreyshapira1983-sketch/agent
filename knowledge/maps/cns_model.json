@@ -165,22 +165,22 @@
       "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:126)",
       "note": "Every step failure travels through this carrier. It is invisible to the node/edge discovery rule and absent from the operator's map — found by reconciliation on 2026-08-07.",
       "writers": [
-        "core/loop_step_execution.py:181 (policy_blocked)",
-        "core/loop_step_execution.py:421 (policy_blocked)",
-        "core/loop_step_execution.py:444 (policy_blocked)",
-        "core/loop_step_execution.py:475 (code — variable)",
-        "core/loop_step_execution.py:510 (unknown)",
-        "core/loop_step_execution.py:521 (replan_code — variable)",
-        "core/loop_step_execution.py:555 (verify_failed)",
-        "core/loop_step_execution.py:587 (web_empty)",
-        "core/loop_step_execution.py:614 (timeout)",
-        "core/loop_step_execution.py:635 (injection_blocked)",
-        "core/loop_step_execution.py:842 (unknown)"
+        "core/loop_step_execution.py:189 (policy_blocked)",
+        "core/loop_step_execution.py:429 (policy_blocked)",
+        "core/loop_step_execution.py:452 (policy_blocked)",
+        "core/loop_step_execution.py:483 (code — variable)",
+        "core/loop_step_execution.py:518 (unknown)",
+        "core/loop_step_execution.py:529 (replan_code — variable)",
+        "core/loop_step_execution.py:563 (verify_failed)",
+        "core/loop_step_execution.py:595 (web_empty)",
+        "core/loop_step_execution.py:622 (timeout)",
+        "core/loop_step_execution.py:643 (injection_blocked)",
+        "core/loop_step_execution.py:850 (unknown)"
       ],
       "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:550, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.",
-      "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk. | shifted 2026-08-27: `core/repo_provenance` imported at the top (+1 to every site below it) and the blocked branch gained a provenance arm that downgrades a block on our OWN committed document to an annotation (+22 below that). Why, and the three rejected alternatives: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §6.",
+      "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk. | shifted 2026-08-27: `core/repo_provenance` imported at the top (+1 to every site below it) and the blocked branch gained a provenance arm that downgrades a block on our OWN committed document to an annotation (+22 below that). Why, and the three rejected alternatives: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §6. | shifted again 2026-08-27: the injection exemption lost two of its three tools and the comment explaining why grew above these sites.",
       "readers": [
-        "core/loop_step_execution.py:127 (consume)"
+        "core/loop_step_execution.py:133 (consume)"
       ],
       "_readers_note": "One reader, verified against the same census: lines 108, 111 and 255 write None (the clear and the consume), and 110 is the only read. The bare-string anchor shape with a trailing '(consume)' is why tests/test_cns_model.py never checked any of these — its digit test fails on the suffix and the anchor is skipped in silence.",
       "lifetime": "per step, per worker thread; set to None on read",

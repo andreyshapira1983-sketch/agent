@@ -121,7 +121,7 @@ tool call that skipped the gateway.
 | H-40 | nodes disagree about time and each is right | several clocks | **no** | one host | — | — | NOT_APPLICABLE | — | none |
 | H-03 | a computing unit silently wrong on rare inputs | a scorer whose wrongness is invisible | **yes** | the verifier and the relevance/quality scorers | J-statistic measurements exist (MIR-141/143/147) and are open | those entries | FUTURE_PLAUSIBLE_UNPROVEN | a scorer error that changes an ADMISSION, measured | record only |
 | H-26 | two gates read one input and disagree | a check separated in TIME from the act it guards | **yes** | `file_write.risk_for` asks «does the target exist» and `run()` writes later — a classic check-then-use window on I-1 | parallelism is granted ONLY to read-only steps: `if any(not self._step_only_reads(step) …)` sends the whole batch sequential, so no write races another write | source read 2026-08-27 | ALREADY_PROTECTED | — | **fragile**: the day parallel writes are allowed, I-1 becomes race-able |
-| H-34 | the boundary is checked for some shapes of input, not all | a scan applied by NAME rather than by property | **yes** | `_INJECTION_SCAN_EXEMPT` — three tools skipped by name; `file_read` left that list on 2026-08-14 for exactly this reason | partial: the premise is re-examined per tool, not enforced structurally | §5 and MIR-171 | **LOCALLY_REACHABLE**, one arm addressed today | whether `list_dir` / `run_tests` can carry attacker text the way `read_logs` does | examine the two survivors next |
+| H-34 | the boundary is checked for some shapes of input, not all | a scan applied by NAME rather than by property | **was yes** | all three exemptions measured 2026-08-27: a FILENAME carries an order through `list_dir`; a failing test prints file text through `run_tests`; the journal carries the guard's own `excerpt` through `read_logs` | two removed (MIR-172), the third kept deliberately | §5, MIR-171, MIR-172 | **CURRENT_DEFECT_REPRODUCED → fixed for two of three** | none for `list_dir`/`run_tests`; for `read_logs` the repair is on the WRITE side | done, with the remaining piece named |
 | H-37 / H-13 | a harmless-looking field is EXPANDED downstream | a stored value reaching a template/parse layer | **no** | `source_library.search_template.format(topic=…)` — the template is a MODULE CONSTANT, not stored state | the template is code, so an attacker controls the argument, never the format string | source read 2026-08-27 | ALREADY_PROTECTED | — | **fragile**: if the source library ever becomes data the agent can write, this is the log4shell shape exactly |
 | H-38 | a DATA update, not a code change, kills every consumer | config the agent rewrites at runtime | **yes** | `config/model_catalog.json`, rewritten by an autorefresh fired from an ordinary lookup | none before today | live 2026-08-27: the refresh emptied a provider and reddened seven guards | **LIVE_OBSERVED, fixed same day (MIR-170)** | — | done |
 | H-32 | recovery itself becomes the load | an unthrottled repair path | **yes** | catalog autorefresh; checkpoint reactivation | throttled on both: `_AUTOREFRESH_DONE` is one attempt per process; reactivation is batched 3 with a 60-minute cooldown | source read | ALREADY_PROTECTED | — | none |
@@ -239,8 +239,16 @@ independent — three of them are one subsystem seen from three angles:
   LOCALLY_REACHABLE. The injection guard writes excerpts of untrusted text into
   the run journal; the journal reader is exempt from the scan by NAME. Links 1–3
   are the current state of the tree; delivery into a prompt is the missing
-  evidence and is not assumed. One arm (the document case) is fixed as MIR-171;
-  the two remaining exempt tools are the next thing to examine.
+  evidence and is not assumed. One arm (the document case) is fixed as MIR-171. The
+  other two were then measured and fixed as MIR-172 — a filename alone carries an
+  order through `list_dir`, and a failing test prints file text through
+  `run_tests` — with false positives measured on real output BEFORE the change
+  (`clean` in both cases), so the exemption was replaced by a narrowed scan view
+  rather than removed blind. `read_logs` is kept exempt on purpose: its excerpts
+  are the guard's own preserved evidence, and scanning them at the READ side
+  would take away the agent's ability to investigate its own incidents. The
+  remaining repair is on the WRITE side — neutralise the excerpt where it is
+  stored, so it stays evidence and stops being an instruction.
 * **H-27 — an effect can land while its accounting fails silently.**
   LOCALLY_REACHABLE. The receipt write is deliberately swallowed so it cannot
   break execution, but it is swallowed WITHOUT a log. The defect is the silence,

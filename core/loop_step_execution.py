@@ -36,7 +36,7 @@ from core.models import (
 from core.redaction import collect_pii_findings, redact_payload, scan
 from core.replan import FailureType as ReplanCode
 from core.replan import ReplanTrigger
-from core.repo_provenance import is_committed_source
+from core.repo_provenance import block_may_be_annotated
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -64,9 +64,15 @@ _TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
 # `file_read` and `diff_file` return arbitrary file content and are scanned.
 # The rest stay exempt: they return framework-shaped output, and scanning it
 # tripped false positives on our own text (see untrusted_scan_view).
+# Проверено 2026-08-27: основание «эти инструменты выдают текст, сделанный
+# каркасом» ложно для ВСЕХ трёх. Имя файла несёт приказ и возвращается дословно
+# (`list_dir`); падающий тест печатает исходник (`run_tests`); журнал несёт
+# `excerpt`, сохранённый самой защитой (`read_logs`). Первые два выведены из
+# исключения — на настоящем выводе обоих вердикт `clean`, то есть паралича не
+# будет. `read_logs` оставлен НАМЕРЕННО: его куски защита сохранила как улику, и
+# проверять их на входе значит отнимать разбор собственных инцидентов; лечение
+# там на стороне записи. Разбор: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §5.
 _INJECTION_SCAN_EXEMPT: frozenset[str] = frozenset({
-    "list_dir",
-    "run_tests",
     "read_logs",
 })
 
@@ -167,7 +173,9 @@ class AgentLoopStepExecution:
         Замер, три отвергнутых варианта и то, на каком инварианте держится
         признак «наш»: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md, §6.
         """
-        if is_committed_source(source_label, self._file_read_workspace_root()):
+        if block_may_be_annotated(
+            action.tool_name, source_label, self._file_read_workspace_root()
+        ):
             self.log.log(
                 "injection_blocked_downgraded",
                 {
