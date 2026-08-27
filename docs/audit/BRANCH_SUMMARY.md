@@ -1,8 +1,18 @@
 # What this branch contains
 
-Branch `self-apply/20260815T191927Z`, measured against `main` on 2026-08-27.
+Published as `work/2026-08-27-autonomy-hardening`; the same commits are also the
+local working branch `self-apply/20260815T191927Z`, which is where they were
+made. Measured against `main` on 2026-08-27.
 
-**278 commits.** By kind: 112 docs, 73 fix, 29 test, 21 feat, 20 audit, 7 chore,
+**279 commits at the moment this document was written**, including the commit
+that added it. The count moves as the branch does — read it as a measurement with
+a date on it, not as a property of the branch. The first version of this file
+said 278 and named only the local branch: written five minutes before the push,
+it described a different object than the one a reader would be standing on, which
+is the exact defect shape this branch spent a week removing from other people's
+captions.
+
+By kind: 112 docs, 73 fix, 29 test, 21 feat, 20 audit, 7 chore,
 5 refactor, 4 verify. The docs share is not padding — in this repository a
 finding is not considered closed until its measurement, its rejected
 alternatives and its boundary are written down where the next reader will hit
