@@ -11,6 +11,7 @@ from typing import Any
 
 from core.best_next_action import BestNextAction
 from core.campaign_types import CampaignActionOutcome, CampaignConfig
+from core.command_subjects import command_module
 
 
 def _log(agent: Any, event: str, payload: dict[str, Any]) -> None:
@@ -97,7 +98,9 @@ def _default_gather_signals(
 
     action = select_best_next_action(
         goal=goal,
-        goal_subject=resolve_goal_subject(goal, exists=_here),
+        goal_subject=resolve_goal_subject(
+            goal, exists=_here, command_module=command_module
+        ),
         goal_names_missing=unresolved_goal_targets(goal, exists=_here),
         result_status=str(hb.get("result_status", "none")),
         tests_health=str(hb.get("tests_health", "none")),
@@ -680,7 +683,8 @@ def _default_execute_action(
         engineered = _propose_engineering_step(
             agent=agent, workspace=workspace, approval_inbox=approval_inbox,
             target=action.target_path or resolve_goal_subject(
-                config.goal, exists=lambda rel: (_ws / rel).is_file()
+                config.goal, exists=lambda rel: (_ws / rel).is_file(),
+                command_module=command_module,
             ),
         )
         if engineered:

@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 207 modules across 12 groups._
+_Total: 208 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -44,6 +44,7 @@ _Input handling and injection/exfiltration defense._
 | `core/secret_scanner` | Secret Scanner — single source of truth for credential detection (§7). |
 | `core/repo_provenance` | Происхождение файла: лежит он в истории репозитория или просто в папке. |
 | `core/rule_approved_apply` | Применение того, на что разрешение даёт ПРАВИЛО, а не человек. |
+| `core/command_subjects` | Команда как ПРЕДМЕТ цели: `:team-run` → модуль, где живёт её обработчик. |
 
 ## Cognitive Core & Agent Cycle (§3)
 

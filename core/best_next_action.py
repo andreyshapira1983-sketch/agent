@@ -218,19 +218,30 @@ def _is_engineering_goal(text: str) -> bool:
 #: Токен, похожий на путь: минимум один разделитель каталогов. Голое слово
 #: путём не считается — иначе предметом цели становилась бы любая фраза.
 _SUBJECT_TOKEN_RE = re.compile(r"[\w.-]+(?:[/\\][\w.-]+)+")
+#: Второй словарь предметов: имя команды. Живой пример из ленты — цель
+#: «Trace `:team-run` sharing of models…», у которой предмет назван точно, а
+#: путеподобных токенов нет ни одного (MIR-174).
+_COMMAND_TOKEN_RE = re.compile(r":[a-z][a-z0-9-]*")
 
 
-def resolve_goal_subject(text: str, *, exists) -> str | None:
+def resolve_goal_subject(text: str, *, exists, command_module=None) -> str | None:
     """Артефакт, О КОТОРОМ цель, — по существованию, а не по суффиксу.
 
-    Замер, отвергнутые варианты и границы: MIR-158 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    `exists` внедряется, чтобы решающая таблица осталась чистой функцией.
+    Два словаря, потому что агент пишет обоими: путь к файлу и имя команды.
+    Читать один означало объявлять «предмет не назван» там, где он назван точно
+    (MIR-174). `exists` и `command_module` внедряются, чтобы решающая таблица
+    осталась чистой функцией. Замер и границы: MIR-158, MIR-174.
     """
     for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
         token = raw.replace("\\", "/").strip("`'\",.;:()[]")
         for candidate in (token, f"{token}.py"):
             if candidate and exists(candidate):
                 return candidate
+    if command_module is not None:
+        for raw in _COMMAND_TOKEN_RE.findall(str(text or "")):
+            module = command_module(raw)
+            if module and exists(module):
+                return module
     return None
 
 
