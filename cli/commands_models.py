@@ -136,8 +136,18 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
                 for provider, pdata in catalog_providers.items()
             },
             "updated_at": catalog.get("updated_at"),
+            # Кого спросить не удалось. Молчание об этом читалось бы как
+            # «спросили всех» (MIR-170).
+            "unreachable": dict(catalog.get("unreachable") or {}),
         },
     )
+    for provider, reason in (catalog.get("unreachable") or {}).items():
+        kept = len((catalog_providers.get(provider) or {}).get("models") or ())
+        print(
+            f"  ({provider}: спросить не удалось — {reason}; "
+            f"оставлены прежние модели: {kept})",
+            file=sys.stderr,
+        )
 
     print("\n── Result ───────────────────────────────────────────────────────────", file=sys.stderr)
     for provider, pdata in catalog.get("providers", {}).items():
