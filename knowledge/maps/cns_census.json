@@ -37,6 +37,7 @@
       "failure_semantics"
     ],
     "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint": [],
+    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": [],
     "loop_context.py::AgentLoopContext._maybe_resolve_referent": [],
     "loop_context.py::AgentLoopContext._open_run": [],
     "loop_context.py::AgentLoopContext._retrieve_turn_context": [],
@@ -47,6 +48,7 @@
       "mutation_bite"
     ],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence": [],
+    "loop_evidence_chain.py::chain_has_tool_evidence": [],
     "loop_gates.py::AgentLoopGates._check_clarification": [],
     "loop_gates.py::AgentLoopGates._check_operational_domain": [],
     "loop_gates.py::AgentLoopGates._clarification_gate": [
@@ -134,6 +136,7 @@
       "callers",
       "inputs"
     ],
+    "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan": [],
     "loop_step_execution.py::AgentLoopStepExecution._call_tool": [],
     "loop_step_execution.py::AgentLoopStepExecution._capture_compensation_plan": [],
     "loop_step_execution.py::AgentLoopStepExecution._execute_step": [
@@ -152,15 +155,13 @@
     "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder": [],
     "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block": [],
     "loop_synthesis.py::AgentLoopSynthesis._synthesize": [],
-    "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
-    "loop_verification.py::AgentLoopVerification._verify_draft": [],
-    "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
-    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
     "loop_synthesis_helpers.py::_artifact_blocks": [],
     "loop_synthesis_helpers.py::_log_budget_trim": [],
     "loop_synthesis_helpers.py::_organ_map": [],
-    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": [],
-    "loop_evidence_chain.py::chain_has_tool_evidence": []
+    "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
+    "loop_verification.py::AgentLoopVerification._verify_draft": [],
+    "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
+    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": []
   },
   "edges": [
     [
@@ -440,6 +441,10 @@
       "loop_sensor.py::AgentLoopSensor._sensor_failed"
     ],
     [
+      "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
       "loop_step_execution.py::AgentLoopStepExecution._call_tool",
       "loop.py::AgentLoop._file_read_workspace_root"
     ],
@@ -450,6 +455,10 @@
     [
       "loop_step_execution.py::AgentLoopStepExecution._execute_step",
       "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step",
+      "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan"
     ],
     [
       "loop_step_execution.py::AgentLoopStepExecution._execute_step",

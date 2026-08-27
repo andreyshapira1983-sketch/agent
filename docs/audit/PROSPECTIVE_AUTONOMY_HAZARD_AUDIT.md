@@ -171,11 +171,22 @@ a design decision, not a patch:
 The choice belongs to the operator: it trades the agent's access to its own
 memory against the strength of a defence that is currently working correctly.
 
+**Operator's decision, 2026-08-27: D.** Implemented as MIR-171. The verdict
+stands; only the consequence changes, and only for a source committed to this
+repository — `core/repo_provenance.is_committed_source`. Provenance, not
+location, because location as a trust signal is the exact error corrected on
+2026-08-14. The signal rests on I-1: the agent cannot alter a tracked file,
+because an overwrite escalates. **If I-1 ever goes, this weakens with it** — the
+dependency is recorded so it cannot be lost. The check fails closed: no git, no
+repository, a hung call — nothing becomes «ours». Runtime confirmation is still
+outstanding and named: `injection_blocked_downgraded` in the next tick's journal.
+
 ---
 
 ## 4. Summaries (as of the first batch)
 
-**1. Current reproduced defects.** One, LIVE_OBSERVED (§6): the injection guard
+**1. Current reproduced defects.** One, LIVE_OBSERVED (§6), now fixed as
+MIR-171 under the operator's option D and awaiting runtime confirmation: the injection guard
 blocks the agent from reading its own defect registry and reasoning book — 263
 and 126 findings respectively — observed during the unattended run of
 2026-08-27T00:31:55Z and reproducible on demand. No fix applied: the repair is a

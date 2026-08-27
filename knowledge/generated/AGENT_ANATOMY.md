@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 205 modules across 12 groups._
+_Total: 206 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -42,6 +42,7 @@ _Input handling and injection/exfiltration defense._
 | `core/data_classifier` | Data Classifier (§7 Data Governance). |
 | `core/dlp` | DLP helpers for sensitive personal data. |
 | `core/secret_scanner` | Secret Scanner — single source of truth for credential detection (§7). |
+| `core/repo_provenance` | Происхождение файла: лежит он в истории репозитория или просто в папке. |
 
 ## Cognitive Core & Agent Cycle (§3)
 
