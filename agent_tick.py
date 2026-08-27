@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
+from core.rule_approved_apply import drain_and_log
 from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH
 
 if TYPE_CHECKING:
@@ -1746,6 +1747,7 @@ def run_paced_campaign(
         "cycles_run": result.cycles_run,
         "totals": result.totals,
     })
+    drain_and_log(workspace, dry_run=dry_run, log_tick=lambda p: _log_tick(workspace, p))
     print(result.user_summary(), file=sys.stderr)
     return 0
 

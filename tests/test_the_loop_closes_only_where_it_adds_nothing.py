@@ -128,3 +128,47 @@ def test_the_drain_refuses_without_a_standing_grant(tmp_path) -> None:
 
     assert out["applied"] == 0
     assert out["blocked"] == "no active standing grant"
+
+
+def test_the_drain_runs_on_the_live_scheduled_path(tmp_path) -> None:
+    """Красный свидетель: шаг был вшит в артерию, по которой кровь не течёт.
+
+    Плановая задача выходит через `run_paced_campaign` (`if args.campaign:
+    sys.exit(...)`) и до `run_tick` не доходит НИКОГДА — последний
+    `tick_complete` в живом журнале датирован 25 августа. Первая проводка
+    (MIR-173) стояла в хвосте `run_tick`: зелёные тесты, мёртвый путь — ровно
+    урок «починка не готова без живого пути». Проверено по журналу прогона
+    11:31: грант списан, кампания прошла, событий петли ноль.
+
+    Свидетель поведенческий: гоняем сам живой путь с подделками и требуем след
+    шага в журнале тиков.
+    """
+    import json
+
+    from agent_tick import run_paced_campaign
+
+    class _Result:
+        status = "completed"
+        stop_reason = ""
+        cycles_run = 1
+        totals: dict = {}  # noqa: RUF012 — подделка, класс живёт один тест
+
+        @staticmethod
+        def user_summary() -> str:
+            return "fake"
+
+    code = run_paced_campaign(
+        tmp_path,
+        dry_run=True,
+        max_cycles=1,
+        heartbeat_fn=lambda ws, payload: None,
+        run_campaign_fn=lambda *a, **k: _Result(),
+        build_agent_fn=lambda ws: object(),
+    )
+
+    assert code == 0
+    log = tmp_path / "logs" / "daemon_tick.jsonl"
+    events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    drains = [e for e in events if e.get("event") == "rule_approved_drain"]
+    assert drains, "шаг замыкания петли не оставил следа на ЖИВОМ пути"
+    assert drains[0].get("blocked") == "effects disabled"
