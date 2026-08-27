@@ -90,3 +90,22 @@ def drain_rule_approved_proposals(
             "reason": reason,
         })
     return out
+
+
+def drain_and_log(workspace: Path, *, dry_run: bool, log_tick: Callable[[dict], None]) -> None:
+    """Обёртка для живого пути кампании: след пишется ВСЕГДА, ошибки глотаются.
+
+    Первая проводка (MIR-173) стояла в хвосте `run_tick`, а плановая задача
+    туда не доходит: `--campaign` выходит через `run_paced_campaign`. Найдено
+    по прогону 2026-08-27 11:31 — грант списан, событий петли ноль, последний
+    `tick_complete` в журнале датирован 25 августа. Отсутствие события
+    неотличимо от мёртвого кода — ровно так дефект и был пойман (MIR-175).
+    """
+    try:
+        drain = drain_rule_approved_proposals(
+            workspace, dry_run=dry_run,
+            log=lambda e, p: log_tick({"event": e, **p}),
+        )
+        log_tick({"event": "rule_approved_drain", **drain})
+    except Exception as exc:  # noqa: BLE001 — петля не вправе ронять кампанию
+        log_tick({"event": "rule_approval_error", "error": type(exc).__name__})
