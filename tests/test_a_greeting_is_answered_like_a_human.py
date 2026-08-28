@@ -111,6 +111,30 @@ def test_a_two_letter_acronym_is_still_business() -> None:
     assert classify_register("привет, как дела?") == "small_talk"
 
 
+def test_a_single_letter_subject_is_still_business() -> None:
+    """Четвёртая граница Codex (2026-08-28): «hi, C?» — вопрос про язык C.
+    Асимметрия цены — довод до конца: порог «два знака» был так же
+    необоснован, как «три»; дело признаётся по ЛЮБОМУ содержательному знаку
+    в остатке. Утечка в безопасную сторону («ну привет» получит полный
+    ответ) принята ценой конструкции."""
+    assert classify_register("hi, C?") == "substantive"
+    assert classify_register("привет, 5?") == "substantive"
+    # Чистая вежливость с пунктуацией — по-прежнему болтовня.
+    assert classify_register("привет!!") == "small_talk"
+    assert classify_register("thanks :)") == "small_talk"
+
+
+def test_the_alphabet_itself_is_not_a_developer_choice() -> None:
+    """Пятая граница Codex (2026-08-28): «где именно решение разработчика?»
+    Оно пряталось в классе символов [a-zа-яё0-9] — выбранном АЛФАВИТЕ.
+    «hi, γ?» и вопрос иероглифом — дело на любом письме; содержательный
+    знак = любая юникодная буква или цифра, выбора алфавита больше нет."""
+    assert classify_register("hi, γ?") == "substantive"
+    assert classify_register("привет, 中?") == "substantive"
+    # Пунктуация и эмодзи-скобки любых письмён — не содержание.
+    assert classify_register("привет…") == "small_talk"
+
+
 def test_a_fresh_reply_is_not_mistaken_for_a_repeat() -> None:
     judgement = judge_reply(
         "как дела?", "Сегодня закрыл MIR-185 и стёр старую модель толчков.",
