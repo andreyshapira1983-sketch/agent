@@ -310,10 +310,22 @@ Repairs of registered defects were never frozen and are not listed.
 
 | built after 2026-08-20 | operator's word | vs. the invariants |
 |---|---|---|
-| causal-climb ladder, slices 1–3 (MIR-096) | «бери орган MIR-096», «бери слайс 1/2/3» (2026-08-28) | serves I: the agent explains/refutes its own failures instead of receiving verdicts |
-| mentor question channel (MIR-178) | «бери третий канал» (2026-08-27) | serves I with a recorded non-interference boundary; advisory only |
+| causal-climb ladder, slices 1–3 (`core/causal_climb_action.py`, MIR-096) | «бери орган MIR-096», «бери слайс 1/2/3» (2026-08-28) | serves I: the agent explains/refutes its own failures instead of receiving verdicts |
+| mentor question channel (`core/mentor_channel.py`, MIR-178) | «бери третий канал» (2026-08-27) | serves I with a recorded non-interference boundary; advisory only |
 | DeepSeek provider wiring | «положил $5 на deepseek — запусти и посмотрим» (2026-08-28) | generic capability — the class the freeze explicitly permits |
 | conversation judge, stage 1 (`core/conversation_contract.py`) | «надо доделать вторую половину человеческого разговора» (2026-08-28) | neither invariant; a human-boundary form contract, developer-owned by its own honest table — the freeze's core stays unresolved by it |
+
+Modules born of surgery on registered defects (repairs were never frozen):
+`anatomy_groups.py` (MIR-180 data relocation), `autonomous_runtime_proposals.py`
+and `autonomous_runtime_types.py` (the oversized-runtime split),
+`command_subjects.py` (MIR-158), `repo_provenance.py`, `rule_approved_apply.py`
+(MIR-173/175), `spend_report.py` (the spending mirror), `subagent_quarantine.py`.
+
+This ledger is a GATE, not a chronicle: since 2026-08-28,
+`tests/test_the_freeze_gates_new_organs.py` reddens the battery for any core
+module that exists now, did not exist at the freeze baseline (`1577b85`), and
+is not named in this document — registering an exception is required BEFORE
+its build can merge (the second examiner's caveat, mechanised).
 
 The blocking issue of this document — WHO DECIDES and WHO LIVES — remains
 open and is not diminished by any row above.
