@@ -473,6 +473,9 @@ class AutonomousRuntimeProposals:
                     "target_path": result.get("target_path"),
                     "approval_id": result.get("approval_id"),
                     "veto_reasons": result.get("veto_reasons"),
+                    # MIR-185: без причины отказ в трассе недиагностируем —
+                    # улика обязана рождаться в момент отказа, не зондом позже.
+                    "reason": result.get("reason"),
                 },
             )
             # Journal the outcome (and WHY) so the agent remembers this attempt.

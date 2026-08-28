@@ -93,6 +93,43 @@ def test_proposal_records_veto_reason(monkeypatch, tmp_path) -> None:
     assert "empty generated content" in store.saved[0].summary
 
 
+def test_a_decline_leaves_its_reason_in_the_trace(monkeypatch, tmp_path) -> None:
+    """MIR-185, заказ второго экзаменатора: «полный сырой журнал одного
+    отказавшего тика … включая reason». Красный свидетель: до починки событие
+    `self_build_proposal` несло status/target/approval_id/veto_reasons и
+    ТЕРЯЛО причину — отказ 08:31Z 2026-08-28 пришлось диагностировать живым
+    зондом спустя 3,5 часа по уже изменившемуся состоянию. Улика обязана
+    рождаться в момент отказа."""
+    class _Log:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict]] = []
+
+        def log(self, event, payload) -> None:
+            self.events.append((event, payload))
+
+    def _fake_produce(**kwargs):
+        return _FakeReport({
+            "status": "no_grounded_target",
+            "target_path": None,
+            "approval_id": None,
+            "reason": "grounded target 'core/self_build_producer.py' is critical",
+            "veto_reasons": [],
+        })
+
+    monkeypatch.setattr(prop_mod, "produce_self_apply_proposal", _fake_produce)
+    agent = _FakeAgent(_FakeStore())
+    agent.log = _Log()
+    rt = _runtime(agent, tmp_path)
+
+    rt._run_self_build_proposal(_real_run_config())
+
+    traced = [p for e, p in agent.log.events if e == "self_build_proposal"]
+    assert traced, "событие self_build_proposal не записано вовсе"
+    assert traced[0].get("reason") == (
+        "grounded target 'core/self_build_producer.py' is critical"
+    ), f"причина отказа потеряна по дороге в трассу: {traced[0]}"
+
+
 def test_proposal_skipped_in_dry_run(monkeypatch, tmp_path) -> None:
     called = {"n": 0}
 
