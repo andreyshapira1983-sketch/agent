@@ -135,6 +135,11 @@ def is_structural_chunk(text: str) -> bool:
     if not text or not text.strip():
         return True
     stripped = text.strip()
+    # Кодовый забор — предложение, не утверждение: вне арифметики улик
+    # (2026-08-29, серия «учимся программировать себя»). Проза о коде
+    # остаётся заявлением и проверяется как раньше.
+    if stripped.startswith("```"):
+        return True
     if _output_contract_header_name(stripped) is not None:
         return True
     if _MD_HEADING_RE.match(stripped) and "[" not in stripped:
@@ -171,11 +176,31 @@ def _merge_citation_only_chunks(chunks: list[str]) -> list[str]:
     return merged
 
 
+#: Кодовый забор целиком, лениво и без катастрофы: ``` … ``` через (?s).
+_FENCE_BLOCK_RE = re.compile(r"(?s)(```.*?```)")
+
+
 def split_into_chunks(answer: str) -> list[str]:
+    """Проза режется на предложения; кодовый забор — атомарный кусок.
+
+    До 2026-08-29 `\\n+` в резаке шинковал рождённый код на псевдо-заявления,
+    и стена улик душила творчество (живое удушение run_e4d9a8e8: агент
+    спроектировал свой первый тест — страж спрятал 27 «утверждений»). Код —
+    предложение, не заявление о мире; его судья — тесты.
+    """
     if not answer or not answer.strip():
         return []
-    parts = _SENTENCE_SPLIT_RE.split(answer)
-    return [p.strip() for p in parts if p.strip()]
+    chunks: list[str] = []
+    for part in _FENCE_BLOCK_RE.split(answer):
+        if not part.strip():
+            continue
+        if part.lstrip().startswith("```"):
+            chunks.append(part.strip())
+        else:
+            chunks.extend(
+                p.strip() for p in _SENTENCE_SPLIT_RE.split(part) if p.strip()
+            )
+    return chunks
 
 
 def extract_unresolved_web_urls(report: VerificationReport) -> list[str]:
