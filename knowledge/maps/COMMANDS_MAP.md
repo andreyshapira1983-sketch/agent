@@ -147,6 +147,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:architecture-audit \| :arch-audit \| :roadmap-audit` | Static architecture gap audit. |
 | `:conflicts \| :conflict-status` | Source Registry conflicts. |
 | `:state-store-drill \| :state-drill \| :state-recovery-drill` | State-store recovery drill. |
+| `:receipts` | Спросить накопленную улику квитанций: счёт по операциям, хвост, вопрос по трассе (`[trace <кусок>] [N]`). Только чтение (MIR-138). |
 | `:release-audit \| :release-hygiene` | Release artifact hygiene. |
 | `:supply-chain-audit \| :supply-audit \| :ci-audit` | Supply-chain / CI audit. |
 

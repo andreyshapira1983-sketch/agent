@@ -87,6 +87,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("raw", "  :budget-window-status [--json] inspect persistent hour/day budget windows"),
     ("raw", "  :budget-kill-switch [--json] [--clear] inspect/reset autonomous day-budget kill-switch"),
     ("cmd", ":state-store-drill", ":state-store-drill [--json]", 33),
+    ("cmd", ":receipts", ":receipts [trace <substr>] [N]", 34),
     ("cmd", ":release-audit", ":release-audit [--json]", 34),
     ("cmd", ":supply-chain-audit", ":supply-chain-audit [--json]", 33),
     ("cmd", ":approval-list", ":approval-list [status|all]", 34),

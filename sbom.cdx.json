@@ -21,17 +21,17 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "96f747cad11886c4ae12d4080131b94eebd68b202bd2190fe27959031bb1fa9c"
+          "content": "6048713fa441e59e1cba8363171cd2a86273b25bd213e9c7ac70a523af88b011"
         },
         {
           "alg": "SHA-256",
-          "content": "ab96540bbd4b0f36564252d955a86f8abbe4f00944a24bc9931acc9b139bab6f"
+          "content": "e79d6e08ab3376602fc9a70d4d5ea3540817c76cf7e16658bed790834e1833d6"
         }
       ],
       "name": "anthropic",
-      "purl": "pkg:pypi/anthropic@0.102.0",
+      "purl": "pkg:pypi/anthropic@0.121.0",
       "type": "library",
-      "version": "0.102.0"
+      "version": "0.121.0"
     },
     {
       "hashes": [
@@ -477,17 +477,17 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2"
+          "content": "9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6"
         },
         {
           "alg": "SHA-256",
-          "content": "918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96"
+          "content": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76"
         }
       ],
       "name": "click",
-      "purl": "pkg:pypi/click@8.4.1",
+      "purl": "pkg:pypi/click@8.4.2",
       "type": "library",
-      "version": "8.4.1"
+      "version": "8.4.2"
     },
     {
       "hashes": [

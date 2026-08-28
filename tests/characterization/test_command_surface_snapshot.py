@@ -51,12 +51,14 @@ FROZEN = {
     # 141 -> 142 (2026-08-15): `:causal`, водитель причинной лестницы.
     # 142 -> 144 (2026-08-26): `:standing-grant` и её сокращение `:grant`.
     # Автомат ЧИТАЛ стоячий грант, а завести его не мог никто (MIR-166).
-    "dispatched": 144,
+    # 144 -> 145 (2026-08-28): `:receipts` — накопленную улику стало чем
+    # спросить (MIR-138).
+    "dispatched": 145,
     "pre_dotenv_fast_paths": 2,
     "repl_control_tokens": 4,
     # 96 at 9daa9bf; 98 after the two documented help gaps were closed
     # (`:refresh-models` and `:help` itself were added to the page).
-    "help_tokens": 101,  # +1: :standing-grant (2026-08-26)
+    "help_tokens": 102,  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28)
     # One printed token (`:task-begin`) is a REPL block token rather than a
     # dispatched command — see the divergence tests below.
     # 72/71 -> 73/72 (2026-08-13): `:refresh-models` joined the banner beside

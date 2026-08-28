@@ -504,3 +504,28 @@ def record_gateway_receipt(
         return append_receipt(receipt, workspace=ws)
     except Exception:  # noqa: BLE001 — reason stated above
         return None  # documented contract: never raises
+
+
+def summarise_receipts(
+    ledger: ToolReceiptLedger, *, trace: str | None = None, recent: int = 10,
+) -> str:
+    """Спросить накопленную улику (MIR-138): счёт по операциям + хвост.
+
+    Только чтение. `trace` сужает до одной трассы — вопрос «что агент делал
+    в этом прогоне» перестаёт требовать ручного разбора 1,2 МБ jsonl.
+    """
+    rows = ledger.load()
+    if trace:
+        rows = [r for r in rows if trace in (r.trace_id or "")]
+    lines = [f"квитанций: {len(rows)}" + (f" (трасса ~ '{trace}')" if trace else "")]
+    by_op: dict[str, int] = {}
+    for r in rows:
+        by_op[r.operation] = by_op.get(r.operation, 0) + 1
+    for op, count in sorted(by_op.items(), key=lambda kv: -kv[1]):
+        lines.append(f"  {op}: {count}")
+    for r in rows[-max(0, recent):]:
+        lines.append(
+            f"  [{r.created_at[:19]}] {r.operation} {r.status} "
+            f"{r.trace_id[:18]} {r.summary[:60]}"
+        )
+    return "\n".join(lines)

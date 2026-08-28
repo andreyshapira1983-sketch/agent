@@ -184,8 +184,9 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         # называется здесь, чтобы «подальше» не читалось как «на время».
         if not dry_run and rep.archived:
             print(
-                "  they now live in data/persistent_memory.archive.jsonl, which "
-                "no command reads back — recoverable by hand only (MIR-138)",
+                "  they now live in data/persistent_memory.archive.jsonl — "
+                "читается `:smart-memory archive <слово>` (MIR-138); "
+                "пробуждение в активную память — отдельная власть (MIR-156)",
                 file=sys.stderr,
             )
         return True
@@ -211,9 +212,27 @@ def _print_persistent(agent: AgentLoop) -> None:
 
 def _handle_smart_memory(rest: str, agent: AgentLoop) -> bool:
     tokens = _split_meta_args(rest)
+    # MIR-138: архив достижим взглядом — `archive <слово>` ищет по спящим
+    # записям, только чтение; пробуждение — отдельная власть (MIR-156).
+    if tokens and tokens[0] == "archive":
+        term = " ".join(tokens[1:]).strip()
+        if not term:
+            print("Usage: :smart-memory archive <слово>", file=sys.stderr)
+            return True
+        store = getattr(agent, "persistent_store", None)
+        if store is None:
+            print("(постоянная память не подключена)", file=sys.stderr)
+            return True
+        hits = store.search_archive(term)
+        agent.log.log("memory_archive_read", {"term": term, "hits": len(hits)})
+        print(f"архив: найдено {len(hits)} по '{term}'", file=sys.stderr)
+        for rec in hits:
+            print(f"  [{str(rec.created_at)[:19]}] {rec.id} "
+                  f"{str(rec.content)[:90]}", file=sys.stderr)
+        return True
     as_json = "--json" in tokens
     if any(token != "--json" for token in tokens):
-        print("Usage: :smart-memory [--json]", file=sys.stderr)
+        print("Usage: :smart-memory [archive <слово>] [--json]", file=sys.stderr)
         return True
     payload = agent.smart_memory_summary()
     agent.log.log("smart_memory_status", payload)
@@ -280,4 +299,30 @@ def _handle_memory_consolidate(rest: str, agent: AgentLoop) -> bool:
     )
     for note in report.notes:
         print(f"  - {note}", file=sys.stderr)
+    return True
+
+
+def _handle_receipts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """`:receipts [trace <кусок>] [N]` — спросить накопленную улику (MIR-138)."""
+    from core.tool_receipts import ToolReceiptLedger, default_receipts_path, summarise_receipts
+
+    tokens = rest.split()
+    trace = None
+    recent = 10
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "trace" and i + 1 < len(tokens):
+            trace = tokens[i + 1]
+            i += 2
+            continue
+        try:
+            recent = max(0, int(tokens[i]))
+        except ValueError:
+            print("Usage: :receipts [trace <кусок>] [N]", file=sys.stderr)
+            return True
+        i += 1
+    ledger = ToolReceiptLedger(path=default_receipts_path(workspace))
+    report = summarise_receipts(ledger, trace=trace, recent=recent)
+    agent.log.log("receipts_read", {"trace": trace or "", "recent": recent})
+    print(report, file=sys.stderr)
     return True

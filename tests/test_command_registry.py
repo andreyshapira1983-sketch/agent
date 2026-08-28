@@ -381,11 +381,15 @@ def test_recorded_surface_sizes():
     завести его не мог никто — читатель без писателя (MIR-166). Команда,
     которой нет на виду, не будет вызвана тем более, если без неё безнадзорная
     работа невозможна вовсе.
+    
+    94 -> 95 команд (2026-08-28): `:receipts` — накопленную улику стало чем
+    спросить (MIR-138); в баннер не входит (74 без изменений): судебный
+    инструмент, не ежедневный.
     """
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
     assert in_banner == 74
-    assert len(reg.COMMANDS) == 94
-    assert len(reg.all_tokens()) == 144
+    assert len(reg.COMMANDS) == 95
+    assert len(reg.all_tokens()) == 145
 
 
 # ── deliberate exclusions ────────────────────────────────────────────────────

@@ -301,6 +301,14 @@ COMMANDS_OPS: tuple[CommandSpec, ...] = (
         in_startup_summary=True,
     ),
     CommandSpec(
+        canonical=":receipts",
+        description="ask the accumulated tool-receipt evidence (read-only, MIR-138)",
+        category="Operator status, audits & readiness",
+        handler_key="receipts",
+        aliases=(),
+        usage="[trace <substr>] [N]",
+    ),
+    CommandSpec(
         canonical=":standing-grant",
         description="file a standing-grant request for unattended runs (does not grant)",
         category="Approvals & alerts",

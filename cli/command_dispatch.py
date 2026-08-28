@@ -171,6 +171,10 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
     if head == ":memory-consolidate":
         return _handle_memory_consolidate(rest.strip(), agent)
 
+    if head == ":receipts":
+        from cli.commands_memory import _handle_receipts
+        return _handle_receipts(rest.strip(), agent, workspace)
+
     if head == ":audit":
         arg = rest.strip().lower()
         if arg in {"on", "enable", "start"}:
