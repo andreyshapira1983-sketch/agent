@@ -21,13 +21,11 @@ from typing import Any
 
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,
-    CODE_TODO_SOURCE,
     OVERSIZED_MODULE_SOURCE,
     SignalRecord,
     ValuePenalties,
     anatomy_candidates,
     architecture_audit_candidates,
-    code_todo_candidates,
     open_tech_debt,
     oversized_module_candidates,
     self_build_docs_candidate,
@@ -44,12 +42,8 @@ _SOURCE_BASE_SCORE = {
     "tech_debt": 2.0,
     "self_build_docs": 1.5,
     ARCHITECTURE_AUDIT_SOURCE: 1.25,
-    # Code comments sit below the debt doc, the docs pilot and the structural
-    # audit, but above the advisory anatomy list: a concrete, line-anchored TODO
-    # is more actionable than an advisory heading. Note it is NOT a contrast
-    # between the agent's own findings and human-authored ones — both texts are
-    # written by a person; only the storage place differs (2026-08-19).
-    CODE_TODO_SOURCE: 1.1,
+    # code_todo (1.1) sat here until 2026-08-28 — erased by operator ruling,
+    # see the tombstone in core/backlog_signals.py and MIR-183.
     "anatomy": 1.0,
     # Oversized-module advisories sit at the very bottom: they are report-only
     # (abstract ``split:`` target, no mapper) and never displace actionable work.
@@ -59,7 +53,6 @@ _SOURCE_CONFIDENCE = {
     "tech_debt": 0.7,
     "self_build_docs": 0.65,
     ARCHITECTURE_AUDIT_SOURCE: 0.55,
-    CODE_TODO_SOURCE: 0.5,
     "anatomy": 0.5,
     OVERSIZED_MODULE_SOURCE: 0.4,
 }
@@ -156,8 +149,6 @@ def build_backlog(
     self_build_proposal_text: str = "",
     architecture_audit_records: list[SignalRecord] | None = None,
     architecture_audit_text: str = "",
-    code_todo_records: list[SignalRecord] | None = None,
-    code_todo_text: str = "",
     oversized_records: list[SignalRecord] | None = None,
     oversized_text: str = "",
     include_self_build_docs: bool = True,
@@ -173,7 +164,6 @@ def build_backlog(
         )
         + anatomy_candidates(anatomy_text)
         + list(architecture_audit_records or [])
-        + list(code_todo_records or [])
         + list(oversized_records or [])
     )
     sources = {
@@ -181,7 +171,6 @@ def build_backlog(
         "self_build_docs": self_build_proposal_text,
         "anatomy": anatomy_text,
         ARCHITECTURE_AUDIT_SOURCE: architecture_audit_text,
-        CODE_TODO_SOURCE: code_todo_text,
         OVERSIZED_MODULE_SOURCE: oversized_text,
     }
     return _finalize(records, sources, penalties)
@@ -235,39 +224,6 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
         return [], ""
 
 
-# Directories the agent is allowed to edit and therefore worth self-inspecting.
-# Kept intentionally to the low-risk Python homes; critical-organ and config
-# files are filtered downstream by the producer's own gates, so scanning here is
-# safe even if a marker happens to live in a file it may never actually change.
-_CODE_TODO_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools", "tests", "app")
-
-
-def _scan_code_todos(root: Path) -> tuple[list[SignalRecord], str]:
-    """Read the agent's own editable ``*.py`` files and extract TODO/FIXME/XXX
-    signals. Read-only, deterministic (sorted), and fully best-effort: an
-    unreadable file degrades to empty rather than raising, so a bad file can
-    never break backlog loading.
-    """
-    files: list[tuple[str, str]] = []
-    for name in _CODE_TODO_SCAN_DIRS:
-        base = root / name
-        if not base.is_dir():
-            continue
-        try:
-            paths = sorted(base.rglob("*.py"))
-        except OSError:
-            continue
-        for path in paths:
-            if "__pycache__" in path.parts:
-                continue
-            try:
-                rel = path.relative_to(root).as_posix()
-            except ValueError:
-                continue
-            files.append((rel, _read_text(path)))
-    return code_todo_candidates(files)
-
-
 # Directories scanned for oversized modules. Kept to the product code homes
 # (not ``tests``): splitting large test files is not the modularity goal.
 _OVERSIZED_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools")
@@ -315,7 +271,6 @@ def load_backlog(
     )
     include_self_build_docs = not _path_exists(root / "docs" / "self_build.md")
     audit_records, audit_text = _load_architecture_audit(root)
-    code_todo_records, code_todo_text = _scan_code_todos(root)
     oversized_records, oversized_text = _scan_oversized_modules(root)
     penalties = None
     if value_reviews is not None:
@@ -326,8 +281,6 @@ def load_backlog(
         self_build_proposal_text=self_build_proposal_text,
         architecture_audit_records=audit_records,
         architecture_audit_text=audit_text,
-        code_todo_records=code_todo_records,
-        code_todo_text=code_todo_text,
         oversized_records=oversized_records,
         oversized_text=oversized_text,
         include_self_build_docs=include_self_build_docs,

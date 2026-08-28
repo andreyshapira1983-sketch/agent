@@ -43,12 +43,6 @@ _TD_TITLE_RE = re.compile(r"^(TD-\d+(?:\s*/\s*TD-\d+)*|P\d+[A-Za-z]?)\s+—\s+\S
 _TD_ID_RE = re.compile(r"^(TD-\d+(?:\s*/\s*TD-\d+)*|P\d+[A-Za-z]?)")
 # A numbered anatomy candidate item: "1. **TD-030 (candidate): Unify ...**  rest"
 _ANATOMY_ITEM_RE = re.compile(r"^\d+\.\s+\*\*(.+?)\*\*")
-# A self-flagged code problem left in the agent's OWN source as a comment marker
-# in the conventional leading form: "# TODO: rewire", "# FIXME handle None",
-# "# XXX broken". Anchored to the comment start so a comment that merely mentions
-# a marker mid-sentence does not match. Case-sensitive uppercase only, so prose
-# ("todo list") never matches.
-_CODE_TODO_MARKER_RE = re.compile(r"^#\s*(TODO|FIXME|XXX)\b")
 _SELF_BUILD_DOC_TARGET = "docs/self_build.md"
 _SELF_BUILD_DOC_SOURCE = (
     "docs/proposals/self-build-grounded-target-coverage-proposal.md"
@@ -294,93 +288,10 @@ def architecture_audit_candidates(
     return records, "\n".join(quotes)
 
 
-# ── Code-comment signal: HUMAN-authored markers in the agent's own tree ───────
-# Source constant for backlog signals the agent derives by reading its OWN source
-# files and finding markers SOMEBODY ELSE left there (TODO/FIXME/XXX comments).
-# The reading is the agent's; the finding of the problem is not — a person typed
-# the need. Correction of 2026-08-19: this block used to say "self-flagged
-# problems" and call itself a "self-perception organ", and that label is exactly
-# what let an engineer-planted TODO be read later as a self-measured signal. The
-# organ that genuinely measures is the oversized-module scanner, which applies
-# the agent's own size rule to the agent's own tree.
-CODE_TODO_SOURCE = "code_todo"
-
-# Keep the scan bounded and the emitted quote small: a runaway file of markers
-# should not flood the backlog, and a very long comment line should not bloat the
-# signal. Both limits are deterministic.
-_MAX_CODE_TODO_QUOTE_LEN = 200
-_MAX_CODE_TODO_RECORDS = 50
-
-
-def _comment_markers(content: str) -> list[tuple[int, str]]:
-    """Return ``(lineno, comment_text)`` for real ``#`` comment tokens that carry
-    a TODO/FIXME/XXX marker.
-
-    Uses the stdlib tokenizer so markers that merely appear inside a string
-    literal, docstring, or regex (e.g. this module documenting ``# TODO``) are
-    NOT mistaken for a self-flagged problem — only genuine comment tokens count.
-    Best-effort: if the file cannot be fully tokenized (e.g. a syntax error), we
-    keep whatever comment tokens were emitted before the failure and fall back to
-    a line scan for the rest so a broken file still surfaces its markers.
-    """
-    import io
-    import tokenize
-
-    found: list[tuple[int, str]] = []
-    seen_lines: set[int] = set()
-    try:
-        tokens = tokenize.generate_tokens(io.StringIO(content).readline)
-        for tok in tokens:
-            if tok.type == tokenize.COMMENT and _CODE_TODO_MARKER_RE.search(tok.string):
-                lineno = tok.start[0]
-                seen_lines.add(lineno)
-                found.append((lineno, tok.string.strip()))
-    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
-        # Tokenizer bailed partway; scan any not-yet-seen lines textually so a
-        # syntactically broken file still reveals its comment markers.
-        for lineno, raw in enumerate(content.splitlines(), start=1):
-            if lineno in seen_lines:
-                continue
-            stripped = raw.strip()
-            if stripped.startswith("#") and _CODE_TODO_MARKER_RE.search(stripped):
-                found.append((lineno, stripped))
-    return found
-
-
-def code_todo_candidates(
-    files: Iterable[tuple[str, str]],
-) -> tuple[list[SignalRecord], str]:
-    """Turn self-flagged code comments into grounded backlog signals."""
-    records: list[SignalRecord] = []
-    quotes: list[str] = []
-    seen: set[str] = set()
-    for rel_path, content in files:
-        rel = str(rel_path or "").replace("\\", "/").strip()
-        if not rel or not content:
-            continue
-        for lineno, comment in _comment_markers(content):
-            quote = comment.strip()
-            if not quote:
-                continue
-            if len(quote) > _MAX_CODE_TODO_QUOTE_LEN:
-                quote = quote[:_MAX_CODE_TODO_QUOTE_LEN].rstrip()
-            evidence_ref = f"{rel}:{lineno}"
-            if evidence_ref in seen:
-                continue
-            seen.add(evidence_ref)
-            quotes.append(quote)
-            records.append(
-                SignalRecord(
-                    signal_source=CODE_TODO_SOURCE,
-                    target_path=rel,
-                    evidence_ref=evidence_ref,
-                    problem_quote=quote,
-                )
-            )
-            if len(records) >= _MAX_CODE_TODO_RECORDS:
-                return records, "\n".join(quotes)
-    return records, "\n".join(quotes)
-
+# The code_todo organ (scanning the tree for TODO/FIXME/XXX comment markers)
+# lived here until 2026-08-28 and was erased by operator ruling: a marker a
+# person typed is the retired "human assigns — agent executes" model, not a
+# self-measured signal. History: MIR-183 in docs/audit/MASTER_ISSUE_REGISTRY.md.
 
 OVERSIZED_MODULE_SOURCE = "oversized_module"
 

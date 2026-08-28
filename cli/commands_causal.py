@@ -101,14 +101,16 @@ def _handle_ab_experiment(args: list[str], agent: Any) -> bool:
     lesson_key = args[0]
     k = int(args[1]) if len(args) > 1 and args[1].isdigit() else 4
     workspace = getattr(agent, "workspace", None) or "."
+    from core.self_task_producer import _selectable_signal_sources
+
     candidate = next(
         (c for c in load_backlog(workspace)
-         if str(getattr(c, "signal_source", "")) == "code_todo"),
+         if str(getattr(c, "signal_source", "")) in _selectable_signal_sources()),
         None,
     )
     if candidate is None:
-        print("в бэклоге нет code_todo-кандидата — эксперименту не на чем "
-              "мерить; выдумывать задачу нельзя", file=sys.stderr)
+        print("в бэклоге нет самоизмеренного кандидата — эксперименту не на "
+              "чем мерить; выдумывать задачу нельзя", file=sys.stderr)
         return True
     target = str(candidate.target_path)
     try:

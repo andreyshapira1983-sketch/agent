@@ -1471,10 +1471,14 @@ def test_cooldown_selector_noop_without_exclusions(workspace: Path, monkeypatch)
     assert selector() is first
 
 
-def test_selector_skips_oversized_split_and_picks_next(workspace: Path, monkeypatch):
-    # C at selection time: an oversized module-split is non-actionable, so the
-    # selector advances to the next actionable candidate WITHIN the same run
-    # instead of ending the run on a doomed split.
+def test_selector_keeps_oversized_split_actionable(workspace: Path, monkeypatch):
+    # Re-premised 2026-08-28 (MIR-183): this test used to pin the OPPOSITE —
+    # "an oversized split is non-actionable, skip to the next candidate". That
+    # was the second copy of the premise MIR-179 buried: it predated the
+    # incremental splitter, and its live cost was a whole tick ending
+    # no_grounded_target with workable splits in the backlog. An oversized
+    # split is actionable — the produce-phase scale gate routes it to the
+    # deterministic splitter ("Site 2" above) — so the selector keeps it.
     import core.backlog_selector as bl
     import core.self_build_producer as mod
     from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
@@ -1498,7 +1502,7 @@ def test_selector_skips_oversized_split_and_picks_next(workspace: Path, monkeypa
     monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [split_cand, nxt])
 
     selector = mod._default_grounded_selector(workspace)
-    assert selector() is nxt
+    assert selector() is split_cand
 
 
 def test_selector_keeps_small_split_actionable(workspace: Path, monkeypatch):

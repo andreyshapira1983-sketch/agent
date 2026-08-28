@@ -1,38 +1,29 @@
-"""Stage A may start from the agent's own findings, not only from human TODOs.
+"""Stage A grounds itself in the agent's own findings — and ONLY those.
 
-Operator ruling 2026-08-19: «пусть Stage A берёт самоизмеренные кандидаты».
-Until now its selector accepted exactly one signal class — `code_todo`, a
-comment an engineer typed into the source — and ignored everything the
-agent measured about itself. That was the push the charter was built to
-end, still load-bearing one floor down (banked as
-tests/test_stage_a_eats_only_human_pushes.py, now replaced by this file).
+Two operator rulings, in order:
+  * 2026-08-19 «пусть Stage A берёт самоизмеренные кандидаты» — the selector
+    opened beyond `code_todo` to `architecture_audit` (this file's first form).
+  * 2026-08-28 «убрать TODO/FIXME — это старая модель, стереть» — `code_todo`
+    itself was erased everywhere: a marker a person typed into the source is
+    the retired "human assigns — agent executes" push model, not a
+    self-measured signal. The erasure superseded the 08-19 «kept» clause;
+    history in MIR-183 (docs/audit/MASTER_ISSUE_REGISTRY.md).
 
-What Stage A may now take, and why each:
-  * architecture_audit — the agent's own read-only self-analysis; the
-    module that produces it calls itself "the wire that lets the agent find
-    its own work from self-analysis, not only from human-authored docs".
-    Its records name a real evidence file, so a failing acceptance test can
-    reproduce the gap.
-  * code_todo — kept, not because a human should push, but because a real
-    TODO in shipped code is still a grounded defect when one exists.
+What Stage A may take now, and why:
+  * architecture_audit — the agent's own read-only self-analysis; its records
+    name a real evidence file, so a failing acceptance test can reproduce the
+    gap.
 
-What Stage A still refuses, BY NAME rather than by accident:
-  * oversized_module — its target is `split:<path>`, not a file to edit,
-    and its work is a module split, which has its own producer (the
-    self-build splitter the charter road now feeds). Stage A's contract is
-    "a defect earns a failing test"; a size limit already has a ratchet.
-
-Measured the moment it was wired, so the record cannot drift: the door is
-open and the room behind it is EMPTY. The architecture audit today reports
-18/18 checks `present` and zero priority gaps, so Stage A still selects
-nothing. This file pins a CONTRACT, not an achievement — nothing here says
-the agent has discovered work for itself.
+What it refuses, BY NAME rather than by accident:
+  * oversized_module — its target is `split:<path>`, not a file to edit, and
+    its work belongs to the self-build splitter.
+  * code_todo — erased; the source no longer exists in the backlog, and a
+    stray record wearing the old name must not be selectable either.
 
 Gate: an audit-sourced task gets the same target gate as a verified
-diagnosis — core organs open — for the identical reason recorded there:
-Stage A writes ONLY a new test under tests/, edits nothing, and a human
-blesses that test before any implementation exists. Path hygiene
-(config/, secrets, lockfiles) still applies.
+diagnosis — core organs open — because Stage A writes ONLY a new test under
+tests/, edits nothing, and a human blesses that test before any
+implementation exists. Path hygiene (config/, secrets, lockfiles) applies.
 """
 from __future__ import annotations
 
@@ -58,8 +49,9 @@ def test_an_audit_finding_is_selectable() -> None:
     assert "architecture_audit" in _selectable_signal_sources()
 
 
-def test_a_human_todo_is_still_selectable() -> None:
-    assert "code_todo" in _selectable_signal_sources()
+def test_a_human_todo_is_no_longer_selectable() -> None:
+    """The 2026-08-28 erasure: the push model does not re-enter by name."""
+    assert "code_todo" not in _selectable_signal_sources()
 
 
 def test_a_module_split_is_refused_by_name() -> None:
@@ -73,7 +65,6 @@ def test_the_selector_takes_the_audit_finding(monkeypatch) -> None:
     backlog = [
         _candidate("oversized_module", "split:core/smart_memory.py"),
         _candidate("architecture_audit", "core/loop_gates.py"),
-        _candidate("code_todo", "cli/commands_health.py"),
     ]
     monkeypatch.setattr(bs, "load_backlog", lambda ws: backlog)
     picked = _default_task_selector(".")()
@@ -81,8 +72,9 @@ def test_the_selector_takes_the_audit_finding(monkeypatch) -> None:
     assert picked.signal_source == "architecture_audit"
 
 
-def test_backlog_order_decides_between_selectable_sources(monkeypatch) -> None:
-    """No source preference of its own: the ranked backlog already decided."""
+def test_a_stray_todo_record_is_skipped_not_selected(monkeypatch) -> None:
+    """A record wearing the erased name (e.g. from an old cached backlog)
+    must be walked past, exactly like a split."""
     import core.backlog_selector as bs
 
     backlog = [
@@ -90,7 +82,7 @@ def test_backlog_order_decides_between_selectable_sources(monkeypatch) -> None:
         _candidate("architecture_audit", "core/y.py"),
     ]
     monkeypatch.setattr(bs, "load_backlog", lambda ws: backlog)
-    assert _default_task_selector(".")().signal_source == "code_todo"
+    assert _default_task_selector(".")().signal_source == "architecture_audit"
 
 
 def test_a_backlog_of_only_splits_yields_nothing(monkeypatch) -> None:
@@ -113,6 +105,6 @@ def test_path_hygiene_still_closes_config_for_audits() -> None:
     assert gate("config/credentials.json") is False
 
 
-def test_the_todo_gate_is_unchanged() -> None:
-    """A human TODO does not open core organs — that stays as it was."""
-    assert _target_gate_for("code_todo")("core/loop.py") is False
+def test_an_unknown_source_gets_the_conservative_gate() -> None:
+    """A source nobody vouched for does not open core organs."""
+    assert _target_gate_for("somebody_new")("core/loop.py") is False
