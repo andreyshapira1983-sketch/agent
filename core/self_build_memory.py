@@ -397,6 +397,27 @@ def _recent_self_improvement_events(
     return records
 
 
+def has_fresh_self_improvement_failure(
+    agent: Any,
+    workspace: Path,
+    *,
+    max_age_hours: int = 24,
+) -> bool:
+    """Была ли СВЕЖАЯ неудача самоулучшения — скоропортящийся сигнал.
+
+    Свежая собственная неудача обгоняет рутинный бэклог в выборе действия
+    (MIR-186): контекст поломки выветривается — живой зонд 2026-08-28
+    расходился с тиковым состоянием уже через 3,5 часа, — а измеренный
+    раскол подождёт до завтра. Сутки — окно, в котором трасса, дерево и
+    память ещё говорят об одном и том же.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, max_age_hours))
+    return any(
+        r["kind"] == "failure" and r["stamp"] >= cutoff
+        for r in _recent_self_improvement_events(agent, workspace, max_age_days=2)
+    )
+
+
 def recent_unresolved_self_improvement_failures(
     agent: Any,
     workspace: Path,

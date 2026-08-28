@@ -115,11 +115,41 @@ def _default_gather_signals(
         acknowledged=acknowledged,
         self_improvement_registry_available=registry_available,
         open_self_improvement_issues=open_issues,
+        # Неудачи самоулучшения — БЕЗЛЮДНОМУ пути тоже (MIR-186): до
+        # 2026-08-29 их передавала только REPL-команда, где и так сидит
+        # человек, — демон был слеп к собственным провалам при выборе дела.
+        # Тот же класс, что «The unattended path was the blind one» выше.
+        recent_self_improvement_failures=_recent_failures(agent, ws),
+        fresh_self_improvement_failure=_has_fresh_failure(agent, ws),
         unexplained_observations_count=_unexplained_observation_count(ws),
         discriminable_claims_count=_discriminable_claim_count(ws),
         experimentable_claims_count=_experimentable_claim_count(ws),
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
+
+
+def _recent_failures(agent: Any, workspace: Any) -> tuple[str, ...]:
+    """Свежая история неудач самоулучшения; провал сбора — пусто, не падение."""
+    try:
+        from core.self_build_memory import (
+            recent_unresolved_self_improvement_failures,
+        )
+
+        return recent_unresolved_self_improvement_failures(
+            agent, Path(workspace)
+        )
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return ()
+
+
+def _has_fresh_failure(agent: Any, workspace: Any) -> bool:
+    """Скоропортящийся сигнал (MIR-186): неудача младше суток."""
+    try:
+        from core.self_build_memory import has_fresh_self_improvement_failure
+
+        return has_fresh_self_improvement_failure(agent, Path(workspace))
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return False
 
 
 def _unexplained_observation_count(workspace: Any) -> int:

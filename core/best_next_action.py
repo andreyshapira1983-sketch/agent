@@ -47,6 +47,11 @@ _P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
 #   repair habit (55), below the doc goal (58) — a request to write is more
 #   concrete than a request to read
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
+_P_SELF_IMPROVEMENT_FAILURE_FRESH = 60  # a failure younger than a day is a
+#   PERISHABLE signal: its trace, tree and memory still agree (the 2026-08-28
+#   live probe drifted from tick state in 3.5h), while a measured backlog
+#   split keeps until tomorrow — so fresh own pain outranks the routine (59).
+#   Ties with health at 60 resolve to health: it is admitted first (MIR-186).
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
 _P_CAUSAL_EXPERIMENT = 47  # claims with experiment specs: the intervention
                           # rung is the deepest — prove causes first
@@ -413,6 +418,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     self_improvement_registry_available: bool = False,
     open_self_improvement_issues: tuple[dict, ...] = (),
     recent_self_improvement_failures: tuple[str, ...] = (),
+    fresh_self_improvement_failure: bool = False,
     unexplained_observations_count: int = 0,
     discriminable_claims_count: int = 0,
     experimentable_claims_count: int = 0,
@@ -460,7 +466,8 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     )
     if improvement is None and not self_improvement_registry_available:
         improvement = _candidate_self_improvement_failure(
-            recent_self_improvement_failures
+            recent_self_improvement_failures,
+            fresh=fresh_self_improvement_failure,
         )
     admit(improvement, "retained_record")
 
@@ -679,6 +686,8 @@ def _candidate_inbox_debt(triage: TriageReport | None) -> BestNextAction | None:
 
 def _candidate_self_improvement_failure(
     failures: tuple[str, ...],
+    *,
+    fresh: bool = False,
 ) -> BestNextAction | None:
     evidence = tuple(str(item).strip()[:300] for item in failures if str(item).strip())
     if not evidence:
@@ -708,12 +717,18 @@ def _candidate_self_improvement_failure(
             "Recent self-improvement history contains a rollback, rejection, or "
             "failure lesson that has not been followed by a successful apply."
         )
+        if fresh:
+            reason += (
+                " The failure is younger than a day — a perishable signal whose "
+                "trace and tree still agree — so it outranks routine backlog."
+            )
         command = "review recent self-build history and propose one small read-only fix"
     return BestNextAction(
         action=action,
         title=title,
         severity="medium",
-        priority=_P_SELF_IMPROVEMENT_FAILURE,
+        priority=(_P_SELF_IMPROVEMENT_FAILURE_FRESH if fresh
+                  else _P_SELF_IMPROVEMENT_FAILURE),
         reason=reason,
         evidence=evidence,
         unknowns=(
