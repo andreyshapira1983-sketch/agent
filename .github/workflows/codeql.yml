@@ -1,18 +1,18 @@
-# CodeQL analysis, kept as configuration but NOT run automatically.
+# CodeQL analysis — automatic again since 2026-08-28.
 #
-# The analysis itself succeeds; uploading its SARIF does not. GitHub code
-# scanning needs a GitHub Code Security licence, which Free and Pro do not
-# carry for a PRIVATE repository — only Team/Enterprise with Code Security
-# enabled on the repo. Copilot is a separate product and grants none of it.
-# So every automatic run ended in "Code scanning is not enabled for this
-# repository", and no amount of permissions or YAML changes that.
-#
-# Left here so the configuration survives: run it by hand from the Actions
-# tab if the account ever gains Code Security. Security cover meanwhile is
-# the ruff S-family, the test suite and the dependency audit.
+# History (kept so the lock is explainable): while this repository was
+# PRIVATE, SARIF upload required a Code Security licence that Free/Pro do
+# not carry, every automatic run died with "Code scanning is not enabled",
+# and the workflow was deliberately reduced to manual dispatch. The
+# repository is PUBLIC now, code scanning is free — the obstacle is gone,
+# so the triggers are back: push to main, weekly schedule, and manual.
 name: "CodeQL Advanced"
 
 on:
+  push:
+    branches: [ "main" ]
+  schedule:
+    - cron: "31 7 * * 1"
   workflow_dispatch:
 
 jobs:
