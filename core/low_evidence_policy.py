@@ -237,12 +237,36 @@ def _unverified_block(
     )
 
 
+def _fenced_code_blocks(answer: str) -> list[str]:
+    """Кодовые заборы ответа — предложения, не утверждения (2026-08-29).
+
+    У рождённого кода улик нет по определению; его судья — тесты, не цитаты.
+    Подавитель гасит бездоказательную прозу, но хоронить вместе с ней код
+    значило душить творчество (живое удушение run_e4d9a8e8).
+    """
+    import re
+
+    return [m.group(1).strip()
+            for m in re.finditer(r"(?s)(```.*?```)", answer or "")]
+
+
+def _code_proposal_block(code_blocks: list[str], locale: str) -> str:
+    if locale == "ru":
+        head = ("Код-предложение (не утверждение: судится тестами, "
+                "не цитатами — сохранено при усечении):")
+    else:
+        head = ("Proposed code (a proposal, not a claim: judged by tests, "
+                "kept through truncation):")
+    return head + "\n" + "\n\n".join(code_blocks)
+
+
 def _build_short_answer(
     *,
     verified_claim_texts: list[str],
     suppressed_count: int,
     locale: str,
     dialogue_count: int = 0,
+    code_blocks: list[str] | None = None,
 ) -> str:
     """Assemble a deterministic short reply that follows the Output
     Contract section order. We rebuild from scratch — never paraphrase
@@ -253,6 +277,7 @@ def _build_short_answer(
             len(verified_claim_texts) - dialogue_count, locale, dialogue_count
         ),
         _facts_block(verified_claim_texts, locale),
+        *([_code_proposal_block(code_blocks, locale)] if code_blocks else []),
         "Sources: only verified claims listed above (if any)",
         "Confidence: low",
         _unverified_block(suppressed_count, notice, locale),
@@ -406,6 +431,7 @@ def evaluate_low_evidence_policy(
         suppressed_count=suppressed_count,
         locale=locale,
         dialogue_count=len(dialogue_texts),
+        code_blocks=_fenced_code_blocks(answer),
     )
     reason = (
         f"supported_ratio={supported_ratio:.2f} <= {max_verified_ratio} "
