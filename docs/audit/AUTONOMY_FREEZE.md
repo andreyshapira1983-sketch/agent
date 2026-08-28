@@ -297,3 +297,23 @@ are admitted by an unconditional exemption that the self-build machinery grants
 its own output. Nine of 136 would pass the documented rule. Run the experiment
 against that instrument and a landfill would be indistinguishable from
 learning.
+
+## Operator-ordered exceptions since the freeze (recorded 2026-08-28)
+
+The freeze was declared by the operator, and the operator's later words
+outrank it — but a freeze whose exceptions go unrecorded reads as an absolute
+it no longer is. The second examiner (Codex) caught exactly that on
+2026-08-28: new organs existed while this document still said "nothing new is
+to be built". This ledger repairs the bookkeeping, not the breach; each entry
+names the word that opened it and how it stands to the two invariants.
+Repairs of registered defects were never frozen and are not listed.
+
+| built after 2026-08-20 | operator's word | vs. the invariants |
+|---|---|---|
+| causal-climb ladder, slices 1–3 (MIR-096) | «бери орган MIR-096», «бери слайс 1/2/3» (2026-08-28) | serves I: the agent explains/refutes its own failures instead of receiving verdicts |
+| mentor question channel (MIR-178) | «бери третий канал» (2026-08-27) | serves I with a recorded non-interference boundary; advisory only |
+| DeepSeek provider wiring | «положил $5 на deepseek — запусти и посмотрим» (2026-08-28) | generic capability — the class the freeze explicitly permits |
+| conversation judge, stage 1 (`core/conversation_contract.py`) | «надо доделать вторую половину человеческого разговора» (2026-08-28) | neither invariant; a human-boundary form contract, developer-owned by its own honest table — the freeze's core stays unresolved by it |
+
+The blocking issue of this document — WHO DECIDES and WHO LIVES — remains
+open and is not diminished by any row above.
