@@ -445,14 +445,18 @@ _PROHIBITING_CLAUSE_RE = re.compile(
 
 #: Границы предложений и однородных частей. Точка с запятой и тире разделяют
 #: «сделай A; не трогай B» — без них запрет утащил бы за собой и требование.
-_CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|\s+—\s+)")
+# CodeQL #19/20 (2026-08-28): ветка `\s+—` заново съедала пробельный хвост с
+# каждого старта — стена пробелов давала квадратуру (×14.5 на вход ×4), а
+# текст сюда приходит из чужих ответов модели. Якорь на самом тире стартует
+# только у «—»; предпробельный хвост уходит в strip у потребителя ниже.
+_CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|(?<=\s)—\s+)")
 
 
 def demanding_text(text: str) -> str:
     """Текст без запрещающих предложений — из него и читаются долги."""
     kept = [
-        part for part in _CLAUSE_SPLIT_RE.split(text or "")
-        if part.strip() and not _PROHIBITING_CLAUSE_RE.match(part)
+        part.strip() for part in _CLAUSE_SPLIT_RE.split(text or "")
+        if part.strip() and not _PROHIBITING_CLAUSE_RE.match(part.strip())
     ]
     return " ".join(kept)
 
