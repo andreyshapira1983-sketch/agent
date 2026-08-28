@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.llm import LLM
 
 
@@ -53,8 +55,12 @@ def test_the_router_whitelist_admits_deepseek() -> None:
 def test_the_registry_carries_the_candidate_with_its_honest_note() -> None:
     """Кандидат существует и его запись не врёт о статике выбора."""
     root = Path(__file__).resolve().parent.parent
-    data = json.loads(
-        (root / "config" / "model_registry.json").read_text(encoding="utf-8"))
+    registry = root / "config" / "model_registry.json"
+    if not registry.exists():
+        # Чистый клон (CI): живой реестр моделей в gitignore. Кандидат живёт
+        # в рабочей области оператора; тут проверять нечего. 2026-08-28.
+        pytest.skip("нет живого config/model_registry.json в этом клоне")
+    data = json.loads(registry.read_text(encoding="utf-8"))
     ds = [m for m in data["models"] if m.get("provider") == "deepseek"]
 
     assert len(ds) == 1

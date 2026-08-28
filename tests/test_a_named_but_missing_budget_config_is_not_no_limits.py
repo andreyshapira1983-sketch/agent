@@ -58,6 +58,12 @@ def test_a_present_config_still_bounds_spending(tmp_path) -> None:
 def test_the_live_workspace_actually_carries_the_file(tmp_path) -> None:
     """Замер, а не мнение: живой потолок и правда держится на этом файле."""
     repo = pathlib.Path(__file__).resolve().parent.parent
+    if not (repo / "config" / "budget_limits.json").exists() and not (
+            repo / "data").exists():
+        # Чистый клон (CI): config/budget_limits.json в gitignore нарочно.
+        # Дома отсутствие файла — авария без потолка; здесь — не живая
+        # рабочая область вовсе (data/ тоже нет). 2026-08-28.
+        pytest.skip("не живая рабочая область: нет ни config-лимитов, ни data/")
     assert (repo / "config" / "budget_limits.json").exists(), (
         "файла лимитов нет в репозитории — тогда живой агент работает без "
         "денежного потолка, и это надо чинить раньше всего остального"
