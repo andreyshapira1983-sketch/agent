@@ -44,7 +44,20 @@ _SAME_QUESTION_JACCARD = 0.5
 
 
 def _tokens(text: str) -> frozenset[str]:
-    return frozenset(re.findall(r"[a-zа-яё0-9]{3,}", (text or "").lower()))
+    """Слова ≥3 знаков ПЛЮС полярные коротышки из канонного словаря.
+
+    Находка второго экзаменатора 2026-08-28: правило длины молча резало «не»,
+    и «тест прошёл»/«тест не прошёл» совпадали множествами — судья глушил
+    именно изменение факта. Тот же класс уже чинился в topic_tokens; словарь
+    ОДИН на репозиторий — второй завёл бы болезнь двух словарей.
+    """
+    from core.topic_tokens import _POLARITY_WORDS
+
+    lowered = (text or "").lower()
+    words = frozenset(re.findall(r"[a-zа-яё0-9]+", lowered))
+    return frozenset(re.findall(r"[a-zа-яё0-9]{3,}", lowered)) | (
+        words & _POLARITY_WORDS
+    )
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
@@ -54,13 +67,22 @@ def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
 
 
 def classify_register(incoming: str) -> str:
-    """«small_talk» — короткая человеческая фраза без дела; иначе «substantive»."""
+    """«small_talk» — короткая человеческая фраза без дела; иначе «substantive».
+
+    Болтовня признаётся ВЫЧЕТОМ: после удаления формул вежливости не должно
+    остаться ни одного содержательного слова. Иначе «спасибо, почему упал
+    тест?» считалось бы болтовнёй по одной формуле благодарности — и деловой
+    ответ был бы урезан (находка второго экзаменатора 2026-08-28).
+    """
     text = (incoming or "").strip()
-    if not text:
+    if not text or len(text) > _SMALL_TALK_MAX_LEN:
         return "substantive"
-    if len(text) <= _SMALL_TALK_MAX_LEN and _SMALL_TALK_RE.search(text):
-        return "small_talk"
-    return "substantive"
+    if not _SMALL_TALK_RE.search(text):
+        return "substantive"
+    remainder = _SMALL_TALK_RE.sub(" ", text)
+    if re.findall(r"[a-zа-яё0-9]{3,}", remainder.lower()):
+        return "substantive"
+    return "small_talk"
 
 
 @dataclass(frozen=True)
