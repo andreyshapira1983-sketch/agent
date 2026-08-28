@@ -24,6 +24,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "workspace_reference",
         "file_request_intent",
         "answer_format", "lang_match", "output_policy", "user_profile", "truth_hype_filter",
+        "conversation_contract",
         "alert_ack",
     ]),
     ("Perception & Adversarial Defense (§2)", "Input handling and injection/exfiltration defense.", [

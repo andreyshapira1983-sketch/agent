@@ -238,7 +238,44 @@ def _ask_the_agent(
         workspace=workspace,
         stream=False,
     )
-    print("\n" + format_human_response(answer) + "\n")
+    print("\n" + _judged_human_reply(agent, question, answer) + "\n")
+
+
+#: Недавние пары (вопрос, ответ) этого процесса — для правила «не повторяйся
+#: без спроса» (ступень 1 разговора; нить между процессами — ступень 2).
+_RECENT_REPLIES: list[tuple[str, str]] = []
+_RECENT_REPLIES_KEEP = 8
+
+
+def _judged_human_reply(agent: object, question: str, answer: str) -> str:
+    """Судья разговора между переводчиком и печатью (ступень 1, MIR/записка
+    docs/audit/CONVERSATION_ORGAN_DESIGN.md): на человеческую фразу —
+    человеческий ответ; дубль — молчание; каждый не-ok вердикт — в журнал."""
+    from core.conversation_contract import judge_reply
+
+    # Судья смотрит на СЫРОЙ ответ (в нём секции контракта — приметы отчёта);
+    # переводчик остаётся способом показа, когда вердикт ok.
+    judgement = judge_reply(question, answer, tuple(_RECENT_REPLIES))
+    reply = format_human_response(answer)
+    log = getattr(agent, "log", None)
+    if log is not None and (judgement.verdict != "ok" or judgement.observations):
+        try:
+            log.log("conversation_contract", {
+                "verdict": judgement.verdict,
+                "reasons": list(judgement.reasons),
+                "observations": list(judgement.observations),
+            })
+        except Exception:  # noqa: BLE001, S110 — журнал не роняет разговор
+            pass
+    if judgement.verdict == "trim" and judgement.human_reply:
+        reply = judgement.human_reply
+    elif judgement.verdict == "repeat_silence":
+        reply = "(я это уже говорил — молчу, чтобы не шуметь)"
+    elif judgement.verdict == "silence":
+        reply = "(мне нечего добавить)"
+    _RECENT_REPLIES.append((question, answer))
+    del _RECENT_REPLIES[:-_RECENT_REPLIES_KEEP]
+    return reply
 
 
 def _stdin_is_interactive() -> bool:

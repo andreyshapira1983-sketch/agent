@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 212 modules across 12 groups._
+_Total: 213 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -29,6 +29,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
 | `core/truth_hype_filter` | Truth/Hype Filter — the first LEARNING antibody (правда vs шумиха). |
+| `core/conversation_contract` | Правила человеческого разговора: судья исходящей реплики (ступень 1). |
 | `core/alert_ack` | Operator acknowledgement for advisory alerts — retire accepted signals. |
 
 ## Perception & Adversarial Defense (§2)
