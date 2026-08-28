@@ -124,6 +124,38 @@ def test_a_single_letter_subject_is_still_business() -> None:
     assert classify_register("thanks :)") == "small_talk"
 
 
+def test_long_pure_politeness_is_still_small_talk() -> None:
+    """Оговорка Codex (2026-08-28): потолок длины 60 был третьей константой.
+    Снят — вычет покрывает и длинную чистую вежливость сам."""
+    long_politeness = "Привет, здравствуйте, доброе утро, спасибо, до свидания!"
+    assert len(long_politeness) > 50
+    assert classify_register(long_politeness + " Благодарю!") == "small_talk"
+    # Длина не спасает дело от узнавания делом.
+    assert classify_register(
+        "спасибо огромное за вчерашнее, и всё-таки почему упал тест?"
+    ) == "substantive"
+
+
+def test_the_politeness_dictionary_is_pinned_against_rot() -> None:
+    """Действующий триггер AIML-диагноза (оговорка Codex: «условие пока
+    текстовое»). Словарь формул — главный вектор гнили по тридцати годам
+    истории; его рост теперь ЛОМАЕТ батарею, а не ждёт читателя записки.
+    Легальный путь расширения — явная правка этого пина одним коммитом с
+    обоснованием; второй такой коммит подряд — диагноз, орган меняется на
+    классификатор (docs/audit/CONVERSATION_ORGAN_DESIGN.md)."""
+    import hashlib
+
+    from core.conversation_contract import _SMALL_TALK_RE
+
+    digest = hashlib.sha256(_SMALL_TALK_RE.pattern.encode("utf-8")).hexdigest()
+    assert digest == (
+        "0c8d7814688b34d010a3ce6dddcea71adaa29fac6efd13316f5b16406a45db0c"
+    ), (
+        "словарь формул вежливости изменился — это событие AIML-диагноза, "
+        "оно требует явного решения, а не тихой латки: " + _SMALL_TALK_RE.pattern
+    )
+
+
 def test_the_alphabet_itself_is_not_a_developer_choice() -> None:
     """Пятая граница Codex (2026-08-28): «где именно решение разработчика?»
     Оно пряталось в классе символов [a-zа-яё0-9] — выбранном АЛФАВИТЕ.
