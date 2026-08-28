@@ -58,8 +58,32 @@ _DENY_EXACT = frozenset(
         "config/model_catalog.json",
         "config/budget_limits.example.json",
         "config/model_registry.example.json",
+        # MIR-139/H-39 (слово оператора 2026-08-28): улики ПРОШЛОГО. Правка
+        # судьи меняет будущие вердикты и потому идёт с флагом и глазом
+        # человека; правка реестра/леджера меняет прошлые улики задним
+        # числом — подсудимый не правит материалы своего дела.
+        "docs/audit/MASTER_ISSUE_REGISTRY.md",
+        "docs/audit/HISTORICAL_FAILURE_LEDGER.md",
     }
 )
+
+
+def judge_touching_note(paths) -> str:
+    """«ПРАВИТ СУДЬЮ» — флаг для глаза оператора (MIR-139).
+
+    tests/ полосе не запрещены — новые тесты и есть главный продукт агента, —
+    но заявка, трогающая судей, обязана кричать об этом с первой строки:
+    самооценка через собственные тесты остаётся идеальной, пока реальность
+    падает (поле, июль 2026).
+    """
+    touched = sorted({
+        str(p).replace("\\", "/")
+        for p in paths
+        if str(p).replace("\\", "/").startswith("tests/")
+    })
+    if not touched:
+        return ""
+    return f"⚠ ПРАВИТ СУДЬЮ (tests/: {', '.join(touched[:3])}) — "
 _DENY_PREFIXES = (".github/", ".git/", "config/", "secrets/", ".venv/")
 _DENY_SUFFIXES = (".lock", ".pem", ".key")
 _DENY_NAMES = frozenset(

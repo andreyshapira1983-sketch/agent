@@ -1224,13 +1224,22 @@ def _reporter_publish(
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
     dedup_key = f"self_apply:{target}:{digest}"
     extra = len(files) - 1
+    from core.self_apply_lane import judge_touching_note
+
     summary = f"self-apply proposal for {target}"
     if extra > 0:
         summary = f"self-apply split proposal for {target} (+{extra} new file(s))"
+    # MIR-139 (OWASP-уточнение оператора 2026-08-28): правка судей — не
+    # только флаг, но и ЯВНО повышенный класс риска: обратим-то патч обратим,
+    # ущерб — судебной системе, и машинные ворота ниже по течению обязаны
+    # видеть это в поле risk, а не только глаз — в тексте.
+    _note = judge_touching_note([f["path"] for f in files])
+    summary = _note + summary
+    _risk = "irreversible" if _note else "reversible"
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
         summary=summary,
-        risk="reversible",
+        risk=_risk,
         reasons=tuple(evidence),
         payload=payload,
         dedup_key=dedup_key,
@@ -1304,13 +1313,17 @@ def publish_incremental_split_step(
         workspace=workspace,
     )
     digest = hashlib.sha256(step.target_content.encode("utf-8")).hexdigest()[:12]
+    from core.self_apply_lane import judge_touching_note
+
+    _split_paths = [f.get("path", "") for f in (payload.get("files") or [])]
+    _split_note = judge_touching_note(_split_paths)
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
-        summary=(
+        summary=_split_note + (
             f"incremental split step for {step.target}: move "
             f"{len(step.moved_names)} name(s) into {step.new_module}"
         ),
-        risk="reversible",
+        risk="irreversible" if _split_note else "reversible",
         reasons=tuple(evidence),
         payload=payload,
         dedup_key=f"self_split:{step.target}:{digest}",

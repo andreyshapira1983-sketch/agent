@@ -325,7 +325,7 @@ def test_smart_memory_rejects_unknown_flags(capsys):
         log=FakeLog(), smart_memory_summary=lambda: pytest.fail("must not be read")
     )
     assert _handle_smart_memory("--all", agent) is True
-    assert "Usage: :smart-memory [--json]" in capsys.readouterr().err
+    assert "Usage: :smart-memory [archive <слово>] [--json]" in capsys.readouterr().err
 
 
 def test_smart_memory_prints_all_three_stores(capsys):

@@ -1,4 +1,4 @@
-"""Архивация обязана сказать, что прочесть архив нечем.
+"""Архивация обязана сказать, ЧЕМ прочесть архив (читатель построен, MIR-138).
 
 Замер, отвергнутые варианты и границы: F-2 в docs/audit/FIELD_CHECK_QUEUE.md, MIR-074 в docs/audit/MASTER_ISSUE_REGISTRY.md.
 """
@@ -31,12 +31,14 @@ def test_the_archive_command_names_the_price(capsys, monkeypatch) -> None:
     )
 
 
-def test_nothing_reads_the_archive_and_the_message_may_stop_saying_so() -> None:
-    """Растяжка: как только читатель появится, надпись обязана устареть.
+def test_the_archive_reader_set_is_exactly_the_sanctioned_door() -> None:
+    """Растяжка переехала ПО СОБСТВЕННОЙ инструкции (2026-08-28): читатель
+    появился (`search_archive` → `:smart-memory archive`, MIR-138), и теперь
+    закон обратный — читает РОВНО санкционированная дверь. Второй вызывающий
+    `load_archive` вне неё — красный: у чтения архива один рот, как у
+    выдвижения гипотез.
 
-    По РАЗБОРУ, а не по тексту. Первая редакция искала подстроку и покраснела
-    на собственном комментарии, объясняющем починку, — проба, меряющая текст,
-    меряет адрес, а не свойство. Этот урок за сегодня уже был.
+    По РАЗБОРУ, а не по тексту (урок первой редакции сохранён).
     """
     import ast
 
@@ -61,7 +63,8 @@ def test_nothing_reads_the_archive_and_the_message_may_stop_saying_so() -> None:
             ):
                 callers.append(f"{path.name}:{node.lineno}")
 
-    assert not callers, (
-        "у архива появился читатель — сообщение команды больше не верно, "
-        f"перепишите его и эту растяжку: {callers}"
+    sanctioned = {"commands_memory.py"}
+    strangers = [c for c in callers if c.split(":")[0] not in sanctioned]
+    assert not strangers, (
+        f"у архива появился ВТОРОЙ читатель вне санкционированной двери: {strangers}"
     )

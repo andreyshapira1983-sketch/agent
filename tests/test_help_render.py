@@ -137,7 +137,7 @@ def test_layout_entry_kinds_are_known_and_counted():
     # Frozen shape: 84 lines render from the registry, 44 are verbatim (24
     # `flags:` continuations, 9 irregular command lines, 2 non-command lines,
     # 7 prose lines, 2 headings), 1 blank separates the two blocks.
-    assert kinds == {"cmd": 85, "raw": 44, "blank": 1}  # +1: :standing-grant (2026-08-26)
+    assert kinds == {"cmd": 86, "raw": 44, "blank": 1}  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28, MIR-138)
 
 
 def test_help_module_imports_only_the_registry():

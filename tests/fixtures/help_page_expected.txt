@@ -66,6 +66,7 @@ Commands:
   :budget-window-status [--json] inspect persistent hour/day budget windows
   :budget-kill-switch [--json] [--clear] inspect/reset autonomous day-budget kill-switch
   :state-store-drill [--json]    prove JSONL quarantine/recovery on an isolated file
+  :receipts [trace <substr>] [N]  ask the accumulated tool-receipt evidence (read-only, MIR-138)
   :release-audit [--json]         inspect release artifact hygiene exclusions
   :supply-chain-audit [--json]   inspect pinned deps and CI release gates
   :approval-list [status|all]     list pending/approved/denied approval items

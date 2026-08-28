@@ -245,3 +245,21 @@ class PersistentMemoryStore:
                 self.path,
                 [record.model_dump(mode="json") for record in records],
             )
+
+
+    def search_archive(self, term: str, *, limit: int = 10) -> list[MemoryRecord]:
+        """Разбудить взглядом, не рукой (MIR-138): поиск по архиву, только чтение.
+
+        86 % памяти жило недостижимым ни одной командой; «отодвинем подальше»
+        честно лишь пока из сна можно ЗАГЛЯНУТЬ. Возврат в активную память —
+        отдельная власть (MIR-156), не эта функция.
+        """
+        needle = (term or "").strip().casefold()
+        if not needle:
+            return []
+        hits = [
+            record for record in self.load_archive()
+            if needle in str(record.content).casefold()
+        ]
+        hits.sort(key=lambda r: str(r.created_at), reverse=True)
+        return hits[:limit]
