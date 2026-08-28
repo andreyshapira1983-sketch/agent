@@ -45,9 +45,15 @@ _WORST_CASE_BUDGET_MS = 70
 def test_the_worst_case_stays_cheap_at_the_cap(name, pattern, filler) -> None:
     text = filler * MAX_EXCERPT_CHARS
 
-    started = time.perf_counter()
-    pattern.search(text)
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    # H-10: минимум из пяти замеров — шум планировщика ОС под полной батареей
+    # аддитивен и случаен, минимум его срезает; квадратичная стоимость
+    # детерминирована и не спрячется ни в одной попытке (плакал волком
+    # 2026-08-28 тем же способом, что и test_the_path_regex_costs...).
+    elapsed_ms = float("inf")
+    for _ in range(5):
+        started = time.perf_counter()
+        pattern.search(text)
+        elapsed_ms = min(elapsed_ms, (time.perf_counter() - started) * 1000)
 
     assert elapsed_ms < _WORST_CASE_BUDGET_MS, (
         f"{name} стоит {elapsed_ms:.0f} мс на предельной выдержке "
