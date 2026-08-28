@@ -80,7 +80,12 @@ def classify_register(incoming: str) -> str:
     if not _SMALL_TALK_RE.search(text):
         return "substantive"
     remainder = _SMALL_TALK_RE.sub(" ", text)
-    if re.findall(r"[a-zа-яё0-9]{3,}", remainder.lower()):
+    # Остаток мерится словами от ДВУХ знаков: «PR?» и «AI?» — дело, не
+    # вежливость (акронимная родня MIR-007, находка второго экзаменатора).
+    # Цена ошибки асимметрична: дело-как-болтовня теряет улики ответа,
+    # болтовня-как-дело лишь оставляет полный ответ — режем в безопасную
+    # сторону.
+    if re.findall(r"[a-zа-яё0-9]{2,}", remainder.lower()):
         return "substantive"
     return "small_talk"
 
