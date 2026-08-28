@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 211 modules across 12 groups._
+_Total: 212 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -80,6 +80,7 @@ _Planning, verification, clarification, control loop._
 | `core/causal_store` | Наблюдения переживают ход — первая перекладина причинной лестницы. |
 | `core/causal_climb` | Подъём по причинной лестнице: гипотезы, вмешательства, обобщение. |
 | `core/causal_claim_store` | Хранилище причинных утверждений выше первой ступени + выжимка уроков. |
+| `core/causal_climb_action` | Слайс 1 органа подъёма: наблюдение → конкурирующие объяснения (MIR-096). |
 | `core/lesson_provenance` | Causal-provenance meter for lessons (read-only, no delivery organ here). |
 | `core/attribute_sieve` | Attribute-phantom sieve: attribute access is verified like call kwargs. |
 | `core/lesson_ab_experiment` | The differentiating experiment: lesson OFF vs ON, everything else equal. |

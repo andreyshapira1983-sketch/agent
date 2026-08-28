@@ -48,6 +48,10 @@ _P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
 #   concrete than a request to read
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
+_P_CAUSAL_DISCRIMINATE = 46  # claims with live probes: finishing an open
+                          # investigation outranks starting a new one
+_P_CAUSAL_CLIMB = 45      # unexplained self-failure observations: investigate
+                          # own defects before admin debt (MIR-096, slice 1)
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
 _P_INBOX_BACKLOG = 30     # large pending queue with no clear duplicates
 _P_OBSERVE = 0            # nothing pressing: stay in honest observation
@@ -407,6 +411,8 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     self_improvement_registry_available: bool = False,
     open_self_improvement_issues: tuple[dict, ...] = (),
     recent_self_improvement_failures: tuple[str, ...] = (),
+    unexplained_observations_count: int = 0,
+    discriminable_claims_count: int = 0,
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
@@ -456,6 +462,12 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(improvement, "retained_record")
 
     admit(_candidate_inbox_debt(triage), "observed_state")
+    # Наблюдения о СОБСТВЕННЫХ провалах, не покрытые объяснениями, — состояние,
+    # накопленное прежними прогонами (канал MIR-096).
+    admit(_candidate_discriminable_claim(discriminable_claims_count),
+          "retained_record")
+    admit(_candidate_unexplained_observation(unexplained_observations_count),
+          "retained_record")
     admit(_candidate_dry_run_stuck(dry_run_streak), "observed_state")
     admit(_candidate_inbox_backlog(triage, inbox_pending), "observed_state")
 
@@ -779,6 +791,50 @@ def _candidate_open_self_improvement_issue(
             confidence=0.75,
         )
     return None
+
+
+def _candidate_discriminable_claim(count: int) -> BestNextAction | None:
+    """Заявки с живыми пробами ждут различения (MIR-096, слайс 2)."""
+    try:
+        pending = int(count)
+    except (TypeError, ValueError):
+        pending = 0
+    if pending < 1:
+        return None
+    return BestNextAction(
+        action="discriminate_causal_claim",
+        title="Let the journals judge the competing explanations",
+        severity="medium",
+        priority=_P_CAUSAL_DISCRIMINATE,
+        reason=(
+            "Open causal claims carry machine-checkable predictions; the "
+            "journals, not the author, decide which survive."
+        ),
+        evidence=(f"discriminable_claims={pending}",),
+        risk="reversible",
+    )
+
+
+def _candidate_unexplained_observation(count: int) -> BestNextAction | None:
+    """Наблюдения о собственных провалах без объяснений (MIR-096, слайс 1)."""
+    try:
+        naked = int(count)
+    except (TypeError, ValueError):
+        naked = 0
+    if naked < 1:
+        return None
+    return BestNextAction(
+        action="explain_causal_observation",
+        title="Explain one of the agent's own recorded failures",
+        severity="medium",
+        priority=_P_CAUSAL_CLIMB,
+        reason=(
+            "Recorded failure observations have no competing explanations; "
+            "understanding own defects outranks admin debt."
+        ),
+        evidence=(f"unexplained_observations={naked}",),
+        risk="reversible",
+    )
 
 
 def _candidate_dry_run_stuck(dry_run_streak: int) -> BestNextAction | None:

@@ -58,22 +58,10 @@ def _machine_sources() -> dict[str, str]:
     return out
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-17 and banked rather than fixed: a "
-        "defect signal at occurrences=20 produced a LearningPlan (read the "
-        "weak-point files) and nothing else — no competing hypotheses, no "
-        "discriminating measurement, no root cause / UNKNOWN. The invariant "
-        "this bank protects: recurrence past a threshold must open a causal "
-        "INVESTIGATION — in this system's own vocabulary, explanations "
-        "attached to a claim on the ladder and a measurement that can kill "
-        "them — initiated by the machine, not by the operator typing "
-        ":causal. Reading lists do not satisfy it. The implementation is "
-        "deliberately unprescribed. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
+# Маркер снят 2026-08-27 ПО СОБСТВЕННОЙ инструкции («When this XPASSes,
+# replace the marker»): слайс 1 органа подъёма (core/causal_climb_action.py,
+# MIR-096) закрыл ровно закреплённый инвариант — повторяемость ведёт очередь
+# наблюдений, и машина сама выдвигает конкурирующие объяснения на лестницу.
 def test_recurrence_opens_a_machine_investigation() -> None:
     sources = _machine_sources()
     sources.pop("causal_climb.py", None)  # the ladder itself, not a caller
