@@ -241,16 +241,28 @@ class ReadLogsTool(Tool):
         if not self.log_dir.is_dir():
             return None
         if trace_id is not None:
-            candidate = self.log_dir / f"{trace_id}.jsonl"
-            # Re-resolve and re-check containment to prevent symlink games.
-            resolved = candidate.resolve()
-            try:
-                resolved.relative_to(self.log_dir.resolve())
-            except ValueError:
-                raise PermissionError(
-                    f"trace_id {trace_id!r} resolves outside the logs/ directory"
-                ) from None
-            return resolved if resolved.is_file() else None
+            # Голый идентификатор — законный адрес: живой отказ 2026-08-28
+            # (раунд 7 допроса) — агент передал hex собственной трассы и
+            # получил «файла нет, 0 событий». TraceLogger пишет стемы
+            # `trace_<hex>`/`run_<hex>`; точное имя остаётся первым, префиксы
+            # — запасным ходом, проверки содержания — те же для каждого.
+            stems = [trace_id]
+            if not trace_id.startswith(("trace_", "run_")):
+                stems += [f"trace_{trace_id}", f"run_{trace_id}"]
+            for stem in stems:
+                candidate = self.log_dir / f"{stem}.jsonl"
+                # Re-resolve and re-check containment to prevent symlink games.
+                resolved = candidate.resolve()
+                try:
+                    resolved.relative_to(self.log_dir.resolve())
+                except ValueError:
+                    raise PermissionError(
+                        f"trace_id {trace_id!r} resolves outside the logs/ "
+                        f"directory"
+                    ) from None
+                if resolved.is_file():
+                    return resolved
+            return None
 
         # No trace_id given — the most recent session log that can hold an
         # answer. `logs/` also holds checkpoints and other stores; those are

@@ -211,6 +211,21 @@ DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_OUTPUT_CAP = 64 * 1024  # 64 KiB per stream
 
 
+def _oem_encoding() -> str | None:
+    """Кодовая страница консоли Windows (cp866 здесь), None вне Windows.
+
+    Отдельной функцией — чтобы полигоны могли судить декодер на любой ОС.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    except Exception:  # noqa: BLE001 — нет OEM — нет запасного декодера
+        return None
+
+
 class ShellExecTool(Tool):
     name = "shell_exec"
     # What this says is what the planner believes it may do: a stale list is
@@ -611,9 +626,15 @@ class ShellExecTool(Tool):
                 f"shell_exec cannot find executable '{real_cmd}' on PATH"
             )
 
-        # Arguments are adapted only when the PROGRAM changed underneath the
-        # caller; the requested binary already understands its own dialect.
-        run_argv = [exe, *self._normalise_argv_for(list(argv), substituted=substituted)[1:]]
+        # Arguments are adapted when the PROGRAM changed underneath the caller
+        # — or when the program is findstr, whose slash dialect the CALLER
+        # never speaks (see _normalise_argv_for).
+        run_argv = [
+            exe,
+            *self._normalise_argv_for(
+                list(argv), substituted=substituted, real_cmd=real_cmd
+            )[1:],
+        ]
         env = self._safe_env()
         started = time.monotonic()
         timed_out = False
@@ -726,16 +747,21 @@ class ShellExecTool(Tool):
         return cmd, False
 
     @staticmethod
-    def _normalise_argv_for(argv: list[str], *, substituted: bool) -> list[str]:
+    def _normalise_argv_for(
+        argv: list[str], *, substituted: bool, real_cmd: str = ""
+    ) -> list[str]:
         """Make the arguments readable by the program that will actually run.
 
-        Only when a SUBSTITUTION happened: if the requested binary is the
-        one executing, its own dialect is already correct and rewriting
-        would be damage. On Windows `findstr` reads `/` as a switch prefix,
-        so `core/loop.py` parses as `core` plus `/l /o /o /p` — the exact
-        live failure.
+        On Windows `findstr` reads `/` as a switch prefix, so `core/loop.py`
+        parses as `core` plus `/l /o /o /p`. Until 2026-08-29 this ran only
+        when a SUBSTITUTION happened (grep→findstr), on the premise that "the
+        requested binary's own dialect is already correct". The premise died
+        in the live interrogation of 2026-08-28: the CALLER is a model that
+        speaks POSIX paths even when it asks for findstr by name — three
+        direct probes fell on their own slashes. findstr is therefore
+        normalised whenever it is the binary that runs.
         """
-        if not substituted or sys.platform != "win32":
+        if sys.platform != "win32" or not (substituted or real_cmd == "findstr"):
             return argv
         out = [argv[0]]
         for elem in argv[1:]:
@@ -795,16 +821,30 @@ class ShellExecTool(Tool):
         return env
 
     def _cap_and_decode(self, raw: bytes) -> tuple[str, bool]:
-        """Truncate to output_cap_bytes; decode UTF-8 strictly."""
+        """Truncate to output_cap_bytes; decode UTF-8, then the console's OEM.
+
+        Windows console tools answer in the OEM code page (cp866 on this
+        machine), and until 2026-08-29 the refusal «Не удалось открыть»
+        reached the agent as «�� �������» — it could not read WHY it was
+        refused (live interrogation, round 3). UTF-8 stays first: it is what
+        every modern tool emits; OEM is the fallback for the console natives;
+        `replace` remains the last resort so no bytes ever raise.
+        """
         truncated = False
         if len(raw) > self.output_cap_bytes:
             raw = raw[: self.output_cap_bytes]
             truncated = True
         try:
-            text = raw.decode("utf-8")
+            return raw.decode("utf-8"), truncated
         except UnicodeDecodeError:
-            text = raw.decode("utf-8", errors="replace")
-        return text, truncated
+            pass
+        oem = _oem_encoding()
+        if oem:
+            try:
+                return raw.decode(oem), truncated
+            except (UnicodeDecodeError, LookupError):
+                pass
+        return raw.decode("utf-8", errors="replace"), truncated
 
     # ------------------------------------------------------------------
     # Output validation (Tool contract)
