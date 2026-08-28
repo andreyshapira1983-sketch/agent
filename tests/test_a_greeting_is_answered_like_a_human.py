@@ -98,6 +98,19 @@ def test_thanks_with_a_question_is_business_not_small_talk() -> None:
         "доказательный ответ на деловой вопрос урезан из-за формулы вежливости")
 
 
+def test_a_two_letter_acronym_is_still_business() -> None:
+    """Третья находка того же экзаменатора (родня акронимной половины
+    MIR-007): «thanks, PR?» и «hi, AI?» теряли доказательную часть, потому
+    что остаток после вычета мерился словами от трёх букв. Цена ошибки
+    асимметрична: посчитать дело болтовнёй — потерять улики; посчитать
+    болтовню делом — лишь оставить полный ответ."""
+    assert classify_register("thanks, PR?") == "substantive"
+    assert classify_register("hi, AI?") == "substantive"
+    assert classify_register("привет, что с PR?") == "substantive"
+    # Граница держится: чистая вежливость остаётся болтовнёй.
+    assert classify_register("привет, как дела?") == "small_talk"
+
+
 def test_a_fresh_reply_is_not_mistaken_for_a_repeat() -> None:
     judgement = judge_reply(
         "как дела?", "Сегодня закрыл MIR-185 и стёр старую модель толчков.",
