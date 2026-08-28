@@ -58,12 +58,12 @@ def _agent():
 
 
 # Живая цель белого списка: сенсор рассуждение↔действие. Вход
-# «текст || инструменты» — А несёт причину (нет упоминания инструмента),
+# «текст ;; инструменты» — А несёт причину (нет упоминания инструмента),
 # Б — не несёт (глагол осмотра оправдывает file_read после MIR-015).
 _EXP_PROVES = (
     "без упоминания сенсор обвиняет "
-    "[exp: reasoning_action_check | A=посчитаю в уме || web_search | "
-    "B=изучу файл конфигурации || file_read | след=unjustified=['w]"
+    "[exp: reasoning_action_check | A=посчитаю в уме ;; web_search | "
+    "B=изучу файл конфигурации ;; file_read | след=unjustified=['w]"
 )
 # Уточнение: следствие — подстрока результата; для А это unjustified с
 # web_search, для Б unjustified пуст.
@@ -72,9 +72,9 @@ _EXP_PROVES = (
 def test_the_experiment_grammar_parses_and_rejects() -> None:
     """Красный свидетель разбора: белый список — закон."""
     ok = parse_experiment(
-        "x [exp: reasoning_action_check | A=а || t1 | B=б || t2 | след=unjust]")
+        "x [exp: reasoning_action_check | A=а ;; t1 | B=б ;; t2 | след=unjust]")
     assert ok is not None and ok.target == "reasoning_action_check"
-    assert ok.arm_a == "а || t1" and ok.effect == "unjust"
+    assert ok.arm_a == "а ;; t1" and ok.effect == "unjust"
 
     assert parse_experiment("без спецификации") is None
     assert parse_experiment(
@@ -103,8 +103,8 @@ def test_an_effect_in_both_arms_refutes_the_hypothesis(tmp_path: Path) -> None:
     """Следствие не исчезло с причиной — механизм гипотезы различия не даёт."""
     both_arms = (
         "обвинение всегда "
-        "[exp: reasoning_action_check | A=посчитаю в уме || web_search | "
-        "B=найду в интернете поиском || web_search | след=unjustified=['w]"
+        "[exp: reasoning_action_check | A=посчитаю в уме ;; web_search | "
+        "B=сравню два числа ;; web_search | след=unjustified=['w]"
     )
     save_claim(_claim(both_arms, "соперник"), workspace=tmp_path)
 
@@ -112,15 +112,15 @@ def test_an_effect_in_both_arms_refutes_the_hypothesis(tmp_path: Path) -> None:
 
     claim, _extra = load_claims(tmp_path)[0]
     assert not claim.explanations[0].alive, "следствие в обоих рукавах — опровергнута"
-    assert "обоих" in claim.explanations[0].refuted_by
+    assert "ОБОИХ" in claim.explanations[0].refuted_by
     assert claim.chosen == ""
     assert outcome.did_work
 
 
 def test_no_effect_anywhere_is_ignorance_not_a_verdict(tmp_path: Path) -> None:
     nowhere = (
-        "х [exp: reasoning_action_check | A=прочитаю файл || file_read | "
-        "B=изучу файл || file_read | след=НЕТ_ТАКОЙ_ПОДСТРОКИ]"
+        "х [exp: reasoning_action_check | A=прочитаю файл ;; file_read | "
+        "B=изучу файл ;; file_read | след=НЕТ_ТАКОЙ_ПОДСТРОКИ]"
     )
     save_claim(_claim(nowhere, "соперник"), workspace=tmp_path)
     agent = _agent()

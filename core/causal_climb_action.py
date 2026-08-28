@@ -262,6 +262,170 @@ def _run_probe(workspace: Path, probe: Probe) -> bool | None:
     return False if found_any_file else None
 
 
+# ── Слайс 3: причина доказывается её устранением ─────────────────────────────
+#
+# Двурукавный эксперимент исполнения (DoVer: атрибуция из журналов —
+# непроверенная гипотеза, пока не подтверждена исполнением):
+#   [exp: цель | A=<вход с причиной> | B=<вход без причины> | след=<подстрока>]
+# Следствие есть в A и исчезает в B → Intervention.proves_cause. Следствие в
+# ОБОИХ рукавах → гипотеза опровергнута (её механизм различия не даёт).
+# Нигде → эксперимент не воспроизвёл явление: неведение, не вердикт.
+# Цели — ТОЛЬКО белый список чистых функций: ни файлов, ни сети, ни состояния.
+
+_EXP_RE = re.compile(
+    r"\[exp:\s*(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*\|\s*"
+    r"A=(?P<arm_a>[^|\]]+?)\s*\|\s*B=(?P<arm_b>[^|\]]+?)\s*\|\s*"
+    r"след=(?P<effect>[^\]]+?)\s*\]",
+    re.IGNORECASE,
+)
+
+
+def _run_reasoning_action_check(arm: str) -> str:
+    """Адаптер белого списка: «текст ;; tool1,tool2» → строка отчёта сенсора."""
+    from core.reasoning_action_check import check_reasoning_actions
+
+    text, _, tools_raw = arm.partition(";;")
+    tools = [t.strip() for t in tools_raw.split(",") if t.strip()]
+    report = check_reasoning_actions(text.strip(), tools)
+    return (f"unjustified={sorted(report.unjustified_actions)!r} "
+            f"mentioned_extra={sorted(report.mentioned_but_not_planned)!r}")
+
+
+#: Белый список целей эксперимента. Только ЧИСТЫЕ функции; расширение —
+#: новая строка здесь плюс свидетель, никогда динамический импорт по имени.
+_EXPERIMENT_TARGETS: dict[str, Any] = {
+    "reasoning_action_check": _run_reasoning_action_check,
+}
+
+
+@dataclass(frozen=True)
+class Experiment:
+    """Машинно-исполняемая спецификация двурукавного вмешательства."""
+
+    target: str
+    arm_a: str
+    arm_b: str
+    effect: str
+
+
+def parse_experiment(predicts: str) -> Experiment | None:
+    """Спецификация из предсказания; цель вне белого списка — невалидна."""
+    m = _EXP_RE.search(predicts or "")
+    if not m:
+        return None
+    target = m.group("target").strip()
+    if target not in _EXPERIMENT_TARGETS:
+        return None
+    arm_a = m.group("arm_a").strip()
+    arm_b = m.group("arm_b").strip()
+    effect = m.group("effect").strip()
+    if not arm_a or not arm_b or not effect:
+        return None
+    return Experiment(target=target, arm_a=arm_a, arm_b=arm_b, effect=effect)
+
+
+def experimentable_claims(workspace: str | Path):
+    """Открытые заявки, где хоть одна живая гипотеза несёт спецификацию."""
+    out = []
+    for claim, extra in load_claims(workspace):
+        if claim.chosen.strip() or claim.refuted_reason.strip():
+            continue
+        if any(e.alive and parse_experiment(e.predicts) is not None
+               for e in claim.explanations):
+            out.append((claim, extra))
+    return tuple(out)
+
+
+def run_claim_experiment(
+    *, agent: Any, workspace: str | Path,
+) -> CampaignActionOutcome:
+    """Каждая живая спецификация исполняется; исход решает, не автор."""
+    import dataclasses
+
+    from core.causal_lesson import Intervention
+
+    ws = Path(workspace)
+    pending = experimentable_claims(ws)
+    if not pending:
+        return _decline(agent, "нет заявок со спецификациями эксперимента")
+    claim, extra = pending[0]
+
+    verdicts = 0
+    chosen = claim.chosen
+    intervention = claim.intervention
+    new_explanations = []
+    for exp in claim.explanations:
+        spec = parse_experiment(exp.predicts) if exp.alive else None
+        if spec is None:
+            new_explanations.append(exp)
+            continue
+        runner = _EXPERIMENT_TARGETS[spec.target]
+        try:
+            out_a = str(runner(spec.arm_a))
+            out_b = str(runner(spec.arm_b))
+        except Exception as err:  # noqa: BLE001 — сломанный рукав — не вердикт
+            _log(agent, "causal_experiment_inconclusive", {
+                "claim_key": extra["key"], "target": spec.target,
+                "reason": f"рукав упал: {type(err).__name__}",
+            })
+            new_explanations.append(exp)
+            continue
+        in_a = spec.effect in out_a
+        in_b = spec.effect in out_b
+        if in_a and not in_b:
+            verdicts += 1
+            if not chosen.strip():
+                chosen = exp.statement
+                intervention = Intervention(
+                    mutated=(f"рукав B цели {spec.target}: "
+                             f"предполагаемая причина устранена"),
+                    predicted=f"следствие '{spec.effect}' исчезает",
+                    observed=(f"A: следствие есть; B: следствия нет "
+                              f"(A='{out_a[:120]}', B='{out_b[:120]}')"),
+                    restored=True,  # чистая функция: состояние не менялось
+                )
+            new_explanations.append(exp)
+        elif in_a and in_b:
+            verdicts += 1
+            new_explanations.append(dataclasses.replace(
+                exp,
+                refuted_by=(f"эксперимент {spec.target}: следствие "
+                            f"'{spec.effect}' в ОБОИХ рукавах — механизм "
+                            f"гипотезы различия не даёт"),
+            ))
+        else:
+            _log(agent, "causal_experiment_inconclusive", {
+                "claim_key": extra["key"], "target": spec.target,
+                "reason": "следствие не воспроизвелось ни в одном рукаве",
+            })
+            new_explanations.append(exp)
+
+    if verdicts == 0:
+        return _decline(agent, "эксперименты не дали ни одного вердикта",
+                        claim_key=extra["key"])
+
+    updated = dataclasses.replace(
+        claim, explanations=tuple(new_explanations),
+        chosen=chosen, intervention=intervention,
+    )
+    key = save_claim(updated, workspace=ws,
+                     machine_action="run_claim_experiment")
+    _log(agent, "causal_climb_experimented", {
+        "claim_key": key, "verdicts": verdicts,
+        "chosen": bool(chosen.strip()),
+        "proves_cause": bool(intervention and intervention.proves_cause),
+    })
+    return CampaignActionOutcome(
+        result="completed",
+        artifact=(
+            f"заявка {key}: экспериментальных вердиктов {verdicts}"
+            + (f", причина доказана вмешательством: '{chosen[:60]}'"
+               if chosen.strip() and intervention else "")
+        ),
+        work_done=True,
+    )
+
+
 def discriminate_causal_claim(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:

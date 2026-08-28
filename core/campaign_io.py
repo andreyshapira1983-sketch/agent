@@ -117,6 +117,7 @@ def _default_gather_signals(
         open_self_improvement_issues=open_issues,
         unexplained_observations_count=_unexplained_observation_count(ws),
         discriminable_claims_count=_discriminable_claim_count(ws),
+        experimentable_claims_count=_experimentable_claim_count(ws),
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
 
@@ -137,6 +138,16 @@ def _discriminable_claim_count(workspace: Any) -> int:
         from core.causal_climb_action import discriminable_claims
 
         return len(discriminable_claims(workspace))
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return 0
+
+
+def _experimentable_claim_count(workspace: Any) -> int:
+    """Сигнал MIR-096, слайс 3: заявки, доказуемые вмешательством."""
+    try:
+        from core.causal_climb_action import experimentable_claims
+
+        return len(experimentable_claims(workspace))
     except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
         return 0
 
@@ -638,6 +649,13 @@ def _default_execute_action(
         from core.causal_climb_action import discriminate_causal_claim
 
         return discriminate_causal_claim(agent=agent, workspace=workspace)
+
+    # MIR-096 (слайс 3): причина доказывается устранением — двурукавный
+    # эксперимент на белом списке чистых функций, ноль вызовов модели.
+    if action.action == "run_claim_experiment":
+        from core.causal_climb_action import run_claim_experiment
+
+        return run_claim_experiment(agent=agent, workspace=workspace)
 
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits

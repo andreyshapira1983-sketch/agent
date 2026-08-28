@@ -48,6 +48,8 @@ _P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
 #   concrete than a request to read
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
+_P_CAUSAL_EXPERIMENT = 47  # claims with experiment specs: the intervention
+                          # rung is the deepest — prove causes first
 _P_CAUSAL_DISCRIMINATE = 46  # claims with live probes: finishing an open
                           # investigation outranks starting a new one
 _P_CAUSAL_CLIMB = 45      # unexplained self-failure observations: investigate
@@ -413,6 +415,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     recent_self_improvement_failures: tuple[str, ...] = (),
     unexplained_observations_count: int = 0,
     discriminable_claims_count: int = 0,
+    experimentable_claims_count: int = 0,
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
@@ -464,6 +467,8 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(_candidate_inbox_debt(triage), "observed_state")
     # Наблюдения о СОБСТВЕННЫХ провалах, не покрытые объяснениями, — состояние,
     # накопленное прежними прогонами (канал MIR-096).
+    admit(_candidate_experimentable_claim(experimentable_claims_count),
+          "retained_record")
     admit(_candidate_discriminable_claim(discriminable_claims_count),
           "retained_record")
     admit(_candidate_unexplained_observation(unexplained_observations_count),
@@ -791,6 +796,28 @@ def _candidate_open_self_improvement_issue(
             confidence=0.75,
         )
     return None
+
+
+def _candidate_experimentable_claim(count: int) -> BestNextAction | None:
+    """Заявки со спецификациями вмешательства (MIR-096, слайс 3)."""
+    try:
+        pending = int(count)
+    except (TypeError, ValueError):
+        pending = 0
+    if pending < 1:
+        return None
+    return BestNextAction(
+        action="run_claim_experiment",
+        title="Prove a cause by removing it",
+        severity="medium",
+        priority=_P_CAUSAL_EXPERIMENT,
+        reason=(
+            "Open causal claims carry two-arm experiment specs; the "
+            "intervention, not the author, proves the cause."
+        ),
+        evidence=(f"experimentable_claims={pending}",),
+        risk="reversible",
+    )
 
 
 def _candidate_discriminable_claim(count: int) -> BestNextAction | None:
