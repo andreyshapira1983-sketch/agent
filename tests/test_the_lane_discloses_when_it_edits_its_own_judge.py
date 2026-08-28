@@ -28,8 +28,12 @@ _JUDGE_STRENGTHENED = _JUDGE_BEFORE + "\ndef test_z():\n    assert 3 == 3\n"
 
 
 def _git(ws: Path, *args: str) -> None:
+    # Собственная личность полигона: на CI-раннере нет user.email/user.name,
+    # и `git commit` падал кодом 128 (три ERRORS на каждом прогоне GitHub,
+    # дома невидимо — локальный git настроен). 2026-08-28.
     subprocess.run(  # noqa: S603
-        ["git", *args], cwd=str(ws), check=True, capture_output=True  # noqa: S607
+        ["git", "-c", "user.email=polygon@test", "-c", "user.name=polygon",  # noqa: S607
+         *args], cwd=str(ws), check=True, capture_output=True
     )
 
 
