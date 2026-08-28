@@ -16,6 +16,8 @@ def _default_model(provider: str) -> str:
     override = os.getenv("AGENT_MODEL")
     if override:
         return override
+    if provider == "deepseek":
+        return "deepseek-chat"
     if provider == "openai":
         return "gpt-4o-mini"
     if provider == "huggingface":
@@ -200,6 +202,14 @@ class LLM:
                 base_url="https://router.huggingface.co/v1",
                 api_key=os.getenv("HF_TOKEN"),
             )
+        if self.provider == "deepseek":
+            # OpenAI-совместимый API; счёт пополнен оператором 2026-08-28
+            # ($5, баланс проверен живым запросом) — эксперимент оси цены.
+            from openai import OpenAI
+            return OpenAI(
+                base_url="https://api.deepseek.com",
+                api_key=os.getenv("DEEPSEEK_API_KEY"),
+            )
         if self.provider == "local":
             from openai import OpenAI
 
@@ -221,7 +231,8 @@ class LLM:
             return None
         raise ValueError(
             f"Unsupported AGENT_PROVIDER: {self.provider!r}. "
-            "Use 'anthropic', 'openai', 'huggingface', 'local', or 'mock'."
+            "Use 'anthropic', 'openai', 'deepseek', 'huggingface', "
+            "'local', or 'mock'."
         )
 
     def complete(
@@ -320,7 +331,7 @@ class LLM:
         """
         if self.provider == "anthropic":
             return self._complete_anthropic(system, user, max_tokens, temperature, prior)
-        if self.provider in {"openai", "huggingface", "local"}:
+        if self.provider in {"openai", "deepseek", "huggingface", "local"}:
             return self._complete_openai_compatible(
                 system, user, max_tokens, temperature, self.model, prior
             )

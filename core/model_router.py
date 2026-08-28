@@ -106,6 +106,7 @@ class ModelSpec:
 SUPPORTED_PROVIDERS = frozenset({
     "anthropic",
     "openai",
+    "deepseek",
     "huggingface",
     "local",
     "mock",
