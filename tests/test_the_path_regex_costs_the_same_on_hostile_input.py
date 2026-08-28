@@ -20,11 +20,22 @@ def _hostile(length: int) -> str:
     return "A" * length + "_" + "a" * length
 
 
+def _best_ms(length: int, attempts: int = 5) -> float:
+    """Минимум из N замеров — H-10: шум планировщика ОС аддитивен и случаен,
+    минимум его срезает; настоящий квадратичный откат детерминирован и не
+    спрячется ни в одной попытке. Одиночный замер под полной батареей плакал
+    волком трижды за 2026-08-27."""
+    best = float("inf")
+    for _ in range(attempts):
+        started = time.perf_counter()
+        _PATH_TOKEN_RE.findall(_hostile(length))
+        best = min(best, (time.perf_counter() - started) * 1000)
+    return best
+
+
 @pytest.mark.parametrize("length", [1600, 3200, 6400])
 def test_a_hostile_token_stays_cheap(length: int) -> None:
-    started = time.perf_counter()
-    _PATH_TOKEN_RE.findall(_hostile(length))
-    spent_ms = (time.perf_counter() - started) * 1000
+    spent_ms = _best_ms(length)
 
     assert spent_ms < _CEILING_MS, (
         f"разбор путей стоит {spent_ms:.0f} мс на {length * 2 + 1} знаках — "
@@ -38,12 +49,7 @@ def test_growth_is_not_quadratic() -> None:
     Учетверение времени на удвоение входа — подпись квадратичного отката, и
     именно она делает выражение оружием против самого агента.
     """
-    def _ms(length: int) -> float:
-        started = time.perf_counter()
-        _PATH_TOKEN_RE.findall(_hostile(length))
-        return (time.perf_counter() - started) * 1000
-
-    small, large = _ms(1600), _ms(6400)  # вход вчетверо
+    small, large = _best_ms(1600), _best_ms(6400)  # вход вчетверо
     growth = large / max(small, 0.01)
 
     assert growth < 8.0, (
