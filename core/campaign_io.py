@@ -115,8 +115,30 @@ def _default_gather_signals(
         acknowledged=acknowledged,
         self_improvement_registry_available=registry_available,
         open_self_improvement_issues=open_issues,
+        unexplained_observations_count=_unexplained_observation_count(ws),
+        discriminable_claims_count=_discriminable_claim_count(ws),
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
+
+
+def _unexplained_observation_count(workspace: Any) -> int:
+    """Сигнал MIR-096: провал сбора — ноль, не падение (незнание не приговор)."""
+    try:
+        from core.causal_climb_action import unexplained_observations
+
+        return len(unexplained_observations(workspace))
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return 0
+
+
+def _discriminable_claim_count(workspace: Any) -> int:
+    """Сигнал MIR-096, слайс 2: заявки, которые журналы могут рассудить."""
+    try:
+        from core.causal_climb_action import discriminable_claims
+
+        return len(discriminable_claims(workspace))
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return 0
 
 
 def _propose_repair_from_diagnosis(
@@ -601,6 +623,21 @@ def _default_execute_action(
     # MIR-070: liveness is answerable from state — never spend a model on it.
     if action.action == "restore_daemon_liveness":
         return _execute_daemon_liveness_probe(workspace)
+
+    # MIR-096 (слайс 1): подъём собственного провала — свой исполнитель,
+    # с воротами качества и без выбора победителя автором.
+    if action.action == "explain_causal_observation":
+        from core.causal_climb_action import explain_causal_observation
+
+        return explain_causal_observation(
+            agent=agent, workspace=workspace, dry_run=config.dry_run)
+
+    # MIR-096 (слайс 2): различение детерминированное — журналы судят,
+    # модель не зовётся, dry-run не нужен (эффект — строка в заявке).
+    if action.action == "discriminate_causal_claim":
+        from core.causal_climb_action import discriminate_causal_claim
+
+        return discriminate_causal_claim(agent=agent, workspace=workspace)
 
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits

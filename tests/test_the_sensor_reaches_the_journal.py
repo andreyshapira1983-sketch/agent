@@ -146,24 +146,23 @@ def test_the_observation_carries_what_it_promises(tmp_path: Path) -> None:
     assert "причина не доказана" in payload["observed_mismatch"]
 
 
-def test_the_agent_itself_proposes_no_hypotheses() -> None:
-    """ИЗВЕСТНАЯ ГРАНИЦА: поднимается оператор, не агент.
+def test_the_only_machine_proposer_is_the_gated_organ() -> None:
+    """Граница переехала СЛОВОМ ОПЕРАТОРА (2026-08-27, «бери орган MIR-096»).
 
-    Подъём построен и у него есть водитель — команда `:causal`. Но гипотезы
-    выдвигает человек: ни один автоматический путь не зовёт
-    `propose_explanation`. Пока это так, `ATTRIBUTED` означает «оператор
-    доказал», а не «модель уверена», и это единственная честная версия.
-
-    Когда агент начнёт выдвигать гипотезы сам, тест покраснеет.
+    Прежняя растяжка держала «гипотезы выдвигает только человек» и покраснела
+    ровно как обещала, когда слайс 1 органа подъёма начал выдвигать их
+    машиной. Новый честный контракт: автоматический выдвиженец РОВНО один —
+    `core/causal_climb_action.py`, у которого ворота (без предсказания не
+    принимается, меньше двух — отказ) и запрет судить себя (chosen пуст до
+    различения). ВТОРОЙ автоматический выдвиженец без своей записи в реестре —
+    красный: каждый новый рот на лестницу проходит через эту растяжку.
     """
     import re
 
     root = Path(__file__).parent.parent
-    # Строители утверждений, а не любые упоминания: хранение наблюдения —
-    # это первая ступень, а подъёмом было бы создание `CausalClaim`.
-    # Автоматические выдвиженцы гипотез, а не операторская команда.
     pattern = re.compile(r"propose_explanation\(")
-    owners = {"causal_lesson.py", "causal_climb.py", "commands_causal.py"}
+    owners = {"causal_lesson.py", "causal_climb.py", "commands_causal.py",
+              "causal_climb_action.py"}
     consumers = [
         str(path.relative_to(root))
         for area in ("core", "cli", "app", "api", "tools")
@@ -172,6 +171,5 @@ def test_the_agent_itself_proposes_no_hypotheses() -> None:
         and pattern.search(path.read_text(encoding="utf-8", errors="ignore"))
     ]
     assert not consumers, (
-        "гипотезы выдвигает уже не только оператор — описание этого "
-        f"агент начал выдвигать гипотезы сам: {consumers}"
+        f"появился второй автоматический выдвиженец гипотез: {consumers}"
     )
