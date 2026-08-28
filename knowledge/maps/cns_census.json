@@ -162,7 +162,9 @@
   "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
   "loop_verification.py::AgentLoopVerification._verify_draft": [],
   "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
-  "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": []
+  "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
+  "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings": [],
+  "loop_memory_read.py::_family_appendix": []
  },
  "edges": [
   [
@@ -572,6 +574,10 @@
   [
    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
    "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims"
+  ],
+  [
+   "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
+   "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings"
   ]
  ]
 }

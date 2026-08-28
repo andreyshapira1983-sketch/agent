@@ -480,7 +480,11 @@ class AutonomousRuntimeProposals:
             )
             # Journal the outcome (and WHY) so the agent remembers this attempt.
             record_self_build_episode(
-                agent, kind="self-build-produce", result=result
+                agent, kind="self-build-produce", result=result,
+                # Семейная связка тика (MIR-184): тот же trace, что у
+                # эпизода-ответа этого прогона, — по ней их сошьёт читатель.
+                trace_id=str(getattr(
+                    getattr(agent, "log", None), "trace_id", "") or ""),
             )
             return result
         except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged

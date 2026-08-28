@@ -60,7 +60,7 @@ WATCH: dict[str, int] = {
     "core/loop_init.py:AgentLoopInit.__init__": 242,  # уехал целиком из core/loop.py; +1 (2026-08-13): поле last_evidence_support — вердикт применимости улик живёт рядом с отчётом проверки. +1 (2026-08-15): поле last_confidence_vector — ось соответствия вопросу едет в эпизод, и читатель обязан получить гарантированное поле, а не значение по умолчанию. +2 (2026-08-15): параметр и поле `causal_store` — нижняя ступень причинной лестницы приходит извне, как все хранилища.
     "core/self_apply_lane.py:run_self_apply_lane": 239,  # +4 (2026-08-26): шестые ворота — сверка с версией файла, на которой предложение построено (MIR-168). Сжато до предела: сама проверка и оговорка вынесены в `_base_state_gate`, в цепочке осталась строка вызова. Потолок ставили при пяти воротах; храповик здесь ловит прибавление ЗВЕНА в цепь предохранителей, а не разрастание обязанностей.
     "core/model_router.py:ModelRouter.for_task": 227,
-    "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 218,
+    "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 220,  # +2 (2026-08-29, MIR-184): проводка сшивки семьи — вызов и дописка приложения; сама логика вынесена в _family_product_warnings/_family_appendix
     "core/work_session.py:run_work_session": 211,
     "core/architecture_audit.py:_build_checks": 197,
     "core/self_task_builder.py:build_coding_task": 195,

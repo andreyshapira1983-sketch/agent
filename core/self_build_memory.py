@@ -94,7 +94,9 @@ def _touched_paths(result: dict[str, Any]) -> list[str]:
     return out[:_MAX_PATH_TAGS]
 
 
-def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
+def build_self_build_episode(
+    kind: str, result: dict[str, Any], *, trace_id: str = ""
+) -> Any:
     """Build an :class:`EpisodeRecord` describing one attempt (no I/O).
 
     ``kind`` is ``"self-build-produce"`` or ``"self-apply-run"``; ``result`` is the
@@ -171,13 +173,18 @@ def build_self_build_episode(kind: str, result: dict[str, Any]) -> Any:
         summary=summary[:2000],
         tags=tuple(dict.fromkeys(t for t in tags if t)),  # dedup, keep order
         source_labels=tuple(dict.fromkeys(sources)),
+        # Семейная связка тика (MIR-184): отказ продукта обязан быть сшиваем
+        # с эпизодом-успехом того же прогона, иначе он структурно неслышим.
+        trace_id=str(trace_id or ""),
         completion_state=_COMPLETION_BY_OUTCOME.get(  # type: ignore[arg-type]
             outcome, "unknown"
         ),
     )
 
 
-def record_self_build_episode(agent: Any, *, kind: str, result: dict[str, Any]) -> bool:
+def record_self_build_episode(
+    agent: Any, *, kind: str, result: dict[str, Any], trace_id: str = ""
+) -> bool:
     """Persist one attempt outcome to the agent's episodic memory.
 
     Returns True when an episode was written, False otherwise. Best-effort: any
@@ -188,7 +195,7 @@ def record_self_build_episode(agent: Any, *, kind: str, result: dict[str, Any]) 
         store = getattr(agent, "episodic_store", None)
         if store is None:
             return False
-        episode = build_self_build_episode(kind, result)
+        episode = build_self_build_episode(kind, result, trace_id=trace_id)
         if episode is None:
             return False
         # MIR-090's writer half: a producer that hits the same gate twice must

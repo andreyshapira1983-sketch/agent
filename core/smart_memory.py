@@ -182,6 +182,10 @@ class EpisodeRecord:
     # on legacy records and on runs that carry no task.
     task_id: str = ""
     run_id: str = ""
+    # Family link (MIR-184): every episode born inside one tick carries that
+    # tick's trace id, so a success answer-episode and the declined product
+    # of the SAME tick can be joined at read time. Empty on legacy rows.
+    trace_id: str = ""
     # May this episode steer later answers? THREE states, deliberately not a
     # bool: None = legacy row (written before the field), False = quarantined
     # (an explicit decision to withhold), True = eligible. Collapsing None
@@ -231,6 +235,8 @@ class EpisodeRecord:
             "id": self.id,
             "task_id": self.task_id,
             "run_id": self.run_id,
+            # Omit-when-empty: a legacy row stays byte-identical (MIR-184).
+            **({} if not self.trace_id else {"trace_id": self.trace_id}),
             "usage_eligible": self.usage_eligible,
             "used_procedure_ids": (
                 None if self.used_procedure_ids is None
@@ -268,6 +274,7 @@ class EpisodeRecord:
             id=str(data.get("id") or new_id("ep")),
             task_id=str(data.get("task_id") or ""),
             run_id=str(data.get("run_id") or ""),
+            trace_id=str(data.get("trace_id") or ""),
             # `.get` WITHOUT a default: an absent key must stay None
             # (legacy_unclassified), never collapse into False (quarantined).
             usage_eligible=(
@@ -1483,6 +1490,7 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
     replan_exhausted: bool = False,
     run_id: str = "",
     task_id: str = "",
+    trace_id: str = "",
     usage_eligible: bool | None = None,
     aborted_reason: str = "",
     used_procedure_ids: tuple[str, ...] | None = None,
@@ -1557,6 +1565,7 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
         tags=tags,
         task_id=str(task_id or ""),
         run_id=str(run_id or ""),
+        trace_id=str(trace_id or ""),
         # Defaults to None (legacy_unclassified): banking an episode is not by
         # itself a verdict that it may steer later answers. The caller decides.
         usage_eligible=usage_eligible,
@@ -1761,6 +1770,37 @@ def format_experience_context(
     if len(text) > max_chars:
         return text[: max_chars - 1].rstrip() + "..."
     return text
+
+
+def family_product_warnings(
+    selected: list[EpisodeRecord],
+    all_episodes: Iterable[EpisodeRecord],
+    *,
+    max_each: int = 200,
+) -> list[str]:
+    """Продуктовые исходы тех же прогонов, что и выбранные success-эпизоды.
+
+    MIR-184, замысел самого агента (прогон run_e4d9a8e8, 2026-08-29: «тест
+    фиксирует оба значения одновременно»): эпизод-успех не имеет права ехать
+    в будущую подсказку без отказа-брата из того же тика. Семья сшивается по
+    trace_id; чистая функция — судить может любой полигон.
+    """
+    traces = {
+        ep.trace_id for ep in selected
+        if ep.trace_id and ep.outcome == "success"
+    }
+    if not traces:
+        return []
+    chosen_ids = {ep.id for ep in selected}
+    warnings: list[str] = []
+    for cand in all_episodes:
+        if (
+            cand.trace_id in traces
+            and cand.outcome != "success"
+            and cand.id not in chosen_ids
+        ):
+            warnings.append(cand.summary[:max_each])
+    return warnings
 
 
 def _episode_outcome(value: str) -> EpisodeOutcome:
