@@ -74,6 +74,30 @@ def test_a_repeated_question_earns_its_answer_again() -> None:
     assert judgement.verdict == "ok", judgement.reasons
 
 
+def test_a_fact_inversion_is_never_silenced_as_a_repeat() -> None:
+    """Находка второго экзаменатора (2026-08-28): токенизатор, режущий «не»,
+    отдаёт «тест прошёл» и «тест не прошёл» одним множеством — судья заглушил
+    бы именно ИЗМЕНЕНИЕ факта. Тот же класс уже чинился в topic_tokens
+    (полярные слова — третье исключение из правила длины); орган обязан пить
+    из того же словаря, а не заводить второй."""
+    judgement = judge_reply(
+        "тест упал?", "Тест не прошёл.",
+        recent_exchanges=(("тест прошёл?", "Тест прошёл."),),
+    )
+
+    assert judgement.verdict != "repeat_silence", (
+        "противоположный по смыслу ответ заглушён как повтор")
+
+
+def test_thanks_with_a_question_is_business_not_small_talk() -> None:
+    """Вторая находка: короткое «спасибо, почему упал тест?» не смеет
+    считаться болтовнёй — после вычета формул вежливости остаётся дело."""
+    assert classify_register("спасибо, почему упал тест?") == "substantive"
+    judgement = judge_reply("спасибо, почему упал тест?", _CONTRACT_DUMP)
+    assert judgement.verdict == "ok", (
+        "доказательный ответ на деловой вопрос урезан из-за формулы вежливости")
+
+
 def test_a_fresh_reply_is_not_mistaken_for_a_repeat() -> None:
     judgement = judge_reply(
         "как дела?", "Сегодня закрыл MIR-185 и стёр старую модель толчков.",
