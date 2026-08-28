@@ -184,6 +184,11 @@ def looks_like_multi_file_review_without_hint(question: str) -> bool:
 
 
 def validate_user_file_path(raw_path: str, *, workspace: Path) -> dict[str, Any]:
+    # Закалка (CodeQL-разбор 2026-08-28): канонизируем И workspace — иначе
+    # симлинк/короткое имя Windows в самом workspace разъезжают relative_to
+    # в сторону ложных отказов. Забор ниже — resolve().relative_to ДО любой
+    # файловой пробы; порядок ворот приколочен тестом.
+    workspace = Path(workspace).resolve()
     cleaned = raw_path.strip().strip("\"'")
     normalized = cleaned.replace("\\", "/")
     if re.match(r"^[A-Za-z]:/", normalized):
