@@ -33,6 +33,14 @@ MOVED_METHODS = [
     "_existing_proposal_fingerprints",
     "_proposal_digest",
     "_has_pending_self_build_proposal",
+]
+#: Moved verbatim and since legitimately evolved IN PLACE — the relocation pin
+#: no longer applies to these, but every other guard here still does. Each
+#: entry must name its change; an unnamed entry is a smuggled edit.
+EVOLVED_AFTER_MOVE = [
+    # 2026-08-28, MIR-185 (заказ второго экзаменатора): событие
+    # self_build_proposal теперь несёт reason — отказ оставляет улику в момент
+    # отказа; свидетель tests/test_autonomous_self_build.py.
     "_run_self_build_proposal",
 ]
 MOVED_FUNCTIONS = [
@@ -92,11 +100,14 @@ def test_nothing_moved_stayed_behind() -> None:
     """Two definitions of one method is worse than none: the reader cannot tell
     which one runs."""
     still_there = _index(Path(runtime_mod.__file__).read_text(encoding="utf-8"))
-    duplicated = [n for n in MOVED_METHODS + MOVED_FUNCTIONS if n in still_there]
+    duplicated = [
+        n for n in MOVED_METHODS + EVOLVED_AFTER_MOVE + MOVED_FUNCTIONS
+        if n in still_there
+    ]
     assert not duplicated, f"left behind in the original: {duplicated}"
 
 
-@pytest.mark.parametrize("name", MOVED_METHODS)
+@pytest.mark.parametrize("name", MOVED_METHODS + EVOLVED_AFTER_MOVE)
 def test_the_consumer_still_sees_one_class(name: str) -> None:
     """The split must be invisible from outside: `AutonomousRuntime` still
     answers for every moved method, so no caller had to change."""
