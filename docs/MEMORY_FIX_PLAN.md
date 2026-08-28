@@ -124,8 +124,9 @@ registry.unresolved()  →  the agent lists its own open problems
 
 Correction, 2026-08-19 — measured, not assumed: the SECOND arrow does not exist.
 `registry.unresolved()` is not one of `backlog_selector.load_backlog`'s sources,
-so no registered issue reaches Stage A; Stage A selects from `code_todo` and
-`architecture_audit` only. The remaining arrows do exist in code. This plan
+so no registered issue reaches Stage A; Stage A selects from
+`architecture_audit` only (`code_todo` was erased 2026-08-28 by operator
+ruling, MIR-183). The remaining arrows do exist in code. This plan
 supplies inputs; wiring the registry into the selector is a separate operator
 decision, and until it is made this loop is a target, not a capability.
 

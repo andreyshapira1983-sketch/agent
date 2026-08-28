@@ -863,7 +863,9 @@ the measurement store (instrument=ab_experiment). Door:
 code_todo — inventing a task to measure on is forbidden. (Correction,
 2026-08-19: that code_todo was itself PLANTED by an engineer the day
 before. The rule held — nothing was invented at measurement time — but the
-candidate was supplied, not found by the agent.)
+candidate was supplied, not found by the agent. 2026-08-28: `code_todo` was
+erased outright by operator ruling — MIR-183 — and `:causal ab` now takes
+its candidate from Stage A's self-measured selectable sources.)
 
 First live run (k=4, nano, tools/lesson_provenance_tool.py TODO):
 **no_discrimination** — 0 phantoms in BOTH arms (meas_6cf34f351530). Two
@@ -1049,6 +1051,10 @@ producer. An audit-sourced task gets the diagnosis-grade target gate for
 the identical recorded reason — Stage A writes only a new test under
 tests/, edits nothing, and a human blesses the test before any
 implementation exists; path hygiene stays closed.
+
+(2026-08-28: the story ended where it was pointing all along — the operator
+erased `code_todo` entirely: «убрать TODO/FIXME — это старая модель». The
+selector now accepts only self-measured sources; MIR-183.)
 
 Measured immediately after: **the door opened onto an empty room.** The
 architecture audit currently reports 18/18 checks `present` and ZERO
@@ -3069,7 +3075,8 @@ critical organs. `_target_gate_for(source_kind)` picks the gate: code_todo
 keeps the full gate (critical-organ deny + low-risk classifier), and
 verified_diagnosis drops only the critical-organ deny — path hygiene and the
 lane's classifier stay, so config/, secrets, lockfiles and non-repo paths
-remain closed to everyone. Stage B keeps its own gates: when the first blessed
+remain closed to everyone. (2026-08-28: `code_todo` erased — MIR-183; the
+full gate now serves as the conservative default for any unvouched source.) Stage B keeps its own gates: when the first blessed
 core test arrives, widening BUILD authority will be its own decision, made at
 that gate, not smuggled through this one.
 

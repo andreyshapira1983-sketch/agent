@@ -87,11 +87,21 @@ def test_a_core_grounded_diagnosis_is_not_turned_away(tmp_path):
     assert len(inbox.items) == 1
 
 
-def test_a_todo_candidate_is_still_turned_away_from_core(tmp_path):
-    """Улов не отдан: TODO-источнику органы ядра закрыты, как и были."""
+def test_a_stray_source_is_still_turned_away_from_core(tmp_path):
+    """Улов не отдан: непоручённому источнику органы ядра закрыты, как и были.
+    Перепремировано 2026-08-28 (MIR-183): здесь стоял code_todo — источник
+    стёрт словом оператора, но заблудшая запись в его костюме (или любом
+    чужом) обязана умирать на тех же консервативных воротах, а дефолт
+    вызывающего не должен её отмывать: слово кандидата сильнее дефолта."""
+    stray = SimpleNamespace(
+        target_path="core/loop.py",
+        problem_quote="# TODO: do it",
+        evidence_ref="core/loop.py:1",
+        signal_source="code_todo",
+    )
     report = produce_coding_task(
         workspace=_workspace(tmp_path), inbox=_Inbox(), llm=_JsonLLM(),
-        task_selector=_candidate(),
+        task_selector=lambda: stray,
     )
 
     assert report.status == "no_task"

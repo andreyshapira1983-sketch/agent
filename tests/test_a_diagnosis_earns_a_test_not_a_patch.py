@@ -77,16 +77,19 @@ def test_the_frame_names_the_evidence_for_what_it_is():
     assert "Verified diagnosis:" in llm.user
 
 
-def test_the_todo_frame_is_untouched():
-    """Улов не отдан: прежний источник говорит прежними словами."""
+def test_the_erased_todo_frame_stays_gone():
+    """Перепремировано 2026-08-28 (MIR-183): до стирания code_todo этот тест
+    закреплял ОБРАТНОЕ — «прежний источник говорит прежними словами». Теперь
+    кадра TODO не существует, и дефолтный кадр называет уликой само-аудит."""
     llm = _JsonLLM()
 
     _task_builder_generate(
-        llm, impl_path="cli/x.py", quote="# TODO: do it",
+        llm, impl_path="cli/x.py", quote="audit gap: do it",
         evidence_ref="cli/x.py:1", current_content="",
     )
 
-    assert "TODO/FIXME comment" in llm.system
+    assert "TODO/FIXME comment" not in llm.system
+    assert "PRIORITY GAP" in llm.system
 
 
 def test_a_diagnosis_candidate_becomes_a_blessed_test_proposal(tmp_path):

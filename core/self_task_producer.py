@@ -42,14 +42,12 @@ SELF_TASK_OPERATION = "self_build_task.approve"
 
 TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 
-_CODE_TODO_SOURCE = "code_todo"
-
 #: Signal classes Stage A may take work from. `oversized_module` is excluded BY
 #: NAME, not by oversight: its target is `split:<path>` and its work belongs to
-#: the self-build producer. Rationale and the operator ruling that opened this
-#: set: tests/test_stage_a_takes_self_measured_work.py.
+#: the self-build producer. `code_todo` was erased 2026-08-28 by operator
+#: ruling (a human-typed marker is the retired push model, MIR-183); rationale
+#: for the rest: tests/test_stage_a_takes_self_measured_work.py.
 _SELECTABLE_SIGNAL_SOURCES: frozenset[str] = frozenset({
-    _CODE_TODO_SOURCE,
     "architecture_audit",
 })
 
@@ -77,8 +75,8 @@ def _is_diagnosis_target_allowed(target: str) -> bool:
 
 
 def _target_gate_for(source_kind: str) -> Callable[[str], bool]:
-    """Диагнозу открыты органы ядра (решение оператора 2026-08-15), TODO — нет:
-    ветка А кладёт только новый тест в tests/, цель на этом шаге не редактируется.
+    """Диагнозу и аудиту открыты органы ядра (решение оператора 2026-08-15);
+    неизвестному источнику — консервативные ворота низкого риска.
     """
     if source_kind in ("verified_diagnosis", "architecture_audit"):
         # Self-analysis lives in the organs, so an audit finding gets the
@@ -155,10 +153,6 @@ def _unresolved_task(inbox: Any) -> Any | None:
 #: The frame must name the evidence for what it is: feeding a diagnosis to the
 #: model disguised as a "TODO comment" is a lie to the model.
 _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
-    "code_todo": (
-        "a real TODO/FIXME comment from a Python file",
-        "TODO/FIXME comment",
-    ),
     "verified_diagnosis": (
         (
             "a VERIFIED self-diagnosis from the agent's own audit log: every "
@@ -241,10 +235,12 @@ def _lesson_prompt_parts(
 
 def _task_builder_generate(
     llm: Any, *, impl_path: str, quote: str, evidence_ref: str, current_content: str,
-    source_kind: str = "code_todo", lessons: tuple[Any, ...] = (),
+    source_kind: str = "architecture_audit", lessons: tuple[Any, ...] = (),
 ) -> RoleOutput:
     """Ask the model for a task spec + a failing acceptance test (never code)."""
-    frame, quote_label = _SOURCE_FRAMES.get(source_kind, _SOURCE_FRAMES["code_todo"])
+    frame, quote_label = _SOURCE_FRAMES.get(
+        source_kind, _SOURCE_FRAMES["architecture_audit"]
+    )
     lesson_system, lesson_user = _lesson_prompt_parts(lessons, impl_path)
     system = (
         "You are the Task Author on a self-build team. You are given "
@@ -485,7 +481,7 @@ def _task_critic_review(
     reader: Callable[[str], str | None],
     confidence_threshold: float,
     quote: str = "",
-    source_kind: str = "code_todo",
+    source_kind: str = "architecture_audit",
 ) -> RoleOutput:
     """Reject garbage tasks BEFORE a human ever sees them. Any failure vetoes."""
     veto: list[str] = []
@@ -629,7 +625,7 @@ def produce_coding_task(
     file_reader: Callable[[str], str | None] | None = None,
     confidence_threshold: float = _DEFAULT_CONFIDENCE_THRESHOLD,
     task_selector: Callable[[], Any] | None = None,
-    source_kind: str = "code_todo",
+    source_kind: str = "architecture_audit",
 ) -> ProducerReport:
     """Stage A: publish at most one grounded coding-task proposal for approval.
 
@@ -690,7 +686,7 @@ def produce_coding_task(
     reader = file_reader or _default_file_reader(workspace)
     roles: list[RoleOutput] = []
 
-    # ── selector: one grounded code_todo candidate ──────────────────────────
+    # ── selector: one grounded self-measured candidate ──────────────────────
     selector = task_selector or _default_task_selector(workspace)
     try:
         candidate = selector()
@@ -701,11 +697,14 @@ def produce_coding_task(
     if candidate is None:
         return ProducerReport(
             status="no_task",
-            reason="no grounded code TODO/FIXME candidate available",
+            reason="no grounded self-measured candidate available",
             checked_gates=gates,
             role_outputs=roles,
             next_human_action="No grounded coding-task candidate this run.",
         )
+    # Слово кандидата о своём источнике сильнее дефолта вызывающего (MIR-183):
+    # улика не приходит к модели в чужом костюме, чужой источник — на воротах.
+    source_kind = _field(candidate, "signal_source") or source_kind
     impl_path = _field(candidate, "target_path").replace("\\", "/")
     quote = _field(candidate, "problem_quote")
     evidence_ref = _field(candidate, "evidence_ref")

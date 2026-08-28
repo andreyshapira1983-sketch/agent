@@ -170,20 +170,23 @@ def test_a_sound_diagnosis_test_still_passes_the_critic():
     assert critic.decision != "veto", critic.data.get("veto_reasons")
 
 
-def test_code_todo_source_is_not_asked_for_linkage():
-    """У TODO-источника связь и так обеспечена целевым файлом; спрашивать с
-    него носители диагноза значило бы ветировать законные задачи.
+def test_a_non_diagnosis_source_is_not_asked_for_linkage():
+    """Граница: носители диагноза спрашивают ТОЛЬКО с verified_diagnosis; у
+    аудита связь и так обеспечена целевым файлом, и ветировать его законные
+    задачи этим требованием нельзя. (До 2026-08-28 здесь стоял code_todo —
+    источник стёрт словом оператора, MIR-183.)
     """
     critic = _task_critic_review(
         _build([
             "from core.reasoning_action_check import check",
-            "def test_todo_done():",
+            "def test_gap_closed():",
             "    assert check(executed=[], planned=[]) == []",
         ]),
         grounded_target="core/reasoning_action_check.py",
         reader=lambda _p: None,
         confidence_threshold=0.6,
-        quote="# TODO: handle the empty plan",
+        quote="audit gap: check() drops the empty plan",
+        source_kind="architecture_audit",
     )
 
     assert critic.decision != "veto", critic.data.get("veto_reasons")

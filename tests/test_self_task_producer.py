@@ -2,11 +2,12 @@
 
 Every dependency is faked: FakeLLM (no provider/network), an in-memory
 ApprovalInbox, a FakeVCS, an in-memory reader, and a plain candidate object for
-the grounded ``code_todo`` selector. The producer must:
+the grounded selector (``architecture_audit`` since the 2026-08-28 erasure of
+``code_todo`` — MIR-183). The producer must:
 
 * honour the deterministic gates (kill-switch, budget, one-in-flight, dirty tree)
   before any LLM-heavy work runs;
-* refuse when there is no grounded code TODO/FIXME candidate;
+* refuse when there is no grounded self-measured candidate;
 * VETO garbage tasks (trivial assert, no module reference, pre-existing test
   file, mismatched impl path, low confidence) so a human never sees them;
 * on the happy path create exactly ONE ``self_build_task.approve`` inbox item
@@ -68,10 +69,10 @@ _IMPL = "core/redaction.py"
 
 def _candidate(target: str = _IMPL) -> SimpleNamespace:
     return SimpleNamespace(
-        signal_source="code_todo",
+        signal_source="architecture_audit",
         target_path=target,
         evidence_ref=f"{target}:12",
-        problem_quote="TODO: add a redact() helper for secrets",
+        problem_quote="audit gap: no redact() helper for secrets",
         proposed_change="",
         proof_of_value="",
         expected_effect="",
