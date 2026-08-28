@@ -73,11 +73,20 @@ from dataclasses import dataclass
 # negatives (missed mention) lead to noisy warnings, false positives
 # (matched on common stem) silently hide real mismatches.
 _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
+    # MIR-015 (замер 2026-08-19): 158 из 241 ложных обвинений — глаголы
+    # ОСМОТРА, не значившиеся упоминанием инструментов осмотра («inspect the
+    # source», «изучу», «посмотрю структуру»). Осмотровый глагол оправдывает
+    # осмотровый инструмент; обратное направление этим не вооружается — там
+    # сильными считаются только токены с подчёркиванием.
     "file_read": ("file_read", "read_file", "read the file", "read file",
                   "reads the file", "reading the file", "read ", "reads ",
-                  "прочита", "прочту", "читаю", "содерж", "файл"),
+                  "прочита", "прочту", "читаю", "содерж", "файл",
+                  "inspect", "examine", "look at", "изуч", "посмотр",
+                  "просмотр", "загля", "открою"),
     "list_dir": ("list_dir", "ls ", "list the dir", "list files",
-                 "содержим", "директор", "каталог", "папк"),
+                 "содержим", "директор", "каталог", "папк",
+                 "inspect", "examine", "structure", "структур",
+                 "изуч", "посмотр", "просмотр", "состав", "обзор"),
     "web_search": ("web_search", "search the web", "google", "search engine",
                    "поиск", "найти в", "поищ"),
     "web_fetch": ("web_fetch", "fetch the page", "fetch url", "загруз",
