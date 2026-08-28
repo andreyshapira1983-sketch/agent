@@ -68,3 +68,51 @@ def workspace_paths_named(text: str, *, root: Path | None = None) -> list[str]:
 def names_workspace_path(text: str, *, root: Path | None = None) -> bool:
     """True when the text names at least one file or directory we own."""
     return bool(workspace_paths_named(text, root=root))
+
+
+# ── Символы репозитория (MIR-098, половина «символ») ─────────────────────────
+
+_CAMEL_RE = re.compile(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b")
+_SNAKE_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+
+@lru_cache(maxsize=4)
+def _repo_symbol_index(root: str | None = None) -> frozenset[str]:
+    """Классы и функции core/ по AST — один обход на процесс (lru_cache).
+
+    Структурный факт вместо словаря: «что делает AutonomousQueueRunReport» —
+    интроспекция, потому что символ СУЩЕСТВУЕТ, а не потому что в таблице
+    из 51 термина нашлось слово (там его и не было — живой замер 2026-08-22).
+    """
+    import ast as _ast
+
+    base = Path(root) if root is not None else Path(__file__).resolve().parent
+    names: set[str] = set()
+    for path in sorted(base.glob("*.py")):
+        try:
+            tree = _ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.ClassDef, _ast.FunctionDef,
+                                 _ast.AsyncFunctionDef)):
+                names.add(node.name)
+    return frozenset(names)
+
+
+def repo_symbols_named(text: str, *, root: Path | None = None) -> list[str]:
+    """Идентификаторы из текста, существующие как символы в core/.
+
+    Выдуманное имя не совпадает: членство обязательно, иначе любая
+    верблюжья абракадабра глушила бы веб-поиск.
+    """
+    index = _repo_symbol_index(str(root) if root is not None else None)
+    seen: list[str] = []
+    for pattern in (_CAMEL_RE, _SNAKE_RE):
+        for token in pattern.findall(text or ""):
+            if token in index and token not in seen:
+                seen.append(token)
+    return seen
+
+
+def names_repo_symbol(text: str) -> bool:
+    return bool(repo_symbols_named(text))

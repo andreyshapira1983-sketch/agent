@@ -383,8 +383,15 @@ def _is_self_repo_introspection_question(question: str) -> bool:
     # Наш файл, названный по имени, — интроспекция без всякого словаря. Таблица
     # из 51 термина не совпала ни разу с «Открой core/loop.py…», и планировщик
     # трижды искал `SynthesisState tests site:tests/` в интернете (2026-08-15).
+    # Четвёртый структурный факт (MIR-098, половина «символ», 2026-08-28):
+    # класс/функция ИЗ РЕПОЗИТОРИЯ, названные без пути, — интроспекция.
+    # «Что делает AutonomousQueueRunReport» не совпадало ни с одним из
+    # 51 термина, и план уходил искать собственный класс в интернете.
+    from core.workspace_reference import names_repo_symbol
+
     if not (
         names_workspace_path(question or "")
+        or names_repo_symbol(question or "")
         or any_term_matches(question or "", _SELF_REPO_INTROSPECTION_TERMS)
         or _ru_pronoun_domain_introspection(tokenize(question or ""))
     ):
