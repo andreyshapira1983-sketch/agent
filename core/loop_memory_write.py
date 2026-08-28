@@ -257,6 +257,9 @@ class AgentLoopMemoryWrite:
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
+                # Семейная связка тика (MIR-184): по ней читатель впрыска
+                # сошьёт этот эпизод с продуктовым исходом того же прогона.
+                trace_id=str(getattr(self.log, "trace_id", "") or ""),
                 # Admission is decided per episode, not by a global switch:
                 # MIR-002/041/046 are fixed, so the blanket quarantine is
                 # lifted — but only evidenced, completed, non-replay episodes

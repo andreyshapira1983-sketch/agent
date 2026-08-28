@@ -31,6 +31,19 @@ from core.smart_memory import (
 from core.topic_tokens import FLAT, TokenSalience, build_salience
 
 
+def _family_appendix(family: list[str]) -> str:
+    """Приложение к блоку опыта: продуктовые исходы тех же прогонов (MIR-184).
+
+    Пусто — пустая строка: успех без отказа-брата ничего не дописывает.
+    """
+    if not family:
+        return ""
+    return (
+        "\n⚠ Продуктовые исходы тех же прогонов (успех их не стирает):\n"
+        + "\n".join(f"- {w}" for w in family)
+    )
+
+
 def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
     """Combine `rejected_by` maps from the components that did the rejecting.
 
@@ -194,6 +207,24 @@ class AgentLoopMemoryRead:
             self.log.log("question_salience_unavailable", {"error": repr(exc)})
             return FLAT
 
+    # часть сшивки MIR-184 — см. _family_product_warnings ниже
+    def _family_product_warnings(self, episodes: list) -> list[str]:
+        """MIR-184, замысел самого агента: эпизод-успех не едет в подсказку
+        без продуктового исхода того же прогона. Провал сшивки не роняет
+        впрыск и НЕ молчит — журнал получает причину."""
+        if self.episodic_store is None or not episodes:
+            return []
+        try:
+            from core.smart_memory import family_product_warnings
+
+            return family_product_warnings(episodes, self.episodic_store.load())
+        except Exception as exc:  # noqa: BLE001 — сшивка не роняет чтение
+            self.log.log(
+                "experience_family_join_failed",
+                {"error": f"{type(exc).__name__}: {exc}"},
+            )
+            return []
+
     def _retrieve_experience_memory(self, question: str) -> str:
         """Inject compact episodic/procedural memory into planning.
 
@@ -315,10 +346,13 @@ class AgentLoopMemoryRead:
             procedures = []
             procedures_rejected_by = {}
         block = format_experience_context(episodes=episodes, procedures=procedures)
+        family = self._family_product_warnings(episodes) if block else []
+        block += _family_appendix(family)
         self.log.log(
             "experience_memory_inject",
             {
                 "episodes_selected": len(episodes),
+                "family_product_warnings": len(family),
                 "procedures_selected": len(procedures),
                 "episode_ids": [ep.id for ep in episodes],
                 "procedure_ids": [proc.id for proc in procedures],

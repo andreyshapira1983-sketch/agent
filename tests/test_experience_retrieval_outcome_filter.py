@@ -25,6 +25,9 @@ def _fake_self(store):
         _last_procedure_records=[],
         _last_best_similar_episode=None,
         _last_best_similar_score=0.0,
+        # Сшивка семьи (MIR-184) — не предмет этого сьюта; фальшивое «я»
+        # обязано нести метод, который читатель теперь зовёт.
+        _family_product_warnings=lambda episodes: [],
     )
 
 
