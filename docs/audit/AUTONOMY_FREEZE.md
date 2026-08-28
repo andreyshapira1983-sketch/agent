@@ -321,11 +321,17 @@ and `autonomous_runtime_types.py` (the oversized-runtime split),
 `command_subjects.py` (MIR-158), `repo_provenance.py`, `rule_approved_apply.py`
 (MIR-173/175), `spend_report.py` (the spending mirror), `subagent_quarantine.py`.
 
-This ledger is a GATE, not a chronicle: since 2026-08-28,
-`tests/test_the_freeze_gates_new_organs.py` reddens the battery for any core
-module that exists now, did not exist at the freeze baseline (`1577b85`), and
-is not named in this document — registering an exception is required BEFORE
-its build can merge (the second examiner's caveat, mechanised).
+This ledger carries a DISCLOSURE SENSOR, not a permission gate — the honest
+name is the second examiner's: since 2026-08-28,
+`tests/test_the_freeze_gates_new_organs.py` reddens the battery for any .py
+file under core/, cli/, app/, tools/ or api/ (subdirectories included) that
+did not exist at the freeze baseline (`1577b85`) and is not named in this
+document. What that forces is the RECORD, not the prior permission: prior
+permission is a process property (the operator's word before the build), and
+a test living in the same tree as the code cannot outrun it. New behaviour
+inside an old module stays invisible to a structural sensor; both live
+runners have full history (the home clone; CI fetches depth 0), so the
+history-unavailable skip applies only to third-party shallow clones.
 
 The blocking issue of this document — WHO DECIDES and WHO LIVES — remains
 open and is not diminished by any row above.

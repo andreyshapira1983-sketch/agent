@@ -1,16 +1,23 @@
-"""Заморозка — ворота, а не летопись: новый core-модуль без записи краснит.
+"""Заморозка — датчик раскрытия: новый кодовый файл без записи краснит.
 
-Оговорка второго экзаменатора (Codex, 2026-08-28): «реестр исключений честно
-документирует нарушение задним числом, но ничего не предотвращает — нет
-ворот, требующих зарегистрировать исключение ДО строительства». Эти ворота —
-здесь: каждый core-модуль, которого не было в день заморозки (2026-08-20,
-базовая линия — коммит 1577b85), обязан быть назван по имени в
-docs/audit/AUTONOMY_FREEZE.md — в таблице операторских исключений или в
-списке модулей, рождённых хирургией зарегистрированных дефектов. Построить
-орган и не записать его стало невозможно тихо.
+Оговорка второго экзаменатора (Codex, 2026-08-28): реестр исключений сам по
+себе ничего не предотвращает. Этот тест — механизированная половина ответа,
+и его имя честное: это ДАТЧИК РАСКРЫТИЯ, не ворота разрешения. Предварительное
+разрешение — свойство процесса (слово оператора до стройки), и репозиторий
+может принудить только к записи, не к разрешению: тест живёт в том же дереве,
+что и код, и обгонять стройку не умеет. Что он гарантирует: файл, рождённый
+после заморозки в любом кодовом доме (core/, cli/, app/, tools/, api/,
+включая подкаталоги) и не названный по имени в docs/audit/AUTONOMY_FREEZE.md,
+валит батарею — тихой стройки не бывает.
 
-Базовая линия читается из git-истории тем же узором, что пин дословности
-раскола (недоступна история — честный skip, не провал).
+Честные слепые пятна, названные экзаменатором и не закрытые: новая
+функциональность ВНУТРИ старого модуля структурному датчику не видна
+(семантика, не имена); при недоступной git-истории — skip, но оба живых
+прогонщика историю имеют (домашний клон полный; CI качает fetch-depth: 0
+ради gitleaks — проверено 2026-08-28).
+
+Базовая линия — последний коммит дня заморозки (2026-08-20), прочитан из
+истории: `git rev-list -1 --before=2026-08-21 HEAD`.
 """
 from __future__ import annotations
 
@@ -19,18 +26,16 @@ from pathlib import Path
 
 import pytest
 
-#: День заморозки: последний коммит 2026-08-20, тот самый, что дописал
-#: AUTONOMY_FREEZE.md (MIR-115). Идентификатор прочитан из истории, не по
-#: памяти: `git rev-list -1 --before=2026-08-21 HEAD`.
 _FREEZE_BASELINE = "1577b85"
+_CODE_HOMES = ("core", "cli", "app", "tools", "api")
 
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def _core_modules_at(ref: str) -> set[str] | None:
+def _py_files_at(ref: str) -> set[str] | None:
     try:
         out = subprocess.run(  # noqa: S603 — fixed argv
-            ["git", "ls-tree", "--name-only", ref, "core/"],  # noqa: S607
+            ["git", "ls-tree", "-r", "--name-only", ref, *_CODE_HOMES],  # noqa: S607
             cwd=str(_ROOT), capture_output=True, timeout=30, check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -44,13 +49,16 @@ def _core_modules_at(ref: str) -> set[str] | None:
     return names or None
 
 
-def test_every_post_freeze_core_module_is_named_in_the_freeze_doc() -> None:
-    baseline = _core_modules_at(_FREEZE_BASELINE)
+def test_every_post_freeze_code_file_is_named_in_the_freeze_doc() -> None:
+    baseline = _py_files_at(_FREEZE_BASELINE)
     if baseline is None:
         pytest.skip("git history unavailable — cannot read the freeze baseline")
     current = {
-        f"core/{p.name}" for p in (_ROOT / "core").glob("*.py")
-        if p.name != "__init__.py"
+        p.relative_to(_ROOT).as_posix()
+        for home in _CODE_HOMES
+        for p in (_ROOT / home).rglob("*.py")
+        if (_ROOT / home).is_dir() and "__pycache__" not in p.parts
+        and p.name != "__init__.py"
     }
     freeze_doc = (_ROOT / "docs" / "audit" / "AUTONOMY_FREEZE.md").read_text(
         encoding="utf-8"
@@ -61,7 +69,7 @@ def test_every_post_freeze_core_module_is_named_in_the_freeze_doc() -> None:
         if Path(name).name not in freeze_doc
     )
     assert unrecorded == [], (
-        "core-модули построены после заморозки 2026-08-20 и НЕ записаны в "
+        "кодовые файлы построены после заморозки 2026-08-20 и НЕ записаны в "
         "docs/audit/AUTONOMY_FREEZE.md (таблица исключений или список "
         "хирургий): " + ", ".join(unrecorded)
     )
