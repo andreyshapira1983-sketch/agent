@@ -262,9 +262,20 @@ def format_human_response(answer: str) -> str:
         # Bare markdown quote leftovers after citation strip (user-visible `>`).
         return not _EMPTY_QUOTE_LINE_RE.match(clean)
 
+    in_fenced_facts = False
+
     for raw in lines:
         stripped = raw.strip()
         low = stripped.lower()
+
+        # Preserve fenced code in Facts verbatim, including indentation.
+        if section == "facts" and (
+            in_fenced_facts or stripped.startswith("```")
+        ):
+            facts_lines.append(raw)
+            if stripped.startswith("```"):
+                in_fenced_facts = not in_fenced_facts
+            continue
 
         # ── section detection ─────────────────────────────────────────────
         if low.startswith("conclusion:"):
