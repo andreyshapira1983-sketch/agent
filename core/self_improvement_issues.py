@@ -278,3 +278,52 @@ class SelfImprovementIssueRegistry:
 
     def _save(self, issues: list[SelfImprovementIssue]) -> None:
         rewrite_state_jsonl(self.path, [issue.to_dict() for issue in issues])
+
+
+# Единственное место, где применяется закон свидетеля: `transition` — слепой
+# сеттер и доказанную починку от произвольного перехода отличить не может.
+# Проект охраны авторства агента (docs/CODE_NOTES.md, «The learning organ was
+# starved, not broken»).
+_WITNESS_FIELDS = 3
+
+
+def _witness_runs(evidence: tuple[str, ...]) -> list[list[str]]:
+    """Только записи протокола `статус|время|метка`.
+
+    В улике лежит и сырой текст провала, положенный при заведении: разделителей
+    в нём нет, и разбор на нём падает.
+    """
+    return [
+        parts for parts in (entry.split("|") for entry in evidence)
+        if len(parts) == _WITNESS_FIELDS
+    ]
+
+
+def close_proven_issue(registry: SelfImprovementIssueRegistry, fingerprint: str) -> bool:
+    """Закрыть проблему, если улика доказывает починку. Иначе не трогать.
+
+    Доказательством считаются ДВА прогона свидетеля: красный на объекте,
+    сломанном именно этой проблемой, и зелёный после починки. Свидетель,
+    зелёный на сломанном объекте, ничего не доказывает; чужой уже зелёный тест
+    красного прогона предъявить не может.
+    """
+    problem = None
+    for item in registry.list():
+        if item.fingerprint == fingerprint:
+            problem = item
+            break
+    if problem is None:
+        return False
+
+    runs = _witness_runs(problem.evidence)
+    labels = [parts[2] for parts in runs]
+    if "red-before-fix" not in labels or "green-after-fix" not in labels:
+        return False
+
+    result = registry.transition(
+        status="resolved",
+        observed_at=max(parts[1] for parts in runs),
+        fingerprint=fingerprint,
+        evidence="closed by close_proven_issue: red-before-fix and green-after-fix present",
+    )
+    return result is not None

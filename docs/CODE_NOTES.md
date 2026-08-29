@@ -4485,3 +4485,54 @@ common reason to open the status at all.
 
 Result: 1,873,000 → 21,927 bytes, no file bodies, and what remains is mostly the
 startup banner. Registry: MIR-167.
+
+## The learning organ was starved, not broken
+
+The causal ladder — OBSERVED → EXPLAINED → ATTRIBUTED → GENERALIZED → LESSON —
+had been standing unused for thirteen days. Measured 2026-08-29:
+`data/causal_observations.jsonl` held 47 distinct deviations with 409
+occurrences and was still filling; `data/causal_claims.jsonl` held three rows,
+the newest from 2026-08-16; `data/lessons.jsonl` did not exist at all, though
+its lock file did.
+
+The first suspicion — a blind sensor — was wrong: `unexplained_observations(".")`
+returns 47, and the campaign saw that number on every tick. The defect was in
+the weights. `_P_CAUSAL_CLIMB` is 45; the rival candidate raised by an open
+self-improvement issue is 55. Since `data/self_improvement_issues.jsonl` held 29
+rows and every one of them was `open`, that rival existed on every single tick.
+Direct runs of `select_best_next_action` on the live signals:
+
+    as it stands            -> improve_failure_to_idea_pipeline (55)
+    freshness removed       -> improve_failure_to_idea_pipeline (55)   unchanged
+    open issues removed     -> explain_causal_observation       (45)
+
+The saturated freshness signal (detector defects mark 40 of the last 40 episodes
+as failures, so the "fresh failure" flag is a constant rather than a
+discriminator) is a second lock, armed but silent: its branch only applies when
+the issue registry is UNAVAILABLE. Fixing it alone would have changed nothing —
+worth knowing before the next reader spends a day on it.
+
+Why the queue never drained: the campaign can OPEN an issue and cannot CLOSE
+one. The transition to `verified`/`resolved` existed in exactly one place —
+behind the operator command `:self-issue-verify` — with no entry from the
+autonomous tick. The winning action's own best outcome is a proposal parked in
+the approval queue awaiting a human, and it additionally refuses to produce even
+that unless verification confirms the diagnosis in full (`verified != examined`
+returns nothing), which is why 105 of its 191 cycles left no artifact at all. Of
+the four steps — open, repair, apply, close — one belonged to the agent.
+
+`close_proven_issue` in `core/self_improvement_issues.py` gives the tick the
+missing exit, and the guard on it is the agent's own design: the right to refuse comes from a run, not from the
+tick's word. A witness must have been RED on an object broken by THIS issue and
+GREEN after the repair; the two runs live as `red-before-fix` / `green-after-fix`
+records in the issue's own evidence, chosen because that is the only place the
+registry already keeps arbitrary strings. A witness that is green on the broken
+object proves nothing, and a foreign already-green test cannot produce the red
+run it never had — both holes were named by the agent before they were pinned.
+Closing is safe to automate for a second reason: `upsert_failure` reopens a
+resolved issue when the same fingerprint recurs, so a wrong closure is undone by
+the defect itself.
+
+Not yet wired: nothing writes the two run records during a real repair, so no
+issue closes in production today. The organ exists and is proven; the live path
+is the next stage.
