@@ -359,10 +359,19 @@ class TestUnresolvedCitationHardCap:
         # (1 initial + 2 verify-driven replans, bounded by hard cap).
         assert len(planner.calls) <= 3
 
-        # A verify_replan_noop event was logged at least once.
+        # Re-premised 2026-08-29 (the agent's own persistence hook, its rule
+        # mem_8b36eb3c mechanised): an empty fetch round no longer exits as a
+        # silent noop — the loop now makes exactly ONE alternative-form
+        # attempt (web_search) and exits via terminal_fallback_settled. The
+        # old noop exit remains legal for rounds after the one-shot fallback
+        # is spent, so either exit proves the loop terminated honestly.
         events = _events(log_path)
         noops = [e for e in events if e["event"] == "verify_replan_noop"]
-        assert noops  # at least one — empty plan produced no evidence
+        settled = [e for e in events
+                   if e["event"] == "verify_replan_terminal_fallback_settled"]
+        assert noops or settled, (
+            "the loop exited with neither a noop nor a settled fallback — "
+            "no honest termination event was logged")
 
 
 # ===========================================================================

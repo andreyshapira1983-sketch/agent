@@ -92,7 +92,7 @@ WATCH: dict[str, int] = {
     "core/loop_verification.py:AgentLoopVerification._verify_draft": 165,
     "core/loop_run_tail.py:AgentLoopRunTail._finalize_run_tail": 203,
     "core/loop_attempt.py:AgentLoopAttempt._run_attempt_loop": 433,
-    "core/loop_verify_replan.py:AgentLoopVerifyReplan._verify_and_settle_answer": 358,
+    "core/loop_verify_replan.py:AgentLoopVerifyReplan._verify_and_settle_answer": 385,  # +27 (2026-08-29, авторство агента): крючок настойчивости — helper исполнения шагов, одноразовый fallback иной формы и settled-выход; правило mem_8b36eb3c, ставшее механизмом
 }
 
 

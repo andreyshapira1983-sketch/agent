@@ -61,13 +61,13 @@
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:234",
+     "site": "core/loop_verify_replan.py:255",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "unresolved_citation",
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:385",
+     "site": "core/loop_verify_replan.py:406",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three",
      "call": "append"
@@ -150,14 +150,14 @@
     },
     {
      "defect": "synthetic attempt number",
-     "detail": "core/loop_verify_replan.py:226 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"
+     "detail": "core/loop_verify_replan.py:247 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"
     },
     {
      "defect": "duplication per verify iteration",
      "detail": "the same unresolved URL is appended again on each iteration: twice into the type budget, twice into the planner prompt"
     }
    ],
-   "_anchor_correction": " | shifted 2026-08-29 by +4: the hard-cap branch gained st.replan_exhausted = True (agent-authored fix, reissue of ain_ec564743); both loop_verify_replan sites moved below it. Correction rows authored by the agent itself (trace_67cc..., which also refuted the courier's wrong 'fifth writer' framing)."
+   "_anchor_correction": " | shifted 2026-08-29 by +4: the hard-cap branch gained st.replan_exhausted = True (agent-authored fix, reissue of ain_ec564743); both loop_verify_replan sites moved below it. Correction rows authored by the agent itself (trace_67cc..., which also refuted the courier's wrong 'fifth writer' framing). | shifted 2026-08-29 (second time this night): the agent's persistence hook added a fallback helper and a one-shot alternative step; all loop_verify_replan anchors remapped by mechanical diff (append(trigger) moved inside the helper), courier-applied."
   },
   "_step_trigger_tls": {
    "kind": "scratch slot",
@@ -285,7 +285,7 @@
      "does": "same"
     },
     {
-     "site": "core/loop_verify_replan.py:328",
+     "site": "core/loop_verify_replan.py:349",
      "phase": "verification_replan",
      "does": "same"
     }
@@ -436,7 +436,7 @@
    "consumers": [
     "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:288)",
     "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:588)",
-    "verify-replan planner call (core/loop_verify_replan.py:326) — bitten by M23"
+    "verify-replan planner call (core/loop_verify_replan.py:347) — bitten by M23"
    ],
    "evidence": {
     "hole_measured": "M22a+M22b (2026-08-08): both llm= overrides cut -> 221 routing tests green. for_task was still called, its verdict still logged in adaptive_route, and its RESULT silently discarded — every run would execute on the default model. One wire past M11: the operator's escalation reached the router, the router picked the deep model, the loop threw the choice away",
@@ -965,14 +965,14 @@
  },
  "decision_boundaries": {
   "verify_replan_authority": {
-   "site": "core/loop_verify_replan.py:235",
+   "site": "core/loop_verify_replan.py:256",
    "reads": "decision.action from ReplanPolicy",
    "consequence_class": "LOOP",
-   "second_belt": "VERIFY_REPLAN_HARD_CAP = 2 (core/loop_verify_replan.py:197) stops the loop when the verdict is ignored — which is why breaking the wiring changes where the run stops rather than whether it stops",
+   "second_belt": "VERIFY_REPLAN_HARD_CAP = 2 (core/loop_verify_replan.py:217) stops the loop when the verdict is ignored — which is why breaking the wiring changes where the run stops rather than whether it stops",
    "protection": "PROVEN (10240f8)"
   },
   "unresolved_citation_eligibility_gate": {
-   "site": "core/loop_verify_replan.py:201",
+   "site": "core/loop_verify_replan.py:222",
    "reads": "unresolved_urls emptiness",
    "consequence_class": "PHASE",
    "protection": "PROVEN in isolation 2026-08-08: both poles (no citation -> decide never consulted; citation -> consulted), and M20 breaks the GATE, not the detector — 3 red"
@@ -1946,12 +1946,12 @@
       "kind": "control"
      },
      {
-      "consumer": "core/loop_verify_replan.py:235",
+      "consumer": "core/loop_verify_replan.py:256",
       "reads": "inequality with 'continue' ONLY — sets replan_exhausted and breaks",
       "kind": "control"
      },
      {
-      "consumer": "journal: loop_attempt.py:522,534, loop_verify_replan.py:243, replan.py:442 to_log_payload",
+      "consumer": "journal: loop_attempt.py:522,534, loop_verify_replan.py:264, replan.py:442 to_log_payload",
       "reads": "the full string",
       "kind": "diagnostic"
      }
