@@ -39,22 +39,113 @@ _FENCE_MARKER = "```"
 _DIFF_MARKERS: tuple[str, ...] = ("--- ", "+++ ", "@@ ")
 
 
-def _carries_generated_artifact(answer: str) -> bool:
-    """Whether *answer* actually contains generated code / a diff.
+#: --- Жанр, а не форма (авторство агента, 2026-08-29) -------------------------
+#: Измерено: код в заборе освобождался от улик, а ПЛАН прозой — нет, хотя оба
+#: суть синтез. За день это задушило пять его собственных планов (поставка MVP,
+#: карантин, оценка вакансии, выбор органа, реплика спора), и дважды курьеру
+#: приходилось просить заворачивать прозу в кодовый забор — то есть маскировать
+#: замысел под код, чтобы он прошёл.
+#:
+#: Водораздел его словами: «цифра-параметр не существует вне моего решения и её
+#: нельзя пойти и проверить; цифра-утверждение говорит о том, что существует
+#: независимо от меня». Утверждение о мире обязано нести источник; предложение о
+#: будущей работе источника иметь не может по природе — работы ещё нет.
+#:
+#: Наблюдаемые признаки внешнего факта (его мера, замер 9/9 + атака 7/7):
+#: единица измерения мира; дата; утвердительная связка при имени внешней
+#: сущности; имя внешней сущности без слова замысла рядом. Его же страховка:
+#: собственная величина в мировых единицах («бюджет 5 долларов») считается
+#: фактом — лишний запрос источника дешевле пропуска.
+_WORLD_UNIT_MARKERS: tuple[str, ...] = (
+    "доллар", "usd", "$", "евро", "eur", "рубл", "процент", "%", "годовых",
+)
+_ASSERTIVE_COPULAS: tuple[str, ...] = (
+    "стоит", "стоил", "вышел", "вышла", "вышло", "составляет", "составлял",
+    "равен", "равна", "равно", "опубликован", "достиг", "превысил",
+)
+_EXTERNAL_ENTITY_MARKERS: tuple[str, ...] = (
+    "deepseek", "gpt", "claude", "llama", "gemini", "openai", "anthropic",
+    "google", "microsoft", "apple", "nvidia", "windows", "linux", "android",
+    "iphone", "python", "java", "rust", "pytorch", "docker", "aws", "azure",
+)
+_INTENT_WORD_MARKERS: tuple[str, ...] = (
+    "порог", "шаг", "длина", "окно", "лимит", "попыт", "символ", "цикл",
+    "размер", "количеств", "значени", "параметр", "настройк", "бюджет",
+    "таймаут", "задержк", "глубин",
+)
+_DATE_PATTERNS: tuple[str, ...] = (
+    r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b",
+    r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b",
+    (
+        r"\b\d{1,2}\s+(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|"
+        r"сентябр|октябр|ноябр|декабр)\w*\b"
+    ),
+)
 
-    Deterministic and regex-free, matching the rest of this module. A fenced
-    block anywhere counts; diff markers count only at the start of a line, so
-    a sentence containing "---" in prose does not qualify.
+
+def _states_external_fact(text: str) -> bool:
+    """True, когда текст утверждает о внешнем мире и потому обязан нести улику."""
+    import re
+    if not text or not re.search(r"\d", text):
+        return False
+    lowered = text.lower()
+    if any(unit in lowered for unit in _WORLD_UNIT_MARKERS):
+        return True
+    if any(re.search(pat, lowered) for pat in _DATE_PATTERNS):
+        return True
+    has_entity = any(name in lowered for name in _EXTERNAL_ENTITY_MARKERS)
+    if has_entity and any(cop in lowered for cop in _ASSERTIVE_COPULAS):
+        return True
+    if has_entity:
+        for sentence in re.split(r"[.!?]\s*", lowered):
+            if any(name in sentence for name in _EXTERNAL_ENTITY_MARKERS) and not any(
+                word in sentence for word in _INTENT_WORD_MARKERS
+            ):
+                return True
+    # Все признаки внешнего факта промолчали — это параметр замысла, не факт.
+    return False
+
+
+#: Признаки предложения о будущей работе: наклонение намерения и нумерованные
+#: шаги. Одного признака мало — он должен встретиться в тексте, который НЕ
+#: утверждает о внешнем мире (см. `_states_external_fact`).
+_PLAN_MARKERS: tuple[str, ...] = (
+    "шаг ", "шаг:", "сначала", "затем", "потом", "предлагаю", "сделаю",
+    "план:", "план ", "поставк", "1.", "2.", "3.",
+)
+
+
+def _carries_plan_proposal(answer: str) -> bool:
+    """True, когда ответ — предложение о будущей работе, а не отчёт о мире."""
+    if not answer:
+        return False
+    lowered = answer.lower()
+    if not any(marker in lowered for marker in _PLAN_MARKERS):
+        return False
+    return not _states_external_fact(answer)
+
+
+def _carries_generated_artifact(answer: str) -> bool:
+    """Whether *answer* actually contains generated code / a diff / a plan.
+
+    Deterministic and regex-free for the code paths, matching the rest of this
+    module. A fenced block anywhere counts; diff markers count only at the start
+    of a line, so a sentence containing "---" in prose does not qualify. A plan
+    counts too: it is synthesis, not a claim about the world (see the genre note
+    above) — that is the only addition, and it never fires when the text states
+    an external fact.
     """
 
     if not answer:
         return False
     if _FENCE_MARKER in answer:
         return True
-    return any(
+    if any(
         line.startswith(_DIFF_MARKERS)
         for line in answer.splitlines()
-    )
+    ):
+        return True
+    return _carries_plan_proposal(answer)
 
 
 def is_evidence_expected(
@@ -96,6 +187,13 @@ def is_evidence_expected(
         if answer is None:
             return False
         return not _carries_generated_artifact(answer)
+    # Жанр решает независимо от роли: предложение о будущей работе — синтез, а
+    # не утверждение о мире, кем бы оно ни было произнесено. Планы пишутся и в
+    # роли собеседника оператора, и там их душило ровно так же (замер
+    # 2026-08-29). Освобождение снимается, как только текст начинает утверждать
+    # о внешнем мире — это проверяет `_carries_plan_proposal`.
+    if answer is not None and _carries_plan_proposal(answer):
+        return False
     return not (chain_was_empty and not realtime_required)
 
 
