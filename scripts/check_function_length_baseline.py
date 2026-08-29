@@ -61,7 +61,7 @@ WATCH: dict[str, int] = {
     "core/self_apply_lane.py:run_self_apply_lane": 239,  # +4 (2026-08-26): шестые ворота — сверка с версией файла, на которой предложение построено (MIR-168). Сжато до предела: сама проверка и оговорка вынесены в `_base_state_gate`, в цепочке осталась строка вызова. Потолок ставили при пяти воротах; храповик здесь ловит прибавление ЗВЕНА в цепь предохранителей, а не разрастание обязанностей.
     "core/model_router.py:ModelRouter.for_task": 227,
     "core/loop_memory_read.py:AgentLoopMemoryRead._retrieve_experience_memory": 220,  # +2 (2026-08-29, MIR-184): проводка сшивки семьи — вызов и дописка приложения; сама логика вынесена в _family_product_warnings/_family_appendix
-    "core/work_session.py:run_work_session": 211,
+    "core/work_session.py:run_work_session": 262,  # +46 (2026-08-29): переключатель расследования, груз №3 курьерского режима, авторство агента — ветка сходимости получила half-open probe (расследовательский цикл вне серии, канон Circuit Breaker) и подмену цели current_goal. Забанковано с долгом: извлечение ветки в помощника — его следующий урок рефакторинга, мутирует шесть локалов и рвёт цикл, механическое извлечение курьером исказило бы авторскую конструкцию.
     "core/architecture_audit.py:_build_checks": 197,
     "core/self_task_builder.py:build_coding_task": 195,
     # 2026-08-05, MIR-077: measured 170 -> 178. The handler that used to turn

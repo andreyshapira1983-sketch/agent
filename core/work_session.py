@@ -33,6 +33,14 @@ from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 logger = logging.getLogger(__name__)
 
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
+
+#: Цель-расследование для цикла, следующего за серией одинаковых концовок
+#: (авторство агента, груз №3). {signature} — повторившаяся сигнатура серии,
+#: {goal} — исходная цель смены, к которой цикл после расследования вернётся.
+INVESTIGATION_GOAL_TEMPLATE = (
+    "Investigate why goal {goal!r} keeps producing the same outcome "
+    "signature {signature!r}; propose and apply a fix."
+)
 WorkSessionStopReason = Literal[
     "max_cycles", "time_budget", "circuit_open", "converged", "budget_exhausted",
     "awaiting_approval", "interrupted", ""
@@ -62,6 +70,16 @@ class WorkSessionConfig:
     # remainder, so a long shift spreads over real hours instead of sprinting
     # into the persistent hour budget window. 0 keeps the sprint behaviour.
     pace_seconds: float = 0.0
+    # ── investigation switch (authorship: the agent, cargo 3; default OFF —
+    # preserves current behaviour) ────────────────────────────────────────────
+    # When True, a cycle whose outcome signature repeats `investigation_window`
+    # times in a row triggers a follow-up cycle with the investigation goal
+    # template instead of stopping. Default False keeps the session as today.
+    investigate_on_repeat: bool = False
+    # Number of identical outcome signatures required before investigation
+    # fires. Must be strictly LESS than convergence_window so investigation
+    # triggers before the TD-018 stop-crane (see __post_init__).
+    investigation_window: int = 2
 
     def __post_init__(self) -> None:
         if self.minutes <= 0:
@@ -74,6 +92,16 @@ class WorkSessionConfig:
             raise ValueError("report_every must be >= 1")
         if self.convergence_window < 2:
             raise ValueError("convergence_window must be >= 2")
+        if self.investigation_window < 2:
+            raise ValueError("investigation_window must be >= 2")
+        if (
+            self.investigate_on_repeat
+            and self.investigation_window >= self.convergence_window
+        ):
+            raise ValueError(
+                "investigation_window must be < convergence_window "
+                "so investigation fires before the stop-crane"
+            )
 
 
 @dataclass(frozen=True)
@@ -176,6 +204,13 @@ def run_work_session(
     # how many times in a row the same signature has repeated.
     prev_signature: Any = None
     repeat_count: int = 0
+    # Investigation switch locals (authorship: the agent, cargo 3): the goal the
+    # NEXT cycle will actually run (swapped to the investigation template when
+    # the sensor fires, restored after the probe cycle), plus the one-probe-per-
+    # series limiter and the "probe just ran" marker.
+    current_goal: str = config.goal
+    investigation_done: bool = False
+    investigation_just_ran: bool = False
 
     _log(agent, "work_session_start", {
         "goal": config.goal,
@@ -212,10 +247,12 @@ def run_work_session(
             # include_goal=True when a non-default goal was supplied so the
             # agent actually executes it via agent.run().  Queue = [status,
             # learn, goal] → need limit=3 so the goal task is not cut off.
-            has_real_goal = bool(config.goal) and config.goal != "project health"
+            # current_goal, не config.goal: переключатель расследования подменяет
+            # цель ровно одного цикла (авторство агента, груз №3).
+            has_real_goal = bool(current_goal) and current_goal != "project health"
             run_report = runtime.run(
                 AutonomousRuntimeConfig(
-                    goal=config.goal,
+                    goal=current_goal,
                     dry_run=config.dry_run,
                     limit=3 if has_real_goal else 2,
                     include_tests=False,  # tests are slow; keep cycles fast
@@ -276,32 +313,73 @@ def run_work_session(
                 })
                 break
 
-            # ── convergence stop (TD-018) ────────────────────────────────────
+            # ── convergence stop (TD-018) + investigation switch (cargo 3) ───
             # If the cycle produced the same outcome signature as the previous
             # ones for `convergence_window` passes in a row, the session is
-            # spinning (re-running the same goal with the same result). Stop
-            # early — but only while cycles remain, so a run that naturally ends
-            # on its last cycle still reports stop_reason="" as before.
+            # spinning. With investigate_on_repeat, a shorter window fires ONE
+            # investigation cycle first: the next cycle's goal becomes the
+            # investigation template, then the original goal returns. The
+            # stop-crane stays as the last resort, unchanged.
             if config.stop_on_convergence:
-                signature = _cycle_signature(run_report)
-                if signature == prev_signature:
-                    repeat_count += 1
+                if investigation_just_ran:
+                    # ── half-open probe (Microsoft Circuit Breaker Pattern) ──
+                    # The investigation cycle is a PROBE: its report must NOT
+                    # enter the series counter. Per the pattern, a probe's
+                    # outcome decides the transition but is never mixed into
+                    # the failure/success series. Skip signature computation,
+                    # series updates and the stop-crane for this report; the
+                    # original goal's series resumes next cycle with its
+                    # previous count. (Courier note: assembled as if/else
+                    # instead of the author's `continue` so the cycle-end log,
+                    # circuit update and pacing below still run.)
+                    current_goal = config.goal
+                    investigation_just_ran = False
                 else:
-                    repeat_count = 1
-                prev_signature = signature
-                if (
-                    repeat_count >= config.convergence_window
-                    and cycle < config.max_cycles
-                ):
-                    stop_reason = "converged"
-                    status = "completed"
-                    _log(agent, "work_session_converged", {
-                        "cycle": cycle,
-                        "repeat_count": repeat_count,
-                        "convergence_window": config.convergence_window,
-                        "goal": config.goal,
-                    })
-                    break
+                    signature = _cycle_signature(run_report)
+                    # ── investigation branch: fires BEFORE the stop-crane, on
+                    #    its own (strictly smaller) threshold ─────────────────
+                    if (
+                        config.investigate_on_repeat
+                        and repeat_count == config.investigation_window
+                        and not investigation_done
+                    ):
+                        investigation_done = True
+                        investigation_just_ran = True
+                        current_goal = INVESTIGATION_GOAL_TEMPLATE.format(
+                            goal=config.goal,
+                            signature=signature,
+                        )
+                        _log(agent, "work_session_investigation", {
+                            "cycle": cycle,
+                            "repeat_count": repeat_count,
+                            "investigation_window": config.investigation_window,
+                            "goal": config.goal,
+                        })
+                        # Do NOT update prev_signature/repeat_count on this
+                        # pass — the series is preserved; the stop-crane is
+                        # skipped because the investigation branch consumed it.
+                    else:
+                        # ── series tracking (non-investigation passes) ───────
+                        if signature == prev_signature:
+                            repeat_count += 1
+                        else:
+                            repeat_count = 1
+                        prev_signature = signature
+
+                        # ── stop-crane (TD-018, unchanged) ───────────────────
+                        if (
+                            repeat_count >= config.convergence_window
+                            and cycle < config.max_cycles
+                        ):
+                            stop_reason = "converged"
+                            status = "completed"
+                            _log(agent, "work_session_converged", {
+                                "cycle": cycle,
+                                "repeat_count": repeat_count,
+                                "convergence_window": config.convergence_window,
+                                "goal": config.goal,
+                            })
+                            break
 
             # ── update circuit based on run outcome ──────────────────────────
             if run_report.status == "completed":
