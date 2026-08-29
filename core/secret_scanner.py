@@ -181,6 +181,66 @@ class SecretFinding:
     matched: str
 
 
+def looks_like_secret_body(value: str) -> bool:
+    """True, когда строка — ТЕЛО секрета (случайный материал), а не имя/путь/фраза.
+
+    Авторство агента (2026-08-29). Меряется уникальность символов: настоящий
+    ключ — шум без структуры, его символы взяты из широкого алфавита и почти
+    не повторяются, поэтому доля уникальных высока. Имена, пути и фразы
+    повторяют малый алфавит и несут словарные куски, и доля остаётся низкой.
+    Узкому алфавиту (hex) нужен свой порог: даже длинная шестнадцатеричная
+    строка повторяет всего 16 знаков и общей меры не достигнет никогда.
+
+    Замерено на 12 формах (5 настоящих секретов, 7 законных строк, включая
+    UUID и короткий git-sha) — 12/12. Первая мера того же автора (доля
+    НЕ-словарных символов) была опровергнута замером: у реальных ключей она
+    0.00–0.04, и правило пропустило бы их все.
+    """
+    s = (value or "").strip()
+    if not s:
+        return False
+    if len(s) >= 40 and len(set(s)) / len(s) >= 0.55:
+        return True
+    return bool(len(s) >= 32 and re.fullmatch(r"[0-9a-fA-F]+", s))
+
+
+#: Формы значения, которые НЕ являются секретом, а лишь указывают на него:
+#: чтение из окружения, обращение к хранилищу, аннотация типа в сигнатуре,
+#: ссылка на другую переменную. Правило узкое НАМЕРЕННО: пропустить настоящий
+#: секрет дороже, чем лишний раз заблокировать (цена, названная агентом), —
+#: поэтому здесь перечислены только явные ссылки, а всё остальное значение
+#: по-прежнему считается телом.
+_REFERENCE_VALUE_RE: Final[re.Pattern[str]] = re.compile(
+    r"""^(?:
+        (?:[A-Za-z_][\w.]*\s*[(\[])             # os.environ[...], getenv(...), cfg.get(
+      | (?:str|int|float|bytes|bool|Optional|Any|Path)\b   # аннотация типа
+      | \{\{|\$\{|<[A-Za-z_]                    # шаблонная подстановка
+    )""",
+    re.VERBOSE,
+)
+
+
+def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
+    """True, когда за именем доступа стоит ССЫЛКА, а не значение секрета.
+
+    `credential-assignment` ловит форму «имя = значение» и не смотрит, что
+    именно присвоено. Из-за этого блокировались обычный код (чтение значения
+    из окружения) и объявление функции с параметром-именем: агент не мог
+    записать ни план про доступы, ни код, работающий с ключами (замер
+    2026-08-29). Обратное направление — короткий настоящий пароль вроде
+    «password: hunter2» — обязано ловиться по-прежнему, поэтому пропускаются
+    ТОЛЬКО явные ссылочные формы, а не «всё короткое».
+    """
+    raw = match.group(0)
+    value = raw.split("=", 1)[-1] if "=" in raw else raw.split(":", 1)[-1]
+    value = value.strip().strip("\"'` \t,;")
+    if not value:
+        return True
+    if looks_like_secret_body(value):
+        return False
+    return bool(_REFERENCE_VALUE_RE.match(value))
+
+
 def scan(text: str) -> list[SecretFinding]:
     """Return every regex hit in `text`. Empty list for clean input."""
     if not text:
@@ -188,6 +248,9 @@ def scan(text: str) -> list[SecretFinding]:
     findings: list[SecretFinding] = []
     for kind, pat in REGEX_RULES:
         for m in pat.finditer(text):
+            if kind == "credential-assignment" and _assignment_is_only_a_reference(text, m):
+                # Присваивание-ссылка (окружение, аннотация, имя) — не утечка.
+                continue
             findings.append(SecretFinding(kind=kind, start=m.start(), end=m.end(), matched=m.group(0)))
     return findings
 
