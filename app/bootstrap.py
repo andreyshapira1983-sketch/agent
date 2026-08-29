@@ -174,7 +174,7 @@ def build_agent(
     llm = model_router.for_role(ModelRole.SYNTHESIZER)
     planner = LLMPlanner(
         llm=model_router.for_role(ModelRole.PLANNER),
-        registry=registry,
+        registry=registry, workspace=str(workspace),  # адрес уроков: см. kwarg
     )
     memory = WorkingMemory() if with_memory else None
 

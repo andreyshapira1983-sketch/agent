@@ -191,3 +191,40 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
             key=extra["key"],
         ))
     return tuple(cards)
+
+
+# --- Доставка уроков планировщику: авторство агента (груз 2а, 2026-08-29). ---
+# Его выбор (б): опровержения через load_claims, карточку не нагружаем.
+def lesson_block_for_prompt(workspace) -> str:
+    """Build a '## Lessons for planning' block from the causal claim store.
+
+    Returns an empty string when the store is empty. Each lesson is rendered
+    as plain lines (not a table). Counter-evidence lines are included only
+    when the claim has non-empty refuted_by texts.
+    """
+    lessons = distilled_lessons(workspace)
+    if not lessons:
+        return ""
+
+    claims = load_claims(workspace)
+    claim_by_key = {extra["key"]: claim for claim, extra in claims}
+
+    lines = ["## Lessons for planning"]
+    for lesson in lessons:
+        lines.append(f"- Rule: {lesson.rule}")
+        lines.append(f"  Scope: {lesson.scope}")
+        lines.append(f"  Directive: {lesson.directive}")
+        cases = ", ".join(lesson.cases) if lesson.cases else ""
+        lines.append(f"  Cases: {cases}")
+
+        # Find the claim linked by key and collect its refuted_by texts.
+        claim = claim_by_key.get(lesson.key)
+        refuted_by = []
+        if claim is not None:
+            for expl in claim.explanations:
+                if expl.refuted_by:
+                    refuted_by.append(expl.refuted_by)
+        if refuted_by:
+            lines.append(f"  Counter-evidence: {'; '.join(refuted_by)}")
+
+    return "\n".join(lines)
