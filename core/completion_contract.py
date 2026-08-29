@@ -62,6 +62,38 @@ _READ_STEMS: tuple[str, ...] = (
     "compare", "review", "analyse", "analyze", "find", "search",
 )
 
+
+# Explicit operator-declared change-sets override incidental path mentions.
+# The declaration is read from the full request before demanding_text() and
+# before mixed read/modify ambiguity detection. Авторство агента (урок 3,
+# 2026-08-29): его собственный уточнитель шесть раз за ночь спросил «which
+# of them must change» при стоящем в задании «МЕНЯТЬ: ровно один файл» —
+# шестой раз на уроке о починке самого себя.
+_EXPLICIT_CHANGE_TARGET_DECLARATIONS: dict[str, re.Pattern[str]] = {
+    "ru": re.compile(
+        '^[ \\t]*(?:менять|изменить|изменя(?:ть|йте))\\s*:\\s*(?:ровно\\s+(?:один|одну|\\d+)\\s+(?:файл|файла|файлов)\\s*[-—:]?\\s*)?(?P<targets>[^\\n;]+)',
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    "en": re.compile(
+        '^[ \\t]*(?:change|modify|edit)(?:\\s+set)?\\s*:\\s*(?:exactly\\s+(?:one|\\d+)\\s+files?\\s*[-—:]?\\s*)?(?P<targets>[^\\n;]+)',
+        re.IGNORECASE | re.MULTILINE,
+    ),
+}
+
+
+def _explicit_change_targets(text: str) -> tuple[str, ...]:
+    """Return the operator-declared change-set, if one is syntactically valid."""
+    for declaration in _EXPLICIT_CHANGE_TARGET_DECLARATIONS.values():
+        match = declaration.search(text)
+        if match is None:
+            continue
+
+        # Keep request order while removing duplicate declarations.
+        targets = tuple(dict.fromkeys(paths_mentioned(match.group("targets"))))
+        if targets:
+            return targets
+    return ()
+
 #: A passing test suite is a deliverable in its own right — it names no path.
 _TESTS_PASS_RE = re.compile(
     r"(тест\w*\s+(проход|прошл|зелён|зелен))"
@@ -333,21 +365,33 @@ def derive_completion_contract(
     obligations: list[ContractObligation] = []
     ambiguities: list[str] = []
 
-    named = list(paths_mentioned(demanding))
+    # Explicit scope is authoritative: it is not an ambiguity merely because
+    # the request names additional read-only/context paths.
+    declared_change_set = _explicit_change_targets(text)
+    if declared_change_set:
+        action = "modify"
+        named = list(declared_change_set)
+    else:
+        named = list(paths_mentioned(demanding))
 
     # A request that both reads and changes, over MORE THAN ONE path, cannot
     # be attributed: "прочитай A.py и исправь B.py" would otherwise owe a
     # change on A.py too, and an invented duty blocks `achieved` on its own
     # (Copilot, PR #258). One path is safe — "прочитай core/foo.py и исправь
     # его" names a single object and the stricter action wins.
-    if action in {"create", "modify"} and _mentions_read(tokens) and len(named) > 1:
+    if (
+        not declared_change_set
+        and action in {"create", "modify"}
+        and _mentions_read(tokens)
+        and len(named) > 1
+    ):
         ambiguities.append(
             "the request mixes reading and changing over several paths; "
             "which of them must change cannot be read from the wording"
         )
         named = []
     hint = (file_hint or "").strip()
-    if hint and hint not in named:
+    if hint and not declared_change_set and hint not in named:
         # A --file hint is an explicit pointer, not a request to change it.
         # It only carries a deliverable when the request itself asks for one.
         if action in {"create", "modify"}:
