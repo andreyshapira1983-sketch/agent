@@ -47,6 +47,14 @@ CASES: tuple[tuple[str, str, bool], ...] = (
     ("huggingface", "You have exceeded your monthly included credits for Inference Providers. Subscribe to PRO to get 20x more monthly included credits.", True),
     ("huggingface", "Authorization header is invalid, use 'Bearer API_TOKEN'", True),
     ("huggingface", "Model is currently loading, estimated time 20s", False),
+    # deepseek — вписан в цепочку 2026-08-29 (марафонская ночь: OpenAI без
+    # денег, единственный пополненный провайдер не пробовался). Фразы — из
+    # собственной документации кодов ошибок DeepSeek, не по аналогии с
+    # соседями: 402 — долговечный до пополнения, 401 — долговечный, 429
+    # («слишком быстро») — преходящий и демотировать не должен.
+    ("deepseek", "Error code: 402 - {'error': {'message': 'Insufficient Balance', 'type': 'unknown_error'}}", True),
+    ("deepseek", "Error code: 401 - Authentication Fails, Your api key is invalid", True),
+    ("deepseek", "Error code: 429 - Rate limit reached. You are sending requests too quickly.", False),
     # `local` — последнее средство в цепочке, и для него ответ на тот же
     # вопрос ДРУГОЙ. Ни один его отказ не должен демотировать провайдера:
     # сервер поднимают снаружи (scripts/start_local_llm.ps1), денег он не
