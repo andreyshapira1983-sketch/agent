@@ -164,6 +164,26 @@ class AgentLoopVerifyReplan:
             "reasons": [c.reason.to_log_payload() for c in refuted[:5]],
         })
 
+    @staticmethod
+    def _terminal_verify_fallback_source(
+        unresolved_urls: list[str],
+        iteration: int,
+    ) -> dict[str, Any]:
+        """Один альтернативный шаг после терминального fetch/no-op.
+
+        Основной verify-replan требует ``web_fetch`` каждого URL. Если весь
+        план исчерпан без улик, один ``web_search`` — иной вид действия —
+        получает шанс найти доступный источник до капитуляции синтеза.
+        """
+        return {
+            "tool": "web_search",
+            "arguments": {"query": " OR ".join(unresolved_urls)},
+            "label": f"verify-fallback-search-{iteration}",
+            "expected_outcome": (
+                "Find an accessible source for the unresolved web citations."
+            ),
+        }
+
     def _verify_and_settle_answer(self, st: VerifyState) -> None:
         """Довести черновик до текста, который увидят решатели.
 
@@ -197,6 +217,7 @@ class AgentLoopVerifyReplan:
 
             verify_replan_attempt = 0
             VERIFY_REPLAN_HARD_CAP = 2  # belt + braces over ReplanPolicy
+            terminal_fallback_used = False
 
             while True:
                 unresolved_urls = extract_unresolved_web_urls(report)
@@ -374,32 +395,55 @@ class AgentLoopVerifyReplan:
                 # just exit on the next loop iteration when re-verify
                 # still finds the same unresolved URLs. No infinite loop
                 # because the hard cap + per-type budget both bound us.
-                added_evidence = 0
-                for step, outcome, trigger in self._execute_steps_parallel(verify_plan.steps):
-                    if outcome is None:
-                        step.status = "failed"
-                        # Drain the scratch trigger so it doesn't leak into
-                        # the next decide() iteration with a misleading code
-                        # (e.g. tool_error for a fetch that was sanitised).
-                        if trigger is not None:
-                            st.failure_history.append(trigger)
-                        continue
-                    self._executed_tools.append(outcome["tool"])
-                    st.artifacts[outcome["label"]] = {
-                        "tool": outcome["tool"],
-                        "output": outcome["output"],
-                        "issues": outcome["issues"],
-                    }
-                    ev = evidence_from_tool_result(
-                        tool_name=outcome["tool"],
-                        arguments=outcome.get("arguments"),
-                        output=outcome["output"],
-                        status="success",
+                def execute_verify_steps(steps: list[Any]) -> int:
+                    added = 0
+                    for step, outcome, trigger in self._execute_steps_parallel(steps):
+                        if outcome is None:
+                            step.status = "failed"
+                            # Drain the scratch trigger so it does not leak into
+                            # a later policy decision with a misleading code.
+                            if trigger is not None:
+                                st.failure_history.append(trigger)
+                            continue
+                        self._executed_tools.append(outcome["tool"])
+                        st.artifacts[outcome["label"]] = {
+                            "tool": outcome["tool"],
+                            "output": outcome["output"],
+                            "issues": outcome["issues"],
+                        }
+                        ev = evidence_from_tool_result(
+                            tool_name=outcome["tool"],
+                            arguments=outcome.get("arguments"),
+                            output=outcome["output"],
+                            status="success",
+                        )
+                        if ev is not None:
+                            st.chain.add(ev)
+                            added += 1
+                        step.status = "done"
+                    return added
+
+                added_evidence = execute_verify_steps(verify_plan.steps)
+                fallback_executed = False
+                if added_evidence == 0 and not terminal_fallback_used:
+                    terminal_fallback_used = True
+                    fallback_executed = True
+                    fallback_source = self._terminal_verify_fallback_source(
+                        unresolved_urls,
+                        verify_replan_attempt,
                     )
-                    if ev is not None:
-                        st.chain.add(ev)
-                        added_evidence += 1
-                    step.status = "done"
+                    fallback_plan = self._build_plan(st.goal, [fallback_source])
+                    self.log.log(
+                        "verify_replan_terminal_fallback",
+                        {
+                            "iteration": verify_replan_attempt,
+                            "failed_step_count": len(verify_plan.steps),
+                            "fallback_tool": fallback_source["tool"],
+                            "unresolved_urls": list(unresolved_urls),
+                        },
+                    )
+                    added_evidence += execute_verify_steps(fallback_plan.steps)
+
 
                 # Re-verify the ORIGINAL draft against the enriched chain.
                 # The draft already cites these URLs (that's why they
@@ -490,6 +534,19 @@ class AgentLoopVerifyReplan:
                         "iteration": verify_replan_attempt,
                     },
                 )
+
+                # Ровно один альтернативный шаг был выполнен. Независимо от
+                # его результата следующий исход — финальная разметка текущего
+                # черновика, а не повторная генерация fallback-шага.
+                if fallback_executed:
+                    self.log.log(
+                        "verify_replan_terminal_fallback_settled",
+                        {
+                            "iteration": verify_replan_attempt,
+                            "evidence_added": added_evidence,
+                        },
+                    )
+                    break
 
                 # If the fetch round added zero evidence, re-verify will
                 # produce the same unresolved list — exit instead of
