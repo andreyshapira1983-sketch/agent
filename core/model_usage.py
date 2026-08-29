@@ -46,6 +46,13 @@ _KEY_CLASS_TEXT_MARKERS: tuple[str, ...] = (
     # durable AND transient, so coverage can no longer be inherited silently.
     "included credits",
     "authorization header is invalid",
+    # deepseek (2026-08-29, added with the provider's entry into the fallback
+    # order; phrasing from DeepSeek's own error-code documentation): a drained
+    # account answers 402 "Insufficient Balance" — matched by none of the
+    # markers above ("insufficient funds" is OpenAI's wording, not theirs).
+    # Its 401 "Authentication Fails" is already caught by "authentication",
+    # and its 429 "sending requests too quickly" must stay transient.
+    "insufficient balance",
 )
 
 #: Consecutive key-class failures after which a provider is skipped.

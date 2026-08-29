@@ -140,6 +140,7 @@ _COST_RANK = {
 _DEFAULT_PROVIDER_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
     "openai": ("OPENAI_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
     "huggingface": ("HF_TOKEN",),
     "local": ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL"),
     "mock": (),
@@ -825,8 +826,16 @@ def _coerce_role(role: ModelRole | str) -> str:
 # not first — a local model is a last resort, never a preference over a paid
 # provider — and it still earns its place only by having both of its variables
 # set, so an unconfigured host behaves exactly as before.
+#
+# ``deepseek`` repeated the local story beat for beat on 2026-08-29: client
+# built, key in ``.env``, balance topped up by the operator ($5, 2026-08-28) —
+# and a marathon shift died through the whole chain (openai out of money →
+# anthropic no balance → huggingface key errors → local no server) while the
+# one funded provider was never tried, because it was absent both here and in
+# ``_DEFAULT_PROVIDER_ENV``. Second place: the cheap rescuer right after the
+# default brain, ahead of the providers known to be unfunded.
 _PROVIDER_FALLBACK_ORDER: tuple[str, ...] = (
-    "openai", "anthropic", "huggingface", "local",
+    "openai", "deepseek", "anthropic", "huggingface", "local",
 )
 
 
