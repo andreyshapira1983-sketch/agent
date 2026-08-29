@@ -44,17 +44,89 @@ _PATH_PLACEHOLDER_MARKS: tuple[str, ...] = (
 _WHOLE_FILE_TODO_RE = re.compile(r"^(?:TODO|FIXME|XXX|HACK)\b\s*[:\-—]", re.IGNORECASE)
 
 
+#: --- Родной диалект заглушек самой модели (авторство агента, 2026-08-29) -----
+#: Пойман на четырёх живых промахах: прозаический однострочник со словом-маркером
+#: («PLACEHOLDER — will be filled by executor»), комментарий «# placeholder …»,
+#: многострочник, чьи единственные операторы — голые pass / assert False / «...».
+#: Настоящий код определяется разбором синтаксиса, не решёткой: проза не
+#: парсится, стаб парсится в голый оператор, а документация — комментарии без
+#: маркеров — законна (решение агента, закреплено его же свидетелем).
+_STUB_MARKER_WORDS: tuple[str, ...] = (
+    "placeholder", "will be filled", "will be replaced", "write me",
+    "to be", "tbd", "todo", "fixme", "stub", "fill in", "fill-in", "insert ",
+)
+
+
+def _is_bare_statement_tree(tree) -> bool:
+    """Голый стаб: единственный оператор pass, «...» или assert False (с любым сообщением)."""
+    import ast
+    if len(tree.body) != 1:
+        return False
+    node = tree.body[0]
+    if isinstance(node, ast.Pass):
+        return True
+    if (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and node.value.value is Ellipsis
+    ):
+        return True
+    return (
+        isinstance(node, ast.Assert)
+        and isinstance(node.test, ast.Constant)
+        and node.test.value is False
+    )
+
+
 def looks_like_unfilled_content(content: str) -> bool:
-    """True, когда всё содержимое — одна незаполненная заготовка."""
+    """True, когда всё содержимое — одна незаполненная заготовка.
+
+    Контракт органа: content: str -> bool (живой вызывающий — tools/file_write —
+    передаёт строку целиком). Старый закон сохранён дословно; новый закон —
+    авторство агента, собран курьером из его v5 и двух его словесных правок.
+    """
+    import ast
     stripped = (content or "").strip()
+    # Старый закон, дословно: однострочный TODO:/FIXME:/XXX:/HACK: — заготовка.
     if "\n" not in stripped and _WHOLE_FILE_TODO_RE.match(stripped):
         return True
-    if not SINGLE_TAG_RE.match(stripped):
+    # Старый закон, дословно: «<тег>» целиком.
+    if SINGLE_TAG_RE.match(stripped):
+        inner = stripped[1:-1]
+        if any(ch.isspace() for ch in inner):
+            return True
+        return any(hint in stripped.casefold() for hint in PLACEHOLDER_HINTS)
+    # Новый закон: решает разбор синтаксиса.
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if not lines:
         return False
-    inner = stripped[1:-1]
-    if any(ch.isspace() for ch in inner):
-        return True
-    return any(hint in stripped.casefold() for hint in PLACEHOLDER_HINTS)
+    if len(lines) == 1 and not lines[0].startswith("#"):
+        # Проза со словом-маркером — заглушка, ТОЛЬКО если не парсится как
+        # Python: «x = fill_rate(1)» парсится и законен (граница — его решение).
+        lowered = lines[0].casefold()
+        if any(word in lowered for word in _STUB_MARKER_WORDS):
+            try:
+                ast.parse(lines[0])
+            except SyntaxError:
+                return True
+        return False
+    code_lines = [line for line in lines if not line.startswith("#")]
+    comment_text = " ".join(
+        line for line in lines if line.startswith("#")
+    ).casefold()
+    has_marker_comment = any(word in comment_text for word in _STUB_MARKER_WORDS)
+    if not code_lines:
+        # Одни комментарии: маркерные — заглушка, документация — законна.
+        return has_marker_comment
+    # Код есть: заглушка, только если ВЕСЬ он — голые стабы.
+    for line in code_lines:
+        try:
+            tree = ast.parse(line)
+        except SyntaxError:
+            return False
+        if not _is_bare_statement_tree(tree):
+            return False
+    return True
 
 
 def looks_like_unfilled_path(path: str) -> bool:
