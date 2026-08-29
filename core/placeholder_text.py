@@ -1,6 +1,7 @@
 """Шаблон там, где должен стоять адрес или содержимое."""
 from __future__ import annotations
 
+import os
 import re
 
 #: Одиночная угловая заготовка целиком: `<to be synthesized …>`, `<insert path>`.
@@ -129,14 +130,25 @@ def looks_like_unfilled_content(content: str) -> bool:
     return True
 
 
-def looks_like_unfilled_path(path: str) -> bool:
+def looks_like_unfilled_path(path: str, base_dir: str | None = None) -> bool:
     """True, когда путь — заготовка, а не адрес.
 
     Пустая строка сюда не относится: у неё свой отказ, и два диагноза на одну
     неисправность мешают читателю понять, который сработал.
+
+    Контракт факта существования (авторство агента, 2026-08-29, груз №2):
+    если передан ``base_dir`` (корень рабочей области), путь, существующий на
+    диске относительно него, считается настоящим адресом и возвращает False —
+    даже при шаблонных признаках в имени. Признак родился из живого отказа:
+    сторож осуждал реальный ``core/placeholder_text.py`` — собственный модуль —
+    за подстроку в имени, и 26 раз записал вину в память агента как его
+    ошибку планирования. У настоящего адреса есть факт существования; у
+    заготовки — никогда. Без ``base_dir`` решают только текстовые правила.
     """
     raw = (path or "").strip()
     if not raw:
+        return False
+    if base_dir is not None and os.path.exists(os.path.join(base_dir, raw)):
         return False
     if _PATH_TEMPLATE_RE.search(raw):
         return True
