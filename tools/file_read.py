@@ -115,7 +115,9 @@ class FileReadTool(Tool):
         # см. core/placeholder_text и docs/CODE_NOTES.md.
         from core.placeholder_text import looks_like_unfilled_path
 
-        if looks_like_unfilled_path(path):
+        # base_dir несёт факт существования: реальный файл — всегда адрес,
+        # что бы ни значилось в его имени (контракт агента, груз №2).
+        if looks_like_unfilled_path(path, base_dir=str(self.workspace_root)):
             raise ValueError(
                 f"refusing to read an unfilled placeholder path: {path!r} — "
                 "the plan carries a template where an address belongs"

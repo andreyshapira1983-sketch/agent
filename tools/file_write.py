@@ -139,7 +139,9 @@ class FileWriteTool(Tool):
             looks_like_unfilled_path,
         )
 
-        if looks_like_unfilled_path(path):
+        # base_dir несёт факт существования: перезапись реального файла — не
+        # шаблон, что бы ни значилось в имени (контракт агента, груз №2).
+        if looks_like_unfilled_path(path, base_dir=str(self.workspace_root)):
             raise ValueError(
                 f"refusing to write to an unfilled placeholder path: {path!r} — "
                 "the plan carries a template where an address belongs"
