@@ -58,6 +58,127 @@ _STUB_MARKER_WORDS: tuple[str, ...] = (
 )
 
 
+#: --- Сторож v2 (авторство агента, 2026-08-29, вторая волна) ------------------
+#: Атака невиданными формами показала: v1 знал только четыре формы из своих же
+#: тестов и пропускал семь других, включая те, что РЕАЛЬНО ложились на диск
+#: вместо кода (голый токен-маркер; `def f(): pass`; `raise NotImplementedError`;
+#: docstring-заглушка). Общий признак, названный агентом: «нет реального тела»,
+#: и решает его разбор синтаксиса, а не список слов.
+_STUB_TOKENS: frozenset[str] = frozenset({
+    "placeholder",
+    "placeholder_replaced_by_executor_with_full_file",
+    "placeholder_filled_by_synthesizer",
+    "todo",
+    "todo_later",
+    "fixme",
+    "tbd",
+    "xxx",
+})
+
+
+def _body_is_stub(node) -> bool:
+    """True, когда тело функции — заглушка (авторство агента, часть 1).
+
+    Декоратор @abstractmethod авторитетен: у абстрактного метода законно ЛЮБОЕ
+    тело (pass / ... / docstring / raise), это объявление интерфейса, а не стаб.
+    """
+    import ast
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    for dec in node.decorator_list:
+        if isinstance(dec, ast.Name) and dec.id == "abstractmethod":
+            return False
+        if (
+            isinstance(dec, ast.Attribute)
+            and isinstance(dec.value, ast.Name)
+            and dec.value.id == "abc"
+            and dec.attr == "abstractmethod"
+        ):
+            return False
+    statements = list(node.body)
+    if not statements:
+        return False
+    if (
+        isinstance(statements[0], ast.Expr)
+        and isinstance(statements[0].value, ast.Constant)
+        and isinstance(statements[0].value.value, str)
+    ):
+        statements = statements[1:]
+    if len(statements) != 1:
+        return False
+    stmt = statements[0]
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+        return stmt.value.value is Ellipsis
+    if isinstance(stmt, ast.Raise):
+        exc = stmt.exc
+        if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
+            return exc.func.id == "NotImplementedError"
+        return isinstance(exc, ast.Name) and exc.id == "NotImplementedError"
+    return False
+
+
+def _has_executable_statement(tree) -> bool:
+    """True, когда в дереве есть хоть один исполняемый оператор (авторство агента).
+
+    Комментарии в AST невидимы, поэтому файл из одних комментариев даёт пустое
+    тело. Определения сами по себе не исполняемы — рекурсируем в них, а не
+    пропускаем: файл из настоящих функций обязан считаться живым кодом.
+    """
+    import ast
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Тело-заглушка не делает файл живым: pass/.../raise NotImplementedError
+            # внутри стаба — это отсутствие работы, а не работа. Абстрактный метод
+            # (@abstractmethod) _body_is_stub не считает заглушкой, и он живой.
+            if not _body_is_stub(node) and _has_executable_statement(node):
+                return True
+            continue
+        if isinstance(node, ast.ClassDef):
+            if _has_executable_statement(node):
+                return True
+            continue
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            continue
+        return True
+    return False
+
+
+def _all_defs_are_stubs(tree) -> bool:
+    """True, когда в дереве есть определения и ВСЕ они — заглушки."""
+    import ast
+    found = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found = True
+            if not _body_is_stub(node):
+                return False
+    return found
+
+
+_DOCSTRING_STUB_MARKERS: tuple[str, ...] = (
+    "will be filled in later", "to be implemented", "placeholder", "stub",
+)
+
+
+def _docstring_has_marker(tree) -> bool:
+    """True, когда docstring модуля или любого определения несёт маркер заготовки."""
+    import ast
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            doc = ast.get_docstring(node)
+            if doc and any(m in doc.casefold() for m in _DOCSTRING_STUB_MARKERS):
+                return True
+    return False
+
+
 def _is_bare_statement_tree(tree) -> bool:
     """Голый стаб: единственный оператор pass, «...» или assert False (с любым сообщением)."""
     import ast
@@ -88,6 +209,11 @@ def looks_like_unfilled_content(content: str) -> bool:
     """
     import ast
     stripped = (content or "").strip()
+    if not stripped:
+        return False
+    # Закон v2: голый токен-маркер целиком (PLACEHOLDER, TODO_LATER, «...»).
+    if stripped.casefold().replace(" ", "") in _STUB_TOKENS or stripped == "...":
+        return True
     # Старый закон, дословно: однострочный TODO:/FIXME:/XXX:/HACK: — заготовка.
     if "\n" not in stripped and _WHOLE_FILE_TODO_RE.match(stripped):
         return True
@@ -97,6 +223,23 @@ def looks_like_unfilled_content(content: str) -> bool:
         if any(ch.isspace() for ch in inner):
             return True
         return any(hint in stripped.casefold() for hint in PLACEHOLDER_HINTS)
+    # Закон v2: структурный разбор — «есть ли реальное тело». Комментарии в AST
+    # невидимы, поэтому чистая документация сюда не попадает (её решает старая
+    # ветка ниже, по маркерам). Файл из настоящих функций — живой код.
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        tree = None
+    if tree is not None:
+        if _docstring_has_marker(tree):
+            return True
+        if not _has_executable_statement(tree) and _all_defs_are_stubs(tree):
+            return True
+        # Модуль, чьё единственное содержимое — голый стаб (pass / ... / assert
+        # False), заглушка и без комментариев рядом: старая ветка ниже видела
+        # такие формы только в компании комментариев (атака курьера, 2026-08-29).
+        if _is_bare_statement_tree(tree):
+            return True
     # Новый закон: решает разбор синтаксиса.
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]
     if not lines:
