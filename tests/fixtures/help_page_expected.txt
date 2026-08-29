@@ -56,7 +56,7 @@ Commands:
   :auto-run [goal] [flags]        bounded autonomous health pass
       flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests
   :work-session [goal] [flags]    bounded multi-cycle session with time budget
-      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N
+      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N  --pace-seconds N
   :campaign-start [goal] [flags]  budgeted autonomous campaign with per-cycle ledger
       flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N
   :campaign-status [--recent N]   read the campaign ledger digest (no budget spent)

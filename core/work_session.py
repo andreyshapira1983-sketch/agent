@@ -57,10 +57,17 @@ class WorkSessionConfig:
     # goal it can no longer make progress on. Set False to disable.
     stop_on_convergence: bool = True
     convergence_window: int = 3
+    # Marathon heartbeat (2026-08-29): minimum wall-clock seconds one cycle's
+    # slot occupies. After each non-final cycle the session sleeps the slot's
+    # remainder, so a long shift spreads over real hours instead of sprinting
+    # into the persistent hour budget window. 0 keeps the sprint behaviour.
+    pace_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if self.minutes <= 0:
             raise ValueError("minutes must be > 0")
+        if self.pace_seconds < 0:
+            raise ValueError("pace_seconds must be >= 0")
         if self.max_cycles < 1:
             raise ValueError("max_cycles must be >= 1")
         if self.report_every < 1:
@@ -324,6 +331,9 @@ def run_work_session(
                 status = "stopped"
                 break
 
+            # ── pacing pause (marathon heartbeat) ────────────────────────────
+            _pace_pause(agent, config, cycle, cycle_elapsed, deadline)
+
     except KeyboardInterrupt:
         stop_reason = "interrupted"
         status = "interrupted"
@@ -344,6 +354,32 @@ def run_work_session(
 
 
 # ── internal helpers ───────────────────────────────────────────────────────────
+
+def _pace_pause(
+    agent: Any,
+    config: WorkSessionConfig,
+    cycle: int,
+    cycle_elapsed: float,
+    deadline: float,
+) -> None:
+    """Sleep out the remainder of this cycle's slot (marathon heartbeat).
+
+    Keeps the shift's burn rate under persistent budget windows. Never after
+    the final cycle, never past the deadline: an oversleep would silently eat
+    the next cycle's slot and misreport the stop as time_budget work.
+    """
+    if config.pace_seconds <= 0 or cycle >= config.max_cycles:
+        return
+    slot_remaining = config.pace_seconds - cycle_elapsed
+    pause = min(slot_remaining, deadline - time.monotonic())
+    if pause > 0:
+        _log(agent, "work_session_pause", {
+            "cycle": cycle,
+            "sleep_s": round(pause, 1),
+            "pace_seconds": config.pace_seconds,
+        })
+        time.sleep(pause)
+
 
 def _cycle_signature(run_report: Any) -> tuple:
     """Content signature of one autonomous pass, used for convergence detection.

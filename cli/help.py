@@ -77,7 +77,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("cmd", ":auto-run", ":auto-run [goal] [flags]", 34),
     ("raw", "      flags: --dry-run  --allow-effects  --limit N  --learning-limit N  --no-tests"),
     ("cmd", ":work-session", ":work-session [goal] [flags]", 34),
-    ("raw", "      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N"),
+    ("raw", "      flags: --dry-run  --allow-effects  --minutes N  --max-cycles N  --report-every N  --pace-seconds N"),
     ("cmd", ":campaign-start", ":campaign-start [goal] [flags]", 34),
     ("raw", "      flags: --dry-run  --allow-effects  --cycles N  --max-llm-calls N  --max-cost-units N  --max-idle N"),
     ("cmd", ":campaign-status", ":campaign-status [--recent N]", 34),

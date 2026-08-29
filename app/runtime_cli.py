@@ -136,6 +136,7 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     minutes: float = 10.0
     max_cycles: int = 3
     report_every: int = 1
+    pace_seconds: float = 0.0
     goal_parts: list[str] = []
 
     i = 0
@@ -182,6 +183,20 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 return True
             i += 2
             continue
+        if token == "--pace-seconds":
+            if i + 1 >= len(tokens):
+                print("Usage: --pace-seconds requires a number", file=sys.stderr)
+                return True
+            try:
+                pace_seconds = float(tokens[i + 1])
+            except ValueError:
+                print(
+                    "Usage: --pace-seconds requires a non-negative number",
+                    file=sys.stderr,
+                )
+                return True
+            i += 2
+            continue
         goal_parts.append(token)
         i += 1
 
@@ -192,6 +207,7 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             minutes=minutes,
             max_cycles=max_cycles,
             report_every=report_every,
+            pace_seconds=pace_seconds,
         )
     except ValueError as exc:
         print(f"(work-session config error: {exc})", file=sys.stderr)
@@ -200,7 +216,7 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     print(
         f"(work-session goal={config.goal!r} dry_run={config.dry_run} "
         f"minutes={config.minutes} max_cycles={config.max_cycles} "
-        f"report_every={config.report_every})",
+        f"report_every={config.report_every} pace_seconds={config.pace_seconds})",
         file=sys.stderr,
     )
 
