@@ -203,6 +203,10 @@ class AgentLoopVerifyReplan:
                 if not unresolved_urls:
                     break
                 if verify_replan_attempt >= VERIFY_REPLAN_HARD_CAP:
+                    # Hard cap — это исчерпание перепланирования, а не
+                    # успешное разрешение цитат. Сохраняем тот же выходной
+                    # сигнал, что и ветка ReplanPolicy ниже.
+                    st.replan_exhausted = True
                     self.log.log(
                         "verify_replan_capped",
                         {

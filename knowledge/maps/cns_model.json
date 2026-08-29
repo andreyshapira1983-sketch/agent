@@ -61,13 +61,13 @@
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:230",
+     "site": "core/loop_verify_replan.py:234",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "unresolved_citation",
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:381",
+     "site": "core/loop_verify_replan.py:385",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three",
      "call": "append"
@@ -156,7 +156,8 @@
      "defect": "duplication per verify iteration",
      "detail": "the same unresolved URL is appended again on each iteration: twice into the type budget, twice into the planner prompt"
     }
-   ]
+   ],
+   "_anchor_correction": " | shifted 2026-08-29 by +4: the hard-cap branch gained st.replan_exhausted = True (agent-authored fix, reissue of ain_ec564743); both loop_verify_replan sites moved below it. Correction rows authored by the agent itself (trace_67cc..., which also refuted the courier's wrong 'fifth writer' framing)."
   },
   "_step_trigger_tls": {
    "kind": "scratch slot",
