@@ -15,6 +15,7 @@ the loop in ``cli/repl.py``.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -106,6 +107,16 @@ def run_cli() -> int:
     # data come from another. `agent_tick.py` names the path for the same
     # reason. Default `--workspace` is ".", so an ordinary launch is unchanged.
     load_dotenv(workspace / ".env")
+
+    # Same discipline as the line above, for the same reason: the runtime names
+    # the store, the library never guesses one. `core.llm` banks here which
+    # models spend the whole output budget thinking before they speak — a
+    # default location inside the library was written by anything that ever
+    # truncated, the suite included (measured 2026-08-29: three invented models
+    # in the live journal, four budget tests red). Scoped to THIS workspace.
+    os.environ.setdefault(
+        "AGENT_REASONING_ROSTER", str(workspace / "data" / "reasoning_roster.jsonl"),
+    )
 
     # §3.5 Resume: look up the checkpoint and short-circuit before the full
     # agent stack is built, when possible.

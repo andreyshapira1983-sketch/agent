@@ -29,6 +29,61 @@ def _default_model(provider: str) -> str:
 
 DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
 
+
+#: Home of the roster, chosen by the RUNTIME, never by this library. Unset
+#: means "no roster here": a store with a default location would be written by
+#: anything that ever truncates — the suite did exactly that on 2026-08-29 and
+#: banked three invented models into the live journal, after which real budget
+#: tests read 8192 where they had asked for 1024. Entry points set it (see
+#: `main.py`); libraries and tests get silence unless they ask for a home.
+def _roster_path() -> Any:
+    from pathlib import Path
+
+    configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
+    return Path(configured) if configured else None
+
+
+def _roster_key(provider: str, model: str) -> str:
+    return f"{(provider or '').strip().lower()}:{(model or '').strip()}"
+
+
+def is_known_reasoning_model(provider: str, model: str) -> bool:
+    """Has this model already proved it spends the budget on thinking?
+
+    A missing or unreadable roster answers "not known" — ignorance must not
+    become a verdict, and the caller simply pays the blind leg once more.
+    """
+    from core.state_integrity import read_state_jsonl
+
+    path = _roster_path()
+    if path is None or not path.exists():
+        return False
+    try:
+        rows = read_state_jsonl(path)
+    except Exception:  # noqa: BLE001 — a damaged roster must never break a call
+        return False
+    key = _roster_key(provider, model)
+    return any(str(row.get("key")) == key for row in rows)
+
+
+def remember_reasoning_model(provider: str, model: str, *, spent: int) -> None:
+    """Record what silence taught us, so the next run does not buy it again."""
+    from core.state_integrity import append_state_jsonl
+
+    path = _roster_path()
+    if path is None or is_known_reasoning_model(provider, model):
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        append_state_jsonl(path, [{
+            "key": _roster_key(provider, model),
+            "provider": (provider or "").strip().lower(),
+            "model": (model or "").strip(),
+            "evidence": f"truncated with empty text at {int(spent)} output tokens",
+        }])
+    except Exception:  # noqa: BLE001 — learning is best-effort, answering is not
+        return
+
 # Provider stop/finish reasons that mean "I ran out of output budget mid-answer"
 # rather than "I finished naturally". When we see one of these we can ask the
 # model to continue where it left off instead of returning a truncated answer.
@@ -249,6 +304,13 @@ class LLM:
             system, user, max_tokens, temperature, prior=None
         )
         self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
+        # Truncated with nothing to show: the whole budget went to internal
+        # reasoning. That is the BEHAVIOUR, and it is what the roster records —
+        # a name table recognises one generation and ages into a bug the moment
+        # the provider ships the next (see `_is_o_series` below, where that
+        # rule is written and applied to one provider out of six).
+        if not text and self.last_answer_was_truncated:
+            remember_reasoning_model(self.provider, self.model, spent=max_tokens)
         if not allow_continuation:
             return text if self.provider == "mock" else text.strip()
         # The per-leg provider calls now return RAW text (no .strip()) so that
@@ -559,9 +621,21 @@ class LLM:
             return max_tokens
         return max(max_tokens, floor)
 
+    def _reasons_internally(self) -> bool:
+        """Does this model spend the output budget on thinking before speaking?
+
+        Two routes in, and the order matters: the name table answers instantly
+        for models it happens to know, and the roster answers for every model
+        that has ever proved it by going silent — including the ones released
+        after this code was written.
+        """
+        if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
+            return True
+        return is_known_reasoning_model(self.provider, self.model)
+
     def _effective_budget(self, max_tokens: int) -> int:
         """Tokens the next leg will really be allowed to spend."""
-        if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
+        if self._reasons_internally():
             return self._reasoning_budget(max_tokens)
         return max_tokens
 
