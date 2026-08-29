@@ -76,8 +76,6 @@ def _plan_max_tokens() -> int:
     return value if value > 0 else _PLAN_MAX_TOKENS_DEFAULT
 
 
-
-
 @dataclass
 class PlannerOutput:
     reasoning: str
@@ -125,7 +123,12 @@ class LLMPlanner:
         llm: LLM,
         registry: ToolRegistry,
         self_documentation_paths: tuple[str, ...] | None = None,
+        workspace: str | None = None,
     ):
+        # workspace: None значит "адреса нет" — ни чтения уроков, ни квитанций.
+        # Хранилище называет runtime при сборке; библиотека без адреса молчит.
+        # Иначе каждый тест, строящий планировщик, писал бы в живые журналы.
+        self.workspace = workspace
         self.llm = llm
         self.registry = registry
         # Run-scoped set of tool names to hide from the planner surface. Empty
@@ -150,6 +153,38 @@ class LLMPlanner:
                 and not p.startswith(("/", "\\"))
                 and ":" not in p
             )
+
+    # Авторство агента, груз 2б 2026-08-29 (docs/CODE_NOTES.md).
+    def lesson_block_for_prompt(self) -> str:
+        """Return the distilled-lessons block for the planner prompt.
+
+        Delivery is best-effort: any failure returns "" so that lesson
+        delivery can never crash planning. The injection receipt is written
+        on delivery, not on plan success.
+        """
+        try:
+            if not self.workspace:
+                return ""
+
+            from core.causal_claim_store import (
+                distilled_lessons,
+                lesson_block_for_prompt,
+            )
+
+            block = lesson_block_for_prompt(self.workspace)
+            if not block:
+                return ""
+
+            from core.lesson_provenance import record_lesson_injections
+            record_lesson_injections(
+                self.workspace,
+                distilled_lessons(self.workspace),
+                consumer="planner.plan",
+            )
+        except Exception:  # noqa: BLE001 — доставка не роняет планирование
+            return ""
+        else:
+            return "\n" + block
 
     def plan(
         self,
@@ -182,6 +217,7 @@ class LLMPlanner:
         # actually installed on this machine (from .env BLENDER_PATH etc.)
         host_block = _build_host_tools_block()
         effective_system = PLANNER_SYSTEM + host_block if host_block else PLANNER_SYSTEM
+        effective_system += self.lesson_block_for_prompt()  # живой путь уроков
         raw = _active_llm.complete(
             system=effective_system,
             user=safe_prompt,
