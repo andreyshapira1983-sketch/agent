@@ -795,6 +795,10 @@ class TestLargeOutputContinuation:
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch):
         monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        # Learned state is state: a roster left by an earlier test would
+        # answer "this model reasons" and lift the budget under a test
+        # that is asking what an UNKNOWN model gets.
+        monkeypatch.delenv("AGENT_REASONING_ROSTER", raising=False)
         monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
 
     # --- config helpers ---------------------------------------------------
@@ -1051,6 +1055,10 @@ class TestStructuredAnswersAreNotBlindlyStitched:
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch):
         monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        # Learned state is state: a roster left by an earlier test would
+        # answer "this model reasons" and lift the budget under a test
+        # that is asking what an UNKNOWN model gets.
+        monkeypatch.delenv("AGENT_REASONING_ROSTER", raising=False)
         monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
 
     #: Shaped like the real failure: leg 1 is inside a JSON string, leg 2 is not.
@@ -1156,6 +1164,10 @@ class TestEscalationStartsFromTheEffectiveBudget:
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch):
         monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        # Learned state is state: a roster left by an earlier test would
+        # answer "this model reasons" and lift the budget under a test
+        # that is asking what an UNKNOWN model gets.
+        monkeypatch.delenv("AGENT_REASONING_ROSTER", raising=False)
         monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
 
     @staticmethod
