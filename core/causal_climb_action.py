@@ -170,6 +170,7 @@ def explain_causal_observation(
     return CampaignActionOutcome(
         result="completed",
         llm_calls_spent=max(0, _llm_calls(agent) - spent_before),
+        subject=record.fingerprint,
         artifact=(
             f"заявка {key}: {len(claim.explanations)} конкурирующих объяснения "
             f"с предсказаниями для '{record.fingerprint}'; выбор — за различением"
@@ -424,6 +425,7 @@ def run_claim_experiment(
     })
     return CampaignActionOutcome(
         result="completed",
+        subject=key,
         artifact=(
             f"заявка {key}: экспериментальных вердиктов {verdicts}"
             + (f", причина доказана вмешательством: '{chosen[:60]}'"
@@ -508,6 +510,7 @@ def discriminate_causal_claim(
     })
     return CampaignActionOutcome(
         result="completed",
+        subject=key,
         artifact=(
             f"заявка {key}: вердиктов {verdicts}, живых {len(alive)}"
             + (f", выбрано '{chosen[:60]}'" if chosen.strip() else "")
