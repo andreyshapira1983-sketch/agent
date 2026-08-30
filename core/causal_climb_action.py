@@ -113,6 +113,9 @@ def explain_causal_observation(
 
     spent_before = _llm_calls(agent)
     try:
+        # Кормление реальностью (проект агента): без списка модель выдумывала
+        # имена журналов, и суд давился неведением — замер 2/2 кампаний.
+        inventory = _live_inventory_block(workspace)
         raw = str(agent.llm.complete(
             system=_SYSTEM_PROMPT,
             user=(
@@ -120,6 +123,7 @@ def explain_causal_observation(
                 f"Наблюдение: {record.observed_mismatch[:1200]}\n"
                 f"Улики: {', '.join(record.evidence_refs[:6])}\n"
                 f"Повторений: {record.occurrences}"
+                + (f"\n{inventory}" if inventory else "")
             ),
             max_tokens=600, temperature=0.4,
         ) or "")
@@ -128,6 +132,9 @@ def explain_causal_observation(
                         fingerprint=record.fingerprint)
 
     pairs = _parse_hypotheses(raw)
+    # Ворота рождения (проект агента): проба в несуществующий файл убивает
+    # пару здесь, а «меньше двух выживших» решает существующий порог ниже.
+    pairs = _pairs_with_real_targets(pairs, workspace)
     if len(pairs) < 2:
         # Ворота качества: гипотеза без предсказания мертва, а одна выжившая —
         # подтверждение задним числом, не расследование.
@@ -508,3 +515,37 @@ def discriminate_causal_claim(
         ),
         work_done=True,
     )
+
+
+# --- Ворота рождения проб и кормление реальностью: проект и обе функции —
+# авторства агента (GUARD_DESIGN + два груза 2026-08-30, оба с первого захода);
+# курьер перенёс дословно. Замер 2/2: объяснитель выдумывал имена журналов,
+# суд честно давился неведением, кампании гасли датчиком петли.
+def _pairs_with_real_targets(pairs, workspace):
+    """Пробу судят при рождении, чтобы суд не давился неведением."""
+    survivors = []
+    for statement, predicts in pairs:
+        probe = parse_probe(predicts)
+        if probe is None:
+            survivors.append((statement, predicts))
+            continue
+        if (Path(workspace) / probe.rel_path).exists():
+            survivors.append((statement, predicts))
+    return survivors
+
+
+def _live_inventory_block(workspace):
+    """Модель пишет пробы по списку настоящих файлов, а не по памяти."""
+    lines = []
+    for dirname in _PROBE_DIRS:
+        d = Path(workspace) / dirname
+        if not d.is_dir():
+            continue
+        names = sorted(
+            p.name for p in d.iterdir() if p.is_file()
+        )[:40]
+        if names:
+            lines.append(f"{dirname}/: {', '.join(names)}")
+    if not lines:
+        return ""
+    return "Существующие файлы для проб (только эти пути годятся в [probe: ...]):\n" + "\n".join(lines)
