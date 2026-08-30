@@ -387,9 +387,11 @@ def test_recorded_surface_sizes():
     инструмент, не ежедневный.
     """
     in_banner = sum(1 for spec in reg.COMMANDS if spec.in_startup_summary)
-    assert in_banner == 74
-    assert len(reg.COMMANDS) == 95
-    assert len(reg.all_tokens()) == 145
+    # 95 -> 96, 74 -> 75, 145 -> 146 (2026-08-30): `:self-issue-retire` —
+    # дверь человеческого вердикта для реестра, умевшего только копить.
+    assert in_banner == 75
+    assert len(reg.COMMANDS) == 96
+    assert len(reg.all_tokens()) == 146
 
 
 # ── deliberate exclusions ────────────────────────────────────────────────────

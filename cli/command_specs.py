@@ -229,6 +229,14 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         in_startup_summary=True,
     ),
     CommandSpec(
+        canonical=":self-issue-retire",
+        description="Retire a self-improvement issue by operator verdict.",
+        category="Self-improvement (self-build / self-repair) — human-gated",
+        handler_key="self_issue_retire",
+        usage="<fingerprint> <reason>",
+        in_startup_summary=True,
+    ),
+    CommandSpec(
         canonical=":self-apply-run",
         description="run one approved low-risk self-apply proposal",
         category="Self-improvement (self-build / self-repair) — human-gated",

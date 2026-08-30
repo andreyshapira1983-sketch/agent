@@ -62,6 +62,7 @@ from cli.commands_approval import (
     _handle_approval_run,
     _handle_approval_triage,
     _handle_best_next_action,
+    _handle_self_issue_retire,
     _handle_self_issue_verify,
     _handle_standing_grant,
 )
@@ -389,6 +390,9 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
 
     if head == ":self-issue-verify":
         return _handle_self_issue_verify(rest.strip(), agent, workspace)
+
+    if head == ":self-issue-retire":
+        return _handle_self_issue_retire(rest.strip(), agent, workspace)
 
     if head in {":ack", ":acknowledge"}:
         return _handle_alert_ack(rest.strip(), agent, workspace)

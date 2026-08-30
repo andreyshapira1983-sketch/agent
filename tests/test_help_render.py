@@ -123,8 +123,9 @@ def test_banner_tokens_agree_with_the_registry_flag():
     assert resolved == flagged
     # 71/72 -> 72/73 (2026-08-13): `:refresh-models` вошёл в баннер (R7).
     # 72/73 -> 73/74 (2026-08-15): `:causal` — водитель причинной лестницы.
-    assert len(flagged) == 74
-    assert len(help_module.BANNER_TOKENS) == 75
+    # 74 -> 75 (2026-08-30): `:self-issue-retire` — дверь человеческого вердикта.
+    assert len(flagged) == 75
+    assert len(help_module.BANNER_TOKENS) == 76
 
 
 # ── shape of the layout itself ───────────────────────────────────────────────
@@ -137,7 +138,7 @@ def test_layout_entry_kinds_are_known_and_counted():
     # Frozen shape: 84 lines render from the registry, 44 are verbatim (24
     # `flags:` continuations, 9 irregular command lines, 2 non-command lines,
     # 7 prose lines, 2 headings), 1 blank separates the two blocks.
-    assert kinds == {"cmd": 86, "raw": 44, "blank": 1}  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28, MIR-138)
+    assert kinds == {"cmd": 86, "raw": 45, "blank": 1}  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28, MIR-138); +1 raw: :self-issue-retire (2026-08-30)
 
 
 def test_help_module_imports_only_the_registry():

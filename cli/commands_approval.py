@@ -277,6 +277,37 @@ def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> b
     return True
 
 
+# Авторство агента (утренний груз 2026-08-30): дверь человеческого вердикта.
+# Вердикт помечен retired-by-operator — охрана close_proven_issue его со
+# свидетелем не спутает; у автономного тика дороги сюда нет.
+def _handle_self_issue_retire(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    from core.self_improvement_issues import (
+        DEFAULT_ISSUE_PATH,
+        SelfImprovementIssueRegistry,
+        retire_issue,
+    )
+
+    parts = rest.split(maxsplit=1)
+    if len(parts) < 2:
+        print("Usage: :self-issue-retire <fingerprint> <reason>", file=sys.stderr)
+        return True
+    fingerprint, reason = parts
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    ok = retire_issue(registry, fingerprint, reason=reason)
+    if ok:
+        print(f"{fingerprint} retired by operator verdict: {reason}")
+    else:
+        print(
+            f"{fingerprint} refused (unknown, already resolved, or empty reason)",
+            file=sys.stderr,
+        )
+    agent.log.log(
+        "self_improvement_issue_retired",
+        {"fingerprint": fingerprint, "reason": reason, "ok": ok},
+    )
+    return True
+
+
 def _handle_alert_ack(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """Acknowledge an advisory alert so it stops dominating :best-next-action.
 

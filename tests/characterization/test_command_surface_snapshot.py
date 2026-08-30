@@ -53,19 +53,21 @@ FROZEN = {
     # Автомат ЧИТАЛ стоячий грант, а завести его не мог никто (MIR-166).
     # 144 -> 145 (2026-08-28): `:receipts` — накопленную улику стало чем
     # спросить (MIR-138).
-    "dispatched": 145,
+    # 145 -> 146 (2026-08-30): `:self-issue-retire` — дверь человеческого
+    # вердикта: реестр умел только копить, 29 вечных записей глушили весы.
+    "dispatched": 146,
     "pre_dotenv_fast_paths": 2,
     "repl_control_tokens": 4,
     # 96 at 9daa9bf; 98 after the two documented help gaps were closed
     # (`:refresh-models` and `:help` itself were added to the page).
-    "help_tokens": 102,  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28)
+    "help_tokens": 103,  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28); +1: :self-issue-retire (2026-08-30)
     # One printed token (`:task-begin`) is a REPL block token rather than a
     # dispatched command — see the divergence tests below.
     # 72/71 -> 73/72 (2026-08-13): `:refresh-models` joined the banner beside
     # its read-only sibling — the visible half of the catalog pair had steered
     # the operator to a usage refusal while the catalog stayed expired (R7).
-    "startup_tokens": 75,  # +1: :standing-grant (2026-08-26)
-    "startup_dispatched_tokens": 74,  # +1: :standing-grant (2026-08-26)
+    "startup_tokens": 76,  # +1: :standing-grant (2026-08-26); +1: :self-issue-retire (2026-08-30)
+    "startup_dispatched_tokens": 75,  # +1: :standing-grant (2026-08-26); +1: :self-issue-retire (2026-08-30)
     "nl_intent_kinds": 23,
 }
 

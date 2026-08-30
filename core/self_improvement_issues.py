@@ -327,3 +327,40 @@ def close_proven_issue(registry: SelfImprovementIssueRegistry, fingerprint: str)
         evidence="closed by close_proven_issue: red-before-fix and green-after-fix present",
     )
     return result is not None
+
+
+def retire_issue(registry, fingerprint, *, reason) -> bool:
+    """Retire an issue only via the operator CLI; the verdict line starts with retired-by-operator, which close_proven_issue cannot confuse with a witness label, and autonomous ticks have no path to this function.
+
+    Retire an issue by fingerprint, appending a retired-by-operator evidence line.
+
+    Behavior:
+    1. If reason is empty after strip -> return False, change nothing.
+    2. If no issue with this fingerprint exists -> return False.
+    3. If the issue is already resolved -> return False, do not touch evidence.
+    4. Otherwise: transition to resolved, appending 'retired-by-operator|<ISO time>|<reason>' to the evidence. Return True.
+    """
+    if not reason.strip():
+        return False
+
+    issue = None
+    for candidate in registry.list():
+        if candidate.fingerprint == fingerprint:
+            issue = candidate
+            break
+
+    if issue is None:
+        return False
+
+    if issue.status == "resolved":
+        return False
+
+    now = datetime.now(timezone.utc).isoformat()
+    evidence_line = f"retired-by-operator|{now}|{reason}"
+    updated = registry.transition(
+        status="resolved",
+        observed_at=now,
+        fingerprint=fingerprint,
+        evidence=evidence_line,
+    )
+    return updated is not None
