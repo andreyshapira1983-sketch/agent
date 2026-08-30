@@ -74,6 +74,7 @@ Commands:
   :approval-triage                read-only triage: clusters/duplicates/stale + advice
   :best-next-action [--json]      choose the single most important next action (advisory)
   :self-issue-verify <fingerprint> run the issue's fixed targeted verifier and resolve on green
+  :self-issue-retire <fingerprint> <reason> retire an issue by operator verdict (no witness needed)
   :ack <action> [--ttl H] [why]   acknowledge an advisory alert so it stops dominating BNA
   :ack-list                       list active acknowledgements
   :ack-clear <action>             restore an acknowledged alert to the top-pick race

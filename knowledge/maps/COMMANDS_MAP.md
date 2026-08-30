@@ -111,6 +111,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:self-task-build <approval_id>` | Stage B: implement one approved task. |
 | `:self-apply-run <inbox_id>` | Apply an approved change (trusted lane). |
 | `:self-issue-verify <fingerprint>` | Verify a self-improvement issue. |
+| `:self-issue-retire <fingerprint> <reason>` | Retire a self-improvement issue by operator verdict. |
 | `:value-review <item_id> <verdict> [note]` | Human value-review verdict (TD-032). |
 | `:value-review-list` | List value-review items. |
 
