@@ -52,6 +52,15 @@ from core.campaign_ledger import (
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 from core.run_context import run_cost_envelope
 
+# Предметный страж повторов — авторство агента (DEDUP_DESIGN/DEDUP_TIMING,
+# WEAVE ред.2 §1): белый список статичен и известен до исполнения.
+_SUBJECT_AWARE_ACTIONS = frozenset({
+    "explain_causal_observation",
+    "discriminate_causal_claim",
+    "run_claim_experiment",
+})
+_MAX_STEPS_PER_ACTION = 10
+
 CampaignStatus = Literal["completed", "stopped"]
 
 
@@ -119,6 +128,28 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
     )
 
 
+def _repeat_reason(action_name, hit_ceiling):
+    """Return the reason a repeated action is being skipped, based on whether it hit the per-campaign step ceiling."""
+    if hit_ceiling:
+        return f"потолок шагов действия за кампанию: {_MAX_STEPS_PER_ACTION} — одно действие не монополизирует прогон"
+    return f"already attempted '{action_name}' this campaign; the earlier pass did not clear the signal — skipping re-execution"
+
+
+def _bank_signature(agent, signature, outcome, subject_aware, attempted, action_steps):
+    """Return True if the action is stalled (subject already banked), else False, banking the appropriate composite or bare signature."""
+    if not subject_aware:
+        attempted.add(signature)
+        return False
+    action_steps[signature] = action_steps.get(signature, 0) + 1
+    subject = getattr(outcome, "subject", "") or ""
+    banked = f"{signature}:{subject}" if subject else signature
+    stalled = banked in attempted
+    if stalled:
+        _log(agent, "campaign_subject_stalled", {"action": signature, "subject": subject})
+    attempted.add(banked)
+    return stalled
+
+
 def _utc_now() -> datetime:
     from datetime import timezone
 
@@ -156,6 +187,7 @@ def run_campaign(
 
     records: list[CampaignCycleRecord] = []
     attempted_signatures: set[str] = set()
+    action_steps: dict[str, int] = {}  # WEAVE ред.2 §1: шаги по имени действия
     # MIR-149: единственная память, переживающая запуски, — леджер; страж
     # повторов слеп к траектории (146 из 150 циклов были циклом №1).
     signature_spend = _cross_run_signature_spend(ledger)
@@ -306,7 +338,12 @@ def run_campaign(
                 continue
 
             signature = action.action
-            if signature in attempted_signatures:
+            subject_aware = signature in _SUBJECT_AWARE_ACTIONS
+            hit_ceiling = (
+                subject_aware
+                and action_steps.get(signature, 0) >= _MAX_STEPS_PER_ACTION
+            )
+            if hit_ceiling or (not subject_aware and signature in attempted_signatures):
                 idle_streak += 1
                 streak_repeats = True
                 repeat_cycles += 1
@@ -325,10 +362,7 @@ def run_campaign(
                     llm_calls_spent=0,
                     cost_units_spent=0,
                     result="repeat",
-                    reason=(
-                        f"already attempted '{action.action}' this campaign; the "
-                        f"earlier pass did not clear the signal — skipping re-execution"
-                    ),
+                    reason=_repeat_reason(action.action, hit_ceiling),
                 )
                 ledger.append(record)
                 records.append(record)
@@ -362,7 +396,6 @@ def run_campaign(
                     break
                 continue
 
-            idle_streak = 0
             streak_repeats = False
             with _cycle_cost_envelope(agent, config, cost_units_used):
                 outcome = execute(
@@ -374,14 +407,17 @@ def run_campaign(
                 )
             llm_calls_used += max(0, outcome.llm_calls_spent)
             cost_units_used += max(0, outcome.cost_units_spent)
-            if outcome.proposal:
-                proposals += 1
-            if outcome.artifact:
-                artifacts += 1
+            proposals += int(outcome.proposal is not None)
+            artifacts += int(outcome.artifact is not None)
 
             # MIR-117: подпись банится попыткой, полезность — работой (см. типы).
             if outcome.ran:
-                attempted_signatures.add(signature)
+                stalled = _bank_signature(
+                    agent, signature, outcome, subject_aware,
+                    attempted_signatures, action_steps,
+                )
+                idle_streak = (idle_streak + 1) * int(stalled)
+                streak_repeats = streak_repeats or stalled
             if outcome.did_work:
                 useful_cycles += 1
             # MIR-149: межзапусковая память цены пополняется и внутри запуска.
@@ -411,6 +447,10 @@ def run_campaign(
             _log(agent, "campaign_cycle_work", record.to_dict())
             _emit_cycle(record)
             consecutive_errors = 0
+            if idle_streak >= config.max_idle_streak:
+                stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
+                status = "stopped"
+                break
 
             recent_actions.append(action.action)
             # Продуктивность = видимый ПРОДУКТ, не занятость; нога «строка
