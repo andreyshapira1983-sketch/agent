@@ -740,6 +740,43 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "journal_append":
+        # Contract: exactly path (str) and record (dict) — both required.
+        required = ("path", "record")
+        missing = [k for k in required if not args.get(k)]
+        if missing:
+            warnings.append(
+                f"step[{idx}]: journal_append missing required args "
+                f"{missing!r}, dropping step"
+            )
+            return None
+        # record must be a dict, not a string.
+        if not isinstance(args["record"], dict):
+            warnings.append(
+                f"step[{idx}]: journal_append record must be a dict, "
+                f"got {type(args['record']).__name__}, dropping step"
+            )
+            return None
+        # Drop any extra arguments the planner accidentally adds.
+        extra = sorted(set(args.keys()) - set(required))
+        if extra:
+            warnings.append(
+                f"step[{idx}]: journal_append dropping unexpected args {extra!r}"
+            )
+        path = args["path"]
+        return {
+            "tool": "journal_append",
+            "arguments": {
+                "path": path,
+                "record": args["record"],
+            },
+            "label": f"journal_append:{path}",
+            "expected_outcome": (
+                "Returns a dict with path (str) and appended (bool). "
+                "A ValueError about path boundaries is protection, not a bug."
+            ),
+        }
+
     # ----- spawn_subagent: agent-as-tool pattern -----
     if tool_name == "spawn_subagent":
         from core.subagent_runner import _SAFE_SUBAGENT_TOOLS

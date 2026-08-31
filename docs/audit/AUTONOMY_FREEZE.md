@@ -315,6 +315,7 @@ Repairs of registered defects were never frozen and are not listed.
 | DeepSeek provider wiring | «положил $5 на deepseek — запусти и посмотрим» (2026-08-28) | generic capability — the class the freeze explicitly permits |
 | conversation judge, stage 1 (`core/conversation_contract.py`) | «надо доделать вторую половину человеческого разговора» (2026-08-28) | neither invariant; a human-boundary form contract, developer-owned by its own honest table — the freeze's core stays unresolved by it |
 | tools/memory_bank.py | «самое первое - долговременная память: он должен запоминать то, что положено... сам» (2026-08-31) | serves invariant I — the agent itself persists and recalls what it is supposed to remember, without external verdicts; BLOCKED for the unsupervised path |
+| tools/journal_append.py | «Сначала реестр... пусть агент сам сначала вычитает реальные capabilities инструмента» (2026-09-01) | Appends state-journal entries under lock and envelope, born from the belt census that no tool can append; the agent must first read the tool's real capabilities from the registry before relying on this append. ; BLOCKED for the unsupervised path |
 
 Modules born of surgery on registered defects (repairs were never frozen):
 `anatomy_groups.py` (MIR-180 data relocation), `autonomous_runtime_proposals.py`
