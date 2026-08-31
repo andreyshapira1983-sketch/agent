@@ -232,12 +232,23 @@ def parse_probe(predicts: str) -> Probe | None:
     )
 
 
+AWAITING_EXPERIMENT_MARK = "awaiting_experiment"
+
+
+def awaiting_experiment(claim) -> bool:
+    """True, если заявка помечена "ждёт эксперимента" (метка присутствует в claim.notes).
+    Чистая функция, только чтение."""
+    return AWAITING_EXPERIMENT_MARK in claim.notes
+
+
 def discriminable_claims(workspace: str | Path):
     """Заявки без выбранного и без опровержения, где есть хоть одна живая проба."""
     out = []
     for claim, extra in load_claims(workspace):
         if claim.chosen.strip() or claim.refuted_reason.strip():
             continue
+        if awaiting_experiment(claim):
+            continue  # помеченные "ждёт эксперимента" пропускаются судом на входе
         probed = any(
             e.alive and parse_probe(e.predicts) is not None
             for e in claim.explanations
@@ -494,6 +505,13 @@ def discriminate_causal_claim(
                      or refuted_reason != claim.refuted_reason
                      or new_explanations != list(claim.explanations)))
     if not advanced:
+        # Суд сам помечает исчерпанную заявку "ждёт эксперимента" (решение
+        # агента, awaiting_experiment.py): пробы не развели соперников — дальше
+        # только вмешательство; фильтр выше её больше не возьмёт.
+        marked = dataclasses.replace(
+            claim, notes=(*claim.notes, AWAITING_EXPERIMENT_MARK))
+        save_claim(marked, workspace=ws, directive=extra["directive"],
+                   machine_action=extra["machine_action"])
         return _decline(agent, "ни одного вердикта: пробы не решили ничего",
                         claim_key=extra["key"])
 
