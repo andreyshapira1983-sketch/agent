@@ -11,6 +11,7 @@ Minimal contract:
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -263,3 +264,58 @@ class PersistentMemoryStore:
         ]
         hits.sort(key=lambda r: str(r.created_at), reverse=True)
         return hits[:limit]
+
+
+# ---------- the agent's own write door (his design, his redactions) ----------
+# Contract: memory_door_write(store, policy, text, kind, provenance) -> mem_id | None.
+# Conclusions pass, raw code / duplicates / frozen sources / unmapped kinds do not.
+
+_CODE_PUNCT_RE = re.compile(r"[:=+\[\](){}<>]|->|;\s*$")
+_WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]{2,}")
+
+
+def _count_code_punct(text):
+    return len(_CODE_PUNCT_RE.findall(text))
+
+
+def _count_words(text):
+    return len(_WORD_RE.findall(text))
+
+
+def _looks_like_code(text):
+    words = _count_words(text)
+    punct = _count_code_punct(text)
+    if punct >= 1 and words <= 8:
+        return True
+    if words >= 10 and punct == 0:
+        return False
+    if punct >= 2 and words <= 12:
+        return True
+    return False
+
+
+CONSENT_TAG_MAP = {
+    "[ВЫВОД, проверен боем]": "decision",
+    "[ВЫВОД, замерен N раз]": "fact",
+    "[НАБЛЮДЕНИЕ, один день]": "insight",
+    "[ГИПОТЕЗА, не проверена]": "rejected",
+}
+
+def memory_door_write(store, policy, text, kind, provenance):
+    text = (text or '').strip()
+    kind = (kind or '').strip()
+    provenance = (provenance or '').strip()
+    if not text or not kind or not provenance:
+        return None
+    if _looks_like_code(text):
+        return None
+    consent_tag = CONSENT_TAG_MAP.get(kind)
+    if consent_tag is None:
+        return None
+    tags = [kind, provenance, consent_tag]
+    decision = policy.decide(text, tags, source="agent-auto", existing=store.load())
+    if decision.decision != "save":
+        return None
+    record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
+    store.save(record)
+    return record.id
