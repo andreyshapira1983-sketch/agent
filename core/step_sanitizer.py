@@ -708,6 +708,38 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "memory_bank":
+        # Contract: exactly text, kind, provenance — all three strings, all required.
+        required = ("text", "kind", "provenance")
+        missing = [k for k in required if not args.get(k)]
+        if missing:
+            warnings.append(
+                f"step[{idx}]: memory_bank missing required args "
+                f"{missing!r}, dropping step"
+            )
+            return None
+        # Drop any extra arguments the planner accidentally adds.
+        extra = sorted(set(args.keys()) - set(required))
+        if extra:
+            warnings.append(
+                f"step[{idx}]: memory_bank dropping unexpected args {extra!r}"
+            )
+        kind = args["kind"]
+        return {
+            "tool": "memory_bank",
+            "arguments": {
+                "text": args["text"],
+                "kind": kind,
+                "provenance": args["provenance"],
+            },
+            "label": f"memory_bank:{kind}",
+            "expected_outcome": (
+                "Returns a dict with banked (bool), mem_id (str|None), "
+                "and kind (str). A None return means the gate refused "
+                "the write — that is a gate decision, not an error."
+            ),
+        }
+
     # ----- spawn_subagent: agent-as-tool pattern -----
     if tool_name == "spawn_subagent":
         from core.subagent_runner import _SAFE_SUBAGENT_TOOLS

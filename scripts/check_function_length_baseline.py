@@ -39,7 +39,7 @@ SKIP_DIRS = frozenset({
 #: "path:function" -> ceiling. Measured 2026-08-04.
 WATCH: dict[str, int] = {
     "core/loop.py:AgentLoop._run_inner": 427,  # замер 417 (2213 до раскола) + запас 10
-    "core/step_sanitizer.py:sanitize_step": 668,
+    "core/step_sanitizer.py:sanitize_step": 697,  # +29 (2026-08-31): added memory_bank dispatch block; one tool branch is not a reason to cut (решение и подпись — агента, sanitizer_ratchet.md).
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 390,  # уехал целиком из core/loop.py
