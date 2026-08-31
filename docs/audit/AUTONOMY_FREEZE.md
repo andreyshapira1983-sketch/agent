@@ -314,6 +314,7 @@ Repairs of registered defects were never frozen and are not listed.
 | mentor question channel (`core/mentor_channel.py`, MIR-178) | «бери третий канал» (2026-08-27) | serves I with a recorded non-interference boundary; advisory only |
 | DeepSeek provider wiring | «положил $5 на deepseek — запусти и посмотрим» (2026-08-28) | generic capability — the class the freeze explicitly permits |
 | conversation judge, stage 1 (`core/conversation_contract.py`) | «надо доделать вторую половину человеческого разговора» (2026-08-28) | neither invariant; a human-boundary form contract, developer-owned by its own honest table — the freeze's core stays unresolved by it |
+| tools/memory_bank.py | «самое первое - долговременная память: он должен запоминать то, что положено... сам» (2026-08-31) | serves invariant I — the agent itself persists and recalls what it is supposed to remember, without external verdicts; BLOCKED for the unsupervised path |
 
 Modules born of surgery on registered defects (repairs were never frozen):
 `anatomy_groups.py` (MIR-180 data relocation), `autonomous_runtime_proposals.py`
