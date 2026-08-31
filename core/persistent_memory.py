@@ -298,7 +298,6 @@ CONSENT_TAG_MAP = {
     "[ВЫВОД, проверен боем]": "decision",
     "[ВЫВОД, замерен N раз]": "fact",
     "[НАБЛЮДЕНИЕ, один день]": "insight",
-    "[ГИПОТЕЗА, не проверена]": "rejected",
 }
 
 def memory_door_write(store, policy, text, kind, provenance):
