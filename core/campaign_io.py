@@ -55,6 +55,7 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
 
 def _default_gather_signals(
     agent: Any, workspace: Any, approval_inbox: Any, goal: str = "",
+    exhausted_actions: Any = None,
 ) -> dict[str, Any]:
     from core.alert_ack import AlertAckStore
     from core.approval_inbox import ApprovalInbox
@@ -125,6 +126,7 @@ def _default_gather_signals(
         discriminable_claims_count=_discriminable_claim_count(ws),
         experimentable_claims_count=_experimentable_claim_count(ws),
         birth_candidates=_birth_candidate_count(ws),
+        exhausted_actions=frozenset(exhausted_actions or ()),
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
 

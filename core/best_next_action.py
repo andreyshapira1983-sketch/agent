@@ -425,6 +425,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     fresh_self_improvement_failure: bool = False,
     unexplained_observations_count: int = 0,
     birth_candidates: int = 0,
+    exhausted_actions: frozenset[str] | set[str] | None = None,
     discriminable_claims_count: int = 0,
     experimentable_claims_count: int = 0,
 ) -> BestNextAction:
@@ -440,12 +441,21 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     """
     candidates: list[BestNextAction] = []
 
+    exhausted = frozenset(exhausted_actions or ())
+
     def admit(candidate: BestNextAction | None, grounds: str) -> None:
         """Tag the candidate with WHERE its grounds came from, at the one place
         where the input it read is visible. Derived, never assigned: a
         generator taking `goal` rests on the operator's text, one taking live
         signals on observation, one reading the durable registry on records
         carried from earlier runs."""
+        # Насыщенное потолком действие не допускается в гонку (вердикт агента,
+        # CEILING_VERDICT путь (а)): знание о потолке рождается в кампании и
+        # едет сюда сборщиком. Критические кандидаты (демон упал, тик сломан)
+        # фильтру не подлежат ПО ПОСТРОЕНИЮ: в exhausted_actions попадают
+        # только предметные имена из action_steps кампании.
+        if candidate is not None and candidate.action in exhausted:
+            return
         if candidate is not None:
             candidates.append(replace(candidate, grounds=grounds))
 

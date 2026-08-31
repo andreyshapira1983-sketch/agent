@@ -277,10 +277,24 @@ def run_campaign(
             # видима выбирателю действий (живой замер 2026-08-15 — голова
             # выбрала «напиши контракт», руки сделали привычный ремонт).
             # Старые инжектированные сборщики трёх аргументов не ломаются.
+            # Исчерпанные потолком предметные действия не должны выигрывать
+            # гонку (вердикт агента, CEILING_VERDICT): их имена едут сборщику
+            # той же терпимой передачей, что и цель.
+            exhausted_actions = frozenset(
+                name for name, steps in action_steps.items()
+                if steps >= _MAX_STEPS_PER_ACTION
+                and name in _SUBJECT_AWARE_ACTIONS
+            )
             try:
-                signals = gather(agent, workspace, approval_inbox, goal=config.goal)
+                signals = gather(agent, workspace, approval_inbox,
+                                 goal=config.goal,
+                                 exhausted_actions=exhausted_actions)
             except TypeError:
-                signals = gather(agent, workspace, approval_inbox)
+                try:
+                    signals = gather(agent, workspace, approval_inbox,
+                                     goal=config.goal)
+                except TypeError:
+                    signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
             goal_drove_cycles += int(action.grounds == "operator_goal")  # MIR-163
             now = now_fn()
