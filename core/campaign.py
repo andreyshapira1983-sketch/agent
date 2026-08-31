@@ -58,6 +58,7 @@ _SUBJECT_AWARE_ACTIONS = frozenset({
     "explain_causal_observation",
     "discriminate_causal_claim",
     "run_claim_experiment",
+    "birth_experiment_specs",
 })
 _MAX_STEPS_PER_ACTION = 10
 
