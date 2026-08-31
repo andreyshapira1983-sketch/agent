@@ -81,11 +81,13 @@ def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
     return out
 
 
-def _decline(agent: Any, reason: str, **payload: Any) -> CampaignActionOutcome:
+def _decline(agent: Any, reason: str, *, llm_calls_spent: int = 0,
+             **payload: Any) -> CampaignActionOutcome:
     """Отказ не носит продукта: artifact = работа (MIR-117), а причина —
-    в журнале `causal_climb_declined`, молчаливых отказов нет."""
+    в журнале `causal_climb_declined`, молчаливых отказов нет. Потраченные
+    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3)."""
     _log(agent, "causal_climb_declined", {"reason": reason, **payload})
-    return CampaignActionOutcome(result="failed")
+    return CampaignActionOutcome(result="failed", llm_calls_spent=llm_calls_spent)
 
 
 def _log(agent: Any, event: str, payload: dict) -> None:
@@ -233,6 +235,68 @@ def parse_probe(predicts: str) -> Probe | None:
 
 
 AWAITING_EXPERIMENT_MARK = "awaiting_experiment"
+#: Нота невыразимости (SPEC_WEAVE §2, авторство агента): развод гипотез не
+#: выражается песочными целями — заявка ждёт слова человека; вечерний отчёт
+#: находит все такие одним грепом по "spec_unexpressible".
+SPEC_UNEXPRESSIBLE_NOTE = "spec_unexpressible_in_sandbox"
+
+
+def _birth_experiment_spec(agent, claim):
+    """Build a sandbox experiment spec that splits two competing live hypotheses, or None if impossible."""
+    try:
+        alive = [e for e in claim.explanations if e.alive]
+        if len(alive) < 2:
+            return None
+
+        h1, h2 = alive[0], alive[1]
+        targets = ", ".join(_EXPERIMENT_TARGETS.keys())
+        system = (
+            "Ты разводишь ДВЕ конкурирующие гипотезы одним песочным экспериментом. "
+            "Верни РОВНО ОДНУ строку в формате [exp: цель | A=рукав для гипотезы 1 | B=рукав для гипотезы 2 | след=наблюдаемое различие]. "
+            "Цель - только из списка. Не можешь выразить развод доступными целями - верни ровно слово НЕВЫРАЗИМО."
+        )
+        user = (
+            f"Гипотеза 1: {h1.predicts}\n"
+            f"Гипотеза 2: {h2.predicts}\n"
+            f"Доступные цели: {targets}"
+        )
+        response = agent.llm.complete(
+            system=system, user=user, max_tokens=300, temperature=0.2
+        )
+        spec_text = response
+        if "НЕВЫРАЗИМО" in spec_text:
+            return None
+        if parse_experiment(spec_text) is None:
+            return None
+    except Exception:  # noqa: BLE001 — рождение не роняет суд
+        return None
+    else:
+        return spec_text
+
+
+def _apply_born_spec(claim, extra, spec_text, workspace):
+    """Applies a born specification to the first alive hypothesis and saves the updated claim."""
+    import dataclasses
+
+    alive = [e for e in claim.explanations if e.alive]
+    if not alive:
+        return
+    hypothesis = alive[0]
+    new_predicts = hypothesis.predicts + " " + spec_text
+    replaced = dataclasses.replace(hypothesis, predicts=new_predicts)
+    new_explanations = tuple(
+        replaced if e is hypothesis else e for e in claim.explanations
+    )
+    new_notes = tuple(n for n in claim.notes if n != AWAITING_EXPERIMENT_MARK)
+    new_claim = dataclasses.replace(
+        claim, explanations=new_explanations, notes=new_notes
+    )
+    save_claim(
+        new_claim,
+        workspace=workspace,
+        directive=extra["directive"],
+        machine_action=extra["machine_action"],
+    )
 
 
 def awaiting_experiment(claim) -> bool:
@@ -507,7 +571,9 @@ def discriminate_causal_claim(
     if not advanced:
         # Суд сам помечает исчерпанную заявку "ждёт эксперимента" (решение
         # агента, awaiting_experiment.py): пробы не развели соперников — дальше
-        # только вмешательство; фильтр выше её больше не возьмёт.
+        # только вмешательство; фильтр выше её больше не возьмёт. Рождение
+        # спецификации ЖИВЁТ НЕ ЗДЕСЬ: суд без модели на любом пути — его
+        # конституция (INVARIANT_CLASH, вердикт агента: путь (б)).
         marked = dataclasses.replace(
             claim, notes=(*claim.notes, AWAITING_EXPERIMENT_MARK))
         save_claim(marked, workspace=ws, directive=extra["directive"],
@@ -570,3 +636,59 @@ def _live_inventory_block(workspace):
     if not lines:
         return ""
     return "Существующие файлы для проб (только эти пути годятся в [probe: ...]):\n" + "\n".join(lines)
+
+
+def birth_experiment_specs(
+    *, agent: Any, workspace: str | Path,
+) -> CampaignActionOutcome:
+    """Помеченной заявке — песочный эксперимент, либо честная нота невыразимости.
+
+    Отдельное действие кампании по конституционному вердикту агента
+    (INVARIANT_CLASH, путь (б)): суд без модели на любом пути, рождение — вне
+    суда. Сборка — объединение его принятых кусков (обход пар и фильтр из
+    его поставки; замер трат — SPEC_WEAVE §3; событие рождения — §4; путь
+    невыразимости — §2 и принятая вплетка суда); оба двигателя не удержали
+    композицию целиком — граница забанкована в леджере, третий замер.
+    """
+    import dataclasses
+
+    ws = Path(workspace)
+    candidates = [
+        (claim, extra)
+        for claim, extra in load_claims(ws)
+        if awaiting_experiment(claim)
+        and SPEC_UNEXPRESSIBLE_NOTE not in claim.notes
+    ]
+    if not candidates:
+        return _decline(agent, "нет помеченных заявок без спецификаций")
+
+    claim, extra = candidates[0]
+    spent_before = _llm_calls(agent)
+    spec_text = _birth_experiment_spec(agent, claim)
+    birth_calls = max(0, _llm_calls(agent) - spent_before)
+
+    if spec_text is not None:
+        _apply_born_spec(claim, extra, spec_text, ws)
+        born = parse_experiment(spec_text)
+        target = born.target if born else ""
+        _log(agent, "spec_born", {"claim_key": extra["key"], "target": target})
+        return CampaignActionOutcome(
+            result="completed",
+            llm_calls_spent=birth_calls,
+            subject=extra["key"],
+            artifact=(
+                f"заявка {extra['key']} получила песочный эксперимент "
+                f"цели '{target}'"
+            ),
+            work_done=True,
+        )
+
+    marked = dataclasses.replace(
+        claim, notes=(*claim.notes, SPEC_UNEXPRESSIBLE_NOTE))
+    save_claim(marked, workspace=ws, directive=extra["directive"],
+               machine_action=extra["machine_action"])
+    _log(agent, "spec_unexpressible", {"claim_key": extra["key"]})
+    return _decline(
+        agent, "спецификация невыразима песочными целями",
+        llm_calls_spent=birth_calls, claim_key=extra["key"],
+    )

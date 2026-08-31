@@ -124,6 +124,7 @@ def _default_gather_signals(
         unexplained_observations_count=_unexplained_observation_count(ws),
         discriminable_claims_count=_discriminable_claim_count(ws),
         experimentable_claims_count=_experimentable_claim_count(ws),
+        birth_candidates=_birth_candidate_count(ws),
     )
     return {"heartbeat": hb, "age": age, "triage": triage, "action": action}
 
@@ -168,6 +169,24 @@ def _discriminable_claim_count(workspace: Any) -> int:
         from core.causal_climb_action import discriminable_claims
 
         return len(discriminable_claims(workspace))
+    except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
+        return 0
+
+
+def _birth_candidate_count(workspace: Any) -> int:
+    """Сигнал рождения: помеченные «ждёт эксперимента» без ноты невыразимости."""
+    try:
+        from core.causal_claim_store import load_claims
+        from core.causal_climb_action import (
+            SPEC_UNEXPRESSIBLE_NOTE,
+            awaiting_experiment,
+        )
+
+        return sum(
+            1 for claim, _extra in load_claims(workspace)
+            if awaiting_experiment(claim)
+            and SPEC_UNEXPRESSIBLE_NOTE not in claim.notes
+        )
     except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
         return 0
 
@@ -686,6 +705,11 @@ def _default_execute_action(
         from core.causal_climb_action import run_claim_experiment
 
         return run_claim_experiment(agent=agent, workspace=workspace)
+
+    if action.action == "birth_experiment_specs":
+        from core.causal_climb_action import birth_experiment_specs
+
+        return birth_experiment_specs(agent=agent, workspace=workspace)
 
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits

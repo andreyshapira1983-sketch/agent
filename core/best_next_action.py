@@ -59,6 +59,10 @@ _P_CAUSAL_DISCRIMINATE = 46  # claims with live probes: finishing an open
                           # investigation outranks starting a new one
 _P_CAUSAL_CLIMB = 45      # unexplained self-failure observations: investigate
                           # own defects before admin debt (MIR-096, slice 1)
+_P_SPEC_BIRTH = 44      # marked claims without specs: the judge is exhausted
+                        # there, and only a born experiment can move the claim
+                        # (agent's wiring answer, birth_action; weight chain
+                        # 47 exp > 46 judge > 45 explain > 44 birth > 40 stuck)
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
 _P_INBOX_BACKLOG = 30     # large pending queue with no clear duplicates
 _P_OBSERVE = 0            # nothing pressing: stay in honest observation
@@ -420,6 +424,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     recent_self_improvement_failures: tuple[str, ...] = (),
     fresh_self_improvement_failure: bool = False,
     unexplained_observations_count: int = 0,
+    birth_candidates: int = 0,
     discriminable_claims_count: int = 0,
     experimentable_claims_count: int = 0,
 ) -> BestNextAction:
@@ -480,6 +485,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
           "retained_record")
     admit(_candidate_unexplained_observation(unexplained_observations_count),
           "retained_record")
+    admit(_candidate_spec_birth(birth_candidates), "retained_record")
     admit(_candidate_dry_run_stuck(dry_run_streak), "observed_state")
     admit(_candidate_inbox_backlog(triage, inbox_pending), "observed_state")
 
@@ -831,6 +837,28 @@ def _candidate_experimentable_claim(count: int) -> BestNextAction | None:
             "intervention, not the author, proves the cause."
         ),
         evidence=(f"experimentable_claims={pending}",),
+        risk="reversible",
+    )
+
+
+def _candidate_spec_birth(count: int) -> BestNextAction | None:
+    """Помеченные «ждёт эксперимента» заявки без спецификаций (проект агента)."""
+    try:
+        pending = int(count)
+    except (TypeError, ValueError):
+        pending = 0
+    if pending < 1:
+        return None
+    return BestNextAction(
+        action="birth_experiment_specs",
+        title="Give a stuck claim its sandbox experiment",
+        severity="medium",
+        priority=_P_SPEC_BIRTH,
+        reason=(
+            "A judged-out claim waits for an experiment; only a born spec "
+            "can move it, and the sandbox whitelist bounds what may run."
+        ),
+        evidence=(f"birth_candidates={pending}",),
         risk="reversible",
     )
 
