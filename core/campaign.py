@@ -410,6 +410,7 @@ def run_campaign(
                     reason=f"{action.action}:cap",
                     ts=now.isoformat(),
                     outcome="cost_cap",
+                    workspace=workspace,
                 )
                 record_stop_observation(
                     workspace,
