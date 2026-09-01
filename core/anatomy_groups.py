@@ -68,6 +68,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "source_connectors",
     ]),
     ("Tools, Actions & Execution (§5)", "Effect gateways, receipts, compensation, VCS safety.", [
+        "self_stop_record",
         "actuation_gateway", "gateway_consult", "tool_receipts", "receipt_consumer",
         "backup_cleanup",
         "compensation", "safe_vcs", "supply_chain",

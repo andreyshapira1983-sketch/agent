@@ -1858,6 +1858,16 @@ if __name__ == "__main__":
         pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
         if pick.status != "proposed":
             print(f"[CHARTER] no goal: {pick.reason}")
+            # Его собственный след остановки (core/self_stop_record.py):
+            # поля и категория — его редакции, см. call_args_v2.md.
+            from core.self_stop_record import reason_kind, record_self_stop
+            record_self_stop(
+                kind="goal_selection_failure",
+                source="data/charter_decisions.jsonl",
+                reason=reason_kind(pick.reason),
+                ts=datetime.now(timezone.utc).isoformat(),
+                outcome=pick.status,
+            )
             sys.exit(3)
         print(f"[CHARTER] goal: {pick.goal}")
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")

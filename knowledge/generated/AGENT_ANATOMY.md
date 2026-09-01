@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 213 modules across 12 groups._
+_Total: 214 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -168,6 +168,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 
 | Module | Purpose |
 | ------ | ------- |
+| `core/self_stop_record` | Records the agent's self-stop decision as a single journal entry so the next run can reconstruct why and how the agent stopped. |
 | `core/actuation_gateway` | Actuation gateway — checked door for effectful actions (REPL, runtime, daemon). |
 | `core/gateway_consult` | Gateway hard-stop consult helpers (G5a). |
 | `core/tool_receipts` | Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b). |
