@@ -92,8 +92,16 @@ def test_the_cross_run_sum_reads_the_ledger() -> None:
 
 
 def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
-    """Красный свидетель: 440 единиц истории ≥ потолка 400 — исполнения нет."""
-    ledger = _ledger_with_history(tmp_path, "improve_x", units_per_row=110, rows=4)
+    """Красный свидетель: история ≥ потолка — исполнения нет.
+
+    Числа берутся из живого потолка, а не вписаны: 2026-09-01 оператор поднял
+    его 400 -> 1200, и свидетель, приколоченный к старому числу, покраснел бы
+    на смене ПОЛИТИКИ, хотя механизм цел. Проверяется механизм: превышение
+    останавливает исполнение и называет оба числа.
+    """
+    cap = CampaignConfig(max_cycles=1).max_cost_units_per_signature
+    per_row = cap // 4 + 10
+    ledger = _ledger_with_history(tmp_path, "improve_x", units_per_row=per_row, rows=4)
     execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
 
     result = _run(tmp_path, ledger, "improve_x", execute)
@@ -101,13 +109,15 @@ def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
     assert execute.calls == 0, "потолок обязан стоять ДО исполнения"
     capped = [r for r in result.records if r.result == "cost_cap"]
     assert capped, "строка эскалации обязана лечь в леджер"
-    assert "400" in capped[0].reason and "440" in capped[0].reason
+    assert str(cap) in capped[0].reason and str(per_row * 4) in capped[0].reason
     assert "оператор" in capped[0].reason.lower()
 
 
 def test_a_signature_under_the_cap_still_runs(tmp_path: Path) -> None:
-    """Другая сторона: 330 < 400 — работа идёт как шла."""
-    ledger = _ledger_with_history(tmp_path, "improve_x", units_per_row=110, rows=3)
+    """Другая сторона: история ниже живого потолка — работа идёт как шла."""
+    cap = CampaignConfig(max_cycles=1).max_cost_units_per_signature
+    ledger = _ledger_with_history(
+        tmp_path, "improve_x", units_per_row=cap // 4, rows=3)
     execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
 
     result = _run(tmp_path, ledger, "improve_x", execute)

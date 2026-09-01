@@ -1860,13 +1860,27 @@ if __name__ == "__main__":
             print(f"[CHARTER] no goal: {pick.reason}")
             # Его собственный след остановки (core/self_stop_record.py):
             # поля и категория — его редакции, см. call_args_v2.md.
-            from core.self_stop_record import reason_kind, record_self_stop
-            record_self_stop(
+            from core.self_stop_record import (
+                reason_kind,
+                record_self_stop,
+                record_stop_observation,
+            )
+            _wall = reason_kind(pick.reason)
+            _stop = record_self_stop(
                 kind="goal_selection_failure",
                 source="data/charter_decisions.jsonl",
-                reason=reason_kind(pick.reason),
+                reason=_wall,
                 ts=datetime.now(timezone.utc).isoformat(),
                 outcome=pick.status,
+            )
+            # Остановка становится ПОВОДОМ для причинной лестницы: без этого
+            # машина объясняла что угодно, кроме собственных стен (замер 01.09).
+            record_stop_observation(
+                ws,
+                kind="goal_selection_failure",
+                reason=_wall,
+                signature=str(_stop.get("signature") or ""),
+                source="data/charter_decisions.jsonl",
             )
             sys.exit(3)
         print(f"[CHARTER] goal: {pick.goal}")

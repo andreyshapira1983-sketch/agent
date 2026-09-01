@@ -51,7 +51,7 @@ from core.campaign_ledger import (
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 from core.run_context import run_cost_envelope
-from core.self_stop_record import record_self_stop
+from core.self_stop_record import record_self_stop, record_stop_observation
 
 # Предметный страж повторов — авторство агента (DEDUP_DESIGN/DEDUP_TIMING,
 # WEAVE ред.2 §1): белый список статичен и известен до исполнения.
@@ -404,12 +404,19 @@ def run_campaign(
                 _log(agent, "campaign_cost_cap", record.to_dict())
                 # Его след бюджетной стены; reason по его правилу
                 # «действие + факт упора», без изменчивых чисел.
-                record_self_stop(
+                _stop = record_self_stop(
                     kind="budget_stop",
                     source="data/campaign_ledger.jsonl",
                     reason=f"{action.action}:cap",
                     ts=now.isoformat(),
                     outcome="cost_cap",
+                )
+                record_stop_observation(
+                    workspace,
+                    kind="budget_stop",
+                    reason=f"{action.action}:cap",
+                    signature=str(_stop.get("signature") or ""),
+                    source="data/campaign_ledger.jsonl",
                 )
                 _emit_cycle(record)
                 consecutive_errors = 0
