@@ -39,7 +39,7 @@ SKIP_DIRS = frozenset({
 #: "path:function" -> ceiling. Measured 2026-08-04.
 WATCH: dict[str, int] = {
     "core/loop.py:AgentLoop._run_inner": 427,  # замер 417 (2213 до раскола) + запас 10
-    "core/step_sanitizer.py:sanitize_step": 734,  # +37 (2026-09-01): ветка journal_append — легитимный обработчик, не раздувание; настоящее лекарство названо — диспетчеризация по словарю (решение и подпись — агента, append_ratchets.md).  # +29 (2026-08-31): added memory_bank dispatch block; one tool branch is not a reason to cut (решение и подпись — агента, sanitizer_ratchet.md).
+    "core/step_sanitizer.py:sanitize_step": 776,  # +42 (2026-09-01, Fable строит за агента): ветка semantic_scholar_search — лечение МЁРТВОЙ способности: инструмент стоял в поясе и в промпте планировщика, а шаг с ним молча выбрасывался. Найден новым сторожем tests/test_a_registered_tool_is_not_silently_dead.py. Лекарство остаётся прежним и всё нужнее: диспетчеризация по словарю (названо агентом 2026-09-01).  # +37 (2026-09-01): ветка journal_append — легитимный обработчик, не раздувание; настоящее лекарство названо — диспетчеризация по словарю (решение и подпись — агента, append_ratchets.md).  # +29 (2026-08-31): added memory_bank dispatch block; one tool branch is not a reason to cut (решение и подпись — агента, sanitizer_ratchet.md).
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
     "agent_tick.py:run_tick": 474,
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 390,  # уехал целиком из core/loop.py
