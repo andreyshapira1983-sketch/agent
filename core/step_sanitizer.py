@@ -740,6 +740,48 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "semantic_scholar_search":
+        # Найден сторожем «зарегистрирован, но мёртв» 2026-09-01: инструмент
+        # стоял в поясе и в промпте планировщика, а ветки не имел — любой шаг
+        # с ним выбрасывался молча, и поиск научных работ был мёртвой
+        # способностью. Контракт: query обязателен, остальное необязательно.
+        query = str(args.get("query") or "").strip()
+        if not query:
+            warnings.append(
+                f"step[{idx}]: semantic_scholar_search needs a non-empty "
+                f"query, dropping step"
+            )
+            return None
+        arguments: dict[str, Any] = {"query": query}
+        raw_max = args.get("max_results")
+        if raw_max is not None:
+            try:
+                arguments["max_results"] = max(1, min(20, int(raw_max)))
+            except (TypeError, ValueError):
+                warnings.append(
+                    f"step[{idx}]: semantic_scholar_search max_results "
+                    f"{raw_max!r} is not a number, ignored"
+                )
+        fields = args.get("fields_of_study")
+        if isinstance(fields, str) and fields.strip():
+            arguments["fields_of_study"] = fields.strip()
+        extra = sorted(set(args) - {"query", "max_results", "fields_of_study"})
+        if extra:
+            warnings.append(
+                f"step[{idx}]: semantic_scholar_search dropping unexpected "
+                f"args {extra!r}"
+            )
+        return {
+            "tool": "semantic_scholar_search",
+            "arguments": arguments,
+            "label": f"semantic_scholar_search:{query[:40]}",
+            "expected_outcome": (
+                "Returns a list of papers with title, url, ar5iv_url, "
+                "abstract, year, authors, venue and citation_count. An empty "
+                "list means the search found nothing, which is an answer."
+            ),
+        }
+
     if tool_name == "journal_append":
         # Contract: exactly path (str) and record (dict) — both required.
         required = ("path", "record")

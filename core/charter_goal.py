@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from core.mentor_channel import mentor_block, open_questions
+from core.state_integrity import read_state_jsonl_unlocked
 
 CHARTER_RELPATH = Path("knowledge") / "doctrine" / "future" / "CORPORATE_MODEL.md"
 
@@ -76,6 +77,14 @@ def _widens_own_authority(goal: str) -> bool:
 #: Сколько последних целей журнала показываются модели и сторожат новизну.
 _RECENT_GOALS = 8
 
+#: Исходы, при которых цель прозвучала, но работы не дала — к ней можно
+#: вернуться. Замер 2026-09-01: cost_cap в 11:31 сделал цель «недавней» и
+#: запер её от повтора в 15:31.
+_NO_WORK_RESULTS = frozenset({
+    "cost_cap", "repeat", "idle", "approval_wait", "dirty_tree_wait",
+    "stalled", "error", "declined",
+})
+
 _JACCARD_REPEAT = 0.6
 
 
@@ -89,26 +98,93 @@ class CharterGoalReport:
     why_now: str = ""
     success_check: str = ""
     reason: str = ""
+    #: Учёт прошлых остановок — МАШИННЫЙ, а не фраза в рассуждении: требование
+    #: оператора 2026-09-01 («докажи управляющий эффект, а не красивую фразу»).
+    #: stop_considered — держал ли выбор перед глазами журнал своих остановок;
+    #: previous_stop_ref — подпись стены, на которую выбор реально опирался.
+    stop_considered: bool = False
+    previous_stop_ref: str = ""
 
 
 def _decline(reason: str) -> CharterGoalReport:
     return CharterGoalReport(status="declined", reason=reason)
 
 
+#: Сколько последних остановок видит выбор цели. Число — из его проекта
+#: (self_record_design.md, «последние 20»); окно, а не вся история, чтобы
+#: журнал остановок не превращался во второй склад истины.
+_RECENT_STOPS = 20
+
+
+def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
+    """Последние собственные остановки — НИЗКОДОВЕРЕННАЯ подсказка.
+
+    Контракт оператора (2026-09-01): совпавшая подпись означает «проверь
+    прошлую стену», а НЕ «эта причина истинна». Поэтому здесь только чтение,
+    без вердиктов: сам журнал пишет `core/self_stop_record.py` из рантайма.
+    Нечитаемый журнал — не отказ выбора: отсутствие подсказки хуже, чем
+    остановка всей работы из-за неё.
+    """
+    path = workspace / "data" / "self_stops.jsonl"
+    if not path.is_file():
+        return ()
+    try:
+        rows = read_state_jsonl_unlocked(path)
+    except (OSError, ValueError):
+        return ()
+    stops: list[dict[str, str]] = []
+    for row in rows[-_RECENT_STOPS:]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
+        stops.append({
+            "kind": str(payload.get("kind") or ""),
+            "reason": str(payload.get("reason") or ""),
+            "signature": str(payload.get("signature") or ""),
+            "ts": str(payload.get("ts") or ""),
+        })
+    return tuple(stops)
+
+
 def _recent_goals(workspace: Path) -> tuple[str, ...]:
+    """Цели, которые действительно ЗАНИМАЛИ прогон, а не просто прозвучали.
+
+    Клинч 2026-09-01, замерен: в 11:31 цель прошла ворота, но исполнение
+    остановил межзапусковый бюджет (`result="cost_cap"`, ноль вызовов, ноль
+    работы). Запись цели легла в леджер — и в 15:31 та же цель была отвергнута
+    как «повтор недавней». Страж считал повтором ЗАЯВЛЕНИЕ цели, а не
+    ВЫПОЛНЕНИЕ работы, и цель, прерванную внешним лимитом, стало нельзя
+    повторить: два исправных механизма вместе дали тупик.
+
+    Поэтому цель попадает в «недавние» только если по ней был хотя бы один
+    цикл с работой. Исходы без работы (`cost_cap`, `repeat`, `idle`,
+    `dirty_tree_wait`, `approval_wait`) не занимают тему: к ним можно и нужно
+    вернуться.
+    """
     path = workspace / "data" / "campaign_ledger.jsonl"
     if not path.is_file():
         return ()
-    goals: list[str] = []
+    worked: list[str] = []
+    unworked: set[str] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             row = json.loads(line)
         except ValueError:
             continue
-        goal = str((row.get("payload") or row).get("goal") or "").strip()
-        if goal and goal not in goals:
-            goals.append(goal)
-    return tuple(goals[-_RECENT_GOALS:])
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
+        goal = str(payload.get("goal") or "").strip()
+        if not goal:
+            continue
+        result = str(payload.get("result") or "").strip()
+        # Чёрный список ЯВНО безработных исходов: всё прочее (включая записи
+        # старого формата без поля result) считается занявшим тему. Инвертировать
+        # нельзя — тогда неполная запись молча вернула бы «день сурка».
+        did_work = not (result in _NO_WORK_RESULTS and not payload.get("work_done"))
+        if did_work:
+            if goal not in worked:
+                worked.append(goal)
+            unworked.discard(goal)
+        elif goal not in worked:
+            unworked.add(goal)
+    return tuple(worked[-_RECENT_GOALS:])
 
 
 def _tokens(text: str) -> frozenset[str]:
@@ -251,6 +327,7 @@ def _ask(
     backlog: tuple[str, ...] = (),
     verdicts: tuple[tuple[str, str, str], ...] = (),
     mentor_questions: str = "",
+    stops: tuple[dict[str, str], ...] = (),
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
@@ -266,7 +343,8 @@ def _ask(
         'only: {"goal": "<one concrete goal, 20-300 chars>", '
         '"anchor_id": <number of the charter line this goal serves>, '
         '"why_now": "<1-2 sentences>", '
-        '"success_check": "<how a reviewer will see the goal is done>"}.'
+        '"success_check": "<how a reviewer will see the goal is done>", '
+        '"previous_stop_ref": "<signature of the past stop you took into account, or empty string if none applies>"}.'
     )
     user = (
         "The charter (your target shape):\n" + charter
@@ -275,6 +353,24 @@ def _ask(
         + "\n\nRecent campaign goals (do NOT repeat them):\n"
         + ("\n".join(f"- {g}" for g in recent) or "- (none)")
     )
+    if stops:
+        # Низкодоверенная подсказка: совпавшая подпись значит «проверь прошлую
+        # стену», а не «эта причина истинна» (контракт оператора 2026-09-01).
+        stop_lines = "\n".join(
+            "- [{kind}] {reason} (signature {sig}, {ts})".format(
+                kind=st["kind"], reason=st["reason"],
+                sig=st["signature"][:12], ts=st["ts"][:19],
+            )
+            for st in stops
+        )
+        user += (
+            "\n\nYour own recent STOPS — runs that produced no work. "
+            "These are hints, not proven causes: a matching wall means CHECK "
+            "it, not that the cause is true. If your goal risks the same wall, "
+            "either choose differently or say why this time is different, and "
+            "put the matching signature into previous_stop_ref:\n"
+            + stop_lines
+        )
     if declined:
         user += (
             "\n\nRecently DECLINED proposals — your own gates rejected these; "
@@ -345,12 +441,15 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     if not anchors:
         return _decline("the charter has no anchorable lines")
     recent = _recent_goals(root)
+    stops = _recent_stops(root)
 
     # Каждый исход ниже — гражданин памяти: решение переживает свой тик,
     # и следующий выбор видит отклонённое (см. «день сурка», 2026-08-19).
     def _declined(reason: str, goal_text: str = "") -> CharterGoalReport:
         _record_decision(root, status="declined", goal=goal_text, reason=reason)
-        return _decline(reason)
+        return CharterGoalReport(
+            status="declined", reason=reason, stop_considered=bool(stops),
+        )
 
     # Читается ДО обращения к модели: отзыв, потерянный из-за сбоя чтения,
     # вернул бы отозванную работу без ведома человека, поэтому нечитаемый
@@ -364,6 +463,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         llm, charter, anchors, recent, _recent_declined(root),
         _backlog_lines(root), _recent_verdicts(root),
         mentor_questions=mentor_block(mentor_qs),
+        stops=stops,
     )
     if not parsed:
         return _declined("the model returned no parseable goal")
@@ -408,9 +508,16 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
 
     _record_decision(root, status="proposed", goal=goal,
                      mentor_questions_shown=len(mentor_qs))
+    # Машинный след учёта прошлых стен: подпись берётся ТОЛЬКО из журнала
+    # остановок — выдуманная моделью строка сюда не проходит (иначе поле
+    # доказывало бы фразу, а не эффект).
+    claimed_ref = str(parsed.get("previous_stop_ref") or "").strip()
+    known = {st["signature"] for st in stops if st["signature"]}
     return CharterGoalReport(
         status="proposed", goal=goal, charter_quote=quote,
         why_now=why_now, success_check=check,
+        stop_considered=bool(stops),
+        previous_stop_ref=claimed_ref if claimed_ref in known else "",
     )
 
 
