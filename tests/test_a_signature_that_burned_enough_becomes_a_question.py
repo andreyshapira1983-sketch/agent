@@ -64,9 +64,11 @@ def _ledger_with_history(tmp_path: Path, action: str, *, units_per_row: int,
     return CampaignLedger(path=path)
 
 
-def _run(tmp_path: Path, ledger: CampaignLedger, action: str, execute):
+def _run(tmp_path: Path, ledger: CampaignLedger, action: str, execute, cap: int = 400):
+    # Потолок задаётся ЯВНО: по умолчанию политика выключена (0) со слова
+    # оператора 2026-09-01, но механизм обязан работать, когда его включают.
     return run_campaign(
-        CampaignConfig(goal="g", max_cycles=3),
+        CampaignConfig(goal="g", max_cycles=3, max_cost_units_per_signature=cap),
         agent=SimpleNamespace(log=None),
         workspace=str(tmp_path),
         gather_signals=_Gather(action),
@@ -99,7 +101,9 @@ def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
     на смене ПОЛИТИКИ, хотя механизм цел. Проверяется механизм: превышение
     останавливает исполнение и называет оба числа.
     """
-    cap = CampaignConfig(max_cycles=1).max_cost_units_per_signature
+    # Потолок задаётся ЯВНО: политика по умолчанию выключена (0) со слова
+    # оператора 2026-09-01, но механизм обязан срабатывать, когда его включают.
+    cap = 400
     per_row = cap // 4 + 10
     ledger = _ledger_with_history(tmp_path, "improve_x", units_per_row=per_row, rows=4)
     execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
@@ -115,7 +119,7 @@ def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
 
 def test_a_signature_under_the_cap_still_runs(tmp_path: Path) -> None:
     """Другая сторона: история ниже живого потолка — работа идёт как шла."""
-    cap = CampaignConfig(max_cycles=1).max_cost_units_per_signature
+    cap = 400
     ledger = _ledger_with_history(
         tmp_path, "improve_x", units_per_row=cap // 4, rows=3)
     execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
