@@ -1612,6 +1612,7 @@ def run_paced_campaign(
     max_cost_units: int = 0,
     max_unproductive_streak: int = 3,
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
+    charter_goals: bool = False,
     run_campaign_fn: Callable[..., Any] | None = None,
     build_agent_fn: Callable[[Path], Any] | None = None,
 ) -> int:
@@ -1707,14 +1708,51 @@ def run_paced_campaign(
         file=sys.stderr,
     )
 
+    # Право сменить исчерпанную цель ВНУТРИ прогона (слово оператора
+    # 2026-09-01). Ворота те же, что на старте: цель выбирает сам агент по
+    # хартии, и хартия так же вправе отказать — отказ означает, что прогон
+    # честно заканчивается, а не обходит правило.
+    #
+    # Замер, из-за которого это понадобилось: узкая инженерная цель
+    # исчерпывается за ОДИН цикл (предложение произведено и ушло ждать
+    # человека), после чего кампания умирала за четыре минуты, повторяя одно и
+    # то же; с широкой целью тот же агент дал 21 полезный цикл из 21.
+    def _pick_next_goal() -> str:
+        try:
+            from core.charter_goal import propose_charter_goal
+            router = _charter_goal_router(workspace)
+            pick = propose_charter_goal(router.for_role("planner"), workspace)
+        except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
+            # уронить прогон: не вышло — останавливаемся прежним путём.
+            print(f"[CHARTER] next goal failed: {type(exc).__name__}: {exc}")
+            return ""
+        if pick.status != "proposed":
+            print(f"[CHARTER] no next goal: {pick.reason}")
+            return ""
+        print(f"[CHARTER] next goal: {pick.goal}")
+        print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
+        return pick.goal
+
+    def _call_run_campaign(**extra):
+        try:
+            return run_campaign(
+                config, agent=agent, workspace=workspace,
+                approval_inbox=inbox, ledger=ledger, on_cycle=_on_cycle,
+                **extra,
+            )
+        except TypeError:
+            if not extra:
+                raise
+            # Старая сигнатура без next_goal — прогон продолжается без права
+            # смены цели, а не умирает из-за нового необязательного параметра.
+            return run_campaign(
+                config, agent=agent, workspace=workspace,
+                approval_inbox=inbox, ledger=ledger, on_cycle=_on_cycle,
+            )
+
     try:
-        result = run_campaign(
-            config,
-            agent=agent,
-            workspace=workspace,
-            approval_inbox=inbox,
-            ledger=ledger,
-            on_cycle=_on_cycle,
+        result = _call_run_campaign(
+            **({"next_goal": _pick_next_goal} if charter_goals else {}),
         )
     except Exception as exc:  # noqa: BLE001 — the failure lands in the heartbeat
         write_heartbeat(workspace, {
@@ -1900,6 +1938,7 @@ if __name__ == "__main__":
             max_llm_calls=args.max_llm_calls,
             max_cost_units=args.max_cost_units,
             max_unproductive_streak=args.max_unproductive_streak,
+            charter_goals=bool(args.charter),
         ))
 
     sys.exit(run_tick(ws, dry_run=dry))
