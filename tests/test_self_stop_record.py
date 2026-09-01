@@ -7,6 +7,10 @@ from core.state_integrity import read_state_jsonl_unlocked
 @pytest.fixture
 def chdir_to_tmp(tmp_path, monkeypatch):
     (tmp_path / "data").mkdir()
+    # Изоляция теста: орган пишет в data/ ОТНОСИТЕЛЬНО переданного рабочего
+    # места, а по умолчанию — текущей папки. Замер 2026-09-01: без chdir прогон
+    # батареи из корня репозитория положил 96 тестовых остановок в БОЕВОЙ
+    # журнал, и агент прочитал бы их как свои стены.
     monkeypatch.chdir(tmp_path)
     return tmp_path
 

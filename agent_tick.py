@@ -1872,6 +1872,7 @@ if __name__ == "__main__":
                 reason=_wall,
                 ts=datetime.now(timezone.utc).isoformat(),
                 outcome=pick.status,
+                workspace=ws,
             )
             # Остановка становится ПОВОДОМ для причинной лестницы: без этого
             # машина объясняла что угодно, кроме собственных стен (замер 01.09).

@@ -12,7 +12,19 @@ from core.causal_lesson import observation_from_self_stop
 from core.causal_store import CausalObservationStore
 from core.state_integrity import append_state_jsonl_unlocked, state_file_lock
 
+#: Единственный относительный адрес журнала. Абсолютный путь собирается от
+#: РАБОЧЕГО МЕСТА, а не от текущей папки процесса: замер 2026-09-01 показал,
+#: что при относительном пути прогон батареи из корня репозитория писал
+#: тестовые остановки (improve_x:cap) в БОЕВОЙ журнал — 96 фальшивых стен,
+#: которые агент прочитал бы как свои. Узость канала от этого не страдает:
+#: адрес по-прежнему один и не приходит снаружи.
 ALLOWED_PATH = "data/self_stops.jsonl"
+
+
+def _journal_path(workspace=None) -> Path:
+    """Абсолютный путь журнала внутри рабочего места."""
+    root = Path(workspace) if workspace is not None else Path.cwd()
+    return root / ALLOWED_PATH
 ALLOWED_KINDS = {"goal_selection_failure", "budget_stop", "plan_parse_failed", "approval_denied", "other"}
 
 
@@ -45,7 +57,7 @@ def reason_kind(text: str) -> str:
     return "other"
 
 
-def record_self_stop(kind, source, reason, episode_id=None, run_id=None, ts=None, verdict_ref=None, outcome=None) -> dict:
+def record_self_stop(kind, source, reason, episode_id=None, run_id=None, ts=None, verdict_ref=None, outcome=None, workspace=None) -> dict:
     if not source or not _normalize(source):
         return {"recorded": False, "path": ALLOWED_PATH, "signature": "", "error": "source is required"}
     if kind not in ALLOWED_KINDS:
@@ -62,8 +74,10 @@ def record_self_stop(kind, source, reason, episode_id=None, run_id=None, ts=None
         "outcome": outcome,
         "signature": signature,
     }
-    with state_file_lock(ALLOWED_PATH):
-        append_state_jsonl_unlocked(ALLOWED_PATH, [record])
+    path = _journal_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with state_file_lock(path):
+        append_state_jsonl_unlocked(path, [record])
     return {"recorded": True, "path": ALLOWED_PATH, "signature": signature}
 
 
