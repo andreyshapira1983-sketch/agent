@@ -162,6 +162,12 @@ GatherSignals = Callable[[Any, Any, Any], dict[str, Any]]
 ExecuteAction = Callable[..., CampaignActionOutcome]
 
 
+#: Сколько раз за один прогон агент вправе сменить исчерпанную цель.
+#: Не безлимит: смена — это признание «дело кончилось», и если признаний
+#: слишком много, прогон честнее закончить, чем перебирать темы.
+_MAX_GOAL_SWITCHES = 12
+
+
 def run_campaign(
     config: CampaignConfig,
     *,
@@ -171,6 +177,7 @@ def run_campaign(
     ledger: CampaignLedger | None = None,
     gather_signals: GatherSignals | None = None,
     execute_action: ExecuteAction | None = None,
+    next_goal: Callable[[], str] | None = None,
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
     on_cycle: Callable[[dict], None] | None = None,
@@ -194,6 +201,10 @@ def run_campaign(
     # повторов слеп к траектории (146 из 150 циклов были циклом №1).
     signature_spend = _cross_run_signature_spend(ledger)
     idle_streak = 0
+    #: Текущая цель прогона: она может смениться, поэтому читается отсюда,
+    #: а не из замороженного config (право смены — слово оператора 2026-09-01).
+    current_goal = config.goal
+    goal_switches = 0
     # Does the current no-progress streak contain repeat cycles? A streak of
     # pure priority-0 observations means the world was checked and found
     # healthy; a streak with repeats means work was wanted and went nowhere.
@@ -288,12 +299,12 @@ def run_campaign(
             )
             try:
                 signals = gather(agent, workspace, approval_inbox,
-                                 goal=config.goal,
+                                 goal=current_goal,
                                  exhausted_actions=exhausted_actions)
             except TypeError:
                 try:
                     signals = gather(agent, workspace, approval_inbox,
-                                     goal=config.goal)
+                                     goal=current_goal)
                 except TypeError:
                     signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
@@ -314,7 +325,7 @@ def run_campaign(
                 record = CampaignCycleRecord(
                     cycle=cycle,
                     ts=now.isoformat(),
-                    goal=config.goal,
+                    goal=current_goal,
                     action=action.action,
                     action_title=action.title,
                     severity=action.severity,
@@ -366,7 +377,7 @@ def run_campaign(
                 record = CampaignCycleRecord(
                     cycle=cycle,
                     ts=now.isoformat(),
-                    goal=config.goal,
+                    goal=current_goal,
                     action=action.action,
                     action_title=action.title,
                     severity=action.severity,
@@ -387,6 +398,49 @@ def run_campaign(
                 consecutive_errors = 0
 
                 if idle_streak >= config.max_idle_streak:
+                    # Право сменить цель ВНУТРИ прогона (слово оператора
+                    # 2026-09-01). Замер, из-за которого оно понадобилось:
+                    # узкая инженерная цель исчерпывается за ОДИН цикл —
+                    # предложение произведено и ушло ждать человека, делать по
+                    # ней больше нечего, и кампания умирала через четыре
+                    # минуты, повторяя одно и то же. При широкой цели тот же
+                    # агент отработал 21 полезный цикл из 21. Не хватало не
+                    # полномочий и не бюджета, а права сказать себе «это дело
+                    # кончилось, беру следующее».
+                    #
+                    # Смена идёт ЧЕРЕЗ ТЕ ЖЕ ворота, что и цель на старте:
+                    # выбирает её сам агент, хартия так же вправе отказать, и
+                    # отказ означает честную остановку, а не обход правила.
+                    switched = ""
+                    if next_goal is not None and goal_switches < _MAX_GOAL_SWITCHES:
+                        try:
+                            switched = str(next_goal() or "").strip()
+                        except Exception as exc:  # noqa: BLE001 — смена цели не
+                            # имеет права уронить прогон: не вышло — останавливаемся
+                            # прежним путём, назвав причину.
+                            _log(agent, "campaign_goal_switch_failed",
+                                 {"cycle": cycle, "error": repr(exc)[:200]})
+                            switched = ""
+                    if switched and switched != current_goal:
+                        goal_switches += 1
+                        previous_goal, current_goal = current_goal, switched
+                        # Новая цель — новая тема: память о повторах прежней
+                        # темы не должна объявлять повтором первый же шаг по
+                        # новой (иначе право сменить цель было бы фиктивным).
+                        attempted_signatures.clear()
+                        action_steps.clear()
+                        idle_streak = 0
+                        streak_repeats = False
+                        _log(agent, "campaign_goal_switched", {
+                            "cycle": cycle,
+                            "from": previous_goal[:200],
+                            "to": current_goal[:200],
+                            "switches_used": goal_switches,
+                            "limit": _MAX_GOAL_SWITCHES,
+                            "reason": "goal exhausted: "
+                                      f"{config.max_idle_streak}_cycles_without_new_action",
+                        })
+                        continue
                     stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
                     status = "stopped"
                     break
@@ -396,7 +450,7 @@ def run_campaign(
             if (config.max_cost_units_per_signature
                     and spent_before >= config.max_cost_units_per_signature):
                 record = _cost_cap_record(
-                    cycle=cycle, ts=now.isoformat(), goal=config.goal,
+                    cycle=cycle, ts=now.isoformat(), goal=current_goal,
                     action=action, spent=spent_before,
                     cap=config.max_cost_units_per_signature)
                 ledger.append(record)
@@ -459,7 +513,7 @@ def run_campaign(
             record = CampaignCycleRecord(
                 cycle=cycle,
                 ts=now.isoformat(),
-                goal=config.goal,
+                goal=current_goal,
                 action=action.action,
                 action_title=action.title,
                 severity=action.severity,
@@ -527,7 +581,7 @@ def run_campaign(
             err_record = CampaignCycleRecord(
                 cycle=cycle,
                 ts=err_now.isoformat(),
-                goal=config.goal,
+                goal=current_goal,
                 action="<cycle_error>",
                 action_title="cycle raised an exception",
                 severity="error",
@@ -581,7 +635,7 @@ def run_campaign(
     }
     result = CampaignResult(
         status=status,
-        goal=config.goal,
+        goal=current_goal,
         stop_reason=stop_reason,
         cycles_run=len(records),
         records=records,
