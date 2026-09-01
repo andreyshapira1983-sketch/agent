@@ -321,6 +321,60 @@ def _backlog_lines(root: Path) -> tuple[str, ...]:
         return ()
 
 
+def _open_defect_lines(root: Path) -> tuple[str, ...]:
+    """Незакрытые дефекты его собственного реестра; сомнение = пусто."""
+    try:
+        from core.self_improvement_issues import SelfImprovementIssueRegistry
+
+        registry = SelfImprovementIssueRegistry(
+            root / "data" / "self_improvement_issues.jsonl"
+        )
+        out: list[str] = []
+        for issue in registry.unresolved()[:5]:
+            suggestion = str(issue.suggested_next_action or "").strip()
+            out.append(
+                f"[open defect] {issue.title[:110]}"
+                + (f" — next: {suggestion[:90]}" if suggestion else "")
+            )
+        return tuple(out)
+    except Exception:  # noqa: BLE001 — нечитаемый реестр отнимает подсказку,
+        # а не прогон: выбор цели идёт дальше без этих строк.
+        return ()
+
+
+def _unexplained_lines(root: Path) -> tuple[str, ...]:
+    """Наблюдения, которых никто не объяснил; сомнение = пусто."""
+    try:
+        from core.causal_climb_action import unexplained_observations
+
+        return tuple(
+            f"[unexplained] {str(observation.observed_mismatch)[:120]} "
+            f"(seen {observation.occurrences}x)"
+            for observation in unexplained_observations(root)[:5]
+        )
+    except Exception:  # noqa: BLE001 — то же правило: подсказка необязательна.
+        return ()
+
+
+def _open_work_lines(root: Path) -> tuple[str, ...]:
+    """Собственные незакрытые дела агента — то, что ждёт именно его.
+
+    Замер 2026-09-01, из-за которого блок появился: получив право менять
+    исчерпанную цель, агент предложил себе замену — и она оказалась повтором
+    уже сделанного. Причина не в механике: его бэклог состоит из ПЯТИ строк
+    одного класса («слишком большой модуль»), поэтому все цели подряд были
+    про расщепление очередного файла — smart_memory, self_build_producer,
+    autonomous_runtime. Спрашивать себя ему было больше не о чем.
+
+    При этом дела у него были: открытая проблема в собственном реестре и
+    пять наблюдений, которые никто не объяснил. Они просто не попадали в
+    поле зрения на выборе цели.
+
+    Источники разные по смыслу, и это видно в строках: реестр говорит «здесь
+    сломано», лестница — «здесь непонятно».
+    """
+    return _open_defect_lines(root) + _unexplained_lines(root)
+
 def _ask(
     llm: Any, charter: str, anchors: tuple[str, ...], recent: tuple[str, ...],
     declined: tuple[tuple[str, str], ...] = (),
@@ -328,17 +382,35 @@ def _ask(
     verdicts: tuple[tuple[str, str, str], ...] = (),
     mentor_questions: str = "",
     stops: tuple[dict[str, str], ...] = (),
+    open_work: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     system = (
         "You are choosing YOUR OWN next piece of work. You are the agent this "
         "charter describes; the charter is the target shape you are moving "
         "toward. Propose ONE small, bounded, verifiable goal for a single "
         "campaign run that moves you toward the charter FROM where you are "
-        "now. The goal must be achievable by reading, analysing and proposing "
-        "— OR by naming ONE real engineering candidate from your backlog to "
-        "be turned into a reviewed proposal (a module split, or a failing-test "
-        "task for a proven gap); every product still goes through human "
-        "approval. Never widen your own authority. Anchor the goal by CHOOSING "
+        "now.\n"
+        "\n"
+        "THREE KINDS OF WORK ARE OPEN TO YOU, and the third is the one you "
+        "keep forgetting you have:\n"
+        "  (a) REPAIR — name ONE real engineering candidate from your backlog "
+        "or from your own open defects and turn it into a reviewed proposal "
+        "(a module split, a failing-test task for a proven gap).\n"
+        "  (b) UNDERSTAND YOURSELF — read your own journals, code, anatomy "
+        "map and past decisions to answer a question about yourself that you "
+        "cannot answer today: why a run stopped, which of your capabilities is "
+        "dead, what you actually did over a period, whether a claim you made "
+        "about yourself holds against the record.\n"
+        "  (c) STUDY THE OUTSIDE WORLD — when the answer is not inside this "
+        "repository, say so and go look. A goal that names a study verb "
+        "(изучи / прочитай / study / read / research) together with the "
+        "outside world (интернет / сайт / web / http) opens web_search and "
+        "web_fetch for that run; nothing else opens them. Prior art before "
+        "invention: how others solved this is evidence, and what you bring "
+        "back is a HYPOTHESIS with its source, never a truth.\n"
+        "\n"
+        "Every product still goes through human approval. Never widen your "
+        "own authority. Anchor the goal by CHOOSING "
         "one numbered charter line it serves. Reply with ONE JSON object "
         'only: {"goal": "<one concrete goal, 20-300 chars>", '
         '"anchor_id": <number of the charter line this goal serves>, '
@@ -353,6 +425,16 @@ def _ask(
         + "\n\nRecent campaign goals (do NOT repeat them):\n"
         + ("\n".join(f"- {g}" for g in recent) or "- (none)")
     )
+    if open_work:
+        # Его собственные незакрытые дела: реестр говорит «здесь сломано»,
+        # лестница — «здесь непонятно». До 2026-09-01 на выборе цели он видел
+        # только список больших файлов и потому предлагал одно и то же.
+        user += (
+            "\n\nYOUR OWN OPEN WORK — defects you recorded and observations "
+            "nobody has explained. These are yours, they are waiting, and they "
+            "are usually a better goal than another module split:\n"
+            + "\n".join(f"- {line}" for line in open_work)
+        )
     if stops:
         # Низкодоверенная подсказка: совпавшая подпись значит «проверь прошлую
         # стену», а не «эта причина истинна» (контракт оператора 2026-09-01).
@@ -464,6 +546,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         _backlog_lines(root), _recent_verdicts(root),
         mentor_questions=mentor_block(mentor_qs),
         stops=stops,
+        open_work=_open_work_lines(root),
     )
     if not parsed:
         return _declined("the model returned no parseable goal")
