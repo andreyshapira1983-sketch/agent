@@ -81,6 +81,20 @@ def _inn_context_excluded(text: str, start: int, end: int) -> bool:
         return False
     return any(tok in window for tok in _INN_CONTEXT_NEGATIVE_TOKENS)
 
+#: Дата ISO внутри «телефона» — верный признак, что это не телефон.
+#: Замер 2026-09-01: подписи планок вида «+29 (2026-08-31)» проходили под
+#: _PHONE_RE (скобки и дефис даты укладываются в класс символов) и уезжали
+#: в вывод как [REDACTED:pii-phone] — агент терял ВСЕ даты в своих подписях,
+#: и каждую приходилось восстанавливать вручную. Ведущий плюс, на который
+#: рассчитывал прежний комментарий, не спасает: подпись с него и начинается.
+_DATE_INSIDE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _looks_like_a_dated_note(matched: str) -> bool:
+    """True, когда «телефон» несёт внутри календарную дату."""
+    return bool(_DATE_INSIDE_RE.search(matched))
+
+
 # Russian pension fund number (СНИЛС): XXX-XXX-XXX XX
 _SNILS_RE = re.compile(r"\b\d{3}-\d{3}-\d{3}\s\d{2}\b")
 
@@ -100,6 +114,9 @@ def scan_pii(text: str) -> list[DlpFinding]:
     for kind, pattern in _PII_PATTERNS:
         for match in pattern.finditer(text):
             matched = match.group(0)
+            if kind == "phone" and _looks_like_a_dated_note(matched):
+                # Датированная пометка, а не номер (см. _DATE_INSIDE_RE).
+                continue
             if kind == "inn":
                 # Two-stage filter to suppress timestamp/id false positives.
                 if not _inn_checksum_valid(matched):
