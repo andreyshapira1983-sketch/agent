@@ -37,6 +37,12 @@ from core.redaction import collect_pii_findings, redact_payload, scan
 from core.replan import FailureType as ReplanCode
 from core.replan import ReplanTrigger
 from core.repo_provenance import block_may_be_annotated
+from core.step_references import (
+    UnresolvedStepReference,
+    has_step_reference,
+    referenced_steps,
+    resolve_step_references,
+)
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -275,10 +281,21 @@ class AgentLoopStepExecution:
                 for step in sorted(steps, key=lambda s: s.order)
             ]
 
-        # Partition: parallel = no intra-batch dependencies; sequential = rest.
+        # Партиция: параллельные — без внутренних зависимостей; последовательные —
+        # остальные. Ссылка {{step:...output}} в аргументах ТОЖЕ делает шаг
+        # зависимым: без этого шаг-получатель ушёл бы в параллельную группу и
+        # разрешал ссылку на ещё не исполненный шаг (замер 2026-09-01).
         step_ids = {s.id for s in steps}
-        parallel = [s for s in steps if not any(pc in step_ids for pc in s.preconditions)]
-        sequential = [s for s in steps if any(pc in step_ids for pc in s.preconditions)]
+        step_orders = {str(s.order) for s in steps}
+
+        def _depends_on_batch(step: PlanStep) -> bool:
+            if any(pc in step_ids for pc in step.preconditions):
+                return True
+            refs = referenced_steps(step.action_spec.get("arguments", {}))
+            return any(ref in step_ids or ref in step_orders for ref in refs)
+
+        parallel = [s for s in steps if not _depends_on_batch(s)]
+        sequential = [s for s in steps if _depends_on_batch(s)]
 
         results: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]] = []
 
@@ -295,13 +312,53 @@ class AgentLoopStepExecution:
         else:
             results.extend(self._run_step_parallel(step) for step in parallel)
 
-        # Sequential steps follow in plan order.
-        results.extend(self._run_step_parallel(step) for step in sequential)
+        # Последовательные идут в порядке плана — и только здесь ссылки
+        # разрешаются: к этому моменту вывод шага-источника уже ИЗМЕРЕН.
+        for step in sequential:
+            self._resolve_references_in(step, results)
+            results.append(self._run_step_parallel(step))
 
         # Re-sort to plan order so callers process artifacts in a stable sequence.
         order_map = {s.id: i for i, s in enumerate(steps)}
         results.sort(key=lambda r: order_map.get(r[0].id, 9999))
         return results
+
+    def _resolve_references_in(
+        self,
+        step: PlanStep,
+        done: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]],
+    ) -> None:
+        """Подставить в аргументы шага выводы уже исполненных шагов.
+
+        Молчаливого «как-нибудь» здесь нет: если источник не дал результата,
+        ссылка остаётся неразрешённой, шаг помечается провалившимся с названной
+        причиной и НЕ исполняется. Правдоподобная подстановка была бы худшим
+        исходом — ровно она и породила класс «выдумывает вместо того, чтобы
+        посмотреть».
+        """
+        arguments = step.action_spec.get("arguments", {})
+        if not has_step_reference(arguments):
+            return
+        outputs: dict[str, Any] = {}
+        for done_step, artifact, _trigger in done:
+            if artifact is None:
+                continue
+            output = artifact.get("output")
+            outputs[done_step.id] = output
+            outputs[str(done_step.order)] = output
+        try:
+            step.action_spec["arguments"] = resolve_step_references(
+                arguments, outputs,
+            )
+        except UnresolvedStepReference as exc:
+            self.log.log("step_reference_unresolved", {
+                "step_id": step.id,
+                "tool": step.action_spec.get("tool_name"),
+                "reason": str(exc),
+                "known_steps": sorted(outputs),
+            })
+            step.action_spec["arguments"] = arguments
+            step.status = "failed"
 
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 3, all 16 returns are guard clauses
         """Run a single PlanStep through Act -> Policy -> Tool -> Verify.

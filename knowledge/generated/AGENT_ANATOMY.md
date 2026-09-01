@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 214 modules across 12 groups._
+_Total: 215 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -56,6 +56,7 @@ _Planning, verification, clarification, control loop._
 | `core/loop` | Control Loop — Observe -> Interpret -> Plan -> Act -> Verify -> Respond. |
 | `core/loop_step_execution` | Исполнение одного шага плана — вырезано из ``core/loop.py`` дословно. |
 | `core/loop_sensor` | Запись о сбое наблюдательного сенсора — один метод, и это его дом. |
+| `core/step_references` | Наблюдённое значение доезжает из шага A в аргументы шага B. |
 | `core/loop_knowledge` | Запись знаний, добытых конвейером, в долгую память. |
 | `core/loop_memory_commands` | Операторские команды памяти: запомнить, забыть, показать. |
 | `core/loop_repair` | Фасад операторских команд починки на объекте агента. |

@@ -524,6 +524,24 @@ Output format - return ONLY a JSON object, no markdown fences, no preface:
   ]
 }
 
+Carrying a measured value into a later step
+  A step's arguments are fixed when the plan is written, BEFORE anything runs.
+  To use what an earlier step actually produced, reference it instead of
+  guessing it:
+
+      {"tool": "file_read",  "arguments": {"path": "core/loop.py"}},
+      {"tool": "file_write", "arguments": {"path": "copy.py",
+                                           "content": "{{step:0.output}}"}}
+
+  {{step:<order or step id>.output}} is replaced with that step's real output
+  just before the later step runs; the step waits for its source. The whole
+  argument may be the reference (the value keeps its type) or it may sit
+  inside text. If the source produced no result the later step FAILS with a
+  named reason — it is never filled with something plausible.
+
+  Use this instead of writing a description of what you expect to read
+  (a "<content of the file>" string is a placeholder and will be rejected).
+
 Examples of run_tests arguments:
   Basic run:    {"paths": ["tests"]}
   With filter:  {"paths": ["tests"], "pattern": "test_loop"}

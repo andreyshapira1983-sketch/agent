@@ -35,6 +35,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Cognitive Core & Agent Cycle (§3)", "Planning, verification, clarification, control loop.", [
         "loop", "loop_step_execution", "loop_sensor",
+        "step_references",
         "loop_knowledge", "loop_memory_commands", "loop_repair", "loop_hygiene",
         # B1: реализация уехала из двух примесей сюда; `agent` остался фасадом.
         "repair_commands", "memory_hygiene_commands",
