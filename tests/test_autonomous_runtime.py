@@ -949,13 +949,15 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
     for dry in (True, False):
         seen.clear()
         runtime._task_goal(task, AutonomousRuntimeConfig(dry_run=dry))
+    # 2026-09-01, слово оператора: ЧТЕНИЕ веба (web_search/web_fetch) выведено
+    # из блокировки — агент сам потянулся за чужим решением своей же проблемы,
+    # а ключ висел на формулировке цели. Остальной выход наружу закрыт.
         assert {
             "spawn_subagent",
-            "web_search",
-            "web_fetch",
             "rss_fetch",
             "semantic_scholar_search",
         } <= seen["blocked"]
+        assert not ({"web_search", "web_fetch"} & seen["blocked"])
         assert seen["blocked"] >= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
         # Planner surface is pruned too (not just policy-blocked at execution).
         assert seen["hidden"] >= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
