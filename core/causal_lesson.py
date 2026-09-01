@@ -261,6 +261,52 @@ def claim_tags(claim: CausalClaim) -> tuple[str, ...]:
     return (f"causal:{state.lower()}", "unverified")
 
 
+#: Мостик остановки → нижняя перекладина причинной лестницы.
+#:
+#: Замер 2026-09-01: четыре самостоятельных запуска подряд не дали работы, и
+#: НИ ОДИН из отказов не попал в поток наблюдений — лестница объяснений не
+#: видела собственных стен агента и объясняла что угодно, кроме них. Журнал
+#: остановок это чинит только наполовину: он даёт подсказку выбору цели, но
+#: не даёт машине ПОВОД расследовать.
+#:
+#: Мостик отдельный, а не внутри `record_self_stop`: узкий орган по контракту
+#: оператора пишет ровно один журнал, и расширять его вторым адресом нельзя.
+#: Здесь наблюдение только СОБИРАЕТСЯ; записывает его существующий владелец
+#: потока — `CausalObservationStore`, тем же путём, что и все прочие.
+_STOP_SIGNAL_PREFIX = "self_stop"
+
+
+def observation_from_self_stop(
+    *, kind: str, reason: str, signature: str, source: str,
+    run_id: str = "", trace_id: str = "", episode_id: str = "",
+) -> Observation | None:
+    """Наблюдение о собственной остановке — или None, если повода нет.
+
+    Отпечаток наблюдения считается по `defect_signals`, поэтому сигналы здесь
+    строятся из СТАБИЛЬНЫХ частей стены (род и каноническая причина): та же
+    стена копит счётчик повторений вместо того, чтобы плодить записи. Без
+    источника наблюдения не бывает — это то же правило, что у журнала: улика
+    обязана указывать на первичное событие.
+    """
+    kind = (kind or "").strip()
+    reason = (reason or "").strip()
+    source = (source or "").strip()
+    if not kind or not reason or not source:
+        return None
+    return Observation(
+        episode_id=episode_id,
+        trace_id=trace_id,
+        run_id=run_id,
+        defect_signals=(f"{_STOP_SIGNAL_PREFIX}:{kind}", f"wall:{reason}"),
+        evidence_refs=(source, f"signature:{signature}" if signature else source),
+        observed_mismatch=(
+            f"A self-launched run produced no work: {kind} at wall '{reason}'. "
+            f"The run intended to work and stopped instead; the primary event "
+            f"is recorded in {source}."
+        ),
+    )
+
+
 def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | None:
     """Отклонение из эпизода: три выводимые вещи и ни одной невыводимой.
 
