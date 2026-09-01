@@ -52,5 +52,9 @@ def test_the_posture_blocks_still_guard_the_unattended_goal_path():
     """The autonomy grant does not widen tooling: the daemon goal path keeps
     refusing subagents and network egress by its own constant."""
     assert "spawn_subagent" in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-    for tool in ("web_search", "web_fetch", "rss_fetch", "semantic_scholar_search"):
+    # 2026-09-01: чтение веба открыто по слову оператора — агент сам захотел
+    # посмотреть чужое решение своей проблемы. Остальной выход наружу закрыт.
+    for tool in ("rss_fetch", "semantic_scholar_search"):
         assert tool in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+    for tool in ("web_search", "web_fetch"):
+        assert tool not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS

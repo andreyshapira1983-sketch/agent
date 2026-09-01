@@ -57,17 +57,32 @@ _NO_TESTS_BLOCKED_TOOLS: frozenset[str] = frozenset({"run_tests"})
 # would otherwise violate on the goal task:
 #   - spawn_subagent: the subagent runner is Stage 6, never unattended — an
 #     auto-run / daemon goal must not spawn child agents.
-#   - network egress (web_search / web_fetch / rss_fetch /
-#     semantic_scholar_search): external perception is operator/CLI-gated and
-#     not on the autonomous path (see knowledge/generated/AGENT_ANATOMY.md). Keeps unattended
-#     goals repo-local instead of silently reaching the web.
+#   - network egress: ЧТЕНИЕ веба (web_search / web_fetch) открыто с
+#     2026-09-01 по слову оператора — агент сам потянулся за чужим решением
+#     своей же проблемы, и ключ висел не на той двери. Остальной выход наружу
+#     (rss_fetch / semantic_scholar_search) закрыт: их никто не просил, и одни
+#     ворота за раз.
 # Applied via PolicyGate.blocked_tools exactly like _NO_TESTS_BLOCKED_TOOLS:
 # run-scoped and always restored. The interactive REPL path is unaffected.
 _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
     {
         "spawn_subagent",
-        "web_search",
-        "web_fetch",
+        # web_search / web_fetch БОЛЬШЕ НЕ ЗДЕСЬ — решение оператора 2026-09-01,
+        # дословно: «разреши ему смотреть в интернет, когда он сам захотел».
+        #
+        # Замер, вызвавший решение. Впервые увидев свои открытые дела, агент
+        # взял целью собственный дефект («передача значения между шагами») и
+        # САМ потянулся за чужим решением: планировщик выбрал web_search с
+        # запросом "step-to-step value-passing contract tool output arguments
+        # defect". Ворота отказали — потому что чтение веба открывалось не по
+        # намерению агента, а по ФОРМУЛИРОВКЕ цели (глагол изучения плюс слово
+        # про веб). Ключ висел на другой двери: инициатива была, доступа не
+        # было.
+        #
+        # Открыто ровно чтение и ровно два инструмента. Оба не меняют мир:
+        # поиск и выкачка страницы. Всё, что приходит снаружи, остаётся
+        # ГИПОТЕЗОЙ с источником — это уже правило дома, а не новая уступка;
+        # защита от инъекций и классификация данных стоят на прежнем месте.
         "rss_fetch",
         "semantic_scholar_search",
         # python_probe: лаборатория исполняет код — безнадзорный путь остаётся
@@ -88,11 +103,17 @@ _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-#: Что вообще МОЖНО разблокировать целевому прогону: только чтение веба, и
-#: только явным полем конфига (учебное действие под стоячим грантом, решение
-#: оператора 2026-08-16). spawn_subagent и python_probe этим полем не
-#: разблокируемы по построению — им нужны собственные ворота.
-_UNBLOCKABLE_TOOLS: frozenset[str] = frozenset({"web_search", "web_fetch"})
+#: Что вообще МОЖНО разблокировать целевому прогону явным полем конфига
+#: (учебное действие под стоячим грантом, решение оператора 2026-08-16).
+#: spawn_subagent и python_probe этим полем не разблокируемы по построению —
+#: им нужны собственные ворота.
+#:
+#: 2026-09-01: web_search/web_fetch ушли отсюда не потому, что запрещены, а
+#: потому что открыты ВСЕГДА (слово оператора). Разблокировать осталось поиск
+#: научных работ — то же чтение внешнего мира, и учебное действие открывает
+#: его той же дверью. Поле не бездействует: механизм узкой, НЕ переживающей
+#: прогон разблокировки обязан оставаться проверяемым живым инструментом.
+_UNBLOCKABLE_TOOLS: frozenset[str] = frozenset({"semantic_scholar_search"})
 
 
 def _goal_block_set(

@@ -51,7 +51,7 @@ class _Done(Exception):
 
 def _agent(workspace: Path):
     agent = _durable_agent(workspace)
-    for name in ("rss_fetch", "run_tests", "web_search"):
+    for name in ("rss_fetch", "run_tests", "semantic_scholar_search"):
         agent.registry.register(_Stub(name))
     return agent
 
@@ -126,17 +126,23 @@ def test_a_runs_narrowing_does_not_outlive_it(workspace: Path) -> None:
 def test_a_runs_widening_does_not_outlive_it(workspace: Path) -> None:
     """Invariant 3, the permission direction — the half that would matter if a
     run were ever allowed to lift something. `unblock_tools` narrowly restores
-    access to a tool the run itself would otherwise block."""
+    access to a tool the run itself would otherwise block.
+
+    Проверяется на поиске научных работ: 2026-09-01 чтение веба открыто всегда
+    (слово оператора), поэтому инвариант «разблокировка не переживает прогон»
+    держится теперь на инструменте, который ДЕЙСТВИТЕЛЬНО закрыт. Сам инвариант
+    не изменился: временное право обязано умирать вместе со своим прогоном.
+    """
     agent = _agent(workspace)
     blocked = _observe_during_run(
-        agent, workspace, lambda: _verdict(agent, "web_search"),
+        agent, workspace, lambda: _verdict(agent, "semantic_scholar_search"),
         dry_run=True, include_tests=True)
     unblocked = _observe_during_run(
-        agent, workspace, lambda: _verdict(agent, "web_search"),
+        agent, workspace, lambda: _verdict(agent, "semantic_scholar_search"),
         dry_run=True, include_tests=True,
-        unblock_tools=frozenset({"web_search"}))
+        unblock_tools=frozenset({"semantic_scholar_search"}))
     after = _observe_during_run(
-        agent, workspace, lambda: _verdict(agent, "web_search"),
+        agent, workspace, lambda: _verdict(agent, "semantic_scholar_search"),
         dry_run=True, include_tests=True)
 
     assert blocked == "deny"
