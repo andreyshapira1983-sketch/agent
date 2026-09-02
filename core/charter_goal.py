@@ -144,7 +144,7 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
     return tuple(stops)
 
 
-def _recent_goals(workspace: Path) -> tuple[str, ...]:
+def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
     """Цели, которые действительно ЗАНИМАЛИ прогон, а не просто прозвучали.
 
     Клинч 2026-09-01, замерен: в 11:31 цель прошла ворота, но исполнение
@@ -162,7 +162,7 @@ def _recent_goals(workspace: Path) -> tuple[str, ...]:
     path = workspace / "data" / "campaign_ledger.jsonl"
     if not path.is_file():
         return ()
-    worked: list[str] = []
+    worked_ts: dict[str, str] = {}
     unworked: set[str] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
@@ -179,12 +179,16 @@ def _recent_goals(workspace: Path) -> tuple[str, ...]:
         # нельзя — тогда неполная запись молча вернула бы «день сурка».
         did_work = not (result in _NO_WORK_RESULTS and not payload.get("work_done"))
         if did_work:
-            if goal not in worked:
-                worked.append(goal)
+            ts = str(payload.get("ts") or "")
+            if goal in worked_ts:
+                worked_ts[goal] = max(worked_ts[goal], ts)
+            else:
+                worked_ts[goal] = ts
             unworked.discard(goal)
-        elif goal not in worked:
+        elif goal not in worked_ts:
             unworked.add(goal)
-    return tuple(worked[-_RECENT_GOALS:])
+    pairs = list(worked_ts.items())
+    return tuple(pairs[-_RECENT_GOALS:])
 
 
 def _tokens(text: str) -> frozenset[str]:
@@ -411,7 +415,28 @@ def _ask(
         "\n"
         "Every product still goes through human approval. Never widen your "
         "own authority. Anchor the goal by CHOOSING "
-        "one numbered charter line it serves. Reply with ONE JSON object "
+        "one numbered charter line it serves.\n"
+        "\n"
+        "HOW TO CHOOSE WHAT MATTERS (the operator's priority ladder, "
+        "2026-09-02):\n"
+        "  P0 never violate constraints: no unauthorised spend, no "
+        "irreversible external acts, no fabricated success.\n"
+        "  P1 finish what is open — if a blocker of an open item has cleared, "
+        "RESUME it before starting anything new.\n"
+        "  P2 remove a PROVEN blocker of useful work (your own measured "
+        "defect first).\n"
+        "  P3 externally useful work: code, analysis, research, commercial "
+        "tasks.\n"
+        "  P4 grow a capability ONLY with the proven chain defect -> blocks "
+        "capability -> needed for mission.\n"
+        "  P5 open research (self-model, literature, experiments).\n"
+        "Self-expansion is not the goal; mission capability is. Ask first: "
+        "which MEASURED limitation currently blocks useful external work the "
+        "most? Your measured capability map lives at "
+        "knowledge/doctrine/future/WHAT_I_HAVE_AND_WHAT_I_LACK.md — it names "
+        "what you have, what you lack, and the exam you have not passed.\n"
+        "\n"
+        "Reply with ONE JSON object "
         'only: {"goal": "<one concrete goal, 20-300 chars>", '
         '"anchor_id": <number of the charter line this goal serves>, '
         '"why_now": "<1-2 sentences>", '
@@ -512,6 +537,34 @@ def _operator_vetoes(root: Path) -> tuple[str, ...] | None:
     )
 
 
+def _ask_shorter(llm: Any, goal: str) -> str:
+    """Одна попытка семантически сократить ту же цель до лимита.
+
+    Policy и recovery разделены (слово оператора 2026-09-02): лимит 300 НЕ
+    меняется и не обходится — но отказ по длине обязан вести к переформулировке,
+    а не к остановке всей системы. Замер 2026-09-02T09:03: содержательно годная
+    цель в 312 символов стала третьим и последним отказом старта — прогон
+    честно умер из-за двенадцати лишних символов.
+    """
+    prompt = (
+        f"Your goal is {len(goal)} characters; the hard limit is 300. "
+        "Shorten it to at most 300 characters, keeping the SAME semantic "
+        'goal — do not change what is to be done. Reply with ONE JSON '
+        'object only: {"goal": "<the same goal, shortened>"}.'
+    )
+    try:
+        raw = llm.complete(system=prompt, user=goal, max_tokens=400,
+                           temperature=0.2)
+        start, end = raw.find("{"), raw.rfind("}")
+        parsed = json.loads(raw[start:end + 1]) if start >= 0 else None
+    except Exception:  # noqa: BLE001 — сокращение — это recovery, не несущая
+        # конструкция: его провал возвращает прежний честный отказ по длине.
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    return str(parsed.get("goal") or "").strip()
+
+
 def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     """Одна цель от хартии — или отказ, называющий, какие ворота не пройдены."""
     root = Path(workspace)
@@ -522,7 +575,28 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     anchors = _anchor_lines(charter)
     if not anchors:
         return _decline("the charter has no anchorable lines")
-    recent = _recent_goals(root)
+    recent_pairs = _recent_goals(root)
+    # Мир мог измениться: записываем состав заблокированных инструментов
+    # безнадзорного пути (строка ложится только на перемене) и отсекаем от
+    # стража повторов темы, чья последняя РАБОТА старше последней перемены.
+    # Recentness ≠ completion (слово оператора 2026-09-02): вердикт «здесь
+    # больше нечего делать», вынесенный в другом мире, не запирает тему.
+    try:
+        from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+        from core.capability_events import (
+            last_capability_change_ts,
+            record_capability_snapshot,
+        )
+        record_capability_snapshot(root, _AUTONOMOUS_GOAL_BLOCKED_TOOLS)
+        change_ts = last_capability_change_ts(root)
+    except Exception:  # noqa: BLE001 — без журнала событий действует прежнее
+        # правило (всё недавнее блокирует): потеря нового смягчения не должна
+        # ломать выбор цели.
+        change_ts = ""
+    recent = tuple(
+        goal_text for goal_text, work_ts in recent_pairs
+        if not (change_ts and work_ts and work_ts < change_ts)
+    )
     stops = _recent_stops(root)
 
     # Каждый исход ниже — гражданин памяти: решение переживает свой тик,
@@ -559,6 +633,10 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     except (TypeError, ValueError):
         anchor_id = -1
 
+    if len(goal) > 300:
+        shortened = _ask_shorter(llm, goal)
+        if shortened:
+            goal = shortened
     if not 20 <= len(goal) <= 300:
         return _declined(f"goal length {len(goal)} outside 20..300", goal)
     if _widens_own_authority(goal):

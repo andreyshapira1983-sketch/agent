@@ -81,6 +81,11 @@ HEARTBEAT_PATH     = _hb.HEARTBEAT_PATH
 # path app/single_instance.py documents, so a future always-on daemon and this
 # cron tick exclude each other rather than both claiming tasks.
 DAEMON_LOCK_PATH   = "data/daemon.lock"
+
+#: Сколько раз пробовать выбрать цель на старте кампании. Замер
+#: 2026-09-01T23:27: одна попытка — и прогон умирал на первой отвергнутой
+#: цели, хотя внутри прогона право сменить исчерпанную цель уже есть.
+_GOAL_PICK_ATTEMPTS = 3
 BUDGET_LEDGER_PATH = "data/budget_ledger.jsonl"
 BUDGET_CONFIG_PATH = "config/budget_limits.json"
 # Persistent cooldown state for the autonomous self-build producer (TD-026).
@@ -1893,11 +1898,21 @@ if __name__ == "__main__":
         from core.charter_goal import propose_charter_goal
 
         _charter_router = _charter_goal_router(ws)
-        pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
-        if pick.status != "proposed":
-            print(f"[CHARTER] no goal: {pick.reason}")
-            # Его собственный след остановки (core/self_stop_record.py):
-            # поля и категория — его редакции, см. call_args_v2.md.
+        # Несколько попыток выбрать цель на СТАРТЕ. Замер 2026-09-01T23:27:
+        # прогон умирал на первой же отвергнутой цели, потому что попытка была
+        # ровно одна — притом внутри прогона право сменить исчерпанную цель уже
+        # есть. Стартовать оказалось труднее, чем продолжать.
+        #
+        # Каждая неудачная попытка ОСТАВЛЯЕТ СЛЕД: запись стены и повод для
+        # причинной лестницы. Тишины здесь быть не должно — иначе выбор снова
+        # станет невидимым для него самого.
+        pick = None
+        for _attempt in range(_GOAL_PICK_ATTEMPTS):
+            pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
+            if pick.status == "proposed":
+                break
+            print(f"[CHARTER] no goal (attempt {_attempt + 1}"
+                  f"/{_GOAL_PICK_ATTEMPTS}): {pick.reason}")
             from core.self_stop_record import (
                 reason_kind,
                 record_self_stop,
@@ -1912,8 +1927,6 @@ if __name__ == "__main__":
                 outcome=pick.status,
                 workspace=ws,
             )
-            # Остановка становится ПОВОДОМ для причинной лестницы: без этого
-            # машина объясняла что угодно, кроме собственных стен (замер 01.09).
             record_stop_observation(
                 ws,
                 kind="goal_selection_failure",
@@ -1921,6 +1934,9 @@ if __name__ == "__main__":
                 signature=str(_stop.get("signature") or ""),
                 source="data/charter_decisions.jsonl",
             )
+        if pick is None or pick.status != "proposed":
+            print("[CHARTER] no goal after "
+                  f"{_GOAL_PICK_ATTEMPTS} attempts; stopping honestly")
             sys.exit(3)
         print(f"[CHARTER] goal: {pick.goal}")
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")

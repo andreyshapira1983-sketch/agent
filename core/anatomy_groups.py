@@ -75,6 +75,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "compensation", "safe_vcs", "supply_chain",
     ]),
     ("Runtime, State & Orchestration (§6)", "Autonomous loop, scheduling, budgets, state durability.", [
+        "capability_events",
         "autonomous_runtime", "autonomous_runtime_proposals", "autonomous_runtime_types", "scheduler", "campaign", "campaign_io", "campaign_ledger",
         "campaign_types", "work_session", "task_queue", "task_lifecycle",
         "checkpoint", "circuit_breaker", "termination_guard", "step_repetition",
