@@ -52,6 +52,7 @@ Set a real provider deliberately, when you intend live calls.
 |---|---|---|
 | `AGENT_MODEL_MAX_CALLS_PER_SESSION` | `0` (off) | Hard cap on LLM calls per session. |
 | `AGENT_MODEL_MAX_TOKENS_PER_SESSION` | `0` (off) | Hard cap on tokens per session. |
+| `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` | `off` | `off` \| `on`. When `on`, unsupported-claim rewriting (`core/unsupported_claims`) changes the answer; when `off` it only records what it would have done. Undocumented until 2026-09-03 (audit D6). |
 | `AGENT_MODEL_MAX_COST_UNITS_PER_SESSION` | `0` (off) | Hard cap on cost units per session. |
 | `AGENT_BUDGET_HOUR_LLM_CALLS` | see `config/` | Persistent hourly call budget. |
 | `AGENT_BUDGET_DAY_LLM_CALLS` | see `config/` | Persistent daily call budget. |

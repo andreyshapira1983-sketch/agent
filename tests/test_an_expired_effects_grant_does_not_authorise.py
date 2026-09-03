@@ -97,19 +97,31 @@ def test_the_standing_grant_already_did_this(tmp_path) -> None:
     Если это когда-нибудь перестанет быть правдой, приведение одного механизма
     к другому теряет основание, и тест обязан этого потребовать.
     """
-    import inspect
-
     from core.autonomous_runtime import active_standing_grant
 
-    # Смотрим ФУНКЦИЮ, где проверка живёт, а не метод, который к ней сводится:
-    # 2026-08-27 условия гранта вынесли в одно общее место, чтобы тик спрашивал
-    # о том же разрешении и не завёл вторую расходящуюся проверку. Пин следует
-    # за свойством, а не за адресом.
-    src = inspect.getsource(active_standing_grant)
-    assert "expires" in src and "continue" in src, (
+    # Блок 5 (аудит G3, 2026-09-03): прежде здесь стояла подстрока
+    # `"expires" in src and "continue" in src` — её выдержал бы и код,
+    # который срок читает и игнорирует. Свойство проверяется ПОВЕДЕНИЕМ:
+    # истёкший стоячий грант не находится, живой — находится.
+    def _standing(inbox: ApprovalInbox, *, expires_at: str):
+        item = inbox.add(
+            operation="autonomous_runtime.standing_grant", summary="стоячий",
+            risk="irreversible", reasons=("оператор",),
+            payload={"max_runs_per_day": 3}, expires_at=expires_at,
+        )
+        inbox.approve(item.id)
+        return item
+
+    expired = ApprovalInbox(path=tmp_path / "expired.jsonl")
+    _standing(expired, expires_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat())
+    assert active_standing_grant(expired, tmp_path) is None, (
         "стоячий грант больше не проверяет срок — основание для правки "
         "разрешения на эффекты исчезло, перечитайте H-41"
     )
+
+    live = ApprovalInbox(path=tmp_path / "live.jsonl")
+    fresh = _standing(live, expires_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat())
+    assert active_standing_grant(live, tmp_path).id == fresh.id
 
 
 @pytest.mark.parametrize("goal", ["цель один", "цель два"])
