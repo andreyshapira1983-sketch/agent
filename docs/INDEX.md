@@ -216,6 +216,7 @@ frozen operator protocol.
 | `PROJECT_MAP.ru.md` | the project map for the operator, in Russian | active reference | operator |
 | `audit/MASTER_ISSUE_REGISTRY.md` | defect status — the only live `MIR-` ledger | **authoritative for status** | engineering; the self-improvement signal gatherer |
 | `audit/AUTONOMY_FREEZE.md` | the architectural freeze: where code decides instead of the agent, and what lifts it | **binding — nothing new is built until it lifts** | everyone, before starting any work |
+| `audit/AUTONOMY_AUDIT_2026-09-03.md` | six-axis audit of what earlier passes missed: accounting truth, liveness, learning loop, dead wiring, doctrine drift, dead guards — 41 verified findings with line addresses and a build order | dated snapshot; statuses live only in the registry | whoever decides what to build next |
 | `audit/HISTORICAL_FAILURE_LEDGER.md` | the failure corpus: every measured past failure as training material | active — feeds the night school | learning machinery; engineering |
 | `audit/FIELD_CHECK_QUEUE.md` | the queue for verifying registry claims against the field, by decision form | active working queue | the verification campaign |
 | `audit/CAUSAL_CLIMB_ORGAN_DESIGN.md` | design note of the built falsifiable-climb organ (MIR-096) | anchor for the organ's contract | whoever changes the causal ladder |
