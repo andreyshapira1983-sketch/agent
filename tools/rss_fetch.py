@@ -23,6 +23,7 @@ from tools.network_safety import (
     build_safe_opener,
     decompress_gzip_limited,
     host_patterns_from_env,
+    reserve_egress,
 )
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -64,6 +65,7 @@ class RssFetchTool(Tool):
         allow_http_hosts: tuple[str, ...] | None = None,
         egress_allow_hosts: tuple[str, ...] | None = None,
         egress_deny_hosts: tuple[str, ...] | None = None,
+        budget_ledger: Any | None = None,
     ):
         if max_bytes <= 0:
             raise ValueError(f"max_bytes must be > 0, got {max_bytes}")
@@ -71,6 +73,8 @@ class RssFetchTool(Tool):
             raise ValueError(f"timeout_seconds must be > 0, got {timeout_seconds}")
         self.max_bytes = int(max_bytes)
         self.timeout_seconds = float(timeout_seconds)
+        #: Persistent `web_fetches` meter (block 7, W3); None = unmetered.
+        self.budget_ledger = budget_ledger
         self._opener = opener
         self._network_policy = NetworkSafetyPolicy(
             tool_name=self.name,
@@ -100,6 +104,7 @@ class RssFetchTool(Tool):
 
     def run(self, url: str, max_entries: int | None = None) -> dict[str, Any]:
         self._network_policy.validate_url(url, role="rss_fetch url")
+        reserve_egress(self.budget_ledger, tool_name="rss_fetch", target=url)
         entry_limit = max(1, min(int(max_entries or DEFAULT_MAX_ENTRIES), MAX_ENTRIES_CAP))
 
         req = urllib.request.Request(  # noqa: S310 — validate_url above enforces the scheme allow-list and egress policy

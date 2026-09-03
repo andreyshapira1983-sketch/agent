@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from tools.base import Tool
+from tools.network_safety import reserve_egress
 
 MAX_RESULTS_CAP = 10
 DEFAULT_MAX_RESULTS = 5
@@ -32,12 +33,16 @@ class WebSearchTool(Tool):
     )
     risk = "read_only"
 
-    def __init__(self, default_max_results: int = DEFAULT_MAX_RESULTS):
+    def __init__(self, default_max_results: int = DEFAULT_MAX_RESULTS,
+                 budget_ledger: Any | None = None):
         self.default_max_results = default_max_results
+        #: Persistent `web_fetches` meter (block 7, W3); None = unmetered.
+        self.budget_ledger = budget_ledger
 
     def run(self, query: str, max_results: int | None = None) -> list[dict[str, str]]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
+        reserve_egress(self.budget_ledger, tool_name="web_search", target=query)
 
         requested = max_results if max_results is not None else self.default_max_results
         n = max(1, min(int(requested), MAX_RESULTS_CAP))

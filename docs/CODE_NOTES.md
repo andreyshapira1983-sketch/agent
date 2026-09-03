@@ -3170,6 +3170,37 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 7 — dead wiring carries current (2026-09-03)
+
+Audit §4, the CONFIRMED rows. Witnesses in
+`tests/test_dead_wiring_carries_current.py` (16); without the repair the
+file cannot even import the organs it names.
+
+- **W1** `IncidentLog` was write-only. A repeated circuit-open stop now
+  UPDATES the open incident (`_record_incident`: recurrence note,
+  `incident_recurred` event) instead of vanishing behind the dedup, and
+  `IncidentLog.status_line()` puts open/awaiting-a-human counts on the daemon
+  status the operator reads (`agent_tick._print_status`).
+- **W2** `tools/journal_append.py` resolves the path against its
+  `workspace_root` and requires the resolved file to stay under
+  `<workspace>/data/`; `data/../../x.jsonl` is refused, and a write no longer
+  lands relative to the current directory. The tool declares its arguments.
+- **W3** `web_fetches` is charged: `tools/network_safety.reserve_egress`
+  reserves one unit on the persistent `BudgetLedger` before any egress and
+  refuses on an exhausted window; `web_fetch`, `rss_fetch` and `web_search`
+  take `budget_ledger=` and `app/bootstrap.build_agent` hands them the same
+  ledger the model calls use. A hand-built tool (`None`) stays unmetered.
+- **W4** the memory door consults the write policy WITH the recent-writes
+  log (`data/memory_writes.jsonl` beside the store) and feeds it after a
+  save, so the echo antibody sees door writes.
+- **W5** `AGENT_FETCH_ALLOW_HOSTS` / `AGENT_FETCH_DENY_HOSTS` documented in
+  `docs/CONFIGURATION.md` and `.env.example` with the pattern grammar of
+  `_matches_host`. Setting them is the operator's decision (§8) and they stay
+  unset.
+
+Not done: W6–W10 (PLAUSIBLE). Planks signed: `agent_tick.py` 1964→1971,
+`core/autonomous_runtime.py` 1207→1219, `build_agent` 258→263.
+
 ## Block 6 — doctrine re-read against code (2026-09-03)
 
 Audit §5, the CONFIRMED rows. Each edit records the measured fact and the

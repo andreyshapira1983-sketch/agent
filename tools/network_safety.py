@@ -210,6 +210,25 @@ def host_patterns_from_env(name: str) -> tuple[str, ...]:
     )
 
 
+def reserve_egress(budget_ledger, *, tool_name: str, target: str) -> None:
+    """Charge one `web_fetches` unit on the persistent budget ledger before
+    any egress; refuse when the window is exhausted.
+
+    Block 7 (audit W3, 2026-09-03): `web_fetches` had limits in
+    `config/budget_limits.json`, a kill-switch and a health line reading
+    `web_fetches=0/300` — and no site that ever charged it, so the meter read
+    zero while unattended web was open. `None` ledger = unmetered (tests,
+    scripts that build a tool by hand).
+    """
+    if budget_ledger is None:
+        return
+    decision = budget_ledger.reserve("web_fetches", reason=f"{tool_name}: {target[:80]}")
+    if not decision.allowed:
+        raise PermissionError(
+            f"{tool_name}: web_fetches budget exhausted — {decision.reason}"
+        )
+
+
 def _parse_ip_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
         return ipaddress.ip_address(hostname)

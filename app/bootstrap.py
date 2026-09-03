@@ -159,6 +159,11 @@ def build_agent(
         logger=logger,
         budget_ledger=budget_ledger,
     )
+    # Block 7 (audit W3, 2026-09-03): every egress tool charges `web_fetches`
+    # on the same persistent ledger the model calls use. Before this the
+    # counter had limits, a kill-switch and a health line, and no charger.
+    for egress_tool in ("web_search", "web_fetch", "rss_fetch"):
+        registry.get(egress_tool).budget_ledger = budget_ledger
     model_router = ModelRouter.from_env(usage_ledger=model_usage_ledger)
 
     # Agent-as-tool: spawn_subagent must be registered AFTER policy and

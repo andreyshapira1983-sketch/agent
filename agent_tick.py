@@ -423,6 +423,13 @@ def _print_status(workspace: Path) -> int:
                 file=sys.stderr,
             )
 
+    # Block 7 (W1): open incidents reach the one line the operator reads.
+    from core.incident import IncidentLog
+
+    incident_line = IncidentLog(path=workspace / INCIDENT_LOG_PATH).status_line()
+    if incident_line:
+        print(incident_line, file=sys.stderr)
+
     # Dry-run visibility from the last heartbeat: honest "what was (not) applied".
     if heartbeat is not None:
         mode = heartbeat.get("mode", "?")

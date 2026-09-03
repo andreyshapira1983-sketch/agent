@@ -52,6 +52,8 @@ Set a real provider deliberately, when you intend live calls.
 |---|---|---|
 | `AGENT_MODEL_MAX_CALLS_PER_SESSION` | `0` (off) | Hard cap on LLM calls per session. |
 | `AGENT_MODEL_MAX_TOKENS_PER_SESSION` | `0` (off) | Hard cap on tokens per session. |
+| `AGENT_FETCH_ALLOW_HOSTS` | — (empty = any public host) | Egress allow-list for `web_fetch` / `rss_fetch`: comma-separated patterns — `host.example`, `.example.org` or `*.example.org` (subdomains), `*` (any). When set, a URL whose host matches none is refused before any connection. Read by `tools/network_safety.py`; never set anywhere by default (audit W5, 2026-09-03). |
+| `AGENT_FETCH_DENY_HOSTS` | — | Egress deny-list, same pattern grammar; checked before the allow-list. Private, loopback and link-local addresses are refused regardless (SSRF guard). |
 | `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` | `off` | `off` \| `on`. When `on`, unsupported-claim rewriting (`core/unsupported_claims`) changes the answer; when `off` it only records what it would have done. Undocumented until 2026-09-03 (audit D6). |
 | `AGENT_MODEL_MAX_COST_UNITS_PER_SESSION` | `0` (off) | Hard cap on cost units per session. |
 | `AGENT_BUDGET_HOUR_LLM_CALLS` | see `config/` | Persistent hourly call budget. |

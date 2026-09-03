@@ -247,6 +247,22 @@ class IncidentLog:
     def summary(self) -> str:
         return summarise_incidents(self.incidents)
 
+    def status_line(self) -> str:
+        """One line for the daemon status, or "" when nothing is open.
+
+        Block 7 (audit W1, 2026-09-03): `needing_human` and `summary` had no
+        production caller — an incident could be opened and never shown.
+        """
+        opened = self.open_incidents()
+        if not opened:
+            return ""
+        owed = self.needing_human()
+        newest = max(opened, key=lambda inc: inc.updated_at)
+        return (
+            f"Incidents: {len(opened)} open, {len(owed)} awaiting a human — "
+            f"latest {newest.trigger} ({newest.severity}, {newest.updated_at[:19]})."
+        )
+
     def load(self) -> list[Incident]:
         return list(self.incidents)
 

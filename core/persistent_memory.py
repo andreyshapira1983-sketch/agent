@@ -327,13 +327,46 @@ def memory_door_verdict(store, policy, text, kind, provenance):
     if consent_tag is None:
         return None, f"unknown kind {kind!r}; the door accepts {ACCEPTED_KINDS_TEXT}"
     tags = [kind, provenance, consent_tag]
-    decision = policy.decide(text, tags, source="agent-auto", existing=store.load())
+    # Block 7 (audit W4, 2026-09-03): the door consulted the policy WITHOUT
+    # the recent-writes log, so the echo antibody never saw the agent's own
+    # door writes and `data/memory_writes.jsonl` was never fed by them.
+    registry = _door_write_registry(store)
+    recent = []
+    if registry is not None:
+        try:
+            recent = registry.recent()
+        except Exception:  # noqa: BLE001 — a registry hiccup must never block the door
+            recent = []
+    decision = policy.decide(
+        text, tags, source="agent-auto", existing=store.load(), recent_writes=recent,
+    )
     if decision.decision != "save":
         why = "; ".join(str(r) for r in (getattr(decision, "reasons", None) or ())) or "write policy refused"
         return None, f"write policy refused: {why}"
     record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
     store.save(record)
+    if registry is not None:
+        try:
+            from core.memory_echo_antibody import make_event
+
+            registry.append(make_event(text, tags=tags, record_type="semantic", source="agent-auto"))
+        except Exception:  # noqa: BLE001, S110 — the write stands; the echo log is best-effort
+            pass
     return record.id, ""
+
+
+def _door_write_registry(store):
+    """The recent-writes log beside the store (`data/memory_writes.jsonl`),
+    or None for a store without a path."""
+    path = getattr(store, "path", None)
+    if path is None:
+        return None
+    try:
+        from core.memory_echo_antibody import MemoryWriteRegistry
+
+        return MemoryWriteRegistry(Path(path).parent / "memory_writes.jsonl")
+    except Exception:  # noqa: BLE001 — no registry is «no recent writes known»
+        return None
 
 
 def memory_door_write(store, policy, text, kind, provenance):
