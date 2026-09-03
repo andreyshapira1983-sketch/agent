@@ -64,6 +64,10 @@ class Tool(ABC):
     name: str
     description: str
     risk: Risk = "read_only"
+    #: Контракт аргументов словами — имена, типы, допустимые значения. Пусто
+    #: значит «контракт не объявлен», и планировщик угадывает (замер
+    #: 2026-09-03: memory_bank, шесть неверных вызовов подряд).
+    arguments: str = ""
 
     @abstractmethod
     def run(self, **kwargs: Any) -> Any:
@@ -163,4 +167,17 @@ class ToolRegistry:
         return list(self._tools.values())
 
     def describe(self) -> str:
-        return "\n".join(f"- {t.name} ({t.risk}): {t.description}" for t in self._tools.values())
+        return "\n".join(
+            f"- {t.name} ({t.risk}): {t.description}"
+            + (f" Arguments: {t.arguments}" if getattr(t, "arguments", "") else "")
+            for t in self._tools.values()
+        )
+
+    def argument_contracts(self, *, hidden: frozenset[str] = frozenset()) -> str:
+        """Контракты аргументов объявивших их инструментов — для планировщика."""
+        lines = [
+            f"- {t.name}: {t.arguments}"
+            for t in self._tools.values()
+            if getattr(t, "arguments", "") and t.name not in hidden
+        ]
+        return "\n".join(lines)

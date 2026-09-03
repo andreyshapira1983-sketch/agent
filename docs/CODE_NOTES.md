@@ -3170,6 +3170,52 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## The holdout closed by hand (2026-09-03, evening)
+
+The operator switched the agent off and changed the mode: «начни строительство
+… сам справляться, без него». The four defects that had been left as the
+agent's holdout — each with a banked RED witness — were repaired in one pass,
+witness first, the witnesses flipped to green, nothing else touched.
+
+**Д2 — silence is not a parse failure.** `charter_goal._ask` now returns
+`(parsed, reason)`: an empty reply with `llm.last_answer_was_truncated` is
+declined as «no final output (reasoning consumed the token budget)», an empty
+untruncated reply as «empty reply», a reply with no JSON object as «no
+parseable JSON object». `self_stop_record.reason_kind` maps them to
+`model_silence` / `goal_parse`, so the stop journal accumulates the right wall.
+
+**Д4 — the last complete JSON object.** `_last_json_object` tries every `{`
+with `JSONDecoder.raw_decode` and keeps the last dict that decodes; braces in
+prose before the final answer no longer break a valid reply.
+
+**Д5 — the roster is reachable live.** Measured cause: `AGENT_REASONING_ROSTER`
+was set nowhere, so `_roster_path()` was `None` in every live process, the
+roster was never consulted, and a thinking planner climbed 1200→2400→4800
+instead of getting the 8192 floor — three silences of 8 400 tokens in one
+morning. The first attempt at a fix — a default path inside `core/llm.py` —
+was rejected by the house's own 2026-08-29 decision the moment the battery
+ran: the library must not pick a store, because the suite then wrote three
+invented models into the live journal (it did, again; the file was restored).
+The wiring therefore lives at the entry points: `llm.ensure_roster_home
+(workspace)` sets the variable to `<workspace>/data/reasoning_roster.jsonl`
+when the operator has not chosen a home, and both `agent_tick.py` (tick and
+paced campaign) and `cli/app.py` call it right after `load_dotenv`. A nerve
+test pins that both entry points call it. The two rows already in the file
+now take effect.
+
+**Д6 — the memory door speaks its own vocabulary.** Six mentor turns produced
+zero deposits: the planner saw tools as one line each (name, risk,
+description) and guessed `memory_bank`'s arguments — three calls without
+`text`, two with `kind='reflection'` — while the door refused with a bare
+`None`. Three fixes at one seam: `Tool.arguments` (an optional prose contract;
+`memory_bank` names its three accepted kinds), `ToolRegistry.argument_contracts`
+rendered into the planner's user prompt as «tool argument contracts», and
+`memory_door_verdict` returning `(mem_id, reason)` so the tool's output carries
+`refused_by` naming the rule. `memory_door_write` keeps its API. Witnesses:
+`tests/test_the_memory_door_speaks_its_own_vocabulary.py`,
+`tests/test_a_silent_thinker_is_told_apart_from_a_bad_parser.py`,
+`tests/test_a_model_that_proved_silent_is_believed_next_time.py`.
+
 ## The bootstrap deadlock, cut at two seams (2026-09-03)
 
 Three runs in a row on 2026-09-03 replicated one trace: the agent chose a

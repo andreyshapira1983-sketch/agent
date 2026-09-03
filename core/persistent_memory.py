@@ -300,21 +300,41 @@ CONSENT_TAG_MAP = {
     "[НАБЛЮДЕНИЕ, один день]": "insight",
 }
 
-def memory_door_write(store, policy, text, kind, provenance):
+#: Словарь двери — одной строкой, чтобы его можно было показать тому, кто в
+#: дверь стучится (замер 2026-09-03: шесть ходов, kind='lesson'/'reflection',
+#: ноль записей — дверь молчала о своих ключах).
+ACCEPTED_KINDS_TEXT = "EXACTLY one of: " + ", ".join(repr(k) for k in (
+    "[ВЫВОД, проверен боем]", "[ВЫВОД, замерен N раз]", "[НАБЛЮДЕНИЕ, один день]",
+))
+
+
+def memory_door_verdict(store, policy, text, kind, provenance):
+    """(mem_id | None, reason) — отказ называет правило, которое сработало.
+
+    До 2026-09-03 дверь на отказ возвращала None без слова, и агент угадывал
+    причину (и угадывал неверно). Причина — для того, кто стучится; решение
+    двери не меняется.
+    """
     text = (text or '').strip()
     kind = (kind or '').strip()
     provenance = (provenance or '').strip()
     if not text or not kind or not provenance:
-        return None
+        missing = [n for n, v in (("text", text), ("kind", kind), ("provenance", provenance)) if not v]
+        return None, f"missing required field(s): {', '.join(missing)}"
     if _looks_like_code(text):
-        return None
+        return None, "text looks like code (code punctuation with few words); the door banks prose conclusions only"
     consent_tag = CONSENT_TAG_MAP.get(kind)
     if consent_tag is None:
-        return None
+        return None, f"unknown kind {kind!r}; the door accepts {ACCEPTED_KINDS_TEXT}"
     tags = [kind, provenance, consent_tag]
     decision = policy.decide(text, tags, source="agent-auto", existing=store.load())
     if decision.decision != "save":
-        return None
+        why = "; ".join(str(r) for r in (getattr(decision, "reasons", None) or ())) or "write policy refused"
+        return None, f"write policy refused: {why}"
     record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
     store.save(record)
-    return record.id
+    return record.id, ""
+
+
+def memory_door_write(store, policy, text, kind, provenance):
+    return memory_door_verdict(store, policy, text, kind, provenance)[0]

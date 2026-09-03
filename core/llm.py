@@ -36,11 +36,39 @@ DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
 #: banked three invented models into the live journal, after which real budget
 #: tests read 8192 where they had asked for 1024. Entry points set it (see
 #: `main.py`); libraries and tests get silence unless they ask for a home.
+#: Дом реестра молчавших внутри рабочей области. Библиотека сама хранилище
+#: НЕ выбирает (решение 2026-08-29: дефолт в библиотеке дал батарее тестов
+#: записать три выдуманные модели в живой журнал — и 2026-09-03 при пробе
+#: дефолта это повторилось). Дом задаёт РАНТАЙМ в точке входа —
+#: `ensure_roster_home` из agent_tick и REPL.
+ROSTER_RELPATH = "data/reasoning_roster.jsonl"
+
+
 def _roster_path() -> Any:
+    """Путь к реестру молчавших из окружения; None — рантайм дом не задал."""
     from pathlib import Path
 
     configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
     return Path(configured) if configured else None
+
+
+def ensure_roster_home(workspace: Any) -> Any:
+    """Точка входа объявляет дом реестра, если оператор не задал свой.
+
+    Замер 2026-09-03: AGENT_REASONING_ROSTER не задавал никто, путь был None
+    в каждом живом процессе, реестр не читался и не писался, и думающая
+    модель получала лестницу 1200→2400→4800 вместо пола 8192 — три молчания
+    по 8 400 токенов за утро. Орган работал; подключения не было. Возвращает
+    действующий путь.
+    """
+    from pathlib import Path
+
+    configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
+    if configured:
+        return Path(configured)
+    home = Path(workspace) / ROSTER_RELPATH
+    os.environ["AGENT_REASONING_ROSTER"] = str(home)
+    return home
 
 
 def _roster_key(provider: str, model: str) -> str:

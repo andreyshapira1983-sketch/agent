@@ -87,7 +87,7 @@
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:234",
+     "site": "core/loop_synthesis.py:235",
      "role": "control",
      "uses": "<failure_context> block in the synthesis prompt",
      "gated_by": "core/loop_synthesis.py:608 — receives the world-facing subset unless st.replan_exhausted",

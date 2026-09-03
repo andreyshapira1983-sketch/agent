@@ -513,13 +513,43 @@ def _ask(
         user += "\n\n" + mentor_questions
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
-    except Exception:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
-        return None
-    try:
-        start, end = raw.find("{"), raw.rfind("}")
-        return json.loads(raw[start:end + 1]) if start >= 0 else None
-    except ValueError:
-        return None
+    except Exception as exc:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
+        return None, f"the model call failed: {type(exc).__name__}"
+    # Молчание (finish_reason=length, content='') ≠ сбой разбора: клиент их
+    # различает (last_answer_was_truncated), шов доносит различие (Д2, 2026-09-03).
+    if not str(raw or "").strip():
+        if bool(getattr(llm, "last_answer_was_truncated", False)):
+            return None, (
+                "the model produced no final output: the reply was truncated "
+                "before any answer (reasoning consumed the token budget)"
+            )
+        return None, "the model returned an empty reply"
+    parsed = _last_json_object(raw)
+    if parsed is None:
+        return None, "the model's reply contained no parseable JSON object"
+    return parsed, ""
+
+
+def _last_json_object(raw: str) -> dict | None:
+    """Последний ПОЛНЫЙ JSON-объект в ответе, или None.
+
+    Прежний разбор брал «первую { … последнюю }»: фигурные скобки в прозе перед
+    финальным JSON (думающие модели так делают) превращали годный ответ в
+    «no parseable goal». Здесь каждая «{» пробуется как начало объекта, и
+    побеждает последний, который разобрался в словарь.
+    """
+    decoder = json.JSONDecoder()
+    found: dict | None = None
+    for pos, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(raw[pos:])
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            found = obj
+    return found
 
 
 
@@ -622,7 +652,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         return _declined(f"operator veto list unreadable: {VETO_RELPATH}")
 
     mentor_qs = open_questions(root)
-    parsed = _ask(
+    parsed, why = _ask(
         llm, charter, anchors, recent, _recent_declined(root),
         _backlog_lines(root), _recent_verdicts(root),
         mentor_questions=mentor_block(mentor_qs),
@@ -630,7 +660,7 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         open_work=_open_work_lines(root),
     )
     if not parsed:
-        return _declined("the model returned no parseable goal")
+        return _declined(why or "the model returned no parseable goal")
 
     goal = str(parsed.get("goal") or "").strip()
     why_now = str(parsed.get("why_now") or "").strip()

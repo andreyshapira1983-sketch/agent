@@ -40,7 +40,7 @@ SKIP_DIRS = frozenset({
 WATCH: dict[str, int] = {
     #: 188 (2026-09-01): пейсер впервые пересёк порог 150 — в него въехал
     #: выбор СЛЕДУЮЩЕЙ цели по хартии (право смены цели внутри прогона).
-    "agent_tick.py:run_paced_campaign": 188,
+    "agent_tick.py:run_paced_campaign": 189,  # +1 (2026-09-03, Д5): вызов ensure_roster_home после load_dotenv — дом реестра молчавших объявляет точка входа.
     "core/loop.py:AgentLoop._run_inner": 427,  # замер 417 (2213 до раскола) + запас 10
     "core/step_sanitizer.py:sanitize_step": 776,  # +42 (2026-09-01, Fable строит за агента): ветка semantic_scholar_search — лечение МЁРТВОЙ способности: инструмент стоял в поясе и в промпте планировщика, а шаг с ним молча выбрасывался. Найден новым сторожем tests/test_a_registered_tool_is_not_silently_dead.py. Лекарство остаётся прежним и всё нужнее: диспетчеризация по словарю (названо агентом 2026-09-01).  # +37 (2026-09-01): ветка journal_append — легитимный обработчик, не раздувание; настоящее лекарство названо — диспетчеризация по словарю (решение и подпись — агента, append_ratchets.md).  # +29 (2026-08-31): added memory_bank dispatch block; one tool branch is not a reason to cut (решение и подпись — агента, sanitizer_ratchet.md).
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,

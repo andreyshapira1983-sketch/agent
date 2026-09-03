@@ -18,8 +18,11 @@
 Клиент УЖЕ различает (a): `complete()` возвращает "" и ставит
 `last_answer_was_truncated=True`. Различение теряется на шве charter_goal —
 там любая пустота и любой сбой разбора называются одним словом.
-Свидетели ниже красные ровно там, где различение потеряно, и зелёные там,
-где оно живо (транспорт), — чтобы ремонт бил в шов, а не в клиент.
+Свидетели ниже были красными ровно там, где различение терялось, и зелёными
+там, где оно живо (транспорт). Ремонт 2026-09-03 (слово оператора «строй
+сам»): шов charter_goal читает last_answer_was_truncated и называет молчание
+молчанием; разбор берёт последний ПОЛНЫЙ JSON-объект, а не «первую { …
+последнюю }».
 """
 from __future__ import annotations
 
@@ -77,20 +80,6 @@ def _workspace(tmp_path):
     return tmp_path
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-09-03 and banked rather than fixed (RED witness "
-        "by the operator's word): charter_goal names an empty, truncated reply "
-        "('' + last_answer_was_truncated=True — reasoning consumed the budget) "
-        "with the same words as a parse failure. Raw evidence: deepseek-reasoner "
-        "on the exact goal prompt, finish_reason=length, content='' — 2/2 at "
-        "max_tokens=1200, 1/3 at the 8192 roster floor. Minimal repair proposed, "
-        "not applied: read llm.last_answer_was_truncated at the charter_goal seam "
-        "and decline with 'no final output (reasoning consumed the budget)'. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_silent_thinker_is_named_as_silent_not_as_unparseable(thinker, tmp_path):
     """(a) Сырой ответ: content=None, reasoning есть, finish_reason=length —
     на КАЖДОМ плече, включая продолжения с удвоенным бюджетом."""
@@ -128,19 +117,6 @@ def test_a_thinker_whose_answer_arrived_is_proposed(thinker, tmp_path):
     assert len(api.calls) == 1, "полный ответ не требует продолжений"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-09-03 and banked rather than fixed (RED witness "
-        "by the operator's word): the goal parser takes the FIRST '{' to the "
-        "LAST '}' of the reply, so braces in prose before the final JSON turn a "
-        "valid answer into 'no parseable goal'. Not the live cause on 2026-09-03 "
-        "(that was silence, see the test above) — banked as the third shape the "
-        "one error message hides. Minimal repair proposed, not applied: scan for "
-        "the last complete JSON object (json.JSONDecoder.raw_decode from each '{'). "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_final_json_after_braces_in_prose_is_still_parsed(thinker, tmp_path):
     """(c) Разбор: content дошёл, но перед финальным JSON есть проза с фигурными
     скобками (думающие модели так делают, когда рассуждение просачивается в

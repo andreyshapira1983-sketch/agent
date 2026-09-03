@@ -368,6 +368,12 @@ class LLMPlanner:
         tool_names = ", ".join(
             t.name for t in self.registry.list() if t.name not in hidden
         )
+        # Контракты аргументов (Д6, 2026-09-03): без них планировщик угадывал.
+        _contracts = getattr(self.registry, "argument_contracts", lambda **_k: "")(hidden=frozenset(hidden))
+        contracts_block = (
+            f"tool argument contracts (use these names and values exactly):\n{_contracts}\n"
+            if _contracts else ""
+        )
         # When tools are hidden for this path (autonomous goal path), do not
         # merely omit them — the static system prompt still describes tools like
         # spawn_subagent. Add an explicit directive so the planner never selects
@@ -480,6 +486,7 @@ class LLMPlanner:
             f"current_date: {today}\n"
             f"file hint: {hint}\n"
             f"registered tools: {tool_names}\n"
+            f"{contracts_block}"
             f"{unavailable_block}"
             f"\n"
             f"{history_block}"

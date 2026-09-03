@@ -53,6 +53,12 @@ def reason_kind(text: str) -> str:
         return "goal_length"
     if "widen the agent's own authority" in lowered:
         return "authority_widen"
+    # Д2 (2026-09-03): молчание думающей модели и сбой разбора — разные стены;
+    # до этого обе падали в "other" и не копили повторений.
+    if "no final output" in lowered or "empty reply" in lowered:
+        return "model_silence"
+    if "no parseable" in lowered:
+        return "goal_parse"
 
     return "other"
 

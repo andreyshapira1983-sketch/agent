@@ -107,6 +107,9 @@ def run_cli() -> int:
     # data come from another. `agent_tick.py` names the path for the same
     # reason. Default `--workspace` is ".", so an ordinary launch is unchanged.
     load_dotenv(workspace / ".env")
+    # Дом реестра молчавших объявляет точка входа (Д5, 2026-09-03).
+    from core.llm import ensure_roster_home
+    ensure_roster_home(workspace)
 
     # Same discipline as the line above, for the same reason: the runtime names
     # the store, the library never guesses one. `core.llm` banks here which
