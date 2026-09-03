@@ -66,15 +66,22 @@ class LifecycleDecision:
 
 
 def classify_run_outcome(
-    *, status: str, stop_reason: str = ""
+    *, status: str, stop_reason: str = "", work_done: bool | None = None
 ) -> LifecycleDecision:
     """Map an :class:`~core.autonomous_runtime.AutonomousRunReport` to a status.
 
     Pure: no store, no I/O. The table in the module docstring is this function.
+    ``work_done`` is the run's own semantic verdict (`semantic_result()[1]`):
+    a run that completed its queue without doing work is not ``done`` — the
+    lifecycle token said «processed», the outcome says «nothing happened»
+    (audit 2026-09-03, A2; MIR-117 norm A one layer up). ``None`` keeps the
+    old lifecycle-only reading for callers that carry no verdict.
     """
     status_s = (status or "").strip().lower()
     reason = (stop_reason or "").strip()
     if status_s == "completed":
+        if work_done is False:
+            return LifecycleDecision("failed", "run completed without work")
         return LifecycleDecision("done", "run completed")
     if status_s == "blocked":
         return LifecycleDecision(
@@ -96,9 +103,12 @@ def apply_run_outcome(
     status: str,
     stop_reason: str = "",
     report: dict | None = None,
+    work_done: bool | None = None,
 ) -> tuple[RuntimeTask, LifecycleDecision]:
     """Write the decided status for a run that returned."""
-    decision = classify_run_outcome(status=status, stop_reason=stop_reason)
+    decision = classify_run_outcome(
+        status=status, stop_reason=stop_reason, work_done=work_done,
+    )
     if decision.outcome == "done":
         return store.mark_done(task_id, report=report), decision
     if decision.outcome == "blocked":

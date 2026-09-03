@@ -248,8 +248,11 @@ def test_rolled_back_surfaces_rollback_and_marks_executed():
         lane=lane,
     )
     assert result["status"] == "rolled_back"
+    # A7 (audit 2026-09-03): a rollback consumes the approval but is not an
+    # application — `aborted`, never `executed` (value review lists `executed`
+    # as "applied proposals").
     assert result["rollback_status"] == "restored"
-    assert inbox.get(item.id).status == "executed"  # terminal -> consumed
+    assert inbox.get(item.id).status == "aborted"  # terminal -> consumed, not applied
 
 
 # ── requirement 5: transient statuses do NOT consume the item ────────────────

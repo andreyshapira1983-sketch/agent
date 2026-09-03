@@ -377,6 +377,14 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 status=run_report.status,
                 stop_reason=run_report.stop_reason,
                 report=run_report.to_dict(),
+                # A2 (2026-09-03): исход, не жизненный цикл — но только когда
+                # прогону БЫЛО что делать: проход здоровья (status/learn) без
+                # рабочих задач честно «done», а не «без работы».
+                work_done=(
+                    run_report.semantic_result()[1]
+                    if any(t.task.kind in ("goal", "propose", "tests") for t in run_report.tasks)
+                    else None
+                ),
             )
             self._log(
                 "task_lifecycle",
@@ -531,7 +539,9 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 self._log("autonomous_task_result", report.to_dict())
                 if report.status == "failed":
                     circuit.record_failure(report.summary)
-                elif report.status in {"done", "clarify"}:
+                elif report.status == "done" and task.kind not in ("status", "learn"):
+                    # A8 (2026-09-03): вопрос ворот и служебная проба — не успех;
+                    # прерыватель кормится только РАБОЧИМИ задачами.
                     circuit.record_success()
 
         circuit_decision = circuit.check()
@@ -1015,11 +1025,14 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                     "recommended_action": "enter_clarify_mode",
                 },
             )
-        summary = (answer[:120].replace("\n", " ")) if answer else "(no answer)"
+        if not str(answer or "").strip():
+            # A9 (2026-09-03): пустой ответ замечался («(no answer)») и всё
+            # равно уезжал как done. Ничего не сделано — «inconclusive».
+            return AutonomousTaskReport(task, "inconclusive", "(no answer)", {"answer": answer})
         return AutonomousTaskReport(
             task,
             "done",
-            summary,
+            answer[:120].replace("\n", " "),
             {"answer": answer},
         )
 

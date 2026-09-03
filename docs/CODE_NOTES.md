@@ -3170,6 +3170,46 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 1 — the ledger counts outcomes, not events (2026-09-03)
+
+The six-axis audit (`docs/audit/AUTONOMY_AUDIT_2026-09-03.md` §1) found the
+morning's Д1 fix overridden three times inside the same two files: the word
+«work» was minted from events. Operator's word: «начинай блок 1». Nine seams,
+one RED witness each (`tests/test_the_ledger_counts_outcomes_not_events.py`),
+then the smallest repair, with positive controls that real work still counts.
+
+- **A1** `AutonomousRunReport.semantic_result`: a `done` from the `status`
+  or `learn` task is not work; only goal/propose/tests can make a run
+  «completed». Every queue starts with a status task that is always done —
+  so every run had read as work.
+- **A2** `task_lifecycle.classify_run_outcome(work_done=…)`: a completed run
+  that had work-kind tasks and did none is `failed: run completed without
+  work`, not `done`. Health passes (status/learn only) pass `None` and stay
+  `done`.
+- **A3** `campaign_io._default_execute_action`: the cycle's proposal is the
+  inbox DELTA (`approvals_new=k`), not the inbox size. The absolute count had
+  made every cycle useful while any old item sat pending, and it reset the
+  `loop_suspected` streak.
+- **A4** the artifact digest is taken only from a goal task with status
+  `done` — a question back (clarify) or an empty reply (inconclusive) is not a
+  product.
+- **A5** a dedup collision returns `None` from both hands (`repair`, `doc
+  draft`); the journal was already honest, the outcome now is too.
+- **A7** `self_apply_bridge`: `committed_local` → `executed`; `rolled_back` →
+  `aborted`. Both consume the approval; only one is an application, and the
+  value-review queue lists `executed` as «applied proposals».
+- **A8** the circuit breaker records success only for work-kind tasks that
+  are `done`; a question back or a status probe neither credits nor debits it.
+- **A9** an empty answer from the goal task is `inconclusive`, not `done`.
+
+Left on the table, named: **A6** the liveness probe reports `completed /
+work_done` for reading a heartbeat file (an observation, not work — whether a
+probe is «productive» is the operator's metric decision); **A10** a
+`proposed` self-build episode is banked `success` with the `lesson` tag and
+never revised when the human denies it; **A11** `run_tests` never overrides
+`execution_status`; **A12** an empty or clarify answer still banks an episode
+with `outcome=success`. All four are recorded in the agent's registry.
+
 ## The holdout closed by hand (2026-09-03, evening)
 
 The operator switched the agent off and changed the mode: «начни строительство
