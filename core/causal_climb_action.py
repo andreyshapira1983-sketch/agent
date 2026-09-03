@@ -274,22 +274,67 @@ def _birth_experiment_spec(agent, claim):
         return spec_text
 
 
-def _apply_born_spec(claim, extra, spec_text, workspace):
-    """Applies a born specification to the first alive hypothesis and saves the updated claim."""
+_INVARIANT_RE = re.compile(r"ИНВАРИАНТ\s*:\s*(?P<text>[^\n]+)", re.IGNORECASE)
+
+
+def _birth_intervention_spec(agent, claim):
+    """(spec_text, invariant) for a claim whose cause is chosen but unproven
+    (block 4, M1): one hypothesis, arm A carries the cause, arm B removes it,
+    and the model names the invariant the cause violates — the prose field no
+    machine wrote before. None when inexpressible or the invariant is missing."""
+    try:
+        target = chosen_explanation(claim)
+        if target is None:
+            return None
+        targets = ", ".join(_EXPERIMENT_TARGETS.keys())
+        system = (
+            "Ты доказываешь ОДНУ уже выбранную причину её УСТРАНЕНИЕМ. Верни РОВНО ДВЕ строки:\n"
+            "[exp: цель | A=вход, где причина присутствует | B=тот же вход без причины | след=наблюдаемое следствие]\n"
+            "ИНВАРИАНТ: <какое правило системы нарушает эта причина - одной фразой>\n"
+            "Цель - только из списка. Не можешь выразить - верни ровно слово НЕВЫРАЗИМО."
+        )
+        user = (
+            f"Причина: {target.statement}\n"
+            f"Её предсказание: {target.predicts}\n"
+            f"Доступные цели: {targets}"
+        )
+        response = str(agent.llm.complete(
+            system=system, user=user, max_tokens=300, temperature=0.2,
+        ) or "")
+        if "НЕВЫРАЗИМО" in response or parse_experiment(response) is None:
+            return None
+        found = _INVARIANT_RE.search(response)
+        invariant = found.group("text").strip() if found else ""
+        if not invariant:
+            return None
+    except Exception:  # noqa: BLE001 — рождение не роняет суд
+        return None
+    else:
+        return response, invariant
+
+
+def _apply_born_spec(claim, extra, spec_text, workspace, *, invariant=""):
+    """Applies a born specification to the hypothesis it is for — the chosen
+    one when the claim awaits its proof, else the first alive — and saves."""
     import dataclasses
 
     alive = [e for e in claim.explanations if e.alive]
     if not alive:
         return
-    hypothesis = alive[0]
-    new_predicts = hypothesis.predicts + " " + spec_text
+    hypothesis = chosen_explanation(claim) if needs_intervention(claim) else alive[0]
+    if hypothesis is None:
+        return
+    born = _EXP_RE.search(spec_text)
+    piece = born.group(0) if born else spec_text
+    new_predicts = hypothesis.predicts + " " + piece
     replaced = dataclasses.replace(hypothesis, predicts=new_predicts)
     new_explanations = tuple(
         replaced if e is hypothesis else e for e in claim.explanations
     )
     new_notes = tuple(n for n in claim.notes if n != AWAITING_EXPERIMENT_MARK)
     new_claim = dataclasses.replace(
-        claim, explanations=new_explanations, notes=new_notes
+        claim, explanations=new_explanations, notes=new_notes,
+        violated_invariant=invariant or claim.violated_invariant,
     )
     save_claim(
         new_claim,
@@ -303,6 +348,40 @@ def awaiting_experiment(claim) -> bool:
     """True, если заявка помечена "ждёт эксперимента" (метка присутствует в claim.notes).
     Чистая функция, только чтение."""
     return AWAITING_EXPERIMENT_MARK in claim.notes
+
+
+def needs_intervention(claim) -> bool:
+    """EXPLAINED без хода (блок 4, M1, 2026-09-03): объяснение выбрано пробами
+    по журналам, а причина вмешательством не доказана. Замер: 15 живых заявок
+    стояли так навсегда — `chosen` запирал слайс 3, ступени выше не было."""
+    return bool(claim.chosen.strip()) and not claim.refuted_reason.strip() \
+        and claim.intervention is None
+
+
+def chosen_explanation(claim):
+    """Живое объяснение, которое заявка выбрала, или None."""
+    for exp in claim.explanations:
+        if exp.alive and exp.statement == claim.chosen:
+            return exp
+    return None
+
+
+def birth_candidates(workspace: str | Path):
+    """Заявки, которым нужна спецификация: помеченные «ждёт эксперимента» и
+    выбранные-без-вмешательства, у которых выбранное объяснение спеки не несёт.
+    Нота невыразимости снимает заявку с рождения."""
+    out = []
+    for claim, extra in load_claims(workspace):
+        if SPEC_UNEXPRESSIBLE_NOTE in claim.notes:
+            continue
+        if awaiting_experiment(claim):
+            out.append((claim, extra))
+            continue
+        if needs_intervention(claim):
+            target = chosen_explanation(claim)
+            if target is not None and parse_experiment(target.predicts) is None:
+                out.append((claim, extra))
+    return tuple(out)
 
 
 def discriminable_claims(workspace: str | Path):
@@ -408,10 +487,20 @@ def parse_experiment(predicts: str) -> Experiment | None:
 
 
 def experimentable_claims(workspace: str | Path):
-    """Открытые заявки, где хоть одна живая гипотеза несёт спецификацию."""
+    """Открытые заявки, где живая гипотеза несёт спецификацию.
+
+    Блок 4 (M1): заявка с выбранным ПО ПРОБАМ объяснением, но без
+    вмешательства, на этой ступени открыта — журналы указали, доказывает
+    эксперимент. Заявка с вмешательством или опровержением закрыта.
+    """
     out = []
     for claim, extra in load_claims(workspace):
-        if claim.chosen.strip() or claim.refuted_reason.strip():
+        if claim.refuted_reason.strip():
+            continue
+        if claim.chosen.strip():
+            target = chosen_explanation(claim) if needs_intervention(claim) else None
+            if target is not None and parse_experiment(target.predicts) is not None:
+                out.append((claim, extra))
             continue
         if any(e.alive and parse_experiment(e.predicts) is not None
                for e in claim.explanations):
@@ -457,7 +546,10 @@ def run_claim_experiment(
         in_b = spec.effect in out_b
         if in_a and not in_b:
             verdicts += 1
-            if not chosen.strip():
+            # Блок 4 (M1): выбор достаётся ПЕРВОМУ доказанному. Выбор по
+            # пробам (журналы) — ещё не доказательство, и заявка без
+            # вмешательства здесь открыта.
+            if intervention is None:
                 chosen = exp.statement
                 intervention = Intervention(
                     mutated=(f"рукав B цели {spec.target}: "
@@ -470,6 +562,8 @@ def run_claim_experiment(
             new_explanations.append(exp)
         elif in_a and in_b:
             verdicts += 1
+            if exp.statement == chosen and intervention is None:
+                chosen = ""  # опровергнутое объяснение выбранным не остаётся
             new_explanations.append(dataclasses.replace(
                 exp,
                 refuted_by=(f"эксперимент {spec.target}: следствие "
@@ -653,25 +747,29 @@ def birth_experiment_specs(
     import dataclasses
 
     ws = Path(workspace)
-    candidates = [
-        (claim, extra)
-        for claim, extra in load_claims(ws)
-        if awaiting_experiment(claim)
-        and SPEC_UNEXPRESSIBLE_NOTE not in claim.notes
-    ]
+    candidates = birth_candidates(ws)
     if not candidates:
         return _decline(agent, "нет помеченных заявок без спецификаций")
 
     claim, extra = candidates[0]
     spent_before = _llm_calls(agent)
-    spec_text = _birth_experiment_spec(agent, claim)
+    invariant = ""
+    if needs_intervention(claim):
+        # Блок 4 (M1): выбранной по пробам причине — эксперимент на устранение
+        # и имя нарушенного инварианта; без них EXPLAINED не имел выхода.
+        pair = _birth_intervention_spec(agent, claim)
+        spec_text = pair[0] if pair else None
+        invariant = pair[1] if pair else ""
+    else:
+        spec_text = _birth_experiment_spec(agent, claim)
     birth_calls = max(0, _llm_calls(agent) - spent_before)
 
     if spec_text is not None:
-        _apply_born_spec(claim, extra, spec_text, ws)
+        _apply_born_spec(claim, extra, spec_text, ws, invariant=invariant)
         born = parse_experiment(spec_text)
         target = born.target if born else ""
-        _log(agent, "spec_born", {"claim_key": extra["key"], "target": target})
+        _log(agent, "spec_born", {"claim_key": extra["key"], "target": target,
+                                  "invariant_named": bool(invariant)})
         return CampaignActionOutcome(
             result="completed",
             llm_calls_spent=birth_calls,

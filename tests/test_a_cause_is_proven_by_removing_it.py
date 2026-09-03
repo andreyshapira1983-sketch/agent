@@ -147,14 +147,27 @@ def test_the_signal_and_the_executor_ship_together() -> None:
 
 
 def test_experimentable_lists_only_open_specced_claims(tmp_path: Path) -> None:
+    """Block 4 (M1, 2026-09-03) re-drew «open» at this rung: a claim whose
+    explanation was CHOSEN BY PROBES but never proven by intervention is still
+    open here — before, `chosen` closed slice 3 and 15 live EXPLAINED claims
+    had no move at all. A claim with its intervention, or refuted, is closed."""
     save_claim(_claim(_EXP_PROVES, "без спеки"), workspace=tmp_path)
 
     assert len(experimentable_claims(tmp_path)) == 1
 
     import dataclasses
+
+    from core.causal_lesson import Intervention
     claim, _extra = load_claims(tmp_path)[0]
     save_claim(dataclasses.replace(claim, chosen="гипотеза 0"),
                workspace=tmp_path)
+    assert len(experimentable_claims(tmp_path)) == 1, "выбор по пробам — не доказательство"
+
+    proven = dataclasses.replace(
+        claim, chosen="гипотеза 0",
+        intervention=Intervention(mutated="m", predicted="p", observed="o"),
+    )
+    save_claim(proven, workspace=tmp_path)
     assert experimentable_claims(tmp_path) == ()
 
 
