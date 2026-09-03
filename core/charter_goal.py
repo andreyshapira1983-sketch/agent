@@ -435,6 +435,13 @@ def _ask(
         "most? Your measured capability map lives at "
         "knowledge/doctrine/future/WHAT_I_HAVE_AND_WHAT_I_LACK.md — it names "
         "what you have, what you lack, and the exam you have not passed.\n"
+        "ONE PAPER RULE (operator's word, 2026-09-03): do NOT propose writing "
+        "a new TARGET/DRAFT contract or design document while an existing one "
+        "under knowledge/doctrine/future/ remains unimplemented — seven such "
+        "contracts already wait. Implementing a piece of one of them, or "
+        "revising one against measured reality, is welcome; adding an eighth "
+        "is not. A document is the cheapest thing you can produce and the "
+        "least likely to change anything.\n"
         "\n"
         "Reply with ONE JSON object "
         'only: {"goal": "<one concrete goal, 20-300 chars>", '

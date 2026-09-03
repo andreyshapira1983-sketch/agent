@@ -1,5 +1,10 @@
 # The containment-boundary matrix — 2026-08-21
 
+> **⚠️ SNAPSHOT of 2026-08-21 (banner added 2026-09-03).** The classification
+> method stands; the parameter list was read from that day's constructor and
+> may have drifted. Re-verify against `AgentLoop.__init__` before relying on
+> any specific row.
+
 Every parameter of `AgentLoop.__init__`, classified so that a later
 consolidation cannot silently open a hole. Read-only audit under the
 architectural freeze; nothing here is built.

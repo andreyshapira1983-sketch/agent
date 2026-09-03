@@ -1,5 +1,12 @@
 # The cognitive core of this agent — what it is, proven from the code
 
+> **⚠️ SNAPSHOT (banner added 2026-09-03).** Everything below was proven
+> against `main` @ `eec6507`, 2026-07-26 — five weeks of heavy building ago.
+> The boundary reasoning still teaches; the ENFORCING/OBSERVING/ABSENT marks
+> and line anchors may have drifted. For the current module map read
+> `knowledge/generated/AGENT_ANATOMY.md` (generated, drift-guarded); defect
+> statuses live only in `audit/MASTER_ISSUE_REGISTRY.md`.
+
 **Status:** analysis, 2026-07-26. No code was moved or written for this document.
 It answers one question: *which part of this system is the cognitive core, and how
 do we know?* Everything below was read out of the repository at

@@ -3,13 +3,13 @@
 > **Status of this document:** authoritative for *intended order and current
 > state*. It is the source-of-truth entry #3 named by `README.md`.
 > **Facts are grounded in code** (`core/*.py`, `app/*.py`, `cli/*.py`,
-> `main.py`) and in `docs/daemon-progress.md`. A capability marked
+> `main.py`) and in `docs/audit/archive/daemon-progress.md`. A capability marked
 > **IMPLEMENTED** here means the code exists and is tested; it does **not**
 > claim the behaviour is production-hardened. **PLANNED** means the contract is
 > declared (module, doc, or test scaffold) but the full behaviour is not built.
 
 The existence of a module is **not** proof that a capability is complete. Read
-each track's status line, and cross-check `docs/daemon-progress.md` for the
+each track's status line, and cross-check `docs/audit/archive/daemon-progress.md` for the
 per-PR merge/acceptance state of the async-daemon work.
 
 ---
@@ -85,7 +85,7 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   `docker/daemon_loop.py` under Compose). That supervisor is **not**
   `app.daemon.DaemonLoop`.
 - **Async daemon plan** (`app/daemon.py` and related building blocks):
-  incremental, tracked per sub-item in `docs/daemon-progress.md`. Modules may
+  incremental, tracked per sub-item in `docs/audit/archive/daemon-progress.md`. Modules may
   exist and be tested without being composed into a production entry point.
 - Durability/queue/retry failure classes to verify (queue-without-consumer,
   dead runner, no retry backoff) are catalogued in

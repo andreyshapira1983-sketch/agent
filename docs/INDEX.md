@@ -64,7 +64,11 @@ the only one the evidence supports.
 | How sub-agents are proposed, bounded, judged, retired | [SUBAGENT_LIFECYCLE.md](../knowledge/doctrine/SUBAGENT_LIFECYCLE.md) | the sub-agent spec; subordinate to the governance doc | general approval/budget contract |
 | **How the agent must diagnose and repair its own defects** | [SELF_REPAIR_DOCTRINE.md](../knowledge/doctrine/SELF_REPAIR_DOCTRINE.md) | the normative self-diagnosis/self-repair protocol (prove the defect → find the invariant boundary → migrate safely → verify on three levels → bank the lesson only after a closed verdict), with each section marked NORMATIVE / IMPLEMENTED / PLANNED. **Thematically routed — read only for repair/root-cause/regression/migration questions** | which defects exist (registry owns it); the historical list of past mistakes (→ self-audit-lessons.md) |
 | **Which mistakes already cost us money and time, and how to find them in your own work** | [MISTAKE_NOTEBOOK.md](MISTAKE_NOTEBOOK.md) | mistakes caught on live runs: symptom, cost in numbers, a self-check, what to do | defect status (owned by `MASTER_ISSUE_REGISTRY.md`); behavioural rules (→ `AGENT_DOCTRINE.md`) |
-| Daemon build state, item by item | [daemon-progress.md](daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
+| Daemon build state, item by item | [daemon-progress.md](audit/archive/daemon-progress.md) | per-sub-item implementation/PR/hotfix/acceptance | anything outside the daemon plan |
+| **Defect status — the only live ledger** | [MASTER_ISSUE_REGISTRY.md](audit/MASTER_ISSUE_REGISTRY.md) | every `MIR-` id, its status and closing commit | method/history of the audits that found them |
+| **Past failures as an adversarial curriculum** | [HISTORICAL_FAILURE_LEDGER.md](audit/HISTORICAL_FAILURE_LEDGER.md) | the failure corpus the night school trains against | current defect status (→ registry) |
+| Which registry claims were checked against the field | [FIELD_CHECK_QUEUE.md](audit/FIELD_CHECK_QUEUE.md) | the verification queue by decision *form* | defect status |
+| What the agent can and cannot do, measured, in its own voice | [WHAT_I_HAVE_AND_WHAT_I_LACK.md](../knowledge/doctrine/future/WHAT_I_HAVE_AND_WHAT_I_LACK.md) | the capability/gap map wired into goal selection | defect status; roadmap order |
 | How to run, operate, drive the HTTP API, and diagnose failures | [OPERATIONS.md](OPERATIONS.md) | run modes, API operator guide, troubleshooting, recovery | config values (→ CONFIGURATION.md) |
 | How the agent is configured, and where it keeps state | [CONFIGURATION.md](CONFIGURATION.md) | env vars, `config/` files, `data/` state layout | issue status; runtime behaviour |
 | Problem *classes* already fixed, and how to run the next audit | [self-audit-lessons.md](../knowledge/doctrine/self-audit-lessons.md) | the 6 recurring anti-patterns + audit procedure. **History of regressions — never delete** | current defect status |
@@ -80,7 +84,7 @@ the only one the evidence supports.
 These four found the defects and remain valuable as evidence and reasoning. Their
 **status ledgers are superseded** by the registry — see §4.
 
-- [CORE_AUDIT_2026-07-18.md](CORE_AUDIT_2026-07-18.md) — execution-verified core defects (CORE-01…12), plus honest negatives.
+- [CORE_AUDIT_2026-07-18.md](audit/archive/CORE_AUDIT_2026-07-18.md) — execution-verified core defects (CORE-01…12), plus honest negatives.
 - [MEMORY_SYSTEM_AUDIT.md](../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md) — memory-governance audit (MGA-01…09) + refined fix proposals (§D).
 - [LIVE_PROBE_FINDINGS.md](LIVE_PROBE_FINDINGS.md) — the only log grounded in *live runs* (LPF-001…018).
 - [MEMORY_FIX_PLAN.md](MEMORY_FIX_PLAN.md) — the A1–A8 plan; partly executed, partly superseded by the M1 contract.
@@ -165,7 +169,9 @@ Two more traps that are *by design*, not drift:
   `TEST_SUITE_AS_INSTRUMENT.md`, `AUTONOMY_FREEZE.md`,
   `REPAIR_ENVELOPE_SURVEY.md`, `LIFECYCLE_OWNERSHIP_MAP.md` and
   `WHO_SHOULD_OWN_THE_AGENT.md` and
-  `CONTAINMENT_BOUNDARY_MATRIX.md`.
+  `CONTAINMENT_BOUNDARY_MATRIX.md`. *(2026-09-03: the dated snapshots among
+  those — TEST_SUITE, REPAIR_ENVELOPE, LIFECYCLE_OWNERSHIP, WHO_SHOULD_OWN —
+  have since moved to `docs/audit/archive/`; see §6.1.1.)*
 
   `архитектура автономного Агента.txt` (repo root) — this section called it
   **source-of-truth entry #2** and recorded it as *read in full on 2026-07-21*.
@@ -193,6 +199,10 @@ routing table reached 22 of them; the largest document in the repository and
 the most-cited one — `CODE_NOTES.md`, 3427 lines and 90 inbound references —
 was not in it at all.
 
+Recounted 2026-09-03: **67 documents** — 44 living, 23 finished dated
+snapshots now in `docs/audit/archive/` (§6.1.1). The recount found this index
+blind to 26 of the 67; the ledger below was rebuilt to cover every file.
+
 "Inbound" below is the number of files in the tree that name the document.
 It measures attention, not worth: `ACCEPTANCE_LADDER.ru.md` has none and is a
 frozen operator protocol.
@@ -205,22 +215,23 @@ frozen operator protocol.
 | `CODE_NOTES.md` | why a change was made, with its live measurement | active reference; **binds nothing** | engineers and models arriving from a pointer in code (90 inbound) |
 | `PROJECT_MAP.ru.md` | the project map for the operator, in Russian | active reference | operator |
 | `audit/MASTER_ISSUE_REGISTRY.md` | defect status — the only live `MIR-` ledger | **authoritative for status** | engineering; the self-improvement signal gatherer |
-| `audit/TEST_SUITE_AS_INSTRUMENT.md` | what the suite can and cannot falsify, measured by breaking working code | active record; **binds nothing** | whoever is about to trust a green run |
 | `audit/AUTONOMY_FREEZE.md` | the architectural freeze: where code decides instead of the agent, and what lifts it | **binding — nothing new is built until it lifts** | everyone, before starting any work |
-| `audit/REPAIR_ENVELOPE_SURVEY.md` | what of an autonomous repair envelope exists, and at which level of aliveness | active record; **binds nothing** | anyone about to build a repair mechanism |
-| `audit/LIFECYCLE_OWNERSHIP_MAP.md` | who owns identity, state and continuity at each place that constructs an agent | active record; **binds nothing** | anyone about to touch how the agent is started |
-| `audit/WHO_SHOULD_OWN_THE_AGENT.md` | organ, door or separate agent, for each of the seven construction sites | active record; **binds nothing** | anyone about to consolidate the runtimes |
+| `audit/HISTORICAL_FAILURE_LEDGER.md` | the failure corpus: every measured past failure as training material | active — feeds the night school | learning machinery; engineering |
+| `audit/FIELD_CHECK_QUEUE.md` | the queue for verifying registry claims against the field, by decision form | active working queue | the verification campaign |
+| `audit/CAUSAL_CLIMB_ORGAN_DESIGN.md` | design note of the built falsifiable-climb organ (MIR-096) | anchor for the organ's contract | whoever changes the causal ladder |
+| `audit/CONVERSATION_ORGAN_DESIGN.md` | design note for the human-conversation organ | **project — organ not built** | future build work |
+| `audit/LEARNING_LADDER.md` | the night school's charter | active; wiring into the school **unverified** (0 inbound) | learning machinery |
+| `audit/ESCALATION_CONTRACT.md` | when the agent asks the human | active; overlaps the expert-defaults policy — reconcile on next change | gates design |
+| `audit/MEMORY_AUTHORITY_MAP.md` | which paths may write memory, with what authority | active; reconcile with MEMORY_LIFECYCLE_CONTRACT on next change | memory work |
+| `audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md` | hazards predicted 2026-08-27 for the autonomy push | predictions — several since measured; statuses live in the registry | autonomy work |
 | `audit/CONTAINMENT_BOUNDARY_MATRIX.md` | every AgentLoop constructor parameter: is it a right, and would sharing a host widen it | active record; **binds nothing** | anyone about to give two organs one host |
 | `MISTAKE_NOTEBOOK.md` | mistakes caught live: symptom, cost, self-check | active reference | whoever is about to say "done" |
 | `EVIDENCE_PROTOCOL.md` | how several models may argue without confirming each other | **specification — nothing is built** | design work only |
 | `COGNITIVE_CORE.md` | the core boundary and its gates, proven from code | active reference | engineering |
-| `daemon-progress.md` | per-item daemon build state | historical log | traceability |
 | `OPERATIONAL_FAILURE_MODES.md` | an external operator's failure taxonomy | **no number in it measures this repo** | checklist use only |
 | `ACCEPTANCE_LADDER.ru.md` | stage-1 self-report calibration, frozen after six operator amendments | operator protocol | operator; **0 inbound** |
 | `LIVE_PROBE_FINDINGS.md` | what live runs showed (LPF-nnn) | evidence; **status superseded by the registry** | engineering |
 | `MEMORY_FIX_PLAN.md` | the A1–A8 memory plan | partly executed, partly superseded | historical |
-| `CORE_AUDIT_2026-07-18.md` | execution-verified core defects (CORE-nn) | evidence; **status superseded** | historical |
-| `Технический_анализ_автономного_агента_и_функций_мозга.md` | one analysis note on the agent and brain functions | note | occasional |
 | `NERVE_PROTOCOL.ru.md` | how to check that a nerve is really wired | active protocol | engineering |
 | `CONFIGURATION.md` | env vars, `config/`, `data/` layout | active reference | operator, engineering |
 | `INSTRUCTION_AUTHORITY.md` | whose instruction wins in a conflict | §1–§4 normative, §5 implemented, §6 planned | engineering |
@@ -228,6 +239,38 @@ frozen operator protocol.
 | `AGENTS.md` | repository working guidelines | active convention | contributors |
 | `AGENT_DOCTRINE.md` | behavioural doctrine, correctness-first order | active convention | contributors, models |
 | `OPERATOR_NOTES.ru.md` | what documents the agent has created, for the operator | note | operator |
+
+### 6.1.1 `docs/audit/archive/` — finished dated snapshots
+
+Moved here 2026-09-03 (operator's word, doc inventory). Each is self-dated and
+says what was true when written; none claims to describe today. History is
+kept, statuses live only in the registry. One line each:
+
+| file | what it recorded |
+|---|---|
+| `CORE_AUDIT_2026-07-18.md` | execution-verified core defects (CORE-nn); status superseded |
+| `daemon-progress.md` | per-item daemon build log, July 2026 |
+| `Технический_анализ_автономного_агента_и_функций_мозга.md` | analysis essay, 2026-08-02 |
+| `ARCHITECTURAL_BALLAST_AUDIT_2026-08-22.md` | ballast audit of 2026-08-22 |
+| `CLOSURE_AUDIT_2026-08-22.md` | audit of the closures of 2026-08-22 |
+| `OPEN_ENTRY_SWEEP_2026-08-22.md` | sweep of the 38 then-open registry entries |
+| `PUBLISHED_CRITERIA_SELF_ASSESSMENT.md` | the agent vs the field's published criteria, 2026-08-22 |
+| `FIELD_TECHNIQUES_APPLICABLE.md` | field techniques mapped against the repo, 2026-08-22 |
+| `DECISION_AUTHORITY_CENSUS_METHOD.md` | the census instrument, 2026-08-22 |
+| `DECISION_AUTHORITY_CENSUS_RUN_1.md` | census run 1, family A |
+| `SATURDAY_LAUNCH_DECISIONS.md` | the three launch decisions of 2026-08-23 |
+| `INCIDENT_CATALOGUE_2024_2026.md` | external incident catalogue, verified before use |
+| `WALL_CLASS_AND_EXTERNAL_PRACTICE.md` | wall-class gap vs the field, 2026-08-22 |
+| `WALL_SELF_REWRITE_PROBE.md` | can the raw write path rewrite a wall — probe |
+| `APPROVAL_BOUNDARY_SURVEY.md` | which approvals sit on a real authority boundary |
+| `REPAIR_ENVELOPE_SURVEY.md` | what existed of a repair envelope, 2026-08-20 |
+| `TEST_SUITE_AS_INSTRUMENT.md` | what the suite could falsify, measured 2026-08-20 |
+| `LIFECYCLE_OWNERSHIP_MAP.md` | who owned identity/state/continuity, 2026-08-20 |
+| `WHO_SHOULD_OWN_THE_AGENT.md` | organ, door or separate agent — classification |
+| `SELF_BUILD_FAILURE_ANALYSIS.md` | why self-build kept failing, measured 2026-08-22 |
+| `MEMORY_CONSOLIDATION_MEASUREMENT.md` | does the consolidation gap cost anything — measured |
+| `ECONOMIC_AGENT_RESEARCH_DIGEST.md` | thirty years of resource-rational agents, digest |
+| `BRANCH_SUMMARY.md` | what the branch contained as of 2026-08-27 |
 
 ### 6.2 `knowledge/` — semantic input, present or intended
 
@@ -249,6 +292,8 @@ Presence here is not authority. The `status` column is the whole point.
 | `doctrine/future/MIGRATION_PATH.md` | how one would migrate to that target | draft / target | planning |
 | `doctrine/future/AGENT_ROLE_CONTRACT.md` | proposed durable specialised roles | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
 | `doctrine/future/ORGANISATIONAL_ROLES_CONTRACT.md` | proposed role contracts and performance ledgers | **DRAFT / TARGET, non-binding. Written by the agent's own charter campaign. 0 inbound, no runtime consumer** | nobody today |
+| `doctrine/future/RESEARCH_PARALLELS.md` | the agent's own question: what of it survives a model replacement | **written unprompted by the agent, 2026-09-01; committed verbatim; marked incomplete by its author** | the agent's own future work |
+| `doctrine/future/WHAT_I_HAVE_AND_WHAT_I_LACK.md` | the measured capability/gap map, in the agent's voice | active — the goal-selection prompt points at it | the agent, at goal selection; the operator |
 
 **On those last two, read 2026-08-20 (MIR-104).** Together they are 2282
 lines the agent wrote about itself, and nothing in the tree reads them. Both

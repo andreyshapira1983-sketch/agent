@@ -194,7 +194,7 @@ its own trace id and its own independent load of every store, and the campaign
 lane builds a fourth (`agent_tick.py:1352`). So the shape today is not one
 agent that drains a queue, keeps house and develops itself; it is several
 temporary cognitive instances working over one heap of shared durable state.
-The full map is in `docs/audit/LIFECYCLE_OWNERSHIP_MAP.md`.
+The full map is in `docs/audit/archive/LIFECYCLE_OWNERSHIP_MAP.md`.
 
 The installed production path is the one that matters most:
 `scripts/install_daemon.ps1` registers a Windows Scheduled Task that runs

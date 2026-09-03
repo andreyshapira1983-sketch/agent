@@ -1,7 +1,7 @@
 """The budget tail read under the field's named log-tailing failures.
 
 WHY THIS EXISTS. Not a new defect report — this is the AUDIT of MIR-125's own
-closure (`docs/audit/CLOSURE_AUDIT_2026-08-22.md`). A bounded tail read over an
+closure (`docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md`). A bounded tail read over an
 append-only file is a well-worn shape, and the field names how it breaks:
 rotation or truncation between measuring the file and reading it; a partial
 last line from a writer that died mid-append; a concurrent writer moving the

@@ -1,5 +1,11 @@
 # Prospective autonomy hazard audit
 
+> **⚠️ PREDICTIONS OF 2026-08-27 (banner added 2026-09-03).** Written before
+> the autonomy push; several predicted hazards have since been observed live
+> (fabricated completions, guard clinches). Treat each entry as a prediction
+> with a date, not a current status — statuses live only in
+> `MASTER_ISSUE_REGISTRY.md`.
+
 **Question this pass asks.** Not «is there a bug». For every historical failure
 class already collected in `HISTORICAL_FAILURE_LEDGER.md` (H-01…H-51): could an
 unattended agent built from THIS repository develop the same causal mechanism as
