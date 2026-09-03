@@ -46,6 +46,10 @@ _P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
 _P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
 #   repair habit (55), below the doc goal (58) — a request to write is more
 #   concrete than a request to read
+_P_OWN_ISSUE_NAMED = 59   # the goal names one of the agent's OWN registered
+                          # defects: the hands follow the head (Д3, 2026-09-03);
+                          # ties with the engineering task, which is admitted
+                          # first and therefore wins when both apply
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 _P_SELF_IMPROVEMENT_FAILURE_FRESH = 60  # a failure younger than a day is a
 #   PERISHABLE signal: its trace, tree and memory still agree (the 2026-08-28
@@ -332,6 +336,125 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
     )
 
 
+#: Слова цели, по которым она может назвать запись реестра дефектов: не короче
+#: четырёх букв и не служебные. Порог совпадений — три РАЗНЫХ содержательных
+#: слова заголовка либо буквальное совпадение отпечатка/действия/файла.
+_GOAL_WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё_][\w'-]{3,}")
+_GOAL_STOP_WORDS = frozenset({
+    "that", "this", "with", "from", "into", "then", "than", "when", "what",
+    "which", "where", "while", "about", "after", "before", "their", "there",
+    "them", "have", "been", "were", "will", "your", "each", "only", "also",
+    "draft", "reviewed", "proposal", "read", "run", "make", "add",
+})
+_OWN_ISSUE_MIN_SHARED_WORDS = 3
+
+
+def _goal_names_issue(goal: str, issue: dict) -> bool:
+    """Называет ли цель ЭТУ запись реестра: отпечаток, действие, файл — буквально;
+    заголовок — тремя содержательными словами."""
+    text = str(goal or "")
+    low = text.lower()
+    if not low.strip():
+        return False
+    for literal in (
+        str(issue.get("fingerprint") or ""),
+        str(issue.get("action") or ""),
+        *[str(f) for f in issue.get("related_files") or ()],
+    ):
+        if literal and literal.lower() in low:
+            return True
+    goal_words = {
+        w.lower() for w in _GOAL_WORD_RE.findall(text)
+    } - _GOAL_STOP_WORDS
+    title_words = {
+        w.lower() for w in _GOAL_WORD_RE.findall(str(issue.get("title") or ""))
+    } - _GOAL_STOP_WORDS
+    return len(goal_words & title_words) >= _OWN_ISSUE_MIN_SHARED_WORDS
+
+
+#: Конкретная вещь, названная целью: идентификатор записи/эпизода/прогона —
+#: слово с подчёркиванием или дефисом и хвостом из шести и более шестнадцатеричных
+#: знаков (`ep-run-run_fc8125…`, `sii_5423bb16…`, `run_7394…`). Пути файлов сюда
+#: не входят — их разрешает `resolve_goal_subject`.
+_GOAL_ID_RE = re.compile(r"\b[A-Za-z]+[_-][\w-]*?[0-9a-f]{6,}\b")
+
+
+def _habit_shadowed_by_goal(
+    goal: str,
+    goal_subject: str | None,
+    improvement: BestNextAction | None,
+    issues: tuple[dict, ...],
+) -> bool:
+    """Отводится ли привычка реестра под этой целью.
+
+    Да — когда цель назвала другую запись реестра, или конкретный идентификатор,
+    которого текст записи не содержит, и при этом не назвала предмет (файл)
+    самой записи. Нет — когда цели нет или она общая. Замер 2026-09-03: три
+    прогона подряд отдавали цель про свой дефект самой свежей чужой записи.
+    """
+    text = str(goal or "")
+    if improvement is None or not text.strip():
+        return False
+    if goal_subject and improvement.target_path == goal_subject:
+        return False
+    own = [SelfImprovementIssue.from_dict(raw).to_dict() for raw in issues]
+    mine = [i for i in own if str(i.get("action")) == improvement.action]
+    if any(_goal_names_issue(text, i) for i in mine):
+        return False
+    if any(_goal_names_issue(text, i) for i in own if i not in mine):
+        return True
+    ids = {m.group(0).lower() for m in _GOAL_ID_RE.finditer(text)}
+    if not ids:
+        return False
+    known = " ".join(
+        str(x) for i in mine for x in (i.get("title"), i.get("fingerprint"), *(i.get("evidence") or ()))
+    ).lower()
+    return any(token not in known for token in ids)
+
+
+def _candidate_own_issue_named_by_goal(
+    goal: str, issues: tuple[dict, ...],
+) -> BestNextAction | None:
+    """Цель, называющая собственный дефект, получает руки ЭТОГО дефекта.
+
+    Замер 2026-09-03 (три прогона подряд): голова выбирала свой дефект из
+    реестра — ремонт парсера, свидетель встречного вопроса, — а руки брали
+    самую свежую ЧУЖУЮ запись, потому что генераторов по цели было три
+    (инженерная задача, документ, внешнее чтение) и цель класса
+    «расследовать/починить свой дефект» давала ноль кандидатов. Основание —
+    в цели (operator_goal), поэтому сужение по предмету его не отводит.
+    """
+    for raw in issues:
+        issue = SelfImprovementIssue.from_dict(raw).to_dict()
+        if str(issue.get("status") or "open") == "resolved":
+            continue
+        if not _goal_names_issue(goal, issue):
+            continue
+        files = [str(f) for f in issue.get("related_files") or () if str(f)]
+        # Предметом становится файл, который назвала ЦЕЛЬ, а не первый в списке
+        # (та же ошибка привязки, что MIR-160, только по другой дороге).
+        named_file = next((f for f in files if f.lower() in str(goal).lower()), None)
+        evidence = [f"goal names durable issue {issue.get('fingerprint')}"]
+        evidence.extend(str(e)[:300] for e in (issue.get("evidence") or ())[:3])
+        return BestNextAction(
+            action=str(issue.get("action") or "improve_failure_to_idea_pipeline"),
+            title=str(issue.get("title") or "Work the own defect the goal names"),
+            severity="medium",
+            priority=_P_OWN_ISSUE_NAMED,
+            reason=(
+                "The campaign goal names this defect of the agent's own; the "
+                "hands follow the head instead of the newest record."
+            ),
+            evidence=tuple(evidence[:5]),
+            unknowns=("whether the issue still reproduces until matching verification is recorded",),
+            risk="read_only",
+            recommended_command=str(issue.get("suggested_next_action") or "") or None,
+            target_path=named_file or (files[0] if files else None),
+            confidence=0.8,
+        )
+    return None
+
+
 def _candidate_goal_names_missing(
     goal: str,
     goal_subject: str | None,
@@ -462,6 +585,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(_candidate_engineering_task(goal), "operator_goal")
     admit(_candidate_charter_document(goal), "operator_goal")
     admit(_candidate_external_study(goal), "operator_goal")
+    admit(_candidate_own_issue_named_by_goal(goal, open_self_improvement_issues), "operator_goal")
 
     admit(
         _candidate_daemon(heartbeat_missing, heartbeat_stale,
@@ -484,6 +608,12 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             recent_self_improvement_failures,
             fresh=fresh_self_improvement_failure,
         )
+    # Отрицательная сторона Д3 — см. `_habit_shadowed_by_goal`.
+    habit_shadowed: list[BestNextAction] = []
+    if _habit_shadowed_by_goal(goal, goal_subject, improvement,
+                               open_self_improvement_issues):
+        habit_shadowed.append(replace(improvement, grounds="retained_record"))
+        improvement = None
     admit(improvement, "retained_record")
 
     admit(_candidate_inbox_debt(triage), "observed_state")
@@ -523,6 +653,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
         active, off_subject, unknown_subject = _partition_by_subject(
             active, goal_subject,
         )
+    unknown_subject.extend(habit_shadowed)
 
     if not active:
         fallback = _candidate_observe(

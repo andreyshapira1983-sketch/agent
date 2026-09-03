@@ -20,8 +20,6 @@ decided_by=no_candidate — кандидатов по цели НОЛЬ. При�
 """
 from __future__ import annotations
 
-import pytest
-
 from core.best_next_action import select_best_next_action
 
 _GOAL = (
@@ -42,6 +40,68 @@ _STRANGER = {
 }
 
 
+_OWN_DEFECT = {
+    "id": "sii_own",
+    "fingerprint": "sii_f49e4ac9824ce89a",
+    "title": "Goal-reply parser takes the first '{' to the last '}' so braces in prose break a valid final JSON",
+    "status": "open",
+    "action": "parse_the_last_complete_json_object_of_a_reply",
+    "severity": "medium",
+    "related_files": ["core/charter_goal.py"],
+    "evidence": ["witness: tests/test_a_silent_thinker_is_told_apart_from_a_bad_parser.py"],
+}
+
+_REPAIR_GOAL = (
+    "Repair goal-reply parser: run witness case (c) to red, then make "
+    "prose-with-braces no longer break extraction of final JSON object; add "
+    "regression test"
+)
+
+
+def test_a_goal_that_names_an_own_defect_gets_that_defect_as_hands():
+    """Положительная сторона Д3 (замер 2026-09-03 07:34: цель — ремонт парсера,
+    руки — чужое дело про встречный вопрос). Цель, называющая собственный
+    дефект словами его записи, обязана получить действие ЭТОГО дефекта, с
+    основанием в цели."""
+    picked = select_best_next_action(
+        goal=_REPAIR_GOAL, self_improvement_registry_available=True,
+        open_self_improvement_issues=(_STRANGER, _OWN_DEFECT),
+    )
+
+    assert picked.action == "parse_the_last_complete_json_object_of_a_reply", (
+        f"цель про парсер, а руки: {picked.action!r} ({picked.grounds}, {picked.decided_by})"
+    )
+    assert picked.grounds == "operator_goal"
+    assert picked.target_path == "core/charter_goal.py"
+
+
+def test_a_broad_self_improvement_goal_keeps_the_habit():
+    """Граница отрицательной стороны: ОБЩАЯ цель («улучшай себя») привычку
+    реестра не отводит — это её законное чтение (тесты 2026-08-26 про
+    «найди дефект и почини»). Отводит только цель, назвавшая другую запись
+    или конкретную вещь, которой запись не знает."""
+    picked = select_best_next_action(
+        goal="Improve yourself in whatever way the measured evidence supports",
+        self_improvement_registry_available=True,
+        open_self_improvement_issues=(_STRANGER,),
+        unexplained_observations_count=3,
+    )
+
+    assert picked.action == "carry_observed_values_between_plan_steps"
+    assert picked.grounds == "retained_record"
+
+
+def test_without_a_goal_the_habit_still_runs():
+    """Граница: без цели реестр дефектов по-прежнему единственный законный
+    источник дела (test_the_unattended_path_sees_its_own_defects)."""
+    picked = select_best_next_action(
+        goal="", self_improvement_registry_available=True,
+        open_self_improvement_issues=(_STRANGER,),
+    )
+
+    assert picked.action == "carry_observed_values_between_plan_steps"
+
+
 def test_an_investigation_goal_yields_no_goal_grounded_candidate_today():
     """Зелёный дискриминатор причины: без чужих дел цель даёт ПУСТУЮ гонку."""
     picked = select_best_next_action(
@@ -56,27 +116,11 @@ def test_an_investigation_goal_yields_no_goal_grounded_candidate_today():
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-09-03 and banked rather than fixed (RED witness "
-        "by the operator's word): the goal-derived candidate generators know only "
-        "three goal classes (engineering task, doctrine document, external study); "
-        "an 'Investigate/Trace why …' goal yields ZERO candidates (green test above, "
-        "decided_by=no_candidate), so the durable-issue habit at priority 55 runs "
-        "alone and the cycle goes to an unrelated open defect (charter_day4_reasoner "
-        "cycle 1: carry_observed_values_between_plan_steps under an episode-audit "
-        "goal). Cause (1) — a missing generator — not a lost priority race. Minimal "
-        "repair proposed, not applied: a fourth goal-grounded generator for the "
-        "investigate/trace class routing to the causal-climb organ "
-        "(explain_causal_observation) with the goal as subject, and — as a guard — "
-        "under an explicit goal a retained_record candidate wins only when its "
-        "subject matches; otherwise honest idle naming the goal. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_an_investigation_goal_is_not_handed_to_an_unrelated_record():
-    """Красный свидетель: с чужим открытым дефектом в реестре цикл уходит ему."""
+    """Был красным свидетелем 2026-09-03 (banked strict-xfail), зелёный после
+    минимального ремонта тем же днём по слову оператора: под явной целью
+    привычка реестра допускается к гонке только если цель назвала её предмет
+    или саму запись; иначе — честный простой, называющий цель."""
     picked = select_best_next_action(
         goal=_GOAL, self_improvement_registry_available=True,
         open_self_improvement_issues=(_STRANGER,),

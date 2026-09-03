@@ -270,7 +270,7 @@ class AgentLoop(
         # previous turn's contract verdict — wrong both ways (census A6, see
         # `tests/test_cross_mixin_fields_are_guaranteed.py`).
         self._synthesis_expects_contract_headers = True
-        self.last_replan_exhausted = False
+        self.last_replan_exhausted = self.last_answer_was_clarification = False
         self.last_source_ranking = None
         self.last_source_registry = SourceRegistry()
         self.last_knowledge_pipeline = None

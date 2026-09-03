@@ -256,6 +256,8 @@ class AgentLoopInit:
         self.clarification_gate_enabled = bool(clarification_gate_enabled)
         # TD-032 slice 3 — last run stuck signal for autonomous runtime parity.
         self.last_replan_exhausted: bool = False
+        # Ворота ответили вопросом, не работой (Д1, 2026-09-03): рантайм читает.
+        self.last_answer_was_clarification: bool = False
         # §7 Operational Design Domain (ODD / B-05) wiring. When enabled, an
         # out-of-domain request is refused or escalated BEFORE any planning.
         # `odd_enabled=False` skips the check for integration tests.

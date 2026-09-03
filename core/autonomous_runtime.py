@@ -858,6 +858,25 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
     def _gateway_path(self) -> GatewayPath:
         return gateway_path_from_receipt(self.receipt_path)
 
+    def _gate_question_report(self, task: AutonomousTask, answer: str) -> AutonomousTaskReport:
+        """Отчёт о ходе, на котором петля ответила вопросом, а не работой."""
+        question = str(answer or "")
+        self._log(
+            "clarification_gate",
+            {"question": question[:500], "path": self.receipt_path, "trigger": "gate_question"},
+        )
+        return AutonomousTaskReport(
+            task,
+            "clarify",
+            (question[:120].replace("\n", " ") or "clarification required"),
+            {
+                "answer": answer,
+                "clarification": {"question": question, "trigger": "gate_question"},
+                "stop_reason": "clarification_gate",
+                "recommended_action": "enter_clarify_mode",
+            },
+        )
+
     def _task_goal(self, task: AutonomousTask, config: AutonomousRuntimeConfig) -> AutonomousTaskReport:
         """Run task.description as a user question through the parent AgentLoop.
 
@@ -951,6 +970,9 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 blocked_tools=to_block if block else frozenset(),
                 dry_run=bool(config.dry_run),
             ):
+                # Флаг ворот — свойство ОДНОГО прогона: наследовать его от
+                # прошлого хода значило бы красить настоящий ответ в вопрос.
+                self.agent.last_answer_was_clarification = False
                 answer = self.agent.run(user_question=task.description)
         finally:
             self.agent.gateway_path = previous_gateway_path
@@ -961,6 +983,12 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             self.agent.suppress_durable_learning_writes = previous_suppress_learning_writes
             if planner_supports_hidden:
                 planner.hidden_tools = previous_hidden
+        # Вопрос с ворот петли — не работа (Д1, замер 2026-09-03: «Я не могу
+        # безопасно продолжить. Уточни: …» уходил как done → completed/useful).
+        # Та же форма отчёта, что у ветки replan_exhausted ниже: статус
+        # «clarify», вопрос в details['clarification'].
+        if bool(getattr(self.agent, "last_answer_was_clarification", False)):
+            return self._gate_question_report(task, answer)
         replan_exhausted = bool(getattr(self.agent, "last_replan_exhausted", False))
         if replan_exhausted:
             clarify = clarification_for_replan_exhausted()

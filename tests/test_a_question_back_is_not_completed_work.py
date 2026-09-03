@@ -22,8 +22,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from core.approval import AutoApprover
 from core.autonomous_runtime import (
     AutonomousRuntime,
@@ -88,6 +86,37 @@ def _events(agent: AgentLoop) -> list[dict]:
     ]
 
 
+def test_real_work_is_still_reported_as_done(workspace: Path):
+    """Положительный контроль: настоящий ответ петли остаётся «done» и
+    считается работой — ремонт Д1 не имеет права лечить ложь, ломая правду."""
+    agent = _agent(workspace)
+    agent.clarification_enabled = True
+    agent.run = lambda *, user_question: "analysis: core/replan.py has two callers"  # type: ignore[method-assign]
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
+
+    report = runtime._task_goal(task, AutonomousRuntimeConfig(dry_run=True))
+
+    assert report.status == "done"
+    assert not report.details.get("clarification")
+
+
+def test_a_question_back_that_arrived_earlier_does_not_taint_the_next_goal(workspace: Path):
+    """Флаг ворот — свойство ОДНОГО прогона петли: вопрос на прошлом вопросе
+    не должен перекрашивать следующий настоящий ответ в «clarify»."""
+    agent = _asking_agent(workspace)
+    runtime = AutonomousRuntime(agent, workspace=workspace)
+    runtime._task_goal(AutonomousTask(kind="goal", description="analyze core/replan.py"),
+                       AutonomousRuntimeConfig(dry_run=True))
+    agent._check_clarification = lambda _q: ClarificationResult(decision="proceed")  # type: ignore[method-assign]
+    agent.run = lambda *, user_question: "analysis: done for real"  # type: ignore[method-assign]
+
+    report = runtime._task_goal(AutonomousTask(kind="goal", description="analyze core/replan.py"),
+                                AutonomousRuntimeConfig(dry_run=True))
+
+    assert report.status == "done"
+
+
 def test_the_loop_leaves_a_machine_readable_trace_of_the_question(workspace: Path):
     """Зелёный дискриминатор: след есть — событие `clarification_request`.
     Потеря, значит, ниже по течению."""
@@ -101,26 +130,11 @@ def test_the_loop_leaves_a_machine_readable_trace_of_the_question(workspace: Pat
     assert "clarification_request" in kinds
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-09-03 and banked rather than fixed (RED witness "
-        "by the operator's word): AutonomousRuntime._task_goal wraps ANY non-empty "
-        "answer as status 'done', so the clarification gate's question back "
-        "('Я не могу безопасно продолжить. Уточни: …') becomes completed / "
-        "work_done=True / useful=1 (charter_day4_reasoner cycle 1, 287 cost units). "
-        "The loop DOES leave a machine-readable trace (event clarification_request "
-        "— the green test above); the runtime does not read it. Minimal repair "
-        "proposed, not applied: have the gate mark the loop (e.g. "
-        "agent.last_answer_was_clarification) and let _task_goal return status "
-        "'clarify' with details['clarification'], exactly as the replan_exhausted "
-        "branch already does. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_question_back_is_reported_as_clarify_not_done(workspace: Path):
-    """Красный свидетель: тот же прогон — статус задачи обязан быть «clarify»,
-    как у ветки replan_exhausted, а не «done»."""
+    """Был красным свидетелем 2026-09-03 (banked strict-xfail), зелёный после
+    минимального ремонта тем же днём по слову оператора: ворота ставят
+    `agent.last_answer_was_clarification`, `_task_goal` читает флаг и отвечает
+    статусом «clarify» с вопросом в details — как ветка replan_exhausted."""
     agent = _asking_agent(workspace)
     runtime = AutonomousRuntime(agent, workspace=workspace)
     task = AutonomousTask(kind="goal", description="analyze core/replan.py")

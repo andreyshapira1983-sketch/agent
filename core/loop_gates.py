@@ -90,7 +90,12 @@ class AgentLoopGates:
         return pending + "\n\n" + user_question, True
 
     def _park_clarification(self, user_question: str) -> None:
-        """Park the question a clarification was just raised about."""
+        """Park the question a clarification was just raised about.
+
+        Ставит и флаг «ход ответил вопросом»: его читает безлюдный рантайм,
+        чтобы вопрос не уехал как сделанная работа (Д1, замер 2026-09-03).
+        """
+        self.last_answer_was_clarification = True
         if getattr(self, "pending_clarification_path", None) is not None:
             from core.pending_clarification import pending_clarification
             pending_clarification(self.pending_clarification_path, user_question)
