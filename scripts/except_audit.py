@@ -97,7 +97,7 @@ def _broad(handler_type: ast.expr | None) -> bool:
 #: the tool that asked for one. Found 2026-08-22 auditing this audit against
 #: the field's named failure for "zero unexplained" reports («the comments
 #: turn out to be fig leaves»): 8 of 127 silent handlers were justified by
-#: nothing but `# noqa: BLE001`, and this instrument counted them as
+#: nothing but a bare BLE001 suppression, and this instrument counted them as
 #: explained. A directive followed by real prose still counts — it is the
 #: BARE directive that says nothing.
 _DIRECTIVE_ONLY_RE = re.compile(
