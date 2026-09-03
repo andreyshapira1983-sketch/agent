@@ -87,6 +87,7 @@ _NO_WORK_RESULTS = frozenset({
     # и «failed» писались в леджер как занявшие тему. Для строк, где есть
     # честное поле `work_done` (пишется с блока 3), этот список не нужен.
     "blocked", "failed", "empty", "inconclusive",
+    "waiting",  # блок 8: ожидание внутри смены — не работа по теме
 })
 
 _JACCARD_REPEAT = 0.6

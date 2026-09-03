@@ -74,6 +74,7 @@ def test_a_denial_ages_out(tmp_path) -> None:
         replace(it, updated_at="2020-01-01T00:00:00+00:00") if it.id == first.id else it
         for it in inbox.items
     ]
+    inbox._save()  # блок 8: ящик читает файл перед каждой записью — старим на диске
 
     again = _file(inbox)
 

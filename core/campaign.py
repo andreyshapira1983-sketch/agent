@@ -51,6 +51,7 @@ from core.campaign_ledger import (
     spent_units_by_action,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
+from core.capability_events import last_capability_change_ts
 from core.run_context import run_cost_envelope
 from core.self_stop_record import record_self_stop, record_stop_observation
 
@@ -132,6 +133,17 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
     )
 
 
+def _approved_ids(approval_inbox) -> frozenset[str]:
+    """Approved item ids, or empty when the inbox is absent or unreadable —
+    a new approval during a backoff is a wake condition (block 8)."""
+    if approval_inbox is None:
+        return frozenset()
+    try:
+        return frozenset(str(i.id) for i in approval_inbox.list(status="approved"))
+    except Exception:  # noqa: BLE001 — a reading hiccup must not fake a wake or a stop
+        return frozenset()
+
+
 def _repeat_reason(action_name, hit_ceiling):
     """Return the reason a repeated action is being skipped, based on whether it hit the per-campaign step ceiling."""
     if hit_ceiling:
@@ -172,6 +184,16 @@ _MAX_GOAL_SWITCHES = 12
 #: (agent_tick._GOAL_PICK_ATTEMPTS): одна попытка убивала прогон на любом
 #: молчании модели (L6, аудит 2026-09-03).
 _GOAL_SWITCH_ATTEMPTS = 3
+#: Ожидание внутри смены (блок 8, слово оператора 2026-09-03): исход
+#: отдельной работы — не конец смены. Когда три попытки сменить цель
+#: отвергнуты, процесс не умирает, а ждёт ограниченно: основное условие
+#: пробуждения — журнал перемен мира (data/capability_events.jsonl) и новое
+#: одобрение в ящике; периодическая перепроверка — страховка от
+#: пропущенного события («event-driven waiting + missed event = агент умер
+#: очень правильно»). Замер вечера: три прогона по 4, 21 и 8 циклов, каждый
+#: погашен исходом работы и уснул до триггера через 12 часов.
+_BACKOFF_STEP_SECONDS = 60
+_BACKOFF_MAX_SECONDS = 900
 
 
 def run_campaign(
@@ -277,6 +299,62 @@ def run_campaign(
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
+
+    def _wait_for_change(cycle: int, stall: str) -> bool:
+        """Блок 8: ограниченное ожидание ВНУТРИ процесса вместо смерти.
+
+        Только для прогона с выбором цели (смены): без `next_goal` прежняя
+        семантика остановки сохраняется. Просыпается по журналу перемен мира
+        или новому одобрению; иначе — по периодической перепроверке.
+        """
+        nonlocal idle_streak, streak_repeats, unproductive_streak, goal_switches
+        if next_goal is None:
+            return False
+        mark = last_capability_change_ts(workspace)
+        approved_before = _approved_ids(approval_inbox)
+        # Темп ожидания — темп прогона: без паузы между циклами (тесты, ручной
+        # запуск) ожидание не спит, а лишь занимает цикл; в смене с паузой 60 с
+        # шаг равен паузе, потолок — _BACKOFF_MAX_SECONDS.
+        pace = float(config.cycle_pause_seconds or 0)
+        limit = min(float(_BACKOFF_MAX_SECONDS), pace * (_BACKOFF_MAX_SECONDS // _BACKOFF_STEP_SECONDS))
+        if config.max_wall_clock_seconds:
+            remaining = config.max_wall_clock_seconds - (now_fn() - started_at).total_seconds()
+            limit = max(0.0, min(limit, remaining))
+        waited = 0.0
+        woke = ""
+        while waited < limit:
+            step = min(pace, limit - waited)
+            sleep_fn(step)
+            waited += step
+            if last_capability_change_ts(workspace) != mark:
+                woke = "world_changed"
+                break
+            if _approved_ids(approval_inbox) - approved_before:
+                woke = "new_approval"
+                break
+        record = CampaignCycleRecord(
+            cycle=cycle, ts=now_fn().isoformat(), goal=current_goal,
+            action="<backoff>", action_title="waiting for the world to change",
+            severity="low", priority=0, risk="read_only", idle=True,
+            llm_calls_spent=0, cost_units_spent=0, result="waiting",
+            reason=f"{stall}; waited {int(waited)}s; woke_by={woke or 'periodic_recheck'}",
+            work_done=False,
+        )
+        ledger.append(record)
+        records.append(record)
+        _log(agent, "campaign_backoff", record.to_dict())
+        _emit_cycle(record)
+        idle_streak = 0
+        streak_repeats = False
+        unproductive_streak = 0
+        attempted_signatures.clear()
+        action_steps.clear()
+        goal_switches = 0  # новая эра выбора: потолок смен сторожит перебор, не смену
+        return True
+
+    def _stall(cycle: int, why: str, stall: str) -> bool:
+        """Исход работы упёрся в стену: сменить цель, иначе ждать. False = стоп."""
+        return _switch_goal(cycle, why) or _wait_for_change(cycle, stall)
 
     def _emit_cycle(record: CampaignCycleRecord) -> None:
         if on_cycle is None:
@@ -403,7 +481,8 @@ def run_campaign(
                     # L5 (2026-09-03): простой — тоже повод сменить цель, а не
                     # объявить прогон здоровым: цель, которая не связывает
                     # никакой работы, — самый ясный случай для новой цели.
-                    if _switch_goal(cycle, f"goal idle: {idle_streak}_checks_found_nothing_to_do"):
+                    if _stall(cycle, f"goal idle: {idle_streak}_checks_found_nothing_to_do",
+                              f"idle_stall:{idle_streak}_consecutive_idle_cycles"):
                         continue
                     if streak_repeats:
                         stop_reason = (
@@ -459,8 +538,9 @@ def run_campaign(
                 consecutive_errors = 0
 
                 if idle_streak >= config.max_idle_streak:
-                    if _switch_goal(cycle, "goal exhausted: "
-                                    f"{config.max_idle_streak}_cycles_without_new_action"):
+                    if _stall(cycle, "goal exhausted: "
+                              f"{config.max_idle_streak}_cycles_without_new_action",
+                              f"no_progress_stall:{idle_streak}_cycles_without_new_action"):
                         continue
                     stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
                     status = "stopped"
@@ -499,6 +579,9 @@ def run_campaign(
                 idle_streak += 1
                 streak_repeats = True
                 if idle_streak >= config.max_idle_streak:
+                    if _stall(cycle, "cost cap: awaiting the operator's word",
+                              f"cost_cap_stall:{idle_streak}_cycles_awaiting_operator"):
+                        continue
                     stop_reason = f"cost_cap_stall:{idle_streak}_cycles_awaiting_operator"
                     status = "stopped"
                     break
@@ -560,6 +643,9 @@ def run_campaign(
             _emit_cycle(record)
             consecutive_errors = 0
             if idle_streak >= config.max_idle_streak:
+                if _stall(cycle, f"goal exhausted: {idle_streak}_cycles_without_new_action",
+                          f"no_progress_stall:{idle_streak}_cycles_without_new_action"):
+                    continue
                 stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
                 status = "stopped"
                 break
@@ -577,13 +663,12 @@ def run_campaign(
                     config.max_unproductive_streak
                     and unproductive_streak >= config.max_unproductive_streak
                 ):
-                    stop_reason = (
+                    suspected = (
                         f"loop_suspected:"
                         f"{unproductive_streak}_cycles_without_useful_change"
                     )
-                    status = "stopped"
                     from core.clarification_gate import for_loop_suspected
-                    clarification = for_loop_suspected().to_dict()
+                    suspected_clarification = for_loop_suspected().to_dict()
                     _log(agent, "campaign_loop_suspected", {
                         "cycles_without_progress": unproductive_streak,
                         "recent_actions": recent_actions[-5:],
@@ -591,13 +676,22 @@ def run_campaign(
                         "cost_units_spent": cost_units_used,
                         "useful_state_change": False,
                         "recommended_action": "enter_clarify_mode",
-                        "clarification": clarification,
+                        "clarification": suspected_clarification,
                         "reason": (
                             "no new artifact, proposal, or result-status change "
                             "across the last "
                             f"{unproductive_streak} executed cycles"
                         ),
                     })
+                    # Блок 8: третий выход, который блок 2 не тронул, — вечер
+                    # 2026-09-03 закончился здесь на 21-м цикле после трёх
+                    # честных «невыразимо». Петля — исход работы, не конец смены.
+                    if _stall(cycle, f"loop suspected: {unproductive_streak}_cycles_without_useful_change",
+                              suspected):
+                        continue
+                    stop_reason = suspected
+                    status = "stopped"
+                    clarification = suspected_clarification
                     break
         except Exception as exc:  # noqa: BLE001 — per-cycle resilience seam
             consecutive_errors += 1
@@ -644,6 +738,11 @@ def run_campaign(
                 break
             continue
 
+    if not stop_reason:
+        # Блок 8: потолок циклов — часть лимита смены, не шестой тип
+        # остановки (ратифицированные терминальные классы: бюджет, safety/
+        # authority, повреждённое состояние, инфраструктура, конец смены).
+        stop_reason = f"shift_limit:max_cycles={config.max_cycles}"
     totals = {
         "llm_calls": llm_calls_used,
         "cost_units": cost_units_used,

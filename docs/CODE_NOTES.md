@@ -3170,6 +3170,49 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 8 — a shift outlives its first wall (2026-09-03, evening)
+
+Operator's word, narrow: «строй сейчас, но узко» — only continuity inside
+the ten-hour shift and a live approval inbox; everything else frozen
+(holdouts, the priority table, the schedule's `PT12H`, the maintenance
+protocol, capabilities). Measured cause: after the agent was switched on,
+three runs lived 4, 21 and 8 cycles (5, 35, 10 minutes) and each was ended by
+the outcome of ONE piece of work — `idle_stall` after three declined goal
+switches (two of them the authority guard misreading «bypass» in the agent's
+own registry title), `loop_suspected` after three honest «inexpressible»
+verdicts on the ladder's third rung, `no_progress_stall` — then slept until
+the trigger twelve hours later. Task stopped read as agent stopped: the
+`event ≠ outcome` disease reached the scheduler.
+
+- **Continuity** (`core/campaign.py`): `_stall(cycle, why, stall)` = switch
+  goal, else `_wait_for_change`: a bounded wait inside the process (step =
+  the run's own pause, cap `_BACKOFF_MAX_SECONDS` = 900 s, never past the
+  wall clock), woken early by the world-change journal
+  (`last_capability_change_ts`) or a new approved item, otherwise by the
+  periodic recheck — the insurance Кодекс asked for against a missed event.
+  Called from the idle, repeat, cost-cap and work no-progress exits and from
+  the loop-suspect exit, which block 2 had not touched. A wait is a ledger
+  row `result="waiting"`, `work_done=False` (and «waiting» is in
+  `_NO_WORK_RESULTS`), resets the streaks and the switch budget (a new era
+  of choosing). A run without `next_goal` keeps the old stops: it is not a
+  shift. The cycle cap is named `shift_limit:max_cycles=N` — part of the
+  shift limit, not a sixth stop class; the ratified terminal classes
+  (budget, wall clock, consecutive errors, safety elsewhere) are untouched.
+- **Live inbox** (`core/approval_inbox.py`): `_sync()` re-reads the file
+  before every read and write on a path-backed inbox. Every mutation saves
+  immediately, so disk is the truth and memory a cache; the grant and the
+  denial of that evening both needed the run killed because the campaign's
+  inbox object rewrote the file whole from memory.
+
+Witnesses: `tests/test_a_shift_outlives_its_first_wall.py` (14; 9 red with
+`core/` stashed, the 5 green are controls). Redrawn with the word cited:
+three tests in `test_an_exhausted_goal_yields_to_the_next_one.py` (a refused
+switch now waits, not dies) and the empty-`stop_reason` assertions in
+`test_campaign.py`. Plank signed: `run_campaign` 501→578.
+
+Morning exam (09:03): can one process, after its first, second, tenth local
+failure, keep looking for useful work until the shift ends without a human.
+
 ## Block 7 — dead wiring carries current (2026-09-03)
 
 Audit §4, the CONFIRMED rows. Witnesses in
