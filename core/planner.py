@@ -155,12 +155,14 @@ class LLMPlanner:
             )
 
     # Авторство агента, груз 2б 2026-08-29 (docs/CODE_NOTES.md).
-    def lesson_block_for_prompt(self) -> str:
+    def lesson_block_for_prompt(self, question: str = "", file_hint: str | None = None) -> str:
         """Return the distilled-lessons block for the planner prompt.
 
         Delivery is best-effort: any failure returns "" so that lesson
         delivery can never crash planning. The injection receipt is written
-        on delivery, not on plan success.
+        on delivery, not on plan success. Block 4 (M3): with a question the
+        block is SCOPED — a lesson is delivered, and receipted, only where
+        it applies; an unscoped call keeps every lesson.
         """
         try:
             if not self.workspace:
@@ -168,17 +170,22 @@ class LLMPlanner:
 
             from core.causal_claim_store import (
                 distilled_lessons,
+                lesson_applies,
                 lesson_block_for_prompt,
             )
 
-            block = lesson_block_for_prompt(self.workspace)
+            hint = file_hint or ""
+            block = lesson_block_for_prompt(
+                self.workspace, question=question, file_hint=hint,
+            )
             if not block:
                 return ""
 
             from core.lesson_provenance import record_lesson_injections
             record_lesson_injections(
                 self.workspace,
-                distilled_lessons(self.workspace),
+                tuple(card for card in distilled_lessons(self.workspace)
+                      if lesson_applies(card, question=question, file_hint=hint)),
                 consumer="planner.plan",
             )
         except Exception:  # noqa: BLE001 — доставка не роняет планирование
@@ -217,7 +224,9 @@ class LLMPlanner:
         # actually installed on this machine (from .env BLENDER_PATH etc.)
         host_block = _build_host_tools_block()
         effective_system = PLANNER_SYSTEM + host_block if host_block else PLANNER_SYSTEM
-        effective_system += self.lesson_block_for_prompt()  # живой путь уроков
+        effective_system += self.lesson_block_for_prompt(  # живой путь уроков
+            question, file_hint,
+        )
         raw = _active_llm.complete(
             system=effective_system,
             user=safe_prompt,

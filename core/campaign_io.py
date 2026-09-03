@@ -176,19 +176,13 @@ def _discriminable_claim_count(workspace: Any) -> int:
 
 
 def _birth_candidate_count(workspace: Any) -> int:
-    """Сигнал рождения: помеченные «ждёт эксперимента» без ноты невыразимости."""
+    """Сигнал рождения: помеченные «ждёт эксперимента» и выбранные-без-
+    вмешательства (блок 4, M1) без ноты невыразимости — один список с
+    исполнителем, чтобы сигнал и действие не разошлись."""
     try:
-        from core.causal_claim_store import load_claims
-        from core.causal_climb_action import (
-            SPEC_UNEXPRESSIBLE_NOTE,
-            awaiting_experiment,
-        )
+        from core.causal_climb_action import birth_candidates
 
-        return sum(
-            1 for claim, _extra in load_claims(workspace)
-            if awaiting_experiment(claim)
-            and SPEC_UNEXPRESSIBLE_NOTE not in claim.notes
-        )
+        return len(birth_candidates(workspace))
     except Exception:  # noqa: BLE001 — сбор сигналов не роняет кампанию
         return 0
 

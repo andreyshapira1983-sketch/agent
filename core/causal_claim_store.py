@@ -185,7 +185,12 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
             rule=claim.generalized_rule,
             scope=claim.scope,
             directive=extra["directive"] or claim.generalized_rule,
-            machine_action=extra["machine_action"],
+            # M2: a climb step's name in this field is provenance, not an
+            # action for the planner; only the consumed vocabulary passes.
+            machine_action=(
+                extra["machine_action"]
+                if extra["machine_action"] in LESSON_MACHINE_ACTIONS else ""
+            ),
             evidence=claim.observation.evidence_refs,
             cases=proven_cases(claim),
             key=extra["key"],
@@ -195,14 +200,55 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
 
 # --- Доставка уроков планировщику: авторство агента (груз 2а, 2026-08-29). ---
 # Его выбор (б): опровержения через load_claims, карточку не нагружаем.
-def lesson_block_for_prompt(workspace) -> str:
+#: Machine actions a LESSON may carry — the names code actually CONSUMES
+#: (block 4, M2, 2026-09-03). The same store field also records which climb
+#: step last touched a claim (`run_claim_experiment`, …); those are
+#: provenance, not planner actions, and `distilled_lessons` does not pass
+#: them on. Consumers: `core.self_task_producer._lesson_prompt_parts`.
+LESSON_MACHINE_ACTIONS: frozenset[str] = frozenset({"include_real_signatures"})
+
+
+def _lesson_tokens(text: str) -> frozenset[str]:
+    return frozenset(
+        w for w in "".join(c.lower() if c.isalnum() else " " for c in text).split()
+        if len(w) > 2
+    )
+
+
+def lesson_applies(lesson: LessonCard, *, question: str = "", file_hint: str = "") -> bool:
+    """Does this lesson belong in THIS plan? Unscoped call (no question, no
+    file) keeps every lesson — the pre-block-4 behaviour. With a question,
+    the lesson must share a word of its scope or a proven case with the
+    question or name the hinted file. Measured (M3): 347 of 359 injections
+    went into every planner turn regardless of scope."""
+    if not question and not file_hint:
+        return True
+    hint = str(file_hint or "").replace("\\", "/").strip().casefold()
+    if hint:
+        names = (lesson.scope, *lesson.cases, *lesson.evidence)
+        base = hint.rsplit("/", 1)[-1]
+        if any(base and base in str(n).casefold() for n in names):
+            return True
+    asked = _lesson_tokens(question)
+    if not asked:
+        return False
+    scoped = _lesson_tokens(lesson.scope) | frozenset(
+        t for case in lesson.cases for t in _lesson_tokens(case)
+    )
+    return bool(asked & scoped)
+
+
+def lesson_block_for_prompt(workspace, *, question: str = "", file_hint: str = "") -> str:
     """Build a '## Lessons for planning' block from the causal claim store.
 
-    Returns an empty string when the store is empty. Each lesson is rendered
-    as plain lines (not a table). Counter-evidence lines are included only
-    when the claim has non-empty refuted_by texts.
+    Returns an empty string when the store is empty or nothing applies.
+    Each lesson is rendered as plain lines (not a table). Counter-evidence
+    lines are included only when the claim has non-empty refuted_by texts.
     """
-    lessons = distilled_lessons(workspace)
+    lessons = tuple(
+        card for card in distilled_lessons(workspace)
+        if lesson_applies(card, question=question, file_hint=file_hint)
+    )
     if not lessons:
         return ""
 
@@ -214,6 +260,9 @@ def lesson_block_for_prompt(workspace) -> str:
         lines.append(f"- Rule: {lesson.rule}")
         lines.append(f"  Scope: {lesson.scope}")
         lines.append(f"  Directive: {lesson.directive}")
+        if lesson.machine_action:
+            # M2: the mechanical half of a lesson travels with the prose.
+            lines.append(f"  Machine action: {lesson.machine_action}")
         cases = ", ".join(lesson.cases) if lesson.cases else ""
         lines.append(f"  Cases: {cases}")
 

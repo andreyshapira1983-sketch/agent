@@ -552,24 +552,63 @@ class ReflectionEngine:
             # reach disk.
             self._log("reflection_writes_frozen", {"lessons_withheld": len(lessons)})
             return 0
-        records = [
-            MemoryRecord(
+        # Block 4 (M7, 2026-09-03): reflection knocks on the same door as every
+        # other agent-auto write. Measured: 635 of 837 persistent records were
+        # reflection output, 625 written on one day, none policy-checked. Each
+        # lesson is an observation of one day of logs — that is its kind — and
+        # the write policy (consent, secrets, near-duplicates) decides.
+        from core.memory_policy import MemoryWritePolicy
+
+        policy = MemoryWritePolicy()
+        try:
+            existing = list(self.persistent_memory.load())
+        except Exception:  # noqa: BLE001 — an unreadable store is «no duplicates known»
+            existing = []
+
+        def _text_view(rec: MemoryRecord) -> MemoryRecord:
+            # A lesson record stores a dict; the duplicate check compares
+            # prose, so it sees the insight, not the dict's punctuation.
+            body = rec.content
+            if isinstance(body, dict) and isinstance(body.get("insight"), str):
+                return rec.model_copy(update={"content": body["insight"]})
+            return rec
+
+        seen = [_text_view(rec) for rec in existing]
+        records: list[MemoryRecord] = []
+        for lesson in lessons:
+            tags = [
+                "reflection",
+                "lesson",
+                lesson.action,
+                lesson.focus_area or "general",
+                # Russian synonyms so keyword retrieval works for RU queries
+                "урок",
+                "рефлексия",
+                "[НАБЛЮДЕНИЕ, один день]",
+                "insight",
+            ]
+            decision = policy.decide(
+                lesson.insight, tags, source="agent-auto", owner="self",
+                existing=seen,
+            )
+            if decision.decision != "save":
+                self._log("reflection_lesson_refused", {
+                    "lesson_id": lesson.id,
+                    "reasons": list(getattr(decision, "reasons", ()) or ()),
+                })
+                continue
+            record = MemoryRecord(
                 type="episodic",
                 content=lesson.to_dict(),
-                tags=[
-                    "reflection",
-                    "lesson",
-                    lesson.action,
-                    lesson.focus_area or "general",
-                    # Russian synonyms so keyword retrieval works for RU queries
-                    "урок",
-                    "рефлексия",
-                ],
+                tags=tags,
                 owner="reflection_engine",
+                source="agent-auto",
                 importance=lesson.confidence,
             )
-            for lesson in lessons
-        ]
+            records.append(record)
+            seen.append(_text_view(record))
+        if not records:
+            return 0
         return self.persistent_memory.save_many(records)
 
     # ── Step 5: generate a LearningPlan from the lessons ─────────────────────

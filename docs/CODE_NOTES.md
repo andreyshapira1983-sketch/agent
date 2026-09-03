@@ -3170,6 +3170,52 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 4 — a learning loop that can close (2026-09-03)
+
+Audit §3 / §7 item 4, the by-hand half named in §8 (M1 exit field, M2
+transport) plus the two guard-side cuts (M3 scope, M7 door). Live shape on
+2026-09-03: 25 REFUTED / 15 EXPLAINED / 10 OBSERVED / 1 LESSON / 0 ATTRIBUTED
+ever. Witnesses in `tests/test_an_explained_claim_can_still_be_attributed.py`,
+`tests/test_a_lesson_is_delivered_where_it_applies.py`,
+`tests/test_reflection_knocks_on_the_memory_door.py` (without `core/` they
+do not even import — the organs did not exist).
+
+- **M1** the exit from EXPLAINED. Every EXPLAINED claim had an explanation
+  chosen by the journal probes and nothing more: `experimentable_claims`
+  skipped any claim with `chosen`, birth took only claims marked «awaiting»,
+  and `violated_invariant` was prose no machine wrote. Now
+  `needs_intervention` (chosen, unrefuted, no intervention) makes the claim a
+  birth candidate (`birth_candidates`, one list for signal and executor);
+  `_birth_intervention_spec` asks for a one-hypothesis removal experiment
+  AND the line `ИНВАРИАНТ: …`, refusing a spec without it; `_apply_born_spec`
+  attaches the spec to the CHOSEN explanation and writes the invariant;
+  `run_claim_experiment` gives the choice to the first PROVEN cause
+  (`intervention is None`, not `chosen == ""`) and un-chooses an explanation
+  the experiment refutes. The recorded slice-3 test was re-drawn: «open» at
+  this rung means unproven, not unchosen. The ladder above ATTRIBUTED
+  (generalization, scope) stays as designed — `name_scope` is the human's,
+  and no CLI reaches it yet; that is the next organ, not this block.
+- **M2** `LESSON_MACHINE_ACTIONS` names the vocabulary code consumes
+  (`include_real_signatures`); a climb step's name in the same store field is
+  provenance and `distilled_lessons` no longer passes it on; the planner
+  block prints `Machine action:` when a lesson has one.
+- **M3** `lesson_block_for_prompt(workspace, question=, file_hint=)` and
+  `lesson_applies`: with a question, a lesson is delivered and receipted only
+  where its scope, a proven case or the hinted file touches the question; an
+  unscoped call keeps every lesson. `LLMPlanner.plan` passes both.
+- **M7** `ReflectionEngine._save_lessons` goes through `MemoryWritePolicy`
+  with the kind «[НАБЛЮДЕНИЕ, один день]» + `insight`, `source="agent-auto"`,
+  near-duplicate check against the store AND the batch (dict-content records
+  compared by their insight text); a refusal is logged as
+  `reflection_lesson_refused` with the policy's reasons.
+
+Not done, and why: **M6** (eligibility admits mostly self-build bookkeeping)
+is the store's fail-closed rule reading measured facts — lowering it is a
+policy decision, not a defect repair; **M9/M11** (eviction, procedure
+review) are what the agent keeps, his by the operator's word; **M4/M5/M8/
+M10/M12** are PLAUSIBLE and untouched. Plank signed: `core/planner.py`
+566→575.
+
 ## Block 3 — the commitments view: waiting ≠ exhausted, denied ≠ never seen (2026-09-03)
 
 Audit §7 item 3. No new registry: the approval inbox already holds every
