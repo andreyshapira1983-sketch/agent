@@ -49,8 +49,8 @@ _HISTORICAL_ANCHOR_DOCS = {
     "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "MEMORY_FIX_PLAN.md",
     "../knowledge/doctrine/self-audit-lessons.md",
-    "CORE_AUDIT_2026-07-18.md",
-    "daemon-progress.md",
+    "audit/archive/CORE_AUDIT_2026-07-18.md",
+    "audit/archive/daemon-progress.md",
 }
 
 #: Top-level code directories a documented path may start with.
@@ -164,7 +164,7 @@ _RENAMED_PATHS: dict[str, str] = {
 #: numbers drifting, this one is about a module name that no longer exists. A
 #: document can need one and not the other.
 _HISTORICAL_RENAME_DOCS = {
-    "CORE_AUDIT_2026-07-18.md",
+    "audit/archive/CORE_AUDIT_2026-07-18.md",
     "LIVE_PROBE_FINDINGS.md",
     # Added 2026-08-04 with the `loop_methods2` dissolution: dated audits and
     # fix plans whose job is to say what was true when they were written. The
@@ -172,7 +172,7 @@ _HISTORICAL_RENAME_DOCS = {
     # that file, and rewriting it would falsify the record.
     "MEMORY_FIX_PLAN.md",
     "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
-    "Технический_анализ_автономного_агента_и_функций_мозга.md",
+    "audit/archive/Технический_анализ_автономного_агента_и_функций_мозга.md",
     "../knowledge/doctrine/self-audit-lessons.md",
 }
 

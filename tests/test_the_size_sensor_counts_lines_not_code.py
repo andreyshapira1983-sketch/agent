@@ -86,7 +86,7 @@ def test_a_small_module_is_not_flagged() -> None:
     assert records == []
 
 
-# ── Audit of this closure (docs/audit/CLOSURE_AUDIT_2026-08-22.md) ──────────
+# ── Audit of this closure (docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md) ──────────
 #
 # The field's named failure for AST line counting is that it misreads real
 # Python shapes. Seven were probed — one-liner ifs, multi-line call arguments,

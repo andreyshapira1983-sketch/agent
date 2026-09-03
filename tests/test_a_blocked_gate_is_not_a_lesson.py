@@ -1,7 +1,7 @@
 """A gate that refused to start is a status line, not a lesson.
 
 WHY THIS EXISTS. Measured on the live store 2026-08-22
-(`docs/audit/SELF_BUILD_FAILURE_ANALYSIS.md`): one unanswered approval on
+(`docs/audit/archive/SELF_BUILD_FAILURE_ANALYSIS.md`): one unanswered approval on
 2026-08-16 banked 41 episodes saying *an approval is already pending*, and the
 store held 64 wait-records in all — half of the entire protected set, while
 genuine lessons were evicted to make room. Every one was `usage_eligible=True`,

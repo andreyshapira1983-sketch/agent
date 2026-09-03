@@ -3158,6 +3158,18 @@ self-chosen goal agrees with him.
 Entry point: `agent_tick.py --campaign --charter` (goal resolved by the agent,
 printed with its anchor and success check before the run).
 
+**The one-paper rule (2026-09-03).** The goal-selection prompt now forbids
+proposing a NEW TARGET/DRAFT document while the existing contracts under
+`knowledge/doctrine/future/` remain unimplemented. Measured cause: documents
+are the model's cheapest product, and when engineering proposals stall in the
+approval queue, paper becomes the free currency — docs+knowledge doubled in a
+month (37 → 73 files), and one evening cycle "produced" an 823-line contract
+that was a copy of the one already in the tree with a single corrupted line.
+Implementing a piece of an existing contract, or revising one against measured
+reality, stays welcome. Witness:
+`tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
+text reaches the model).
+
 ## The head chose, the hands didn't know how
 
 The first charter campaign (2026-08-15) measured the next gap within the hour
@@ -3458,7 +3470,7 @@ Three modules survived the corrected pass unreached: `app/worker_pool.py`,
 and the rule matters more than the case:** a module found unwired is not an
 instruction to wire it — it is a reason to ask whether it should be, where,
 why, and on what proof. Here the answer was already written down.
-`docs/daemon-progress.md` marks items 2.2, 3.1 and 3.2 as *merged (acceptance
+`docs/audit/archive/daemon-progress.md` marks items 2.2, 3.1 and 3.2 as *merged (acceptance
 pending)*, and each module's own docstring says it "does not own the daemon
 loop, does not change agent_tick.py". Category: FUTURE / merged-not-accepted.
 Wiring them would have been the same error as trusting a proxy — acting on a
@@ -4318,7 +4330,7 @@ is gone. The summary now states the condition that actually holds, and the two
 reasons name the two permissions that were checked and found missing.
 
 Found by the architectural-ballast audit of 2026-08-22
-(`docs/audit/ARCHITECTURAL_BALLAST_AUDIT_2026-08-22.md`, item B6).
+(`docs/audit/archive/ARCHITECTURAL_BALLAST_AUDIT_2026-08-22.md`, item B6).
 
 ## A citation that is not about the claim
 

@@ -18,13 +18,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 HISTORICAL_AUDIT_DOCS = (
-    "docs/CORE_AUDIT_2026-07-18.md",
+    "docs/audit/archive/CORE_AUDIT_2026-07-18.md",
     "docs/OPERATIONAL_FAILURE_MODES.md",
     "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "docs/LIVE_PROBE_FINDINGS.md",
 )
 
 # The exact relative link target every banner must point at (from docs/*.md).
+REGISTRY_NAME = "MASTER_ISSUE_REGISTRY.md"
+# Kept for the unit test below: the strictest banner form is a real relative
+# link. The per-document contract accepts the registry NAME inside the same
+# blockquote (the live banners cite it as an inline-code path, and three of the
+# four documents sit at different depths, so no single relative link fits all).
 REGISTRY_LINK = "](audit/MASTER_ISSUE_REGISTRY.md)"
 
 
@@ -44,12 +49,25 @@ def _blockquote_blocks(text: str) -> list[str]:
 
 
 def has_superseded_registry_banner(text: str) -> bool:
-    """True iff one blockquote block both says 'superseded' and links the registry."""
+    """True iff one blockquote block both says 'superseded' and names the registry."""
     for block in _blockquote_blocks(text):
-        if "superseded" in block.lower() and REGISTRY_LINK in block:
+        if "superseded" in block.lower() and REGISTRY_NAME in block:
             return True
     return False
 
+
+def test_every_historical_audit_doc_carries_the_banner():
+    """The guard this file existed for — and, found 2026-09-03, never ran: the
+    doc list and the helper were defined, but no test walked the documents. A
+    dead guard is the registered-but-not-operational defect in miniature."""
+    for rel in HISTORICAL_AUDIT_DOCS:
+        path = REPO_ROOT / rel
+        assert path.is_file(), f"{rel}: the listed document is gone — update the list"
+        text = path.read_text(encoding="utf-8")
+        assert has_superseded_registry_banner(text), (
+            f"{rel}: no blockquote block says 'superseded' AND names "
+            f"{REGISTRY_NAME} — its stale statuses can be read as current"
+        )
 
 
 def test_contract_requires_terms_in_the_same_block():
