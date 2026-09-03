@@ -93,6 +93,10 @@ _DECLARED_ADDED_PARAMS = ("pending_clarification_path", "causal_store")
 _DECLARED_ADDED_FIELDS = frozenset({
     "last_evidence_support",
     "last_confidence_vector",
+    # 2026-09-03 (Д1, слово оператора): `last_answer_was_clarification` — ворота
+    # помечают ход, ответивший вопросом; безлюдный рантайм читает флаг и не
+    # пишет вопрос как сделанную работу. Классифицировано per_run в cns_model.
+    "last_answer_was_clarification",
     "causal_store",
 })
 

@@ -3170,6 +3170,49 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## The bootstrap deadlock, cut at two seams (2026-09-03)
+
+Three runs in a row on 2026-09-03 replicated one trace: the agent chose a
+correct goal about its OWN defect (repair the goal-reply parser; run the
+witness for the question-recorded-as-work; extract the completion semantics
+from `smart_memory.py`) → the hands executed the newest unrelated record of
+the issue registry → the loop's clarification gate answered with a question →
+the ledger wrote `completed / useful=1` → three repeats → stop. Self-directed
+cognition worked; actuation broke it on the way to the hands. The agent could
+not repair this itself: its own repair path runs through the two broken
+components. The operator's word: RED witnesses first, then only these two
+repairs by hand, everything else (silence vs parse, the last-JSON parser, the
+unreachable reasoning roster, the three split slices) stays the agent's
+holdout.
+
+**Д1 — a question back is not work.** `_park_clarification` (called exactly
+when a gate answered with a question) now sets
+`AgentLoop.last_answer_was_clarification`; `AutonomousRuntime._task_goal`
+resets it before `agent.run` and, when set, returns status `clarify` with the
+question in `details["clarification"]` — the same report shape the
+`replan_exhausted` branch already used. `semantic_result()` then counts no
+work. Positive controls: a real answer stays `done`; a question on the
+previous turn does not taint the next. Witness:
+`tests/test_a_question_back_is_not_completed_work.py`.
+
+**Д3 — the goal's own defect gets the goal's hands.** A fourth goal-grounded
+generator, `_candidate_own_issue_named_by_goal`: a goal that names one of the
+agent's registered issues (fingerprint, action, related file literally, or
+three substantive title words) yields that issue's action with
+`grounds=operator_goal` at priority 59 (ties with the engineering task, which
+is admitted first and wins when both apply). The negative side is deliberately
+narrow: `_habit_shadowed_by_goal` sets the registry habit aside only when the
+goal names a DIFFERENT record, or a concrete identifier (`ep-run-…`, `sii_…`)
+the record does not know; a generic "find a defect and fix it" keeps the habit
+— the operator-ratified reading of MIR-158/161 and the tests of 2026-08-26.
+Witness: `tests/test_an_investigation_goal_is_not_handed_to_a_stranger.py`.
+
+Not fixed by this, measured and left on the table: with any open record in
+the registry the habit at 55 shadows the causal-climb organ at 45 under every
+goal — 62 causal cycles on 2026-08-31, zero on 09-02/03 once one stale record
+sat open. That is a priority-table decision, not a wiring defect, and it is
+not taken here.
+
 ## The head chose, the hands didn't know how
 
 The first charter campaign (2026-08-15) measured the next gap within the hour
