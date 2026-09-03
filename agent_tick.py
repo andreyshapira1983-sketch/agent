@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 from core import heartbeat_io as _hb
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH
+from core.llm import ensure_roster_home
 from core.rule_approved_apply import drain_and_log
 from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH
 
@@ -965,6 +966,8 @@ def _ensure_env_loaded(workspace: Path) -> None:
     from dotenv import load_dotenv
 
     load_dotenv(Path(workspace) / ".env")
+    # Дом реестра молчавших объявляет точка входа (Д5, 2026-09-03).
+    ensure_roster_home(Path(workspace))
 
 
 # ── main tick ─────────────────────────────────────────────────────────────────
@@ -1697,6 +1700,7 @@ def run_paced_campaign(
     else:
         from dotenv import load_dotenv
         load_dotenv(workspace / ".env")
+        ensure_roster_home(workspace)  # дом реестра молчавших (Д5)
         from app.bootstrap import build_agent
         agent = build_agent(
             workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
