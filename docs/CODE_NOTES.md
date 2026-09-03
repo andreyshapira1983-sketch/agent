@@ -3170,6 +3170,38 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 2 — a run lives past its first step (2026-09-03)
+
+Audit §2: the four-minute profile (one useful cycle, three repeats, stop) was
+structural. Operator's word: «начинай блок 2». Six seams, one RED witness
+each in `tests/test_a_run_lives_past_its_first_step.py`, then the smallest
+repair:
+
+- **L1** `run_campaign` hands the executor `replace(config, goal=current_goal)`
+  after a switch. Before, the worker kept receiving the frozen start goal —
+  the 12-cycle runs of 2026-09-02 were one question under three labels.
+- **L2** a bare action repeated once is counted in `action_steps` and
+  reported to the gatherer as exhausted; `_candidate_open_self_improvement_issue`
+  and the own-issue generator skip exhausted actions, so the registry yields
+  its second record instead of its first forever.
+- **L3** `campaign_io._is_own_issue_action`: the diagnosis→repair bridge is
+  open to any action that carries the registry's evidence line («durable
+  issue …» / «goal names durable issue …»), not only to the one legacy name.
+- **L4** the fresh-failure candidate (priority 60) is admitted beside the
+  registry habit when the failure is fresh; it had been locked behind an
+  empty registry and never fired.
+- **L5/L6** the goal switch moved into a closure `_switch_goal(cycle, why)`
+  called from BOTH stall exits (repeats and idle) with `_GOAL_SWITCH_ATTEMPTS
+  = 3`, matching the start. An idle goal now tries a new one before the run
+  declares itself healthy; two silent picks no longer end the run.
+
+Function planks signed: `run_campaign` 482→498, `select_best_next_action`
+167→174. Still open from §2, decided later: L7 (file-identity repeat rule
+equates «implement X.md» with «draft X.md»), L8 (Jaccard lets a shorter
+restatement through), L9–L10 (waiting ≠ exhausted, denied ≠ never seen —
+the commitments registry), L11–L12 (the recent-goals block and the dead
+`work_done` field in `_recent_goals`).
+
 ## Block 1 — the ledger counts outcomes, not events (2026-09-03)
 
 The six-axis audit (`docs/audit/AUTONOMY_AUDIT_2026-09-03.md` §1) found the

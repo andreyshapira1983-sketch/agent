@@ -203,6 +203,20 @@ def _experimentable_claim_count(workspace: Any) -> int:
         return 0
 
 
+def _is_own_issue_action(action: BestNextAction) -> bool:
+    """Действие — про собственный дефект: привычка реестра ИЛИ запись, которую
+    цель назвала. Реестр стал выдавать делу его собственное имя действия
+    (2026-08-31+), и мост «диагноз → заявка», открытый одному имени
+    `improve_failure_to_idea_pipeline`, закрылся для всех его дел (L3,
+    аудит 2026-09-03). Узнаётся по улике, которую кладут оба генератора."""
+    if action.action == "improve_failure_to_idea_pipeline":
+        return True
+    return any(
+        str(e).startswith(("durable issue ", "goal names durable issue "))
+        for e in (action.evidence or ())
+    )
+
+
 def _propose_repair_from_diagnosis(
     *, agent: Any, workspace: Any, config: CampaignConfig,
     action: BestNextAction, answer: str, approval_inbox: Any,
@@ -224,7 +238,7 @@ def _propose_repair_from_diagnosis(
     уверенности, заявка `self_apply_lane.run` в очереди, решение человека
     (§9), лента с полным pytest и откатом. Здесь ничего не исполняется.
     """
-    if action.action != "improve_failure_to_idea_pipeline" or config.dry_run:
+    if not _is_own_issue_action(action) or config.dry_run:
         return None
     if not answer or approval_inbox is None:
         return None
