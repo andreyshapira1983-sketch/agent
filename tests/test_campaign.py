@@ -300,7 +300,9 @@ class TestCompletedRun:
             now_fn=_fixed_now,
         )
         assert result.status == "completed"
-        assert result.stop_reason == ""
+        # Block 8 (2026-09-03): the cycle cap is named as the shift limit, not
+        # left blank — an empty reason read as «nothing stopped it».
+        assert result.stop_reason.startswith("shift_limit:max_cycles=")
         assert result.cycles_run == 3
         assert result.totals["useful_cycles"] == 3
 

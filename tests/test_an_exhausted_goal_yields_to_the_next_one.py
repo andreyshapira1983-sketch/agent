@@ -100,24 +100,28 @@ def test_an_exhausted_goal_is_replaced_and_the_run_continues(tmp_path):
     )
 
 
-def test_a_refused_next_goal_stops_the_run_honestly(tmp_path):
-    """Ворота те же: хартия отказала — прогон заканчивается, а не обходит её."""
+def test_a_refused_next_goal_makes_the_run_wait_not_die(tmp_path):
+    """Ворота те же: хартия отказала — цель НЕ берётся. Но с блока 8 (слово
+    оператора 2026-09-03) отказ — исход попытки, а не конец смены: прогон
+    ждёт ограниченно и пробует снова, пока смена не кончится сама."""
     result = _run(tmp_path, _OneActionGather(), _WorksOnce(),
                   next_goal=lambda: "")
 
-    assert result.status == "stopped"
-    assert "no_progress_stall" in result.stop_reason
+    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
+    assert any(r.result == "waiting" for r in result.records), "ожидание не записано"
+    assert all(r.goal == "первая цель" for r in result.records), "отказ хартии обойдён"
 
 
 def test_a_failing_goal_picker_never_kills_the_run(tmp_path):
-    """Смена цели — удобство, а не несущая конструкция: её падение молчаливо."""
+    """Смена цели — удобство, а не несущая конструкция: её падение молчаливо,
+    и с блока 8 оно ведёт в ожидание, а не в смерть прогона."""
     def _explodes() -> str:
         raise RuntimeError("модель недоступна")
 
     result = _run(tmp_path, _OneActionGather(), _WorksOnce(), next_goal=_explodes)
 
-    assert result.status == "stopped"
-    assert "no_progress_stall" in result.stop_reason
+    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
+    assert any(r.result == "waiting" for r in result.records)
 
 
 def test_the_same_goal_offered_again_is_not_a_switch(tmp_path):
@@ -125,5 +129,7 @@ def test_the_same_goal_offered_again_is_not_a_switch(tmp_path):
     result = _run(tmp_path, _OneActionGather(), _WorksOnce(),
                   next_goal=lambda: "первая цель")
 
-    assert result.status == "stopped"
-    assert "no_progress_stall" in result.stop_reason
+    # Не смена — значит ожидание (блок 8), а не смерть; и никакой второй цели.
+    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
+    assert {r.goal for r in result.records} == {"первая цель"}
+    assert any(r.result == "waiting" for r in result.records)

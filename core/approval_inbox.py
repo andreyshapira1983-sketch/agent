@@ -195,6 +195,17 @@ class ApprovalInbox:
             self.path = Path(self.path)
             self.items = self._load()
 
+    def _sync(self) -> None:
+        """Re-read the file before every read or write (block 8, operator's
+        word 2026-09-03). A long campaign held the inbox in memory and rewrote
+        the file whole on each save, so an operator's verdict written from
+        outside was overwritten by the agent's next proposal; the grant and
+        the denial of that evening both needed the run stopped. Every mutation
+        in this process saves immediately, so disk is the truth and the
+        in-memory copy is a cache."""
+        if self.path is not None and Path(self.path).exists():
+            self.items = self._load()
+
     def find_pending_by_dedup_key(self, dedup_key: str):
         """Ожидающая заявка с этим ключом, или None.
 
@@ -221,6 +232,7 @@ class ApprovalInbox:
         expires_at: str | None = None,
         dedup_key: str | None = None,
     ) -> ApprovalInboxItem:
+        self._sync()
         # Structural duplicate guard: if a dedup_key is supplied and an
         # equivalent pending item already exists, return it instead of
         # appending a near-identical row. This keeps the inbox drained of the
@@ -295,6 +307,7 @@ class ApprovalInbox:
         self, dedup_key: str, *, statuses: tuple[str, ...] = ("pending",),
     ) -> ApprovalInboxItem | None:
         """Newest item with this key in one of ``statuses``, or None."""
+        self._sync()
         found = None
         for item in self.items:
             if item.status in statuses and item.payload.get("dedup_key") == dedup_key:
@@ -318,6 +331,7 @@ class ApprovalInbox:
         ``None`` means «unknown»: some waiting item names no files, so a
         caller must treat every file as waiting (the pre-block-3 behaviour).
         """
+        self._sync()
         out: set[str] = set()
         for item in self.items:
             if item.status not in ("pending", "approved"):
@@ -335,6 +349,7 @@ class ApprovalInbox:
     ) -> frozenset[str]:
         """Files whose proposal a human denied within ``hours`` — a cooldown
         set for producers, so a denial sends the hand elsewhere."""
+        self._sync()
         out: set[str] = set()
         for item in self.items:
             if item.status != "denied" or not _within_hours(item.updated_at, hours):
@@ -353,6 +368,7 @@ class ApprovalInbox:
 
         Returns the number of items that were aborted.
         """
+        self._sync()
         now = datetime.now(timezone.utc)
         expired = 0
         new_items: list[ApprovalInboxItem] = []
@@ -378,6 +394,7 @@ class ApprovalInbox:
         return [item for item in self.items if item.status == "pending"]
 
     def list(self, *, status: ApprovalInboxStatus | str | None = None) -> list[ApprovalInboxItem]:
+        self._sync()
         if status in (None, "", "all"):
             return list(self.items)
         return [item for item in self.items if item.status == status]
@@ -464,6 +481,7 @@ class ApprovalInbox:
         return self.set_status(item_id, "executed")
 
     def get(self, item_id: str) -> ApprovalInboxItem | None:
+        self._sync()
         for item in self.items:
             if item.id == item_id:
                 return item
@@ -483,6 +501,7 @@ class ApprovalInbox:
         verdict nobody gave."""
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid approval status: {status}")
+        self._sync()
         updated: ApprovalInboxItem | None = None
         out: list[ApprovalInboxItem] = []
         for item in self.items:
