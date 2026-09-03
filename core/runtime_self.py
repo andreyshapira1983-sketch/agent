@@ -38,7 +38,7 @@ def runtime_self_block(
     run_id: str,
     session_id: str | None,
     stores: Mapping[str, Any],
-    durable_writes: Iterable[str],
+    durable_writes: Iterable[str] | None,
 ) -> str:
     """Факты о текущем исполнении, пригодные для проверки по журналу.
 
@@ -67,9 +67,15 @@ def runtime_self_block(
         state = "подключён" if stores.get(organ) is not None else "нет"
         lines.append(f"  {organ}: {state}")
 
-    allowed = sorted(str(w) for w in durable_writes)
-    lines.append(
-        f"  durable_writes: {', '.join(allowed) if allowed else 'ничего не разрешено'}"
-    )
+    # `None` — присутственная сессия, где разрешены ВСЕ приёмники (контракт
+    # app/bootstrap.build_agent). До 2026-09-03 вывеска печатала его как «ничего
+    # не разрешено», и агент в разговоре не собирал даже вызов memory_bank:
+    # дверь была открыта, вывеска — закрыта.
+    if durable_writes is None:
+        shown = "все приёмники (присутственная сессия)"
+    else:
+        allowed = sorted(str(w) for w in durable_writes)
+        shown = ", ".join(allowed) if allowed else "ничего не разрешено"
+    lines.append(f"  durable_writes: {shown}")
     lines.append("</runtime_self>")
     return "\n".join(lines)

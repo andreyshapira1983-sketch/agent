@@ -140,7 +140,8 @@ class AgentLoopSynthesis:
                 run_id=str(getattr(ctx, "run_id", "") or ""),
                 session_id=getattr(self.memory, "session_id", None),
                 stores=_organ_map(self),
-                durable_writes=getattr(self, "durable_writes", ()) or (),
+                # `None` едет как есть: это «все приёмники», а не «ничего».
+                durable_writes=getattr(self, "durable_writes", ()),
             )
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется
             # Молча вернуть пустоту здесь — ровно тот порок, который храповик
