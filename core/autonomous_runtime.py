@@ -588,10 +588,22 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         trigger = "autonomous_run_stopped"
         affected = "core.autonomous_runtime"
         try:
+            failed = sum(1 for t in tasks if t.status == "failed")
             for inc in log.open_incidents():
                 if inc.trigger == trigger and inc.affected_module == affected:
-                    return  # already tracked — do not open a duplicate
-            failed = sum(1 for t in tasks if t.status == "failed")
+                    # Block 7 (audit W1, 2026-09-03): a repeat stop used to
+                    # vanish here — one open incident silenced every later
+                    # one and nothing ever resolved it. The record now grows.
+                    note = (inc.postmortem_note + "; " if inc.postmortem_note else "")
+                    log.update(inc.id, postmortem_note=(
+                        note + f"recurred {datetime.now(timezone.utc).isoformat()}: "
+                        f"{stop_reason[:120]}"
+                    )[-2000:])
+                    self._log("incident_recurred", {
+                        "incident_id": inc.id, "stop_reason": stop_reason,
+                        "failed_tasks": failed,
+                    })
+                    return
             log.open_incident(
                 severity="high",
                 trigger=trigger,
