@@ -127,14 +127,25 @@ class AutonomousRunReport:
         used = self.budget.get("used", {}) if isinstance(self.budget, dict) else {}
         return int(used.get("llm_calls") or 0) > 0 or int(used.get("web_fetches") or 0) > 0
 
+    #: Задачи, чьё «done» — не работа: служебная проба состояния и учебный
+    #: проход. Аудит 2026-09-03 (A1): очередь КАЖДОГО прогона начинается с
+    #: `status`, она всегда done, и любой прогон — даже с одним встречным
+    #: вопросом — читался как «работа была».
+    _NOT_WORK_KINDS = frozenset({"status", "learn"})
+
     def semantic_result(self) -> tuple[str, bool]:
         """(result, work_done) — исход, а не жизненный цикл (MIR-117, норма A).
 
         ``status='completed'`` чеканится по «дочерпали», и прогон, чью
         единственную задачу отверг ценовой конверт, носил его как достижение.
-        Здесь слово следует за работой: сделана = хотя бы одна задача ``done``.
+        Здесь слово следует за работой: сделана = хотя бы одна РАБОЧАЯ задача
+        ``done`` (цель, предложение, тесты) — не проба состояния.
         """
-        work = any(t.status == "done" for t in self.tasks)
+        work = any(
+            t.status == "done"
+            and getattr(getattr(t, "task", None), "kind", "") not in self._NOT_WORK_KINDS
+            for t in self.tasks
+        )
         if self.status in ("stopped", "blocked"):
             return self.status, work
         if work:

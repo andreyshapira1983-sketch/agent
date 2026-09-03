@@ -307,7 +307,10 @@ def _propose_repair_from_diagnosis(
         return None
     else:
         if collision:
-            return f"repair_{collision}"
+            # A5 (2026-09-03): столкновение — не предложение; в ящике осталась
+            # прежняя заявка, и цикл ничего не подал. Журнал уже был честен,
+            # исход — нет.
+            return None
         return f"repair_proposed:{item.id}"
 
 
@@ -475,7 +478,7 @@ def _propose_doctrine_draft(
         **({"collision": collision} if collision else {}),
     })
     if collision:
-        return f"doc_draft_{collision}"
+        return None  # A5: столкновение — не предложение (см. _propose_repair_from_diagnosis)
     return f"doc_draft_proposed:{item.id}"
 
 
@@ -713,11 +716,19 @@ def _default_execute_action(
 
         return birth_experiment_specs(agent=agent, workspace=workspace)
 
+    from core.approval_inbox import ApprovalInbox
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits
 
     llm_before, cost_before = _cost_totals(agent)
     focused_goal = _action_focused_goal(config.goal, action)
+    # A3 (2026-09-03): предложение этого цикла — ДЕЛЬТА ящика, не его размер.
+    # Абсолютный счёт делал любой цикл «полезным», пока в ящике лежала чужая
+    # вчерашняя заявка, и гасил страж «loop_suspected».
+    _inbox = approval_inbox or ApprovalInbox(
+        path=Path(workspace) / "data" / "approval_inbox.jsonl"
+    )
+    _pending_before = {i.id for i in _inbox.pending()}
     runtime = AutonomousRuntime(agent, workspace=workspace, approval_inbox=approval_inbox)
     report = runtime.run(
         AutonomousRuntimeConfig(
@@ -738,18 +749,19 @@ def _default_execute_action(
         )
     )
     llm_after, cost_after = _cost_totals(agent)
-    pending = 0
     try:
-        pending = int(report.approvals.get("pending", 0) or 0)
-    except (AttributeError, TypeError, ValueError):
-        pending = 0
-    proposal = f"approvals_pending={pending}" if pending else None
+        new_items = [i for i in _inbox.pending() if i.id not in _pending_before]
+    except (AttributeError, OSError, ValueError):
+        new_items = []
+    proposal = f"approvals_new={len(new_items)}" if new_items else None
     artifact = None
     goal_answer = ""
     for task_report in getattr(report, "tasks", []) or []:
         if getattr(task_report.task, "kind", "") == "goal":
             answer = (task_report.details or {}).get("answer")
-            if answer:
+            # A4 (2026-09-03): продукт — только у ВЫПОЛНЕННОЙ задачи; вопрос
+            # ворот (clarify) и пустой ответ (inconclusive) продуктом не являются.
+            if answer and getattr(task_report, "status", "") == "done":
                 goal_answer = str(answer)
                 digest = " ".join(goal_answer.split())[:160]
                 if digest:

@@ -437,8 +437,15 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
 
     # Only terminal statuses consume the approval; transient refusals leave the
     # item approved so the operator can retry once budget/queue recovers.
+    # A7 (2026-09-03): «consumed» is not «applied». A commit is executed; a
+    # rollback is an attempt that reverted — it is aborted, so the value-review
+    # queue (which lists `executed` as "applied proposals") never asks a human
+    # to grade a change the suite discarded.
     if report.status in TERMINAL_LANE_STATUSES:
-        inbox.mark_executed(item_id)
+        if report.status == "committed_local":
+            inbox.mark_executed(item_id)
+        else:
+            inbox.abort(item_id)
         _record_lane_outcome(registry, item, report.status)
 
     return result
