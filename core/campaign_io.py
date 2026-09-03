@@ -306,6 +306,7 @@ def _propose_repair_from_diagnosis(
             payload=payload,
             dedup_key=dedup_key,
         )
+        collision = collision or _refused_repeat(item)
         # F-1: при столкновении в ящике остаётся ПРЕЖНЯЯ заявка, и назвать это
         # предложением значило бы записать работу, которой не было.
         _log(agent, "campaign_repair_superseded" if collision
@@ -358,18 +359,42 @@ def _dedup_verdict(approval_inbox, dedup_key: str) -> str | None:
     return f"superseded_by_existing:{existing.id}"
 
 
+def _refused_repeat(item: Any) -> str | None:
+    """Строка об ОТКАЗЕ ящика, если `add` вернул отклонённую заявку (блок 3,
+    L10): ящик помнит отказ и не подаёт то же самое второй раз."""
+    if getattr(item, "status", "pending") != "denied":
+        return None
+    return f"refused_repeat_of_denied:{item.id}"
+
+
+def _prior_denial(approval_inbox: Any, dedup_key: str) -> tuple[str, str] | None:
+    """(id, причина) недавнего отказа по этому ключу — или None."""
+    reader = getattr(approval_inbox, "recently_denied", None)
+    if reader is None:
+        return None
+    try:
+        denied = reader(dedup_key)
+    except Exception:  # noqa: BLE001 — нечитаемая память отказа = её нет
+        return None
+    if denied is None:
+        return None
+    return (str(denied.id), str(getattr(denied, "decision_reason", "") or "(no reason recorded)"))
+
+
 def _propose_engineering_step(
     *, agent: Any, workspace: Any, approval_inbox: Any, target: str | None = None,
-) -> str:
+) -> str | None:
     """Turn the top real backlog candidate into a self-build lane proposal.
 
     The road charter → backlog (2026-08-19): the campaign may now PRODUCE an
     engineering approval item; blessing, the lane and every downstream gate
-    stay human-owned. A refusal is surfaced by name, never hidden."""
+    stay human-owned. A refusal is surfaced by name in the log, never hidden —
+    and never counted as a proposal (block 3, L9)."""
     from pathlib import Path as _Path
 
     from core.budget_kill_switch import BudgetKillSwitch, default_path
     from core.safe_vcs import SafeVCS
+    from core.self_build_memory import recently_vetoed_self_build_targets
     from core.self_build_producer import produce_self_apply_proposal
 
     try:
@@ -388,6 +413,8 @@ def _propose_engineering_step(
             # Дорога головы к рукам (MIR-159). `None` значит «цель предмета не
             # называла» — тогда производитель выбирает сам, как и раньше.
             candidate_targets=(target,) if target else None,
+            # Блок 3 (L10): вето критика помнит и кампания, не только CLI.
+            recently_vetoed_targets=recently_vetoed_self_build_targets(agent),
         )
     except Exception as exc:  # noqa: BLE001 — отказ именуется, не прячется
         _log(agent, "campaign_engineering_error", {
@@ -402,7 +429,10 @@ def _propose_engineering_step(
     })
     if approval_id:
         return f"engineering_proposed:{approval_id}"
-    return f"engineering_declined:{status}"
+    # Блок 3 (L9): ожидание человека, вето критика, остывание после отказа —
+    # не предложение. Статус остаётся в журнале выше; в строке леджера
+    # `proposal` пуст, и цикл не считается полезным.
+    return None
 
 
 def _propose_doctrine_draft(
@@ -414,6 +444,10 @@ def _propose_doctrine_draft(
     target = doc_target_from_goal(goal)
     if not target:
         return "doc_declined:no_target_doc"
+    # Блок 3 (L10): отказ человека по этому же документу читается ДО генерации
+    # и попадает в задание — иначе «ревизия» была бы новым броском кости.
+    dedup_key = f"self_apply:{target}:campaign_doctrine_draft"
+    prior_denial = _prior_denial(approval_inbox, dedup_key)
     existing = ""
     target_file = Path(workspace) / target
     if target_file.exists():
@@ -451,6 +485,13 @@ def _propose_doctrine_draft(
             if existing else ""
         )
         + (f"The charter it serves:\n{charter_text}" if charter_text else "")
+        + (
+            f"\n\nYour previous draft of this document ({prior_denial[0]}) was "
+            f"DENIED by the reviewer with this reason: {prior_denial[1]}\n"
+            "This draft must answer that reason; a draft that ignores it "
+            "will be refused again."
+            if prior_denial else ""
+        )
     )
     try:
         draft = str(agent.llm.complete(
@@ -474,7 +515,6 @@ def _propose_doctrine_draft(
         origin="campaign_doctrine_draft",
         workspace=workspace,
     )
-    dedup_key = f"self_apply:{target}:campaign_doctrine_draft"
     collision = _dedup_verdict(approval_inbox, dedup_key)
     item = approval_inbox.add(
         operation="self_apply_lane.run",
@@ -484,6 +524,7 @@ def _propose_doctrine_draft(
         payload=payload,
         dedup_key=dedup_key,
     )
+    collision = collision or _refused_repeat(item)
     # F-1: `chars` описывал НОВЫЙ черновик, а в ящике при столкновении лежал
     # старый — запись говорила о предложении, которого не было.
     _log(agent, "campaign_doc_draft_superseded" if collision

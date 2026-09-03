@@ -3170,6 +3170,55 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 3 — the commitments view: waiting ≠ exhausted, denied ≠ never seen (2026-09-03)
+
+Audit §7 item 3. No new registry: the approval inbox already holds every
+commitment with its status; what was missing were readers that ask honest
+questions of it, and callers that use the honest answer. Operator's standing
+word (repeated this day): blocks proceed without a per-block «go». Live
+evidence first: 161 inbox items, the MIGRATION_PATH.md draft re-filed three
+times after denial, one split step (same digest) twice; 23 of 80 goal
+decisions «repeat», among them the ONE PAPER RULE's own next step. One RED
+witness per seam in three files (`test_a_commitment_is_remembered_after_its_verdict.py`,
+`test_waiting_on_one_file_does_not_stop_the_hand_on_another.py`,
+`test_the_next_step_on_the_same_paper_is_not_a_repeat.py`).
+
+- **L10** `ApprovalInbox.add` remembers a DENIAL for `_DENIAL_MEMORY_HOURS`
+  (168, expert default with a veto line): the same bytes under the same key
+  are refused (the denied item is returned, receipt `approval_inbox.refuse_repeat`);
+  a revision is admitted and carries `revises` + `prior_denial_reason`.
+  Boundary kept from MIR-072: only a proposal that carries files is
+  remembered; a permission question may be asked again. The verdict's reason
+  now lives on the item (`decision_reason`), and `approval_outcomes.jsonl`
+  rows carry `dedup_key` and `targets`. Readers: `find_by_dedup_key`,
+  `recently_denied`, `pending_targets` (None = unknown), `recently_denied_targets`.
+  The campaign's document hand feeds the prior denial reason into the draft
+  prompt and treats a refused repeat as «nothing filed» (A5's rule); the
+  producer's two publish sites report `denied_repeat`.
+- **L9** the producer's gate 3 is per file: a candidate waits only when a
+  waiting item touches it; a file denied recently is `denied_cooldown`; when
+  the producer chooses, waiting + denied + critic-vetoed files are excluded
+  from the grounded selector. `_propose_engineering_step` returns `None` for
+  every non-proposed status (logged by name) and passes the critic's cooldown
+  set, which only the CLI passed before.
+- **L7** `_repeats_recent`: same file AND same stage of work is a repeat.
+  `_goal_stage` reads the first verb: read / paper / code; for a module,
+  paper and code merge into «work» (a proposal about the edit and the edit
+  are one hand), so the 2026-08-19 decisions stand.
+- **L11** `_recent_goals` windows by last work, not first appearance.
+- **L12** `CampaignCycleRecord.work_done` is written by every record site
+  (`outcome.did_work` for executed cycles, False for idle/repeat/cost_cap);
+  the reader takes the ledger's word when present, else the legacy blacklist
+  extended with `blocked/failed/empty/inconclusive` and the product rule
+  (a proposal or artifact is work at any outcome).
+
+Not done, and why: **L8** (containment over Jaccard) contradicts the
+recorded mixed-pair decision in `test_novelty_judges_the_target_not_the_phrasing.py`
+(0.56 must stay below the threshold); a PLAUSIBLE finding does not overturn
+a measured one. The engineering repair generator does not yet read the
+denial reason (only the document hand does) — the inbox-level marker covers
+it for the reviewer.
+
 ## Block 2 — a run lives past its first step (2026-09-03)
 
 Audit §2: the four-minute profile (one useful cycle, three repeats, stop) was

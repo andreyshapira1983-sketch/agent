@@ -122,6 +122,7 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
         risk=action.risk, grounds=action.grounds, decided_by=action.decided_by,
         idle=False, llm_calls_spent=0, cost_units_spent=0,
         result="cost_cap",
+        work_done=False,
         reason=(
             f"сигнатура '{action.action}' потратила {spent} единиц за все "
             f"запуски при потолке {cap}; исполнение остановлено — нужно слово "
@@ -390,6 +391,7 @@ def run_campaign(
                     result="idle",
                     reason=action.reason,
                     next_check_at=next_check,
+                    work_done=False,
                 )
                 ledger.append(record)
                 records.append(record)
@@ -448,6 +450,7 @@ def run_campaign(
                     cost_units_spent=0,
                     result="repeat",
                     reason=_repeat_reason(action.action, hit_ceiling),
+                    work_done=False,
                 )
                 ledger.append(record)
                 records.append(record)
@@ -549,6 +552,7 @@ def run_campaign(
                 reason=action.reason,
                 proposal=outcome.proposal,
                 artifact=outcome.artifact,
+                work_done=outcome.did_work,
             )
             ledger.append(record)
             records.append(record)

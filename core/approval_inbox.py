@@ -31,6 +31,18 @@ DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
 # operator goes offline.
 _DEFAULT_TTL_HOURS: int = 24
 
+#: How long a DENIAL is remembered by dedup key (block 3, 2026-09-03, audit
+#: L10). Measured on the live inbox: the same doctrine draft re-filed three
+#: times after denial, the same split step (same digest) twice. Pending-only
+#: dedup made every denial a fresh start. Expert default, veto line: the
+#: operator may shorten it in one word; the window is the ONLY thing a
+#: byte-identical refile has to wait out, a revised one is never blocked.
+_DENIAL_MEMORY_HOURS: int = 168
+
+#: Payload keys that describe the refile itself, not the proposal, and are
+#: left out of the content fingerprint.
+_REFILE_MARKER_KEYS = frozenset({"dedup_key", "revises", "prior_denial_reason"})
+
 # Slice 1b-a: map a durable status transition to an explicit receipt operation.
 _STATUS_RECEIPT_OPERATION: dict[str, str] = {
     "approved": "approval_inbox.approve",
@@ -64,6 +76,45 @@ def _redact_durable_payload(payload: dict) -> dict:
     return redacted if isinstance(redacted, dict) else {}
 
 
+def _content_fingerprint(summary: str, payload: dict) -> str:
+    """What a proposal SAYS, minus the refile markers — equal for a byte-
+    identical refile, different for any revision of summary or content."""
+    import hashlib
+    import json
+
+    body = {k: v for k, v in (payload or {}).items() if k not in _REFILE_MARKER_KEYS}
+    raw = json.dumps([str(summary or ""), body], sort_keys=True, ensure_ascii=False,
+                     default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _within_hours(ts: str, hours: int) -> bool:
+    """True when ``ts`` is newer than ``hours`` ago; unparseable = not recent."""
+    from datetime import timedelta
+
+    try:
+        when = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - when <= timedelta(hours=hours)
+
+
+def _payload_targets(payload: dict) -> tuple[str, ...]:
+    """File paths a proposal touches (`payload.files[*].path`), else empty."""
+    files = (payload or {}).get("files")
+    if not isinstance(files, list):
+        return ()
+    out: list[str] = []
+    for entry in files:
+        path = str((entry or {}).get("path") or "").replace("\\", "/").strip() \
+            if isinstance(entry, dict) else ""
+        if path:
+            out.append(path)
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class ApprovalInboxItem:
     operation: str
@@ -78,6 +129,10 @@ class ApprovalInboxItem:
     #: human (§9). A RECORD of who claimed the verdict, never authentication —
     #: a caller saying "operator" is believed.
     decided_by: str = "unattributed"
+    #: The verdict's own words, kept ON the item (block 3, 2026-09-03): a
+    #: refile after denial must carry the reason it answers, and the outcomes
+    #: journal alone could not be read back by dedup key.
+    decision_reason: str = ""
     expires_at: str | None = None
     id: str = field(default_factory=lambda: new_id("ain"))
     status: ApprovalInboxStatus = "pending"
@@ -94,6 +149,7 @@ class ApprovalInboxItem:
             "payload": self.payload,
             "requested_by": self.requested_by,
             "decided_by": self.decided_by,
+            "decision_reason": self.decision_reason,
             "expires_at": self.expires_at,
             "status": self.status,
             "created_at": self.created_at,
@@ -121,6 +177,7 @@ class ApprovalInboxItem:
             payload=payload,
             requested_by=str(data.get("requested_by") or "autonomous_runtime"),
             decided_by=str(data.get("decided_by") or "unattributed"),
+            decision_reason=str(data.get("decision_reason") or ""),
             expires_at=str(data.get("expires_at")) if data.get("expires_at") else None,
             status=status,  # type: ignore[arg-type]
             created_at=str(data.get("created_at") or _now_iso()),
@@ -178,8 +235,30 @@ class ApprovalInbox:
                 datetime.now(timezone.utc) + timedelta(hours=_DEFAULT_TTL_HOURS)
             ).isoformat()
         merged_payload = dict(payload or {})
+        reasons = tuple(reasons)
         if dedup_key is not None:
             merged_payload.setdefault("dedup_key", dedup_key)
+            # Block 3 (L10): a denial is remembered, not forgotten with the
+            # pending row. The SAME content again is refused and the denied
+            # item returned (its status says so); a REVISION is admitted and
+            # carries the denial it answers, so the reviewer sees a refile.
+            # Only a proposal that CARRIES files is remembered: the same
+            # bytes again is the same proposal. A permission question
+            # (allow_effects, no files) may be asked again after a verdict —
+            # MIR-072's contract, kept.
+            denied = (
+                self.recently_denied(dedup_key)
+                if _payload_targets(merged_payload) else None
+            )
+            if denied is not None:
+                if _content_fingerprint(summary, merged_payload) == \
+                        _content_fingerprint(denied.summary, denied.payload):
+                    self._emit_receipt("approval_inbox.refuse_repeat", denied)
+                    return denied
+                merged_payload["revises"] = denied.id
+                merged_payload["prior_denial_reason"] = denied.decision_reason
+                why = denied.decision_reason or "(no reason recorded)"
+                reasons = (f"revises denied {denied.id}: {why}", *reasons)
         safe_summary = _redact_durable_field(summary)
         safe_reasons = _redact_durable_reasons(reasons)
         safe_payload = _redact_durable_payload(merged_payload)
@@ -206,6 +285,64 @@ class ApprovalInbox:
             if item.payload.get("dedup_key") == dedup_key:
                 return item
         return None
+
+    # ── the commitments view (block 3, 2026-09-03) ───────────────────────
+    # The inbox already holds every commitment with its status; what was
+    # missing were readers that tell WAITING from EXHAUSTED and DENIED from
+    # NEVER SEEN. No second registry: one store, more honest questions.
+
+    def find_by_dedup_key(
+        self, dedup_key: str, *, statuses: tuple[str, ...] = ("pending",),
+    ) -> ApprovalInboxItem | None:
+        """Newest item with this key in one of ``statuses``, or None."""
+        found = None
+        for item in self.items:
+            if item.status in statuses and item.payload.get("dedup_key") == dedup_key:
+                found = item
+        return found
+
+    def recently_denied(
+        self, dedup_key: str, *, hours: int = _DENIAL_MEMORY_HOURS,
+    ) -> ApprovalInboxItem | None:
+        """The denial this key still answers to, or None once it has aged out."""
+        item = self.find_by_dedup_key(dedup_key, statuses=("denied",))
+        if item is None or not _within_hours(item.updated_at, hours):
+            return None
+        return item
+
+    def pending_targets(
+        self, *, operation: str | None = None,
+    ) -> frozenset[str] | None:
+        """Files awaiting a human under pending/approved items.
+
+        ``None`` means «unknown»: some waiting item names no files, so a
+        caller must treat every file as waiting (the pre-block-3 behaviour).
+        """
+        out: set[str] = set()
+        for item in self.items:
+            if item.status not in ("pending", "approved"):
+                continue
+            if operation is not None and item.operation != operation:
+                continue
+            paths = _payload_targets(item.payload)
+            if not paths:
+                return None
+            out.update(paths)
+        return frozenset(out)
+
+    def recently_denied_targets(
+        self, *, operation: str | None = None, hours: int = _DENIAL_MEMORY_HOURS,
+    ) -> frozenset[str]:
+        """Files whose proposal a human denied within ``hours`` — a cooldown
+        set for producers, so a denial sends the hand elsewhere."""
+        out: set[str] = set()
+        for item in self.items:
+            if item.status != "denied" or not _within_hours(item.updated_at, hours):
+                continue
+            if operation is not None and item.operation != operation:
+                continue
+            out.update(_payload_targets(item.payload))
+        return frozenset(out)
 
     def expire_stale(self) -> int:
         """Abort pending items whose ``expires_at`` timestamp has passed.
@@ -283,6 +420,7 @@ class ApprovalInbox:
         and forgotten on the other."""
         item = self.set_status(
             item_id, status, decided_by=str(actor).strip() or "unattributed",
+            decision_reason=str(reason or ""),
         )
         self._record_outcome(item, status, reason)
         return item
@@ -310,6 +448,11 @@ class ApprovalInbox:
                 "verdict": verdict,
                 "reason": str(reason or ""),
                 "decided_by": item.decided_by,
+                # Block 3 (L10): the outcome names WHAT was judged, so a
+                # reader can match a verdict to a key or a file, not only
+                # to a summary string.
+                "dedup_key": str(item.payload.get("dedup_key") or ""),
+                "targets": list(_payload_targets(item.payload))[:8],
             }])
         except Exception:  # noqa: BLE001, S110 — мост не роняет вердикт;
             pass           # недоставленная запись хуже, чем упавший approve? нет
@@ -332,10 +475,12 @@ class ApprovalInbox:
         status: ApprovalInboxStatus,
         *,
         decided_by: str | None = None,
+        decision_reason: str | None = None,
     ) -> ApprovalInboxItem:
-        """`decided_by` is written only by the verdict path. Lifecycle moves
-        (executed/aborted) leave it alone: they are plumbing, not review, and
-        stamping an actor on them would attribute a verdict nobody gave."""
+        """`decided_by` / `decision_reason` are written only by the verdict
+        path. Lifecycle moves (executed/aborted) leave them alone: they are
+        plumbing, not review, and stamping an actor on them would attribute a
+        verdict nobody gave."""
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid approval status: {status}")
         updated: ApprovalInboxItem | None = None
@@ -345,6 +490,8 @@ class ApprovalInbox:
                 updated = replace(
                     item, status=status, updated_at=_now_iso(),
                     **({"decided_by": decided_by} if decided_by else {}),
+                    **({"decision_reason": decision_reason}
+                       if decision_reason is not None else {}),
                 )
                 out.append(updated)
             else:
