@@ -32,6 +32,24 @@ def test_a_backup_loads_through_the_real_loader(backup: pathlib.Path) -> None:
     assert isinstance(rows, list), backup.name
 
 
+def test_the_drill_has_a_case_even_where_data_is_absent(tmp_path) -> None:
+    """Блок 5 (аудит G7, 2026-09-03): `data/` исключён из git, и в CI учение
+    собирало НОЛЬ копий — зелёный skip там, где GitLab потерял базу. Здесь
+    копия делается тем же писателем, что и в бою, и читается тем же
+    загрузчиком: учение обязано иметь хотя бы один случай в каждом клоне."""
+    from core.state_integrity import append_state_jsonl, backup_state_file
+
+    store = tmp_path / "data" / "store.jsonl"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    append_state_jsonl(store, [{"a": 1}, {"b": 2}])
+
+    backup = backup_state_file(store)
+    rows = read_state_jsonl(backup)
+
+    assert backup.name.endswith(".bak") and backup != store
+    assert [r.get("payload", r) for r in rows] == [{"a": 1}, {"b": 2}]
+
+
 def test_the_drill_would_notice_a_broken_backup(tmp_path) -> None:
     """Контроль: зелёное учение обязано что-то значить."""
     broken = tmp_path / "store.jsonl.bak"

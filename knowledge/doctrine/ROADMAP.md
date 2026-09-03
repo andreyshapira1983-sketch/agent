@@ -105,7 +105,9 @@ Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM 
   `core/self_apply_bridge`, `core/self_build_producer`,
   `core/proposal_value_gate`, `core/incremental_splitter` (no-LLM split).
 - **Human gate is mandatory:** applied steps go through `:approval-approve` +
-  `:self-apply-run`. There is no unattended self-modification.
+  `:self-apply-run`. There is no unattended self-modification of code; the
+  one rule-approved exception (documents-only items, `core/rule_approved_apply`,
+  since 2026-08-27) is recorded in `CENTRAL_AGENT_GOVERNANCE.md` §10.
 
 ## Track F — Multi-agent / subagents
 
@@ -150,7 +152,7 @@ budget, and self-directed multi-agent coordination. See
   silent failure, stale heartbeat) are catalogued in
   `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-009).
 
-## Track H — Project Intelligence (local read-only graph store)
+## Track H — Project Intelligence (HISTORICAL: `project_intelligence/` was deleted on 2026-08-06; nothing below exists in the tree — audit D7, 2026-09-03)
 
 **Status: STANDALONE on `main` — not wired into the agent.**
 
@@ -167,7 +169,9 @@ budget, and self-directed multi-agent coordination. See
 ## What is deliberately NOT here yet
 
 - Full multi-agent isolation (own memory/identity/budget per agent).
-- Unattended self-modification (kept behind human approval on purpose).
+- Unattended self-modification of code (kept behind human approval on
+  purpose; documents-only items are the rule-approved exception since
+  2026-08-27).
 - A real installed Windows service (only the shell contract exists —
   `app/windows_service.py`, every `*_implemented` flag is `False`).
 - The corporate/organisational model — future only, see `docs/future/`.

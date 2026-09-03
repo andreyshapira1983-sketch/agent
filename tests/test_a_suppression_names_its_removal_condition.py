@@ -32,23 +32,56 @@ _DATED = re.compile(r"until:\s*(\d{4}-\d{2}-\d{2})")
 
 
 def _test_sources() -> list[tuple[Path, str]]:
+    # Блок 5 (аудит G5, 2026-09-03): rglob — 12 модулей tests/characterization
+    # не видел плоский glob.
     return [(p, p.read_text(encoding="utf-8"))
-            for p in sorted(_TESTS.glob("test_*.py"))]
+            for p in sorted(_TESTS.rglob("test_*.py"))]
+
+
+def _xfail_markers(src: str) -> list[tuple[int, str]]:
+    """Каждый декоратор xfail — отдельно: (строка, текст декоратора)."""
+    out: list[tuple[int, str]] = []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        for deco in getattr(node, "decorator_list", ()):
+            text = ast.unparse(deco)
+            if "xfail" in text:
+                out.append((deco.lineno, text))
+    return out
 
 
 def test_every_xfail_names_its_review_condition() -> None:
-    """Красный свидетель: 13 xfail несут причину, ноль — условие пересмотра."""
+    """Красный свидетель: 13 xfail несут причину, ноль — условие пересмотра.
+
+    Блок 5 (G5): условие ищется В САМОМ маркере, а не где-то в файле — прежде
+    `until:` в докстринге прикрывал голый xfail строкой ниже.
+    """
     naked: list[str] = []
     for path, src in _test_sources():
         if path.name == Path(__file__).name:
             continue
-        markers = src.count("pytest.mark.xfail")
-        if not markers:
-            continue
-        conditions = len(_MARKER.findall(src))
-        if conditions < markers:
-            naked.append(f"{path.name}: {markers} xfail, {conditions} условий")
+        for lineno, text in _xfail_markers(src):
+            if not _MARKER.search(text):
+                naked.append(f"{path.name}:{lineno}: {text[:80]}")
     assert not naked, "xfail без until:/standing: — молчаливая временность:\n" + "\n".join(naked)
+
+
+def test_the_marker_check_is_per_marker_not_per_file() -> None:
+    """Контроль: условие в прозе рядом голый маркер не прикрывает."""
+    src = (
+        '"""until: 2099-01-01 — прикрытие в докстринге."""\n'
+        "import pytest\n"
+        "@pytest.mark.xfail(reason='голый')\n"
+        "def test_a(): ...\n"
+        "@pytest.mark.xfail(reason='KNOWN GAP [until: 2099-01-01 — x]')\n"
+        "def test_b(): ...\n"
+    )
+    markers = _xfail_markers(src)
+    assert len(markers) == 2
+    assert [bool(_MARKER.search(t)) for _l, t in markers] == [False, True]
 
 
 def test_the_orphan_allowlist_entries_declare_their_kind() -> None:

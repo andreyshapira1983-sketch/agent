@@ -3170,6 +3170,70 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 6 — doctrine re-read against code (2026-09-03)
+
+Audit §5, the CONFIRMED rows. Each edit records the measured fact and the
+date the sentence stopped being true; none of them decides anything new —
+every exception named here was the operator's word on its own day.
+
+- **D1** `CENTRAL_AGENT_GOVERNANCE.md` §10 and both `ROADMAP.md` echoes:
+  «no unattended self-modification» now says «of code», and names the one
+  rule-approved exception live since 2026-08-27 (documents-only items,
+  `core/rule_approved_apply.py`, actor `rule:documents_only`).
+- **D2** `AUTONOMY_FREEZE.md` row for `spawn_subagent`: the blocked set is
+  listed by name; web READ has been open on the unattended path since
+  2026-09-01 (`data/capability_events.jsonl`).
+- **D3** the freeze ledger row for `core/self_stop_record.py` no longer says
+  «BLOCKED» beside the operator's «ДА»: the organ is LIVE as the narrow
+  capability the quote demanded.
+- **D4** §2 heading: governance modes are a library with one production
+  consumer (`core/self_repair`); §10 says which operations have no gate that
+  reads a verdict and what governs them instead.
+- **D6** §4: the claim-rewriting half enforces only with
+  `AGENT_ENFORCE_UNSUPPORTED_CLAIMS=on` (default `off`); the switch is now in
+  `docs/CONFIGURATION.md` and `.env.example`.
+- **D7** `ROADMAP.md` Track H is marked HISTORICAL (`project_intelligence/`
+  deleted 2026-08-06).
+
+Not done: D5, D8–D12 (PLAUSIBLE). The audit's root cause — nothing measures
+doc-vs-code disagreement beyond existence and filenames — stands; a
+disagreement meter would be a new organ, and this block only corrected the
+sentences the audit could name.
+
+## Block 5 — guards that can go red (2026-09-03)
+
+Audit §6, the by-hand half of §7 item 5. A guard that cannot fail is a
+green light painted on; each of these was measured vacuous and given a
+negative control in the same file.
+
+- **G1** `test_no_test_pins_a_production_path.py`: the detector matched the
+  receiver's text against `"core/"`, a spelling the repo never uses (0 found,
+  34 by an independent count). Now it walks the receiver's string constants
+  in SOURCE order (walk order put `loop.py` before `core`), skips
+  fixture-anchored trees, and holds the 23 pins found that day as a ratchet
+  (`_KNOWN_PINS`, `until: 2026-09-30`) — a new pin is red today, a migrated
+  one must leave the list. Two synthetic controls; the variable-indirection
+  blind spot is stated in the control.
+- **G2** `.github/workflows/ci.yml` installs `ruff==0.16.1` after the
+  supply-chain gates (the fastapi pattern), so `test_ruff_config` — the
+  lint-debt brake — stops skipping in CI.
+- **G3** the standing-grant deadline is checked by BEHAVIOUR (expired grant
+  not found, live grant found) instead of `"expires" in src and "continue" in src`.
+- **G4** `main.py` ceiling 2000 → 40 over 27 measured lines.
+- **G5** xfail review conditions are checked per MARKER by AST (a `until:`
+  in a docstring no longer covers a naked marker two lines down) and the
+  scan is recursive (12 `tests/characterization` modules were unseen);
+  measured before the change: 11 markers, 0 naked.
+- **G6** the three injection tests that accepted either verdict pin the
+  measured one (`_suspicious` / `_blocked`, categories named).
+- **G7** the restore drill makes its own case with the live writer
+  (`backup_state_file`) and the live loader, so a clone without `data/` —
+  every CI run — no longer passes on zero cases.
+
+Not done: G8–G15 (PLAUSIBLE) and G10 (a process fact about ratchets, which
+this session also raised — each raise is signed with its reason, and that is
+the rule, not a fix).
+
 ## Block 4 — a learning loop that can close (2026-09-03)
 
 Audit §3 / §7 item 4, the by-hand half named in §8 (M1 exit field, M2

@@ -84,6 +84,17 @@ jobs:
           pip install "fastapi==0.136.1"
           pip check
 
+      - name: Install ruff (lint-debt brake, test-only)
+        # Block 5 (audit G2, 2026-09-03): `tests/test_ruff_config.py` is the
+        # lint-debt ratchet and skips when ruff is absent — ruff was in no
+        # requirements file, so the brake held on one workstation and never in
+        # CI. Same placement rule as fastapi above: after every supply-chain
+        # gate, outside the hash-locked set, pinned to the workstation version
+        # so a green CI and a green workstation mean the same thing.
+        run: |
+          pip install "ruff==0.16.1"
+          pip check
+
       - name: Run tests with branch coverage
         # Operator decision (PR #178): the suite runs WITH real credentials,
         # not in offline mock mode. Two reasons, both measured:

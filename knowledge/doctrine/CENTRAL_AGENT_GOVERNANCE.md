@@ -20,7 +20,7 @@ execution. It is a pre-execution checkpoint, not an after-the-fact log. Effectfu
 actions additionally route through the actuation gateway (`core/actuation_gateway`,
 `core/gateway_consult`) and leave an append-only receipt (`core/tool_receipts`).
 
-## 2. Governance modes (IMPLEMENTED)
+## 2. Governance modes (IMPLEMENTED as a library — one production consumer, see §10)
 
 `core/governance` defines five modes and answers "is this kind of autonomous
 behaviour allowed in this mode?":
@@ -61,7 +61,11 @@ memory. All of that stays with the human-gated central agent.
 `core/confidence_vector` decomposes the verdict. Thin evidence downgrades or
 rewrites the answer (`core/low_evidence_policy`,
 `core/unsupported_claims`) rather than bluffing — that pair is the only layer
-here that changes what the operator receives.
+here that changes what the operator receives. The claim-rewriting half
+enforces only when `AGENT_ENFORCE_UNSUPPORTED_CLAIMS=on`; the default is
+`off`, in which state it records what it would have rewritten and changes
+nothing (audit D6, 2026-09-03; the switch is listed in `docs/CONFIGURATION.md`
+and `.env.example`).
 
 **Observational.** Each of these reports, and changes nothing:
 
@@ -133,7 +137,17 @@ The following are **not** delegated to the agent and require a human:
 
 ## 10. Honest limits (PLANNED / NOT DONE)
 
-- No unattended self-modification — every applied change is human-approved.
+- No unattended self-modification of CODE — every applied code change is
+  human-approved. One rule-approved exception has been live since 2026-08-27
+  (operator's word, MIR-173/175): a self-apply item that touches documents
+  only is approved and applied on the unattended path by
+  `core/rule_approved_apply.py` (actor `rule:documents_only`). Recorded here
+  on 2026-09-03 (audit D1); until then this line said «no exception».
+- Governance modes (§2) are a library today: in production only
+  `core/self_repair` asks `core/governance` for a verdict; `write_memory`,
+  `run_shell`, `add_tool` and `change_policy` have no gate that reads one
+  (measured 2026-09-03, audit D4). What governs them is the Policy Gate (§1)
+  and the approval inbox (§5), not the mode table.
 - Sub-agents are bounded child loops, **not** isolated agents with their own
   memory/identity/budget (see `knowledge/doctrine/future/CORPORATE_MODEL.md`).
 - Governance verdicts are enforced in the modes/operations enumerated in
