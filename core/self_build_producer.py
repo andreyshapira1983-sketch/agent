@@ -1218,6 +1218,16 @@ def _reporter_publish(
         payload=payload,
         dedup_key=dedup_key,
     )
+    if getattr(item, "status", "pending") == "denied":
+        # Block 3 (L10): the inbox remembered a denial of this same patch and
+        # returned the denied item instead of filing it again.
+        return RoleOutput(
+            "reporter",
+            "refused_repeat",
+            f"identical to denied {item.id}: "
+            f"{getattr(item, 'decision_reason', '') or '(no reason recorded)'}",
+            {"approval_id": None, "dedup_key": dedup_key, "denied_id": item.id},
+        )
     return RoleOutput(
         "reporter",
         "published",
@@ -1399,6 +1409,19 @@ def _deterministic_split_report(
         reason=plan.reason,
         reader=reader,
     )
+    if getattr(item, "status", "pending") == "denied":
+        # Block 3 (L10): the same split step (same digest) was denied recently.
+        roles.append(RoleOutput(
+            "reporter", "refused_repeat",
+            f"identical to denied {item.id}: "
+            f"{getattr(item, 'decision_reason', '') or '(no reason recorded)'}",
+            {"approval_id": None, "denied_id": item.id},
+        ))
+        return ProducerReport(
+            status="denied_repeat", reason=roles[-1].detail,
+            target_path=step.target, checked_gates=gates, role_outputs=roles,
+            next_human_action="The same split step was denied recently; pick another step or file.",
+        )
     roles.append(RoleOutput(
         "reporter",
         "published",
@@ -1429,6 +1452,30 @@ def _has_pending_self_apply(inbox: Any) -> bool:
         if getattr(item, "status", "") in ("pending", "approved"):
             return True
     return False
+
+
+def _waiting_self_apply_targets(inbox: Any) -> frozenset[str] | None:
+    """Files under a pending/approved self-apply item. ``None`` = unknown (an
+    item without a file list, or an inbox without the reader): the whole
+    hand waits, as it did before block 3."""
+    reader = getattr(inbox, "pending_targets", None)
+    if reader is None:
+        return None if _has_pending_self_apply(inbox) else frozenset()
+    try:
+        return reader(operation=SELF_APPLY_OPERATION)
+    except Exception:  # noqa: BLE001 — an unreadable inbox keeps the old wait
+        return None
+
+
+def _denied_self_apply_targets(inbox: Any) -> frozenset[str]:
+    """Files a human denied recently — the hand goes elsewhere (block 3, L10)."""
+    reader = getattr(inbox, "recently_denied_targets", None)
+    if reader is None:
+        return frozenset()
+    try:
+        return frozenset(reader(operation=SELF_APPLY_OPERATION))
+    except Exception:  # noqa: BLE001 — cooldown recall must never break producer
+        return frozenset()
 
 
 def produce_self_apply_proposal(
@@ -1491,13 +1538,32 @@ def produce_self_apply_proposal(
             ))
     gates.append("budget")
 
-    # ── gate 3: an unexecuted self_apply approval already exists ────────────
-    if _has_pending_self_apply(inbox):
+    # ── gate 3: a self_apply approval on the SAME file is still waiting ─────
+    # Block 3 (L9, 2026-09-03): waiting on one file is not exhaustion of the
+    # hand. Only a candidate a waiting item already touches waits; a file a
+    # human denied recently is on cooldown; when the producer chooses, both
+    # sets are excluded so it advances to the next grounded candidate.
+    waiting = _waiting_self_apply_targets(inbox)
+    denied_cooldown = _denied_self_apply_targets(inbox)
+    explicit = tuple(candidate_targets or ())
+    if waiting is None or (explicit and set(explicit) & waiting):
+        held = sorted(set(explicit) & waiting) if waiting is not None else []
         return _record(ProducerReport(
             status="approval_wait",
-            reason="a pending self_apply_lane.run approval item already exists",
+            reason=(
+                f"a pending self_apply_lane.run approval already touches "
+                f"{', '.join(held)}" if held else
+                "a pending self_apply_lane.run approval item names no files"
+            ),
             checked_gates=gates + ["approval"],
             next_human_action="Resolve the existing self-apply approval first.",
+        ))
+    if explicit and set(explicit) <= denied_cooldown:
+        return _record(ProducerReport(
+            status="denied_cooldown",
+            reason=f"a human denied a proposal for {', '.join(explicit)} recently",
+            checked_gates=[*gates, "approval"],
+            next_human_action="Revise against the denial reason or pick another file.",
         ))
     gates.append("approval")
 
@@ -1529,7 +1595,10 @@ def produce_self_apply_proposal(
     else:
         selector = grounded_selector or _default_grounded_selector(
             workspace,
-            exclude_targets=frozenset(recently_vetoed_targets or ()),
+            exclude_targets=(
+                frozenset(recently_vetoed_targets or ())
+                | (waiting or frozenset()) | denied_cooldown
+            ),
         )
         manager = _manager_from_grounded(selector, targets, workspace=workspace)
     roles.append(manager)
@@ -1774,6 +1843,17 @@ def produce_self_apply_proposal(
     # ── Reporter ────────────────────────────────────────────────────────────
     reporter = _reporter_publish(inbox, target, builder.data, evidence, workspace)
     roles.append(reporter)
+    if reporter.decision == "refused_repeat":
+        return _record(ProducerReport(
+            status="denied_repeat",
+            sources=read_sources,
+            reason=reporter.detail,
+            target_path=target,
+            checked_gates=gates,
+            role_outputs=roles,
+            attempts=attempts_used,
+            next_human_action="The same patch was denied recently; revise it or pick another file.",
+        ))
     approval_id = reporter.data["approval_id"]
     return _record(ProducerReport(
         status="proposed",

@@ -35,7 +35,10 @@ class CampaignCycleRecord:
     #: «основания не было».
     grounds: str = "unrecorded"
     decided_by: str = "unrecorded"
-
+    #: Слово исхода «работа была» (блок 3, L12, 2026-09-03). Читатель
+    #: `charter_goal._recent_goals` спрашивал это поле с 2026-09-02, а писатель
+    #: его не писал: 0 из 479 строк. `None` = строка старого формата.
+    work_done: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +60,7 @@ class CampaignCycleRecord:
             "next_check_at": self.next_check_at,
             "grounds": self.grounds,
             "decided_by": self.decided_by,
+            "work_done": self.work_done,
         }
 
     def user_summary(self) -> str:

@@ -174,12 +174,20 @@ def test_a_refusal_is_surfaced_not_hidden(tmp_path: Path, monkeypatch) -> None:
         "core.self_build_producer.produce_self_apply_proposal", _fake_produce)
     import core.campaign_io as cio
 
+    events: list[tuple[str, dict]] = []
+
     note = cio._propose_engineering_step(
         agent=SimpleNamespace(
             model_router=SimpleNamespace(for_role=lambda r: object()),
-            log=SimpleNamespace(log=lambda *a, **k: None),
+            log=SimpleNamespace(
+                log=lambda event, payload=None, **k: events.append((event, payload or {}))),
         ),
         workspace=tmp_path,
         approval_inbox=SimpleNamespace(),
     )
-    assert "dirty_tree_wait" in note
+    # Block 3 (L9, 2026-09-03): surfaced by name in the LOG — and not counted.
+    # Until then the string `engineering_declined:dirty_tree_wait` travelled
+    # as the cycle's proposal and made a cycle of waiting «useful».
+    assert note is None
+    assert any(p.get("status") == "dirty_tree_wait"
+               for e, p in events if e == "campaign_engineering_proposed"), events

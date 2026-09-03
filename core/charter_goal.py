@@ -83,6 +83,10 @@ _RECENT_GOALS = 8
 _NO_WORK_RESULTS = frozenset({
     "cost_cap", "repeat", "idle", "approval_wait", "dirty_tree_wait",
     "stalled", "error", "declined",
+    # Блок 3 (L12, 2026-09-03): исходы прогона без работы — по A2/A9 «blocked»
+    # и «failed» писались в леджер как занявшие тему. Для строк, где есть
+    # честное поле `work_done` (пишется с блока 3), этот список не нужен.
+    "blocked", "failed", "empty", "inconclusive",
 })
 
 _JACCARD_REPEAT = 0.6
@@ -174,10 +178,18 @@ def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
         if not goal:
             continue
         result = str(payload.get("result") or "").strip()
-        # Чёрный список ЯВНО безработных исходов: всё прочее (включая записи
-        # старого формата без поля result) считается занявшим тему. Инвертировать
-        # нельзя — тогда неполная запись молча вернула бы «день сурка».
-        did_work = not (result in _NO_WORK_RESULTS and not payload.get("work_done"))
+        recorded = payload.get("work_done")
+        if isinstance(recorded, bool):
+            # Блок 3 (L12): леджер пишет слово исхода — оно и решает.
+            did_work = recorded
+        else:
+            # Строки до блока 3: чёрный список ЯВНО безработных исходов, но
+            # продукт (заявка, артефакт) — работа при любом исходе. Всё прочее
+            # (включая записи старого формата без поля result) считается
+            # занявшим тему: инвертировать нельзя — неполная запись молча
+            # вернула бы «день сурка».
+            did_work = bool(payload.get("proposal") or payload.get("artifact")) \
+                or result not in _NO_WORK_RESULTS
         if did_work:
             ts = str(payload.get("ts") or "")
             if goal in worked_ts:
@@ -187,7 +199,10 @@ def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
             unworked.discard(goal)
         elif goal not in worked_ts:
             unworked.add(goal)
-    pairs = list(worked_ts.items())
+    # Блок 3 (L11): окно — по ПОСЛЕДНЕЙ работе, а не по первому появлению;
+    # иначе тема, над которой работали вчера, выпадала из окна, если впервые
+    # прозвучала месяц назад.
+    pairs = sorted(worked_ts.items(), key=lambda kv: kv[1])
     return tuple(pairs[-_RECENT_GOALS:])
 
 
@@ -221,6 +236,41 @@ def _goal_identity(goal: str) -> str:
     return name.rsplit("/", 1)[-1].casefold()
 
 
+#: Стадия работы над предметом (блок 3, L7, 2026-09-03). Правило личности
+#: файла равняло «implement X.md» с «draft X.md» и «trace X.py» с «split
+#: X.py»: 23 из 80 решений — отказ «повтор», среди них следующий шаг ONE
+#: PAPER RULE (03:47) и пять раз расследование, убитое предложением о
+#: расколе того же модуля. Решает ПЕРВЫЙ глагол цели. Для документа бумага
+#: и код — разные работы; для кода бумага о нём и правка его — одна.
+_GOAL_STAGE_RES: tuple[tuple[str, _re.Pattern[str]], ...] = (
+    ("read", _re.compile(
+        r"\b(?:trace|investigate|read|study|analy[sz]e|compare|measure|verify|"
+        r"run|check|audit|inspect|review|explain|diagnose|examine|test)\b")),
+    ("paper", _re.compile(
+        r"\b(?:draft|write|propose|design|plan|document|outline|extend|revise|"
+        r"specify|define)\b")),
+    ("code", _re.compile(
+        r"\b(?:implement|build|wire|land|code|ship|split|refactor|extract|"
+        r"decompose|fix|repair|add|create|integrate|migrate)\b")),
+)
+
+
+def _goal_stage(goal: str, identity: str) -> str:
+    """'read' | 'paper' | 'code' | 'work' | '' — по первому глаголу."""
+    low = (goal or "").lower()
+    first: tuple[int, str] | None = None
+    for stage, pattern in _GOAL_STAGE_RES:
+        match = pattern.search(low)
+        if match and (first is None or match.start() < first[0]):
+            first = (match.start(), stage)
+    if first is None:
+        return ""
+    stage = first[1]
+    if stage in ("paper", "code") and not identity.endswith(".md"):
+        return "work"  # о коде: предложение о правке и правка — одна работа
+    return stage
+
+
 def _repeats_recent(goal: str, recent: tuple[str, ...]) -> str:
     mine = _tokens(goal)
     if not mine:
@@ -229,8 +279,13 @@ def _repeats_recent(goal: str, recent: tuple[str, ...]) -> str:
     for old in recent:
         old_id = _goal_identity(old)
         if mine_id and old_id:
-            # Обе цели назвали предмет: решает он, а не слова.
+            # Обе цели назвали предмет: решает он, а не слова — и стадия
+            # работы над ним (L7): следующий шаг по той же бумаге не повтор.
             if mine_id == old_id:
+                mine_stage = _goal_stage(goal, mine_id)
+                old_stage = _goal_stage(old, old_id)
+                if mine_stage and old_stage and mine_stage != old_stage:
+                    continue
                 return old
             continue
         theirs = _tokens(old)
