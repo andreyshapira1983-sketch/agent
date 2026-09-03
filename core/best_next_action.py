@@ -601,13 +601,20 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     # different provenance from a live signal, and it is the one that makes the
     # memory-influence question answerable later.
     improvement = _candidate_open_self_improvement_issue(
-        open_self_improvement_issues, subject=goal_subject,
+        open_self_improvement_issues, subject=goal_subject, exhausted=exhausted,
     )
     if improvement is None and not self_improvement_registry_available:
         improvement = _candidate_self_improvement_failure(
             recent_self_improvement_failures,
             fresh=fresh_self_improvement_failure,
         )
+    elif fresh_self_improvement_failure:
+        # L4 (2026-09-03): скоропортящийся сигнал (60) был заперт за непустым
+        # реестром и не срабатывал никогда. Свежий провал участвует в гонке
+        # рядом с записью реестра и выигрывает у неё по приоритету.
+        admit(_candidate_self_improvement_failure(
+            recent_self_improvement_failures, fresh=True,
+        ), "retained_record")
     # Отрицательная сторона Д3 — см. `_habit_shadowed_by_goal`.
     habit_shadowed: list[BestNextAction] = []
     if _habit_shadowed_by_goal(goal, goal_subject, improvement,
@@ -891,6 +898,7 @@ def _candidate_open_self_improvement_issue(
     issues: tuple[dict, ...],
     *,
     subject: str | None = None,
+    exhausted: frozenset[str] = frozenset(),
 ) -> BestNextAction | None:
     dominant = list(suppress_generic_issue_duplicates(
         SelfImprovementIssue.from_dict(issue) for issue in issues
@@ -909,6 +917,10 @@ def _candidate_open_self_improvement_issue(
         issue = model.to_dict()
         status = str(issue.get("status") or "open")
         if status == "resolved":
+            continue
+        # L2 (2026-09-03): дело, чьё действие в этом прогоне уже исчерпано,
+        # уступает следующему — иначе первая запись закрывала все остальные.
+        if str(issue.get("action") or "improve_failure_to_idea_pipeline") in exhausted:
             continue
         fingerprint = str(issue.get("fingerprint") or "unknown")
         raw_evidence = issue.get("evidence") or ()

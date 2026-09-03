@@ -130,8 +130,11 @@ def test_the_live_doctrine_path_returns_superseded_not_proposed(tmp_path) -> Non
         agent=agent, workspace=tmp_path, goal=goal, approval_inbox=inbox,
     )
 
-    assert verdict is not None
-    assert "superseded" in verdict, (
-        "живой путь по-прежнему называет схлопнутую заявку поданной: " + verdict
+    # A5 (блок 1, 2026-09-03): столкновение — не предложение. Журнал говорит
+    # «superseded» (F-1), а исход цикла — «ничего не подано»: раньше строка
+    # `doc_draft_superseded…` возвращалась как proposal и делала цикл полезным.
+    assert verdict is None, (
+        "живой путь по-прежнему называет схлопнутую заявку поданной: " + str(verdict)
     )
+    assert "campaign_doc_draft_superseded" in agent.log.events, agent.log.events
     assert "campaign_doc_draft_proposed" not in agent.log.events, agent.log.events

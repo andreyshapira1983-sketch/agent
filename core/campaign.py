@@ -33,6 +33,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -166,6 +167,10 @@ ExecuteAction = Callable[..., CampaignActionOutcome]
 #: Не безлимит: смена — это признание «дело кончилось», и если признаний
 #: слишком много, прогон честнее закончить, чем перебирать темы.
 _MAX_GOAL_SWITCHES = 12
+#: Попыток выбрать следующую цель при смене — столько же, сколько на старте
+#: (agent_tick._GOAL_PICK_ATTEMPTS): одна попытка убивала прогон на любом
+#: молчании модели (L6, аудит 2026-09-03).
+_GOAL_SWITCH_ATTEMPTS = 3
 
 
 def run_campaign(
@@ -211,6 +216,49 @@ def run_campaign(
     # The two deserve different stop reasons (measured 2026-08-13: a healthy
     # dry-run reported «idle_stall», which reads as a failure).
     streak_repeats = False
+    previous_goal = ""
+
+    def _switch_goal(cycle: int, why: str) -> bool:
+        """Право сменить цель ВНУТРИ прогона (слово оператора 2026-09-01).
+
+        Замер, из-за которого оно понадобилось: узкая цель исчерпывается за
+        ОДИН цикл, и кампания умирала через четыре минуты. Смена идёт через
+        ТЕ ЖЕ ворота, что и цель на старте: выбирает агент, хартия вправе
+        отказать. L5/L6 (2026-09-03): вызывается из ОБОИХ выходов застоя
+        (повторы и простой) и получает три попытки, как старт, — одна
+        попытка убивала прогон на любом молчании модели.
+        """
+        nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
+        if next_goal is None or goal_switches >= _MAX_GOAL_SWITCHES:
+            return False
+        switched = ""
+        for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
+            try:
+                candidate = str(next_goal() or "").strip()
+            except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
+                # уронить прогон: не вышло — останавливаемся прежним путём.
+                _log(agent, "campaign_goal_switch_failed",
+                     {"cycle": cycle, "error": repr(exc)[:200]})
+                return False
+            if candidate and candidate != current_goal:
+                switched = candidate
+                break
+        if not switched:
+            return False
+        goal_switches += 1
+        previous_goal, current_goal = current_goal, switched
+        # Новая цель — новая тема: память о повторах прежней темы не должна
+        # объявлять повтором первый же шаг по новой.
+        attempted_signatures.clear()
+        action_steps.clear()
+        idle_streak = 0
+        streak_repeats = False
+        _log(agent, "campaign_goal_switched", {
+            "cycle": cycle, "from": previous_goal[:200], "to": current_goal[:200],
+            "switches_used": goal_switches, "limit": _MAX_GOAL_SWITCHES, "reason": why,
+        })
+        return True
+
     llm_calls_used = 0
     cost_units_used = 0
     proposals = 0
@@ -292,10 +340,13 @@ def run_campaign(
             # Исчерпанные потолком предметные действия не должны выигрывать
             # гонку (вердикт агента, CEILING_VERDICT): их имена едут сборщику
             # той же терпимой передачей, что и цель.
+            # L2 (2026-09-03): исчерпание сообщают ВСЕ действия, не только четыре
+            # предметных: голое действие, повторённое раз, больше не участвует
+            # в гонке, и реестр отдаёт следующее дело вместо первого навсегда.
             exhausted_actions = frozenset(
                 name for name, steps in action_steps.items()
-                if steps >= _MAX_STEPS_PER_ACTION
-                and name in _SUBJECT_AWARE_ACTIONS
+                if (steps >= _MAX_STEPS_PER_ACTION and name in _SUBJECT_AWARE_ACTIONS)
+                or (name not in _SUBJECT_AWARE_ACTIONS and steps >= 1)
             )
             try:
                 signals = gather(agent, workspace, approval_inbox,
@@ -347,6 +398,11 @@ def run_campaign(
                 consecutive_errors = 0
 
                 if idle_streak >= config.max_idle_streak:
+                    # L5 (2026-09-03): простой — тоже повод сменить цель, а не
+                    # объявить прогон здоровым: цель, которая не связывает
+                    # никакой работы, — самый ясный случай для новой цели.
+                    if _switch_goal(cycle, f"goal idle: {idle_streak}_checks_found_nothing_to_do"):
+                        continue
                     if streak_repeats:
                         stop_reason = (
                             f"idle_stall:{idle_streak}_consecutive_idle_cycles"
@@ -371,6 +427,8 @@ def run_campaign(
                 and action_steps.get(signature, 0) >= _MAX_STEPS_PER_ACTION
             )
             if hit_ceiling or (not subject_aware and signature in attempted_signatures):
+                if not subject_aware:
+                    action_steps[signature] = action_steps.get(signature, 0) + 1  # L2
                 idle_streak += 1
                 streak_repeats = True
                 repeat_cycles += 1
@@ -398,48 +456,8 @@ def run_campaign(
                 consecutive_errors = 0
 
                 if idle_streak >= config.max_idle_streak:
-                    # Право сменить цель ВНУТРИ прогона (слово оператора
-                    # 2026-09-01). Замер, из-за которого оно понадобилось:
-                    # узкая инженерная цель исчерпывается за ОДИН цикл —
-                    # предложение произведено и ушло ждать человека, делать по
-                    # ней больше нечего, и кампания умирала через четыре
-                    # минуты, повторяя одно и то же. При широкой цели тот же
-                    # агент отработал 21 полезный цикл из 21. Не хватало не
-                    # полномочий и не бюджета, а права сказать себе «это дело
-                    # кончилось, беру следующее».
-                    #
-                    # Смена идёт ЧЕРЕЗ ТЕ ЖЕ ворота, что и цель на старте:
-                    # выбирает её сам агент, хартия так же вправе отказать, и
-                    # отказ означает честную остановку, а не обход правила.
-                    switched = ""
-                    if next_goal is not None and goal_switches < _MAX_GOAL_SWITCHES:
-                        try:
-                            switched = str(next_goal() or "").strip()
-                        except Exception as exc:  # noqa: BLE001 — смена цели не
-                            # имеет права уронить прогон: не вышло — останавливаемся
-                            # прежним путём, назвав причину.
-                            _log(agent, "campaign_goal_switch_failed",
-                                 {"cycle": cycle, "error": repr(exc)[:200]})
-                            switched = ""
-                    if switched and switched != current_goal:
-                        goal_switches += 1
-                        previous_goal, current_goal = current_goal, switched
-                        # Новая цель — новая тема: память о повторах прежней
-                        # темы не должна объявлять повтором первый же шаг по
-                        # новой (иначе право сменить цель было бы фиктивным).
-                        attempted_signatures.clear()
-                        action_steps.clear()
-                        idle_streak = 0
-                        streak_repeats = False
-                        _log(agent, "campaign_goal_switched", {
-                            "cycle": cycle,
-                            "from": previous_goal[:200],
-                            "to": current_goal[:200],
-                            "switches_used": goal_switches,
-                            "limit": _MAX_GOAL_SWITCHES,
-                            "reason": "goal exhausted: "
-                                      f"{config.max_idle_streak}_cycles_without_new_action",
-                        })
+                    if _switch_goal(cycle, "goal exhausted: "
+                                    f"{config.max_idle_streak}_cycles_without_new_action"):
                         continue
                     stop_reason = f"no_progress_stall:{idle_streak}_cycles_without_new_action"
                     status = "stopped"
@@ -489,7 +507,10 @@ def run_campaign(
                     agent=agent,
                     workspace=workspace,
                     action=action,
-                    config=config,
+                    # L1 (2026-09-03): исполнитель слышит ТЕКУЩУЮ цель — после
+                    # смены ему уходила замороженная стартовая.
+                    config=(replace(config, goal=current_goal)
+                            if current_goal != config.goal else config),
                     approval_inbox=approval_inbox,
                 )
             llm_calls_used += max(0, outcome.llm_calls_spent)
