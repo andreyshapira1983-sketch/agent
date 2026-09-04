@@ -166,7 +166,8 @@
     "loop_verification.py::AgentLoopVerification._verify_draft": [],
     "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
     "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source": [],
-    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": []
+    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
+    "loop_context.py::AgentLoopContext._model_roster_block": []
   },
   "edges": [
     [
@@ -588,6 +589,10 @@
     [
       "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
       "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._spend_mirror",
+      "loop_context.py::AgentLoopContext._model_roster_block"
     ]
   ]
 }
