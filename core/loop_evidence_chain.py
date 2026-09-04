@@ -98,25 +98,29 @@ class AgentLoopEvidenceChain:
         )
         return CatalogueResult(ranking=ranking, knowledge=knowledge)
 
+    def _fold_sensor_evidence(self, chain: ProvenanceChain, spend_block: str) -> None:
+        """Блоки собственных сенсоров (реестр моделей, зеркало трат) — улика с
+        цитатой `[sensor:<name>]`. Экзамен 2026-09-04, ход 3: 15 фактов из
+        <model_roster> судья счёл «утверждениями пользователя» и стёр ответ.
+        Отдельный метод, а не строки внутри `_fold_evidence_chain`: тот
+        перенесён дословно и сверяется с историей."""
+        if not spend_block or not spend_block.strip():
+            return
+        from core.evidence import evidence_from_sensor_block
+
+        for name, block in _sensor_blocks(spend_block):
+            try:
+                chain.add(evidence_from_sensor_block(name=name, content=block))
+            except Exception as exc:  # noqa: BLE001 — сборка цепочки не роняет ход; пропуск назван
+                self.log.log("sensor_evidence_skipped", {"sensor": name, "error": repr(exc)[:200]})
+
     def _fold_evidence_chain(
         self,
         chain: ProvenanceChain,
         *,
         persistent_block: str,
-        spend_block: str = "",
     ) -> None:
         """Досыпать в цепочку то, что пришло не через шаги плана."""
-        # Блоки собственных сенсоров (реестр моделей, зеркало трат) — улика с
-        # цитатой `[sensor:<name>]` (экзамен 2026-09-04, ход 3: 15 фактов из
-        # <model_roster> судья счёл «утверждениями пользователя» и стёр ответ).
-        if spend_block and spend_block.strip():
-            from core.evidence import evidence_from_sensor_block
-
-            for name, block in _sensor_blocks(spend_block):
-                try:
-                    chain.add(evidence_from_sensor_block(name=name, content=block))
-                except Exception as exc:  # noqa: BLE001 — сборка цепочки не роняет ход; пропуск назван
-                    self.log.log("sensor_evidence_skipped", {"sensor": name, "error": repr(exc)[:200]})
         if persistent_block and self.persistent_store is not None:
             # `persistent_block` was built from a small set of records
             # in `_retrieve_persistent`; we replay that retrieval cheaply

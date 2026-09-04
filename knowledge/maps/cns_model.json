@@ -87,11 +87,11 @@
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:235",
+     "site": "core/loop_synthesis.py:241",
      "role": "control",
      "uses": "<failure_context> block in the synthesis prompt",
      "gated_by": "core/loop_synthesis.py:608 — receives the world-facing subset unless st.replan_exhausted",
-     "_anchor_correction": "shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard."
+     "_anchor_correction": "shifted 2026-09-05 (+6: spend_block on _synthesize and the sensor citations offered on the no-tool branch, exam of 2026-09-04). shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard."
     },
     {
      "site": "core/loop_run_tail.py:306",
