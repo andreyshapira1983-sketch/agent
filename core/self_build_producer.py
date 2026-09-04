@@ -1107,22 +1107,59 @@ def _sync_anatomy_groups(
     build["files"] = files
 
 
+def _load_anatomy_generator(workspace: str | Path | None) -> Any:
+    """The repo's own `scripts/gen_anatomy.py`, loaded by path the way the
+    anatomy test loads it — never imported as a package. ``None`` when the
+    workspace has no generator (a sandbox), so the caller can fall back."""
+    if workspace is None:
+        return None
+    path = Path(workspace) / "scripts" / "gen_anatomy.py"
+    if not path.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gen_anatomy_for_proposal", path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception:  # noqa: BLE001 — a generator that cannot load is «absent», the canned path stays
+        return None
+    return module
+
+
 def _sync_anatomy_index(
-    build: dict[str, Any], target: str, reader: Callable[[str], str | None]
+    build: dict[str, Any], target: str, reader: Callable[[str], str | None],
+    *, workspace: str | Path | None = None,
 ) -> None:
     """Keep ``knowledge/generated/AGENT_ANATOMY.md`` in sync when the proposal
     adds NEW core modules.
 
-    The base is ALWAYS the on-disk doc (never an LLM-supplied version), so
-    no existing rows can be dropped. Any LLM-provided anatomy doc is
-    replaced by this deterministic result. Best-effort: if the doc can't be
-    read it is left alone and the Critic/lane still catches the drift and
-    rolls back.
+    Измерено 2026-09-04 (полоса, откат ain_b7a0…): эта функция дописывала
+    СВОЮ строку («Extracted from … by autonomous self-build module split») и
+    не трогала «_Total: N modules», а сторож анатомии сравнивает карту с
+    выводом `scripts/gen_anatomy.py` побайтно. Итог: каждый раскол с новым
+    модулем откатывался на одном и том же тесте — молча, всегда. Теперь
+    карта в заявке — то, что напишет САМ генератор для предложенного дерева:
+    группы из предложенного `core/anatomy_groups.py`, модули с диска плюс
+    новые, назначение — первая фраза докстринга из содержимого заявки.
+
+    Без рабочей области (песочница без генератора) — прежний канцелярский
+    путь. Best-effort: если карту нельзя отрисовать (группы не покрывают
+    модули), она остаётся как была, и сторож полосы назовёт пропуск.
     """
     files = build.get("files") or []
     stems = _new_core_module_stems(files)
     if not stems:
         return
+    gen = _load_anatomy_generator(workspace)
+    if gen is not None:
+        rendered = _render_map_for_proposal(gen, files, stems, reader, workspace)
+        if rendered is not None:
+            _carry_file(files, _ANATOMY_DOC_PATH, rendered)
+            build["files"] = files
+            return
     doc_text = reader(_ANATOMY_DOC_PATH) or ""
     if not doc_text.strip():
         return
@@ -1162,14 +1199,50 @@ def _sync_anatomy_index(
     new_doc = "\n".join(lines)
     if doc_text.endswith("\n"):
         new_doc += "\n"
-
-    for entry in files:
-        if str(entry.get("path") or "").replace("\\", "/").strip() == _ANATOMY_DOC_PATH:
-            entry["content"] = new_doc
-            break
-    else:
-        files.append({"path": _ANATOMY_DOC_PATH, "content": new_doc})
+    _carry_file(files, _ANATOMY_DOC_PATH, new_doc)
     build["files"] = files
+
+
+def _carry_file(files: list[dict[str, Any]], path: str, content: str) -> None:
+    """Put ``content`` under ``path`` in the proposal's file list, replacing
+    an existing entry or appending one."""
+    for entry in files:
+        if str(entry.get("path") or "").replace("\\", "/").strip() == path:
+            entry["content"] = content
+            return
+    files.append({"path": path, "content": content})
+
+
+def _render_map_for_proposal(
+    gen: Any, files: list[dict[str, Any]], stems: list[str],
+    reader: Callable[[str], str | None], workspace: str | Path | None,
+) -> str | None:
+    """The anatomy map the generator would write for the PROPOSED tree, or
+    ``None`` when it cannot be rendered (groups do not cover the modules —
+    the guard will say so by name)."""
+    carried: dict[str, str] = {
+        str(e.get("path") or "").replace("\\", "/").strip(): str(e.get("content") or "")
+        for e in files
+    }
+    groups_src = carried.get(_ANATOMY_GROUPS_PATH) or reader(_ANATOMY_GROUPS_PATH) or ""
+    core_dir = Path(workspace) / "core" if workspace is not None else None
+    if not groups_src or core_dir is None or not core_dir.is_dir():
+        return None
+    try:
+        groups = gen.load_groups_from_source(groups_src)
+        actual = {
+            p.name[:-3] for p in core_dir.glob("*.py") if p.name != "__init__.py"
+        } | set(stems)
+
+        def purpose(stem: str) -> str:
+            source = carried.get(f"core/{stem}.py")
+            if source is None:
+                source = reader(f"core/{stem}.py") or ""
+            return gen.purpose_from_source(source)
+
+        return gen.build_document(actual=actual, groups=groups, purpose=purpose)
+    except Exception:  # noqa: BLE001 — unrenderable = leave the map alone; the guard names it
+        return None
 
 
 def _reporter_publish(
@@ -1271,7 +1344,10 @@ def publish_incremental_split_step(
     }
     # Keep knowledge/generated/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
     try:
-        _sync_anatomy_index(build, step.target, reader or _default_file_reader(workspace))
+        _sync_anatomy_index(
+            build, step.target, reader or _default_file_reader(workspace),
+            workspace=workspace,
+        )
     except Exception:  # noqa: BLE001, S110 — doc sync is best-effort; lane catches drift
         pass
     try:
@@ -1765,7 +1841,7 @@ def produce_self_apply_proposal(
         # the repo's anatomy-sync test fails and the lane rolls the apply back.
         if builder.decision == "built":
             try:
-                _sync_anatomy_index(builder.data, target, reader)
+                _sync_anatomy_index(builder.data, target, reader, workspace=workspace)
             except Exception:  # noqa: BLE001, S110 — doc sync must never break the producer
                 pass
 
