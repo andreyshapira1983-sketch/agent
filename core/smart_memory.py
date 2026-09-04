@@ -3,48 +3,50 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from core.completion_marker import sanitize_token
 from core.ids import new_id
-from core.redaction import redact_dlp_text
+from core.smart_memory_helpers import (  # noqa: F401 -- re-exported
+    _ADMISSIBLE_COMPLETIONS,
+    _MAX_LESSONS,
+    _MAX_SHOWN_LABELS,
+    _MAX_SOURCE_QUESTIONS,
+    _MAX_TRIGGER_TAGS,
+    _PROMOTION_MIN_SUCCESSES,
+    CompletionDeclaration,
+    CompletionState,
+    EpisodeOutcome,
+    ProcedureStatus,
+    _capped_lessons,
+    _capped_source_questions,
+    _clean_text,
+    _compute_quality_score,
+    _episode_outcome,
+    _episode_tags,
+    _now_iso,
+    _procedure_status,
+    _procedure_status_for,
+    _summarise_labels,
+    _tokens,
+    episode_id_for_run,
+)
 from core.state_integrity import (
     append_state_jsonl_unlocked,
     read_state_jsonl_unlocked,
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
-from core.topic_tokens import (
-    FLAT,
-    STOPWORDS,
-    TokenSalience,
-    discriminating_tokens,
-    topic_tokens,
-)
-
-EpisodeOutcome = Literal["success", "partial", "failed"]
+from core.topic_tokens import FLAT, STOPWORDS, TokenSalience, discriminating_tokens
 
 # Task completion, kept deliberately apart from `EpisodeOutcome`: `outcome`
 # answers "were the claims supported", this answers "was the goal reached".
 # A cycle can be impeccably supported and still have answered nothing.
-CompletionState = Literal[
-    "achieved",
-    "partially_achieved",
-    "blocked",
-    "refused",
-    "failed",
-    "cancelled",
-    "unknown",
-]
 
 # What the synthesizer may declare about its own run. `cancelled` and
 # `unknown` are absent on purpose: they are facts about the run's termination
 # that the loop observes, never something the answer gets to claim.
-CompletionDeclaration = Literal[
-    "achieved", "partially_achieved", "blocked", "refused", "failed"
-]
 
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
@@ -57,74 +59,15 @@ _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__arg
 #: delivery below. `partially_achieved` IS a delivery — of a part.
 _DELIVERY_DECLARATIONS: frozenset[str] = frozenset({"achieved", "partially_achieved"})
 _NON_DELIVERY_DECLARATIONS: frozenset[str] = _COMPLETION_DECLARATIONS - _DELIVERY_DECLARATIONS
-ProcedureStatus = Literal["candidate", "active", "needs_review", "obsolete"]
 
 # A newly distilled procedure is unproven: born `candidate`, kept out of
 # ordinary planning retrieval, and promoted to `active` only by a SECOND,
 # independent, completed+verified success. Demotion is unchanged, and its
 # check comes first so a doubted procedure is never re-labelled candidate.
-_PROMOTION_MIN_SUCCESSES = 2
 
 # The real status vocabulary, derived from the type rather than restated:
 # operator-facing tallies enumerate THIS, so a hardcoded list goes stale.
 PROCEDURE_STATUSES: tuple[str, ...] = ProcedureStatus.__args__
-
-
-def _procedure_status_for(
-    success_count: int, confidence: float, *, failure_count: int = 0,
-) -> ProcedureStatus:
-    """Статус процедуры по её опыту. Незнание — не приговор.
-
-    H-44 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Прежняя редакция смотрела
-    только на уверенность и потому сваливала «ещё не проверено» и «проверено и
-    не годится» в один исход. У ни разу не запускавшейся процедуры уверенность
-    — это ПРИОР (0.5), а не результат, и `needs_review` для неё означал бы
-    приговор без суда.
-
-    Цена измерена, а не предположена: `needs_review` исключается из выдачи, а
-    `candidate` используется. В живой памяти 24 процедуры из 34 — ровно
-    новорождённые, и проход-починка по прежнему правилу отключил бы 71 %
-    процедурной памяти, при том что ни один факт о них не изменился.
-
-    `failure_count` с умолчанием: старые вызывающие продолжают работать, а
-    послабление действует только там, где ОБА счётчика нулевые.
-    """
-    if success_count == 0 and failure_count == 0:
-        return "candidate"
-    if confidence < 0.6:
-        return "needs_review"
-    if success_count < _PROMOTION_MIN_SUCCESSES:
-        return "candidate"
-    return "active"
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _clean_text(text: str, *, max_chars: int = 800) -> str:
-    redacted, _, _ = redact_dlp_text(str(text or "").strip())
-    redacted = " ".join(redacted.split())
-    if len(redacted) > max_chars:
-        return redacted[: max_chars - 1].rstrip() + "..."
-    return redacted
-
-
-def _compute_quality_score(
-    verified: int, unverified: int, weak: int = 0
-) -> float | None:
-    """Fraction of evidence chunks that stood up as verified support.
-
-    ``weak`` counts claims the verifier could NOT confirm as faithful
-    support — sub-agent-asserted, cited-but-unmatched, receipt-missing and
-    topic-only chunks. They belong in the denominator, never in the
-    numerator: an answer resting on unconfirmed support must not score as if
-    it were verified.
-    """
-    total = verified + unverified + weak
-    if total == 0:
-        return None
-    return round(verified / total, 3)
 
 
 # Laplace (add-one) smoothing prior for procedure confidence, so confidence
@@ -145,7 +88,6 @@ def _smoothed_confidence(success_count: int, failure_count: int) -> float:
 #: Резка живёт в `core/topic_tokens.py` вместе с весом слова: это одна работа —
 #: превратить текст в разрешающий сигнал. Имя оставлено прежним, его зовут из
 #: двух десятков мест этого файла.
-_tokens = topic_tokens
 
 
 @dataclass(frozen=True)
@@ -1321,7 +1263,6 @@ def _lesson_provenance_disqualified(episode: EpisodeRecord) -> bool:
 #: здесь потому, что подтверждение всё равно требуется ниже: послабление даёт
 #: СИГНАЛ, а не слово «частично». Провал, блокировка и `unknown` остаются
 #: снаружи — незнание не суждение. Замер: MIR-169.
-_ADMISSIBLE_COMPLETIONS = frozenset({"achieved", "partially_achieved"})
 
 
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
@@ -1421,15 +1362,6 @@ def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
     if episode.completion_state is None:
         episode = replace(episode, completion_state="unknown")
     return episode
-
-
-def episode_id_for_run(run_id: str) -> str:
-    """Deterministic episode id for one attempt.
-
-    Derived rather than random so `EpisodicMemoryStore.save_once` can detect a
-    duplicate of the same run without a side ledger.
-    """
-    return f"ep-run-{run_id}"
 
 
 def _derive_episode_outcome(
@@ -1593,38 +1525,10 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
 # later run, since the record is rewritten to JSONL and injected into planner
 # prompts. Unbounded tags also destroy retrieval: a record carrying every
 # token matches every query. The most RECENT lessons are kept.
-_MAX_LESSONS = 12
-_MAX_TRIGGER_TAGS = 40
 #: Сколько вопросов-происхождений держит одна процедура. Запись уходит в
 #: подсказки планировщика, поэтому ограничено всё, что в ней копится.
-_MAX_SOURCE_QUESTIONS = 5
 #: Evidence labels shown in one line, before a "+N more" summary. Shared by the
 #: lesson and the step so the two cannot drift apart.
-_MAX_SHOWN_LABELS = 3
-
-
-def _capped_lessons(lessons: Iterable[str]) -> tuple[str, ...]:
-    deduped = tuple(dict.fromkeys(x for x in lessons if x))
-    return deduped[-_MAX_LESSONS:]
-
-
-def _capped_source_questions(questions: Iterable[str]) -> tuple[str, ...]:
-    """ПЕРВЫЕ пять, а не последние: вытесняем поздние приросты, не происхождение.
-
-    Обратное правило `_capped_lessons` (последние N) здесь было бы порчей: урок
-    тем ценнее, чем свежее, а вопрос-происхождение — тем, что он первый.
-    """
-    deduped = tuple(dict.fromkeys(_clean_text(x, max_chars=200) for x in questions if x))
-    return tuple(x for x in deduped if x)[:_MAX_SOURCE_QUESTIONS]
-
-
-def _summarise_labels(labels: tuple[str, ...]) -> str:
-    """`a, b, c, +N more` — bounded, and identical wherever labels are shown."""
-    if not labels:
-        return ""
-    shown = ", ".join(labels[:_MAX_SHOWN_LABELS])
-    hidden = len(labels) - _MAX_SHOWN_LABELS
-    return f"{shown}, +{hidden} more" if hidden > 0 else shown
 
 
 def lesson_from_episode(episode: EpisodeRecord) -> str:
@@ -1802,25 +1706,3 @@ def family_product_warnings(
             warnings.append(cand.summary[:max_each])
     return warnings
 
-
-def _episode_outcome(value: str) -> EpisodeOutcome:
-    return value if value in {"success", "partial", "failed"} else "partial"  # type: ignore[return-value]
-
-
-def _procedure_status(value: str) -> ProcedureStatus:
-    return value if value in {"candidate", "active", "needs_review", "obsolete"} else "needs_review"  # type: ignore[return-value]
-
-
-def _episode_tags(
-    *,
-    tools: tuple[str, ...],
-    outcome: EpisodeOutcome,
-    labels: tuple[str, ...],
-) -> tuple[str, ...]:
-    tags: list[str] = ["episode", outcome]
-    tags.extend(tools)
-    if any(label.startswith("web") for label in labels):
-        tags.append("web")
-    if any(label.startswith("file") for label in labels):
-        tags.append("file")
-    return tuple(dict.fromkeys(tags))
