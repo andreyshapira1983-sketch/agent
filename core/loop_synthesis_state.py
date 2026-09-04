@@ -25,6 +25,10 @@ class SynthesisState:
     plan: Any
     history: str
     persistent_block: str
+    #: The spend mirror + model roster (2026-09-04 exam, turn 2): until then it
+    #: reached the planner only, and the answerer said, truthfully, «the block
+    #: is not in the context passed to me».
+    spend_block: str
     failure_history: list[Any]
     replan_exhausted: bool
     cheap_path_active: bool

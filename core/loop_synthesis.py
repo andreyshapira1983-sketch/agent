@@ -151,7 +151,7 @@ class AgentLoopSynthesis:
             return ""
         return f"{block}\n\n" if block else ""
 
-    def _synthesize(
+    def _synthesize(  # noqa: PLR0913, PLR0917 — the roster rides beside the memory block (exam 2026-09-04)
         self,
         goal: Goal,
         artifacts: dict[str, dict[str, Any]],
@@ -159,6 +159,7 @@ class AgentLoopSynthesis:
         planner_reasoning: str,
         history: str = "",
         persistent_block: str = "",
+        spend_block: str = "",
         cycle_findings: list[dict[str, Any]] | None = None,
         failure_history: list[ReplanTrigger] | None = None,
         llm=None,
@@ -194,6 +195,11 @@ class AgentLoopSynthesis:
             long_term_block = (
                 f"{persistent_block}\n\n" if persistent_block.strip() else ""
             )
+            # Facts about his own models and spend travel with long-term memory:
+            # the answerer must see what the planner saw (exam 2026-09-04, turn 2:
+            # «the model_roster block is not in the context passed to me» — true).
+            if spend_block.strip():
+                long_term_block += f"{spend_block}\n\n"
             role_block = self.last_role_context.to_prompt_block() + "\n\n"
             profile_block = (
                 profile_to_prompt_block(self.last_user_profile) + "\n\n"
@@ -594,6 +600,7 @@ class AgentLoopSynthesis:
                 planner_reasoning=st.planner_out.reasoning,
                 history=st.history,
                 persistent_block=st.persistent_block,
+                spend_block=st.spend_block,
                 cycle_findings=list(self._cycle_findings),
                 # Every failed step, not only the ones that survived to replan
                 # exhaustion. Until 2026-08-14 this read `if st.replan_exhausted
