@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,8 @@ from core.incremental_splitter import (
     _uses_forbidden_scope,
     plan_incremental_split,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
@@ -514,3 +518,21 @@ def test_function_split_prunes_orphaned_imports_and_sorts_the_reexport(workspace
     assert target.index("from core.aaa import") < target.index("from core.lint_helpers import") < target.index("from core.zzz import")
     # the new module carries the datetime import it needs
     assert "from datetime import datetime, timezone" in step.new_content
+
+
+@pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")
+def test_both_post_images_pass_the_import_rules_the_lane_guard_applies(workspace: Path):
+    """Fifth rollback of one split (2026-09-04): the helper carried whole
+    import statements verbatim (six unused names) and both import blocks
+    were un-sorted. The step is now linted by the same ruff the guard runs."""
+    _write(workspace, "core/lint.py", SPLIT_LINT_SRC)
+    plan = plan_incremental_split(workspace, "core/lint.py", max_move_lines=40)
+    assert plan.status == "planned", plan.reason
+    for rel, content in ((plan.step.target, plan.step.target_content),
+                         (plan.step.new_module, plan.step.new_content)):
+        result = subprocess.run(  # noqa: S603 — literal argv; nosec B603 B607
+            ["ruff", "check", "--quiet", "--select", "I001,F401", "--stdin-filename", rel, "-"],  # noqa: S607
+            input=content, capture_output=True, text=True, encoding="utf-8",
+            cwd=str(_REPO_ROOT), check=False,
+        )
+        assert result.returncode == 0, f"{rel}: {result.stdout[:400]}\n{content}"

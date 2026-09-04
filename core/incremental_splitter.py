@@ -267,6 +267,36 @@ def prune_orphaned_imports(src: str) -> str:
     return "\n".join(out)
 
 
+def _lint_fix_imports(content: str, rel: str, workspace: Path) -> str:
+    """``ruff check --fix`` for the two import rules (I001 sort/format, F401
+    unused), fed through stdin under the workspace's own ruff config — the
+    exact judge the lint-debt guard applies later. Any failure (no ruff, a
+    non-zero exit other than «fixed», empty output) returns the text as it
+    came: a tidy-up, never a gate."""
+    import shutil
+    import subprocess  # nosec B404 — fixed argv, our own workspace
+
+    if shutil.which("ruff") is None:
+        return content
+    try:
+        result = subprocess.run(  # noqa: S603 — literal argv, no shell; nosec B603 B607
+            ["ruff", "check", "--fix", "--quiet", "--select", "I001,F401",  # noqa: S607
+             "--stdin-filename", rel, "-"],
+            input=content, capture_output=True, text=True, encoding="utf-8",
+            cwd=str(workspace), check=False, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return content
+    fixed = result.stdout
+    if result.returncode not in (0, 1) or not fixed.strip():
+        return content
+    try:
+        ast.parse(fixed)
+    except (SyntaxError, ValueError):
+        return content
+    return fixed
+
+
 def _sorted_import_slot(tree: ast.Module, module: str) -> int:
     """1-based line AFTER which ``from <module> import …`` sits in the
     isort order ruff's I001 expects among the first-party ``from`` imports:
@@ -688,6 +718,16 @@ def plan_incremental_split(
             f"no self-contained block under {max_move_lines} lines found in "
             f"{rel!r} (every candidate references names that must stay)",
         )
+
+    # The same linter the lane's guard runs, on the same two files, BEFORE the
+    # self-checks (measured 2026-09-04, fifth rollback of one split: the new
+    # module carried whole import statements verbatim — six unused names —
+    # and both import blocks were un-sorted; the repo-wide lint-debt count
+    # rolled the apply back). Import-only rules; ruff absent = text unchanged.
+    step.new_content = _lint_fix_imports(
+        prune_orphaned_imports(step.new_content), step.new_module, ws,
+    )
+    step.target_content = _lint_fix_imports(step.target_content, step.target, ws)
 
     # Deterministic self-checks; refuse rather than propose a broken step.
     try:
