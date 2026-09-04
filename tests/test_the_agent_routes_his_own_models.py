@@ -98,7 +98,7 @@ def _router(tmp_path: Path, monkeypatch, store):
     return ModelRouter(
         default_provider="openai", default_model="gpt-default",
         routes={ModelRole.PLANNER: ModelRoute(role="planner", provider="openai", model="gpt-5.6-sol", reason="env:AGENT_PLANNER")},
-        llm_factory=lambda p, m: _LLM(p, m), routing_policy=store,
+        llm_factory=_LLM, routing_policy=store,
     )
 
 
@@ -139,7 +139,7 @@ def test_the_usage_ledger_carries_the_policy_id_and_no_secret(tmp_path, monkeypa
     router = ModelRouter(
         default_provider="openai", default_model="gpt-default",
         routes={ModelRole.SYNTHESIZER: ModelRoute(role="synthesizer", provider="openai", model="gpt", reason="env:AGENT_SYNTHESIZER")},
-        llm_factory=lambda p, m: _LLM(p, m), usage_ledger=ledger, routing_policy=store,
+        llm_factory=_LLM, usage_ledger=ledger, routing_policy=store,
     )
     router.for_role("synthesizer").complete(system="s", user="u", max_tokens=10, temperature=0.0)
     rows = ledger.load_records()
@@ -160,7 +160,7 @@ def test_a_new_decision_is_picked_up_without_a_restart(tmp_path, monkeypatch):
     router = ModelRouter(
         default_provider="openai", default_model="gpt-default",
         routes={ModelRole.PLANNER: ModelRoute(role="planner", provider="openai", model="gpt", reason="env:AGENT_PLANNER")},
-        llm_factory=lambda p, m: _LLM(p, m), usage_ledger=ledger, routing_policy=store,
+        llm_factory=_LLM, usage_ledger=ledger, routing_policy=store,
     )
     assert router.for_role("planner").provider == "openai"
     store.set_route(role="planner", provider="deepseek", model="deepseek-chat", reason="cheaper", env=dict(_ENV))

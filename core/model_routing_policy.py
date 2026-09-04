@@ -230,3 +230,49 @@ class RoutingPolicyStore:
             "set_by": set_by, "active": False,
         }])
         return RoutingVerdict(True)
+
+
+# ---------- the router's two calls (kept here so the router file does not grow) ----------
+
+
+def agent_policy_route(store: Any, role_key: str) -> Any | None:
+    """The agent's own decision for this role as a `ModelRoute`, if he has
+    made one and its provider still has a key. A record whose provider lost
+    its credential falls through to the next layer — the roster names that —
+    never to an uncredentialed call. ``None`` = no decision applies."""
+    if store is None:
+        return None
+    from core.model_router import (
+        _DEFAULT_PROVIDER_ENV,
+        ModelRoute,
+        _normalise_provider,
+        _provider_has_credentials,
+    )
+
+    try:
+        choice = store.resolve(role_key)
+    except Exception:  # noqa: BLE001 — an unreadable policy is «no policy», never a crash
+        return None
+    if choice is None:
+        return None
+    provider = _normalise_provider(choice.provider)
+    if provider not in _DEFAULT_PROVIDER_ENV or not _provider_has_credentials(provider):
+        return None
+    return ModelRoute(role=role_key, provider=provider, model=choice.model, reason=choice.route_reason)
+
+
+def drop_clients_if_policy_moved(
+    store: Any, last_stamp: tuple[int, int] | None, cache: dict[str, Any],
+) -> tuple[int, int] | None:
+    """Dynamic by construction: when the policy file changes, the router's
+    cached per-role clients are dropped so the next call re-resolves.
+    Returns the stamp to remember."""
+    if store is None:
+        return last_stamp
+    try:
+        stamp = store.version()
+    except Exception:  # noqa: BLE001 — a stat that fails keeps the cache
+        return last_stamp
+    if stamp != last_stamp:
+        cache.clear()
+    return stamp
