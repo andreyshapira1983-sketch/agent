@@ -66,6 +66,7 @@ class AgentLoopContext:
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
         memory: Any
+        model_router: Any
         user_profile_store: Any
         last_user_profile: Any
         last_self_analysis: Any
@@ -177,11 +178,30 @@ class AgentLoopContext:
         """Блок зеркала из живых журналов; без рабочей папки — пустота."""
         try:
             usage_rows, ledger_rows = load_spend_rows(self._file_read_workspace_root())
-            return spend_mirror_block(usage_rows=usage_rows, ledger_rows=ledger_rows)
+            spend = spend_mirror_block(usage_rows=usage_rows, ledger_rows=ledger_rows)
         except Exception as exc:  # noqa: BLE001 — зеркало не вправе ронять ход
             # Молчать нельзя (храповик тишины журнала): оператор, читающий
             # логи, должен видеть, что зеркала не было и почему.
             self.log.log("spend_mirror_unavailable", {"error": repr(exc)[:200]})
+            spend = ""
+        roster = self._model_roster_block()
+        return "\n\n".join(part for part in (spend, roster) if part)
+
+    def _model_roster_block(self) -> str:
+        """Глаз на собственные модели (2026-09-04): провайдеры, ключи есть/нет,
+        роли, здоровье, цена, расход за день, остаток потолка. Только факты;
+        до этого дня ни один блок контекста не называл провайдера, и о ключе
+        он узнавал лишь по его смерти."""
+        try:
+            from core.model_roster import model_roster, model_roster_block
+
+            usage_ledger = getattr(self.model_router, "usage_ledger", None)
+            budget_ledger = getattr(usage_ledger, "budget_ledger", None)
+            return model_roster_block(model_roster(
+                usage_ledger=usage_ledger, budget_ledger=budget_ledger,
+            ))
+        except Exception as exc:  # noqa: BLE001 — глаз не вправе ронять ход
+            self.log.log("model_roster_unavailable", {"error": repr(exc)[:200]})
             return ""
 
     def _maybe_resolve_referent(

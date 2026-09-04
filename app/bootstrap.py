@@ -165,6 +165,13 @@ def build_agent(
     for egress_tool in ("web_search", "web_fetch", "rss_fetch"):
         registry.get(egress_tool).budget_ledger = budget_ledger
     model_router = ModelRouter.from_env(usage_ledger=model_usage_ledger)
+    # The eye on his own models (operator's word 2026-09-04, «ставь глаз»):
+    # read-only, registered for every path including the unattended one.
+    from tools.model_roster import ModelRosterTool
+
+    registry.register(ModelRosterTool(
+        usage_ledger=model_usage_ledger, budget_ledger=budget_ledger,
+    ))
 
     # Agent-as-tool: spawn_subagent must be registered AFTER policy and
     # model_router are built, because it holds references to both.

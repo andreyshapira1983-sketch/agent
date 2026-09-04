@@ -708,6 +708,23 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "model_roster":
+        # The eye on his own models (2026-09-04): no arguments; read-only.
+        if args:
+            warnings.append(
+                f"step[{idx}]: model_roster takes no arguments, "
+                f"dropping {sorted(args.keys())!r}"
+            )
+        return {
+            "tool": "model_roster",
+            "arguments": {},
+            "label": "model_roster:now",
+            "expected_outcome": (
+                "Returns a dict with providers (key_present, roles, health, "
+                "last_error_class, cost tiers, spend today) and the day cost ceiling."
+            ),
+        }
+
     if tool_name == "memory_bank":
         # Contract: exactly text, kind, provenance — all three strings, all required.
         required = ("text", "kind", "provenance")
