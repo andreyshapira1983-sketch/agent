@@ -513,6 +513,7 @@ class AgentLoop(
             plan=plan,
             history=history,
             persistent_block=persistent_block,
+            spend_block=spend_block,
             failure_history=failure_history,
             replan_exhausted=replan_exhausted,
             cheap_path_active=cheap_path_active,

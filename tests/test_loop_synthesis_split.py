@@ -81,12 +81,39 @@ def test_signatures_moved_unchanged():
     for name in MOVED:
         if name not in old:  # pragma: no cover
             continue
-        assert ast.dump(old[name].args) == ast.dump(new[name].args), (
-            f"сигнатура {name} изменилась при переносе"
-        )
+        # Перенос сохранил всё историческое: каждый прежний аргумент на месте,
+        # с тем же типом и тем же значением по умолчанию. Новые именованные
+        # аргументы СО ЗНАЧЕНИЕМ ПО УМОЛЧАНИЮ разрешены — та же линия, что у
+        # снятых снимков тел (см. ниже): законное изменение не запрещается
+        # снимком. Первое такое: `spend_block` у `_synthesize` (2026-09-04,
+        # экзамен, ход 2 — реестр моделей доходил до планировщика, не до ответчика).
+        old_args, new_args = _named_args(old[name]), _named_args(new[name])
+        for arg_name, shape in old_args.items():
+            assert arg_name in new_args, f"аргумент {arg_name} пропал у {name}"
+            assert new_args[arg_name] == shape, f"аргумент {arg_name} у {name} изменил тип/умолчание"
+        for arg_name, shape in new_args.items():
+            if arg_name not in old_args:
+                assert shape[1] is not None, (
+                    f"новый аргумент {arg_name} у {name} обязан иметь значение по умолчанию"
+                )
         assert ast.dump(old[name].returns or ast.Pass()) == ast.dump(
             new[name].returns or ast.Pass()
         ), f"возвращаемый тип {name} изменился"
+
+
+def _named_args(fn: ast.AST) -> dict[str, tuple[str, str | None]]:
+    """name -> (annotation dump, default dump or None), positional and keyword-only."""
+    a = fn.args
+    out: dict[str, tuple[str, str | None]] = {}
+    positional = list(a.posonlyargs) + list(a.args)
+    defaults = [None] * (len(positional) - len(a.defaults)) + list(a.defaults)
+    for arg, default in zip(positional, defaults, strict=True):
+        out[arg.arg] = (ast.dump(arg.annotation) if arg.annotation else "",
+                        ast.dump(default) if default is not None else None)
+    for arg, default in zip(a.kwonlyargs, a.kw_defaults, strict=True):
+        out[arg.arg] = (ast.dump(arg.annotation) if arg.annotation else "",
+                        ast.dump(default) if default is not None else None)
+    return out
 
 
 def test_the_loop_no_longer_defines_it():

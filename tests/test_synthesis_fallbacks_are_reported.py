@@ -165,7 +165,7 @@ def test_a_healthy_registry_reports_nothing():
 def _state(**kw) -> SynthesisState:
     base: dict[str, Any] = {
         "goal": None, "user_question": "q", "file_hint": None, "artifacts": {},
-        "planner_out": None, "plan": None, "history": "", "persistent_block": "",
+        "planner_out": None, "plan": None, "history": "", "persistent_block": "", "spend_block": "",
         "failure_history": [], "replan_exhausted": False,
         "cheap_path_active": True, "local_critique_active": False,
         "_task_synth_llm": "NORMAL-MODEL", "_cp": None,
