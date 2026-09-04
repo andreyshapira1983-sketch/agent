@@ -93,7 +93,14 @@ _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
         # «память — то, что я потом читаю как истину; чтение не фильтруется» —
         # самоотравление перевешивает ценность автономного банкования, пока
         # нет фильтра на чтении. Его собственное решение о его же памяти.
-        "memory_bank",
+        # memory_bank LEFT THIS SET on 2026-09-04 by the operator's word («Надо»)
+        # — an authority change, not a bug fix. He closed the door to his own
+        # unattended self on 09-01 (4321bc4); 0 writes in 267 cycles followed:
+        # the policy's effect, not a defect. The door keeps its walls: three
+        # kinds, provenance required, the write policy (secrets, duplicates,
+        # echo), a readback before «stored», no memory as a source of memory,
+        # a per-process ceiling (tools/memory_bank.py); self-written records
+        # stay low-trust (MIR-074). Retrieval is a separate change.
         # journal_append: вердикт агента 2026-09-01 (append_tool_design.md ред.2,
         # BLOCKED): «реестр — тоже то, что я потом читаю как истину; он кормит
         # выбиратель кампании; существенной разницы с памятью нет» — по его же
