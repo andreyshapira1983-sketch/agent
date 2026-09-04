@@ -139,3 +139,27 @@ def test_the_eye_is_wired_into_the_context_and_the_registry() -> None:
     assert "ModelRosterTool(" in inspect.getsource(bootstrap.build_agent)
     src = inspect.getsource(loop_context)
     assert "_model_roster_block" in src and "model_roster_unavailable" in src
+
+
+def test_without_a_ledger_bearing_router_there_is_no_eye() -> None:
+    """The block describes providers «as the router and the ledgers see them».
+    An AgentLoop built without a router, or with the single-LLM stub router
+    every sandbox test gets (no usage ledger), must get an empty string — not
+    a roster read from the developer's own environment, which put a
+    <conversation_history> wrapper on a first turn and turned 11 tests red
+    (battery of 2026-09-04)."""
+    from core.loop_context import AgentLoopContext
+    from core.model_router import ModelRouter
+
+    class _Bare(AgentLoopContext):
+        model_router = None
+        log = None
+
+    assert _Bare()._model_roster_block() == ""
+
+    class _Stub(AgentLoopContext):
+        model_router = ModelRouter.single(object())
+        log = None
+
+    assert _Stub().model_router.usage_ledger is None
+    assert _Stub()._model_roster_block() == ""
