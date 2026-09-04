@@ -62,7 +62,7 @@ def test_the_roster_names_every_provider_and_its_key_presence_without_the_value(
     roster = model_roster(usage_ledger=_Ledger(_rows(), {}), env=_ENV, now=_NOW)
     by = {p["provider"]: p for p in roster["providers"]}
 
-    assert set(by) == {"openai", "anthropic", "deepseek"}
+    assert set(by) == {"openai", "anthropic", "deepseek", "huggingface", "local", "google"}
     assert by["openai"]["key_present"] and by["deepseek"]["key_present"]
     assert not by["anthropic"]["key_present"], "the third key is absent and must be shown as absent"
     text = model_roster_block(roster)
@@ -163,3 +163,25 @@ def test_without_a_ledger_bearing_router_there_is_no_eye() -> None:
 
     assert _Stub().model_router.usage_ledger is None
     assert _Stub()._model_roster_block() == ""
+
+
+def test_a_key_without_a_client_is_shown_as_a_key_without_a_door() -> None:
+    """The operator keeps four model keys in .env (2026-09-04: «он должен
+    увидеть четыре ключа, а видит только один»). Google's key has no client
+    anywhere in this code; the roster must still SHOW it — present, and
+    uncallable — and read the operator's own spelling of the name."""
+    env = dict(_ENV)
+    env["Google_API_KEY"] = "g-secret"
+    env["HF_TOKEN"] = "hf-secret"
+    roster = model_roster(usage_ledger=_Ledger(_rows(), {}), env=env, now=_NOW)
+    by = {p["provider"]: p for p in roster["providers"]}
+
+    assert by["google"]["key_present"] and not by["google"]["door"]
+    assert by["huggingface"]["key_present"] and by["huggingface"]["door"]
+    assert by["openai"]["door"] and by["anthropic"]["door"] and by["deepseek"]["door"]
+    assert not by["local"]["key_present"]
+    text = model_roster_block(roster)
+    assert "g-secret" not in text and "hf-secret" not in text
+    google_line = next(line for line in text.splitlines() if line.startswith("- google"))
+    assert "key present" in google_line and "NO CLIENT IN THIS CODE" in google_line
+    assert "NO CLIENT" not in next(line for line in text.splitlines() if line.startswith("- openai"))
