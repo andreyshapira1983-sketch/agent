@@ -3170,6 +3170,68 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 9 — the eye, the door, and the first live day (2026-09-04)
+
+The first full day after the switch-on, under the operator's standing word
+and Кодекс's corrections. Mode from this day: **organ growth frozen** —
+the silent-failure review produced ~180 candidates per pass against 5–8
+confirmations-with-repair per maintenance window, so the ratified rule
+(`intake > outflow → freeze`) is arithmetic, not philosophy. Only measurers,
+authority changes by word, and repairs by family.
+
+**Baseline recorded before this evening's changes:** 267 cycles since
+switch-on → 0 web calls → 0 durable memory writes. Then the agent broke the
+first half himself: under a goal he wrote («Study the outside world:
+append-only evidence journals…») the ordinary executor's planner chose
+`web_search` ×3 and `web_fetch` ×4 (cycles 145/155). `study_external_source`
+has fired 0 times in the ledger's whole history — a dead parallel route
+(hypothesis). Use of the fetched pages: NOT OBSERVED (cycle 145 «completed»
+with the doctrine-files boilerplate, cycle 155 `empty`). Three registry
+entries keep those apart so «web works» never becomes a legend. The
+web-action recogniser repair was REMOVED from the window: the next shift is
+the natural replication.
+
+- **The eye** (`core/model_roster.py`, `tools/model_roster.py`): the agent
+  had no perception of his own providers — no context block named one,
+  `:models` was the operator's, a key was learned only when it died. The
+  roster shows key present/absent (never the value), roles as the router
+  reads them, health and reason, last error class, cost tiers seen, spend
+  today, the day ceiling and its remainder; missing sources read as
+  «unknown», never as healthy. Travels with the spend mirror; a read-only,
+  argument-less tool for the executor. No switch built — pre-registered
+  prediction P5: no judgement about models in his products this shift.
+- **The door, opened by word** («Надо»): `memory_bank` leaves the
+  unattended block set — an authority change, not a fix (he closed it on
+  09-01; 0 writes in 267 cycles was the policy). Walls: readback before
+  «stored», no `memory:` provenance, a per-process ceiling of 12, missing
+  arguments name themselves; the write policy and MIR-074 low-trust stay.
+  Retrieval (`memory_recall`, bounded, low-trust) is the 07:03 window —
+  without it the STORE→RETRIEVE→USE exam is unsittable by construction.
+- **Block 8 live:** three waits (loop, idle ×2) of 15 min each, woken by
+  the periodic recheck; the shift never ended itself. The morning shift died
+  at 11:14 by the operator's reboot; the restarted shift (11:22) burned the
+  40/day grant by 12:28 (29 permission questions, aborted later as
+  superseded), a 150/day grant was filed and approved by word and picked up
+  live by the inbox without a restart.
+- **Three-keys experiment (no top-up, by word):** P1 the router itself
+  re-routes planner/synthesizer to OpenAI within the 120-min cooldown probe;
+  P2 the small balance burns, billing errors re-mark it unhealthy; P3
+  Anthropic 0–few calls (no role); P4 the day ceiling (3000 units) walls
+  before the balance does; P5 no model judgement in his products.
+- **Silent-failure review** (six reviewers, 162 unread files): 41 CONFIRMED
+  by my execution on the top subset, four families; repair order after
+  tonight: cache-before-gates → budget switch on `None` → corrupt→empty →
+  the judges → the lane. The lane itself is under suspicion (unguarded test
+  runner, post-commit checkout rollback deleting the commit, backup
+  collision), so tonight's three approved splits run under external
+  containment — see the addendum below.
+
+Deferred to 07:03 by the operator's «не потеряйся» cut: memory recall, the
+two counters (permission questions and decline strings as work), one
+`web_fetch` traced birth-to-death, the coverage shift, families, reviewers
+per invariant. Awaiting the operator's word: a measured shift on a US model
+with a dollar ceiling.
+
 ## Block 8 — a shift outlives its first wall (2026-09-03, evening)
 
 Operator's word, narrow: «строй сейчас, но узко» — only continuity inside
