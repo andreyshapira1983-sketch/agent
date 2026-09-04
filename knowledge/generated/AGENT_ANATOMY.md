@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 219 modules across 12 groups._
+_Total: 220 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -116,6 +116,7 @@ _Planning, verification, clarification, control loop._
 | `core/confidence_vector` | Decompose answer confidence into a three-axis vector. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
+| `core/best_next_action_helpers` | Helpers extracted verbatim from ``core/best_next_action.py`` by the incremental splitter. |
 | `core/task_complexity` | Task Complexity Assessment — automatic model tier selection. |
 | `core/low_evidence_policy` | Low-evidence answer policy. |
 | `core/unsupported_claims` | Claim-level answer enforcement (critique plan PR3) — long-answer truncation is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim- level short path. |
