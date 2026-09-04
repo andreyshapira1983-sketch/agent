@@ -176,7 +176,7 @@ LADDER_STATE_VAR = "_synth_state"
 LADDER_SUBSTITUTED = frozenset({
     "_cp", "_declared", "_task_synth_llm", "artifacts", "cheap_path_active",
     "draft_answer", "failure_history", "file_hint", "goal", "history",
-    "local_critique_active", "persistent_block", "plan", "planner_out",
+    "local_critique_active", "persistent_block", "spend_block", "plan", "planner_out",
     "replan_exhausted", "user_question",
 })
 
