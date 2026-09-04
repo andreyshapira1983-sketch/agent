@@ -375,6 +375,120 @@ def _prior_denial(approval_inbox: Any, dedup_key: str) -> tuple[str, str] | None
     return (str(denied.id), str(getattr(denied, "decision_reason", "") or "(no reason recorded)"))
 
 
+def _engineering_target_waits(inbox: Any, target: str | None) -> str:
+    """Why an engineering proposal for ``target`` would be refused before any
+    model is paid: the file already sits under a pending/approved self-apply
+    item (the operator's lane applies those, not the agent), or a human
+    denied it recently (block 3 cooldown). Empty string = nothing waits.
+    An inbox that cannot say (no reader, unreadable) answers «unknown» and
+    the cycle proceeds as before — doubt must not widen a refusal silently."""
+    from core.self_apply_bridge import SELF_APPLY_OPERATION
+
+    if not target:
+        return ""
+    reader = getattr(inbox, "pending_targets", None)
+    if reader is not None:
+        try:
+            waiting = reader(operation=SELF_APPLY_OPERATION)
+        except Exception:  # noqa: BLE001 — an unreadable inbox is «unknown», not «waits»
+            waiting = frozenset()
+        if waiting and target in waiting:
+            return "target_under_pending_or_approved_item:the_lane_applies_it_not_you"
+    denied = getattr(inbox, "recently_denied_targets", None)
+    if denied is not None:
+        try:
+            if target in denied(operation=SELF_APPLY_OPERATION):
+                return "target_denied_recently:cooldown"
+        except Exception:  # noqa: BLE001 — same rule: doubt does not refuse
+            return ""
+    return ""
+
+
+def _engineering_preflight(
+    *, agent: Any, workspace: Any, action: Any, config: CampaignConfig,
+    approval_inbox: Any,
+) -> CampaignActionOutcome | None:
+    """Замер 2026-09-04 (вечер OpenAI, 65 центов): под целью «выполни
+    одобренный раскол X» цикл сначала ПЛАТИЛ за полный прогон модели
+    (планировщик + синтез, ~25k токенов), и лишь потом производитель заявок
+    отвечал бесплатным «approval_wait: цель уже ждёт полосы». Девять таких
+    циклов, три из них — по расколам, одобренным в тот же день; ноль заявок.
+    Ожидание человека читается ДО прогона и стоит ноль: одобренное — не
+    предмет для нового предложения, недавно отклонённое — остывает (L10).
+    ``None`` = ничего не ждёт, прогон идёт как раньше."""
+    from core.approval_inbox import ApprovalInbox
+    from core.best_next_action import resolve_goal_subject
+
+    ws = Path(workspace)
+    inbox = approval_inbox or ApprovalInbox(path=ws / "data" / "approval_inbox.jsonl")
+    target = action.target_path or resolve_goal_subject(
+        config.goal, exists=lambda rel: (ws / rel).is_file(),
+        command_module=command_module,
+    )
+    waiting = _engineering_target_waits(inbox, target)
+    if not waiting:
+        return None
+    _log(agent, "campaign_engineering_waiting", {
+        "target": str(target or ""), "reason": waiting,
+    })
+    return CampaignActionOutcome(
+        result="approval_wait", llm_calls_spent=0, cost_units_spent=0,
+        work_done=False, subject=str(target or ""),
+    )
+
+
+def _engineering_hands(
+    *, agent: Any, workspace: Any, action: Any, config: CampaignConfig,
+    approval_inbox: Any,
+) -> str | None:
+    """Инженерные руки: дорога хартия → бэклог (2026-08-19). Продукт — заявка
+    ленты, все ворота ниже по течению стоят как стояли. Предмет берётся из
+    РЕШЕНИЯ, а если решение его не назвало — из цели тем же существованием в
+    рабочей области (MIR-158/159): голова и руки связаны значением, а не
+    совпадением тика."""
+    from core.best_next_action import resolve_goal_subject
+
+    ws = Path(workspace)
+    return _propose_engineering_step(
+        agent=agent, workspace=workspace, approval_inbox=approval_inbox,
+        target=action.target_path or resolve_goal_subject(
+            config.goal, exists=lambda rel: (ws / rel).is_file(),
+            command_module=command_module,
+        ),
+    )
+
+
+def _engineering_product_only(
+    agent: Any, *, work_done: bool, proposal: str | None, artifact: str | None,
+) -> tuple[bool, str | None]:
+    """У инженерного действия продукт — заявка, не рассуждение (тот же замер:
+    девять «completed / work_done» без единой заявки — текст, кончавшийся
+    «следующий шаг: человек должен утвердить…», считался работой, а его
+    дайджест как artifact делал цикл «продуктивным» и держал цель живой).
+    Дайджест остаётся в журнале, не в леджере."""
+    work_done = work_done and proposal is not None
+    if proposal is None and artifact is not None:
+        _log(agent, "campaign_engineering_prose_only", {"digest": artifact[:200]})
+        artifact = None
+    return work_done, artifact
+
+
+def _goal_answer_and_digest(report: Any) -> tuple[str, str | None]:
+    """Ответ ВЫПОЛНЕННОЙ задачи цели и его 160-значный дайджест как artifact.
+    A4 (2026-09-03): вопрос ворот (clarify) и пустой ответ (inconclusive)
+    продуктом не являются."""
+    for task_report in getattr(report, "tasks", []) or []:
+        if getattr(task_report.task, "kind", "") != "goal":
+            continue
+        answer = (task_report.details or {}).get("answer")
+        if answer and getattr(task_report, "status", "") == "done":
+            goal_answer = str(answer)
+            digest = " ".join(goal_answer.split())[:160]
+            return goal_answer, (f"reasoning: {digest}" if digest else None)
+        return "", None
+    return "", None
+
+
 def _propose_engineering_step(
     *, agent: Any, workspace: Any, approval_inbox: Any, target: str | None = None,
 ) -> str | None:
@@ -769,6 +883,21 @@ def _default_execute_action(
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits
 
+    # Замер 2026-09-04 (вечер OpenAI, 65 центов): под целью «выполни
+    # одобренный раскол X» цикл сначала ПЛАТИЛ за полный прогон модели
+    # (планировщик + синтез, ~25k токенов), и лишь потом производитель заявок
+    # отвечал бесплатным «approval_wait: цель уже ждёт полосы». Девять таких
+    # циклов, три из них — по расколам, одобренным в тот же день; ноль заявок.
+    # Ожидание человека читается ДО прогона и стоит ноль: одобренное — не
+    # предмет для нового предложения, а недавно отклонённое — остывает (L10).
+    if action.action == "propose_engineering_task" and not config.dry_run:
+        refused = _engineering_preflight(
+            agent=agent, workspace=workspace, action=action, config=config,
+            approval_inbox=approval_inbox,
+        )
+        if refused is not None:
+            return refused
+
     llm_before, cost_before = _cost_totals(agent)
     focused_goal = _action_focused_goal(config.goal, action)
     # A3 (2026-09-03): предложение этого цикла — ДЕЛЬТА ящика, не его размер.
@@ -803,19 +932,7 @@ def _default_execute_action(
     except (AttributeError, OSError, ValueError):
         new_items = []
     proposal = f"approvals_new={len(new_items)}" if new_items else None
-    artifact = None
-    goal_answer = ""
-    for task_report in getattr(report, "tasks", []) or []:
-        if getattr(task_report.task, "kind", "") == "goal":
-            answer = (task_report.details or {}).get("answer")
-            # A4 (2026-09-03): продукт — только у ВЫПОЛНЕННОЙ задачи; вопрос
-            # ворот (clarify) и пустой ответ (inconclusive) продуктом не являются.
-            if answer and getattr(task_report, "status", "") == "done":
-                goal_answer = str(answer)
-                digest = " ".join(goal_answer.split())[:160]
-                if digest:
-                    artifact = f"reasoning: {digest}"
-            break
+    goal_answer, artifact = _goal_answer_and_digest(report)
     # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
     # здесь в 160-значном дайджесте: четвёртый прогон дня процитировал свой
     # дефект из настоящей трассы, получил 6 из 6 подтверждённых — и кампания
@@ -844,27 +961,20 @@ def _default_execute_action(
         )
         if drafted:
             proposal = f"{proposal}; {drafted}" if proposal else drafted
-    # Инженерные руки: дорога хартия → бэклог (2026-08-19). Продукт — заявка
-    # ленты, все ворота ниже по течению стоят как стояли.
     if action.action == "propose_engineering_task" and not config.dry_run:
-        # Предмет берётся из РЕШЕНИЯ, а если решение его не назвало — из цели
-        # тем же существованием в рабочей области (MIR-158/159). Голова и руки
-        # связаны значением, а не совпадением тика.
-        from core.best_next_action import resolve_goal_subject
-
-        _ws = Path(workspace)
-        engineered = _propose_engineering_step(
-            agent=agent, workspace=workspace, approval_inbox=approval_inbox,
-            target=action.target_path or resolve_goal_subject(
-                config.goal, exists=lambda rel: (_ws / rel).is_file(),
-                command_module=command_module,
-            ),
+        engineered = _engineering_hands(
+            agent=agent, workspace=workspace, action=action, config=config,
+            approval_inbox=approval_inbox,
         )
         if engineered:
             proposal = f"{proposal}; {engineered}" if proposal else engineered
     # MIR-117 (норма A): токен жизненного цикла очереди не копируется в исход
     # цикла — прогон, чью единственную задачу отвергли, писал «completed».
     semantic, work_done = report.semantic_result()
+    if action.action == "propose_engineering_task":
+        work_done, artifact = _engineering_product_only(
+            agent, work_done=work_done, proposal=proposal, artifact=artifact,
+        )
     return CampaignActionOutcome(
         result=semantic,
         llm_calls_spent=max(0, llm_after - llm_before),

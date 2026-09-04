@@ -558,10 +558,7 @@ def _ask(
         user += (
             "\n\nRecent VERDICTS on your own past proposals (learn from the "
             "fate of your work — what was valued, what was rejected and why):\n"
-            + "\n".join(
-                f"- [{v}] {s}" + (f" — reviewer: {r}" if r else "")
-                for v, s, r in verdicts
-            )
+            + "\n".join(_verdict_line(v, s, r) for v, s, r in verdicts)
         )
     if mentor_questions:
         # Канал наставника (MIR-178): вопросы, не приказы. Власть названа в
@@ -628,6 +625,19 @@ def _operator_vetoes(root: Path) -> tuple[str, ...] | None:
         line.strip() for line in raw.splitlines()
         if line.strip() and not line.strip().startswith("#")
     )
+
+
+def _verdict_line(v: str, s: str, r: str) -> str:
+    """One verdict as the charter reads it. Замер 2026-09-04: три одобренных
+    раскола породили цели «выполни одобренный раскол», а выполнять их агент
+    не может — одобренное применяет полоса оператора; цель кончалась
+    оплаченным прогоном и бесплатным approval_wait."""
+    line = f"- [{v}] {s}" + (f" — reviewer: {r}" if r else "")
+    if v == "approved":
+        line += (" — APPROVED items are applied by the operator's lane, not by "
+                 "you: do not set a goal to implement or re-propose this; "
+                 "choose other work")
+    return line
 
 
 def _ask_shorter(llm: Any, goal: str) -> str:
