@@ -744,6 +744,28 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "model_route":
+        # His routing door (2026-09-04 22:20): role, provider, reason required;
+        # model required unless provider == release; evidence optional.
+        required = ("role", "provider", "reason")
+        missing = [k for k in required if not str(args.get(k) or "").strip()]
+        if missing:
+            warnings.append(f"step[{idx}]: model_route missing {missing}; step dropped")
+            return None
+        keep = {k: str(args[k]).strip() for k in ("role", "provider", "model", "reason", "evidence") if args.get(k)}
+        extra = sorted(set(args) - set(keep) - {"model", "evidence"})
+        if extra:
+            warnings.append(f"step[{idx}]: model_route dropping unexpected args {extra!r}")
+        return {
+            "tool": "model_route",
+            "arguments": keep,
+            "label": f"model_route:{keep['role']}->{keep['provider']}",
+            "expected_outcome": (
+                "set=true with route_id when the decision was stored (journaled as "
+                "agent_policy:<id>), or refused_by naming why; the allowed pool."
+            ),
+        }
+
     if tool_name == "memory_bank":
         # Contract: exactly text, kind, provenance — all three strings, all required.
         required = ("text", "kind", "provenance")

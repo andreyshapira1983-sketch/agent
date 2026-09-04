@@ -103,12 +103,68 @@ def _provider_rows(usage_ledger: Any, provider: str) -> list[dict]:
         return []
 
 
+def _active_routes(routing_policy: Any, env: dict[str, str]) -> list[dict[str, Any]]:
+    """Who answers each role and by whose word: his policy record, the env
+    pin, or the default layers. Facts for his next decision, never the
+    decision (operator's word 2026-09-04 22:20)."""
+    # The roster's short labels versus the router's role names: a decision is
+    # recorded under the router's name, so it is resolved and shown by it.
+    canonical = {"repair": "repair_proposal", "memory": "memory_summary"}
+    out: list[dict[str, Any]] = []
+    for label, prefixes in _ROLE_PREFIXES:
+        role = canonical.get(label, label)
+        choice = None
+        if routing_policy is not None:
+            try:
+                choice = routing_policy.resolve(role)
+            except Exception:  # noqa: BLE001 — an unreadable policy reads as «no policy»
+                choice = None
+        if choice is not None:
+            out.append({"role": role, "source": "agent_policy", "id": choice.id,
+                        "provider": choice.provider, "model": choice.model, "reason": choice.reason})
+            continue
+        pinned = ""
+        model = ""
+        for prefix in prefixes:
+            pinned = (env.get(f"{prefix}_PROVIDER") or "").strip().lower()
+            model = (env.get(f"{prefix}_MODEL") or "").strip()
+            if pinned or model:
+                break
+        if pinned or model:
+            out.append({"role": role, "source": "env_pin", "id": "", "provider": pinned,
+                        "model": model, "reason": "pinned in .env by the operator; your decision replaces it"})
+        else:
+            out.append({"role": role, "source": "default", "id": "", "provider": "", "model": "",
+                        "reason": "no pin, no decision: the registry's selection policy or the default model"})
+    return out
+
+
+def _measured_outcomes(workspace: Any) -> list[dict[str, Any]]:
+    """Verified share per role/model from his own episodes — the quality
+    axis he was asked to route by. Fewer than MIN_RUNS runs is noise."""
+    if workspace is None:
+        return []
+    try:
+        from core.model_outcomes import MIN_RUNS, measured_outcomes
+
+        rows = sorted(measured_outcomes(workspace), key=lambda o: (-o.runs, o.role))
+    except Exception:  # noqa: BLE001 — no outcomes = nothing measured, never «all good»
+        return []
+    return [{
+        "role": o.role, "provider": o.provider, "model": o.model, "runs": o.runs,
+        "verified_share": round(o.verified_share, 2), "defect_share": round(o.defect_share, 2),
+        "noise": o.runs < MIN_RUNS,
+    } for o in rows[:10]]
+
+
 def model_roster(
     *,
     usage_ledger: Any = None,
     budget_ledger: Any = None,
     env: dict[str, str] | None = None,
     now: datetime | None = None,
+    routing_policy: Any = None,
+    workspace: Any = None,
 ) -> dict[str, Any]:
     """The roster as data. Every field is read from existing state; a missing
     source is reported as such, never as a healthy default."""
@@ -161,7 +217,11 @@ def model_roster(
                            "left": (max(0, limit - used) if limit > 0 else None)}
         except Exception:  # noqa: BLE001 — an unreadable budget is unknown, not healthy
             day = {"known": False}
-    return {"ts": moment.isoformat(), "providers": providers, "day_cost_units": day}
+    return {
+        "ts": moment.isoformat(), "providers": providers, "day_cost_units": day,
+        "routes": _active_routes(routing_policy, env),
+        "outcomes": _measured_outcomes(workspace),
+    }
 
 
 def model_roster_block(roster: dict[str, Any]) -> str:
@@ -189,5 +249,23 @@ def model_roster_block(roster: dict[str, Any]) -> str:
         lines.append(f"Day ceiling (model_cost_units): used {day['used']} of {day['limit']}, left {left}.")
     else:
         lines.append("Day ceiling: unknown (budget ledger not readable here).")
+    routes = roster.get("routes") or []
+    if routes:
+        lines.append("Who answers each role now (your model_route decisions come first, "
+                     "then the operator's .env pins, then the defaults):")
+        for r in routes:
+            who = f"{r['provider'] or '?'}/{r['model'] or '?'}"
+            tag = f" [{r['id']}]" if r.get("id") else ""
+            lines.append(f"- {r['role']}: {who} — {r['source']}{tag}: {r['reason'][:160]}")
+    outcomes = roster.get("outcomes") or []
+    if outcomes:
+        lines.append("Measured outcomes per role/model (verified share of episodes; "
+                     "runs below the minimum are noise):")
+        for o in outcomes:
+            noise = " (noise)" if o.get("noise") else ""
+            lines.append(
+                f"- {o['role']} on {o['provider']}/{o['model']}: {o['runs']} runs, "
+                f"verified {o['verified_share']}, defects {o['defect_share']}{noise}"
+            )
     lines.append("</model_roster>")
     return "\n".join(lines)

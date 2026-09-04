@@ -206,6 +206,8 @@ class AgentLoopContext:
             budget_ledger = getattr(usage_ledger, "budget_ledger", None)
             return model_roster_block(model_roster(
                 usage_ledger=usage_ledger, budget_ledger=budget_ledger,
+                routing_policy=getattr(self.model_router, "routing_policy", None),
+                workspace=self._file_read_workspace_root(),
             ))
         except Exception as exc:  # noqa: BLE001 — глаз не вправе ронять ход
             self.log.log("model_roster_unavailable", {"error": repr(exc)[:200]})
