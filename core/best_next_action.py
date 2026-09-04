@@ -17,84 +17,93 @@ order, so the same signals always yield the same advice.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, replace
-from typing import Literal
 
 from core.approval_triage import TriageReport
+from core.best_next_action_helpers import (  # noqa: F401 -- re-exported
+    _COMMAND_TOKEN_RE,
+    _DOC_NAME_RE,
+    _DRAFT_VERB_RE,
+    _DRY_RUN_STREAK_ALERT,
+    _ENGINEERING_CONTEXT_RE,
+    _ENGINEERING_GOAL_RE,
+    _GOAL_ID_RE,
+    _GOAL_STOP_WORDS,
+    _GOAL_WORD_RE,
+    _INBOX_BACKLOG_PENDING,
+    _INBOX_DEBT_DUPLICATES,
+    _OUTSIDE_RE,
+    _OWN_ISSUE_MIN_SHARED_WORDS,
+    _P_CAUSAL_CLIMB,
+    _P_CAUSAL_DISCRIMINATE,
+    _P_CAUSAL_EXPERIMENT,
+    _P_CHARTER_DOCUMENT,
+    _P_DAEMON_DOWN,
+    _P_DRY_RUN_STUCK,
+    _P_ENGINEERING_TASK,
+    _P_EXTERNAL_STUDY,
+    _P_INBOX_BACKLOG,
+    _P_INBOX_DEBT,
+    _P_OBSERVE,
+    _P_OWN_ISSUE_NAMED,
+    _P_SELF_IMPROVEMENT_FAILURE,
+    _P_SELF_IMPROVEMENT_FAILURE_FRESH,
+    _P_SPEC_BIRTH,
+    _P_TESTS_FAIL,
+    _P_TESTS_INCONCLUSIVE,
+    _P_TICK_ERROR,
+    _PY_TARGET_RE,
+    _STUDY_VERB_RE,
+    _SUBJECT_TOKEN_RE,
+    _SUPPRESSIBLE_ACTIONS,
+    _SUPPRESSIBLE_SEVERITIES,
+    Severity,
+    _goal_names_issue,
+    _is_engineering_goal,
+    _named_target,
+    doc_target_from_goal,
+    is_suppressible_alert,
+    resolve_goal_subject,
+    unresolved_goal_targets,
+)
 from core.self_improvement_issues import (
     SelfImprovementIssue,
     suppress_generic_issue_duplicates,
 )
 
-Severity = Literal["critical", "high", "medium", "low", "none"]
-
-
 # Priority scores. Higher wins. Chosen so the ordering is obvious and stable:
 # if the daemon is not even ticking, nothing else can be trusted; a hard tick
 # error outranks a test failure; a test failure outranks softer hygiene work.
-_P_DAEMON_DOWN = 100      # heartbeat missing/stale: agent may not be running
-_P_TICK_ERROR = 90        # last tick raised: the loop itself is broken
-_P_TESTS_FAIL = 80        # concrete failing tests: minimal repair is provable
-_P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
-_P_ENGINEERING_TASK = 59  # the campaign goal asks for engineering work: the
                           # road charter -> backlog (2026-08-19); outranks the
                           # document so a goal naming both builds, not writes.
-_P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
 #   above the durable-issue habit (55) — live 2026-08-15 the head chose "draft
 #   the contract" and the hands did habitual repair — below health alarms (60+)
-_P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
 #   repair habit (55), below the doc goal (58) — a request to write is more
 #   concrete than a request to read
-_P_OWN_ISSUE_NAMED = 59   # the goal names one of the agent's OWN registered
                           # defects: the hands follow the head (Д3, 2026-09-03);
                           # ties with the engineering task, which is admitted
                           # first and therefore wins when both apply
-_P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
-_P_SELF_IMPROVEMENT_FAILURE_FRESH = 60  # a failure younger than a day is a
 #   PERISHABLE signal: its trace, tree and memory still agree (the 2026-08-28
 #   live probe drifted from tick state in 3.5h), while a measured backlog
 #   split keeps until tomorrow — so fresh own pain outranks the routine (59).
 #   Ties with health at 60 resolve to health: it is admitted first (MIR-186).
-_P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
-_P_CAUSAL_EXPERIMENT = 47  # claims with experiment specs: the intervention
                           # rung is the deepest — prove causes first
-_P_CAUSAL_DISCRIMINATE = 46  # claims with live probes: finishing an open
                           # investigation outranks starting a new one
-_P_CAUSAL_CLIMB = 45      # unexplained self-failure observations: investigate
                           # own defects before admin debt (MIR-096, slice 1)
-_P_SPEC_BIRTH = 44      # marked claims without specs: the judge is exhausted
                         # there, and only a born experiment can move the claim
                         # (agent's wiring answer, birth_action; weight chain
                         # 47 exp > 46 judge > 45 explain > 44 birth > 40 stuck)
-_P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
-_P_INBOX_BACKLOG = 30     # large pending queue with no clear duplicates
-_P_OBSERVE = 0            # nothing pressing: stay in honest observation
 
 
 # Thresholds (deliberately conservative — advice, not automation).
-_DRY_RUN_STREAK_ALERT = 5     # ~5 consecutive dry-run ticks before nudging
-_INBOX_DEBT_DUPLICATES = 3    # this many duplicates is real debt, not noise
-_INBOX_BACKLOG_PENDING = 12   # backlog worth a dedicated review pass
 
 # Severities an operator may acknowledge away (see core.alert_ack). Objective
 # breakages (critical/high) are intentionally excluded — never suppressible.
-_SUPPRESSIBLE_SEVERITIES = frozenset({"medium", "low"})
 
 # The advisory alert actions (exactly the medium/low candidates below) that an
 # operator is allowed to acknowledge. Kept as an explicit registry so the REPL
 # can validate an ack request from the action NAME alone, before any signals
 # are gathered. Critical/high actions are deliberately absent.
-_SUPPRESSIBLE_ACTIONS = frozenset({
-    "reduce_inbox_duplicate_debt",  # medium
-    "review_dry_run_stall",         # medium
-    "review_inbox_backlog",         # low
-})
-
-
-def is_suppressible_alert(action: str) -> bool:
-    """Whether an alert with this action name may be acknowledged. Pure."""
-    return str(action) in _SUPPRESSIBLE_ACTIONS
 
 
 @dataclass(frozen=True)
@@ -158,35 +167,10 @@ class BestNextAction:
 
 
 #: Глагол черновика + имя .md в цели — иначе цель не документная.
-_DRAFT_VERB_RE = re.compile(
-    r"\b(draft|write|compose|напиш|черновик|состав)", re.IGNORECASE
-)
-_DOC_NAME_RE = re.compile(r"[\w/.\-]+\.md\b")
-
-
-def doc_target_from_goal(goal: str) -> str:
-    """Repo-путь документа, который цель просит написать, или "".
-
-    Явный путь в цели сохраняется; голое имя едет в knowledge/doctrine/future/
-    — дом целевых (ещё не действующих) документов доктрины.
-    """
-    text = str(goal or "")
-    if not _DRAFT_VERB_RE.search(text):
-        return ""
-    match = _DOC_NAME_RE.search(text)
-    if not match:
-        return ""
-    name = match.group(0).strip("'\"")
-    if "/" in name:
-        return name
-    return f"knowledge/doctrine/future/{name}"
 
 
 #: Учебная цель: глагол изучения + внешний мир. Решение оператора 2026-08-16
 #: («строй автомат»): чтение внешнего мира — законная работа кампании.
-_STUDY_VERB_RE = re.compile(r"\b(изучи|прочитай|почитай|посмотри|study|read|research)",
-                            re.IGNORECASE)
-_OUTSIDE_RE = re.compile(r"интернет|сайт|http|www\.|в вебе|\bweb\b", re.IGNORECASE)
 
 
 def _candidate_external_study(goal: str) -> BestNextAction | None:
@@ -214,80 +198,16 @@ def _candidate_external_study(goal: str) -> BestNextAction | None:
 
 
 #: Инженерная цель хартии: слова о бэклоге/расколе/падающем тесте/разрыве.
-_ENGINEERING_GOAL_RE = re.compile(
-    r"(?i)backlog|бэклог|self-build|failing.?test|падающ\w+ тест|proven gap"
-    r"|доказанн\w+ разрыв|раскол|module.?split|split (?:of|proposal|plan)"
-    r"|engineering candidate|инженерн\w+ кандидат|разбиени\w+ модул",
-)
 #: Структурная половина (три словарных промаха за 2026-08-19): цель, которая
 #: НАЗЫВАЕТ .py-файл и говорит об инженерном действии над ним, — инженерная,
 #: какими бы словами её ни сформулировала модель.
-_PY_TARGET_RE = re.compile(r"\b[\w/\\.-]+\.py\b")
-_ENGINEERING_CONTEXT_RE = re.compile(
-    r"(?i)split|refactor|restructur|decompos|модул|module|раздели|разбей|почини|fix",
-)
-
-
-def _is_engineering_goal(text: str) -> bool:
-    if _ENGINEERING_GOAL_RE.search(text):
-        return True
-    return bool(_PY_TARGET_RE.search(text) and _ENGINEERING_CONTEXT_RE.search(text))
 
 
 #: Токен, похожий на путь: минимум один разделитель каталогов. Голое слово
 #: путём не считается — иначе предметом цели становилась бы любая фраза.
-_SUBJECT_TOKEN_RE = re.compile(r"[\w.-]+(?:[/\\][\w.-]+)+")
 #: Второй словарь предметов: имя команды. Живой пример из ленты — цель
 #: «Trace `:team-run` sharing of models…», у которой предмет назван точно, а
 #: путеподобных токенов нет ни одного (MIR-174).
-_COMMAND_TOKEN_RE = re.compile(r":[a-z][a-z0-9-]*")
-
-
-def resolve_goal_subject(text: str, *, exists, command_module=None) -> str | None:
-    """Артефакт, О КОТОРОМ цель, — по существованию, а не по суффиксу.
-
-    Два словаря, потому что агент пишет обоими: путь к файлу и имя команды.
-    Читать один означало объявлять «предмет не назван» там, где он назван точно
-    (MIR-174). `exists` и `command_module` внедряются, чтобы решающая таблица
-    осталась чистой функцией. Замер и границы: MIR-158, MIR-174.
-    """
-    for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
-        token = raw.replace("\\", "/").strip("`'\",.;:()[]")
-        for candidate in (token, f"{token}.py"):
-            if candidate and exists(candidate):
-                return candidate
-    if command_module is not None:
-        for raw in _COMMAND_TOKEN_RE.findall(str(text or "")):
-            module = command_module(raw)
-            if module and exists(module):
-                return module
-    return None
-
-
-def unresolved_goal_targets(text: str, *, exists) -> tuple[str, ...]:
-    """Пути, НАЗВАННЫЕ целью и не существующие в рабочей области.
-
-    Замер, отвергнутые варианты и границы: MIR-161 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Нужна, чтобы отказ разрешения не был неотличим от отсутствия имени.
-    """
-    out: list[str] = []
-    for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
-        token = raw.replace("\\", "/").strip("`'\",.;:()[]")
-        if not token or exists(token) or exists(f"{token}.py"):
-            continue
-        out.append(token)
-    return tuple(dict.fromkeys(out))
-
-
-def _named_target(text: str) -> str | None:
-    """Файл, названный в тексте цели, если он там назван.
-
-    Отдельная функция, а не второй разбор внутри решения: тот же `_PY_TARGET_RE`,
-    которым цель признаётся инженерной, отдаёт СОВПАДЕНИЕ, а не только «да».
-    Решение, принятое ПОТОМУ ЧТО файл назван, обязано этот файл унести.
-    """
-    match = _PY_TARGET_RE.search(text or "")
-    return match.group(0) if match else None
 
 
 def _candidate_engineering_task(goal: str) -> BestNextAction | None:
@@ -339,44 +259,12 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
 #: Слова цели, по которым она может назвать запись реестра дефектов: не короче
 #: четырёх букв и не служебные. Порог совпадений — три РАЗНЫХ содержательных
 #: слова заголовка либо буквальное совпадение отпечатка/действия/файла.
-_GOAL_WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё_][\w'-]{3,}")
-_GOAL_STOP_WORDS = frozenset({
-    "that", "this", "with", "from", "into", "then", "than", "when", "what",
-    "which", "where", "while", "about", "after", "before", "their", "there",
-    "them", "have", "been", "were", "will", "your", "each", "only", "also",
-    "draft", "reviewed", "proposal", "read", "run", "make", "add",
-})
-_OWN_ISSUE_MIN_SHARED_WORDS = 3
-
-
-def _goal_names_issue(goal: str, issue: dict) -> bool:
-    """Называет ли цель ЭТУ запись реестра: отпечаток, действие, файл — буквально;
-    заголовок — тремя содержательными словами."""
-    text = str(goal or "")
-    low = text.lower()
-    if not low.strip():
-        return False
-    for literal in (
-        str(issue.get("fingerprint") or ""),
-        str(issue.get("action") or ""),
-        *[str(f) for f in issue.get("related_files") or ()],
-    ):
-        if literal and literal.lower() in low:
-            return True
-    goal_words = {
-        w.lower() for w in _GOAL_WORD_RE.findall(text)
-    } - _GOAL_STOP_WORDS
-    title_words = {
-        w.lower() for w in _GOAL_WORD_RE.findall(str(issue.get("title") or ""))
-    } - _GOAL_STOP_WORDS
-    return len(goal_words & title_words) >= _OWN_ISSUE_MIN_SHARED_WORDS
 
 
 #: Конкретная вещь, названная целью: идентификатор записи/эпизода/прогона —
 #: слово с подчёркиванием или дефисом и хвостом из шести и более шестнадцатеричных
 #: знаков (`ep-run-run_fc8125…`, `sii_5423bb16…`, `run_7394…`). Пути файлов сюда
 #: не входят — их разрешает `resolve_goal_subject`.
-_GOAL_ID_RE = re.compile(r"\b[A-Za-z]+[_-][\w-]*?[0-9a-f]{6,}\b")
 
 
 def _habit_shadowed_by_goal(
