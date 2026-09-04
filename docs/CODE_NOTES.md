@@ -3170,6 +3170,94 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 10 — the agent is switched off and the money burners are repaired (2026-09-04, night)
+
+At 19:20 MSK OpenAI answered a probe after a day of «no credits». The
+router did what P1 predicted: within its 120-minute probe it moved the
+planner and synthesizer back to gpt-5.6. In the next 54 minutes the
+campaign spent $0.65 (24 calls, 282 542 tokens). What that bought, by the
+journals: 32 cycles, nine «completed / work_done», zero approval items,
+zero files, nine texts ending «следующий шаг: человек должен утвердить…»,
+three of them under the goal «Implement the approved split of X» — X being
+a split the operator had approved that afternoon. At 20:20 the operator
+said «выключай агента, начинай исправление полноценно». The process was
+killed, the Windows task disabled. Everything below is repair of measured
+defects; no organ was grown.
+
+- **An approved target is not paid for twice** (`_engineering_preflight`,
+  `_engineering_product_only`): under a goal naming a file that already sits
+  under a pending/approved self-apply item, the cycle paid for a full model
+  run first and only then heard the producer's free `approval_wait`. The
+  wait is now read BEFORE the run and costs nothing; a recent human denial
+  is read the same way (block 3 cooldown). For the engineering action the
+  product is the inbox item: prose is no longer work, and its digest goes
+  to the log, not the ledger — as an artifact it made the cycle
+  «productive» and kept the goal alive. The charter's verdict lines now say
+  that approved items are applied by the operator's lane, not by him.
+- **A decline is not a product; a permission question is not a proposal**
+  (`_product`, `_approvals_born`): the hands return a string either way,
+  and «doc_declined:doc_exists» rode into `proposal`; `approvals_new`
+  counted the agent's own allow_effects questions — 29 of them burned the
+  40/day grant by 12:28 as «useful cycles».
+- **The eye sees every key** (`model_roster`): six credential slots, not
+  three; Google's key is shown «NO CLIENT IN THIS CODE — cannot be called».
+  The operator's dream — that he assigns keys to roles himself — is blocked
+  today by two things that are the operator's, not his: three role pins in
+  .env, and the absence of any door through which he could write a route.
+  Both wait for the word; the exam (P5) is whether he says anything about
+  roles when he sees the roster.
+- **The three approved splits went stale** under the eye commit (the
+  anatomy files changed). Regenerated without a model (the AST slice is
+  deterministic), moved-name sets identical (22/27/44), the operator's
+  approval carried over by operation and target each time, then applied
+  through the lane one at a time under external containment. It took SIX
+  generations of the same proposal, because the lane's guards found, one
+  per run, defects the agent's own producer had carried since those guards
+  were born — every one a certain rollback for every split with a new
+  module, and none of them ever named in his registry:
+  1. the map: `_sync_anatomy_index` wrote a canned row and never touched
+     «_Total: N modules» while the anatomy guard compares byte for byte —
+     now the proposal's map is rendered by `scripts/gen_anatomy.py` for the
+     proposed tree (`core/anatomy_sync.py`, born of this surgery when the
+     producer crossed its size ratchet);
+  2. the order: groups were synced AFTER the map, so the generator refused
+     («not grouped») and the canned path ran anyway;
+  3. the freeze: a new code file must be named in the freeze register — the
+     three helpers are, by the operator's approval of the splits;
+  4. the target's imports: the slice left the moved functions' imports
+     behind (12 unused) and appended the re-export un-sorted; the repo-wide
+     lint-debt guard sat exactly on its baseline (120) — orphaned imports
+     are now pruned by AST and the re-export lands in isort order;
+  5. the helper's imports: whole statements copied verbatim (six unused
+     names) and un-sorted blocks — both post-images now go through the same
+     `ruff --fix --select I001,F401` the guard applies.
+  Rollback was honest every time: HEAD never moved, the tree came back
+  clean, the temp branch was deleted (family «lane recovery paths», 6.4/6.9,
+  NOT reproduced tonight — the paths that were exercised held).
+  Outcome: `smart_memory` (22 names → helpers, 1878 → 1708 lines) and
+  `best_next_action` (44 names, 1311 → 1107) landed through the lane with
+  targeted + full tests green and were fast-forwarded by hand;
+  `operator_intent_patterns` was rolled back on its merits and denied:
+  `tests/test_local_routing_recall.py` derives its corpus from the module's
+  SOURCE TEXT, so moving the pattern constants empties it — a textual
+  coupling the dependency map cannot see (registry: sii_7194b9f6).
+- **The memory-recall door** (`tools/memory_recall.py`): the read half of
+  the authority change agreed the same day — at most 5 records, active
+  store only, newest first, every record marked LOW-TRUST with its source,
+  an unreadable store is «unavailable», never «empty memory». Without it the
+  exam STORE → RETRIEVE → USE could not be sat: passive `<long_term_memory>`
+  injection is the loop's choice, not his.
+- **Evidence into his registry** (five entries, 10 open): web selection
+  observed / use not observed; the doctrine-files boilerplate; outside-study
+  goals dying as template repeats; 23/23 «inexpressible» on a one-target
+  sandbox; the $0.65 evening. One line corrected the same evening: repeat
+  cycles cost 0 calls — the extra planner calls were the charter's seven
+  goal changes.
+
+Left for the next word: the families from the silent-failure review, the
+Google client (a generic capability, the class the freeze permits, but still
+a word), the role pins, and switching the agent back on.
+
 ## Block 9 — the eye, the door, and the first live day (2026-09-04)
 
 The first full day after the switch-on, under the operator's standing word
