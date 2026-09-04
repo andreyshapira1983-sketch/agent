@@ -31,6 +31,7 @@ EvidenceKind = Literal[
     "session_dialogue", # verbatim earlier turn of THIS session (issue #119)
     "user_explicit",    # :remember / explicit consent / direct user command
     "runtime",          # this process measuring ITSELF — interpreter, pid, cwd
+    "sensor",           # a block the loop read from ITS OWN journals (model roster, spend mirror)
     "llm_claim",        # LLM-generated text WITHOUT external grounding
     "unknown",          # last-resort bucket
 ]
@@ -38,7 +39,7 @@ EvidenceKind = Literal[
 ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
     "file", "web_page", "web_search_hit", "tool_output", "test_result",
     "log_event", "shell_output", "diff_preview", "memory",
-    "session_dialogue", "user_explicit", "runtime", "llm_claim", "unknown",
+    "session_dialogue", "user_explicit", "runtime", "sensor", "llm_claim", "unknown",
 )
 
 
@@ -53,6 +54,7 @@ ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
 #   > llm-claim > unknown
 DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "user_explicit":    1.00,
+    "sensor":           0.90,  # measured about this agent by its own sensors (2026-09-04)
     # The process reading its own interpreter, version, pid and cwd. Ranked
     # beside a test result and above a workspace file on purpose: a file can be
     # stale the moment after it is read, while these were measured by the very
@@ -659,6 +661,24 @@ def evidence_from_memory_record(
         # verifier can weigh provenance without parsing the sentence.
         origin=source,
         fetched_at=created_at,
+    )
+
+
+def evidence_from_sensor_block(*, name: str, content: str) -> Evidence:
+    """A block the loop itself injected from its own sensors (the model
+    roster, the spend mirror). Exam 2026-09-04, turn 3: the answerer read
+    fifteen facts off `<model_roster>` and the verifier classed every one as
+    «user asserted», so the low-evidence gate suppressed the whole answer —
+    a fact the loop measured was not evidence to the loop. Now it is, under
+    its own citation `[sensor:<name>]`, with the loop as origin."""
+    return make_evidence(
+        kind="sensor",
+        source_id=f"sensor:{name}",
+        obtained_via="sensor",
+        claim=f"Sensor block {name}, read by the loop from its own journals",
+        excerpt=content,
+        confidence=0.9,
+        origin="loop_sensor",
     )
 
 

@@ -74,6 +74,11 @@ Facts:
                                  (interpreter, python_version, platform, pid,
                                  cwd) — use it ONLY for statements about the
                                  agent's own execution, never for a world fact
+      [sensor:<name>]            a block this loop read from ITS OWN journals
+                                 (model_roster: providers, keys present or
+                                 absent, who answers each role and by whose
+                                 word, measured outcomes; spend_mirror) — a
+                                 measured fact about the agent, citable as such
       [dialogue:<turn>]          verbatim earlier turn of THIS session; use it
                                  ONLY for statements about the exchange itself
                                  (what was asked, what you answered, why that
@@ -231,7 +236,7 @@ def _strip_verification_markers(text: str) -> str:
 _ANSWER_CITATION_RE = re.compile(
     r"\s*\[(?:general-knowledge|web:[^\]]*|file:[^\]]*|file_write:[^\]]*|"
     r"file_read:[^\]]*|search:[^\]]*|"
-    r"test:[^\]]*|log:[^\]]*|shell:[^\]]*|diff:[^\]]*|memory:[^\]]*|"
+    r"test:[^\]]*|log:[^\]]*|shell:[^\]]*|diff:[^\]]*|memory:[^\]]*|sensor:[^\]]*|"
     r"user:target|user:[^\]]*|artifact:[^\]]*|prior_turn:[^\]]*|"
     r"user|declared:[^\]]*|verified:[^\]]*|unverified(?::[^\]]*)?)"
     r"(?:\s*;\s*[^\]]*)?\]",
@@ -369,7 +374,7 @@ def format_human_response(answer: str) -> str:
 
     return "\n\n".join(parts) if parts else answer
 
-def citation_for_evidence(ev: Evidence) -> str | None:
+def citation_for_evidence(ev: Evidence) -> str | None:  # noqa: PLR0911 — one branch per evidence kind
     source_id = ev.source_id
     if ev.kind == "file" and source_id.startswith("file:"):
         body = source_id[len("file:"):]
@@ -386,6 +391,9 @@ def citation_for_evidence(ev: Evidence) -> str | None:
     if ev.kind == "log_event" and source_id.startswith("log_event:"):
         body = source_id[len("log_event:"):]
         return f"[log:{body}]"
+    if ev.kind == "sensor" and source_id.startswith("sensor:"):
+        body = source_id[len("sensor:"):]
+        return f"[sensor:{body}]"
     if ev.kind == "shell_output" and source_id.startswith("shell_output:"):
         body = source_id[len("shell_output:"):]
         return f"[shell:{body}]"
