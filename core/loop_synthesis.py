@@ -471,6 +471,12 @@ class AgentLoopSynthesis:
                     "unmet information need under Unverified. Cite each fact as "
                     "[general-knowledge] when relying on prior knowledge."
                 )
+            # Exam 2026-09-04, turn 3: on a no-tool turn the sensor blocks
+            # (model roster, spend mirror) were in the prompt but not citable —
+            # fifteen facts read off them were booked «user asserted» and the
+            # whole answer was suppressed. The chain already carries them as
+            # `sensor:` evidence; offer the tokens here as on a tool turn.
+            sensor_citations_block = format_allowed_citations_block(self.last_provenance)
             user_prompt = (
                 f"{safety_block}"
                 f"{failure_block}"
@@ -479,11 +485,14 @@ class AgentLoopSynthesis:
                 f"{assumptions_block}"
                 f"{long_term_block}"
                 f"{history_block}"
+                f"{sensor_citations_block}"
                 f"planner_reasoning: {planner_reasoning}\n\n"
                 f"Question: {safe_question}\n\n"
                 "No <evidence> blocks are provided. If conversation_history or "
                 "long_term_memory covers the answer, cite those sources verbatim "
-                "(use [memory:<record_id>] for long_term_memory entries); "
+                "(use [memory:<record_id>] for long_term_memory entries); a fact read "
+                "from a <model_roster> or <spend_mirror> block is a measured fact about "
+                "this agent — cite it [sensor:model_roster] / [sensor:spend_mirror]; "
                 "otherwise answer from general knowledge with [general-knowledge] "
                 "as the source label. Follow the Output Contract from the system instructions."
                 + (f" {extra_guidance}" if extra_guidance else "")

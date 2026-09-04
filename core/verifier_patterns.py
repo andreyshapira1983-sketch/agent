@@ -16,6 +16,9 @@ CITATION_PREFIXES: dict[str, str] = {
     "tool": "tool_output",
     "diff": "diff_preview",
     "memory": "memory",
+    # A block the loop read from its own journals (model roster, spend
+    # mirror): evidence with the loop as origin (exam 2026-09-04, turn 3).
+    "sensor": "sensor",
     # Verbatim earlier turn of this session (issue #119). Resolves only to
     # dialogue-scoped claims; see core/evidence_classes.py.
     "dialogue": "session_dialogue",

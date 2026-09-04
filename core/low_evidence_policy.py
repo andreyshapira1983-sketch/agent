@@ -210,6 +210,9 @@ class LowEvidencePolicyResult:
     reason: str = ""
     locale: str = "en"
     suppressed_chars: int = 0
+    #: The head of what was suppressed — journaled, so a censored answer can
+    #: be read afterwards (exam 2026-09-04, turn 3: 15 claims vanished unseen).
+    suppressed_head: str = ""
     notes: tuple[str, ...] = field(default_factory=tuple)
     dialogue_supported_chunks: int = 0
     #: Never part of `supported_chunks` (operator ruling 2026-08-03, MIR-028):
@@ -239,6 +242,7 @@ class LowEvidencePolicyResult:
             "reason": self.reason,
             "locale": self.locale,
             "suppressed_chars": self.suppressed_chars,
+            "suppressed_head": self.suppressed_head,
         }
 
 
@@ -451,7 +455,8 @@ def evaluate_low_evidence_policy(
     supported_ratio = (supported / total) if total > 0 else 0.0
 
     def _result(*, triggered: bool, answer_out: str, reason: str,
-                locale: str = "en", suppressed_chars: int = 0
+                locale: str = "en", suppressed_chars: int = 0,
+                suppressed_head: str = "",
                 ) -> LowEvidencePolicyResult:
         return LowEvidencePolicyResult(
             triggered=triggered, answer=answer_out,
@@ -462,6 +467,7 @@ def evaluate_low_evidence_policy(
             user_asserted_chunks=user_asserted,
             reason=reason, locale=locale,
             suppressed_chars=suppressed_chars,
+            suppressed_head=suppressed_head,
         )
 
     if local_critique_active:
@@ -541,4 +547,5 @@ def evaluate_low_evidence_policy(
         reason=reason,
         locale=locale,
         suppressed_chars=max(0, len(answer) - len(short_answer)),
+        suppressed_head=answer[:800],
     )

@@ -62,6 +62,8 @@ _KIND_TO_CLASS: dict[str, EvidenceClass] = {
     # so a claim about the agent's own body can be verified instead of landing
     # in the same "cannot be determined" as everything else about itself.
     "runtime": "trace",
+    # A block the loop read from its own journals: about this agent, never the world.
+    "sensor": "trace",
     "session_dialogue": "session_dialogue",
 }
 

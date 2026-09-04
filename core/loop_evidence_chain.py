@@ -28,6 +28,7 @@ class CatalogueResult:
 #: собственная запись не независимый свидетель).
 _NON_TOOL_EVIDENCE_KINDS: frozenset[str] = frozenset({
     "memory", "user_explicit", "session_dialogue", "llm_claim", "runtime",
+    "sensor",  # his own roster/spend blocks: evidence for the verifier, not new knowledge
 })
 
 
@@ -102,8 +103,20 @@ class AgentLoopEvidenceChain:
         chain: ProvenanceChain,
         *,
         persistent_block: str,
+        spend_block: str = "",
     ) -> None:
         """Досыпать в цепочку то, что пришло не через шаги плана."""
+        # Блоки собственных сенсоров (реестр моделей, зеркало трат) — улика с
+        # цитатой `[sensor:<name>]` (экзамен 2026-09-04, ход 3: 15 фактов из
+        # <model_roster> судья счёл «утверждениями пользователя» и стёр ответ).
+        if spend_block and spend_block.strip():
+            from core.evidence import evidence_from_sensor_block
+
+            for name, block in _sensor_blocks(spend_block):
+                try:
+                    chain.add(evidence_from_sensor_block(name=name, content=block))
+                except Exception as exc:  # noqa: BLE001 — сборка цепочки не роняет ход; пропуск назван
+                    self.log.log("sensor_evidence_skipped", {"sensor": name, "error": repr(exc)[:200]})
         if persistent_block and self.persistent_store is not None:
             # `persistent_block` was built from a small set of records
             # in `_retrieve_persistent`; we replay that retrieval cheaply
@@ -300,3 +313,15 @@ class AgentLoopEvidenceChain:
             self.log.log("knowledge_pipeline", knowledge_result.to_log_payload())
 
         return _premature_keyword_fired, source_ranking, source_registry
+
+
+def _sensor_blocks(text: str) -> list[tuple[str, str]]:
+    """Split the spend mirror text into its tagged blocks: `<model_roster>…`
+    becomes ("model_roster", …), `<spend_mirror>…` likewise; untagged text is
+    one block named «spend_mirror»."""
+    import re
+
+    found = re.findall(r"<([a-z_]+)>(.*?)</\1>", text, flags=re.DOTALL)
+    if found:
+        return [(name, f"<{name}>{body}</{name}>") for name, body in found]
+    return [("spend_mirror", text)]

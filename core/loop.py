@@ -473,7 +473,9 @@ class AgentLoop(
         # sees a single uniform chain.
         # Кусок 4 разбора `_run_inner`: сама досборка живёт в
         # `core/loop_evidence_chain.py`; цепочка меняется на месте.
-        self._fold_evidence_chain(chain, persistent_block=persistent_block)
+        self._fold_evidence_chain(
+            chain, persistent_block=persistent_block, spend_block=spend_block,
+        )
 
         # Кусок 8 разбора `_run_inner`: сенсор, ранжирование и каталогизация
         # живут в `core/loop_evidence_chain.py`. Первое значение — теневой
