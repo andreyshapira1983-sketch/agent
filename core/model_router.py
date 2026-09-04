@@ -1227,7 +1227,15 @@ class ModelRouter:
         registry: ModelRegistry | None = None,
         selection_policy: ModelSelectionPolicy | None = None,
         usage_ledger: ModelUsageLedger | None = None,
+        routing_policy: Any | None = None,
     ):
+        # The agent's own routing policy (operator's word 2026-09-04 22:20):
+        # read FIRST in `route_for`, ahead of the env pins, which stop being
+        # the source of truth the moment he has spoken for a role. The store
+        # holds decisions and validates their form; the credential is
+        # substituted here, never seen by him.
+        self.routing_policy = routing_policy
+        self._policy_stamp: tuple[int, int] | None = None
         self.default_provider = _normalise_provider(default_provider)
         self.default_model = default_model.strip() if isinstance(default_model, str) else default_model
         self._routes: dict[str, ModelRoute] = {}
@@ -1259,6 +1267,7 @@ class ModelRouter:
         *,
         llm_factory: LLMFactory | None = None,
         usage_ledger: ModelUsageLedger | None = None,
+        routing_policy: Any | None = None,
     ) -> ModelRouter:
         """Build a router from default and role-specific environment vars.
 
@@ -1300,10 +1309,50 @@ class ModelRouter:
             registry=ModelRegistry.from_env(),
             selection_policy=ModelSelectionPolicy.from_env(),
             usage_ledger=usage_ledger,
+            routing_policy=routing_policy,
         )
+
+    def _agent_policy_route(self, role_key: str) -> ModelRoute | None:
+        """The agent's own decision for this role, if he has made one and its
+        provider still has a key. A record whose provider lost its credential
+        falls through to the next layer — the roster names that — never to an
+        uncredentialed call."""
+        store = self.routing_policy
+        if store is None:
+            return None
+        try:
+            choice = store.resolve(role_key)
+        except Exception:  # noqa: BLE001 — an unreadable policy is «no policy», never a crash
+            return None
+        if choice is None:
+            return None
+        provider = _normalise_provider(choice.provider)
+        if provider not in _DEFAULT_PROVIDER_ENV or not _provider_has_credentials(provider):
+            return None
+        return ModelRoute(
+            role=role_key, provider=provider, model=choice.model,
+            reason=choice.route_reason,
+        )
+
+    def _drop_clients_if_policy_moved(self) -> None:
+        """Dynamic by construction: when the policy file changes, the cached
+        per-role clients are dropped so the next call re-resolves."""
+        store = self.routing_policy
+        if store is None:
+            return
+        try:
+            stamp = store.version()
+        except Exception:  # noqa: BLE001 — a stat that fails keeps the cache
+            return
+        if stamp != self._policy_stamp:
+            self._policy_stamp = stamp
+            self._tracked_cache.clear()
 
     def route_for(self, role: ModelRole | str) -> ModelRoute:
         role_key = _coerce_role(role)
+        agent_route = self._agent_policy_route(role_key)
+        if agent_route is not None:
+            return agent_route
         route = self._routes.get(role_key)
         if route is not None:
             return route
@@ -1344,6 +1393,7 @@ class ModelRouter:
         if self._static_llm is not None:
             return self._static_llm
         role_key = _coerce_role(role)
+        self._drop_clients_if_policy_moved()
         if self.usage_ledger is not None and role_key in self._tracked_cache:
             return self._tracked_cache[role_key]
         route = self.route_for(role_key)

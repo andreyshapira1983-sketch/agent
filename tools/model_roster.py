@@ -19,14 +19,22 @@ class ModelRosterTool(Tool):
     arguments = "no arguments"
     risk = "read_only"
 
-    def __init__(self, *, usage_ledger: Any = None, budget_ledger: Any = None):
+    def __init__(
+        self, *, usage_ledger: Any = None, budget_ledger: Any = None,
+        routing_policy: Any = None, workspace: Any = None,
+    ):
         self._usage_ledger = usage_ledger
         self._budget_ledger = budget_ledger
+        self._routing_policy = routing_policy
+        self._workspace = workspace
 
     def run(self, **kwargs):
         if kwargs:
             raise PermissionError(f"Unexpected arguments: {sorted(kwargs)}")
-        return model_roster(usage_ledger=self._usage_ledger, budget_ledger=self._budget_ledger)
+        return model_roster(
+            usage_ledger=self._usage_ledger, budget_ledger=self._budget_ledger,
+            routing_policy=self._routing_policy, workspace=self._workspace,
+        )
 
     def validate_output(self, output):
         if not isinstance(output, dict) or not isinstance(output.get("providers"), list):

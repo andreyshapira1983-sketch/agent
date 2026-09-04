@@ -3170,6 +3170,59 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 11 — he routes his own models (2026-09-04, 22:20, by the operator's word)
+
+The word, verbatim in its parts: keys stay secrets and are never available
+to the agent; the agent does not assign roles to KEYS; within the allowed
+pool of providers he forms and updates the roles of MODELS himself, by
+observed quality, cost and task type; the choice is dynamic and explainable;
+the credential is substituted by a trusted router; every route is journaled
+without secrets; the role pins in .env are not the source of truth where a
+measurable routing policy can replace them.
+
+**Prior art first** (the rule since 2026-08-29): RouteLLM — a trained
+win-predictor between a strong and a weak model; rejected here: no data of
+ours to train it on, and the decision would be the trainer's, not his.
+FrugalGPT — cascade + quality estimator + stop judge; the lesson kept is
+that quality is MEASURED after the fact, which `core/model_outcomes.py`
+already does per role and model (verified share of episodes). LiteLLM's
+router — policy as data with named strategies and fallbacks; the shape
+kept: one record per role, read first, env pins second. Sources:
+neuraltrust.ai/blog/llm-model-routing, arxiv.org/html/2603.04445v2 (routing
+and cascading survey), truefoundry.com/blog/llm-routing-cost-quality-aware-
+model-selection. What none of them offered and this code refuses on purpose:
+a rule that picks the model FOR him.
+
+- **The store** (`core/model_routing_policy.py`): an append-only journal
+  under the integrity envelope; the newest record per role wins; a record
+  with `active=false` releases the role. It validates the FORM of a
+  decision — role from the router's closed list, provider in the allowed
+  pool, one model token, a reason that is present, bounded and free of
+  secret-looking tokens, evidence lines trimmed — and never its substance.
+  The pool is bounded by the operator, not by him: providers with a client
+  in this code AND a present credential; `AGENT_ROUTING_POOL` narrows it and
+  cannot widen it. Google's key is present and has no client: not routable.
+- **The router** (`ModelRouter.route_for`): agent policy → env pin →
+  registry selection policy → default. A policy naming a provider that has
+  lost its key falls through to the next layer, never to an uncredentialed
+  call. The cached per-role clients are dropped when the policy file moves,
+  so a new decision is picked up without a restart. The usage ledger carries
+  `agent_policy:<id>` as the route reason — the journal of routes, no
+  secret in it.
+- **The door** (`tools/model_route.py`): role, provider (or `release`),
+  model, reason, optional evidence; refuses without a reason, refuses
+  secrets, names the pool in every answer, caps itself at six decisions per
+  process. Open on the unattended path with its reason recorded.
+- **The eye grows two sections** so the decision can be measured, not
+  guessed: who answers each role now and by whose word (his record, the
+  operator's pin, the defaults), and the verified share per role/model from
+  his own episodes (fewer than MIN_RUNS = noise).
+
+What stays the operator's: the pool, the ceiling on spend, the pins as a
+fallback. What is now his: which model answers which role, and the why. The
+exam: does he set a route at all, does his reason cite the measured table,
+and does the ledger show his route being used — three separate facts.
+
 ## Block 10 — the agent is switched off and the money burners are repaired (2026-09-04, night)
 
 At 19:20 MSK OpenAI answered a probe after a day of «no credits». The

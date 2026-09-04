@@ -593,6 +593,10 @@
     [
       "loop_context.py::AgentLoopContext._spend_mirror",
       "loop_context.py::AgentLoopContext._model_roster_block"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._model_roster_block",
+      "loop.py::AgentLoop._file_read_workspace_root"
     ]
   ]
 }

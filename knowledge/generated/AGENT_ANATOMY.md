@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 220 modules across 12 groups._
+_Total: 221 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -291,6 +291,7 @@ _Model discovery, routing, usage accounting._
 | `core/degraded_route` | Ответ написала не та модель, которую выбрал маршрут. |
 | `core/model_outcomes` | Какая модель на какой роли реально даёт подтверждённые ответы. |
 | `core/model_roster` | The agent's eye on its own models: which providers exist, which have a key, which roles they serve, whether they are healthy, what they cost, what was spent today and how much of the day's ceiling is left. |
+| `core/model_routing_policy` | The agent's own routing policy: which model answers which role, and why. |
 
 ## Multi-Agent / Subagents (§6)
 

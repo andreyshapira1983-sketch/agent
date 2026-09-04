@@ -13,6 +13,7 @@ from core.memory import WorkingMemory
 from core.memory_echo_antibody import MemoryWriteRegistry
 from core.memory_policy import MemoryRetrievalPolicy, MemoryWritePolicy
 from core.model_router import ModelRole, ModelRouter
+from core.model_routing_policy import DEFAULT_ROUTING_POLICY_PATH, RoutingPolicyStore
 from core.model_usage import ModelUsageLedger
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
@@ -35,6 +36,7 @@ from tools.lesson_provenance_tool import LessonProvenanceTool
 from tools.list_dir import ListDirTool
 from tools.memory_bank import MemoryBankTool
 from tools.memory_recall import MemoryRecallTool
+from tools.model_route import ModelRouteTool
 from tools.python_probe import PythonProbeTool
 from tools.read_logs import ReadLogsTool
 from tools.rss_fetch import RssFetchTool
@@ -165,13 +167,20 @@ def build_agent(
     # counter had limits, a kill-switch and a health line, and no charger.
     for egress_tool in ("web_search", "web_fetch", "rss_fetch"):
         registry.get(egress_tool).budget_ledger = budget_ledger
-    model_router = ModelRouter.from_env(usage_ledger=model_usage_ledger)
+    # His routing policy (operator's word 2026-09-04 22:20): read by the
+    # router ahead of the env pins; the credential is substituted here.
+    routing_policy = RoutingPolicyStore(workspace / DEFAULT_ROUTING_POLICY_PATH)
+    model_router = ModelRouter.from_env(
+        usage_ledger=model_usage_ledger, routing_policy=routing_policy,
+    )
+    registry.register(ModelRouteTool(store=routing_policy))
     # The eye on his own models (operator's word 2026-09-04, «ставь глаз»):
     # read-only, registered for every path including the unattended one.
     from tools.model_roster import ModelRosterTool
 
     registry.register(ModelRosterTool(
         usage_ledger=model_usage_ledger, budget_ledger=budget_ledger,
+        routing_policy=routing_policy, workspace=workspace,
     ))
 
     # Agent-as-tool: spawn_subagent must be registered AFTER policy and
