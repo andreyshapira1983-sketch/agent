@@ -32,12 +32,12 @@ CORE = os.path.join(ROOT, "core")
 # строки группировки каждый инкрементальный раскол откатывался анатомическим
 # сторожем. Читаем ЛИТЕРАЛ ast-разбором, не импортируя: правило этого скрипта
 # «не исполнять код агента» сохраняется.
-def _load_groups() -> list:
+def load_groups_from_source(source: str) -> list:
+    """The GROUPS literal out of `core/anatomy_groups.py` text, never imported.
+    Public so a proposal that carries its own version of that file can be
+    rendered exactly as this script would (2026-09-04, see `build_document`)."""
     import ast as _ast
 
-    with open(os.path.join(ROOT, "core", "anatomy_groups.py"),
-              encoding="utf-8") as fh:
-        source = fh.read()
     for node in _ast.parse(source).body:
         target = getattr(node, "target", None) or (
             node.targets[0] if getattr(node, "targets", None) else None)
@@ -46,7 +46,23 @@ def _load_groups() -> list:
     raise ValueError("GROUPS not found in core/anatomy_groups.py")
 
 
+def _load_groups() -> list:
+    with open(os.path.join(ROOT, "core", "anatomy_groups.py"),
+              encoding="utf-8") as fh:
+        return load_groups_from_source(fh.read())
+
+
 GROUPS: list[tuple[str, str, list[str]]] = _load_groups()
+
+
+def purpose_from_source(source: str) -> str:
+    """The Purpose cell for a module whose SOURCE TEXT is given (a proposed
+    file that is not on disk yet renders the same way as one that is)."""
+    try:
+        doc = ast.get_docstring(ast.parse(source)) or ""
+    except (SyntaxError, ValueError):
+        doc = ""
+    return first_sentence(doc)
 
 
 def _first_doc_line(stem: str) -> str:
@@ -59,9 +75,13 @@ def _first_doc_line(stem: str) -> str:
     """
     path = os.path.join(CORE, f"{stem}.py")
     try:
-        doc = ast.get_docstring(ast.parse(Path(path).read_text(encoding="utf-8"))) or ""
-    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
-        doc = ""
+        return purpose_from_source(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def first_sentence(doc: str) -> str:
+    """The opening sentence of a docstring, unwrapped and cell-safe."""
     if not doc.strip():
         return ""
 
@@ -87,8 +107,20 @@ def _actual_modules() -> set[str]:
     }
 
 
-def build_document() -> str:
+def build_document(
+    *,
+    actual: set[str] | None = None,
+    groups: list | None = None,
+    purpose=None,
+) -> str:
     """Render the whole map as text. Pure apart from reading `core/`.
+
+    The three keyword arguments let a caller render the map of a tree that
+    is not on disk — a self-apply proposal adding a module (2026-09-04: the
+    producer wrote its own canned row and never touched the total, so every
+    split proposal with a new module failed the anatomy guard and rolled
+    back; the map in a proposal must be what THIS function writes). Defaults
+    read `core/`, `GROUPS` and each module's docstring as before.
 
     Split out from :func:`main` so a test can compare the committed document
     against what the generator would write, without writing anything. Nothing
@@ -102,9 +134,11 @@ def build_document() -> str:
     ``except Exception`` around it would not even catch it. :func:`main` turns
     the error into a message and exit code 1, exactly as before.
     """
-    actual = _actual_modules()
+    actual = _actual_modules() if actual is None else set(actual)
+    groups = GROUPS if groups is None else groups
+    purpose = _first_doc_line if purpose is None else purpose
     seen: set[str] = set()
-    for _title, _desc, mods in GROUPS:
+    for _title, _desc, mods in groups:
         for m in mods:
             if m in seen:
                 raise ValueError(f"module listed twice in GROUPS: {m}")
@@ -130,9 +164,9 @@ def build_document() -> str:
     out.append("(read-only drift check, TD-029). Regenerate with")
     out.append("`python scripts/gen_anatomy.py` whenever a module is added or removed.")
     out.append("")
-    out.append(f"_Total: {len(actual)} modules across {len(GROUPS)} groups._")
+    out.append(f"_Total: {len(actual)} modules across {len(groups)} groups._")
     out.append("")
-    for title, desc, mods in GROUPS:
+    for title, desc, mods in groups:
         out.append(f"## {title}")
         out.append("")
         out.append(f"_{desc}_")
@@ -140,7 +174,7 @@ def build_document() -> str:
         out.append("| Module | Purpose |")
         out.append("| ------ | ------- |")
         for m in mods:
-            out.append(f"| `core/{m}` | {_first_doc_line(m)} |")
+            out.append(f"| `core/{m}` | {purpose(m)} |")
         out.append("")
 
     return "\n".join(out)
