@@ -3170,6 +3170,51 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 12 — the dialogue exam: what «he does not know» was made of (2026-09-04, 23:40–00:10)
+
+The operator's order: «произведи экзамен: вопрос — ответ — разбор — снова
+вопрос; посмотрим, насколько он идиот, потому что есть другие проблемы».
+Seven turns, 19 model calls, 176k tokens, about $0.45. Method: one live REPL
+session per run driven by files (`scratchpad/exam_driver.py`), every
+question inside `:task-begin … :task-end` — the keyboard intent router
+hijacked the first attempt into `:models` on the word «модели», and the
+one-shot `--ask` path has no way around that router. Two drivers alive at
+once steal each other's questions; one per session, always.
+
+| # | Question | Verdict | Whose fault |
+|---|---|---|---|
+| 1 | which models, who answers each role, who decided | WRONG: searched the web, «the materials do not allow» | his, and `LIVE_GROUNDING` («сейчас» → web first) |
+| 2 | told so, answer again from context | TRUE: «the block is not in the context passed to me» | mine — the eye reached the planner only |
+| 3 | after the fix | fifteen facts off the roster, ALL suppressed as user-asserted; after the second fix: RIGHT, 10/12 verified | the judges |
+| 4 | what would you change in the roles, by your measurements | «nothing, yet»: 0.57/0.71 vs 0.47/0.96 on 14 runs; DeepSeek 11.2 vs 3.5 ok per 100 units «does not outweigh»; for repair/memory/verifier «no measurements» | a decision, accepted |
+| 5 | remember «жёлудь-17» for tomorrow | journal_append + memory_bank (mem_a0b9327d) | done |
+| 6 | new session: the word? | «жёлудь-17», source and provenance named | STORE → RETRIEVE passed |
+| 7 | why did the judge give a right answer zero | read the logs; judge right about provenance, too strong about the value; proposed separate scoring of value / record / retrieval | reasoned; did not check the file though he could |
+
+Three repairs the same night, each pinned by a test:
+- **the eye reaches the answerer** (`spend_block` on `SynthesisState`, into
+  the synthesizer beside long-term memory) — `tests/test_the_eye_reaches_the_answerer.py`;
+  the split-fidelity signature check now admits an added keyword with a
+  default, the same line as the retired body snapshots;
+- **a fact the loop measured is evidence to the loop** — new evidence kind
+  `sensor` (class trace, confidence 0.90), the roster and spend mirror folded
+  into the chain beside memory, citation `[sensor:<name>]` in the grammar,
+  the prefix table and the allowed-citations list — offered on the no-tool
+  branch too, where the fifteen claims had died; the low-evidence gate now
+  journals `suppressed_head` so a censored draft can be read afterwards —
+  `tests/test_a_sensor_fact_is_evidence_not_a_user_assertion.py`;
+- (from turn 1, not repaired, registered) `LIVE_GROUNDING` decides for him
+  that «сейчас» means the web.
+
+Five false alarms of the judges, all in his registry now (17 open): the
+relevance judge scores a complete answer 0.15–0.16 «may not answer the
+question»; «8,4» with a Russian decimal comma is refuted against «8.4»; a
+correct recall of an operator-requested fact is «0 of 4, confidence nil»
+because his own record is not an independent witness and the door gave him
+no way to mark the operator as origin; the roster calls a never-called
+provider «healthy»; procedural memory injected four verifier-file reads into
+«remember one word». One idiot per seven turns, and it was turn 1.
+
 ## Block 11 — he routes his own models (2026-09-04, 22:20, by the operator's word)
 
 The word, verbatim in its parts: keys stay secrets and are never available
