@@ -14,7 +14,7 @@
 Файл обязан оставаться ЧИСТЫМ ЛИТЕРАЛОМ без импортов: скрипты читают его
 `ast.literal_eval`-разбором, не исполняя, — их правило «не импортировать код
 агента» сохраняется. Потребители: scripts/gen_anatomy.py и предложение
-расщепителя (`_sync_anatomy_groups` в core/self_build_producer.py).
+расщепителя (`_sync_anatomy_groups` в core/anatomy_sync.py).
 """
 
 GROUPS: list[tuple[str, str, list[str]]] = [
@@ -97,7 +97,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("Learning & Self-Improvement (§9)", "Reflection-driven repair, self-build, value gating.", [
         "self_repair", "self_repair_models", "self_repair_utils", "repair_proposal",
         "self_apply_bridge", "self_apply_lane",
-        "self_build_producer", "self_build_supervisor", "self_build_memory",
+        "self_build_producer", "anatomy_sync", "self_build_supervisor", "self_build_memory",
         "self_build_rules", "veto_cause", "builder_reply_diagnosis",
         "self_task_producer", "self_task_builder",
         "writer_completion",

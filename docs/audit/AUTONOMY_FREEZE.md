@@ -325,7 +325,11 @@ Modules born of surgery on registered defects (repairs were never frozen):
 `anatomy_groups.py` (MIR-180 data relocation), `autonomous_runtime_proposals.py`
 and `autonomous_runtime_types.py` (the oversized-runtime split),
 `command_subjects.py` (MIR-158), `repo_provenance.py`, `rule_approved_apply.py`
-(MIR-173/175), `spend_report.py` (the spending mirror), `subagent_quarantine.py`.
+(MIR-173/175), `spend_report.py` (the spending mirror), `subagent_quarantine.py`,
+`anatomy_sync.py` (2026-09-04: the anatomy-map sync moved out of the producer
+when its repair — render the proposal's map through the generator, so a split
+with a new module stops rolling back on the anatomy guard — pushed the file
+past its size ratchet).
 
 This ledger carries a DISCLOSURE SENSOR, not a permission gate — the honest
 name is the second examiner's: since 2026-08-28,
