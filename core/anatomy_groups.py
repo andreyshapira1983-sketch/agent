@@ -59,7 +59,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "compactor",
     ]),
     ("Memory & Knowledge Governance (§4)", "Working/persistent memory, hygiene, ingestion, evidence.", [
-        "memory", "persistent_memory", "smart_memory", "memory_policy", "memory_echo_antibody",
+        "memory", "persistent_memory", "smart_memory",
+        "smart_memory_helpers", "memory_policy", "memory_echo_antibody",
         "bilingual_terms", "topic_tokens",
         "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "ingestion", "ingestion_reports", "ingestion_utils",
