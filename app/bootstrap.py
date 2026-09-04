@@ -34,6 +34,7 @@ from tools.journal_append import JournalAppendTool
 from tools.lesson_provenance_tool import LessonProvenanceTool
 from tools.list_dir import ListDirTool
 from tools.memory_bank import MemoryBankTool
+from tools.memory_recall import MemoryRecallTool
 from tools.python_probe import PythonProbeTool
 from tools.read_logs import ReadLogsTool
 from tools.rss_fetch import RssFetchTool
@@ -218,6 +219,9 @@ def build_agent(
         assumption_store = AssumptionStore(workspace / DEFAULT_ASSUMPTIONS_PATH)  # Layer 5
         # Register the memory bank tool to persist and retrieve agent memories.
         registry.register(MemoryBankTool(store=persistent_store, policy=write_policy))
+        # The read half of the same door (authority change 2026-09-04): a
+        # bounded, low-trust search of his own durable memory, by his hand.
+        registry.register(MemoryRecallTool(store=persistent_store))
 
     # Experience memory is a SEPARATE axis, deliberately outside the
     # `with_persistent` block above. It used to be nested under both

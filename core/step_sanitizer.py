@@ -725,6 +725,25 @@ def sanitize_step(
             ),
         }
 
+    if tool_name == "memory_recall":
+        # The read door (2026-09-04): exactly one string, `term`; read-only.
+        term = str(args.get("term") or "").strip()
+        extra = sorted(set(args) - {"term"})
+        if extra:
+            warnings.append(f"step[{idx}]: memory_recall dropping unexpected args {extra!r}")
+        if not term:
+            warnings.append(f"step[{idx}]: memory_recall needs a non-empty term; step dropped")
+            return None
+        return {
+            "tool": "memory_recall",
+            "arguments": {"term": term},
+            "label": f"memory_recall:{term[:40]}",
+            "expected_outcome": (
+                "At most 5 of your own past records containing the term, newest "
+                "first, each LOW-TRUST with its source; count and more."
+            ),
+        }
+
     if tool_name == "memory_bank":
         # Contract: exactly text, kind, provenance — all three strings, all required.
         required = ("text", "kind", "provenance")
