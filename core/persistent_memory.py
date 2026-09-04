@@ -327,6 +327,11 @@ def memory_door_verdict(store, policy, text, kind, provenance):
     if consent_tag is None:
         return None, f"unknown kind {kind!r}; the door accepts {ACCEPTED_KINDS_TEXT}"
     tags = [kind, provenance, consent_tag]
+    if provenance.lower().startswith("memory:"):
+        # Authority change 2026-09-04: memory is not a source of memory — a
+        # record whose only evidence is another record is the self-echo the
+        # antibody exists to stop, one layer earlier.
+        return None, "provenance 'memory:…' refused: a memory cannot be the source of a memory"
     # Block 7 (audit W4, 2026-09-03): the door consulted the policy WITHOUT
     # the recent-writes log, so the echo antibody never saw the agent's own
     # door writes and `data/memory_writes.jsonl` was never fed by them.
@@ -345,6 +350,15 @@ def memory_door_verdict(store, policy, text, kind, provenance):
         return None, f"write policy refused: {why}"
     record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
     store.save(record)
+    # Authority change 2026-09-04: «stored» is said only after an independent
+    # readback finds the id on disk. A write that cannot be read back is not
+    # a memory, and the caller must not report DONE on it.
+    try:
+        found = any(getattr(r, "id", None) == record.id for r in store.load())
+    except Exception:  # noqa: BLE001 — an unreadable store cannot confirm a write
+        found = False
+    if not found:
+        return None, "not stored: readback after save did not find the record"
     if registry is not None:
         try:
             from core.memory_echo_antibody import make_event
