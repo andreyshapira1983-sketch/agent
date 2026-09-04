@@ -273,7 +273,7 @@ def _sorted_import_slot(tree: ast.Module, module: str) -> int:
     before the first such import whose module name sorts later, else after
     the last import (`_last_import_end`). Measured 2026-09-04: the re-export
     appended after the block was «un-sorted» — one more finding per split."""
-    head = module.split(".")[0]
+    head = module.partition(".")[0]
     top_imports = [
         n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
     ]
