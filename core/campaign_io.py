@@ -458,6 +458,44 @@ def _engineering_hands(
     )
 
 
+def _approvals_born(inbox: Any, before: set[str]) -> str | None:
+    """«approvals_new=N» — ДЕЛЬТА ящика за прогон (A3), без вопросов о
+    разрешении эффектов (A5, 2026-09-04): грант 40/сутки сгорел к 12:28 на
+    29 таких вопросах, и каждый считался «approvals_new=1» — полезным циклом."""
+    try:
+        new_items = [
+            i for i in inbox.pending()
+            if i.id not in before
+            and getattr(i, "operation", "") != "autonomous_runtime.allow_effects"
+        ]
+    except (AttributeError, OSError, ValueError):
+        new_items = []
+    return f"approvals_new={len(new_items)}" if new_items else None
+
+
+#: Heads of the strings the hands return when something was CREATED — an
+#: inbox item or a recorded hypothesis. Everything else they return is a
+#: reason («doc_declined:doc_exists», «repair_declined:…», «engineering_error:…»,
+#: «superseded_by_existing:…», «refused_repeat_of_denied:…») and is not a product.
+_PRODUCT_HEADS: tuple[str, ...] = (
+    "approvals_new=", "repair_proposed:", "engineering_proposed:",
+    "doc_draft_proposed:", "hypothesis_recorded:", "test_proposed:",
+)
+
+
+def _product(agent: Any, said: str | None) -> str | None:
+    """Замер 2026-09-04: строка отказа («doc_declined:doc_exists»,
+    «repair_declined:…») ехала в `proposal`, и цикл без продукта читался как
+    продуктивный (did_work, сброс серии без продукта, «полезный цикл»). Отказ
+    остаётся в журнале по имени; в леджер едет только созданное."""
+    if not said:
+        return None
+    if any(said.startswith(head) for head in _PRODUCT_HEADS):
+        return said
+    _log(agent, "campaign_hands_declined", {"reason": said[:200]})
+    return None
+
+
 def _engineering_product_only(
     agent: Any, *, work_done: bool, proposal: str | None, artifact: str | None,
 ) -> tuple[bool, str | None]:
@@ -927,11 +965,7 @@ def _default_execute_action(
         )
     )
     llm_after, cost_after = _cost_totals(agent)
-    try:
-        new_items = [i for i in _inbox.pending() if i.id not in _pending_before]
-    except (AttributeError, OSError, ValueError):
-        new_items = []
-    proposal = f"approvals_new={len(new_items)}" if new_items else None
+    proposal = _approvals_born(_inbox, _pending_before)
     goal_answer, artifact = _goal_answer_and_digest(report)
     # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
     # здесь в 160-значном дайджесте: четвёртый прогон дня процитировал свой
@@ -942,6 +976,7 @@ def _default_execute_action(
         agent=agent, workspace=workspace, config=config,
         action=action, answer=goal_answer, approval_inbox=approval_inbox,
     )
+    repaired = _product(agent, repaired)
     if repaired:
         proposal = f"{proposal}; {repaired}" if proposal else repaired
     # Учебные руки: чтение внешнего мира оставляет гипотезу нижней ступени.
@@ -950,6 +985,7 @@ def _default_execute_action(
             agent=agent, workspace=workspace, goal=config.goal,
             answer=goal_answer,
         )
+        studied = _product(agent, studied)
         if studied:
             proposal = f"{proposal}; {studied}" if proposal else studied
     # Документные руки: цель, просящая документ доктрины, рождает черновик
@@ -959,6 +995,7 @@ def _default_execute_action(
             agent=agent, workspace=workspace, goal=config.goal,
             approval_inbox=approval_inbox,
         )
+        drafted = _product(agent, drafted)
         if drafted:
             proposal = f"{proposal}; {drafted}" if proposal else drafted
     if action.action == "propose_engineering_task" and not config.dry_run:
@@ -966,6 +1003,7 @@ def _default_execute_action(
             agent=agent, workspace=workspace, action=action, config=config,
             approval_inbox=approval_inbox,
         )
+        engineered = _product(agent, engineered)
         if engineered:
             proposal = f"{proposal}; {engineered}" if proposal else engineered
     # MIR-117 (норма A): токен жизненного цикла очереди не копируется в исход
