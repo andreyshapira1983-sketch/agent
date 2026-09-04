@@ -191,11 +191,18 @@ class AgentLoopContext:
         """Глаз на собственные модели (2026-09-04): провайдеры, ключи есть/нет,
         роли, здоровье, цена, расход за день, остаток потолка. Только факты;
         до этого дня ни один блок контекста не называл провайдера, и о ключе
-        он узнавал лишь по его смерти."""
+        он узнавал лишь по его смерти. Без роутера с журналом глаза нет: блок
+        описывает провайдеров «как их видят роутер и журналы», а роутер-заглушка
+        (`ModelRouter.single`, песочница тестов) журнала не имеет — читать
+        окружение разработчика вместо него нельзя: первый ход в чистой
+        песочнице получал бы <conversation_history> из ничего (батарея
+        2026-09-04, 11 красных)."""
+        usage_ledger = getattr(getattr(self, "model_router", None), "usage_ledger", None)
+        if usage_ledger is None:
+            return ""
         try:
             from core.model_roster import model_roster, model_roster_block
 
-            usage_ledger = getattr(self.model_router, "usage_ledger", None)
             budget_ledger = getattr(usage_ledger, "budget_ledger", None)
             return model_roster_block(model_roster(
                 usage_ledger=usage_ledger, budget_ledger=budget_ledger,
