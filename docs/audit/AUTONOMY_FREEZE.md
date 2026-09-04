@@ -329,7 +329,10 @@ and `autonomous_runtime_types.py` (the oversized-runtime split),
 `anatomy_sync.py` (2026-09-04: the anatomy-map sync moved out of the producer
 when its repair — render the proposal's map through the generator, so a split
 with a new module stops rolling back on the anatomy guard — pushed the file
-past its size ratchet).
+past its size ratchet). Incremental-split helpers born of the agent's own
+oversized-module defects, each split approved by the operator's word on
+2026-09-04 and applied through the lane by his hands: `smart_memory_helpers.py`,
+`operator_intent_patterns_helpers.py`, `best_next_action_helpers.py`.
 
 This ledger carries a DISCLOSURE SENSOR, not a permission gate — the honest
 name is the second examiner's: since 2026-08-28,

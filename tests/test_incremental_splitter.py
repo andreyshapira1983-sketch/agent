@@ -418,3 +418,99 @@ def test_cli_self_split_caps_targeted_test_paths(workspace: Path, monkeypatch):
     assert _handle_self_split("core/funcs.py", agent, workspace) is True
     item = agent.approval_inbox.items[0]
     assert item["payload"]["test_paths"] == ["tests"]
+
+
+# ── orphaned imports and the sorted re-export (2026-09-04) ──────────────
+# Measured on the lane: the slice left the moved functions' imports in the
+# target (12 unused) and appended the re-export after the import block
+# (un-sorted) — the lint-debt guard rolled the split back every time.
+
+PRUNE_SRC = '''"""Doc."""
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+from core.zeta import zeta  # noqa: F401 -- re-exported
+
+__all__ = ["os_name", "Quoted"]
+
+
+def os_name(x: Any) -> str:
+    """Uses os and Any; ``Quoted`` lives only in a string."""
+    return os.name + str(x)
+'''
+
+
+def test_prune_drops_whole_orphans_narrows_partial_ones_and_keeps_the_rest():
+    from core.incremental_splitter import prune_orphaned_imports
+
+    out = prune_orphaned_imports(PRUNE_SRC)
+    assert "from datetime import" not in out
+    assert "from typing import Any\n" in out and "Literal" not in out
+    assert "import os\n" in out
+    assert "from __future__ import annotations" in out
+    assert "from core.zeta import zeta  # noqa: F401 -- re-exported" in out
+    assert ast.parse(out)  # still a module
+
+
+def test_prune_keeps_a_name_used_only_inside_a_string():
+    from core.incremental_splitter import prune_orphaned_imports
+
+    src = 'from typing import Sequence\n\ndef f() -> "Sequence[int]":\n    return []\n'
+    assert prune_orphaned_imports(src) == src
+
+
+def test_prune_returns_unparseable_input_unchanged():
+    from core.incremental_splitter import prune_orphaned_imports
+
+    assert prune_orphaned_imports("def (:\n") == "def (:\n"
+
+
+SPLIT_LINT_SRC = '''"""Target whose movable helpers own the datetime import."""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from core.aaa import aaa
+from core.zzz import zzz
+
+
+def helper_stamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def helper_two(x: Any) -> str:
+    return helper_stamp() + str(x)
+
+
+def helper_three() -> str:
+    return helper_two(1) + helper_two(2)
+
+
+class Keeper:
+    """Big enough to stay; uses aaa and zzz, never datetime."""
+
+    def run(self) -> Any:
+        return aaa() + zzz()
+
+    def run_more(self) -> Any:
+        return self.run()
+'''
+
+
+def test_function_split_prunes_orphaned_imports_and_sorts_the_reexport(workspace: Path):
+    _write(workspace, "core/lint.py", SPLIT_LINT_SRC)
+    plan = plan_incremental_split(workspace, "core/lint.py", max_move_lines=40)
+    assert plan.status == "planned", plan.reason
+    step = plan.step
+    assert "helper_stamp" in step.moved_names
+    target = step.target_content
+    assert "from datetime import" not in target, target
+    assert "from core.aaa import aaa" in target and "from core.zzz import zzz" in target
+    # sorted: core.aaa < core.lint_helpers < core.zzz
+    assert target.index("from core.aaa import") < target.index("from core.lint_helpers import") < target.index("from core.zzz import")
+    # the new module carries the datetime import it needs
+    assert "from datetime import datetime, timezone" in step.new_content

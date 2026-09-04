@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import builtins as _builtins_mod
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -184,6 +185,105 @@ def _pick_new_module_path(workspace: Path, target: str, suffix: str) -> str:
         candidate = f"{base}_{suffix}{n}.py"
         n += 1
     return candidate
+
+
+_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _names_used_outside_imports(tree: ast.Module, src: str) -> set[str]:
+    """Every name the module body refers to, imports themselves excluded.
+
+    Quoted annotations and ``__all__`` entries are strings, so string
+    constants are scanned by word too — ruff counts those as uses, and a
+    pruned import that a string still names would turn one finding into
+    another."""
+    used: set[str] = set()
+    # A docstring or a bare statement-level string is prose, not a use.
+    prose = {
+        id(n.value) for n in ast.walk(tree)
+        if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+    }
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name):
+                used.add(sub.id)
+            elif (
+                isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+                and id(sub) not in prose
+            ):
+                used.update(_WORD_RE.findall(sub.value))
+    return used
+
+
+def prune_orphaned_imports(src: str) -> str:
+    """Drop top-level imports whose every bound name the module no longer
+    uses, and narrow those partly used — deterministic, AST-driven.
+
+    Measured 2026-09-04 (lane, ain_8e92…, third rollback of one split): the
+    slice carried the moved functions' imports into the new module and left
+    them in the target too — 12 unused imports, and the lint-debt guard
+    (`tests/test_ruff_config.py`, a repo-wide count) rolled the apply back.
+    ``__future__`` imports and lines carrying ``noqa`` (re-exports) stay.
+    Unparseable input is returned unchanged: this is a tidy-up, never a
+    gate."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return src
+    used = _names_used_outside_imports(tree, src)
+    lines = src.split("\n")
+    drop: set[int] = set()
+    replace: dict[int, str] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            continue
+        first, last = node.lineno, node.end_lineno or node.lineno
+        if any("noqa" in lines[i - 1] for i in range(first, last + 1)):
+            continue
+        kept = [
+            alias for alias in node.names
+            if alias.name == "*" or (alias.asname or alias.name).partition(".")[0] in used
+        ]
+        if len(kept) == len(node.names):
+            continue
+        drop.update(range(first, last + 1))
+        if kept:
+            node.names = kept
+            replace[first] = ast.unparse(node)
+    if not drop:
+        return src
+    out: list[str] = []
+    for i, line in enumerate(lines, start=1):
+        if i in replace:
+            out.append(replace[i])
+        elif i in drop:
+            continue
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _sorted_import_slot(tree: ast.Module, module: str) -> int:
+    """1-based line AFTER which ``from <module> import …`` sits in the
+    isort order ruff's I001 expects among the first-party ``from`` imports:
+    before the first such import whose module name sorts later, else after
+    the last import (`_last_import_end`). Measured 2026-09-04: the re-export
+    appended after the block was «un-sorted» — one more finding per split."""
+    head = module.split(".")[0]
+    top_imports = [
+        n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
+    ]
+    for node in top_imports:
+        if (
+            isinstance(node, ast.ImportFrom) and node.module
+            and node.module.split(".")[0] == head and node.module > module
+        ):
+            return node.lineno - 1
+    return _last_import_end(tree)
 
 
 def _last_import_end(tree: ast.Module) -> int:
@@ -353,7 +453,7 @@ def _plan_function_split(
         for deco in getattr(node, "decorator_list", []) or []:
             start = min(start, deco.lineno)
         drop.update(range(start, (node.end_lineno or node.lineno) + 1))
-    insert_after = _last_import_end(tree)
+    insert_after = _sorted_import_slot(tree, _module_name(new_rel))
     reexport = (
         f"from {_module_name(new_rel)} import (  # noqa: F401 -- re-exported\n    "
         + ",\n    ".join(sorted(moved_names))
@@ -368,7 +468,7 @@ def _plan_function_split(
         out.append(line)
         if i == insert_after:
             out.append(reexport)
-    target_content = _collapse_blank_runs("\n".join(out))
+    target_content = _collapse_blank_runs(prune_orphaned_imports("\n".join(out)))
     if not target_content.endswith("\n"):
         target_content += "\n"
 
@@ -498,7 +598,7 @@ def _plan_mixin_split(
         new_header = header_src.replace(
             f"class {cls.name}", f"class {cls.name}({mixin_name})", 1
         )
-    insert_after = _last_import_end(tree)
+    insert_after = _sorted_import_slot(tree, _module_name(new_rel))
     mixin_import = f"from {_module_name(new_rel)} import {mixin_name}"
 
     out: list[str] = []
@@ -513,7 +613,7 @@ def _plan_mixin_split(
             out.append(line)
         if i == insert_after:
             out.append(mixin_import)
-    target_content = _collapse_blank_runs("\n".join(out))
+    target_content = _collapse_blank_runs(prune_orphaned_imports("\n".join(out)))
     if not target_content.endswith("\n"):
         target_content += "\n"
 

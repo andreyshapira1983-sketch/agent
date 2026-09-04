@@ -68,7 +68,9 @@ def _sync_anatomy_groups(
     if not insertion:
         return
     updated = groups_src.replace(anchor, anchor + insertion, 1)
-    files.append({"path": _ANATOMY_GROUPS_PATH, "content": updated})
+    # Замена, не добавление: второй вызов (карта синхронизирует группы сама,
+    # 2026-09-04) удваивал файл в заявке — files_changed нёс путь дважды.
+    _carry_file(files, _ANATOMY_GROUPS_PATH, updated)
     build["files"] = files
 
 
