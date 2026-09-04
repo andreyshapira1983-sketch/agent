@@ -15,14 +15,40 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-#: Providers the roster reports on, in a stable order.
-ROSTER_PROVIDERS: tuple[str, ...] = ("openai", "anthropic", "deepseek")
+#: Providers the roster reports on, in a stable order. Every key the
+#: operator keeps in .env is listed, whether or not the code can call it:
+#: the operator's complaint (2026-09-04) was «he has four keys and sees one»,
+#: and a roster that listed only the router's providers would have repeated
+#: that blindness. A key without a client is reported as such.
+ROSTER_PROVIDERS: tuple[str, ...] = (
+    "openai", "anthropic", "deepseek", "huggingface", "local", "google",
+)
 
-_KEY_ENV: dict[str, str] = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
+_KEY_ENV: dict[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "huggingface": ("HF_TOKEN",),
+    "local": ("LOCAL_LLM_BASE_URL",),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
 }
+
+
+def _key_present(provider: str, env: dict[str, str]) -> bool:
+    """Case-insensitive on the name (the operator's .env spells one key
+    `Google_API_KEY`; Windows reads it either way, a plain dict does not)."""
+    wanted = {name.lower() for name in _KEY_ENV[provider]}
+    return any((value or "").strip() for key, value in env.items() if key.lower() in wanted)
+
+
+def _has_door(provider: str) -> bool:
+    """Whether the router can build a client for this provider at all — read
+    from the router's own credential table, not restated here."""
+    try:
+        from core.model_router import _DEFAULT_PROVIDER_ENV
+    except Exception:  # noqa: BLE001 — no router table: no door can be claimed
+        return False
+    return provider in _DEFAULT_PROVIDER_ENV
 
 #: Role prefixes as the router reads them (`core.model_router._ROLE_ENV_PREFIXES`).
 _ROLE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -111,7 +137,8 @@ def model_roster(
         tiers = {str(r.get("cost_tier") or "") for r in rows if r.get("cost_tier")}
         providers.append({
             "provider": provider,
-            "key_present": bool((env.get(_KEY_ENV[provider]) or "").strip()),
+            "key_present": _key_present(provider, env),
+            "door": _has_door(provider),
             "roles": _roles_for(provider, env),
             "health": ("unknown" if not health_known else ("unhealthy" if health else "healthy")),
             "unhealthy_reason": health or "",
@@ -149,8 +176,9 @@ def model_roster_block(roster: dict[str, Any]) -> str:
         health = p["health"] + (f" ({p['unhealthy_reason']})" if p["unhealthy_reason"] else "")
         err = f", last error: {p['last_error_class']}" if p["last_error_class"] else ""
         tiers = "/".join(p["cost_tiers_seen"]) or "unmeasured"
+        door = "" if p.get("door", True) else "; NO CLIENT IN THIS CODE — cannot be called"
         lines.append(
-            f"- {p['provider']}: key {'present' if p['key_present'] else 'absent'}; "
+            f"- {p['provider']}: key {'present' if p['key_present'] else 'absent'}{door}; "
             f"roles: {roles}; health: {health}{err}; cost tier seen: {tiers}; "
             f"today: {p['calls_today']} calls, {p['tokens_today']} tokens, "
             f"{p['cost_units_today']} cost units"
