@@ -217,6 +217,52 @@ class _DeclaredInsertions(ast.NodeTransformer):
         return node
 
 
+class _DeclaredDropRecording(ast.NodeTransformer):
+    """Санкционированная ВСТАВКА №2 — запись сброшенных шагов как провалов.
+
+    2026-09-05, экзамен, ходы 35–36 (`docs/audit/EXAM_SELF_KNOWLEDGE_2026-09-05.md`).
+    Санитайзер сбросил шаг поиска за `{` в аргументе и записал причину только
+    в `warnings` события `planner`; план исполнился без шага, синтезатор не
+    узнал, что шага не было, и на вопрос «почему поиск не выполнился» агент
+    назвал чужую ошибку и спланировал тот же аргумент снова.
+
+    Перед циклом исполнения шагов вставляется ОДНА инструкция: каждое
+    предупреждение вида `step[N]: … dropped` становится триггером
+    `step_dropped` в `attempt_failures` (`core/replan.py::dropped_step_triggers`),
+    откуда оно доходит и до синтезатора (`<failure_context>`), и до
+    перепланирования. Вставка применяется и к ИСТОРИЧЕСКОМУ телу — объявленная
+    правка, не расширение допуска.
+    """
+
+    _RECORD = (
+        "attempt_failures.extend("
+        "dropped_step_triggers(st.planner_out.warnings, attempt=st.attempt))"
+    )
+
+    def __init__(self) -> None:
+        self.inserted = 0
+
+    @staticmethod
+    def _is_step_execution(stmt: ast.stmt) -> bool:
+        return (
+            isinstance(stmt, ast.For)
+            and isinstance(stmt.iter, ast.Call)
+            and isinstance(stmt.iter.func, ast.Attribute)
+            and stmt.iter.func.attr == "_execute_steps_parallel"
+        )
+
+    def visit_While(self, node: ast.While):
+        node = self.generic_visit(node)
+        body: list = []
+        for stmt in node.body:
+            if self._is_step_execution(stmt):
+                body.append(ast.parse(self._RECORD).body[0])
+                self.inserted += 1
+            body.append(stmt)
+        node.body = body
+        return node
+
+
 def test_the_loop_moved_under_one_declared_substitution():
     """История + объявленная подстановка = то, что лежит в новом модуле."""
     old_src = _history()
@@ -237,11 +283,14 @@ def test_the_loop_moved_under_one_declared_substitution():
     assert new_loop is not None, "в новом методе должен быть ровно один `while True`"
 
     insertions = _DeclaredInsertions()
+    drop_recording = _DeclaredDropRecording()
     expected = ast.fix_missing_locations(
-        insertions.visit(
-            _DeclaredMoves().visit(
-                _DeclaredDeletions().visit(
-                    _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+        drop_recording.visit(
+            insertions.visit(
+                _DeclaredMoves().visit(
+                    _DeclaredDeletions().visit(
+                        _Substitute().visit(ast.parse(ast.unparse(old_loop)))
+                    )
                 )
             )
         )
@@ -249,6 +298,10 @@ def test_the_loop_moved_under_one_declared_substitution():
     assert insertions.inserted == 1, (
         "объявленная вставка рассчитана РОВНО на один голый `raise` в теле "
         f"цикла, а их {insertions.inserted} — правку надо объявить заново"
+    )
+    assert drop_recording.inserted == 1, (
+        "запись сброшенных шагов рассчитана РОВНО на один цикл исполнения шагов, "
+        f"а их {drop_recording.inserted} — правку надо объявить заново"
     )
     got = ast.parse(ast.unparse(new_loop))
     assert ast.dump(expected) == ast.dump(got), (

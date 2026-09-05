@@ -27,6 +27,7 @@ hidden state. The loop owns logging; `ReplanPolicy` just decides.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ FailureType = Literal[
     "claim_refuted",         # MIR-060 (b): arithmetic over the cited excerpt says NO
     "injection_blocked",     # §2 Adversarial Defence: tool output contained injection
     "plan_parse_failed",     # planner LLM output was not valid JSON
+    "step_dropped",          # sanitiser/validator removed a planned step before it ran
     "unknown",               # safety net for any code path the audit missed
 ]
 
@@ -74,6 +76,7 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "claim_refuted",
     "injection_blocked",
     "plan_parse_failed",
+    "step_dropped",
     "unknown",
 )
 
@@ -94,6 +97,11 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
 #: disclosure on a recovered run is noise, and whose withholding while replan
 #: is unexhausted is pinned by
 #: `tests/test_failure_history_reaches_arbitration.py`.
+#:
+#: `step_dropped` IS here (2026-09-05, exam turns 35–36): a step the sanitiser
+#: removed is a fact about what the turn did NOT do, and the reason lived only
+#: in the `planner` event's warnings — the agent, asked why its search never
+#: ran, blamed an unrelated error and repeated the same argument next turn.
 WORLD_FACING_FAILURE_TYPES: frozenset[str] = frozenset({
     "tool_error",
     "file_not_found",
@@ -104,12 +112,50 @@ WORLD_FACING_FAILURE_TYPES: frozenset[str] = frozenset({
     "approval_unavailable",
     "policy_blocked",
     "injection_blocked",
+    "step_dropped",
 })
 
 
 def world_facing_failures(triggers: list[ReplanTrigger] | None) -> list[ReplanTrigger]:
     """The subset a turn may disclose even when it went on to answer."""
     return [t for t in (triggers or []) if t.code in WORLD_FACING_FAILURE_TYPES]
+
+
+#: `step[<n>]: <tool> … dropped` — the shape every sanitiser/validator warning
+#: takes when it removes a step (core/step_sanitizer.py, core/planner.py).
+_DROPPED_STEP_RE = re.compile(
+    r"^step\[(?P<idx>\d+)\]:\s*(?:tool\s+')?(?P<tool>[a-z_][a-z0-9_]*)?.*dropped\s*$",
+    re.DOTALL,
+)
+
+
+def dropped_step_triggers(
+    warnings: Iterable[str] | None, *, attempt: int,
+) -> list[ReplanTrigger]:
+    """One `step_dropped` trigger per step the sanitiser removed.
+
+    A dropped step is a failure of the plan, not of a tool, and until
+    2026-09-05 it was recorded nowhere a later reader could reach: the
+    warning sat in the `planner` event and the loop went on as if the step
+    had never been planned. This turns each such warning into the same
+    record every other failure gets, so the synthesizer can say what did not
+    run and why, and a replan sees the rule it broke.
+    """
+    triggers: list[ReplanTrigger] = []
+    for warning in warnings or ():
+        match = _DROPPED_STEP_RE.match(str(warning).strip())
+        if match is None:
+            continue
+        tool = match.group("tool")
+        triggers.append(ReplanTrigger(
+            code="step_dropped",
+            step_id=f"step[{match.group('idx')}]",
+            tool_name=tool if tool not in (None, "not", "missing") else None,
+            arguments={},
+            reason=f"Step not executed — removed before it ran: {warning}",
+            attempt=attempt,
+        ))
+    return triggers
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +472,25 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "truly need no tools, return {\"reasoning\": \"...\", "
             "\"steps\": []}."
         ),
+    ),
+
+    # A step the sanitiser removed before it ran. The reason is in the
+    # trigger, verbatim — it names the argument and the rule. One retry:
+    # the planner rewrites that step within the rule or picks another tool;
+    # a second identical drop means the rule is not being read.
+    "step_dropped": FailureBudget(
+        max_occurrences=2,
+        advice=(
+            "A step of your plan was REMOVED before it ran; the reason above "
+            "names the step, the argument and the rule it broke. Rewrite that "
+            "step within the rule (shell_exec argv may not contain "
+            "; | & < > ` $ ( ) [ ] or newline/CR/tab/NUL; read_logs last_n is "
+            "1..500; file_read "
+            "windows are at most 400 lines) or reach the same fact with a "
+            "different tool (file_read with start_line/end_line, list_dir). "
+            "Do not resend the same arguments."
+        ),
+        requires_different_action=True,
     ),
 
     # Safety-net.

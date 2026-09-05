@@ -162,13 +162,24 @@ class TestArgvValidation:
     @pytest.mark.parametrize(
         "arg",
         [";rm", "a|b", "a&b", "a>b", "a<b", "a`b", "a$b", "a(b", "a)b",
-         "a{b", "a}b", "a[b", "a]b", "a\nb", "a\rb", "a\tb"],
+         "a[b", "a]b", "a\nb", "a\rb", "a\tb"],
     )
     def test_shell_metachars_rejected_in_args(self, workspace: Path, arg: str):
         with pytest.raises(PermissionError, match="forbidden character"):
             # First arg must be a whitelisted command — but the
             # metachar appears in argv[1], which is what we test.
             self._tool(workspace).run(["touch", arg])
+
+    def test_braces_are_not_metacharacters(self, workspace: Path):
+        """Exam 2026-09-05, turns 35–36: a `findstr` for `{{step:` was
+        dropped twice for the `{`. Braces compose nothing with shell=False;
+        the agent's own reference syntax must be searchable."""
+        (workspace / "refs.txt").write_text("a {{step:1.output}} b\n", encoding="utf-8")
+        out = self._tool(workspace).run(
+            ["findstr" if os.name == "nt" else "grep", "{{step:", "refs.txt"],
+        )
+        assert out["exit_code"] == 0
+        assert "{{step:1.output}}" in out["stdout"]
 
     @pytest.mark.parametrize(
         "arg",
