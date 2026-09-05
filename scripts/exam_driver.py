@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     stop = qdir / "stop"
 
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
-    proc = subprocess.Popen(  # noqa: S603 — fixed argv, our own entry point
+    proc = subprocess.Popen(  # nosec B603 — fixed argv, our own entry point
         [args.python, "-u", "main.py", "--auto-approve", "deny"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace", env=env, bufsize=1,
@@ -100,8 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     buf: list[str] = []
 
     def _pump() -> None:
-        assert proc.stdout is not None
-        for line in proc.stdout:
+        stdout = proc.stdout
+        if stdout is None:  # pragma: no cover — Popen was given a pipe
+            return
+        for line in stdout:
             buf.append(line)
 
     threading.Thread(target=_pump, daemon=True).start()
@@ -112,11 +114,11 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         if stop.exists():
             try:
-                assert proc.stdin is not None
-                proc.stdin.write(":quit\n")
-                proc.stdin.flush()
-            except Exception:  # noqa: BLE001 — the process may already be gone
-                pass
+                if proc.stdin is not None:
+                    proc.stdin.write(":quit\n")
+                    proc.stdin.flush()
+            except Exception as exc:  # noqa: BLE001 — the process may already be gone; say so
+                log.open("a", encoding="utf-8").write(f"quit not delivered: {exc!r}\n")
             time.sleep(3)
             proc.terminate()
             stop.unlink(missing_ok=True)
@@ -137,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         pol_before = _count("data/model_routing_policy.jsonl")
         mem_before = _count("data/persistent_memory.jsonl")
         t0 = time.time()
-        assert proc.stdin is not None
+        if proc.stdin is None:  # pragma: no cover — Popen was given a pipe
+            return 1
         proc.stdin.write(":task-begin\n" + question + "\n:task-end\n")
         proc.stdin.flush()
         why = wait_for_turn_end(buf, start, proc_alive=lambda: proc.poll() is None)
