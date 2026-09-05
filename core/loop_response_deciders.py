@@ -323,6 +323,11 @@ class AgentLoopResponseDeciders:
             # notices that are not claims and that no verdict about the evidence
             # can make untrue.
             _stage = "apply_enforcement"
+            # Work order 1, defect 3 (2026-09-05): the attempts the chain
+            # records (HTTP 429, unsupported, blocked, empty) are the support
+            # an honest «could not confirm» stands on.
+            from core.low_evidence_policy import count_blocked_attempts
+
             _enf = apply_answer_enforcement(
                 answer=draft.body,
                 report=_report,
@@ -331,6 +336,7 @@ class AgentLoopResponseDeciders:
                 local_critique_active=local_critique_active,
                 verifier_failure=verifier_failure,
                 contract=completion_contract,
+                blocked_attempts=count_blocked_attempts(self.last_provenance),
             )
             _stage = "log_enforcement"
             self.log.log("answer_enforcement", _enf.to_log_payload())

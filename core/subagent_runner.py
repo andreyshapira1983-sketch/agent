@@ -246,6 +246,32 @@ class SubAgentRunResult:
         return f"subagent:{self.contract_name}"
 
 
+def _carry_external_evidences(
+    child_chain: Any, contract_name: str, child_trace_id: str,
+) -> tuple[int, tuple[str, ...], list[dict[str, Any]]]:
+    """Count the child's external evidences and carry them whole for the parent.
+
+    Origin is stamped ``subagent:<name>:<trace>`` so the parent's verifier can
+    match a claim against the page the child read. The child's receipt lives
+    under the child's trace; in the parent this is a carried observation, not
+    a parent tool call, so ``obtained_via`` is ``subagent:<name>`` and no
+    parent receipt is owed (work order 1, defect 1)."""
+    count = 0
+    seen: list[str] = []
+    carried: list[dict[str, Any]] = []
+    for ev in child_chain.evidences:
+        if ev.kind not in _EXTERNAL_EVIDENCE_KINDS:
+            continue
+        count += 1
+        if ev.kind not in seen:
+            seen.append(ev.kind)
+        d = ev.to_dict()
+        d["origin"] = f"subagent:{contract_name}:{child_trace_id}"
+        d["obtained_via"] = f"subagent:{contract_name}"
+        carried.append(d)
+    return count, tuple(seen), carried
+
+
 class SubAgentRunner:
     """Creates and runs a bounded child AgentLoop for one sub-agent contract."""
 
@@ -497,22 +523,9 @@ class SubAgentRunner:
         try:
             child_chain = getattr(child_loop, "last_provenance", None)
             if child_chain is not None:
-                seen: list[str] = []
-                for _ev in child_chain.evidences:
-                    if _ev.kind in _EXTERNAL_EVIDENCE_KINDS:
-                        ext_count += 1
-                        if _ev.kind not in seen:
-                            seen.append(_ev.kind)
-                        # Carried whole, origin stamped: the parent's verifier
-                        # can match a claim against the page the child read.
-                        _d = _ev.to_dict()
-                        _d["origin"] = f"subagent:{contract_name}:{child_trace_id}"
-                        # The child's receipt lives under the child's trace;
-                        # in the parent this is a carried observation, not a
-                        # parent tool call, so it needs no parent receipt.
-                        _d["obtained_via"] = f"subagent:{contract_name}"
-                        ext_evidences.append(_d)
-                ext_kinds = tuple(seen)
+                ext_count, ext_kinds, ext_evidences = _carry_external_evidences(
+                    child_chain, contract_name, child_trace_id,
+                )
         except Exception as exc:  # noqa: BLE001 — reason stated above
             # Zero external evidence is a JUDGEMENT about the sub-agent's
             # answer — it feeds the quality score. "The child cited nothing

@@ -197,8 +197,13 @@ def apply_answer_enforcement(
     verifier_failure: bool = False,
     mode: str | None = None,
     contract: Any | None = None,
+    blocked_attempts: int = 0,
 ) -> EnforcementResult:
-    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов."""
+    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов.
+
+    ``blocked_attempts`` — число заблокированных/пустых попыток в цепочке
+    (рабочий заказ 1, дефект 3): честное «подтвердить не удалось» опирается
+    на них и не стирается воротами низкой доказательности."""
     found = ()
     try:
         found = contradicted_claims(answer)
@@ -212,6 +217,7 @@ def apply_answer_enforcement(
         local_critique_active=local_critique_active,
         verifier_failure=verifier_failure,
         mode=mode,
+        blocked_attempts=blocked_attempts,
     )
     result = _annotate_unrepresented_prohibitions(result, contract, question)
     if not found:
@@ -287,6 +293,7 @@ def _enforce_without_contradictions(
     local_critique_active: bool = False,
     verifier_failure: bool = False,
     mode: str | None = None,
+    blocked_attempts: int = 0,
 ) -> EnforcementResult:
     """Apply PR3 enforcement. Never raises."""
     mode_s = mode if mode is not None else enforce_unsupported_claims_mode()
@@ -397,6 +404,7 @@ def _enforce_without_contradictions(
         question=question,
         evidence_expected=evidence_expected,
         local_critique_active=False,
+        blocked_attempts=blocked_attempts,
     )
     if le.triggered:
         return EnforcementResult(
