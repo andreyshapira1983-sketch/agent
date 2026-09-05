@@ -1,6 +1,6 @@
 import pytest
 
-from core.self_stop_record import record_self_stop, ALLOWED_PATH, ALLOWED_KINDS
+from core.self_stop_record import ALLOWED_PATH, record_self_stop
 from core.state_integrity import read_state_jsonl_unlocked
 
 

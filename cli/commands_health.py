@@ -445,6 +445,11 @@ def _grounded_target_payload(workspace: Path) -> dict[str, Any]:
             classification = "off_allowlist"
         if _is_critical(target):
             classification = "off_allowlist"
+    # Same rule: classification is advisory, and an unclassifiable target is
+    # an honest "unknown" WITH its cause in `reason`, not a crashed command.
+    except Exception as exc:  # noqa: BLE001
+        return {"classification": "unknown", "reason": type(exc).__name__, "target_path": None}
+    else:
         return {
             "classification": classification,
             "target_path": target,
@@ -456,10 +461,6 @@ def _grounded_target_payload(workspace: Path) -> dict[str, Any]:
             "mapping_rule": mapping.mapping_rule,
             "mapping_reason": mapping.reason,
         }
-    # Same rule: classification is advisory, and an unclassifiable target is
-    # an honest "unknown" WITH its cause in `reason`, not a crashed command.
-    except Exception as exc:  # noqa: BLE001
-        return {"classification": "unknown", "reason": type(exc).__name__, "target_path": None}
 
 
 def _self_build_payload(workspace: Path, now: datetime) -> dict[str, Any]:

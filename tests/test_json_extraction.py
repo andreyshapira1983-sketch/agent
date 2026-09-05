@@ -29,9 +29,10 @@ def _oracle_subagent(text: str):
         data = json.loads(match.group())
         if not isinstance(data, dict):
             return None
-        return data
     except json.JSONDecodeError:
         return None
+    else:
+        return data
 
 
 # ── retired implementation 2: self_build_producer._parse_json ─────────────────

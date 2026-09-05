@@ -436,10 +436,7 @@ class AgentLoopMemoryRead:
                             "past_question_chars": len(repeat_ep.question),
                         },
                     )
-                    if block:
-                        block = block + "\n\n" + hint
-                    else:
-                        block = hint
+                    block = block + "\n\n" + hint if block else hint
             except Exception:  # noqa: BLE001, S110 — reason stated above
                 # Re-ask detection must never abort the main loop.
                 pass

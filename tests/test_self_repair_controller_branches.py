@@ -120,10 +120,7 @@ class _FakeAgent:
         # `outputs` (a list) lets a tool return different results on successive
         # calls — needed because baseline_tests and post_tests both call
         # run_tests but must report different pass counts.
-        if spec.get("outputs"):
-            current = spec["outputs"].pop(0)
-        else:
-            current = spec
+        current = spec["outputs"].pop(0) if spec.get("outputs") else spec
         status = current.get("status", "success")
         if action.tool_name == "file_write" and status == "success":
             # A real write registers a compensation plan; mirror that so the

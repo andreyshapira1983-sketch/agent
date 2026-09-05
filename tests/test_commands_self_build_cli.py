@@ -296,19 +296,7 @@ def test_tech_debt_summary_when_the_file_is_missing(tmp_path):
 
 def test_tech_debt_summary_counts_open_and_done(tmp_path):
     (tmp_path / "TECH_DEBT.md").write_text(
-        "\n".join(
-            [
-                "# Tech debt",
-                "TD-001 first item",
-                "Статус: done (merged)",
-                "TD-002 second item",
-                "Статус: in progress",
-                "TD-003 third item",
-                "  Статус : DONE",
-                "TD-004 no status line at all",
-                "some prose that is not a status",
-            ]
-        ),
+        "# Tech debt\nTD-001 first item\nСтатус: done (merged)\nTD-002 second item\nСтатус: in progress\nTD-003 third item\n  Статус : DONE\nTD-004 no status line at all\nsome prose that is not a status",
         encoding="utf-8",
     )
 

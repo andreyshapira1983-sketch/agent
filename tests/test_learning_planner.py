@@ -225,8 +225,10 @@ def test_apply_staleness_returns_score_when_stale_hours_zero(workspace: Path):
     (workspace / "README.md").write_text("ov", encoding="utf-8")
 
     recent_ts = datetime.now(timezone.utc).isoformat()
-    fresh = MagicMock(); fresh.last_read_at = recent_ts
-    registry = MagicMock(); registry.get_source = lambda sid: fresh
+    fresh = MagicMock()
+    fresh.last_read_at = recent_ts
+    registry = MagicMock()
+    registry.get_source = lambda sid: fresh
 
     plan = LearningPlanner().plan(
         workspace=workspace, limit=2, source_registry=registry, stale_hours=0.0
@@ -240,7 +242,8 @@ def test_apply_staleness_skips_when_record_missing(workspace: Path):
     (workspace / "core").mkdir()
     (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
 
-    registry = MagicMock(); registry.get_source = lambda sid: None
+    registry = MagicMock()
+    registry.get_source = lambda sid: None
     plan = LearningPlanner().plan(
         workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
     )
@@ -251,8 +254,10 @@ def test_apply_staleness_skips_when_last_read_empty(workspace: Path):
     (workspace / "core").mkdir()
     (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
 
-    record = MagicMock(); record.last_read_at = ""
-    registry = MagicMock(); registry.get_source = lambda sid: record
+    record = MagicMock()
+    record.last_read_at = ""
+    registry = MagicMock()
+    registry.get_source = lambda sid: record
     plan = LearningPlanner().plan(
         workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
     )
@@ -263,8 +268,10 @@ def test_apply_staleness_skips_when_timestamp_unparseable(workspace: Path):
     (workspace / "core").mkdir()
     (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
 
-    record = MagicMock(); record.last_read_at = "not-a-real-iso-timestamp"
-    registry = MagicMock(); registry.get_source = lambda sid: record
+    record = MagicMock()
+    record.last_read_at = "not-a-real-iso-timestamp"
+    registry = MagicMock()
+    registry.get_source = lambda sid: record
     plan = LearningPlanner().plan(
         workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
     )
@@ -279,8 +286,10 @@ def test_apply_staleness_keeps_score_when_record_older_than_window(workspace: Pa
 
     from datetime import timedelta
     old_ts = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-    record = MagicMock(); record.last_read_at = old_ts
-    registry = MagicMock(); registry.get_source = lambda sid: record
+    record = MagicMock()
+    record.last_read_at = old_ts
+    registry = MagicMock()
+    registry.get_source = lambda sid: record
 
     plan = LearningPlanner().plan(
         workspace=workspace, limit=2, source_registry=registry, stale_hours=6.0

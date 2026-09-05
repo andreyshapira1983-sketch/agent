@@ -1422,7 +1422,7 @@ def produce_self_apply_proposal(
             return _record(ProducerReport(
                 status="budget_wait",
                 reason="; ".join(reasons) or "budget near exhaustion",
-                checked_gates=gates + ["budget"],
+                checked_gates=[*gates, "budget"],
                 next_human_action="Wait for the budget window to refill.",
             ))
     gates.append("budget")
@@ -1444,7 +1444,7 @@ def produce_self_apply_proposal(
                 f"{', '.join(held)}" if held else
                 "a pending self_apply_lane.run approval item names no files"
             ),
-            checked_gates=gates + ["approval"],
+            checked_gates=[*gates, "approval"],
             next_human_action="Resolve the existing self-apply approval first.",
         ))
     if explicit and set(explicit) <= denied_cooldown:
@@ -1461,7 +1461,7 @@ def produce_self_apply_proposal(
         return _record(ProducerReport(
             status="dirty_tree_wait",
             reason="git working tree is not clean",
-            checked_gates=gates + ["dirty_tree"],
+            checked_gates=[*gates, "dirty_tree"],
             next_human_action="Commit or stash local changes, then retry.",
         ))
     gates.append("dirty_tree")
@@ -1687,7 +1687,7 @@ def produce_self_apply_proposal(
                 + ("; ".join(str(v) for v in veto_now) or "unspecified reasons")
                 + ". Fix ALL of these and do not reintroduce them."
             )
-            builder_lessons = list(lessons) + [retry_note]
+            builder_lessons = [*list(lessons), retry_note]
             continue
 
         return _record(ProducerReport(

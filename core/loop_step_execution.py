@@ -883,15 +883,6 @@ class AgentLoopStepExecution:
                     label=source_label,
                 )
 
-            return {
-                "label": source_label,
-                "tool": action.tool_name,
-                "arguments": action.parameters,
-                "output": result.output,
-                "issues": issues,
-                "data_class": cls_result.cls.value,
-            }
-
         except Exception as exc:  # noqa: BLE001
             # Last-resort guard: if any postprocessing step (classify,
             # redact, cache_store) raises unexpectedly, capture it as an
@@ -916,6 +907,15 @@ class AgentLoopStepExecution:
                 attempt=self._current_attempt,
             )
             return None
+        else:
+            return {
+                "label": source_label,
+                "tool": action.tool_name,
+                "arguments": action.parameters,
+                "output": result.output,
+                "issues": issues,
+                "data_class": cls_result.cls.value,
+            }
 
     def _call_tool(self, action: Action) -> ToolResult:
         assert action.tool_name is not None  # noqa: S101 — type narrowing, guarded above

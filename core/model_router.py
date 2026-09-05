@@ -297,10 +297,7 @@ class ModelRegistry:
         policy: ModelSelectionPolicy | None = None,
     ) -> ModelSpec | None:
         policy = policy or ModelSelectionPolicy()
-        if policy.name == "conservative":
-            source_specs = self.custom_specs()
-        else:
-            source_specs = self._specs
+        source_specs = self.custom_specs() if policy.name == "conservative" else self._specs
         candidates = [
             spec for spec in source_specs
             if spec.supports(role)
@@ -1118,10 +1115,7 @@ def _custom_model_specs_from_path() -> tuple[ModelSpec, ...]:
 
 
 def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, ...]:
-    if isinstance(data, dict):
-        items = data.get("models", [])
-    else:
-        items = data
+    items = data.get("models", []) if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError("model registry must be a list or {'models': [...]}")
     specs: list[ModelSpec] = []

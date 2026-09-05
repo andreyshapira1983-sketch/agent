@@ -560,11 +560,10 @@ def _maybe_propose_repair(
                 },
             )
             return {"repair_proposed": True, "target": prop.path}
-
-        return {"repair_proposed": False, "reason": f"generator status: {report.status}"}
-
     except Exception as exc:  # noqa: BLE001
         return {"repair_proposed": False, "reason": f"exception: {exc}"}
+    else:
+        return {"repair_proposed": False, "reason": f"generator status: {report.status}"}
 
 
 # ── autonomous self-build producer wiring (TD-026) ────────────────────────────
@@ -785,9 +784,10 @@ def _self_build_status_block(
         except Exception:  # noqa: BLE001
             lines.append("  subagents: unavailable")
         lines.append(f"  providers: {_provider_health_line(workspace)}")
-        return lines
     except Exception as exc:  # noqa: BLE001 — operator status must never crash
         return [f"Self-build: status unavailable ({type(exc).__name__})"]
+    else:
+        return lines
 
 
 def _maybe_produce_self_build(

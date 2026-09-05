@@ -179,11 +179,7 @@ class MemoryWritePolicy:
         if has_pii and SENSITIVE_DATA_CONSENT_TAG not in tags_set:
             return MemoryWriteDecision(
                 "reject",
-                pii_reasons
-                + [
-                    ("sensitive data requires explicit "
-                    f"'{SENSITIVE_DATA_CONSENT_TAG}' tag")
-                ],
+                [*pii_reasons, f"sensitive data requires explicit '{SENSITIVE_DATA_CONSENT_TAG}' tag"],
             )
 
         if _TOOL_DUMP_HINT.search(text):
