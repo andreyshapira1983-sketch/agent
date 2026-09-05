@@ -1438,9 +1438,6 @@ class ModelRouter:
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
-        # Actuation test 2026-09-05, criterion 3: keep `agent_policy:<id>` first, tier note after.
-        if str(route.reason or "").startswith("agent_policy:"):
-            route_reason = f"{route.reason}|{route_reason}"
         provider, model, route_reason = self._cap_role_route(
             role_key, provider, model, route_reason
         )
