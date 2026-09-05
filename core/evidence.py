@@ -302,6 +302,31 @@ def looks_like_error_page(text: str) -> bool:
     return any(marker in lowered for marker in _ERROR_PAGE_MARKERS)
 
 
+def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
+    """Evidence for a `file_read` result, whole file or a line window.
+
+    A windowed read is its own source, named exactly as the plan step labels
+    it (`file:<path>:a-b`, core/step_sanitizer.py). Measured 2026-09-05 (exam
+    turn 33): the synthesizer cited the step's label, the chain knew only
+    `file:<path>`, and six correct citations were judged fabricated.
+    """
+    if not isinstance(output, str) or not output:
+        return None
+    path = str(args.get("path", "<unknown>"))
+    window = ""
+    start, end = args.get("start_line"), args.get("end_line")
+    if isinstance(start, int) and isinstance(end, int):
+        window = f":{start}-{end}"
+    return make_evidence(
+        kind="file",
+        source_id=f"file:{path}{window}",
+        obtained_via="file_read",
+        claim=f"Contents of workspace file {path}"
+        + (f", lines {start}-{end}" if window else ""),
+        excerpt=output,
+    )
+
+
 def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
     *,
     tool_name: str,
@@ -325,16 +350,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
 
     # ---- file_read --------------------------------------------------------
     if tool_name == "file_read":
-        if not isinstance(output, str) or not output:
-            return None
-        path = str(args.get("path", "<unknown>"))
-        return make_evidence(
-            kind="file",
-            source_id=f"file:{path}",
-            obtained_via="file_read",
-            claim=f"Contents of workspace file {path}",
-            excerpt=output,
-        )
+        return _file_read_evidence(args, output)
 
     # ---- web_search -------------------------------------------------------
     if tool_name == "web_search":
