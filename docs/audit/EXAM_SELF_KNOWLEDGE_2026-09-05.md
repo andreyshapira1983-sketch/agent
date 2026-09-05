@@ -304,9 +304,9 @@ git checkout` → `file_write core/planner.py` → TestWriter subagent →
 clarification question instead of code (quality 2/5); the TestWriter returned
 «I cannot produce the file»; `git checkout` and `file_write core/planner.py`
 were **auto-denied** by the session policy (not by him); `diff_file` and the
-test `file_write` received the literal string `{{step:N.output}}` — the
-17-byte file `tests/test_planner_rejects_stale_file_paths.py` is in the tree
-now; `run_tests` on it hung to the 900-s ceiling (the driver defect above).
+test `file_write` received the literal string `{{step:N.output}}` — the 17-byte
+`tests/test_planner_rejects_stale_file_paths.py` landed untracked in the operator's working tree (it does not exist in the repository);
+`run_tests` on it hung to the 900-s ceiling (the driver defect above).
 
 **Attempt 2 (turn 13, `--auto-approve approve` — the operator's word «дай ему
 починить до конца»).** New lesson chosen: `record_self_stop` (a spec he once
