@@ -3170,6 +3170,80 @@ reality, stays welcome. Witness:
 `tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
 text reaches the model).
 
+## Block 13 — the first work order: flights, three passes, three defects (2026-09-05, morning)
+
+The operator's order after the exam: «сейчас я начну давать ему задачи, потом
+опять эту же задачу». The first order, written by Кодекс, checked by the
+operator: five round-trip options Tel Aviv → Berlin, out 15 September, back
+25 September, full price and duration; three prohibitions (do not buy or
+book, do not bypass a CAPTCHA, a search card is not a confirmed price); a
+ten-point rubric, final, never to be changed: 1/10 stays 1/10. Same text
+verbatim, a new session per pass, one driver per session
+(`scripts/exam_driver.py --dir …`), the order inside `:task-begin … :task-end`.
+Everything raw sits in `docs/audit/WORK_ORDER_FLIGHTS_2026-09-05.md` and its
+folder; the five baskets there decide whose fault each loss is: his
+reasoning, his tools, the judges, the wiring, the order itself.
+
+**Pass 1 — 0/10, basket 5 (wiring).** He did not research flights: the
+referent resolver took the quoted term in the order («полная цена») for an
+analysis target and sent him to define it. Rule R7 in
+`core/referent_resolver.py`: a quote shorter than forty characters inside a
+directive ten times longer is a term, not a target —
+`tests/test_a_quoted_term_in_a_work_order_is_not_an_analysis_target.py`.
+
+**Pass 2 — 1/10 as counted, and the count stands.** This time he worked:
+he raised three FlightResearcher subagents himself (nobody named them; the
+planner chose delegation), they fetched real pages — Expedia HTTP 429, a
+Google Flights «unsupported» page, Skyscanner and Trip.com dynamic shells,
+KAYAK and Kiwi empty — and his draft said the honest thing: «ни один из трёх
+проверенных источников не предоставил проверяемых тарифов … задача не
+выполнена». The operator received one Flydubai baggage fact. Eleven model
+calls, 91 942 tokens, 192 units. Three defects, ordered by the operator to be
+repaired separately, each as reproduction → targeted test → patch →
+differential test, no live replay before all three:
+
+1. **A subagent's evidence did not cross the boundary** (`b982bc5`). The
+   parent's chain held the children's prose and `external_evidence_count=3`;
+   the pages themselves stayed in the children's traces, so every claim
+   about them was booked `subagent_asserted`. `SubAgentRunResult.external_evidences`
+   now carries the child's external evidences whole, origin
+   `subagent:<name>:<trace>`, `obtained_via subagent:<name>` (a carried
+   observation owes no parent receipt); the spawn tool stashes them; the run
+   folds them after the attempt loop, once, in its own method so the moved
+   loop body stays verbatim for the split-fidelity check. Differential: a
+   parent claim citing the page the child read is VERIFIED —
+   `tests/test_a_subagents_evidence_crosses_the_boundary.py`.
+2. **A date range was read as a claimed count** (`a2218dd`, `9d04adc`). «с
+   15 по 25 сентября» became «claims 15, lists fewer» in the enumeration
+   judge. `_number_is_a_date` in `core/verifier_utils.py` guards R2 —
+   `tests/test_a_date_range_is_not_a_claimed_count.py`. The first commit
+   was red: the regex reached the file through a heredoc and the shell ate
+   the `\b` into a backspace byte. Code with backslashes is written with
+   file tools, never through the shell.
+3. **The honest negative result was erased** (`e8a5791`). The low-evidence
+   gate computed supported_ratio 0.11 and truncated eight of nine claims —
+   its formal job, «ship nothing unsupported», against the user's, «if
+   nothing can be confirmed, say so». `count_blocked_attempts(chain)` counts
+   the attempt evidence (4xx/5xx, unsupported, blocked, empty); it travels
+   from the decider through `apply_answer_enforcement` into
+   `evaluate_low_evidence_policy`, where an unsupported chunk that asserts
+   blocking / non-confirmation / not-done counts as supported by those
+   attempts and survives the truncation. With zero blocked attempts the
+   same report is cut as before; a positive price is never rescued. The
+   control for that last claim was green on its own at first — seven chunks
+   sit under the gate's floor of eight — a lesson already in the book: a
+   break that did not turn red proves nothing until you know why.
+
+**The multi-agent status, fixed before anyone designs anything** (the
+operator's ruling mid-repair: one central agent creates his own subagents;
+no «AccountingAgent» written by hand): self-delegation OBSERVED (pass 2),
+parallel decomposition OBSERVED (three researchers, one per source group),
+semantic role formation UNPROVEN, memory scope and subagent lifecycle —
+planned gaps, not organs. The market will force a staff; we do not build one.
+
+Pass 3 — same text, new session, same rubric — runs only after the battery
+returns a real exit code (`pytest … > file; rc=$?`, never `pytest | grep`).
+
 ## Block 12 — the dialogue exam: what «he does not know» was made of (2026-09-04, 23:40–00:10)
 
 The operator's order: «произведи экзамен: вопрос — ответ — разбор — снова
