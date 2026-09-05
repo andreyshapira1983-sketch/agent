@@ -42,6 +42,7 @@ from core.step_references import (
     has_step_reference,
     resolve_step_references,
 )
+from core.step_sanitizer import fit_resolved_arguments
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -251,6 +252,9 @@ class AgentLoopStepExecution:
             return []
         if len(steps) == 1:
             return [self._run_step_parallel(steps[0])]
+        # Всё, что план называет шагом — по id и по номеру: резолвер отличает
+        # по этому множеству ссылку от прозы, упоминающей форму ссылки.
+        plan_steps = frozenset({s.id for s in steps} | {str(s.order) for s in steps})
 
         # Concurrency is safe between steps that only READ. The moment one of
         # them changes the workspace, plan order stops being a formality and
@@ -284,7 +288,7 @@ class AgentLoopStepExecution:
             # (docs/audit/EXAM_SELF_KNOWLEDGE_2026-09-05.md, turns 12–13).
             ordered: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]] = []
             for step in sorted(steps, key=lambda s: s.order):
-                ordered.append(self._run_step_after_references(step, ordered))
+                ordered.append(self._run_step_after_references(step, ordered, plan_steps))
             return ordered
 
         # Партиция: параллельные — без внутренних зависимостей; последовательные —
@@ -321,7 +325,7 @@ class AgentLoopStepExecution:
         # Последовательные идут в порядке плана — и только здесь ссылки
         # разрешаются: к этому моменту вывод шага-источника уже ИЗМЕРЕН.
         for step in sequential:
-            results.append(self._run_step_after_references(step, results))
+            results.append(self._run_step_after_references(step, results, plan_steps))
 
         # Re-sort to plan order so callers process artifacts in a stable sequence.
         order_map = {s.id: i for i, s in enumerate(steps)}
@@ -332,6 +336,7 @@ class AgentLoopStepExecution:
         self,
         step: PlanStep,
         done: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]],
+        plan_steps: frozenset[str] | None = None,
     ) -> tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]:
         """Разрешить ссылки шага по уже измеренному — и только потом исполнить.
 
@@ -341,7 +346,7 @@ class AgentLoopStepExecution:
         обещание докстринга «не исполняется» не выполнялось. Провал уезжает
         планировщику как обычный триггер с названной причиной.
         """
-        trigger = self._resolve_references_in(step, done)
+        trigger = self._resolve_references_in(step, done, plan_steps)
         if trigger is not None:
             return step, None, trigger
         return self._run_step_parallel(step)
@@ -350,6 +355,7 @@ class AgentLoopStepExecution:
         self,
         step: PlanStep,
         done: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]],
+        plan_steps: frozenset[str] | None = None,
     ) -> ReplanTrigger | None:
         """Подставить в аргументы шага выводы уже исполненных шагов.
 
@@ -357,7 +363,10 @@ class AgentLoopStepExecution:
         ссылка остаётся неразрешённой, шаг помечается провалившимся с названной
         причиной и НЕ исполняется. Правдоподобная подстановка была бы худшим
         исходом — ровно она и породила класс «выдумывает вместо того, чтобы
-        посмотреть». Возвращает триггер провала или None, если исполнять можно.
+        посмотреть». Подставленное затем примеряется к правилам обрезки
+        санитайзера (`fit_resolved_arguments`): шаблон был в норме, а
+        измеренное значение — нет, и падать об это должен не шаг, а лишнее.
+        Возвращает триггер провала или None, если исполнять можно.
         """
         arguments = step.action_spec.get("arguments", {})
         if not has_step_reference(arguments):
@@ -369,14 +378,15 @@ class AgentLoopStepExecution:
             output = artifact.get("output")
             outputs[done_step.id] = output
             outputs[str(done_step.order)] = output
+        tool_name = step.action_spec.get("tool_name")
         try:
-            step.action_spec["arguments"] = resolve_step_references(
-                arguments, outputs,
+            resolved = resolve_step_references(
+                arguments, outputs, plan_steps=plan_steps,
             )
         except UnresolvedStepReference as exc:
             self.log.log("step_reference_unresolved", {
                 "step_id": step.id,
-                "tool": step.action_spec.get("tool_name"),
+                "tool": tool_name,
                 "reason": str(exc),
                 "known_steps": sorted(outputs),
             })
@@ -385,11 +395,17 @@ class AgentLoopStepExecution:
             return ReplanTrigger(
                 code="tool_error",
                 step_id=step.id,
-                tool_name=step.action_spec.get("tool_name"),
+                tool_name=tool_name,
                 arguments=arguments,
                 reason=f"Step not executed: {exc}",
                 attempt=self._current_attempt,
             )
+        resolved, fitted = fit_resolved_arguments(tool_name, resolved)
+        if fitted:
+            self.log.log("step_arguments_fitted", {
+                "step_id": step.id, "tool": tool_name, "warnings": fitted,
+            })
+        step.action_spec["arguments"] = resolved
         return None
 
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 3, all 16 returns are guard clauses

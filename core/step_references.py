@@ -24,11 +24,19 @@
   правдоподобным текстом, а остаётся ошибкой с названной причиной;
 * значение подставляется как есть; когда ссылка занимает весь аргумент,
   сохраняется исходный ТИП значения (список остаётся списком), потому что
-  превращение результата в строку — это уже догадка о том, что нужно.
+  превращение результата в строку — это уже догадка о том, что нужно;
+* форма ссылки в ПРОЗЕ — ссылкой не является. Замер 2026-09-05 (экзамен,
+  ход 22): в objective субагента стояло «ссылок вида {{step:N.output}}»,
+  резолвер принял «N» за шаг, и шаг, которому нужно было лишь РАССКАЗАТЬ о
+  синтаксисе, провалился целиком. Когда известны шаги плана, ссылкой
+  считается номер, идентификатор `step_…` и всё, что план или измерение
+  называют шагом; остальное — текст и остаётся текстом. Висячая ссылка на
+  номер (`{{step:9.output}}` без девятого шага) по-прежнему ошибка.
 """
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from typing import Any
 
 #: {{step:<ref>.output}} — единственная разрешённая форма.
@@ -78,9 +86,24 @@ def referenced_steps(value: Any) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _resolve_string(text: str, outputs: dict[str, Any]) -> Any:
+def _is_reference(
+    ref: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
+) -> bool:
+    """Ссылка это или проза, упоминающая форму ссылки (см. докстринг модуля).
+
+    Без `plan_steps` (вызовы, не знающие плана) каждая форма — ссылка: это
+    старое поведение, и оно остаётся строгим.
+    """
+    if plan_steps is None or ref in outputs or ref in plan_steps:
+        return True
+    return ref.isdigit() or ref.startswith("step_")
+
+
+def _resolve_string(
+    text: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
+) -> Any:
     match = _REFERENCE_RE.fullmatch(text.strip())
-    if match is not None:
+    if match is not None and _is_reference(match.group("ref"), outputs, plan_steps):
         # Ссылка занимает весь аргумент: возвращаем значение КАК ЕСТЬ, чтобы
         # список остался списком, а число числом.
         ref = match.group("ref")
@@ -93,6 +116,8 @@ def _resolve_string(text: str, outputs: dict[str, Any]) -> Any:
 
     def _substitute(m: re.Match[str]) -> str:
         ref = m.group("ref")
+        if not _is_reference(ref, outputs, plan_steps):
+            return m.group(0)
         if ref not in outputs:
             raise UnresolvedStepReference(
                 f"step reference {{{{step:{ref}.output}}}} has no result: "
@@ -103,19 +128,31 @@ def _resolve_string(text: str, outputs: dict[str, Any]) -> Any:
     return _REFERENCE_RE.sub(_substitute, text)
 
 
-def resolve_step_references(value: Any, outputs: dict[str, Any]) -> Any:
+def resolve_step_references(
+    value: Any,
+    outputs: dict[str, Any],
+    *,
+    plan_steps: Collection[str] | None = None,
+) -> Any:
     """Подставить результаты шагов в аргументы.
 
     `outputs` — отображение «идентификатор или порядковый номер шага ->
     его вывод». Значения не копируются и не преобразуются: транспорт обязан
-    доставить ровно то, что было измерено.
+    доставить ровно то, что было измерено. `plan_steps` — идентификаторы и
+    номера ВСЕХ шагов плана; с ними форма ссылки, не называющая ни шага, ни
+    номера, читается как проза и не трогается.
     """
     if isinstance(value, str):
-        return _resolve_string(value, outputs)
+        return _resolve_string(value, outputs, plan_steps)
     if isinstance(value, dict):
-        return {k: resolve_step_references(v, outputs) for k, v in value.items()}
+        return {
+            k: resolve_step_references(v, outputs, plan_steps=plan_steps)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [resolve_step_references(v, outputs) for v in value]
+        return [resolve_step_references(v, outputs, plan_steps=plan_steps) for v in value]
     if isinstance(value, tuple):
-        return tuple(resolve_step_references(v, outputs) for v in value)
+        return tuple(
+            resolve_step_references(v, outputs, plan_steps=plan_steps) for v in value
+        )
     return value
