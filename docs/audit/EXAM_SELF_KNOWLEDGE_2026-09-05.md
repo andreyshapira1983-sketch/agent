@@ -360,3 +360,33 @@ instead of code, and judges that withhold the report. Subagents: he knows what
 they are from the doctrine, not why he uses them; the reflex comes with the
 planner model and one tool in the list. Nothing repaired; the two placeholder
 files and the empty repair request are his artifacts in his tree.
+
+## Turns 16–17 (12:01–12:17): «почему ты не подставляешь вывод шага в следующий шаг?»
+
+Turn 16: the words «вывода предыдущего шага» tripped the prior-turn detector
+(`core/loop_gates.py`, `prior_turn_no_antecedent`): «В этой сессии ещё нет
+предыдущего шага — уточните, какой результат использовать» — and he waited
+for a reply until the driver's 900-s ceiling (0 model calls). The reply gave
+him the two trace ids and the same question.
+
+Turn 17: he read `SELF_REPAIR_DOCTRINE.md`, both traces through `read_logs`
+(cut to 2 000 chars each), `core/loop.py`, `core/planner.py`,
+`core/self_repair.py`; a `shell_exec` search was dropped for a shell
+metacharacter. His answer: the cause is `core/self_repair.py` — `run()`
+passes `proposal.proposed_content` straight to `file_write` «без раскрытия
+ссылок». Tail: «не подтверждено, где именно в `core/loop*` должна была бы
+выполняться подстановка и почему конвейер ремонта её не вызывает».
+
+**Wrong culprit, right shape.** Neither morning repair went through
+`core/self_repair.py`; both were REPL plans executed by the loop's step
+executor. The resolver exists (`core/step_references.py`) and is called on
+the sequential branch of `core/loop_step_execution.py`; the branch taken when
+a batch holds any effect runs every step through `_run_step_parallel` and
+never calls it. He did not open `loop_step_execution.py`. Two wiring
+contributions: the planner's doc routing pushed the self-repair doctrine and
+`self_repair.py` into his plan because the question said «ремонт»
+(`_ensure_self_repair_doctrine_docs_first`), and the traces reached him as
+2 000 of several hundred thousand chars, so the `file_write` events with the
+literal string were not in what he saw — he said so. The conclusion is his:
+a plausible module, asserted as «точный адрес дефекта», with the true
+uncertainty placed in the tail again.
