@@ -45,6 +45,7 @@ class AgentLoopEvidenceChain:
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
+        registry: Any
         memory: Any
         knowledge_pipeline: Any
         knowledge_auto_write: Any
@@ -97,6 +98,35 @@ class AgentLoopEvidenceChain:
             require_verified=self._unattended_run(),
         )
         return CatalogueResult(ranking=ranking, knowledge=knowledge)
+
+    def _fold_subagent_evidence(self, chain: ProvenanceChain) -> None:
+        """The pages a subagent READ cross the boundary beside what it SAID.
+        Work order 1, pass 2 (2026-09-05): three subagents fetched real pages
+        (HTTP 429, an «unsupported» page, dynamic shells); the parent held only
+        their prose and a count, the verifier booked every claim about them
+        «subagent_asserted», and the honest negative report was suppressed.
+        The spawn tool stashes the child's external evidences; they are folded
+        here, once, with origin `subagent:<name>:<child trace>`."""
+        from core.evidence import Evidence
+
+        try:
+            tool = self.registry.get("spawn_subagent")
+        except Exception:  # noqa: BLE001 — no spawn tool here: nothing to carry
+            return
+        raw = list(getattr(tool, "last_child_evidences", None) or [])
+        tool.last_child_evidences = []
+        carried: list[Evidence] = []
+        for d in raw:
+            try:
+                carried.append(Evidence.from_dict(dict(d)))
+            except Exception as exc:  # noqa: BLE001 — a bad row is named, the rest still crosses
+                self.log.log("subagent_evidence_skipped", {"error": repr(exc)[:200]})
+        for ev in carried:
+            chain.add(ev)
+        if carried:
+            self.log.log("subagent_evidence_carried", {
+                "count": len(carried), "kinds": sorted({e.kind for e in carried}),
+            })
 
     def _fold_sensor_evidence(self, chain: ProvenanceChain, spend_block: str) -> None:
         """Блоки собственных сенсоров (реестр моделей, зеркало трат) — улика с

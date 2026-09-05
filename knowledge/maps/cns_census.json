@@ -169,7 +169,8 @@
     "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
     "loop_context.py::AgentLoopContext._model_roster_block": [],
     "loop_evidence_chain.py::_sensor_blocks": [],
-    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence": []
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence": []
   },
   "edges": [
     [
@@ -603,6 +604,10 @@
     [
       "loop.py::AgentLoop._run_inner",
       "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence"
     ]
   ]
 }
