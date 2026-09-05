@@ -11,6 +11,7 @@ from tools.base import Tool
 
 MAX_BYTES = 1_000_000  # 1 MB hard cap for MVP
 _MAX_HINT_ENTRIES = 40  # cap the "did you mean" listing so error stays compact
+_DEFAULT_WINDOW_LINES = 60  # start_line without end_line: enough for a function
 
 #: Credential-shaped paths this tool refuses to READ. The self-apply lane
 #: already refused to WRITE these (`core/self_apply_lane._is_denied`); measured
@@ -49,9 +50,63 @@ def _is_credential_path(rel: str) -> bool:
     return any(lower.startswith(d) or f"/{d}" in f"/{lower}" for d in _CRED_DIRS)
 
 
+def _line_window(
+    start_line: int | None, end_line: int | None,
+) -> tuple[int, int] | None:
+    """Validate the optional (start, end) window; None means the whole file.
+
+    Why a window at all: the evidence budget keeps ~12 000 chars of a file,
+    chosen by keyword. Measured 2026-09-05, three turns running: the agent
+    found `core/loop_attempt.py:208` with findstr and then could not read
+    line 208, because the whole-file read never contained it. A line the
+    caller can name is a line the tool must be able to hand back.
+    """
+    if start_line is None and end_line is None:
+        return None
+    for label, value in (("start_line", start_line), ("end_line", end_line)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ValueError(f"file_read {label} must be an int, got {value!r}")
+    start = 1 if start_line is None else start_line
+    if start < 1:
+        raise ValueError(f"file_read start_line must be >= 1, got {start}")
+    end = start + _DEFAULT_WINDOW_LINES - 1 if end_line is None else end_line
+    if end < start:
+        raise ValueError(
+            f"file_read end_line ({end}) must not precede start_line ({start})"
+        )
+    return start, end
+
+
+def _slice_lines(text: str, start: int, end: int, *, name: str) -> str:
+    """Lines start..end (1-based, inclusive), each prefixed with its number.
+
+    A window past the end of the file is an error, not an empty string: an
+    empty answer to "show me line 900" would read as "line 900 is blank".
+    """
+    lines = text.splitlines()
+    total = len(lines)
+    if start > total:
+        raise ValueError(
+            f"file_read window starts at line {start} but {name} has only "
+            f"{total} lines"
+        )
+    end = min(end, total)
+    width = len(str(end))
+    body = "\n".join(
+        f"{n:>{width}}: {lines[n - 1]}" for n in range(start, end + 1)
+    )
+    return f"[{name} lines {start}-{end} of {total}]\n{body}\n"
+
+
 class FileReadTool(Tool):
     name = "file_read"
-    description = "Read a UTF-8 text file from inside the workspace and return its contents."
+    description = (
+        "Read a UTF-8 text file from inside the workspace and return its "
+        "contents. Optional start_line/end_line (1-based, inclusive) return "
+        "exactly that window, each line prefixed with its number — use it "
+        "when you already know the line (e.g. from findstr/grep) and the "
+        "whole file would be truncated."
+    )
     risk = "read_only"
 
     def __init__(self, workspace_root: Path | str):
@@ -101,7 +156,12 @@ class FileReadTool(Tool):
             f"Use one of these real paths instead of guessing."
         )
 
-    def run(self, path: str) -> str:
+    def run(
+        self,
+        path: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+    ) -> str:
         # Read-only file access may target user-supplied local documents
         # with non-ASCII names. We still keep the sandbox boundary strict:
         # path must be a non-empty string and must resolve inside workspace.
@@ -111,6 +171,7 @@ class FileReadTool(Tool):
             )
         if not path.strip():
             raise PermissionError("file_read path must be non-empty")
+        window = _line_window(start_line, end_line)
         # Заготовка вместо адреса — не «файл не найден», а недостроенный план:
         # см. core/placeholder_text и docs/CODE_NOTES.md.
         from core.placeholder_text import looks_like_unfilled_path
@@ -161,7 +222,7 @@ class FileReadTool(Tool):
         # Strict UTF-8: a binary or wrong-encoding file must fail loudly so
         # the loop classifies it as a tool error, not as silently-garbled text.
         try:
-            return target.read_text(encoding="utf-8", errors="strict")
+            text = target.read_text(encoding="utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise UnicodeDecodeError(
                 exc.encoding,
@@ -170,6 +231,9 @@ class FileReadTool(Tool):
                 exc.end,
                 f"file is not valid UTF-8: {target.name} ({exc.reason})",
             ) from exc
+        if window is None:
+            return text
+        return _slice_lines(text, *window, name=target.name)
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, str):

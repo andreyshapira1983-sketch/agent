@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -35,6 +36,40 @@ from tools.shell_exec import (
     READ_ONLY_COMMANDS,
     ShellExecTool,
 )
+
+
+def _pid_alive(pid: int) -> bool:
+    """Portable liveness probe — psutil is not a dependency of this repo."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _fake_proc(*, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0):
+    """A stand-in for `subprocess.Popen` that already finished."""
+    proc = mock.Mock()
+    proc.pid = 4242
+    proc.poll.return_value = returncode
+    proc.returncode = returncode
+    proc.communicate.return_value = (stdout, stderr)
+    return proc
 
 # ===========================================================
 # Construction
@@ -224,12 +259,15 @@ class TestReadOnlyExecution:
         if not self._expected_present("whoami"):
             pytest.skip("whoami not on PATH")
         tool = self._tool(workspace)
-        with mock.patch("subprocess.run", wraps=__import__("subprocess").run) as spy:
+        with mock.patch("subprocess.Popen", wraps=__import__("subprocess").Popen) as spy:
             tool.run(["whoami"])
             kwargs = spy.call_args.kwargs
             assert Path(kwargs["cwd"]).resolve() == workspace.resolve()
             # shell=False is the most important contract.
             assert kwargs["shell"] is False
+            # No terminal for the child: a tool that could read the agent's
+            # stdin is a tool that could wait for it.
+            assert kwargs["stdin"] is subprocess.DEVNULL
             # Env is still stripped down — no dotenv leaks, no PYTHONPATH
             # overrides. The home variables joined the allowed set so `git
             # commit` can find who is committing; they name a directory and
@@ -317,18 +355,22 @@ class TestMutatingExecution:
 
 class TestTimeout:
     def test_subprocess_timeout_surfaces_as_timed_out(self, workspace: Path):
-        """We monkey-patch subprocess.run to raise TimeoutExpired."""
+        """We monkey-patch Popen so `communicate(timeout=)` raises TimeoutExpired."""
         import subprocess
 
         tool = ShellExecTool(workspace_root=workspace, timeout_seconds=0.1)
 
-        def raise_timeout(*args, **kwargs):
-            raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=kwargs.get("timeout", 0.1),
-                output=b"partial out", stderr=b"partial err",
-            )
+        fake_proc = mock.Mock()
+        fake_proc.pid = 4242
+        fake_proc.poll.return_value = 1  # already gone — nothing to kill
+        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd=["whoami"], timeout=0.1,
+            output=b"partial out", stderr=b"partial err",
+        )
 
-        with mock.patch("subprocess.run", side_effect=raise_timeout), mock.patch(
+        with mock.patch(
+            "tools.shell_exec.subprocess.Popen", return_value=fake_proc
+        ), mock.patch(
             "tools.shell_exec.shutil.which", return_value="/fake/whoami"
         ):
             result = tool.run(["whoami"])
@@ -339,6 +381,43 @@ class TestTimeout:
         assert "partial" in result["stdout"]
         assert "partial" in result["stderr"]
 
+    def test_a_grandchild_holding_the_pipe_does_not_hold_the_tool(
+        self, workspace: Path, tmp_path: Path
+    ):
+        """The measured hang: the direct child is dead, a grandchild that
+        inherited stdout is not, and `subprocess.run` waited on the pipe for
+        16 minutes. The tool must return within its timeout plus the kill
+        grace, and the grandchild must be dead afterwards."""
+        from tools.shell_exec import _TREE_KILL_GRACE_SECONDS, _run_with_tree_kill
+
+        pid_file = tmp_path / "grandchild.pid"
+        # Parent spawns a grandchild that inherits stdout and sleeps; the
+        # parent then waits on it, so both outlive the tool's timeout.
+        parent = (
+            "import subprocess, sys, pathlib\n"
+            "child = subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(60)'])\n"
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+            "sys.stdout.write('parent up\\n'); sys.stdout.flush()\n"
+            "child.wait()\n"
+        )
+        started = time.monotonic()
+        _stdout, _stderr, exit_code, timed_out = _run_with_tree_kill(
+            [sys.executable, "-c", parent], cwd=workspace,
+            env=dict(os.environ), timeout=1.0,
+        )
+        elapsed = time.monotonic() - started
+
+        assert timed_out is True and exit_code is None
+        assert elapsed < 1.0 + _TREE_KILL_GRACE_SECONDS * 2 + 5
+        deadline = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        grandchild = int(pid_file.read_text())
+        while _pid_alive(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not _pid_alive(grandchild), "grandchild survived the tree kill"
+
 
 # ===========================================================
 # 7. output cap + secret redaction
@@ -347,20 +426,15 @@ class TestTimeout:
 class TestOutputCapAndRedaction:
     def test_huge_stdout_truncated(self, workspace: Path):
         """Patch subprocess.run to emit > cap bytes and assert truncation."""
-        import subprocess
 
         tool = ShellExecTool(
             workspace_root=workspace, output_cap_bytes=128, timeout_seconds=5
         )
         huge = b"x" * 1024
 
-        def fake_run(*args, **kwargs):
-            cp = subprocess.CompletedProcess(args=args[0], returncode=0)
-            cp.stdout = huge
-            cp.stderr = b""
-            return cp
-
-        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
+        with mock.patch(
+            "subprocess.Popen", return_value=_fake_proc(stdout=huge)
+        ), mock.patch(
             "tools.shell_exec.shutil.which", return_value="/fake/whoami"
         ):
             result = tool.run(["whoami"])
@@ -370,18 +444,13 @@ class TestOutputCapAndRedaction:
 
     def test_secret_in_stdout_redacted(self, workspace: Path):
         """A subprocess that prints a credential must NEVER leak it."""
-        import subprocess
 
         tool = ShellExecTool(workspace_root=workspace, timeout_seconds=5)
         leak = b"User: alice\nkey=sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
 
-        def fake_run(*args, **kwargs):
-            cp = subprocess.CompletedProcess(args=args[0], returncode=0)
-            cp.stdout = leak
-            cp.stderr = b""
-            return cp
-
-        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
+        with mock.patch(
+            "subprocess.Popen", return_value=_fake_proc(stdout=leak)
+        ), mock.patch(
             "tools.shell_exec.shutil.which", return_value="/fake/whoami"
         ):
             result = tool.run(["whoami"])

@@ -604,3 +604,81 @@ and of session follow-ups (turns 9, 25, 26); `run_tests` reporting
 `test_a_dangling_numbered_reference_is_still_an_error`,
 `TestReferencesReachTheEffectPath::test_prose_about_the_syntax_reaches_the_tool`,
 `::test_a_substituted_context_is_fitted_not_refused`.
+
+## Turns 28–32 (15:43–16:10, session exam_i)
+
+**The operator's word (15:40):** ask first; find out how deep the problem
+goes; ask deeper each turn; see where he runs aground next. Do not be his
+eyes. If he cannot, repair by hand and record. Raw:
+`exam_self_knowledge_2026-09-05/turn_28…32_*.md`; the tree at `a4b1d60`
+(#328 merged), deny mode, one session of five turns. Questions were phrased
+without the critique verbs the referent resolver listens for (turns 9, 25,
+26), so every turn reached the planner.
+
+| # | Question (short) | What he did | Answer | Verdict |
+|---|---|---|---|---|
+| 28 | At 15:03 and 15:04 you answered with a paraphrase, no tools, one model call; your journal calls it `planner_local_critique`. Which part of you decides to go without tools? Name file, function, condition. | `findstr /c:planner_local_critique *.py` → **found `core\loop_attempt.py:208`**; two `read_logs` steps dropped by the sanitiser (`last_n` outside 1..500 — third time today); read `core/loop.py` and `core/planner.py` instead. 59 s, 2 calls. | «В коде нет ветки, которая принимает решение идти без инструментов» — **false**; then, honestly, that the mechanism is not visible in what he read. | He named his own journal event and found the line that writes it. He then opened two other files and declared the branch absent. |
+| 29 | You found line 208 and did not open it. Open it; follow to the predicate; name it. | `file_read core/loop_attempt.py` → **12 000 of 31 239 chars**, `[INTENT-BUDGET … top sections by keyword relevance]`, line 208 not in the window; `findstr /c:local_critique core\*.py` → only `core/answer_format.py:170–173`; `read_logs last_n=500` → 4 000 of 490 256 chars, **wrong trace** (`trace_9bb5…`, session exam_h2), `session_start` only. 73 s. | Cannot confirm; guessed `can_skip_planner` in `core.task_complexity` (wrong), marked unconfirmed. | His reader cannot read a named line; his journal reader cannot read his journal. Honest about both. |
+| 30 | Your own tools cut the file and the log. Name the parameters that yield exactly line 208 with context, and exactly today's 15:03–15:04 events; apply them; if a parameter is missing, name that as the tool's defect. | `web_search` + `web_fetch git-scm.com/docs/git-blame`; **`git blame -L 195,225 -- core/loop_attempt.py` and `git blame -L 1,90`**, each `timeout=30`; two `findstr`; `read_logs` dropped again. Both `git blame` steps started 15:48:21 and **never returned**. | **None.** The driver's 900-second limit ended the turn at 16:02. `tool_result status=error` for both was journaled at 16:04:26 — sixteen minutes after a thirty-second timeout. | A real workaround — `git blame -L` is a line-range reader he does not otherwise have — and it hung his own process. Not his fault: see below. |
+| 31 | Your last turn ran over fifteen minutes; two `git blame` with a 30 s limit. Read your current trace: call time, result time, difference. Then read the runner's code: what waits, what happens to the process and its children on Windows, what makes the wait unbounded. | `read_logs` → **`trace_9bb5…` again** (the newest *other* file; his own is hidden from the default); `spawn_subagent CodeInvestigator` on `tools/shell_exec.py` → **12 000 of 40 751 chars**, the subprocess call not in the window. 87 s, 5 calls. | Honestly: the trace has no `git blame`; the file window shows only the internal `git rev-parse` guard and `_safe_env`; «имя функции, строки и условие бесконечного ожидания … не подтверждены». Eleven bullets, eight of them «not confirmed». | He can say precisely what he cannot see. He cannot see it. |
+| 32 | You read `trace_9bb5…`, which starts 12:06Z; this session started 12:43Z and writes elsewhere. Name the trace this session writes right now, and how you learned it. Then read its `shell_exec`/`tool_result` events. If you cannot learn your id, name the missing parameter and where in the code it is decided. | `web_search`/`web_fetch` (docs.python.org/logging — «LIVE_GROUNDING»); `read_logs last_n=50`; `read_logs last_n=500 event_filter=[shell_exec,tool_result]`. 55 s, 2 calls. | «Идентификатор трассы … — `trace_828aa08e…`; я узнал его из вывода `read_logs`». **Wrong**: `trace_828aa08e…` is the trace of **his own subagent from turn 31** (39 events, `subagent_start ShellExecTimeoutAudit`). His session's trace is `trace_5392589b…`. Said with confidence; the caveats concern other things. | The newest file that is not his is his subagent's. He was never told his own id, so the nearest stranger became «me». |
+
+**Where the five turns ran aground.** Four places, all in the transport,
+none of them his to fix from inside:
+
+1. **`shell_exec` timeout does not end the process tree** (`tools/shell_exec.py::_run_subprocess`).
+   `subprocess.run(capture_output=True, timeout=30)` on expiry kills the
+   direct child — the `cmd\git.EXE` launcher — and then calls
+   `communicate()` *without* a timeout to drain the pipes. The grandchild
+   `mingw64\bin\git.exe` kept stdout open (two such processes were found at
+   16:04, parents dead, zero CPU) and the drain never returned. Reproduced
+   with a Python parent/grandchild pair: a 1-second timeout returns after
+   the grandchild's full 8 seconds. Why *git blame itself* stalled is not
+   established (it runs in 0.3–0.6 s by hand, in the same environment); the
+   tree-kill gap is real regardless.
+2. **`file_read` has no window.** `run(path)` only; the evidence budget keeps
+   ~12 000 characters chosen by keyword. A planner that has just been told
+   `core/loop_attempt.py:208` by `findstr` has no move that yields line 208.
+3. **`read_logs` hides the live trace and never says which one it is.**
+   By design a run may not read its own outcome (`live_trace_id` excluded
+   from the default, `tools/read_logs.py`), but in a multi-turn session the
+   *previous turn* lives in that same file, and nothing — not the prompt,
+   not the tool output — names the id. Twice he read a neighbour's trace;
+   once he read his own subagent's and called it his session.
+4. **`read_logs last_n` outside 1..500 drops the step** (`core/step_sanitizer.py`).
+   Five such drops across today's sessions; `web_search.max_results` has
+   always been clamped instead.
+
+**Repaired by hand, on the operator's word (16:15).**
+
+* `tools/shell_exec.py`: `_run_with_tree_kill` — `Popen` with
+  `stdin=DEVNULL`, `communicate(timeout)`, and on expiry the **tree** is
+  killed first (`taskkill /T /F` on Windows, `killpg` on POSIX, then the
+  child), the pipes are never re-read; whatever partial output
+  `communicate` already had is returned, the rest forfeited on purpose.
+  Test: `tests/test_shell_exec.py::TestTimeout::test_a_grandchild_holding_the_pipe_does_not_hold_the_tool`
+  spawns a parent that waits on a sleeping grandchild and asserts the tool
+  returns and the grandchild is dead.
+* `tools/file_read.py`: `run(path, start_line=None, end_line=None)` —
+  1-based inclusive window, each line numbered, header
+  `[name lines a-b of N]`; a window past the end is an error, not blank;
+  `start_line` alone opens 60 lines. `core/step_sanitizer.py` admits the
+  window (coerces `"208"`, clamps to 400 lines, refuses a reversed pair);
+  `core/planner_prompt.py` tells the planner the pattern
+  `findstr /n → file_read start_line/end_line`.
+* `tools/read_logs.py`: every result carries `live_trace_id`; when the
+  default skipped the live log the result also carries a `hint` naming it
+  and the call that reads it. The prompt and the tool description say the
+  same in one sentence. Reading the live trace by explicit id was already
+  allowed; now he can know the id.
+* `core/step_sanitizer.py::_sanitize_read_logs`: `last_n` is coerced
+  (`500.0`, `"500"`) and **clamped** to 1..500 with a warning naming the
+  value; only a non-number drops the step.
+
+Not repaired, recorded: the referent-resolver hijack (turns 9, 25, 26);
+`run_tests total=0` after the 60-second cap (turn 27); the reason `git blame`
+stalled under the tool's minimal environment. Tests:
+`tests/test_a_named_line_can_be_read_back.py` (file_read window ×6,
+sanitiser ×5, read_logs ×3), `tests/test_shell_exec.py::TestTimeout` (×2),
+`tests/test_planner_self_repair_sanitizer.py::TestReadLogsSanitizer`
+(clamp ×3).

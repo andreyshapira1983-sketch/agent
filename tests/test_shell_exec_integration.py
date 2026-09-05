@@ -300,14 +300,15 @@ class TestTimeoutSurfacing:
         )
         import subprocess
 
-        # Force every subprocess.run to fail with TimeoutExpired.
-        def raise_timeout(*a, **k):
-            raise subprocess.TimeoutExpired(
-                cmd=a[0], timeout=k.get("timeout", 0.1),
-                output=b"", stderr=b"",
-            )
+        # Force every Popen to time out in `communicate`.
+        fake_proc = mock.Mock()
+        fake_proc.pid = 4242
+        fake_proc.poll.return_value = 1
+        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd=["whoami"], timeout=0.1, output=b"", stderr=b"",
+        )
 
-        with mock.patch("subprocess.run", side_effect=raise_timeout):
+        with mock.patch("tools.shell_exec.subprocess.Popen", return_value=fake_proc):
             agent.run("run whoami")
 
         ev = _events(log_path)
@@ -334,17 +335,16 @@ class TestSecretRedaction:
                 "label": "shell_exec:whoami",
             }],
         )
-        import subprocess
 
         leak = b"sk-1111111111111111111111111111111111111111111111111111\n"
 
-        def fake_run(*a, **k):
-            cp = subprocess.CompletedProcess(args=a[0], returncode=0)
-            cp.stdout = leak
-            cp.stderr = b""
-            return cp
+        fake_proc = mock.Mock()
+        fake_proc.pid = 4242
+        fake_proc.poll.return_value = 0
+        fake_proc.returncode = 0
+        fake_proc.communicate.return_value = (leak, b"")
 
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with mock.patch("tools.shell_exec.subprocess.Popen", return_value=fake_proc):
             agent.run("run whoami")
 
         # The literal credential MUST NEVER appear anywhere in the JSONL.

@@ -15,10 +15,12 @@ if the policy gate, planner sanitiser or approval gate are bypassed):
 
 Sandbox:
 
-- `subprocess.run` with `shell=False`, always
+- `subprocess.Popen` with `shell=False`, always; stdin is /dev/null
 - `cwd = workspace_root`, no escape
 - `env` reset to a tiny safe subset (PATH + SystemRoot on Windows)
-- `timeout` in seconds, default 5 — short on purpose
+- `timeout` in seconds, default 5 — short on purpose; on expiry the WHOLE
+  process tree is killed and the tool returns at once (see
+  `_run_with_tree_kill` for why `subprocess.run` cannot do this)
 - stdout/stderr capped at `DEFAULT_OUTPUT_CAP` bytes; excess truncated and
   flagged in the output
 - text mode with strict UTF-8 (`errors='replace'` is silent corruption)
@@ -224,6 +226,92 @@ def _oem_encoding() -> str | None:
         return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
     except Exception:  # noqa: BLE001 — нет OEM — нет запасного декодера
         return None
+
+
+#: How long the tree kill itself may take before the tool stops waiting for
+#: it. A kill that hangs must not become the hang it was meant to prevent.
+_TREE_KILL_GRACE_SECONDS = 5.0
+
+
+def _kill_process_tree(proc: subprocess.Popen[bytes]) -> None:
+    """Kill `proc` and every descendant, without ever blocking on a pipe.
+
+    The order matters: descendants first, while the parent is still alive to
+    be walked. Kill the parent first and its children are reparented, and
+    a tree walk no longer finds them.
+    """
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        # `taskkill /T` walks the parent-pid chain; `/F` does not ask.
+        taskkill = shutil.which("taskkill") or "taskkill"
+        try:
+            subprocess.run(  # noqa: S603 — fixed argv, our own child's pid
+                [taskkill, "/T", "/F", "/PID", str(proc.pid)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=_TREE_KILL_GRACE_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        import signal
+
+        try:
+            # The child was started with start_new_session=True, so its pid
+            # is also its process-group id.
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=_TREE_KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_with_tree_kill(
+    run_argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
+) -> tuple[bytes, bytes, int | None, bool]:
+    """Run `run_argv`, returning `(stdout, stderr, exit_code, timed_out)`.
+
+    Why not `subprocess.run(..., timeout=)`: on expiry it kills only the
+    direct child and then calls `communicate()` WITHOUT a timeout to drain
+    the pipes. Any grandchild that inherited stdout keeps the pipe open, and
+    that second wait never returns. Measured 2026-09-05: `git blame` through
+    the `cmd\\git.EXE` launcher left a `mingw64\\bin\\git.exe` grandchild; the
+    30-second timeout returned after 16 minutes, when the driver killed the
+    whole turn.
+
+    Here the tree is killed first and the pipes are never re-read after the
+    timeout: partial output that `communicate` already had is returned, and
+    the rest is forfeited on purpose — a bounded answer beats a complete one
+    that never arrives.
+    """
+    popen_kwargs: dict[str, Any] = {}
+    if sys.platform != "win32":
+        # A session of its own, so killpg reaches every descendant. Windows
+        # has no process groups worth the name; taskkill walks the tree.
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(  # noqa: S603 — argv passed _validate_argv: whitelist, no metacharacters, inside workspace
+        run_argv,
+        cwd=cwd,
+        env=env,
+        shell=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **popen_kwargs,
+    )
+    try:
+        stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _kill_process_tree(proc)
+        return exc.stdout or b"", exc.stderr or b"", None, True
+    return stdout_bytes or b"", stderr_bytes or b"", proc.returncode, False
 
 
 class ShellExecTool(Tool):
@@ -641,25 +729,9 @@ class ShellExecTool(Tool):
         ]
         env = self._safe_env()
         started = time.monotonic()
-        timed_out = False
-        try:
-            completed = subprocess.run(  # noqa: S603 — argv passed _validate_argv: whitelist, no metacharacters, inside workspace
-                run_argv,
-                cwd=self.workspace_root,
-                env=env,
-                shell=False,
-                capture_output=True,
-                timeout=self.timeout_seconds,
-                check=False,
-            )
-            stdout_bytes = completed.stdout or b""
-            stderr_bytes = completed.stderr or b""
-            exit_code = completed.returncode
-        except subprocess.TimeoutExpired as exc:
-            stdout_bytes = exc.stdout or b""
-            stderr_bytes = exc.stderr or b""
-            exit_code = None
-            timed_out = True
+        stdout_bytes, stderr_bytes, exit_code, timed_out = _run_with_tree_kill(
+            run_argv, cwd=self.workspace_root, env=env, timeout=self.timeout_seconds,
+        )
 
         duration_ms = int((time.monotonic() - started) * 1000)
         stdout, stdout_trunc = self._cap_and_decode(stdout_bytes)
