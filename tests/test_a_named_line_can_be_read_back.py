@@ -20,7 +20,9 @@ from pathlib import Path
 
 import pytest
 
+from core.evidence import ProvenanceChain, evidence_from_tool_result
 from core.planner import LLMPlanner
+from core.verifier_utils import match_citation, parse_citations, same_file
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.read_logs import ReadLogsTool
@@ -182,3 +184,68 @@ class TestReadLogsNamesItsOwnTrace:
         out = ReadLogsTool(tmp_path).run()
         assert out["live_trace_id"] == ""
         assert "hint" not in out
+
+
+class TestAWindowedReadIsCitable:
+    """Turn 33 (2026-09-05, session exam_j): line 208 quoted correctly, and the
+    verifier judged all six citations fabricated — the plan step was labelled
+    `file:core/loop_attempt.py:200-215`, the evidence `file:core/loop_attempt.py`.
+    The window is part of the source's name on both sides now, and a citation
+    without a window still lands on the file."""
+
+    @staticmethod
+    def _chain(*reads: tuple[dict, str]) -> ProvenanceChain:
+        chain = ProvenanceChain()
+        for arguments, output in reads:
+            chain.add(evidence_from_tool_result(
+                tool_name="file_read", arguments=arguments,
+                output=output, status="success",
+            ))
+        return chain
+
+    def test_the_evidence_is_named_like_the_step(self):
+        ev = evidence_from_tool_result(
+            tool_name="file_read",
+            arguments={"path": "core/loop_attempt.py", "start_line": 200, "end_line": 215},
+            output="208: x", status="success",
+        )
+        assert ev.source_id == "file:core/loop_attempt.py:200-215"
+        assert "lines 200-215" in ev.claim
+
+    def test_a_whole_file_read_keeps_its_old_name(self):
+        ev = evidence_from_tool_result(
+            tool_name="file_read", arguments={"path": "core/loop_attempt.py"},
+            output="text", status="success",
+        )
+        assert ev.source_id == "file:core/loop_attempt.py"
+
+    @pytest.mark.parametrize(
+        "cited,source_id",
+        [
+            ("core/loop_attempt.py:200-215", "file:core/loop_attempt.py:200-215"),
+            ("core/loop_attempt.py:200-215", "file:core/loop_attempt.py"),
+            ("core/loop_attempt.py", "file:core/loop_attempt.py:200-215"),
+            (r"core\loop_attempt.py:208", "file:core/loop_attempt.py:200-215"),
+        ],
+    )
+    def test_a_window_names_a_part_of_the_file_not_another_file(self, cited, source_id):
+        assert same_file(cited, source_id)
+
+    def test_a_different_file_with_a_window_is_still_a_different_file(self):
+        assert not same_file("core/loop.py:200-215", "file:core/loop_attempt.py:200-215")
+
+    def test_the_citation_lands_on_its_own_window_first(self):
+        chain = self._chain(
+            ({"path": "core/loop_attempt.py", "start_line": 1, "end_line": 120}, "1: head"),
+            ({"path": "core/loop_attempt.py", "start_line": 200, "end_line": 215}, "208: tail"),
+        )
+        cit = parse_citations("факт [file:core/loop_attempt.py:200-215].")[0]
+        hit = match_citation(cit, chain)
+        assert hit is not None and hit.source_id == "file:core/loop_attempt.py:200-215"
+
+    def test_a_citation_without_a_window_still_finds_the_file(self):
+        chain = self._chain(
+            ({"path": "core/loop_attempt.py", "start_line": 200, "end_line": 215}, "208: tail"),
+        )
+        cit = parse_citations("факт [file:core/loop_attempt.py].")[0]
+        assert match_citation(cit, chain) is not None

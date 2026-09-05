@@ -242,7 +242,19 @@ def _normalise_path(text: str) -> str:
     return out.rstrip("/")
 
 
-def same_file(cited: str, source_id: str) -> bool:
+#: `path:208` or `path:200-215` — the line window a `file_read` label carries.
+_LINE_WINDOW_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?$")
+
+
+def _split_window(text: str) -> tuple[str, str]:
+    """`core/x.py:200-215` -> (`core/x.py`, `:200-215`); no window -> (`path`, ``)."""
+    m = _LINE_WINDOW_SUFFIX_RE.search(text)
+    if m is None:
+        return text, ""
+    return text[: m.start()], m.group(0)
+
+
+def same_file(cited: str, source_id: str, *, same_window: bool = False) -> bool:
     """Do a citation body and an evidence label name the SAME file?
 
     Not resolved against the workspace root on purpose: the root is not
@@ -250,10 +262,20 @@ def same_file(cited: str, source_id: str) -> bool:
     tool arguments (`core/step_sanitizer.py`), so a label is always
     relative; only the CITATION varies, and a suffix test settles that
     without new plumbing.
+
+    A line window (`:200-215`) names a part of the file, not another file:
+    `[file:core/x.py]` matches evidence `file:core/x.py:200-215` and the
+    other way round. With `same_window=True` both windows must also agree —
+    the caller's first pass, so a citation of lines 200-215 is matched to
+    that window before it falls back to any other read of the same file.
     """
-    a = _normalise_path(cited)
-    b = _normalise_path(source_id.split(":", 1)[-1] if ":" in source_id else source_id)
+    a, a_window = _split_window(_normalise_path(cited))
+    b, b_window = _split_window(
+        _normalise_path(source_id.split(":", 1)[-1] if ":" in source_id else source_id)
+    )
     if not a or not b:
+        return False
+    if same_window and a_window != b_window:
         return False
     return a == b or a.endswith("/" + b) or b.endswith("/" + a)
 
@@ -301,14 +323,22 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
     if not citation.body:
         return candidates[0]
     body_lower = citation.body.lower()
-    for ev in candidates:
+    if citation.prefix == "file":
         # A file citation is compared AS A PATH: one file may be written
         # `x.txt`, `./x.txt` or with the workspace prefix, and those are the
-        # same file. Every other prefix keeps the substring rule — a web query
-        # or a memory id is a string, not a path.
-        if citation.prefix == "file":
+        # same file. The window is decided first: when two reads of one file
+        # are in the chain, `[file:x.py:200-215]` must land on lines 200-215,
+        # not on whichever read came first.
+        for ev in candidates:
+            if same_file(citation.body, ev.source_id, same_window=True):
+                return ev
+        for ev in candidates:
             if same_file(citation.body, ev.source_id):
                 return ev
+    for ev in candidates:
+        # Every other prefix keeps the substring rule — a web query or a
+        # memory id is a string, not a path.
+        if citation.prefix == "file":
             continue
         if body_lower in ev.source_id.lower():
             return ev
