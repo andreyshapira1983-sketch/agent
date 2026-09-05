@@ -986,3 +986,35 @@ def sanitize_step(
 
     warnings.append(f"step[{idx}]: tool '{tool_name}' has no sanitiser, dropped")
     return None
+
+
+def fit_resolved_arguments(
+    tool_name: str | None, arguments: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Re-apply the sanitiser's TRUNCATION rules after step-reference substitution.
+
+    `sanitize_step` sees the plan as a template: a `context` of
+    ``{{step:3.output}}`` is 18 characters and passes. The value that
+    arrives after substitution is the measured output, and it has no cap.
+    Measured 2026-09-05 (exam, session `exam_h2`): a page from pytest's docs
+    plus a `findstr` listing landed in a sub-agent's `context`, the tool
+    refused it («'context' exceeds 2000 characters»), the step failed, and
+    the three steps that depended on it were never executed — the run that
+    was supposed to repair the agent ended without a single file written.
+
+    Only the rules that TRUNCATE are mirrored here; a rule that drops a step
+    belongs to admission, and a step that was admitted is not re-judged.
+    Returns the fitted arguments and the warnings, one per rule applied.
+    """
+    warnings: list[str] = []
+    if tool_name == "spawn_subagent":
+        from tools.spawn_subagent import _MAX_CONTEXT_LEN  # local import: avoid cycles
+
+        context = arguments.get("context")
+        if isinstance(context, str) and len(context) > _MAX_CONTEXT_LEN:
+            warnings.append(
+                f"spawn_subagent context truncated to {_MAX_CONTEXT_LEN} chars "
+                f"after substitution (was {len(context)})"
+            )
+            arguments = {**arguments, "context": context[:_MAX_CONTEXT_LEN]}
+    return arguments, warnings

@@ -99,6 +99,37 @@ def test_an_empty_output_is_still_a_measurement():
 
 
 # ===========================================================
+# Проза о синтаксисе — не ссылка (экзамен 2026-09-05, ход 22)
+# ===========================================================
+
+
+def test_prose_naming_the_reference_form_stays_prose():
+    """В objective субагента стояло «ссылок вида {{step:N.output}}» — «N» не
+    шаг, а буква, и шаг, которому нужно было лишь рассказать о синтаксисе,
+    провалился целиком. Когда план известен, такая форма — текст."""
+    arguments = {"objective": "найди обработку ссылок вида {{step:N.output}} в коде"}
+
+    resolved = resolve_step_references(arguments, {"1": "x"}, plan_steps={"1", "2"})
+
+    assert resolved == arguments
+
+
+def test_a_dangling_numbered_reference_is_still_an_error():
+    """Номер, которого нет в плане, — не проза, а висячая ссылка: раньше
+    ровно такая легла на диск 17-байтовым файлом (ходы 12–13)."""
+    with pytest.raises(UnresolvedStepReference):
+        resolve_step_references(
+            {"content": "{{step:9.output}}"}, {"1": "x"}, plan_steps={"1", "2"},
+        )
+
+
+def test_without_a_plan_every_form_is_a_reference():
+    """Старые вызовы, не знающие плана, остаются строгими."""
+    with pytest.raises(UnresolvedStepReference):
+        resolve_step_references({"objective": "вида {{step:N.output}}"}, {"1": "x"})
+
+
+# ===========================================================
 # Транспорт внутри исполнителя шагов: обе ветки, не одна
 # ===========================================================
 
@@ -188,3 +219,63 @@ class TestReferencesReachTheEffectPath:
 
         assert ran == ["a.txt"], "шаг с неразрешённой ссылкой не должен был запускаться"
         assert results[1][1] is None and results[1][2] is not None
+
+    def test_prose_about_the_syntax_reaches_the_tool(self, workspace: Path):
+        """Экзамен 2026-09-05, ход 22: шаг с «ссылок вида {{step:N.output}}» в
+        objective провалился как неразрешённая ссылка. Здесь план известен,
+        «N» — не шаг, и текст доезжает до инструмента нетронутым."""
+        (workspace / "a.txt").write_text("a", encoding="utf-8")
+        loop = self._loop(workspace)
+        seen: list[dict] = []
+
+        def record(step: PlanStep):
+            seen.append(dict(step.action_spec["arguments"]))
+            return step, {"tool": "file_read", "output": "a", "label": "x", "issues": []}, None
+
+        loop._run_step_parallel = record  # type: ignore[assignment]
+        prose = "найди обработку ссылок вида {{step:N.output}}; контекст: {{step:1.output}}"
+        steps = [
+            self._step("file_read", {"path": "a.txt"}, 1),
+            self._step("file_read", {"path": prose}, 2),
+        ]
+
+        results = loop._execute_steps_parallel(steps)
+
+        assert results[1][2] is None, results[1][2]
+        assert seen[1]["path"] == "найди обработку ссылок вида {{step:N.output}}; контекст: a"
+
+    def test_a_substituted_context_is_fitted_not_refused(self, workspace: Path):
+        """Экзамен 2026-09-05, сессия exam_h2: подставленный в `context`
+        субагента вывод двух шагов превысил 2000 символов, инструмент отказал
+        («'context' exceeds 2000 characters»), и три зависимых шага не
+        исполнились. Шаблон санитайзер обрезал бы — измеренное обязано пройти
+        те же правила."""
+        from tools.spawn_subagent import _MAX_CONTEXT_LEN
+
+        (workspace / "big.txt").write_text("x" * (_MAX_CONTEXT_LEN + 500), encoding="utf-8")
+        loop = self._loop(workspace)
+        seen: list[dict] = []
+
+        def record(step: PlanStep):
+            seen.append(dict(step.action_spec["arguments"]))
+            output = (workspace / "big.txt").read_text(encoding="utf-8")
+            return step, {"tool": step.action_spec["tool_name"], "output": output, "label": "x", "issues": []}, None
+
+        loop._run_step_parallel = record  # type: ignore[assignment]
+        steps = [
+            self._step("file_read", {"path": "big.txt"}, 1),
+            self._step(
+                "spawn_subagent",
+                {"role": "R", "objective": "o", "context": "Event: {{step:1.output}}"},
+                2,
+            ),
+        ]
+
+        results = loop._execute_steps_parallel(steps)
+
+        assert results[1][2] is None, results[1][2]
+        assert len(seen[1]["context"]) == _MAX_CONTEXT_LEN
+        assert seen[1]["context"].startswith("Event: xxx")
+        events = (workspace / "logs").glob("*.jsonl")
+        text = "".join(p.read_text(encoding="utf-8") for p in events)
+        assert "step_arguments_fitted" in text, "обрезка обязана быть видна в журнале"
