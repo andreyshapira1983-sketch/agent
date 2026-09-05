@@ -184,28 +184,38 @@ class TestReadLogsSanitizer:
         sources, _ = _run(workspace, [{"tool": "read_logs", "arguments": {"last_n": 10}}])
         assert sources[0]["arguments"]["last_n"] == 10
 
-    def test_last_n_below_floor_dropped(self, workspace: Path):
+    def test_last_n_below_floor_clamped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
             "tool": "read_logs",
             "arguments": {"last_n": 0},
         }])
-        assert sources == []
-        assert any("[1..500]" in w for w in warnings)
+        assert sources[0]["arguments"]["last_n"] == 1
+        assert any("[1..500]" in w and "clamped to 1" in w for w in warnings)
 
-    def test_last_n_above_cap_dropped(self, workspace: Path):
+    def test_last_n_above_cap_clamped_not_dropped(self, workspace: Path):
+        """Three read_logs steps were deleted in one session (2026-09-05) for
+        asking too much; the planner wanted the log, not nothing."""
         sources, warnings = _run(workspace, [{
             "tool": "read_logs",
             "arguments": {"last_n": 600},
         }])
-        assert sources == []
-        assert any("[1..500]" in w for w in warnings)
+        assert sources[0]["arguments"]["last_n"] == 500
+        assert any("[1..500]" in w and "clamped to 500" in w for w in warnings)
+
+    def test_last_n_numeric_string_or_float_is_read_as_int(self, workspace: Path):
+        for raw in ("120", 120.0):
+            sources, _ = _run(workspace, [{
+                "tool": "read_logs", "arguments": {"last_n": raw},
+            }])
+            assert sources[0]["arguments"]["last_n"] == 120
 
     def test_last_n_non_int_dropped(self, workspace: Path):
-        sources, _ = _run(workspace, [{
+        sources, warnings = _run(workspace, [{
             "tool": "read_logs",
             "arguments": {"last_n": "fifty"},
         }])
         assert sources == []
+        assert any("'fifty'" in w for w in warnings)
 
     def test_event_filter_pass(self, workspace: Path):
         sources, _ = _run(workspace, [{

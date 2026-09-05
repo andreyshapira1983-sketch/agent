@@ -46,6 +46,12 @@ def _is_placeholder_url(url_lower: str) -> bool:
     return any(host.endswith(tld) for tld in _PLACEHOLDER_TLDS)
 
 
+#: file_read window defaults. A window is asked for when the planner already
+#: knows WHERE to look, so it is short: enough for a function, not a file.
+_DEFAULT_LINE_WINDOW = 60
+_MAX_LINE_WINDOW = 400
+
+
 
 # How much of argv[1] may appear in a label. The digest carries uniqueness,
 # so the visible part exists only to stay readable — an unbounded token would
@@ -152,6 +158,134 @@ def _sanitize_lesson_provenance(
     }
 
 
+def _coerce_int(value: Any) -> int | None:
+    """An int the planner meant: 500, 500.0 and "500" all count; "many" does not."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
+def _line_range_arguments(
+    args: dict[str, Any], idx: int,
+) -> tuple[dict[str, int] | None, list[str]]:
+    """file_read's optional window: `{}` when absent, None when malformed.
+
+    Without a window `file_read` returns the whole file and the evidence
+    budget keeps a 12 000-char excerpt chosen by keyword — so a planner that
+    knew the line number (from findstr) still could not read that line
+    (measured 2026-09-05, three turns in a row). Either bound alone is
+    accepted; a reversed pair is a planning error, not something to guess at.
+    """
+    start_raw = args.get("start_line")
+    end_raw = args.get("end_line")
+    if start_raw is None and end_raw is None:
+        return {}, []
+    start = _coerce_int(start_raw) if start_raw is not None else 1
+    end = _coerce_int(end_raw) if end_raw is not None else None
+    if start is None or (end_raw is not None and end is None):
+        return None, [
+            (
+                f"step[{idx}]: file_read start_line/end_line must be ints, "
+                f"got {start_raw!r}/{end_raw!r}, dropped"
+            )
+        ]
+    start = max(1, start)
+    if end is None:
+        end = start + _DEFAULT_LINE_WINDOW - 1
+    if end < start:
+        return None, [
+            f"step[{idx}]: file_read end_line {end} precedes start_line {start}, dropped"
+        ]
+    warnings: list[str] = []
+    if end - start + 1 > _MAX_LINE_WINDOW:
+        warnings.append(
+            f"step[{idx}]: file_read window {start}-{end} exceeds "
+            f"{_MAX_LINE_WINDOW} lines, clamped"
+        )
+        end = start + _MAX_LINE_WINDOW - 1
+    return {"start_line": start, "end_line": end}, warnings
+
+
+def _sanitize_read_logs(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """read_logs admission: last_n clamped to [1..500], filter and trace_id ASCII."""
+    requested_n = args.get("last_n", 50)
+    event_filter = args.get("event_filter")
+    trace_id = args.get("trace_id")
+    # Clamp, do not drop: a planner that asked for 1000 events wanted the
+    # log, not nothing. Three read_logs steps were deleted this way in one
+    # exam session (2026-09-05) and the agent read a neighbour's trace
+    # instead. web_search.max_results has always been clamped; same rule.
+    last_n = _coerce_int(requested_n)
+    if last_n is None:
+        warnings.append(
+            f"step[{idx}]: read_logs last_n must be an int in [1..500], "
+            f"got {requested_n!r}, dropped"
+        )
+        return None
+    if not 1 <= last_n <= 500:
+        clamped = max(1, min(last_n, 500))
+        warnings.append(
+            f"step[{idx}]: read_logs last_n {last_n} outside [1..500], "
+            f"clamped to {clamped}"
+        )
+        last_n = clamped
+    cleaned_args = {"last_n": last_n}
+    if event_filter is not None:
+        if not isinstance(event_filter, list):
+            warnings.append(
+                f"step[{idx}]: read_logs event_filter must be a list, dropped"
+            )
+            return None
+        if len(event_filter) > 20:
+            warnings.append(
+                f"step[{idx}]: read_logs event_filter too long, dropped"
+            )
+            return None
+        cleaned_filter: list[str] = []
+        for j, name in enumerate(event_filter):
+            if not isinstance(name, str) or not name.strip():
+                warnings.append(
+                    f"step[{idx}]: read_logs event_filter[{j}] not a non-empty string, dropped"
+                )
+                return None
+            if not name.isascii():
+                warnings.append(
+                    f"step[{idx}]: read_logs event_filter[{j}] '{name}' not ASCII, dropped"
+                )
+                return None
+            cleaned_filter.append(name)
+        cleaned_args["event_filter"] = cleaned_filter
+    if trace_id is not None:
+        if not isinstance(trace_id, str) or not trace_id.strip():
+            warnings.append(
+                f"step[{idx}]: read_logs trace_id must be a non-empty string, dropped"
+            )
+            return None
+        if not trace_id.isascii():
+            warnings.append(
+                f"step[{idx}]: read_logs trace_id not ASCII, dropped"
+            )
+            return None
+        cleaned_args["trace_id"] = trace_id
+    return {
+        "tool": "read_logs",
+        "arguments": cleaned_args,
+        "label": f"read_logs:{trace_id or 'latest'}",
+        "expected_outcome": (
+            "Returns the last N events from the workspace audit log "
+            "(JSONL) for diagnostic review."
+        ),
+    }
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -199,10 +333,18 @@ def sanitize_step(
                 "non-ASCII planner-invented identifiers are rejected by policy, dropped"
             )
             return None
+        line_args, line_warnings = _line_range_arguments(args, idx)
+        if line_warnings:
+            warnings.extend(line_warnings)
+        if line_args is None:
+            return None
+        label_range = (
+            f":{line_args['start_line']}-{line_args['end_line']}" if line_args else ""
+        )
         return {
             "tool": "file_read",
-            "arguments": {"path": path},
-            "label": f"file:{path}",
+            "arguments": {"path": path, **line_args},
+            "label": f"file:{path}{label_range}",
             "expected_outcome": "Non-empty UTF-8 text from the requested file.",
         }
 
@@ -556,61 +698,7 @@ def sanitize_step(
         }
 
     if tool_name == "read_logs":
-        last_n = args.get("last_n", 50)
-        event_filter = args.get("event_filter")
-        trace_id = args.get("trace_id")
-        if not isinstance(last_n, int) or last_n < 1 or last_n > 500:
-            warnings.append(
-                f"step[{idx}]: read_logs last_n must be an int in [1..500], dropped"
-            )
-            return None
-        cleaned_args = {"last_n": last_n}
-        if event_filter is not None:
-            if not isinstance(event_filter, list):
-                warnings.append(
-                    f"step[{idx}]: read_logs event_filter must be a list, dropped"
-                )
-                return None
-            if len(event_filter) > 20:
-                warnings.append(
-                    f"step[{idx}]: read_logs event_filter too long, dropped"
-                )
-                return None
-            cleaned_filter: list[str] = []
-            for j, name in enumerate(event_filter):
-                if not isinstance(name, str) or not name.strip():
-                    warnings.append(
-                        f"step[{idx}]: read_logs event_filter[{j}] not a non-empty string, dropped"
-                    )
-                    return None
-                if not name.isascii():
-                    warnings.append(
-                        f"step[{idx}]: read_logs event_filter[{j}] '{name}' not ASCII, dropped"
-                    )
-                    return None
-                cleaned_filter.append(name)
-            cleaned_args["event_filter"] = cleaned_filter
-        if trace_id is not None:
-            if not isinstance(trace_id, str) or not trace_id.strip():
-                warnings.append(
-                    f"step[{idx}]: read_logs trace_id must be a non-empty string, dropped"
-                )
-                return None
-            if not trace_id.isascii():
-                warnings.append(
-                    f"step[{idx}]: read_logs trace_id not ASCII, dropped"
-                )
-                return None
-            cleaned_args["trace_id"] = trace_id
-        return {
-            "tool": "read_logs",
-            "arguments": cleaned_args,
-            "label": f"read_logs:{trace_id or 'latest'}",
-            "expected_outcome": (
-                "Returns the last N events from the workspace audit log "
-                "(JSONL) for diagnostic review."
-            ),
-        }
+        return _sanitize_read_logs(args, idx, warnings)
 
     if tool_name == "diff_file":
         path = args.get("path")
