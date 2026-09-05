@@ -99,6 +99,33 @@ def test_an_empty_output_is_still_a_measurement():
 
 
 # ===========================================================
+# Путь внутрь вывода — ссылка, которую нельзя разрешить (ход 34)
+# ===========================================================
+
+
+def test_a_path_into_the_output_is_a_named_error_not_a_literal():
+    """Экзамен 2026-09-05, ход 34: планировщик написал
+    `{{step:1.output.live_trace_id}}`; форма не совпала с контрактом, строка
+    уехала в `read_logs` буквально, и агент два хода объяснял не ту ошибку.
+    Теперь шаг признаётся зависимым и проваливается с названным правилом."""
+    arguments = {"trace_id": "{{step:1.output.live_trace_id}}"}
+
+    assert has_step_reference(arguments)
+    with pytest.raises(UnresolvedStepReference) as excinfo:
+        resolve_step_references(arguments, {"1": {"live_trace_id": "trace_x"}})
+
+    message = str(excinfo.value)
+    assert "not a supported form" in message
+    assert "'.live_trace_id'" in message
+    assert "{{step:1.output}}" in message, "правило обязано быть названо"
+
+
+def test_an_index_into_the_output_is_rejected_the_same_way():
+    with pytest.raises(UnresolvedStepReference):
+        resolve_step_references({"x": "{{step:0.output[0]}}"}, {"0": ["a"]})
+
+
+# ===========================================================
 # Проза о синтаксисе — не ссылка (экзамен 2026-09-05, ход 22)
 # ===========================================================
 

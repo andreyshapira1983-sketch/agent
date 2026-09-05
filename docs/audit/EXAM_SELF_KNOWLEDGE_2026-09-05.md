@@ -682,3 +682,72 @@ stalled under the tool's minimal environment. Tests:
 sanitiser ×5, read_logs ×3), `tests/test_shell_exec.py::TestTimeout` (×2),
 `tests/test_planner_self_repair_sanitizer.py::TestReadLogsSanitizer`
 (clamp ×3).
+
+## Turns 33–37 (18:08–18:18, session exam_j)
+
+**The operator's word (18:05):** «давай» — the same rule as before: ask, do
+not be his eyes, repair what he cannot, record. Purpose of this session: a
+control run on the merged hand (#329, tree at `bd113b1`) — do the four
+repairs hold when he uses them, and where does he run aground next. Raw:
+`exam_self_knowledge_2026-09-05/turn_33…37_*.md`; deny mode, one session,
+five turns; his trace `trace_962e6503…`, 281 events.
+
+| # | Question (short) | What he did | Answer | Verdict |
+|---|---|---|---|---|
+| 33 | Open `core/loop_attempt.py` lines 200–215; quote 208 exactly; say what it is the argument of. | `file_read start_line=200 end_line=215` (+ `1-120`). **26 s, 2 calls.** | «Строка 208: `"planner_local_critique",` — второй аргумент вызова `self.log.log(` на 207». **Correct.** Then: «уверенность: нулевая». | The reader reads a named line — turn 29's defect is closed. But the verifier judged all six citations fabricated (`verified 0/6`, `citation_integrity_violation`), so a correct answer left the door with zero confidence. See (a). |
+| 34 | Name the trace this session writes now, and how you learned it; then read the `act` events of your turn 33. | `read_logs last_n=1` → saw `live_trace_id`/`hint`; **named `trace_962e…` correctly** and called the default `trace_5392…` a past session. Second step: `read_logs trace_id='{{step:1.output.live_trace_id}}'` → passed **literally** → `PermissionError: unsafe filename`. Plus a pointless `web_search`. 44 s. | Right id, right source («из поля `live_trace_id`»). The act events — not read. | Turn 32's defect is closed: he knows his own name. He then wrote a reference form the transport does not have, and the transport ran it as text. See (b). |
+| 35 | Read your own trace by id, `act` events only; quote the turn-33 call; then find the rule that decides which `{{step:…}}` forms are allowed. | `read_logs trace_id=<own> event_filter=[act]` → **quoted the turn-33 act** (`start_line 200, end_line 215`) exactly. His `findstr` for `{{step:` was **dropped by the sanitiser** (`argv[5] contains a shell metacharacter` — the `{`). 44 s. | Act quoted correctly. Then, with a «не подтверждено» caveat, **invented** the rule: «allowed form is `{{step:<n>.output.<field>}}`, lives in `core/loop_attempt.py`» — both false (`core/step_references.py:44`; `.output` only). | Half measured, half made up. He honestly marked the invention as unconfirmed — and still wrote it down as the answer. See (c), (e). |
+| 36 | Your search step did not run. Why — read your trace and name the exact reason. | `findstr` for `{{step:` **dropped again**, same `{`; he blamed it on the earlier `PermissionError`. `read_logs last_n=500` (no filter) on his own trace → 217 events, **1.24 MB** (each earlier `read_logs` output nested inside), budget-trimmed to ~12 000 chars; the planner warnings did not survive the trim. 77 s. | Wrong cause, named with caveats. | The drop reason lives only in the `planner` event's `warnings`; nothing hands it back to him, so he repeated the mistake and explained it with the nearest other error. See (c), (d). |
+| 37 | Read your trace, `planner` events only; quote the warnings verbatim; name the character that stops the search; search without it. | `read_logs event_filter=[planner]` → **quoted both warnings verbatim**, named `{` as the culprit; `findstr /s /n /i /c:step: *.py` → **found `core\step_references.py:44`** (`_REFERENCE_RE`) and line 42 «единственная разрешённая форма». 53 s. | Correct, complete, cited. | Full success, on his own, once the question pointed at the event filter. |
+
+**What the five turns prove.** All four #329 repairs work when he reaches
+for them: a named line in 26 s (turn 33), his own trace id from the tool's
+own field (34), the act event of a previous turn quoted from his own trace
+(35), the planner's warnings read and acted on (37). Turn 37 is the first
+turn of the day in which he found the source of a transport rule alone,
+without a hand.
+
+**Where he ran aground next.**
+
+(a) **The verifier rejected windowed citations.** The sanitiser labels a
+windowed read `file:core/loop_attempt.py:200-215` (`core/step_sanitizer.py:347`),
+so that is what the synthesizer cites; the evidence chain registered
+`file:core/loop_attempt.py` (`core/evidence.py`), and
+`same_file`/`match_citation` (`core/verifier_utils.py`) compare the strings
+as paths — a window never matched. **Mine: a side-effect of the #329 window.**
+(b) **`{{step:1.output.live_trace_id}}` is not a reference.** Only
+`{{step:<ref>.output}}` is (`core/step_references.py:44`); the field form
+passed through the resolver unrecognised, reached `read_logs` as a literal
+and produced an error about *filenames*, which he then chased for two turns.
+(c) **`{` and `}` are banned in every `shell_exec` argument**
+(`core/step_sanitizer.py:487`, with `shell=False`), so a search for the
+brace form itself is impossible; the drop is journaled in the `planner`
+event's `warnings` and nowhere else, and nothing returns it to the planner
+next turn.
+(d) **Reading his own trace without a filter nests his earlier reads**: 217
+events became 1.24 MB, the budget kept ~12 000 characters, and the relevant
+warnings fell out.
+(e) **Turn 35 invented a rule under a caveat.** The caveat was honest; the
+invention still became the answer. Same shape as turns 6 and 28.
+
+**Repaired by hand (18:30).**
+
+* (a) `core/evidence.py`: a windowed `file_read` is now evidence named
+  `file:<path>:<a>-<b>` with «lines a-b» in the claim, the same name the step
+  carries. `core/verifier_utils.py`: `same_file` strips the window from both
+  sides before comparing paths (`same_window=True` also requires equal
+  windows); `match_citation` tries the cited window first, then the same
+  file in any window, so a citation without a window still lands on a
+  windowed read.
+  Tests: `tests/test_a_named_line_can_be_read_back.py::TestAWindowedReadIsCitable` (×9).
+* (b) `core/step_references.py`: `{{step:<ref>.output.<field>}}` and
+  `{{step:<ref>.output[i]}}` are recognised as references that **cannot** be
+  resolved: the step is not executed, and the failure names the rule («the
+  only allowed form is `{{step:1.output}}`») instead of the tool naming an
+  unrelated filename error.
+  Tests: `tests/test_a_measured_value_reaches_the_next_step.py` (×2).
+
+Not repaired, recorded: (c) the brace ban and the fact that drop warnings
+never reach the planner; (d) the nested self-read; (e) the invention under a
+caveat — a synthesizer habit, not a transport defect; and, from before, the
+referent-resolver hijack, `run_tests total=0`, the `git blame` stall.

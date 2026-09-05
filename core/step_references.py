@@ -44,6 +44,17 @@ _REFERENCE_RE = re.compile(
     r"\{\{\s*step:(?P<ref>[A-Za-z0-9_\-]+)\.output\s*\}\}"
 )
 
+#: {{step:<ref>.output.<поле>}} / {{step:<ref>.output[0]}} — ссылка с путём
+#: внутрь вывода. Замер 2026-09-05 (экзамен, ход 34): планировщик написал
+#: `{{step:1.output.live_trace_id}}`, форма не совпала с контрактом и уехала
+#: в `read_logs` буквальной строкой; инструмент ответил PermissionError про
+#: небезопасное имя файла, и агент два хода объяснял не ту ошибку. Такая
+#: форма — ссылка, которую нельзя разрешить, а не текст: она распознаётся и
+#: остаётся ошибкой с названным правилом.
+_FIELD_PATH_RE = re.compile(
+    r"\{\{\s*step:(?P<ref>[A-Za-z0-9_\-]+)\.output(?P<path>[.\[][^{}]*?)\s*\}\}"
+)
+
 
 class UnresolvedStepReference(ValueError):
     """Ссылка на шаг, результата которого нет.
@@ -55,9 +66,14 @@ class UnresolvedStepReference(ValueError):
 
 
 def has_step_reference(value: Any) -> bool:
-    """Есть ли в аргументах хоть одна ссылка на другой шаг."""
+    """Есть ли в аргументах хоть одна ссылка на другой шаг.
+
+    Ссылка с путём внутрь вывода (`.output.<поле>`) тоже считается: такой
+    шаг должен дойти до резолвера и провалиться там с названным правилом,
+    а не исполниться с буквальной строкой в аргументах.
+    """
     if isinstance(value, str):
-        return bool(_REFERENCE_RE.search(value))
+        return bool(_REFERENCE_RE.search(value) or _FIELD_PATH_RE.search(value))
     if isinstance(value, dict):
         return any(has_step_reference(v) for v in value.values())
     if isinstance(value, (list, tuple)):
@@ -99,9 +115,23 @@ def _is_reference(
     return ref.isdigit() or ref.startswith("step_")
 
 
+def _reject_field_path(text: str) -> None:
+    """Ссылка вида `{{step:N.output.<поле>}}` — ошибка с названным правилом."""
+    match = _FIELD_PATH_RE.search(text)
+    if match is None:
+        return
+    ref, path = match.group("ref"), match.group("path").strip()
+    raise UnresolvedStepReference(
+        f"step reference {match.group(0).strip()} is not a supported form: "
+        f"a path into the output ({path!r}) cannot be resolved; the only "
+        f"allowed form is {{{{step:{ref}.output}}}} (the whole output)"
+    )
+
+
 def _resolve_string(
     text: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
 ) -> Any:
+    _reject_field_path(text)
     match = _REFERENCE_RE.fullmatch(text.strip())
     if match is not None and _is_reference(match.group("ref"), outputs, plan_steps):
         # Ссылка занимает весь аргумент: возвращаем значение КАК ЕСТЬ, чтобы
