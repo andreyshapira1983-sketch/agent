@@ -479,3 +479,22 @@ output contains the guard's examples, and he did not try `file_read` on the
 path he had already named. Two more wiring facts on the pile: the
 `spawn_subagent` context cap (2 000 chars) versus resolved step outputs, and a
 step reference that resolved to a neighbouring step. Nothing repaired.
+
+## Turn 21 (12:36–12:37): «почему ты не открыл файл напрямую?»
+
+He did, this time: `read_logs 200`, then `file_read core/injection_guard.py`
+— and the guard **blocked its own source** (`injection_blocked`, 22 findings:
+the module carries its own example phrases and «concealed»-category test
+strings). His answer: «Я не открыл его напрямую, потому что в той сессии
+`file_read` был заблокирован сторожем с 22 находками … В этой сессии открыть
+файл напрямую тоже не удалось … показать фактическое правило не могу.»
+
+**Half true.** The second half is measured and honest: through his own
+tools the guard's source is unreadable — search output blocked on the
+guard's examples (turn 20), the file itself blocked on the same (now). The
+first half is a reconstruction: in the previous session he never called
+`file_read` on that path; the 22-finding block he attributes to «той сессии»
+happened in this one, seconds before he wrote the sentence. Asked why he did
+not try, he answered with the reason it would have failed. The organ that
+keeps him from reading hostile text keeps him from reading the organ.
+Nothing repaired.
