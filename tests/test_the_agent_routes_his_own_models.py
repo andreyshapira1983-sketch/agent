@@ -217,3 +217,30 @@ def test_the_eye_shows_his_decision_under_the_routers_role_name_and_the_measured
     assert "Who answers each role now" in text
     assert f"repair_proposal: deepseek/deepseek-chat — agent_policy [{verdict.choice.id}]" in text
     assert "google-secret" not in text and "sk-secret" not in text
+
+
+def test_the_tier_path_keeps_the_policy_id_in_the_ledger_row(tmp_path, monkeypatch):
+    """Actuation test 2026-09-05, criterion 3: the next natural synthesizer
+    call ran on the model his record chose, but the ledger row said only
+    «complexity:standard|fallback:role_default» — the tier path resolves the
+    role through route_for and then stamps its own reason. The row must name
+    the record first; the tier annotation may follow."""
+    from core.model_router import ModelRole, ModelRoute, ModelRouter
+    from core.model_usage import ModelUsageLedger
+
+    for name in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.setenv(name, "present")
+    store = RoutingPolicyStore(tmp_path / "policy.jsonl")
+    verdict = store.set_route(role="synthesizer", provider="deepseek", model="deepseek-chat", reason="scout", env=dict(_ENV))
+    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
+    router = ModelRouter(
+        default_provider="openai", default_model="gpt-default",
+        routes={ModelRole.SYNTHESIZER: ModelRoute(role="synthesizer", provider="openai", model="gpt-5.6-terra", reason="env:AGENT_SYNTHESIZER")},
+        llm_factory=_LLM, usage_ledger=ledger, routing_policy=store,
+    )
+    llm = router._for_role_with_reason("synthesizer", "complexity:standard|fallback:role_default")
+    llm.complete(system="s", user="u", max_tokens=10, temperature=0.0)
+    row = ledger.load_records()[-1]
+    assert (row.provider, row.model) == ("deepseek", "deepseek-chat")
+    assert row.route_reason.startswith(f"agent_policy:{verdict.choice.id}"), row.route_reason
+    assert "complexity:standard" in row.route_reason
