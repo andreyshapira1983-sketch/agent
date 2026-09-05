@@ -102,3 +102,32 @@ Claim after the test: **agent-controlled routing actuation — criterion 4 PASS,
 ```
 
 Raw transcripts: actuation_test_2026-09-05/turn_1_actuation_raw.md, actuation_test_2026-09-05/turn_2_next_natural_raw.md.
+
+## Dynamic trace (2026-09-05 09:25 +03:00), offline reproduction on the reverted code
+
+Same inputs as the live run (policy record for synthesizer → deepseek/deepseek-chat, env pin openai/gpt-5.6-terra, a usage ledger in a temp dir, no agent, no network):
+
+```
+1 route_for            -> deepseek deepseek-chat  reason: agent_policy:route_f6633191dfda      (core/model_router.py:1313-1315)
+2 _for_role_with_reason -> deepseek deepseek-chat  reason: complexity:standard|fallback:role_default (core/model_router.py:1427, 1438, 1455)
+3 ledger row           -> deepseek deepseek-chat  route_reason: complexity:standard|fallback:role_default (core/model_usage.py:435-457)
+```
+
+Reading: the selected route (step 1) carries the record id; the tier path (step 2) rebuilds a ModelRoute with `reason=route_reason` — the tier string it was handed — at model_router.py:1455, and hands that to the usage-tracked client; the ledger writer (step 3) records what it is given. The id is lost between steps 1 and 2. The live row of 06:12:39Z matches step 3 exactly. Verdict stays: criterion 4 PASS, criterion 3 FAIL; cause now TRACED to the tier path's route rebuild (hypothesis confirmed). Repair: patch 0001 in scratchpad, reverted from the tree, applied only on the operator's word as attempt 2.
+
+
+## Provenance repair — verification (2026-09-05 09:20–09:25 +03:00), separate from the pre-registered run
+
+The pre-registered run stays 4/5; criterion 3 FAIL is not rewritten. This section verifies the repair (commit 090c36e) on its own terms.
+
+- **Targeted tests:** 64 passed (tests/test_the_agent_routes_his_own_models.py incl. the new one, test_model_router.py, the size ratchet).
+- **Differential replay** — the same scenario and an equivalent state, except a freshly generated policy id (the replay writes a new record into a temporary store; the live store still holds route_dc33636b9e62 untouched):
+  ```
+  before (reverted code): route_for -> agent_policy:route_f6633191dfda | tier path -> complexity:standard|fallback:role_default | ledger -> complexity:standard|fallback:role_default
+  after  (090c36e):       route_for -> agent_policy:route_461e84afa1df | tier path -> agent_policy:route_461e84afa1df|complexity:standard|fallback:role_default | ledger -> the same
+  ```
+- **Post-repair live provenance: NOT OBSERVED — the single permitted natural live turn was cut by the exam driver, my tool, not by the agent or the router.** Raw: the turn's planner row landed (06:21:08Z planner openai/gpt-5.6-sol, 13912 tokens, 42 units), the adaptive route at turn start chose synth_model=deepseek-chat, and the driver — which ends a turn after 40 s of silent output — declared the turn over during the long planner call; the stop I then sent quit the process before synthesis, so no synthesizer row exists for that turn (ledger rows 3361; the last synthesizer row is still 06:12:39Z with the old reason). Whether the live ledger keeps `agent_policy:route_dc33636b9e62|…` remains pending; any further live turn is the operator's call, after the driver learns to wait for the end-of-turn marker instead of silence.
+
+Two wording corrections accepted (operator, 09:30): (1) «the same inputs before and after» → «the same scenario and an equivalent state except the regenerated policy id»; (2) criterion 5 = PASS for the observed normalized internal metric `cost_units / 1k tokens` under the router's own tariff derivation (medium 3 / low 1 per 1k); it says nothing about the providers' dollars until `cost_units` is verified against invoices.
+
+Status: agent tool actuation — observed live; policy write — observed live; downstream model switch to DeepSeek — observed live; original provenance criterion — FAIL, forever 4/5; cause — reproduced offline and localized (model_router.py:1455 rebuilt the route's reason); repair — targeted tests + differential replay PASS; post-repair live provenance — pending.
