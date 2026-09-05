@@ -84,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", required=True, help="exchange directory (q/, a/)")
     ap.add_argument("--python", default=sys.executable)
+    ap.add_argument(
+        "--approve", action="store_true",
+        help="run the REPL with --auto-approve approve (the operator's word «дай ему "
+             "починить до конца»); default is deny — the agent may read, not write",
+    )
     args = ap.parse_args(argv)
     root = Path(args.dir)
     qdir, adir = root / "q", root / "a"
@@ -99,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
            "AGENT_TEST_TIMEOUT_SECONDS": os.environ.get("AGENT_TEST_TIMEOUT_SECONDS", "60")}
     proc = subprocess.Popen(  # nosec B603 — fixed argv, our own entry point
-        [args.python, "-u", "main.py", "--auto-approve", "deny"],
+        [args.python, "-u", "main.py", "--auto-approve", "approve" if args.approve else "deny"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace", env=env, bufsize=1,
     )
