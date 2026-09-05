@@ -3242,10 +3242,18 @@ trace (pre-registered hypothesis: the tier path stamps its own reason over
 the record's; a static read of `_for_role_with_reason` supports it); (4) the model
 used was deepseek-chat — MET; (5) cost by tariff: 3.08 → 1.12 units per 1k
 tokens, token counts differ so the bare sums are not the proof — MET.
-Verdict: criterion 4 PASS, criterion 3 FAIL, cause UNKNOWN pending trace.
-A repair was committed before the operator's stop and reverted the same
-hour (patch kept); the writer is named only after the dynamic trace
-route_for → selected route → ledger writer. No promotion to decision authority.
+Verdict of the pre-registered run: criterion 4 PASS, criterion 3 FAIL —
+kept as 4/5 forever. Cause: reproduced offline and localized
+(`_for_role_with_reason` rebuilt the route's reason, model_router.py:1455);
+a repair committed before the operator's stop was reverted, then applied by
+his word (090c36e) and verified separately: targeted tests, a differential
+replay (same scenario, equivalent state, a regenerated policy id), and one
+ordinary live turn whose synthesizer row reads
+`agent_policy:route_dc33636b9e62|complexity:standard|fallback:role_default`
+on deepseek-chat. The first live attempt was cut by the exam driver's
+silence rule — proven by timeline, then repaired (`scripts/exam_driver.py`
+ends a turn on the closing marker, proven last). No promotion to decision
+authority; criterion 5 is PASS for the internal `cost_units/1k` metric only.
 
 ## Block 11 — he routes his own models (2026-09-04, 22:20, by the operator's word)
 

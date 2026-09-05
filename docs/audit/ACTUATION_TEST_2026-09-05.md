@@ -148,3 +148,16 @@ Status: agent tool actuation — observed live; policy write — observed live; 
 | — | — | trace: no `model_call_start role=synthesizer`, ledger: no synthesizer row for run_a6e403ec | **synthesis never happened** |
 
 Sequence proven: 40 s silence → driver declared end of turn (09:21:48, before the planner's 09:21:52 return) → my stop → `:quit` + terminate (09:22:03) → process exit during the second planner call → no synthesizer call, no ledger row. Cause: the exam driver's end-of-turn rule (silence), mine. Repair follows: end of turn by the turn's own closing marker, never by silence alone.
+
+## Addendum — criterion 3 closed separately, post-repair (2026-09-05 09:38 +03:00)
+
+The pre-registered run stays **4/5**. This addendum records a separate verification on the repaired version (090c36e and later, tree a069022, authoritative battery `pytest exit=0`, 9567 passed), one ordinary live turn through the marker-based driver (`scripts/exam_driver.py`, turn ended_by=marker after 36 s, 2 calls captured):
+
+```
+06:37:46Z role=planner     provider=openai   model=gpt-5.6-sol    route_reason=complexity:standard|fallback:role_default                 tier=medium tokens=12142 units=39
+06:38:11Z role=synthesizer provider=deepseek model=deepseek-chat  route_reason=agent_policy:route_dc33636b9e62|complexity:standard|fallback:role_default tier=low tokens=15815 units=16
+```
+
+Field by field: the synthesizer row names the LIVE record the agent wrote (`route_dc33636b9e62`, not a replay id), the model is the assigned cheap one, the tier note follows the id, cost 16 units / 15815 tokens = 1.01 units per 1k (internal metric, tariff low). Raw transcript: actuation_test_2026-09-05/turn_3_post_repair_live_raw.md.
+
+Status after this addendum: agent tool actuation — observed live; policy write — observed live; downstream model switch — observed live; original provenance criterion — FAIL (run stays 4/5); cause — reproduced, localized, then proven by timeline for the cut turn (the driver); repair — targeted tests + differential replay PASS; **post-repair live provenance — CONFIRMED on the agent's own record**. Claim ceiling unchanged: agent-controlled routing actuation. Decision authority: a separate exam, not sat.
