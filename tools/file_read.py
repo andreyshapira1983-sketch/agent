@@ -156,7 +156,7 @@ class FileReadTool(Tool):
             f"Use one of these real paths instead of guessing."
         )
 
-    def run(
+    def run(  # pylint: disable=arguments-differ  # Tool.run(**kwargs) is the contract; every tool names its own
         self,
         path: str,
         start_line: int | None = None,

@@ -363,7 +363,7 @@ class TestTimeout:
         fake_proc = mock.Mock()
         fake_proc.pid = 4242
         fake_proc.poll.return_value = 1  # already gone — nothing to kill
-        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(
+        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(  # nosemgrep — an exception object, not a process
             cmd=["whoami"], timeout=0.1,
             output=b"partial out", stderr=b"partial err",
         )

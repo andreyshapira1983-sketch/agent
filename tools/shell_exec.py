@@ -246,7 +246,7 @@ def _kill_process_tree(proc: subprocess.Popen[bytes]) -> None:
         # `taskkill /T` walks the parent-pid chain; `/F` does not ask.
         taskkill = shutil.which("taskkill") or "taskkill"
         try:
-            subprocess.run(  # noqa: S603 — fixed argv, our own child's pid
+            subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603 — fixed argv, our own child's pid
                 [taskkill, "/T", "/F", "/PID", str(proc.pid)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, timeout=_TREE_KILL_GRACE_SECONDS,
@@ -296,7 +296,11 @@ def _run_with_tree_kill(
         # A session of its own, so killpg reaches every descendant. Windows
         # has no process groups worth the name; taskkill walks the tree.
         popen_kwargs["start_new_session"] = True
-    proc = subprocess.Popen(  # noqa: S603 — argv passed _validate_argv: whitelist, no metacharacters, inside workspace
+    # Not `with Popen(...)`: `__exit__` calls `wait()` without a timeout, the
+    # very unbounded wait this function exists to avoid. The child is reaped
+    # by `communicate` on the normal path and by `_kill_process_tree` on
+    # timeout.
+    proc = subprocess.Popen(  # nosemgrep  # noqa: S603  # nosec B603 — argv passed _validate_argv: whitelist, no metacharacters, inside workspace  # pylint: disable=consider-using-with
         run_argv,
         cwd=cwd,
         env=env,

@@ -304,7 +304,7 @@ class TestTimeoutSurfacing:
         fake_proc = mock.Mock()
         fake_proc.pid = 4242
         fake_proc.poll.return_value = 1
-        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(
+        fake_proc.communicate.side_effect = subprocess.TimeoutExpired(  # nosemgrep — an exception object, not a process
             cmd=["whoami"], timeout=0.1, output=b"", stderr=b"",
         )
 
