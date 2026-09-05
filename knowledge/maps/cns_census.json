@@ -170,7 +170,8 @@
     "loop_context.py::AgentLoopContext._model_roster_block": [],
     "loop_evidence_chain.py::_sensor_blocks": [],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence": [],
-    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence": []
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence": [],
+    "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references": []
   },
   "edges": [
     [
@@ -495,10 +496,6 @@
     ],
     [
       "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
-      "loop_step_execution.py::AgentLoopStepExecution._resolve_references_in"
-    ],
-    [
-      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
       "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel"
     ],
     [
@@ -608,6 +605,18 @@
     [
       "loop.py::AgentLoop._run_inner",
       "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references",
+      "loop_step_execution.py::AgentLoopStepExecution._resolve_references_in"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references",
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel"
     ]
   ]
 }

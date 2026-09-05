@@ -40,7 +40,6 @@ from core.repo_provenance import block_may_be_annotated
 from core.step_references import (
     UnresolvedStepReference,
     has_step_reference,
-    referenced_steps,
     resolve_step_references,
 )
 
@@ -276,23 +275,30 @@ class AgentLoopStepExecution:
             # RESULTS back into plan order, so this one must not depend on the
             # caller happening to pass a sorted slice — the guarantee is the
             # whole point of the branch.
-            return [
-                self._run_step_parallel(step)
-                for step in sorted(steps, key=lambda s: s.order)
-            ]
+            #
+            # References are resolved HERE too. Until 2026-09-05 this branch
+            # ran every step raw, so exactly the plans that write files —
+            # the only plans that need a read to reach a write — were the
+            # plans whose `{{step:N.output}}` never got filled: two repair
+            # attempts that morning wrote the literal 17-byte string to disk
+            # (docs/audit/EXAM_SELF_KNOWLEDGE_2026-09-05.md, turns 12–13).
+            ordered: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]] = []
+            for step in sorted(steps, key=lambda s: s.order):
+                ordered.append(self._run_step_after_references(step, ordered))
+            return ordered
 
         # Партиция: параллельные — без внутренних зависимостей; последовательные —
-        # остальные. Ссылка {{step:...output}} в аргументах ТОЖЕ делает шаг
-        # зависимым: без этого шаг-получатель ушёл бы в параллельную группу и
-        # разрешал ссылку на ещё не исполненный шаг (замер 2026-09-01).
+        # остальные. ЛЮБАЯ ссылка {{step:...output}} в аргументах делает шаг
+        # зависимым (замер 2026-09-01) — не только на шаг из этого пакета:
+        # ссылка на шаг, которого нет, до 2026-09-05 делала шаг «независимым»,
+        # и он исполнялся сырым, с буквальной строкой в аргументах, вместо
+        # того чтобы дойти до резолвера и провалиться с названной причиной.
         step_ids = {s.id for s in steps}
-        step_orders = {str(s.order) for s in steps}
 
         def _depends_on_batch(step: PlanStep) -> bool:
             if any(pc in step_ids for pc in step.preconditions):
                 return True
-            refs = referenced_steps(step.action_spec.get("arguments", {}))
-            return any(ref in step_ids or ref in step_orders for ref in refs)
+            return has_step_reference(step.action_spec.get("arguments", {}))
 
         parallel = [s for s in steps if not _depends_on_batch(s)]
         sequential = [s for s in steps if _depends_on_batch(s)]
@@ -315,30 +321,47 @@ class AgentLoopStepExecution:
         # Последовательные идут в порядке плана — и только здесь ссылки
         # разрешаются: к этому моменту вывод шага-источника уже ИЗМЕРЕН.
         for step in sequential:
-            self._resolve_references_in(step, results)
-            results.append(self._run_step_parallel(step))
+            results.append(self._run_step_after_references(step, results))
 
         # Re-sort to plan order so callers process artifacts in a stable sequence.
         order_map = {s.id: i for i, s in enumerate(steps)}
         results.sort(key=lambda r: order_map.get(r[0].id, 9999))
         return results
 
+    def _run_step_after_references(
+        self,
+        step: PlanStep,
+        done: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]],
+    ) -> tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]:
+        """Разрешить ссылки шага по уже измеренному — и только потом исполнить.
+
+        Шаг, чья ссылка не нашла источника, НЕ исполняется: до 2026-09-05
+        `_resolve_references_in` ставил `status="failed"`, а вызывающий код
+        всё равно запускал инструмент с буквальной строкой в аргументах, и
+        обещание докстринга «не исполняется» не выполнялось. Провал уезжает
+        планировщику как обычный триггер с названной причиной.
+        """
+        trigger = self._resolve_references_in(step, done)
+        if trigger is not None:
+            return step, None, trigger
+        return self._run_step_parallel(step)
+
     def _resolve_references_in(
         self,
         step: PlanStep,
         done: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]],
-    ) -> None:
+    ) -> ReplanTrigger | None:
         """Подставить в аргументы шага выводы уже исполненных шагов.
 
         Молчаливого «как-нибудь» здесь нет: если источник не дал результата,
         ссылка остаётся неразрешённой, шаг помечается провалившимся с названной
         причиной и НЕ исполняется. Правдоподобная подстановка была бы худшим
         исходом — ровно она и породила класс «выдумывает вместо того, чтобы
-        посмотреть».
+        посмотреть». Возвращает триггер провала или None, если исполнять можно.
         """
         arguments = step.action_spec.get("arguments", {})
         if not has_step_reference(arguments):
-            return
+            return None
         outputs: dict[str, Any] = {}
         for done_step, artifact, _trigger in done:
             if artifact is None:
@@ -359,6 +382,15 @@ class AgentLoopStepExecution:
             })
             step.action_spec["arguments"] = arguments
             step.status = "failed"
+            return ReplanTrigger(
+                code="tool_error",
+                step_id=step.id,
+                tool_name=step.action_spec.get("tool_name"),
+                arguments=arguments,
+                reason=f"Step not executed: {exc}",
+                attempt=self._current_attempt,
+            )
+        return None
 
     def _execute_step(self, step: PlanStep) -> dict[str, Any] | None:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 3, all 16 returns are guard clauses
         """Run a single PlanStep through Act -> Policy -> Tool -> Verify.
