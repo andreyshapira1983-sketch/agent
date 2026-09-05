@@ -486,10 +486,11 @@ class AutonomousRuntimeProposals:
                 trace_id=str(getattr(
                     getattr(agent, "log", None), "trace_id", "") or ""),
             )
-            return result
         except Exception as exc:  # noqa: BLE001 — the failure is recorded and logged
             self._log(
                 "self_build_proposal_error",
                 {"error": f"{type(exc).__name__}: {exc}"},
             )
             return None
+        else:
+            return result

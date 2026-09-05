@@ -239,7 +239,7 @@ class LLMPlanner:
                 reasoning="(planner output did not parse — falling back to empty plan)",
                 sources=[],
                 raw_response=raw,
-                warnings=parse_warnings + ["plan_parse_failed"],
+                warnings=[*parse_warnings, "plan_parse_failed"],
                 diagnostics=parse_diag,
             )
 
@@ -251,7 +251,7 @@ class LLMPlanner:
                 reasoning=reasoning,
                 sources=[],
                 raw_response=raw,
-                warnings=parse_warnings + ["steps_field_not_a_list"],
+                warnings=[*parse_warnings, "steps_field_not_a_list"],
                 diagnostics=parse_diag,
             )
 

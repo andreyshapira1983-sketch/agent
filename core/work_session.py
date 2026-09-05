@@ -509,7 +509,6 @@ def _is_budget_exhausted(run_report: Any) -> bool:
             details = getattr(t, "details", None) or {}
             if details.get("error_type") == "ModelBudgetExceeded":
                 return True
-        return False
     except Exception as exc:  # noqa: BLE001 — reason stated above
         # `False` means "budget is fine, keep going" — the permissive answer.
         # An unreadable report therefore does not stop the session, it lets it
@@ -518,6 +517,8 @@ def _is_budget_exhausted(run_report: Any) -> bool:
             "budget-exhaustion check could not read the run report: %s: %s",
             type(exc).__name__, exc,
         )
+        return False
+    else:
         return False
 
 
@@ -547,7 +548,6 @@ def _is_approval_blocked(run_report: Any) -> bool:
                 return True
             if "approval" in str(details.get("reason", "")).lower():
                 return True
-        return False
     except Exception as exc:  # noqa: BLE001 — reason stated above
         # Same permissive direction as the budget check above: `False` means
         # "nothing is waiting for a human", so an unreadable report silently
@@ -556,6 +556,8 @@ def _is_approval_blocked(run_report: Any) -> bool:
             "approval-block check could not read the run report: %s: %s",
             type(exc).__name__, exc,
         )
+        return False
+    else:
         return False
 
 

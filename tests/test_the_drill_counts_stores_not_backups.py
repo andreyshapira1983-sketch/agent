@@ -21,7 +21,7 @@ def test_the_drill_names_stores_without_a_backup(tmp_path) -> None:
         [sys.executable, str(repo / "scripts" / "restore_drill.py")],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
         env={"PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(repo),
-             "SYSTEMROOT": "C:\Windows", "PATH": ""},
+             "SYSTEMROOT": r"C:\Windows", "PATH": ""},
         timeout=120, check=False,
     )
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -45,7 +45,7 @@ def test_the_live_repository_coverage_is_stated(tmp_path) -> None:
         [sys.executable, str(repo / "scripts" / "restore_drill.py")],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
         env={"PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(repo),
-             "SYSTEMROOT": "C:\Windows", "PATH": ""},
+             "SYSTEMROOT": r"C:\Windows", "PATH": ""},
         timeout=120, check=False,
     )
     out = (proc.stdout or "") + (proc.stderr or "")

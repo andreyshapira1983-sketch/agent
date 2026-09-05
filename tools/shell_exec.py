@@ -289,13 +289,17 @@ class ShellExecTool(Tool):
             return "external"
         cmd_norm = cmd.strip().lower()
         write_subs = WRITE_SUBCOMMANDS.get(cmd_norm)
-        if write_subs is not None and len(argv) > 1 and isinstance(argv[1], str):
-            if argv[1].strip().lower() in write_subs:
-                # A recording subcommand rides in on a command whose other
-                # subcommands are read-only, so the verdict has to look at
-                # argv[1]. Classified `irreversible` so the policy gate asks:
-                # a commit is not undone by deleting a path.
-                return "irreversible"
+        # A recording subcommand rides in on a command whose other
+        # subcommands are read-only, so the verdict has to look at
+        # argv[1]. Classified `irreversible` so the policy gate asks:
+        # a commit is not undone by deleting a path.
+        if (
+            write_subs is not None
+            and len(argv) > 1
+            and isinstance(argv[1], str)
+            and argv[1].strip().lower() in write_subs
+        ):
+            return "irreversible"
         if cmd_norm in READ_ONLY_COMMANDS:
             return "read_only"
         if cmd_norm in MUTATING_COMMANDS:

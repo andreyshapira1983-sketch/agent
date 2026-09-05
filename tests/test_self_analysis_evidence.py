@@ -128,23 +128,7 @@ def test_prior_turn_evidence_is_classified_as_session_dialogue():
 
 # ── 3. Verifier verdicts ─────────────────────────────────────────────────────
 
-_SELF_ANALYSIS_ANSWER = "\n".join(
-    [
-        "Conclusion:",
-        "Мой предыдущий ответ не отвечал на заданный вопрос.",
-        "Facts:",
-        "- Вы спросили про возможности, а я ответил общими рекомендациями.",
-        "- Я не привёл ни одного конкретного примера в том ответе.",
-        "- Мой ответ был построен как список советов, а не как ответ.",
-        "- Я не уточнил, о каком именно контексте идёт речь в вопросе.",
-        "- Вопрос требовал разбора, а я выдал шаблонную реплику.",
-        "- Мой ответ не опирался ни на один источник этого цикла.",
-        "Sources: dialogue",
-        "Confidence: low",
-        "Unverified: nothing",
-        "Safety: ok",
-    ]
-)
+_SELF_ANALYSIS_ANSWER = "Conclusion:\nМой предыдущий ответ не отвечал на заданный вопрос.\nFacts:\n- Вы спросили про возможности, а я ответил общими рекомендациями.\n- Я не привёл ни одного конкретного примера в том ответе.\n- Мой ответ был построен как список советов, а не как ответ.\n- Я не уточнил, о каком именно контексте идёт речь в вопросе.\n- Вопрос требовал разбора, а я выдал шаблонную реплику.\n- Мой ответ не опирался ни на один источник этого цикла.\nSources: dialogue\nConfidence: low\nUnverified: nothing\nSafety: ok"
 
 
 def test_dialogue_scoped_claims_become_dialogue_supported_not_unverified():
@@ -170,14 +154,7 @@ def test_dialogue_support_is_never_promoted_to_verified():
 
 def test_dialogue_citation_on_a_world_claim_earns_no_support():
     """The transcript proves what was said — never an arbitrary outside fact."""
-    answer = "\n".join(
-        [
-            "Conclusion:",
-            "Ставка ЦБ составляет 21% годовых [dialogue:turn_1].",
-            "Facts:",
-            "- Инфляция в прошлом месяце была 0.8% [dialogue:turn_1].",
-        ]
-    )
+    answer = "Conclusion:\nСтавка ЦБ составляет 21% годовых [dialogue:turn_1].\nFacts:\n- Инфляция в прошлом месяце была 0.8% [dialogue:turn_1]."
     report = verify(answer=answer, chain=_dialogue_chain())
     assert report.verified_chunks == 0
     assert report.dialogue_supported_chunks == 0

@@ -247,9 +247,11 @@ class TestReadOnlyExecution:
         """A whitelisted command not actually installed must FAIL CLEANLY."""
         tool = self._tool(workspace)
         # Force shutil.which to None to simulate a missing binary.
-        with mock.patch("tools.shell_exec.shutil.which", return_value=None):
-            with pytest.raises(FileNotFoundError, match="executable"):
-                tool.run(["whoami"])
+        with (
+            mock.patch("tools.shell_exec.shutil.which", return_value=None),
+            pytest.raises(FileNotFoundError, match="executable"),
+        ):
+            tool.run(["whoami"])
 
 
 # ===========================================================

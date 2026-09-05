@@ -125,9 +125,10 @@ class RuleStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(asdict(rule), ensure_ascii=False) + "\n")
-            return True
         except OSError:
             return False
+        else:
+            return True
 
     def rules_for(self, target: str) -> list[Rule]:
         norm = target.replace("\\", "/").strip()
