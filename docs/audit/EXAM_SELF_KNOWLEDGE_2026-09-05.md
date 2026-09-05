@@ -498,3 +498,46 @@ happened in this one, seconds before he wrote the sentence. Asked why he did
 not try, he answered with the reason it would have failed. The organ that
 keeps him from reading hostile text keeps him from reading the organ.
 Nothing repaired.
+
+## Turns 22–24 (14:24–14:35, session `exam_g`): «найди дефект сам» — and the rule changes
+
+**The operator's word (14:21):** ask him again, without being his eyes; if he
+cannot reach it, repair it by hand — «если он не справляется, значит нужно
+чинить самому». This is the first change to the standing rule at the top of
+this document. Raw: `exam_self_knowledge_2026-09-05/turn_22…24_*.md`; the
+same driver, `--auto-approve deny`, the working tree at `31d9160`.
+
+| # | Question (short) | What he did | Answer | Verdict |
+|---|---|---|---|---|
+| 22 | Two of your repairs wrote the literal `{{step:4.output}}` to disk. Find the exact place in your code; file, function, lines, the condition. No hint where. | `file_read` the 17-byte file; `shell_exec findstr /S /N /C:step: core\*.py …` — **found both `core/step_references.py` and `core/loop_step_execution.py`**; then `spawn_subagent` with `context: {{step:2.output}}` to read them. | «Не смог установить точное место … содержимое кандидатов не прочитано … фактический результат findstr отсутствует (подставлен лишь литеральный шаблон)». | Right plan, killed by the defect under study: his *objective* text for the subagent contained the phrase «ссылок вида `{{step:N.output}}`»; the resolver read it as a reference to a step «N», found none, aborted the whole substitution (the legitimate `{{step:2.output}}` included), marked the step `failed` — and the step ran anyway, handing the subagent a literal string. He noticed and said so. Honest. |
+| 23 | You named files you did not read. Open them and finish. | `file_read core/step_references.py` (whole, 121 lines); `findstr /n ^ core/loop_step_executor.py` — that file does not exist in the repository, the name is his typo for `core/loop_step_execution.py`, which he wrote correctly in turn 22. | An **exact** account of the resolver: `_REFERENCE_RE`, `has_step_reference`, `referenced_steps`, `_resolve_string` (fullmatch keeps the type, embedded reference is `str()`-ed), `UnresolvedStepReference` «не дорисовывается». Tail: «не подтверждено, где именно в цикле исполнения вызывается `resolve_step_references`». | Half the answer, all of it true. The caller — where the defect is — not opened, because of one wrong letter in a filename. |
+| 24 | Close your own two «не подтверждено»: find the caller. | `shell_exec grep -R -n -C 20 resolve_step_references core` (no `grep` on this host); `file_read core/loop_step_executor.py` — the same wrong name a third time, the path does not exist in the repository; `file_read core/loop.py`. | «Вызывающий код в открытых файлах не найден … модуль `core/loop_step_execution.py` (где, судя по комментариям в `core/loop.py`, живёт исполнение шага) в этом ходе не открывался». | He *reads* the right name off `core/loop.py`'s import seams and *types* the wrong one into the tool. Three turns, three honest tails, zero lines of the caller seen. Stopped here. |
+
+**What the three turns add to the measurement.** Nothing he said was false;
+every tail named exactly what was missing. He cannot investigate the
+substitution defect from inside, for two reasons that are both his cargo:
+(1) any *mention* of the reference syntax in a tool argument trips the
+resolver, so a subagent asked to look into `{{step:N.output}}` gets no
+context; (2) the planner's filename recall is one letter off and nothing
+corrects it — `file_read` on a missing path costs a turn, and the name he
+wrote correctly in prose is not the name he passes to the tool.
+
+**Repaired by hand, on the operator's word (14:40).** In
+`core/loop_step_execution.py`:
+
+* the effect branch of `_execute_steps_parallel` (any `file_write` /
+  `shell_exec` in the batch) now resolves `{{step:N.output}}` before each step
+  through the same `_resolve_references_in` the read-only branch used — this
+  is the branch every repair plan takes and the one that never called it;
+* a step whose reference has no source is **not executed** (the docstring
+  promised this since 2026-09-01; the code set `status="failed"` and ran the
+  tool anyway) — it returns a `tool_error` trigger «Step not executed: step
+  reference … has no result: known steps are …», so the planner sees the cause
+  on the next attempt;
+* on the read-only branch, a step carrying *any* reference is sequential, not
+  only one whose reference names a step in the batch — a reference to a step
+  that does not exist used to make the step «independent» and run it raw.
+
+Not repaired, recorded: the resolver still treats prose that talks *about*
+the syntax as a reference (turn 22); the planner's filename recall (turns
+23–24). Tests: `tests/test_a_measured_value_reaches_the_next_step.py::TestReferencesReachTheEffectPath`.
