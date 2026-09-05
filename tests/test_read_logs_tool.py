@@ -338,6 +338,7 @@ class TestOversizedFieldsAreBounded:
         payload = out["events"][0]["payload"]
         assert payload["id"] == "t1" and payload["latency_ms"] == 3, "short fields intact"
         cut = payload["output"]
+        assert set(cut) == {"_truncated", "chars", "preview"}, "the documented marker, no extras"
         assert cut["_truncated"] is True
         assert cut["chars"] > MAX_FIELD_CHARS
         assert len(cut["preview"]) == MAX_FIELD_CHARS

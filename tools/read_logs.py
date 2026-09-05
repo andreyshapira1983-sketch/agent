@@ -80,10 +80,10 @@ class ReadLogsTool(Tool):
         "the current session's log in `live_trace_id`; pass it as trace_id "
         "to read this session's earlier turns. events_returned=0 with "
         "traces_searched>1 means no such events exist in recent history at "
-        "all, not just in one file. Payload fields longer than 4000 chars are "
-        "cut to a marked preview (`_truncated`), so filter by event name for "
-        "what you need rather than reading a whole trace. Use this as the "
-        "agent's primary self-diagnostic surface. Risk: read_only."
+        f"all, not just in one file. Payload fields longer than {MAX_FIELD_CHARS} "
+        "chars are cut to a marked preview (`_truncated`), so filter by event "
+        "name for what you need rather than reading a whole trace. Use this "
+        "as the agent's primary self-diagnostic surface. Risk: read_only."
     )
     risk: Risk = "read_only"
 
@@ -395,10 +395,6 @@ def _bound_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], i
                 "_truncated": True,
                 "chars": len(text),
                 "preview": text[:MAX_FIELD_CHARS],
-                "note": (
-                    f"field cut to {MAX_FIELD_CHARS} chars by read_logs; "
-                    "narrow event_filter or open the log file for the whole value"
-                ),
             }
         bounded.append({**event, "payload": new_payload})
     return bounded, cut

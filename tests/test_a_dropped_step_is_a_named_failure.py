@@ -48,8 +48,8 @@ class TestTheWarningBecomesATrigger:
     def test_a_metacharacter_drop_names_the_step_the_tool_and_the_rule(self):
         warnings = [
             (
-                "step[2]: shell_exec argv[3] 'a;b' contains a shell metacharacter "
-                "(one of ; | & < > ` $ ( ) [ ]), dropped"
+                "step[2]: shell_exec argv[3] 'a;b' contains the shell metacharacter "
+                "';' (banned: ; | & < > ` $ ( ) [ ] and newline/CR/tab/NUL), dropped"
             ),
         ]
 
@@ -112,8 +112,8 @@ class TestTheTriggerReachesBothReaders:
     def test_a_replan_carries_the_rule_to_the_planner(self):
         trigger = dropped_step_triggers(
             [(
-                "step[1]: shell_exec argv[2] 'a|b' contains a shell metacharacter "
-                "(one of ; | & < > ` $ ( ) [ ]), dropped"
+                "step[1]: shell_exec argv[2] 'a|b' contains the shell metacharacter "
+                "'|' (banned: ; | & < > ` $ ( ) [ ] and newline/CR/tab/NUL), dropped"
             )],
             attempt=1,
         )[0]
@@ -148,6 +148,16 @@ class TestBracesAreSearchable:
         assert sources == []
         assert len(warnings) == 1
         assert "'a;b'" in warnings[0]
-        assert "one of ; | & < > ` $ ( ) [ ]" in warnings[0]
+        assert "metacharacter ';'" in warnings[0], "the offending character is named"
+        assert "newline/CR/tab/NUL" in warnings[0], "the banned set is complete"
         assert warnings[0].endswith("dropped")
         assert dropped_step_triggers(warnings, attempt=1)[0].tool_name == "shell_exec"
+
+    def test_a_control_character_drop_names_the_control_character(self, tmp_path: Path):
+        sources, warnings = _sanitize(tmp_path, [{
+            "tool": "shell_exec",
+            "arguments": {"argv": ["findstr", "a\nb", "*.py"]},
+        }])
+
+        assert sources == []
+        assert "metacharacter '\\n'" in warnings[0]

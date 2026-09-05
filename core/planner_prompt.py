@@ -113,8 +113,9 @@ Available tools:
     alias. `soffice`, `pandoc`, `magick`, `ffmpeg` and `pip` are external
     programs with no measurement at all; they are always probed.
     Each shell_exec is ONE command — plan them as separate steps.
-    NEVER use shell metacharacters: ; | & < > ` $ ( ) [ ] — the step is
-    dropped and the drop is reported to you as a `step_dropped` failure.
+    NEVER use shell metacharacters: ; | & < > ` $ ( ) [ ] or the control
+    characters newline, carriage return, tab, NUL — the step is dropped and
+    the drop is reported to you as a `step_dropped` failure.
     Braces { } are allowed (searching for `{{step:` is fine).
     NEVER use absolute paths, drive letters, or '..' — the tool refuses.
 
