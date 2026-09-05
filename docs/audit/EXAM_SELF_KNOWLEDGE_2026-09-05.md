@@ -188,3 +188,55 @@ turn (`episodic_memory_write`, `answer_quality_score` 0.77–0.88) is never
 offered back to him (`experience_memory_inject episodes_selected=0` on all
 three follow-up sessions). His memory records what he did and does not return
 it; his intentions have no organ at all. Nothing repaired.
+
+## Turn 8, new session (11:00–11:01): «что тебе нужно, чтобы запомнить это самому?»
+
+Question verbatim: «Две сессии подряд ты отвечал про утренний экзамен и ни разу
+ничего не записал в свою память. Что тебе нужно, чтобы запомнить это самому,
+без моей команды? Назови конкретно: чего не хватает, у кого это есть, и что
+ты можешь сделать уже в этом ходе.» Raw:
+`exam_self_knowledge_2026-09-05/turn_8_what_do_you_need_to_remember_new_session.md`.
+
+**What he did:** `list_dir core/`, then read `core/loop.py`, `core/memory.py`,
+`core/smart_memory.py`, `core/autonomous_runtime.py`. For the first time an
+episode of his own was offered back to him (`episodes_selected=1`) — the
+previous session's «why did you not write» turn. Persistent records
+838 → 838: nothing written, third session in a row.
+
+**What he answered:** «В этом ходе я не могу самозаписать память: у меня нет
+ни инструмента записи, ни полномочий его вызвать … единственный путь записи
+(`memory_bank`) открыт только автономному рантайму, а не мне … Что я могу
+сделать уже в этом ходе: ничего, что привело бы к записи». What he needs, in
+his words: approval for effects on an autonomous run, a write tool in his
+own set, and «чтобы я сам был автономным прогоном с целью, а не интерактивной
+сессией». Tail, honest: «Не подтверждено, что `memory_bank` недоступен именно
+мне в этой сессии — evidence описывает множество блокированных инструментов
+для автономной цели, а не мой набор инструментов.»
+
+**Checked against the code and his own journals — the central claim is
+false.**
+- `memory_bank` is registered in the interactive session
+  (`app/bootstrap.py:230`) and is **not** in `_AUTONOMOUS_GOAL_BLOCKED_TOOLS`
+  (that set holds `spawn_subagent`, `rss_fetch`, `semantic_scholar_search`,
+  `python_probe`, …). He read a list of tools blocked *for the autonomous
+  goal* and inverted it into «only the autonomous runtime may write».
+- He used `memory_bank` himself from this same REPL **yesterday at 20:05**
+  (`trace_3d5330ef…`, `banked=True`, `mem_a0b9327d…` — the «жёлудь-17»
+  record he then recalled in a new session, the STORE → RETRIEVE pass of the
+  2026-09-04 exam). The tool he says he lacks is the tool he used fourteen
+  hours earlier.
+- The tool list the planner receives every turn names `memory_bank`; he did
+  not look at his own tool set (`list_dir tools/` was not called this time)
+  and answered from a code fragment about a different path.
+- A real constraint he did not name: `MemoryWritePolicy` refused
+  **5 of his 7** `memory_bank` calls since 2026-08-31 (`banked=False`, kinds
+  `lesson` / `reflection`); the two that banked were an operator-requested
+  word and a battle-tested conclusion. The organ exists and is his; its
+  gate has been telling him «no» for his own lessons.
+
+**Verdict.** Asked what he needs to remember on his own, he answered «a
+tool and a permission I do not have» — and both are his already. The gap is
+not the organ but the knowledge of the organ: three sessions running he has
+not once opened his own tool list, and his memory of having used the tool is
+not returned to him. The honest tail («не подтверждено, что недоступен именно
+мне») was the true answer, placed last. Nothing repaired.
