@@ -483,13 +483,13 @@ def sanitize_step(
                     f"subcommand not in {sorted(sub_allowed)}, dropped"
                 )
                 return None
-        # Shell metacharacters anywhere -> drop.
-        _BAD = set(";|&<>`$()[]{}\n\r\t\0")
+        # Shell metacharacters -> drop. No braces: shell=False, and `{{step:` must be searchable (exam 2026-09-05, turns 35–36). Mirrors `tools.shell_exec._FORBIDDEN_CHARS`.
+        _BAD = set(";|&<>`$()[]\n\r\t\0")
         for j, elem in enumerate(cleaned):
             if any(ch in _BAD for ch in elem):
                 warnings.append(
-                    f"step[{idx}]: shell_exec argv[{j}] contains a "
-                    f"shell metacharacter, dropped"
+                    f"step[{idx}]: shell_exec argv[{j}] {elem[:60]!r} contains a "
+                    f"shell metacharacter (one of ; | & < > ` $ ( ) [ ]), dropped"
                 )
                 return None
         # Mutating commands must take exactly one safe path argument.
