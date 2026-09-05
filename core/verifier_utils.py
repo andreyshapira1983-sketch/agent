@@ -438,6 +438,31 @@ _ENUM_EXCLUDED_RE = re.compile(
 )
 
 
+#: Число, за которым идёт месяц или год, или перед которым стоит тире
+#: диапазона, — ДАТА, а не заявленный счёт. Рабочий заказ 1, проход 2
+#: (2026-09-05): «…на 15–25 сентября 2026 (1 взрослый, эконом, только ручная
+#: кладь)…» дал count_mismatch expected=25 actual=3 — верный вывод «источники
+#: заблокированы» был опровергнут датой вылета.
+_DATE_LIKE_NUMBER_RE = re.compile(
+    r"(?:[–—-]\s*)?(\d{1,2})\s+(?:"
+    r"январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|"
+    r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|"
+    r"\d{1,2}\s+\d{4}|\d{1,2}[.:]\d{2}",
+    re.IGNORECASE,
+)
+
+
+def _number_is_a_date(text: str, m: Any) -> bool:
+    """The matched number sits in a date: a month follows, a range dash
+    precedes, or a year / clock time follows."""
+    start = max(0, m.start() - 3)
+    window = text[start:m.start() + 24]
+    if _DATE_LIKE_NUMBER_RE.search(window):
+        return True
+    before = text[max(0, m.start() - 3):m.start()]
+    return bool(re.search(r"[–—-]\s*$", before))
+
+
 def enumeration_count_reason(text: str) -> Any:
     """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же
     предложения.
@@ -445,6 +470,8 @@ def enumeration_count_reason(text: str) -> Any:
     from .verifier_models import ClaimReason
 
     for m in _ENUM_COUNT_RE.finditer(text or ""):
+        if m.group(1) and _number_is_a_date(text or "", m):
+            continue
         claimed = int(m.group(1)) if m.group(1) else _COUNT_WORDS.get((m.group(2) or "").lower(), 0)
         if claimed < 2:
             continue
