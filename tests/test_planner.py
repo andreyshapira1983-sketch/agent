@@ -1031,7 +1031,7 @@ class TestShellExecSanitizer:
     @pytest.mark.parametrize(
         "metachar_arg",
         [";rm", "a|b", "a&b", "a>b", "a<b", "a`b", "a$b", "a(b", "a)b",
-         "a{b", "a}b", "a[b", "a]b", "a\nb", "a\rb", "a\tb", "a\0b"],
+         "a[b", "a]b", "a\nb", "a\rb", "a\tb", "a\0b"],
     )
     def test_metachar_in_argv_dropped(self, workspace: Path, metachar_arg):
         sources, warnings = self._plan_one_step(
@@ -1039,6 +1039,16 @@ class TestShellExecSanitizer:
         )
         assert sources == []
         assert any("metacharacter" in w for w in warnings), warnings
+
+    def test_braces_pass_the_sanitiser(self, workspace: Path):
+        """Exam 2026-09-05, turns 35–36: `findstr /c:{{step:` dropped twice for
+        a `{`. Braces compose nothing with shell=False; the agent's own
+        reference syntax must be searchable."""
+        sources, warnings = self._plan_one_step(
+            workspace, {"argv": ["findstr", "/s", "/n", "/c:{{step:", "*.py"]}
+        )
+        assert warnings == []
+        assert sources[0]["arguments"]["argv"][3] == "/c:{{step:"
 
     # --- path / arity for mutating commands ---
 

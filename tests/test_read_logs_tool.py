@@ -10,6 +10,7 @@ import pytest
 from tools.read_logs import (
     DEFAULT_LAST_N,
     MAX_EVENT_FILTER,
+    MAX_FIELD_CHARS,
     MAX_LAST_N,
     ReadLogsTool,
 )
@@ -314,3 +315,39 @@ class TestValidateOutput:
 
     def test_max_last_n_is_500(self):
         assert MAX_LAST_N == 500
+
+
+# ============================================================
+# Oversized payload fields are cut, not carried (exam 2026-09-05, turn 36)
+# ============================================================
+
+class TestOversizedFieldsAreBounded:
+    """The agent read its own trace without a filter: 217 events, 1.24 MB,
+    because every earlier `read_logs` result sat whole inside a
+    `tool_result.output`. The evidence budget then kept ~12 000 characters
+    and dropped the planner warnings it was reading for."""
+
+    def test_a_huge_field_becomes_a_marked_preview(self, workspace: Path):
+        nested = {"events": [{"payload": {"x": "y" * 500}} for _ in range(50)]}
+        _seed_log(workspace, "trace_big", [
+            _event("tool_result", id="t1", output=nested, latency_ms=3),
+        ])
+
+        out = ReadLogsTool(workspace_root=workspace).run(trace_id="trace_big")
+
+        payload = out["events"][0]["payload"]
+        assert payload["id"] == "t1" and payload["latency_ms"] == 3, "short fields intact"
+        cut = payload["output"]
+        assert cut["_truncated"] is True
+        assert cut["chars"] > MAX_FIELD_CHARS
+        assert len(cut["preview"]) == MAX_FIELD_CHARS
+        assert out["fields_truncated"] == 1
+        assert len(json.dumps(out)) < 3 * MAX_FIELD_CHARS
+
+    def test_short_events_pass_untouched(self, workspace: Path):
+        _seed_log(workspace, "trace_small", [_event("planner", warnings=["w1"])])
+
+        out = ReadLogsTool(workspace_root=workspace).run(trace_id="trace_small")
+
+        assert out["events"][0]["payload"] == {"warnings": ["w1"]}
+        assert out["fields_truncated"] == 0

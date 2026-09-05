@@ -747,7 +747,34 @@ invention still became the answer. Same shape as turns 6 and 28.
   unrelated filename error.
   Tests: `tests/test_a_measured_value_reaches_the_next_step.py` (×2).
 
-Not repaired, recorded: (c) the brace ban and the fact that drop warnings
-never reach the planner; (d) the nested self-read; (e) the invention under a
-caveat — a synthesizer habit, not a transport defect; and, from before, the
-referent-resolver hijack, `run_tests total=0`, the `git blame` stall.
+**Repaired by hand, second pass, on the operator's word (18:37 — «если он
+не может починить, чини; потом всё равно проверять дальше»).**
+
+* (c) Braces are no longer metacharacters: `tools/shell_exec.py::_FORBIDDEN_CHARS`
+  and the sanitiser's `_BAD` set drop `{}` (they compose nothing with
+  `shell=False`; his own `{{step:N.output}}` must be searchable). The drop
+  warning now quotes the offending argument and lists the banned characters.
+  **And the drop reaches him:** `core/replan.py::dropped_step_triggers` turns
+  every `step[N]: … dropped` warning into a `step_dropped` failure (new
+  `FailureType`, world-facing, budget 2 with advice naming the rules), the
+  attempt loop records it beside tool failures (one statement, declared in
+  `tests/test_loop_attempt_split.py::_DeclaredDropRecording`), so the
+  synthesizer's `<failure_context>` says what did not run and why, and a
+  replan carries the rule. Not done: a plan whose every step was dropped
+  still answers as a 0-step plan — with the drop disclosed, no longer silent.
+  Tests: `tests/test_a_dropped_step_is_a_named_failure.py` (×9),
+  `tests/test_shell_exec.py::TestArgvValidation::test_braces_are_not_metacharacters`,
+  `tests/test_planner.py::TestShellExecSanitizer::test_braces_pass_the_sanitiser`.
+* (d) `tools/read_logs.py`: any payload field over 4 000 JSON characters is
+  cut to a marked preview (`_truncated`, `chars`, `preview`); the result
+  carries `fields_truncated`. Short fields and every event survive; the
+  1.24 MB read becomes a few hundred kilobytes at most, and the planner
+  warnings stay in the window.
+  Tests: `tests/test_read_logs_tool.py::TestOversizedFieldsAreBounded` (×2).
+* Prompt: `core/planner_prompt.py` names the banned set exactly, says braces
+  are fine, and says that `{{step:N.output.<field>}}` is not a form.
+
+Not repaired, recorded: (e) the invention under a caveat — a synthesizer
+habit, not a transport defect, and the next exam's subject; and, from
+before, the referent-resolver hijack, `run_tests total=0`, the `git blame`
+stall.
