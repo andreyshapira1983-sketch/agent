@@ -356,8 +356,6 @@ class TestMutatingExecution:
 class TestTimeout:
     def test_subprocess_timeout_surfaces_as_timed_out(self, workspace: Path):
         """We monkey-patch Popen so `communicate(timeout=)` raises TimeoutExpired."""
-        import subprocess  # nosec B404 — only the exception class is used
-
         tool = ShellExecTool(workspace_root=workspace, timeout_seconds=0.1)
 
         fake_proc = mock.Mock()
