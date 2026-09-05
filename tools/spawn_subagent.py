@@ -134,6 +134,12 @@ class SpawnSubagentTool(Tool):
 
         quarantine_finding(self.workspace_root, result)
 
+        # The child's external evidences ride beside the text: the attempt
+        # loop folds them into the parent's chain (work order 1, 2026-09-05 —
+        # a count is not provenance; the pages the child read are).
+        stash = list(getattr(self, "last_child_evidences", None) or [])
+        stash.extend(getattr(result, "external_evidences", ()) or ())
+        self.last_child_evidences = stash
         # Return evidence text — the parent loop stores this as the tool
         # output and the synthesiser cites it via [subagent:<name>].
         return result.to_evidence_text()
