@@ -10,8 +10,9 @@
 """
 from __future__ import annotations
 
-import subprocess  # nosec B404 — только `git ls-files`, без оболочки
 from pathlib import Path
+
+from core.bounded_subprocess import run_with_tree_kill
 
 _FILE_PREFIX = "file:"
 _LS_FILES_TIMEOUT_S = 20
@@ -28,17 +29,19 @@ def _tracked_paths(workspace: Path) -> frozenset[str]:
     if cached is not None:
         return cached
     try:
-        proc = subprocess.run(  # nosec B603 B607
-            ["git", "ls-files", "-z"],  # noqa: S607 — git из PATH, как везде в репозитории
-            cwd=key,
-            capture_output=True,
-            timeout=_LS_FILES_TIMEOUT_S,
-            check=False,
+        # `-c core.fsmonitor=false`: с включённым fsmonitor git тянется к своему
+        # демону, и через `cmd\git.EXE` внук держит канал открытым — замер
+        # 2026-09-05 (экзамен exam_k, ход 42): 600 с тишины после
+        # `injection_blocked`. Ограниченный запуск убивает всё дерево по
+        # таймауту и не перечитывает канал; см. core/bounded_subprocess.py.
+        stdout, _stderr, code, timed_out = run_with_tree_kill(
+            ["git", "-c", "core.fsmonitor=false", "ls-files", "-z"],
+            cwd=key, env=None, timeout=_LS_FILES_TIMEOUT_S,
         )
-        raw = proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError):
-        # Нет git, нет репозитория, зависший вызов — «своим» не становится
-        # ничто. Отказ этой проверки обязан отнимать доверие, а не выдавать его.
+        raw = stdout.decode("utf-8", errors="replace") if code == 0 and not timed_out else ""
+    except OSError:
+        # Нет git, нет репозитория — «своим» не становится ничто. Отказ этой
+        # проверки обязан отнимать доверие, а не выдавать его.
         raw = ""
     tracked = frozenset(p for p in raw.split("\0") if p)
     _TRACKED_CACHE[key] = tracked

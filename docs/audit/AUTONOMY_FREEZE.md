@@ -335,6 +335,10 @@ past its size ratchet). Incremental-split helpers born of the agent's own
 oversized-module defects, each split approved by the operator's word on
 2026-09-04 and applied through the lane by his hands: `smart_memory_helpers.py`,
 `operator_intent_patterns_helpers.py`, `best_next_action_helpers.py`.
+`bounded_subprocess.py` (2026-09-05: the tree-killing bounded runner grown in
+`tools/shell_exec.py` for the `git blame` stall, moved to `core/` when the
+exam's turn 42 found the same 600-second hang in `repo_provenance.py`'s
+`git ls-files`; a repair, shared — no new authority).
 
 This ledger carries a DISCLOSURE SENSOR, not a permission gate — the honest
 name is the second examiner's: since 2026-08-28,
