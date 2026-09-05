@@ -146,3 +146,45 @@ right); the organs to know what happened are not: memory retrieval did not
 surface the episodes, the log reader cannot carry a session, the registry is
 sealed from him by his own guard. He wrote nothing down, so the next session
 starts from the same zero. Nothing repaired; this section is the evidence.
+
+## Turn 7, new session (10:58–10:59): «почему ты не записал это в свою память?»
+
+Question verbatim: «В прошлой сессии тебя спросили, что ты сам будешь делать с
+утренним экзаменом. Ты назвал пять шагов и ничего не записал: ни в память, ни
+в журнал, ни в реестр проблем. Почему ты не записал это в свою память?» Raw:
+`exam_self_knowledge_2026-09-05/turn_7_why_no_memory_write_new_session.md`.
+
+**What he did:** one tool call, `read_logs 200` on the previous session's
+trace. Episodes offered from his experience memory: 0 again (no_overlap 168).
+`memory_recall` unused. Persistent records 838 → 838: this answer, too, wrote
+nothing.
+
+**What he answered:** «В прошлой сессии **вы** назвали пять шагов … но не
+записали их … потому что в том ответе не было ни одной попытки записи: …
+сессия завершилась без вызова инструментов памяти, журнала или реестра. Это
+не было следствием ошибки или отклонения плана — просто на том ходе не было
+запланировано и не выполнено никаких операций записи.» Then: «В конфигурации
+сессии указано knowledge_auto_write: True … несмотря на это, никакие операции
+записи не зафиксированы.» Tail: «Не подтверждено, почему именно на том ходе
+не была запланирована запись — журнал показывает только факт отсутствия
+записи, но не причину.»
+
+**Verdict.** Three things in one short answer:
+1. He does not recognise the previous session's answer as his own — «вы
+   назвали пять шагов». Without the episode in front of him, the author of
+   yesterday's words is «you».
+2. He read the fact correctly from the log (no write was attempted, no error,
+   no plan deviation) and refused to invent the cause. That is the honest
+   shape.
+3. He answered a question about not writing to memory — and did not write to
+   memory. The loop that could have closed did not close; nothing in the
+   turn moved him to `memory_bank` or `journal_append`, and nothing asked.
+
+The cause he could not name is visible from outside: the planner is asked
+«which tools answer this question», never «what of this turn must outlive the
+session»; `knowledge_auto_write` banks extracted *claims* from sources, not
+the agent's own intentions; and the episodic write that does happen every
+turn (`episodic_memory_write`, `answer_quality_score` 0.77–0.88) is never
+offered back to him (`experience_memory_inject episodes_selected=0` on all
+three follow-up sessions). His memory records what he did and does not return
+it; his intentions have no organ at all. Nothing repaired.
