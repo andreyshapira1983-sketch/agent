@@ -36,6 +36,15 @@ DEFAULT_LAST_N = 50
 MAX_LAST_N = 500
 MAX_EVENT_FILTER = 20      # how many distinct event names a caller may filter on
 
+# Longest a single payload field may be on the way out, in JSON characters.
+# Measured 2026-09-05 (exam turn 36): the agent read its own trace without a
+# filter, 217 events came back as 1.24 MB — each earlier `read_logs` result
+# was nested whole inside its `tool_result.output` — and the evidence budget
+# kept ~12 000 characters, none of them the planner warnings it was after.
+# A field over the cap is replaced by a marked preview; the event itself and
+# every short field stay intact.
+MAX_FIELD_CHARS = 4_000
+
 # Accepting a wider safe pattern than `core.ids.new_trace_id` currently emits
 # keeps an explicitly-passed trace_id resilient to a format change.
 _TRACE_ID_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\.jsonl$")
@@ -71,8 +80,10 @@ class ReadLogsTool(Tool):
         "the current session's log in `live_trace_id`; pass it as trace_id "
         "to read this session's earlier turns. events_returned=0 with "
         "traces_searched>1 means no such events exist in recent history at "
-        "all, not just in one file. Use this as the agent's primary "
-        "self-diagnostic surface. Risk: read_only."
+        f"all, not just in one file. Payload fields longer than {MAX_FIELD_CHARS} "
+        "chars are cut to a marked preview (`_truncated`), so filter by event "
+        "name for what you need rather than reading a whole trace. Use this "
+        "as the agent's primary self-diagnostic surface. Risk: read_only."
     )
     risk: Risk = "read_only"
 
@@ -151,6 +162,7 @@ class ReadLogsTool(Tool):
                 "skipped_live": False,
                 "traces_searched": traces_searched,
                 "live_trace_id": self.live_trace_id or "",
+                "fields_truncated": 0,
                 "compensation_plan": _NOOP_PLAN,
             }
         total = len(events_all)
@@ -164,6 +176,7 @@ class ReadLogsTool(Tool):
         from core.redaction import redact_payload
 
         events_safe = [redact_payload(e) for e in events_recent]
+        events_safe, fields_truncated = _bound_events(events_safe)
 
         try:
             rel_log = str(target_path.relative_to(self.workspace_root))
@@ -192,6 +205,9 @@ class ReadLogsTool(Tool):
             # and reported it as its session. A default that hides the live
             # log must at least say which log it hid.
             "live_trace_id": self.live_trace_id or "",
+            # How many payload fields were cut to MAX_FIELD_CHARS. Non-zero
+            # says: the whole value is in the file, not in this result.
+            "fields_truncated": fields_truncated,
             "compensation_plan": _NOOP_PLAN,
         }
         if skipped_live:
@@ -352,3 +368,33 @@ _NOOP_PLAN = {
     "tool_name": "read_logs",
     "description": "read_logs makes no changes; no rollback needed",
 }
+
+
+def _bound_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Cut every payload field longer than MAX_FIELD_CHARS to a marked preview.
+
+    Returns the bounded events and the number of fields cut. A cut field
+    becomes `{"_truncated": True, "chars": N, "preview": "<json…>"}` so a
+    reader can tell a short value from a shortened one.
+    """
+    bounded: list[dict[str, Any]] = []
+    cut = 0
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            bounded.append(event)
+            continue
+        new_payload: dict[str, Any] = {}
+        for key, value in payload.items():
+            text = json.dumps(value, ensure_ascii=False, default=str)
+            if len(text) <= MAX_FIELD_CHARS:
+                new_payload[key] = value
+                continue
+            cut += 1
+            new_payload[key] = {
+                "_truncated": True,
+                "chars": len(text),
+                "preview": text[:MAX_FIELD_CHARS],
+            }
+        bounded.append({**event, "payload": new_payload})
+    return bounded, cut

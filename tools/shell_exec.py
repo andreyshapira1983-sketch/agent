@@ -8,7 +8,9 @@ if the policy gate, planner sanitiser or approval gate are bypassed):
 
 - argv is a non-empty list of strings; no shell-string form is accepted
 - argv[0] is in the whitelist
-- no element carries a shell metacharacter: ; | & < > ` $ ( ) { } [ ] \\n \\r \\t \\0
+- no element carries a shell metacharacter: ; | & < > ` $ ( ) [ ] \\n \\r \\t \\0
+  (braces are allowed: they compose nothing with shell=False, and the agent's
+  own `{{step:N.output}}` syntax must be searchable)
 - no element equals '..', starts with '/' or '\\\\', looks like 'C:\\...',
   or contains '~' / '$VAR'
 - every path argument to a mutating command resolves INSIDE the workspace
@@ -206,7 +208,13 @@ ALL_WHITELIST: frozenset[str] = READ_ONLY_COMMANDS | MUTATING_COMMANDS
 # layer means a malicious planner can't smuggle them through a quote
 # trick on some platform. Includes whitespace controls so newline
 # injection is impossible too.
-_FORBIDDEN_CHARS = frozenset(";|&<>`$()[]{}\n\r\t\0")
+#
+# Braces are NOT here. `{` and `}` compose nothing in any shell (bash brace
+# expansion yields words, never a second command; cmd.exe ignores them), and
+# banning them made the agent's own reference syntax `{{step:N.output}}` —
+# and half of its Python — unsearchable: exam 2026-09-05, turns 35–36, the
+# same `findstr` was dropped twice for the `{` in the pattern.
+_FORBIDDEN_CHARS = frozenset(";|&<>`$()[]\n\r\t\0")
 
 # Hard limits — short by design.
 DEFAULT_TIMEOUT_SECONDS = 5.0

@@ -37,7 +37,12 @@ from core.model_usage import ModelBudgetExceeded
 from core.models import ErrorObject, Goal, Plan, PlanStep
 from core.planner import PlannerOutput
 from core.reasoning_action_check import check_reasoning_actions
-from core.replan import ReplanTrigger, count_failures, format_replan_context
+from core.replan import (
+    ReplanTrigger,
+    count_failures,
+    dropped_step_triggers,
+    format_replan_context,
+)
 from core.task_complexity import can_skip_planner
 
 
@@ -406,6 +411,11 @@ class AgentLoopAttempt:
                         attempt=st.attempt,
                     )
                 )
+
+            # A sanitiser-dropped step is a plan failure and is recorded as one
+            # (exam 2026-09-05, turns 35–36: the reason lived only in the
+            # `planner` event). Declared in test_loop_attempt_split.py.
+            attempt_failures.extend(dropped_step_triggers(st.planner_out.warnings, attempt=st.attempt))
 
             for step, outcome, trigger in self._execute_steps_parallel(st.plan.steps):
                 if outcome is None:

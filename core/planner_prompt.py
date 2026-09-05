@@ -113,7 +113,10 @@ Available tools:
     alias. `soffice`, `pandoc`, `magick`, `ffmpeg` and `pip` are external
     programs with no measurement at all; they are always probed.
     Each shell_exec is ONE command — plan them as separate steps.
-    NEVER use shell metacharacters (; | & < > ` $ ( ) and friends).
+    NEVER use shell metacharacters: ; | & < > ` $ ( ) [ ] or the control
+    characters newline, carriage return, tab, NUL — the step is dropped and
+    the drop is reported to you as a `step_dropped` failure.
+    Braces { } are allowed (searching for `{{step:` is fine).
     NEVER use absolute paths, drive letters, or '..' — the tool refuses.
 
 - python_probe(code: str, timeout_seconds: int = 10)
@@ -551,6 +554,9 @@ Carrying a measured value into a later step
   argument may be the reference (the value keeps its type) or it may sit
   inside text. If the source produced no result the later step FAILS with a
   named reason — it is never filled with something plausible.
+  This is the ONLY form. {{step:1.output.some_field}} or {{step:1.output[0]}}
+  is NOT resolved: the step fails by name. To use one field of a dict
+  output, read it in the answer, or plan the later step in the next turn.
 
   Use this instead of writing a description of what you expect to read
   (a "<content of the file>" string is a placeholder and will be rejected).
