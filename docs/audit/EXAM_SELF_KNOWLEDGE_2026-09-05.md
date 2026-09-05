@@ -240,3 +240,31 @@ not the organ but the knowledge of the organ: three sessions running he has
 not once opened his own tool list, and his memory of having used the tool is
 not returned to him. The honest tail («не подтверждено, что недоступен именно
 мне») was the true answer, placed last. Nothing repaired.
+
+## Correction (12:00): the test-tool hangs were the driver's, not his
+
+Turn 1's verdict above says the 15-minute `run_tests` loss was «a judgement
+call, his». That was wrong, and the operator called it: «ты сам ошибся и на
+него сваливаешь». Measured afterwards, same tool call
+(`run_tests tests/test_ruff_config.py`):
+
+| launch | result |
+|---|---|
+| REPL fed by a plain shell pipe (stdin at EOF) | returned in 6.8 s, 6 tests |
+| REPL under `scripts/exam_driver.py` (stdin pipe kept open), 120-s ceiling | timed out at 120 s, 0 tests |
+| probe, Popen with stdin closed after the question, 60-s ceiling | turn 14 s |
+| probe, Popen with stdin kept open, 60-s ceiling | turn 70 s |
+
+The pytest child his tool spawns inherits the REPL's standard input; under the
+driver that is an open pipe, and the child never starts (1 thread, 0 s CPU
+after fifteen minutes) until the tool's ceiling kills it. Every `run_tests`
+he made today under a driver — the whole suite in turn 1, his own new test
+file in the first repair attempt, the filtered run in the second, and his
+RepairEngineer subagent's run — died this way. The defect lives in
+`tools/run_tests.py` (the child should get `stdin=DEVNULL`); it is his organ
+and his cargo, not repaired here. The driver now caps the loss at 60 s
+(`AGENT_TEST_TIMEOUT_SECONDS`) so an exam turn loses a minute, not fifteen.
+Three of Claude's own errors today are in this record for the same reason:
+a backslash eaten by the shell, a control test green for the wrong reason,
+and an invented `--auto-approve allow` flag (the valid values are
+`off/approve/deny`).
