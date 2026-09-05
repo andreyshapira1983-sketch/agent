@@ -399,6 +399,74 @@ _UNSUPPORTED_VERDICTS: frozenset[str] = frozenset({
 })
 
 
+#: A claim that says «could not confirm / blocked / not done». Work order 1,
+#: pass 2 (2026-09-05): the draft's honest conclusion — sources blocked, no
+#: confirmed fares, task not done — was booked subagent_asserted / topic-only
+#: and erased by this gate, which then shipped one baggage fact. The gate did
+#: its formal job («ship nothing unsupported») and broke the user's («if
+#: nothing can be confirmed, say so»).
+_HONEST_NEGATIVE_RE = re.compile(
+    r"(?i)(заблокирован|не пуска|BLOCKED|429|не подтверж|неподтверж|не удалось|"
+    r"нет подтверждённ|не выполнен|пуст(ые|ая|ой) страниц|не предоставил|"
+    r"blocked|rate[- ]limit|could not (?:be )?(?:verif|confirm)|unconfirmed|"
+    r"no confirmed|not (?:done|completed)|unsupported)"
+)
+
+#: What an ATTEMPT looks like in the chain: a fetch answered with an HTTP
+#: error, an unsupported/blocked page, a captcha wall, an empty result, or a
+#: subagent that reported the same. Counted from excerpt and source id.
+_BLOCKED_ATTEMPT_RE = re.compile(
+    r"(?i)(HTTP\s*(?:4\d\d|5\d\d)|\b(?:403|429|503)\b|Too Many Requests|unsupported|"
+    r"\bBLOCKED\b|captcha|rate[- ]limit|access denied|forbidden|заблокирован|"
+    r"пуст(?:ые|ая|ой) страниц|empty page)"
+)
+
+
+def count_blocked_attempts(chain: Any) -> int:
+    """How many evidences in the chain record a blocked or empty attempt —
+    the support an honest negative conclusion stands on."""
+    n = 0
+    for ev in getattr(chain, "evidences", ()) or ():
+        text = f"{getattr(ev, 'excerpt', '') or ''}\n{getattr(ev, 'source_id', '') or ''}"
+        if _BLOCKED_ATTEMPT_RE.search(text):
+            n += 1
+    return n
+
+
+def _honest_negative_chunks(report: Any) -> list[str]:
+    """Texts of chunks that assert blocking / non-confirmation / not-done and
+    were left unsupported by the verifier (never a verified or refuted one)."""
+    out: list[str] = []
+    for c in getattr(report, "chunks", ()) or ():
+        verdict = str(getattr(c, "verdict", "") or "")
+        text = str(getattr(c, "text", "") or "")
+        if verdict in ("subagent_asserted", "topic_supported_but_claim_unverified", "unverified") \
+                and _HONEST_NEGATIVE_RE.search(text):
+            out.append(text.strip())
+    return out
+
+
+def _surviving_texts(report: Any) -> tuple[list[str], list[str]]:
+    """Texts the truncation keeps: verified chunks, and dialogue-scoped ones.
+
+    Dialogue-scoped claims survive the truncation alongside verified ones: the
+    answer loses its unsupported world claims and keeps the part the session
+    transcript backs (issue #119). Even when the gate fires, a self-correction
+    is never erased wholesale."""
+    verified_texts: list[str] = []
+    dialogue_texts: list[str] = []
+    for c in getattr(report, "chunks", ()) or ():
+        verdict = getattr(c, "verdict", "")
+        text = getattr(c, "text", "")
+        if not text.strip():
+            continue
+        if verdict == "verified":
+            verified_texts.append(text.strip())
+        elif verdict == "dialogue_supported":
+            dialogue_texts.append(text.strip())
+    return verified_texts, dialogue_texts
+
+
 def evaluate_low_evidence_policy(
     *,
     answer: str,
@@ -409,8 +477,13 @@ def evaluate_low_evidence_policy(
     unverified_floor: int = _DEFAULT_UNVERIFIED_FLOOR,
     evidence_expected: bool = True,
     local_critique_active: bool = False,
+    blocked_attempts: int = 0,
 ) -> LowEvidencePolicyResult:
-    """Decide whether to truncate the answer because evidence is too thin."""
+    """Decide whether to truncate the answer because evidence is too thin.
+
+    ``blocked_attempts`` (work order 1, defect 3): a chunk that honestly says
+    «blocked / not confirmed / not done» is SUPPORTED by the chain's blocked
+    attempts; a positive claim is never rescued by this rule."""
     if report is None:
         return LowEvidencePolicyResult(
             triggered=False, answer=answer,
@@ -423,9 +496,7 @@ def evaluate_low_evidence_policy(
     verified = int(getattr(report, "verified_chunks", 0) or 0)
     dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
     unverified = int(getattr(report, "unverified_chunks", 0) or 0)
-    cited_unmatched = int(
-        getattr(report, "cited_but_unmatched_chunks", 0) or 0
-    )
+    cited_unmatched = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
     topic_supported = int(
         getattr(
             report, "topic_supported_but_claim_unverified_chunks", 0
@@ -451,7 +522,11 @@ def evaluate_low_evidence_policy(
         unverified + cited_unmatched + topic_supported + subagent_asserted
         + refuted
     )
-    supported = verified + dialogue
+    honest_negative_texts = (
+        _honest_negative_chunks(report) if blocked_attempts > 0 else []
+    )
+    supported = verified + dialogue + len(honest_negative_texts)
+    unverified_total = max(0, unverified_total - len(honest_negative_texts))
     supported_ratio = (supported / total) if total > 0 else 0.0
 
     def _result(*, triggered: bool, answer_out: str, reason: str,
@@ -496,7 +571,11 @@ def evaluate_low_evidence_policy(
     if supported_ratio > max_verified_ratio:
         return _result(
             triggered=False, answer_out=answer,
-            reason="verified_ratio_above_threshold",
+            reason=(
+                f"verified_ratio_above_threshold|honest_negative={len(honest_negative_texts)}"
+                f"|blocked_attempts={blocked_attempts}"
+                if honest_negative_texts else "verified_ratio_above_threshold"
+            ),
         )
 
     if supported > 0 and unverified_total < unverified_floor:
@@ -512,26 +591,14 @@ def evaluate_low_evidence_policy(
         _looks_russian(question) or _looks_russian(answer)
     ) else "en"
 
-    chunks_iter = getattr(report, "chunks", ()) or ()
-    verified_texts: list[str] = []
-    dialogue_texts: list[str] = []
-    for c in chunks_iter:
-        verdict = getattr(c, "verdict", "")
-        text = getattr(c, "text", "")
-        if not text.strip():
-            continue
-        if verdict == "verified":
-            verified_texts.append(text.strip())
-        # Dialogue-scoped claims survive the truncation alongside verified ones:
-        # the answer loses its unsupported world claims and keeps the part the
-        # session transcript backs (issue #119). Even when the gate fires, a
-        # self-correction is never erased wholesale.
-        elif verdict == "dialogue_supported":
-            dialogue_texts.append(text.strip())
+    verified_texts, dialogue_texts = _surviving_texts(report)
 
     suppressed_count = total - supported
+    # An honest negative claim backed by blocked attempts survives even when
+    # the gate still fires on the rest: «nothing could be confirmed» is the
+    # one sentence the user must not lose.
     short_answer = _build_short_answer(
-        verified_claim_texts=verified_texts + dialogue_texts,
+        verified_claim_texts=verified_texts + dialogue_texts + honest_negative_texts,
         suppressed_count=suppressed_count,
         locale=locale,
         dialogue_count=len(dialogue_texts),
