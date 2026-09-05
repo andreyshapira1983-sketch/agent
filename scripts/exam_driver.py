@@ -91,7 +91,13 @@ def main(argv: list[str] | None = None) -> int:
     adir.mkdir(parents=True, exist_ok=True)
     stop = qdir / "stop"
 
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    # Measured 2026-09-05 11:45: pytest spawned by his run_tests tool inherits
+    # this driver's OPEN stdin pipe and never starts (0 s CPU) until the tool's
+    # ceiling — 14 s with stdin closed, 70 s with it open under a 60-s ceiling.
+    # The defect is the tool's (a child should get stdin=DEVNULL) and is his
+    # cargo; the driver only caps the loss at one minute instead of fifteen.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
+           "AGENT_TEST_TIMEOUT_SECONDS": os.environ.get("AGENT_TEST_TIMEOUT_SECONDS", "60")}
     proc = subprocess.Popen(  # nosec B603 — fixed argv, our own entry point
         [args.python, "-u", "main.py", "--auto-approve", "deny"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
