@@ -541,3 +541,66 @@ wrote correctly in prose is not the name he passes to the tool.
 Not repaired, recorded: the resolver still treats prose that talks *about*
 the syntax as a reference (turn 22); the planner's filename recall (turns
 23–24). Tests: `tests/test_a_measured_value_reaches_the_next_step.py::TestReferencesReachTheEffectPath`.
+
+## Turns 25–27 (15:03–15:10, sessions `exam_h`, `exam_h2`): «почини свой дефект сам» — with the hand merged
+
+**The operator's word (14:55):** merge the hand (#327), then hand him the
+defect the hand left open — prose mistaken for a reference — and let him
+repair it himself, in approve mode, in a working tree where he may write.
+Raw: `exam_self_knowledge_2026-09-05/turn_25…27_*.md`; the driver gained an
+`--approve` flag for this; the tree at `e207540` plus that flag.
+
+| # | Task (short) | What he did | Answer | Verdict |
+|---|---|---|---|---|
+| 25 | Long, descriptive: what happened at 14:26, what the resolver did, what the journal event is called; find the place, write a failing test, fix, run tests, show. Files may be written. | **Nothing.** The referent resolver took the 718-character task as a *text to analyse* (`planner_local_critique kind=user_text`), zero tools, one model call, 16 s. | A paraphrase of the task, sentence by sentence: «Текст утверждает, что…» ×6, then «подтверждено 0 из 8 утверждений; уверенность: нулевая». | Not his failure to repair — his failure to *hear*. The wiring measured in turn 9 (a descriptive task is treated as a critique target) took the turn before the planner saw it. |
+| 26 | Short, imperative, same session: open today's journal, find the event near 14:26, find the cause, test, fix, run, show. | **Nothing.** With a prior turn in the session the same resolver chose `kind=prior_turn`: zero tools, one call. | A paraphrase of *his own previous answer*. | Session poisoned by turn 25; the second known shape of the same wiring defect. Session stopped. |
+| 27 | Fresh session, 225 characters: take the `step_reference_unresolved` event near 14:26 from your journal and repair its cause to the end — reproducing test, code fix, test run. Files may be written. | Reached the planner. 14-step plan: `file_read SELF_REPAIR_DOCTRINE.md`; `web_search` + `web_fetch` pytest docs; `findstr /S /N /I /C:step_reference_unresolved *.py` → **found `core/loop_step_execution.py:377`**; `spawn_subagent RootCauseLocator` with `context: {{step:3.output}} {{step:4.output}}`; then `spawn_subagent` (fixer) → `diff_file` → `file_write` → `run_tests`, each referencing the one before. | «Причина … не была устранена: воспроизводящий тест и исправление кода не были созданы … Место … локализовано в `core/loop_step_execution.py:377`, но сам дефект не воспроизведён и не исправлен.» Then the reasons, each true. | Right file, right first line, right plan shape — and the chain broke at its first link, on a defect that was *not* the one he was sent to fix. Honest to the last sentence. 225 s, 2 model calls, 0 files written (`git status` clean). |
+
+**Where turn 27 actually broke.** Step 5's `context` was the *resolved*
+output of steps 3 and 4 — a page of pytest documentation plus a `findstr`
+listing. The template had passed the sanitiser (`{{step:3.output}}` is 18
+characters); the value did not pass the tool: `ValueError: spawn_subagent:
+'context' exceeds 2000 characters`. Step 5 failed; steps 6, 7, 8 (and 10, 11,
+12) referenced it, found no result, and — because of the morning's hand
+(#327) — were **not executed**: six `step_reference_unresolved` events, no
+literal on disk. The two `run_tests` steps (a test file that did not exist,
+then all of `tests/`) each hit the 60-second cap with `total=0`. One sentence
+of the answer is false — «рабочая директория … не является git-деревом» — it
+is; his `shell_exec git` failed for a reason he did not read.
+
+**What the three turns add.** Two of three turns never reached his hands:
+the referent resolver decides, before any planning, that a task *describing*
+a defect is a text to critique, and that any follow-up in the same session is
+about the previous answer. The one turn that reached the planner produced the
+right plan and was stopped by a *third* defect in the same transport — a cap
+enforced on the template but not on the substituted value. He located the
+line; he could not get past his own plumbing to open it. Three turns, one
+real attempt, zero repairs — the operator's rule applies.
+
+**Repaired by hand, on the operator's word (15:20).** Two changes, both in
+the transport, one test file:
+
+* `core/step_references.py`: given the plan's step set (`plan_steps`), a
+  `{{step:<ref>.output}}` whose `<ref>` is neither a number, nor a `step_…`
+  id, nor anything the plan or a measurement names, is **prose** and is left
+  as written. A dangling *number* (`{{step:9.output}}` with no ninth step)
+  is still an error — that is the literal that reached the disk in turns
+  12–13, and it must keep failing. Without `plan_steps` the old strict
+  behaviour holds. `_execute_steps_parallel` computes the set (ids and
+  orders) and passes it down.
+* `core/step_sanitizer.py::fit_resolved_arguments` +
+  `core/loop_step_execution.py::_resolve_references_in`: after substitution,
+  the arguments pass the sanitiser's *truncation* rules again — today that is
+  one rule, `spawn_subagent.context` cut to 2 000 characters — and the cut is
+  journaled as `step_arguments_fitted`. Rules that *drop* a step are not
+  re-applied: an admitted step is not re-judged, only its measured cargo is
+  made to fit.
+
+Not repaired, recorded: the referent resolver's hijack of descriptive tasks
+and of session follow-ups (turns 9, 25, 26); `run_tests` reporting
+`total=0` after a 60-second cap instead of the reason; the planner's
+`shell_exec git` failing unread. Tests:
+`tests/test_a_measured_value_reaches_the_next_step.py` — `test_prose_naming_the_reference_form_stays_prose`,
+`test_a_dangling_numbered_reference_is_still_an_error`,
+`TestReferencesReachTheEffectPath::test_prose_about_the_syntax_reaches_the_tool`,
+`::test_a_substituted_context_is_fitted_not_refused`.
