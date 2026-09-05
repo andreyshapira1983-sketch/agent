@@ -19,15 +19,26 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from core.approval import AutoApprover
+from core.logger import TraceLogger
+from core.loop import AgentLoop, new_trace_id
+from core.models import PlanStep
 from core.placeholder_text import looks_like_unfilled_content
+from core.policy import PolicyGate
 from core.step_references import (
     UnresolvedStepReference,
     has_step_reference,
     referenced_steps,
     resolve_step_references,
 )
+from tests.conftest import FakeLLM, FakePlanner
+from tools.base import ToolRegistry
+from tools.file_read import FileReadTool
+from tools.file_write import FileWriteTool
 
 
 def test_a_whole_argument_keeps_the_measured_type():
@@ -85,3 +96,95 @@ def test_an_empty_output_is_still_a_measurement():
     resolved = resolve_step_references({"content": "{{step:0.output}}"}, {"0": ""})
 
     assert resolved["content"] == ""
+
+
+# ===========================================================
+# Транспорт внутри исполнителя шагов: обе ветки, не одна
+# ===========================================================
+
+
+class TestReferencesReachTheEffectPath:
+    """Замер 2026-09-05 (экзамен, ходы 12–13): два ремонта подряд записали в
+    дерево файл из 17 байт — буквальную строку `{{step:4.output}}`. Резолвер
+    существовал и работал, но вызывался только на ветке чтений; ветка, куда
+    попадает любой план с `file_write`, гнала шаги сырыми. Ровно те планы,
+    которым подстановка нужна, её не получали.
+    """
+
+    def _loop(self, workspace: Path) -> AgentLoop:
+        registry = ToolRegistry()
+        registry.register(FileReadTool(workspace_root=workspace))
+        registry.register(FileWriteTool(workspace_root=workspace))
+        return AgentLoop(
+            registry=registry,
+            policy=PolicyGate(registry),
+            llm=FakeLLM(responses=[]),
+            logger=TraceLogger(
+                trace_id=new_trace_id(), log_dir=workspace / "logs", verbose=False
+            ),
+            planner=FakePlanner(sources=[]),
+            approval_provider=AutoApprover(default="approve"),
+        )
+
+    @staticmethod
+    def _step(tool_name: str, arguments: dict, order: int) -> PlanStep:
+        return PlanStep(
+            plan_id="plan_x",
+            order=order,
+            action_spec={"type": "tool_call", "tool_name": tool_name, "arguments": arguments},
+            expected_outcome="whatever",
+        )
+
+    def test_what_was_read_is_what_gets_written(self, workspace: Path):
+        (workspace / "source.txt").write_text("измеренное содержимое", encoding="utf-8")
+        loop = self._loop(workspace)
+        steps = [
+            self._step("file_read", {"path": "source.txt"}, 1),
+            self._step("file_write", {"path": "copy.txt", "content": "{{step:1.output}}"}, 2),
+        ]
+
+        results = loop._execute_steps_parallel(steps)
+
+        assert all(outcome is not None for _, outcome, _ in results), results
+        assert (workspace / "copy.txt").read_text(encoding="utf-8") == "измеренное содержимое"
+
+    def test_a_step_without_a_source_is_not_executed(self, workspace: Path):
+        """Обещание докстринга: неразрешённая ссылка — шаг НЕ исполняется.
+
+        До 2026-09-05 шаг получал `status="failed"` и всё равно запускался с
+        буквальной строкой в аргументах — так плейсхолдер и попал на диск.
+        """
+        loop = self._loop(workspace)
+        steps = [
+            self._step("file_read", {"path": "source.txt"}, 1),
+            self._step("file_write", {"path": "copy.txt", "content": "{{step:9.output}}"}, 2),
+        ]
+
+        results = loop._execute_steps_parallel(steps)
+
+        step, outcome, trigger = results[1]
+        assert outcome is None
+        assert step.status == "failed"
+        assert trigger is not None and "{{step:9.output}}" in trigger.reason
+        assert trigger.code == "tool_error"
+        assert not (workspace / "copy.txt").exists(), "плейсхолдер не должен лечь на диск"
+
+    def test_the_read_only_path_keeps_the_same_promise(self, workspace: Path):
+        (workspace / "a.txt").write_text("a", encoding="utf-8")
+        loop = self._loop(workspace)
+        ran: list[str] = []
+
+        def record(step: PlanStep):
+            ran.append(step.action_spec["arguments"]["path"])
+            return step, {"tool": "file_read", "output": "a", "label": "x", "issues": []}, None
+
+        loop._run_step_parallel = record  # type: ignore[assignment]
+        steps = [
+            self._step("file_read", {"path": "a.txt"}, 1),
+            self._step("file_read", {"path": "{{step:9.output}}"}, 2),
+        ]
+
+        results = loop._execute_steps_parallel(steps)
+
+        assert ran == ["a.txt"], "шаг с неразрешённой ссылкой не должен был запускаться"
+        assert results[1][1] is None and results[1][2] is not None

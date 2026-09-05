@@ -162,26 +162,26 @@
   "_step_trigger_tls": {
    "kind": "scratch slot",
    "type": "threading.local",
-   "created_at": "core/loop_step_execution.py:50",
-   "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:142)",
+   "created_at": "core/loop_step_execution.py:49",
+   "transport": "module-level thread-local; read via getattr (core/loop_step_execution.py:141)",
    "note": "Every step failure travels through this carrier. It is invisible to the node/edge discovery rule and absent from the operator's map — found by reconciliation on 2026-08-07.",
    "writers": [
-    "core/loop_step_execution.py:198 (policy_blocked)",
-    "core/loop_step_execution.py:489 (policy_blocked)",
-    "core/loop_step_execution.py:512 (policy_blocked)",
-    "core/loop_step_execution.py:543 (code — variable)",
-    "core/loop_step_execution.py:578 (unknown)",
-    "core/loop_step_execution.py:589 (replan_code — variable)",
-    "core/loop_step_execution.py:623 (verify_failed)",
-    "core/loop_step_execution.py:655 (web_empty)",
-    "core/loop_step_execution.py:682 (timeout)",
-    "core/loop_step_execution.py:703 (injection_blocked)",
-    "core/loop_step_execution.py:901 (unknown)"
+    "core/loop_step_execution.py:197 (policy_blocked)",
+    "core/loop_step_execution.py:521 (policy_blocked)",
+    "core/loop_step_execution.py:544 (policy_blocked)",
+    "core/loop_step_execution.py:575 (code — variable)",
+    "core/loop_step_execution.py:610 (unknown)",
+    "core/loop_step_execution.py:621 (replan_code — variable)",
+    "core/loop_step_execution.py:655 (verify_failed)",
+    "core/loop_step_execution.py:687 (web_empty)",
+    "core/loop_step_execution.py:714 (timeout)",
+    "core/loop_step_execution.py:735 (injection_blocked)",
+    "core/loop_step_execution.py:933 (unknown)"
    ],
    "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:550, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.",
-   "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk. | shifted 2026-08-27: `core/repo_provenance` imported at the top (+1 to every site below it) and the blocked branch gained a provenance arm that downgrades a block on our OWN committed document to an annotation (+22 below that). Why, and the three rejected alternatives: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §6. | shifted again 2026-08-27: the injection exemption lost two of its three tools and the comment explaining why grew above these sites. | shifted 2026-09-05: the last-resort guard's success return moved into a try/else (TRY300 lint), :910 -> :901; other sites unchanged.",
+   "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk. | shifted 2026-08-27: `core/repo_provenance` imported at the top (+1 to every site below it) and the blocked branch gained a provenance arm that downgrades a block on our OWN committed document to an annotation (+22 below that). Why, and the three rejected alternatives: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §6. | shifted again 2026-08-27: the injection exemption lost two of its three tools and the comment explaining why grew above these sites. | shifted 2026-09-05: the last-resort guard's success return moved into a try/else (TRY300 lint), :910 -> :901; other sites unchanged. | shifted 2026-09-05 (second): step references are now resolved on the effect branch too and an unresolved reference stops the step instead of running it raw (_run_step_after_references, +33 to every site below core/loop_step_execution.py:361); the writer set itself is unchanged.",
    "readers": [
-    "core/loop_step_execution.py:142 (consume)"
+    "core/loop_step_execution.py:141 (consume)"
    ],
    "_readers_note": "One reader, verified against the same census: lines 108, 111 and 255 write None (the clear and the consume), and 110 is the only read. The bare-string anchor shape with a trailing '(consume)' is why tests/test_cns_model.py never checked any of these — its digit test fails on the suffix and the anchor is skipped in silence.",
    "lifetime": "per step, per worker thread; set to None on read",
@@ -553,7 +553,7 @@
   "step_failure_to_policy": {
    "value": "ReplanTrigger per failed step — code, step_id, tool_name, arguments, reason, attempt",
    "producer": "_execute_step, ELEVEN return-None exits, each writing _step_trigger_tls.step_trigger before returning. Verified by AST 2026-08-08, not by reading comments: every return-None path has a trigger assignment as a sibling statement in its OWN block (a looser 30-line window check was rejected as capable of false OKs)",
-   "carrier": "module-level threading.local — thread-local rather than instance state because steps run in parallel workers and one shared slot would race; cleared before the call and consumed immediately after (loop_step_execution.py:108-111)",
+   "carrier": "module-level threading.local — thread-local rather than instance state because steps run in parallel workers and one shared slot would race; cleared before the call and consumed immediately after (loop_step_execution.py:107-111)",
    "consumer_contract": "attempt_failures -> failure_history -> ReplanPolicy.decide: the codes drive the per-type budget and the global cap, and hence whether another attempt happens",
    "evidence": {
     "M47": "the consume site never reads the slot (trigger = None) -> 4 red, strongest being test_two_steps_one_attempt_two_distinct_failure_types: a real run with two failing steps must show BOTH codes in the journal's replan/replan_exhausted triggers",
@@ -584,7 +584,7 @@
   },
   "approval_verdict_stops_the_step": {
    "value": "the ApprovalProvider's verdict for an escalated action — approve / deny / abort / unavailable",
-   "producer": "_request_approval (core/loop_step_execution.py:434), reached only when PolicyGate returns escalate",
+   "producer": "_request_approval (core/loop_step_execution.py:466), reached only when PolicyGate returns escalate",
    "carrier": "the local verdict, mapped to a ReplanCode and written to the thread-local trigger slot",
    "consumer_contract": "anything but approve stops the step and sends a typed trigger into the replan machinery, so the planner can pick a safer alternative",
    "evidence": {
@@ -604,7 +604,7 @@
   },
   "gateway_refusal_stops_the_effect": {
    "value": "GatewayDecision.outcome for an effectful action — specifically the two refusals, deny (the gateway's policy consult said no) and block (a hard stop: engaged kill switch, budget, readiness blockers)",
-   "producer": "ActuationGateway.evaluate (core/actuation_gateway.py), consulted at core/loop_step_execution.py:322 only when is_effectful_tool says the action can change the world",
+   "producer": "ActuationGateway.evaluate (core/actuation_gateway.py), consulted at core/loop_step_execution.py:327 only when is_effectful_tool says the action can change the world",
    "carrier": "the GatewayDecision object, consumed in the same block",
    "consumer_contract": "the step does NOT execute; an ErrorObject is journaled under its own code (policy_blocked for deny, gateway_blocked for block); a policy_blocked ReplanTrigger goes into the thread-local carrier so the failure reaches the replan machinery through step_failure_to_policy",
    "why_this_branch_is_load_bearing": "the SHARED deny handler at :402 lives inside the NON-effectful else-branch. On the effectful path these two branches are the only thing between a refusal and the disk — read from the code structure, then confirmed by mutation",
@@ -628,7 +628,7 @@
   },
   "policy_deny_stops_the_step": {
    "value": "PolicyGate decision (allow/deny + reasons) per non-effectful action",
-   "producer": "core/policy.py via self.policy.check(action) at core/loop_step_execution.py:403",
+   "producer": "core/policy.py via self.policy.check(action) at core/loop_step_execution.py:435",
    "carrier": "the decision object, consumed in the same block",
    "consumer_contract": "deny -> the step does NOT execute, a policy_blocked ReplanTrigger is written to the thread-local carrier, and the failure reaches the replan policy through step_failure_to_policy",
    "evidence": {
@@ -653,7 +653,7 @@
   },
   "_c08_observational_sensors": {
    "kind": "SENSORS, not arcs with control effect — recorded so they are not mistaken for wiring",
-   "StepRepetitionTracker": "observe() at loop_step_execution.py:265 logs step_repetition_detected and nothing else — no consumer decision reads it (MAST FM-1.3 counted, never acted on)",
+   "StepRepetitionTracker": "observe() at loop_step_execution.py:264 logs step_repetition_detected and nothing else — no consumer decision reads it (MAST FM-1.3 counted, never acted on)",
    "TerminationGuard": "observe_attempt() at loop_attempt.py:477 sets _stagnation_shadow and logs; the code says in words 'Nothing is stopped', and the shadow is read at the end of the run only to report what stopping WOULD have cost",
    "why_recorded": "both are producers whose only consumer is the journal. Under the model's existing vocabulary that is the dead_end role — naming them here prevents a later walk from certifying an 'arc' whose consequence is a log line."
   },
@@ -994,10 +994,10 @@
    "classification_note": "Lives here rather than among signal_flows because producer and consumer are both inside _retrieve_turn_context — nothing crosses a boundary, so it is not an arc under _arc_rule. Moved here on the operator's challenge 2026-08-08; the bite is unchanged, only the category is honest."
   },
   "post_tool_trust_boundary": {
-   "site": "core/loop_step_execution.py:656",
+   "site": "core/loop_step_execution.py:688",
    "reads": "InjectionGuard verdict is_blocked",
    "consequence_class": "WORLD",
-   "hole": "core/loop_step_execution.py:48 — five tools (file_read, list_dir, diff_file, run_tests, read_logs) bypass scanning by design; the operator's map draws this boundary solid",
+   "hole": "core/loop_step_execution.py:47 — five tools (file_read, list_dir, diff_file, run_tests, read_logs) bypass scanning by design; the operator's map draws this boundary solid",
    "protection": "PROVEN (08c29cf)"
   }
  },
@@ -1526,7 +1526,7 @@
      "external": "none"
     },
     "premise_proven_before_the_mutation": "Three poles measured on the real code. Readiness blocker plus check_readiness=True: gateway returns `block` with reason 'readiness_blocker: 2 approval item(s) pending', the file is NOT written, and gateway_blocked plus replan_exhausted are journalled. Same blockers with check_readiness=False: `allow`, file written. Nothing engaged: `allow`, file written. So the behaviour is CORRECT and the gate is check_readiness, not the tuple.",
-    "mutation": "ONE relation at the wiring, core/loop_step_execution.py:320: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
+    "mutation": "ONE relation at the wiring, core/loop_step_execution.py:325: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
     "observed_consequence": "The mutation is live: the subject probe's gateway returned `allow`, the file reached the disk. FULL SUITE GREEN — 7313 passed, 5 xfailed, exit 0. A readiness blocker stopped being able to stop an effectful write and nothing in the suite noticed. Restore byte-identical (4eaa5500), subject INTACT.",
     "the_certifying_test_stayed_green_and_that_is_the_point": "Under the same mutation, tests/test_gateway_refusals_stop_the_effect_c08.py passed both its cases, because M53 drives `block` through a latched kill switch. A certification of an OUTCOME is not a certification of its PRODUCERS — measured here, not argued.",
     "verdict": {
@@ -1689,7 +1689,7 @@
     "no_code_change": "None. The code was already right and already guarded."
    },
    "last_two_producer_sites": {
-    "named_state_space": "The two producers whose code is not a literal: the failure CLASSIFIER at core/loop_step_execution.py:488-486, and the last-resort postprocessing guard at :790.",
+    "named_state_space": "The two producers whose code is not a literal: the failure CLASSIFIER at core/loop_step_execution.py:520-486, and the last-resort postprocessing guard at :790.",
     "the_classifier": "raw_error.startswith(('FileNotFoundError:', 'IsADirectoryError:')) -> file_not_found, else tool_error. A TEXTUAL discrimination on an error string whose two outcomes carry different budgets (1 versus 2) and different requires_different_action flags, so a misclassification changes control: a missing file would be retried where the code's own comment says it must not be.",
     "classifier_result": "PROTECTED, as predicted. Replacing the prefix tuple with one that never matches reddens three tests in TestFileNotFoundReplan — the error code, the absence of tool_error, and the single planner call.",
     "the_last_resort_guard": "Wraps the whole postprocessing stretch (classify, injection scan, redact, cache store) at :780. It behaves WELL, unlike the two silent handlers in the attempt loop: it logs the error, invents no artifact, and writes a trigger. Its code is `unknown`, whose max_occurrences=1 is what turns 'postprocessing is broken' into 'stop' rather than 'try the same broken pipeline again'.",
@@ -1740,7 +1740,7 @@
     "no_code_change": "None. Every producer was correct; three of the four observers existed and one did not."
    },
    "verify_failed_producer_is_already_watched": {
-    "named_state_space": "The same one as failure_trigger_code — ReplanTrigger.code — measured at a DIFFERENT producer: core/loop_step_execution.py:533, the tool-result-validation path.",
+    "named_state_space": "The same one as failure_trigger_code — ReplanTrigger.code — measured at a DIFFERENT producer: core/loop_step_execution.py:565, the tool-result-validation path.",
     "why_it_was_opened": "It was the first of the four live unwalked producers left by the C08-U6 census. The expectation, formed from injection_blocked, was another unobserved delivery.",
     "prediction": "GREEN, stated before the run.",
     "evaluation_domain": {
@@ -1757,7 +1757,7 @@
      "durable_state": "temporary workspace",
      "external": "none"
     },
-    "mutation": "ONE literal at core/loop_step_execution.py:533, code=\"verify_failed\" -> \"web_empty\". Both carry budget 2 and requires_different_action=False, so the control flow is identical — two tool invocations either way — and only the advice text and the stop reason move. The ErrorObject at :521 was deliberately left alone so the journal still says verify_failed and the trigger alone is isolated.",
+    "mutation": "ONE literal at core/loop_step_execution.py:565, code=\"verify_failed\" -> \"web_empty\". Both carry budget 2 and requires_different_action=False, so the control flow is identical — two tool invocations either way — and only the advice text and the stop reason move. The ErrorObject at :521 was deliberately left alone so the journal still says verify_failed and the trigger alone is isolated.",
     "observed_consequence": "RED. Three pre-existing tests caught it: test_replan.py::TestReplanAfterVerifyFailed::test_verify_failed_triggers_replan, test_replan.py::TestPlannerSeesFailureHistory::test_failure_context_contains_code_tool_reason, and test_replan_policy_integration.py::TestAcceptanceVerifyFailed::test_verify_failed_replans_with_new_plan. 3 failed, 7294 passed. Restore byte-identical (4eaa5500).",
     "the_prediction_was_wrong_and_that_is_the_finding": "An unwalked producer is not an unprotected one. More usefully, the middle test asserts `code=verify_failed` INSIDE the planner's failure_context — precisely the assertion shape that injection_blocked lacked, in a file written in the MVP-8 era. The pattern existed in this repository and was not carried to the newer security path, whose own test asserted the consequence deliberately and stopped there. Coverage copied from the neighbour, with the same detail missing in the copy.",
     "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys — planner call 1 carries 436 characters of failure_context containing both the code and the advice text, while call 0 carries none. This is the consumer C08-U2 could not exercise, because a budget-1 code never retries.",
@@ -1924,7 +1924,7 @@
      "core/loop_run_tail.py:301 — only the policy_blocked code is singled out, for denied_tools."
     ],
     "preconditions_proven": "The write site fires and the value is delivered: a contaminated tool output produced tool.calls=1, `<failure_context>` present, and `code=injection_blocked` present in the synthesizer prompt before any mutation.",
-    "mutation": "ONE literal at core/loop_step_execution.py:658 — code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort and replan_exhausted are unchanged and only the code text moves.",
+    "mutation": "ONE literal at core/loop_step_execution.py:690 — code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort and replan_exhausted are unchanged and only the code text moves.",
     "observed_consequence": "The mutation is behaviourally live — the prompt changed from `code=injection_blocked` to `code=unknown` and the journal's triggers list from ['injection_blocked'] to ['unknown'] — and the FULL SUITE stayed green: 7285 passed, 1 xfail, pytest exit 0. Byte-identical restore (4eaa5500) verified before and after.",
     "green_mutation_diagnosis": "NOT unreachable (the site fired), NOT vacuous (the delivered value changed), NOT equivalent (each code carries its own budget, advice and prompt text), NOT journal-only (it reaches the synthesis prompt). Partial redundancy exists for the OPERATOR observer only: the `injection_blocked` journal EVENT is written from the scan itself and stayed in the log unchanged throughout the mutation, so a human reading the journal still saw the injection. The synthesizer did not. Classification: a real unprotected distinction at DELIVERY to a live-model consumer.",
     "verdict": {
