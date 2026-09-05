@@ -434,3 +434,48 @@ the budget: the guard flags his own doctrine as adversarial on the word
 «override», and the cheap synthesizer obeys the flag as a blindfold. Nothing
 repaired; the probe script is kept beside the transcripts so the measurement
 can be repeated.
+
+## Turns 19–20 (12:29–12:34): «почему твой сторож считает твою доктрину враждебной?»
+
+Ground truth first (`core/injection_guard.py`, `_PATTERNS`): the
+«suspicious» rule of category `override` is
+`(?:new\s+)?(?:system\s+)?(?:instructions?|prompt|directive|rule|command|task)[:\s]+`
+— any of the words *instruction, prompt, directive, rule, command, task*
+followed by a space or a colon. `COMMANDS_MAP.md` says «command » 26 times;
+`CENTRAL_AGENT_GOVERNANCE.md` is caught on «REPL command is», «prompt in the
+REPL», «rule:documents_only». A document about an agent with commands and
+rules is suspicious by construction.
+
+**Turn 19 (withheld).** He searched `findstr /S /I override *.py`, got the
+hits (including `core/injection_guard.py:25/43/58/66`), spawned an
+InjectionGuardAnalyst subagent — which died on entry: «'context' exceeds
+2000 characters» (the resolved search output was too long for the tool; note
+that in this effect-free plan the `{{step:N.output}}` reference DID resolve,
+as the code reads). He cited `core/injection_guard.py` and `core/dlp.py`
+without opening them; the citation judge withheld the whole report
+(`fabricated_citations=1`).
+
+**Turn 20 (answered, same words).** Same search, and this time the guard
+**blocked his search output** (`injection_blocked shell_exec:findstr`, 14
+findings): the hits quote the guard's own examples — «ignore previous
+instructions», «Override prior rules» — so the guard's source, and any search
+that touches it, is unreadable to him through `shell_exec`. He spawned a
+CodeForensics subagent to read the implementation; its `context` carried the
+`tools/` directory listing under the heading «Кандидаты из поиска /M» — the
+resolved reference pointed at the `list_dir tools` step, not the `findstr /M`
+step (whose index was wrong, the planner's or the executor's, is not
+established here); the subagent searched `tools/` and found nothing. His
+answer: the guard matches lexical markers without context; «наиболее
+вероятное место — `core/injection_guard.py`, который я не смог прочитать,
+потому что вывод поиска был заблокирован защитой от инъекций»; exact rule
+and words: «не подтверждено». He guessed the trigger is the word «override»
+itself — wrong; the trigger is *command / rule / prompt / task /
+instruction*.
+
+**Verdict.** Right file, right shape of the cause, honest about the rest.
+The organ that flags his doctrine also blinds him to its own source: he
+cannot read `core/injection_guard.py` through search because the search
+output contains the guard's examples, and he did not try `file_read` on the
+path he had already named. Two more wiring facts on the pile: the
+`spawn_subagent` context cap (2 000 chars) versus resolved step outputs, and a
+step reference that resolved to a neighbouring step. Nothing repaired.
