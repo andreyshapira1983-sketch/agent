@@ -444,10 +444,10 @@ _ENUM_EXCLUDED_RE = re.compile(
 #: кладь)…» дал count_mismatch expected=25 actual=3 — верный вывод «источники
 #: заблокированы» был опровергнут датой вылета.
 _DATE_LIKE_NUMBER_RE = re.compile(
-    r"(?:[–—-]\s*)?(\d{1,2})\s+(?:"
+    r"(?:[–—-]\s*)?\b(\d{1,2})\s+(?:"
     r"январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|"
     r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|"
-    r"\d{1,2}\s+\d{4}|\d{1,2}[.:]\d{2}",
+    r"\b\d{1,2}\s+\d{4}\b|\b\d{1,2}[.:]\d{2}\b",
     re.IGNORECASE,
 )
 
