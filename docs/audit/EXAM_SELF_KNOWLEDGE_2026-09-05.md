@@ -100,3 +100,49 @@ in his registry as his cargo, if he — or the operator — decides so. The exam
 itself is now in his episodic memory (five episodes, `outcome=success`,
 `answer_quality_score` 0.77–0.88): whether he ever reads it back is the next
 question.
+
+## Turn 6, new session (10:55–10:57): «что ты сам будешь с этим делать?»
+
+The operator's follow-up, asked in a fresh session so that only his durable
+memory could carry the exam: «Сегодня утром был экзамен из пяти вопросов… Он
+записан в твоей эпизодической памяти. Что ты сам будешь делать с тем, что он
+показал? … назови шаги, которые сделаешь сам, своими инструментами, и первый
+шаг сделай.» Raw: `exam_self_knowledge_2026-09-05/turn_6_what_will_you_do_new_session.md`,
+trace `trace_c706ecda43404dd27911ab24c98198dc`.
+
+**What he did:** eleven reads — seven doctrine/map files, `core/smart_memory.py`,
+`core/loop.py`, `docs/audit/MASTER_ISSUE_REGISTRY.md`, and `read_logs 500` of
+the exam trace. No `memory_recall`, no `memory_bank`, no `journal_append`, no
+registry entry; persistent records 838 → 838. Nothing durable came out of it.
+
+**What he said he will do:** (1) reconcile code with the binding documents;
+(2) check every claimed capability is reachable from the CLI/loop, not only
+from unit tests; (3) remove silent `except Exception` and duplicated logic,
+each fix with a regression test red on the old code; (4) not treat
+CORPORATE_MODEL as implemented; (5) first step — read the exam journal from
+episodic memory and compare it with the code. Items 1–3 are the audit
+procedure of `knowledge/doctrine/self-audit-lessons.md` (2026-07-17), recited;
+the verifier refuted his «13 problems, all fixed» as absent from evidence. Not
+one step names what the exam showed: the evidence budget, the missing search
+organ, `docs/` never opened, the false «I did it».
+
+**Why he could not:** measured in the trace —
+- his own exam episodes were **not offered to him**: `experience_memory_inject
+  episodes_selected=0` (rejected: no_overlap 130, over_limit 64); he did not
+  ask for them either (`memory_recall` unused);
+- his substitute, `read_logs 500` on the exam trace: 3 508 475 chars →
+  **1 454 kept**. He read the exam as 1 454 characters and said so: «полный
+  текст 394 событий не прочитан»;
+- `docs/audit/MASTER_ISSUE_REGISTRY.md` — his own issue register — was
+  **blocked by the injection guard** (263 findings). He cannot read the
+  document that lists his known defects; every other doctrine file was marked
+  «suspicious» (2–26 findings each) and passed;
+- the eight files he opened were cut to 1 454 chars each again; long-term
+  memory to 366 chars, 0 records.
+
+**Verdict.** Asked what he will do, he answered with a procedure from an old
+document and read 0.04 % of the exam. The intention to act is there (step 5 is
+right); the organs to know what happened are not: memory retrieval did not
+surface the episodes, the log reader cannot carry a session, the registry is
+sealed from him by his own guard. He wrote nothing down, so the next session
+starts from the same zero. Nothing repaired; this section is the evidence.
