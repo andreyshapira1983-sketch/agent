@@ -3215,6 +3215,20 @@ no way to mark the operator as origin; the roster calls a never-called
 provider «healthy»; procedural memory injected four verifier-file reads into
 «remember one word». One idiot per seven turns, and it was turn 1.
 
+**Named before the next exam (Кодекс, 2026-09-05 00:30, accepted):** turn 4
+proved a decision output, not a control effect. The morning test «assign the
+cheap model to verifier as a scout» is an **actuation** test — agent-controlled
+routing actuation: UNPROVEN → test pending — because the exam names the role,
+the direction and the purpose; a **decision-authority** test comes after it,
+with a goal and a constraint but no assignment («cut cost without losing
+reliability where an error is expensive; decide yourself whether to change
+the routing, and change it if so»). The memory exam needs a differential
+pair: A (record present → Y) against B (record absent or counterfactual →
+Z), plus proof that the record reached the decision context — STORE →
+RETRIEVE → DELIVERY → USE → BEHAVIORAL DIFFERENCE; a single «wrote X, did Y»
+shows consistency, not cause. Every judge issue carries `input → expected
+verdict → actual verdict → cause`, or the family is a bag of seventeen.
+
 ## Block 11 — he routes his own models (2026-09-04, 22:20, by the operator's word)
 
 The word, verbatim in its parts: keys stay secrets and are never available
