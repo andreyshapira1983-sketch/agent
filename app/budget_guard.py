@@ -83,7 +83,6 @@ def _run_agent_with_budget_guard(
     try:
         answer = agent.run(user_question=user_question, file_hint=file_hint, deep_escalation=deep_escalation)
         _retire_resumed_pause(agent, workspace=workspace, resumed_from=resumed_from)
-        return answer
     except ModelBudgetExceeded as exc:
         message = f"Model budget exceeded: {exc}"
         agent.log.log("model_budget_blocked", {"error": str(exc)})
@@ -95,6 +94,8 @@ def _run_agent_with_budget_guard(
             blocked=exc,
         )
         return message
+    else:
+        return answer
 
 
 def _retire_resumed_pause(

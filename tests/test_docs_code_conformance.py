@@ -356,6 +356,13 @@ def test_the_historical_declarations_name_only_documents_that_exist():
     """
     mod = _load_guard()
     docs = REPO_ROOT / "docs"
-    for declaration in (mod._HISTORICAL_ANCHOR_DOCS, mod._HISTORICAL_RENAME_DOCS):
+    for declaration in (mod._HISTORICAL_ANCHOR_DOCS, mod._HISTORICAL_RENAME_DOCS,
+                        mod._VERBATIM_TRANSCRIPT_DIRS):
         missing = [name for name in declaration if not (docs / name).resolve().exists()]
         assert missing == [], missing
+
+
+def test_a_regex_group_quoted_in_prose_is_not_a_command(guard):
+    """`(?:new\\s+)?` is regex syntax, not the `:new` command — pinned 2026-09-05."""
+    quoted = r"`(?:new\s+)?(?:system\s+)?(?:instructions?|prompt)[:\s]+` and :help"
+    assert [m.group(1) for m in guard._COMMAND_RE.finditer(quoted)] == [":help"]

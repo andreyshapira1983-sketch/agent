@@ -121,12 +121,14 @@ def _uses_forbidden_scope(node: ast.AST) -> bool:
     for sub in ast.walk(node):
         if isinstance(sub, (ast.Global, ast.Nonlocal)):
             return True
-        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
-            if sub.func.id == "super":
-                return True
-        if isinstance(sub, ast.Attribute):
-            if sub.attr.startswith("__") and not sub.attr.endswith("__"):
-                return True  # name mangling is bound to the defining class
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == "super":
+            return True
+        if (
+            isinstance(sub, ast.Attribute)
+            and sub.attr.startswith("__")
+            and not sub.attr.endswith("__")
+        ):
+            return True  # name mangling is bound to the defining class
     return False
 
 
@@ -328,9 +330,12 @@ def _last_import_end(tree: ast.Module) -> int:
             last = max(last, node.end_lineno or node.lineno)
     if last == 0 and tree.body:
         first = tree.body[0]
-        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
-            if isinstance(first.value.value, str):  # module docstring
-                last = first.end_lineno or first.lineno
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)  # module docstring
+        ):
+            last = first.end_lineno or first.lineno
     return last
 
 

@@ -41,9 +41,10 @@ def _parse_iso(iso: str) -> datetime | None:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt
     except (TypeError, ValueError):
         return None
+    else:
+        return dt
 
 
 def score_staleness(ep: EpisodeRecord, now: datetime | None = None) -> float:

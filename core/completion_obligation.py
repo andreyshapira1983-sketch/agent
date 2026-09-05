@@ -205,7 +205,7 @@ def evaluate_completion_obligations(
     from core.completion_contract import demanding_text
     named = paths_mentioned(demanding_text(question))
     if file_hint and str(file_hint).strip():
-        named = tuple(dict.fromkeys(named + (str(file_hint).strip(),)))
+        named = tuple(dict.fromkeys((*named, str(file_hint).strip())))
     for path in named:
         base = path.replace("\\", "/").rsplit("/", 1)[-1]
         seen = base.casefold() in artifact_blob.casefold()

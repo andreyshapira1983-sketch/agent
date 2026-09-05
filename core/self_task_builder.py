@@ -273,7 +273,7 @@ def build_coding_task(
             return ProducerReport(
                 status="budget_wait",
                 reason="; ".join(reasons) or "budget near exhaustion",
-                checked_gates=gates + ["budget"],
+                checked_gates=[*gates, "budget"],
                 next_human_action="Wait for the budget window to refill.",
             )
     gates.append("budget")
@@ -283,7 +283,7 @@ def build_coding_task(
         return ProducerReport(
             status="dirty_tree_wait",
             reason="git working tree is not clean",
-            checked_gates=gates + ["dirty_tree"],
+            checked_gates=[*gates, "dirty_tree"],
             next_human_action="Commit or stash local changes, then retry.",
         )
     gates.append("dirty_tree")

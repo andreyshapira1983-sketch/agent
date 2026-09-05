@@ -665,9 +665,9 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
             vcs.clean_untracked()
             vcs.checkout(original_branch)
             vcs.delete_branch(branch)
-            return "restored"
         except VcsError:
             return "failed"
+        return "restored"
 
     # 6. create temp branch + apply ------------------------------------------
     try:

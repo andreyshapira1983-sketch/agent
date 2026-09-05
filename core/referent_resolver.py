@@ -543,7 +543,7 @@ class ReferentResolver:
                 primary=top,
                 analysis_target_excerpt=top.excerpt,
                 directive_excerpt=directive,
-                notes=tuple(notes) + ("read_required",),
+                notes=(*tuple(notes), "read_required"),
             )
 
         return ReferentDecision(

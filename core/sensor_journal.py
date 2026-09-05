@@ -26,6 +26,7 @@ def journal_sensor_failure(log: Any, sensor: str, exc: BaseException) -> bool:
     """Записать сбой сенсора. Возвращает, удалось ли записать."""
     try:
         log.log(SENSOR_FAILED_EVENT, sensor_failure_payload(sensor, exc))
-        return True
     except Exception:  # noqa: BLE001 — последний рубеж вокруг самого журналирования
         return False
+    else:
+        return True

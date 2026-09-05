@@ -1080,7 +1080,9 @@ class TestLoopSuspected:
         ]
 
         class _SeqExecute:
-            def __init__(self, seq): self.seq = seq; self.calls = 0
+            def __init__(self, seq):
+                self.seq = seq
+                self.calls = 0
             def __call__(self, **_kw):
                 o = self.seq[min(self.calls, len(self.seq) - 1)]
                 self.calls += 1
@@ -1111,7 +1113,9 @@ class TestLoopSuspected:
         ]
 
         class _SeqExecute:
-            def __init__(self, seq): self.seq = seq; self.calls = 0
+            def __init__(self, seq):
+                self.seq = seq
+                self.calls = 0
             def __call__(self, **_kw):
                 o = self.seq[min(self.calls, len(self.seq) - 1)]
                 self.calls += 1

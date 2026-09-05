@@ -66,7 +66,7 @@ def _variants(phrase: str) -> list[str]:
     out = []
     for position in sorted({1, len(words) - 1}):
         for filler in FILLERS:
-            out.append(" ".join(words[:position] + [filler] + words[position:]))
+            out.append(" ".join([*words[:position], filler, *words[position:]]))
     return out
 
 

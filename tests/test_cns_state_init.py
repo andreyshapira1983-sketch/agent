@@ -46,9 +46,13 @@ def _fields() -> set[str]:
                 if (isinstance(tgt, ast.Attribute) and isinstance(tgt.value, ast.Name)
                         and tgt.value.id == "self"):
                     found.add(tgt.attr)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Attribute):
-            if isinstance(node.target.value, ast.Name) and node.target.value.id == "self":
-                found.add(node.target.attr)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Attribute)
+            and isinstance(node.target.value, ast.Name)
+            and node.target.value.id == "self"
+        ):
+            found.add(node.target.attr)
     return found
 
 

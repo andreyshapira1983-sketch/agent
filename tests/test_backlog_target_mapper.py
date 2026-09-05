@@ -40,29 +40,12 @@ def _write_model_discovery_evidence(workspace: Path, *, title: str = _TITLE) -> 
     )
     (workspace / "core").mkdir()
     (workspace / "core" / "model_discovery.py").write_text(
-        "\n".join(
-            [
-                '"""Live Model Discovery + Provider Catalog diff -- read-only / dry-run (TD-011/012).',
-                "It exposes build_discovery_audit and build_discovery_report.",
-                "It NEVER writes the catalog.",
-                '"""',
-                "VALUE = 1",
-                "",
-            ]
-        ),
+        '"""Live Model Discovery + Provider Catalog diff -- read-only / dry-run (TD-011/012).\nIt exposes build_discovery_audit and build_discovery_report.\nIt NEVER writes the catalog.\n"""\nVALUE = 1\n',
         encoding="utf-8",
     )
     (workspace / "tests").mkdir()
     (workspace / "tests" / "test_model_discovery.py").write_text(
-        "\n".join(
-            [
-                '"""Tests for TD-011/012 read-only Live Model Discovery + catalog diff.',
-                "The discovery never writes files and has no secret leakage.",
-                '"""',
-                "from core.model_discovery import build_discovery_audit, build_discovery_report",
-                "",
-            ]
-        ),
+        '"""Tests for TD-011/012 read-only Live Model Discovery + catalog diff.\nThe discovery never writes files and has no secret leakage.\n"""\nfrom core.model_discovery import build_discovery_audit, build_discovery_report\n',
         encoding="utf-8",
     )
 

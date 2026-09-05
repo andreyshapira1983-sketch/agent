@@ -274,7 +274,7 @@ def _prolog_declares_a_dtd(text: str) -> bool:
             i = end + 3
             continue
         head = text[i : i + 9].upper()
-        return head.startswith("<!DOCTYPE") or head.startswith("<!ENTITY")
+        return head.startswith(("<!DOCTYPE", "<!ENTITY"))
     return False
 
 

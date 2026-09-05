@@ -40,7 +40,7 @@ class TestRun:
         assert result["unix"] == int(fixed.timestamp())
 
     def test_naive_datetime_treated_as_utc(self):
-        naive = datetime(2026, 1, 1, 0, 0, 0)  # no tzinfo
+        naive = datetime(2026, 1, 1, 0, 0, 0)  # noqa: DTZ001 - naive input is the subject
         tool = CurrentTimeTool(clock=lambda: naive)
         result = tool.run()
         assert result["iso_utc"].startswith("2026-01-01T00:00:00")

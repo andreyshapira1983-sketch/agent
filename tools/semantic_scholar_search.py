@@ -179,7 +179,7 @@ class SemanticScholarSearchTool(Tool):
                 continue
             well_formed += 1
         if well_formed == 0:
-            return False, issues + ["no well-formed results"]
+            return False, [*issues, "no well-formed results"]
         return True, issues
 
     def compensation_plan(self, arguments: dict[str, Any], output: Any) -> dict:

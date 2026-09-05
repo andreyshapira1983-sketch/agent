@@ -391,11 +391,10 @@ def derive_completion_contract(
         )
         named = []
     hint = (file_hint or "").strip()
-    if hint and not declared_change_set and hint not in named:
-        # A --file hint is an explicit pointer, not a request to change it.
-        # It only carries a deliverable when the request itself asks for one.
-        if action in {"create", "modify"}:
-            named.append(hint)
+    # A --file hint is an explicit pointer, not a request to change it.
+    # It only carries a deliverable when the request itself asks for one.
+    if hint and not declared_change_set and hint not in named and action in {"create", "modify"}:
+        named.append(hint)
 
     for path in named:
         if action == "create":

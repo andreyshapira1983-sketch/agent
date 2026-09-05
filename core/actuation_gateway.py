@@ -151,7 +151,7 @@ class ActuationGateway:
                 tool_name=tool_name,
                 path=self.path,
                 policy=decision,
-                reasons=reasons + ("gateway dry_run: effect not executed",),
+                reasons=(*reasons, "gateway dry_run: effect not executed"),
             )
         return GatewayDecision(
             outcome="allow",
