@@ -65,11 +65,14 @@ class ReadLogsTool(Tool):
         "Read the agent's own JSONL audit log to diagnose errors. "
         "Returns the last N events (default 50, max 500), optionally "
         "filtered by event name (e.g. ['error','replan']). If trace_id "
-        "is omitted, reads the most recent PAST session log — and when an "
-        "event_filter is given, the most recent past log that CONTAINS such "
-        "events. events_returned=0 with traces_searched>1 means no such "
-        "events exist in recent history at all, not just in one file. Use "
-        "this as the agent's primary self-diagnostic surface. Risk: read_only."
+        "is omitted, reads the most recent PAST session log — never the one "
+        "this session is writing — and when an event_filter is given, the "
+        "most recent past log that CONTAINS such events. Every result names "
+        "the current session's log in `live_trace_id`; pass it as trace_id "
+        "to read this session's earlier turns. events_returned=0 with "
+        "traces_searched>1 means no such events exist in recent history at "
+        "all, not just in one file. Use this as the agent's primary "
+        "self-diagnostic surface. Risk: read_only."
     )
     risk: Risk = "read_only"
 
@@ -147,6 +150,7 @@ class ReadLogsTool(Tool):
                 "is_live_session": False,
                 "skipped_live": False,
                 "traces_searched": traces_searched,
+                "live_trace_id": self.live_trace_id or "",
                 "compensation_plan": _NOOP_PLAN,
             }
         total = len(events_all)
@@ -167,7 +171,8 @@ class ReadLogsTool(Tool):
             rel_log = str(target_path)
 
         is_live = bool(self.live_trace_id) and target_path.stem == self.live_trace_id
-        return {
+        skipped_live = bool(self.live_trace_id) and trace_id is None and not is_live
+        result: dict[str, Any] = {
             "trace_id": target_path.stem,
             "log_file": rel_log,
             "events_returned": len(events_safe),
@@ -177,12 +182,25 @@ class ReadLogsTool(Tool):
             # Which run this diagnosis is about. Reading the caller's own
             # unfinished trace answers a different question than it looks like.
             "is_live_session": is_live,
-            "skipped_live": bool(self.live_trace_id) and trace_id is None and not is_live,
+            "skipped_live": skipped_live,
             # >1 при пустых events означает: запрошенных событий нет во всей
             # просмотренной истории, а не только в возвращённой трассе.
             "traces_searched": traces_searched,
+            # The one id the caller cannot look up anywhere else. Measured
+            # 2026-09-05: asked for "the command you ran last turn", the
+            # agent read the newest OTHER file — its own subagent's trace —
+            # and reported it as its session. A default that hides the live
+            # log must at least say which log it hid.
+            "live_trace_id": self.live_trace_id or "",
             "compensation_plan": _NOOP_PLAN,
         }
+        if skipped_live:
+            result["hint"] = (
+                f"This is a PAST session's log. The current session writes "
+                f"{self.live_trace_id}; pass trace_id={self.live_trace_id!r} "
+                "to read this session's earlier turns."
+            )
+        return result
 
     # ------------------------------------------------------------------
     # validate_output
