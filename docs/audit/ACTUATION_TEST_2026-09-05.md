@@ -131,3 +131,20 @@ The pre-registered run stays 4/5; criterion 3 FAIL is not rewritten. This sectio
 Two wording corrections accepted (operator, 09:30): (1) «the same inputs before and after» → «the same scenario and an equivalent state except the regenerated policy id»; (2) criterion 5 = PASS for the observed normalized internal metric `cost_units / 1k tokens` under the router's own tariff derivation (medium 3 / low 1 per 1k); it says nothing about the providers' dollars until `cost_units` is verified against invoices.
 
 Status: agent tool actuation — observed live; policy write — observed live; downstream model switch to DeepSeek — observed live; original provenance criterion — FAIL, forever 4/5; cause — reproduced offline and localized (model_router.py:1455 rebuilt the route's reason); repair — targeted tests + differential replay PASS; post-repair live provenance — pending.
+
+## Raw timeline of the cut live turn (2026-09-05, local = UTC+3) — the driver as cause, proven, not assumed
+
+| local | UTC | source | event |
+|---|---|---|---|
+| 09:21:05 | 06:21:05 | exam_a/.marker_live1 mtime | question written to exam_q/next.txt |
+| 09:21:06–08 | 06:21:06–08 | trace run_identity … model_call_start planner | the driver saw output (turn «produced»), then the planner call went silent |
+| 09:21:08 → 09:21:52 | 06:21:08.030 → 06:21:52.022 | ledger planner row, duration_ms=43977 | planner call, 44 s, no output during it |
+| 09:21:48 | 06:21:48 | exam_a/turn_1.md mtime; its journals line «seconds: 42, calls: 0» | **driver ended the turn after 40 s of silence** (QUIET_SECONDS=40), 4 s BEFORE the planner returned; usage snapshot empty because no row existed yet |
+| 09:21:52.7 | 06:21:52.749 | trace planner / plan / act | the real turn continued: plan with one tool step |
+| 09:21:57.9 | 06:21:57.903 | trace tool_result | tool step finished |
+| 09:21:58.3 | 06:21:58.285 | trace model_call_start planner (second call, replan) — LAST EVENT of the trace | |
+| ~09:21:59 | | my wait loop fired on turn_1.md, my next command wrote exam_q/stop | |
+| 09:22:03 | 06:22:03 | exam_a/driver.log mtime («stopped») | driver wrote `:quit`, slept 3 s, `proc.terminate()` — process killed during the second planner call |
+| — | — | trace: no `model_call_start role=synthesizer`, ledger: no synthesizer row for run_a6e403ec | **synthesis never happened** |
+
+Sequence proven: 40 s silence → driver declared end of turn (09:21:48, before the planner's 09:21:52 return) → my stop → `:quit` + terminate (09:22:03) → process exit during the second planner call → no synthesizer call, no ledger row. Cause: the exam driver's end-of-turn rule (silence), mine. Repair follows: end of turn by the turn's own closing marker, never by silence alone.
