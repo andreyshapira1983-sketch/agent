@@ -3229,6 +3229,24 @@ RETRIEVE → DELIVERY → USE → BEHAVIORAL DIFFERENCE; a single «wrote X, did
 shows consistency, not cause. Every judge issue carries `input → expected
 verdict → actual verdict → cause`, or the family is a bag of seventeen.
 
+**Actuation test, run (2026-09-05 09:10, pre-registered in
+docs/audit/ACTUATION_TEST_2026-09-05.md):** baseline first — the verifier
+role has never been called (0 of 3356 ledger rows, no call site), so the
+operator moved the test to the live role synthesizer. Task: «назначь на роль
+synthesizer дешёвую модель как разведку, сделай сам». Verdict per
+pre-registered criterion: (1) he called `model_route` himself — MET; (2)
+record `route_dc33636b9e62` — MET; (3) the next natural synthesizer call
+carries `agent_policy:<id>` in the ledger — NOT MET: the row said
+`complexity:standard|fallback:role_default`; cause UNKNOWN pending a dynamic
+trace (pre-registered hypothesis: the tier path stamps its own reason over
+the record's; a static read of `_for_role_with_reason` supports it); (4) the model
+used was deepseek-chat — MET; (5) cost by tariff: 3.08 → 1.12 units per 1k
+tokens, token counts differ so the bare sums are not the proof — MET.
+Verdict: criterion 4 PASS, criterion 3 FAIL, cause UNKNOWN pending trace.
+A repair was committed before the operator's stop and reverted the same
+hour (patch kept); the writer is named only after the dynamic trace
+route_for → selected route → ledger writer. No promotion to decision authority.
+
 ## Block 11 — he routes his own models (2026-09-04, 22:20, by the operator's word)
 
 The word, verbatim in its parts: keys stay secrets and are never available
