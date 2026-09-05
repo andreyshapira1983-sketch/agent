@@ -168,6 +168,17 @@ def is_local_critique_eligible(decision: ReferentDecision) -> bool:
         q in target for q in ('"', "«", "“", "'", ":")
     ):
         return False
+    # R7 (2026-09-05, work order 1 «flights TLV→BER»): a SHORT quoted span
+    # inside a LONG directive is a term of the order, not a brought text to
+    # criticise. «…первая — «изначально показанная»…» (21 chars in 770) was
+    # resolved as the analysis target: the planner was skipped, no tool ran,
+    # the synthesizer answered the 21 characters with four invented citations
+    # and the answer was withheld. A brought quote is either long or stands
+    # on its own; a term is short and drowned in its directive.
+    if decision.primary.kind == "explicit_quote":
+        directive_len = len((decision.directive_excerpt or "").strip())
+        if len(target) < 40 and directive_len > 10 * len(target):
+            return False
     # R6 (2026-08-17, operator exam run_59b740111): a cross-time proof demand
     # (own past -> later action) must reach the evidence-producing planner;
     # the quote path took it with tools=[] and nano invented four citations.

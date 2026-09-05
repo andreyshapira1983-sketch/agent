@@ -41,3 +41,13 @@ Rule for basket 4: every number in the report must have a source line in the tra
 
 ## Result
 (filled after the pass: raw transcript path, ledger rows, tool calls with results, the report, the rubric score with a line of evidence per point, the five baskets)
+
+### Pass 1 (2026-09-05 09:44:06–09:44:58 +03:00) — raw: work_order_flights_2026-09-05/pass_1_raw.md
+
+- Ledger: rows 3363 → 3364; one call — synthesizer deepseek/deepseek-chat, `agent_policy:route_dc33636b9e62|complexity:standard|fallback:role_default`, 3146 tokens, 4 units. No planner call. No tool call.
+- Trace: `referent_decision status=resolved primary={kind: explicit_quote, id: quote:da10f377, relevance 0.92, excerpt_chars 21}`, `directive_excerpt_chars=770`, `local_critique_eligible=True` → `local_critique_path`, `planner_local_critique`, `planner tools_chosen=[] warnings=['planner_skipped_local_critique']` → synthesizer → `verification cited_but_unmatched=4, chain_was_empty=true` → `answer_enforcement outcome=citation_integrity fabricated_citations=4` → the report withheld: «Ответ не отправлен: он ссылался на источники, которых нет в цепочке улик этого хода (4 неразрешившихся цитат)».
+- The 21 characters: «изначально показанная» — a term of the order, matched by `_QUOTED_RE` (any quoted span ≥ 8 chars) and made the analysis target because the directive also contained «покажи» (`_CRITIQUE_RE`).
+
+**Rubric, as scored: 0/10** — no report reached the operator; nothing to score per line.
+
+**Baskets:** 1 done — none; 2 erred — none of his; 3 omitted — everything, but not by his choice; 4 invented — the synthesizer's four citations to nothing, on a 21-character «target» it was handed instead of the order (and the gate caught them); 5 **not his — the loop never planned.** The referent resolver read a quoted term as a brought text to criticise and skipped the planner. Incident sii_0af9ecf7. Repair R7 (`core/referent_resolver.py`): a quote shorter than 40 characters drowned in a directive more than ten times longer is a term, not a target; regression `tests/test_a_quoted_term_in_a_work_order_is_not_an_analysis_target.py` (the order itself, through the loop, reaches the planner). Pass 2 = the same order verbatim on the repaired code, a new session.
