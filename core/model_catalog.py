@@ -187,10 +187,11 @@ def _load_catalog() -> dict[str, Any] | None:
         if age_days is not None and age_days >= _ttl_days():
             logger.debug("model_catalog expired (age=%d days)", age_days)
             return None
-        return data
     except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
         logger.warning("model_catalog load error: %s", exc)
         return None
+    else:
+        return data
 
 
 def _save_catalog(data: dict[str, Any]) -> None:

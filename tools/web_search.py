@@ -106,6 +106,6 @@ class WebSearchTool(Tool):
             well_formed += 1
 
         if well_formed == 0:
-            return False, issues + ["no well-formed results (no row with both title and url)"]
+            return False, [*issues, "no well-formed results (no row with both title and url)"]
 
         return True, issues

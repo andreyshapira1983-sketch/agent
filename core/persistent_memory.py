@@ -289,9 +289,7 @@ def _looks_like_code(text):
         return True
     if words >= 10 and punct == 0:
         return False
-    if punct >= 2 and words <= 12:
-        return True
-    return False
+    return bool(punct >= 2 and words <= 12)
 
 
 CONSENT_TAG_MAP = {

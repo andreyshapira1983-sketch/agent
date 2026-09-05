@@ -1453,7 +1453,7 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
     labels = tuple(str(label) for label in source_labels if str(label).strip())
     tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)
     if aborted_reason:
-        tags = tags + ("aborted", f"aborted:{aborted_reason}")
+        tags = (*tags, "aborted", f"aborted:{aborted_reason}")
     # A run-derived id is what makes duplicate detection possible at all: the
     # store can recognise "this attempt was already banked" without keeping a
     # ledger. Runs without an id keep the random default.

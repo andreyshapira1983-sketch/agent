@@ -388,10 +388,7 @@ def _find_structured_support(claim: str, chain: ProvenanceChain) -> Evidence | N
 
 def _tool_citation_for(ev: Evidence) -> str:
     sid = ev.source_id or ""
-    if sid.startswith("tool_output:"):
-        body = sid[len("tool_output:"):]
-    else:
-        body = sid or "structured"
+    body = sid[len("tool_output:"):] if sid.startswith("tool_output:") else sid or "structured"
     return f"[verified:tool:{body}]"
 
 

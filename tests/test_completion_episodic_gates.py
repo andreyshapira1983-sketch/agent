@@ -438,7 +438,14 @@ def test_no_legacy_episode_in_the_live_store_is_ever_admitted(tmp_path: Path) ->
     written before the axis existed — is never replayed, whatever else lands
     in the store around it.
     """
-    store = EpisodicMemoryStore(Path("data/episodic_memory.jsonl"))
+    live = Path("data/episodic_memory.jsonl")
+    if not live.exists():
+        # Checked BEFORE the store is built: constructing it mkdirs `data/`
+        # and `load()` takes the lock, which leaves `data/*.lock` behind in a
+        # clean clone — and that stray directory reads as a live workspace to
+        # `test_the_live_workspace_actually_carries_the_file`.
+        pytest.skip("no live store in this environment")
+    store = EpisodicMemoryStore(live)
     episodes = store.load()
     if not episodes:
         pytest.skip("no live store in this environment")

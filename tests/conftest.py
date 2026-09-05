@@ -101,6 +101,33 @@ def _deny_outbound_network():
         yield
 
 
+#: A host may inject git settings through the `GIT_CONFIG_COUNT` protocol
+#: (`GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`). The Copilot app does, and one
+#: of its values is EMPTY (`core.fsmonitor=`). Windows has no empty environment
+#: variables: the first test that writes `os.environ` re-exports the block and
+#: the empty entry vanishes, after which every `git` subprocess dies with
+#: «missing config value GIT_CONFIG_VALUE_2» — eight git-fixture errors that
+#: appear only in the full run and never in isolation (2026-09-05). The
+#: injected settings are host conveniences, not anything the suite relies on,
+#: so an incomplete block is dropped whole (dropping one entry would misalign
+#: the indices).
+@pytest.fixture(scope="session", autouse=True)
+def _drop_incomplete_host_git_config():
+    count = os.environ.get("GIT_CONFIG_COUNT", "")
+    if not count.isdigit():
+        yield
+        return
+    names = [f"GIT_CONFIG_{kind}_{i}" for i in range(int(count)) for kind in ("KEY", "VALUE")]
+    if all(os.environ.get(name) for name in names):
+        yield
+        return
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("GIT_CONFIG_COUNT", raising=False)
+        for name in names:
+            mp.delenv(name, raising=False)
+        yield
+
+
 class FakeLLM:
     """A drop-in LLM stand-in.
 

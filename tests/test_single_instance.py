@@ -179,9 +179,12 @@ def test_context_manager_acquires_and_releases(lock_path: Path):
 
 
 def test_context_manager_refuses_nested_instance(lock_path: Path):
-    with SingleInstanceLock(lock_path), pytest.raises(AlreadyRunningError):
-        with SingleInstanceLock(lock_path):
-            pass  # pragma: no cover - never entered
+    with (
+        SingleInstanceLock(lock_path),
+        pytest.raises(AlreadyRunningError),
+        SingleInstanceLock(lock_path),
+    ):
+        pass  # pragma: no cover - never entered
 
 
 # ── restart / re-run ────────────────────────────────────────────────────────

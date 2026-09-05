@@ -207,10 +207,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Windows service runtime prerequisites are available.")
             return 0
         print(_usage(), file=sys.stderr)
-        return 2
     except (WindowsServiceConfigError, WindowsServiceShellError) as exc:
         print(f"windows service shell error: {exc}", file=sys.stderr)
         return 1
+    else:
+        return 2
 
 
 if __name__ == "__main__":

@@ -360,7 +360,7 @@ class UserProfileStore:
         for raw in reversed(records):
             try:
                 return UserProfile(**raw)
-            except Exception:  # noqa: BLE001 — corrupted record, skip
+            except Exception:  # noqa: BLE001, S112 — corrupted record, skip
                 continue
         return None
 

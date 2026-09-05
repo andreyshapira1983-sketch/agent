@@ -345,9 +345,12 @@ def format_human_response(answer: str) -> str:
             if stripped and normalized not in ("nothing", "ничего", "нет", "нет данных"):
                 # Strip inline citation tokens that bleed into unverified text
                 clean = _ANSWER_CITATION_RE.sub("", stripped).strip()
-                if clean and clean.rstrip(".,!;:").lower() not in ("nothing", "ничего", "нет", "нет данных"):
-                    if not _EMPTY_QUOTE_LINE_RE.match(clean):
-                        unverified_lines.append(clean)
+                if (
+                    clean
+                    and clean.rstrip(".,!;:").lower() not in ("nothing", "ничего", "нет", "нет данных")
+                    and not _EMPTY_QUOTE_LINE_RE.match(clean)
+                ):
+                    unverified_lines.append(clean)
 
     # ── assemble ──────────────────────────────────────────────────────────
     def _clean(text: str) -> str:
@@ -432,11 +435,14 @@ def format_allowed_citations_block(
     lines = ["<allowed_citations>"]
     seen: set[str] = set()
     for ev in chain.evidences:
-        if memory_ids is not None and ev.obtained_via == "memory":
-            # source_id is "memory:<record id>"; compare whole ids, since a
-            # substring test lets one id vouch for another.
-            if ev.source_id.split(":", 1)[-1] not in memory_ids:
-                continue
+        # source_id is "memory:<record id>"; compare whole ids, since a
+        # substring test lets one id vouch for another.
+        if (
+            memory_ids is not None
+            and ev.obtained_via == "memory"
+            and ev.source_id.split(":", 1)[-1] not in memory_ids
+        ):
+            continue
         token = citation_for_evidence(ev)
         if token is None or token in seen:
             continue

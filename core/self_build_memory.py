@@ -257,9 +257,10 @@ def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> lis
             summary = str(getattr(episode, "summary", "") or "").strip()
             if summary:
                 lessons.append(summary[:300])
-        return lessons
     except Exception:  # noqa: BLE001 — lesson recall must never break the caller
         return []
+    else:
+        return lessons
 
 
 def _veto_was_about_the_target(episode: Any, tags: tuple[str, ...]) -> bool:

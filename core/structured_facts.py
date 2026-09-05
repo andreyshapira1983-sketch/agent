@@ -148,10 +148,7 @@ def _add_date_forms(year: int, month: int, day: int, out: set[str]) -> None:
 
 def extract_facts(excerpt: str | Any) -> StructuredFacts:
     """Parse *excerpt* and produce normalised facts."""
-    if isinstance(excerpt, str):
-        parsed = _parse_excerpt(excerpt)
-    else:
-        parsed = excerpt
+    parsed = _parse_excerpt(excerpt) if isinstance(excerpt, str) else excerpt
     if parsed is None or not isinstance(parsed, (dict, list, tuple)):
         return StructuredFacts.empty()
 
@@ -172,7 +169,7 @@ def extract_facts(excerpt: str | Any) -> StructuredFacts:
             booleans.add("true" if val else "false")
             continue
         if isinstance(val, (int, float)):
-            n = ("{:g}".format(val)) if isinstance(val, float) else str(val)
+            n = (f"{val:g}") if isinstance(val, float) else str(val)
             if len(n.lstrip("-")) >= _MIN_NUMERIC_LEN:
                 numbers.add(n)
             if isinstance(val, int):

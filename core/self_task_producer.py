@@ -652,7 +652,7 @@ def produce_coding_task(
             return ProducerReport(
                 status="budget_wait",
                 reason="; ".join(reasons) or "budget near exhaustion",
-                checked_gates=gates + ["budget"],
+                checked_gates=[*gates, "budget"],
                 next_human_action="Wait for the budget window to refill.",
             )
     gates.append("budget")
@@ -664,7 +664,7 @@ def produce_coding_task(
         return ProducerReport(
             status="task_wait",
             reason=f"self_build_task.approve {_id} is {_status} and not executed",
-            checked_gates=gates + ["task"],
+            checked_gates=[*gates, "task"],
             next_human_action=(
                 f":self-task-build to execute it, or :approval-deny {_id}"
                 if _status == "approved"
@@ -678,7 +678,7 @@ def produce_coding_task(
         return ProducerReport(
             status="dirty_tree_wait",
             reason="git working tree is not clean",
-            checked_gates=gates + ["dirty_tree"],
+            checked_gates=[*gates, "dirty_tree"],
             next_human_action="Commit or stash local changes, then retry.",
         )
     gates.append("dirty_tree")
