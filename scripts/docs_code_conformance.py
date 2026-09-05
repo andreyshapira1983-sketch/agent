@@ -60,7 +60,10 @@ _CODE_ROOTS = ("core", "cli", "app", "api", "tools", "tests", "scripts", "bug_la
 _PATH_RE = re.compile(
     r"(?<![\w/.])((?:" + "|".join(_CODE_ROOTS) + r")(?:/[\w.\-]+)+\.py)(?::(\d+))?"
 )
-_COMMAND_RE = re.compile(r"(?<![\w:])(:[a-z][a-z0-9-]{2,})(?![\w-])")
+#: `(?<![\w:?])` — the `?` keeps `(?:new\s+)?` out: a regex quoted from
+#: `core/injection_guard.py` is not a `:new` command. Found 2026-09-05 when the
+#: exam record quoted the `override` pattern verbatim.
+_COMMAND_RE = re.compile(r"(?<![\w:?])(:[a-z][a-z0-9-]{2,})(?![\w-])")
 
 #: Tokens that look like commands in prose but are not dispatched commands.
 #: The four REPL block tokens are intercepted by the dialogue loop before
@@ -95,6 +98,18 @@ _NONEXISTENT_MARKERS = (
     "does not exist", "do not exist", "none of these exist",
     "не существует", "не существуют", "выдуман",
 )
+
+#: Directories of VERBATIM run transcripts — the agent's own log lines, copied
+#: unedited beside the exam that produced them. A path there is what the agent
+#: typed into a tool call, not a claim by the document's author; the file it
+#: names may have been created and undone within the same run (the 2026-09-05
+#: exam wrote a 17-byte placeholder test, compensation registered its removal).
+#: Editing a log line to carry a marker would falsify the record, so the
+#: exemption is by directory and counted separately in the summary. Prose that
+#: NARRATES such a run lives outside these directories and is judged as prose.
+_VERBATIM_TRANSCRIPT_DIRS = {
+    "audit/exam_self_knowledge_2026-09-05/",
+}
 
 #: Files that were RENAMED, old path -> new path.
 #:
@@ -242,6 +257,19 @@ def classify_renamed_reference(
     return RENAMED_LIVE_REFERENCE
 
 
+def _absence_is_declared(line: str) -> bool:
+    """The line itself says the path is planned, or named BECAUSE it is absent.
+
+    Both are correct documentation of a missing file. Kept as two marker sets
+    all the same: «запланирован» и «выдуман» — разные вещи, and the second
+    exists so a разбор вымысла can quote the invented name verbatim.
+    """
+    lowered = line.lower()
+    return any(m in lowered for m in _PLANNED_MARKERS) or any(
+        m in lowered for m in _NONEXISTENT_MARKERS
+    )
+
+
 def _registry_commands() -> set[str]:
     # Since the #278 split the command table lives in two spec volumes that
     # `cli/command_registry.py` combines; scan all three so a token defined in
@@ -297,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     live_renamed: list[str] = []
     historical_anchors = 0
     planned_paths = 0
+    transcript_paths = 0
     valid_paths = 0
     renamed_refs = 0
     historical_renamed = 0
@@ -312,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     for doc, rel_doc in scan_targets:
         docs_scanned += 1
         historical = rel_doc in _HISTORICAL_ANCHOR_DOCS
+        transcript = any(rel_doc.startswith(d) for d in _VERBATIM_TRANSCRIPT_DIRS)
         for lineno, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
             # Renamed paths first, and in both spellings. Owned entirely by this
             # pass so the two spellings cannot be judged by two different rules.
@@ -345,13 +375,10 @@ def main(argv: list[str] | None = None) -> int:
                     continue  # counted and judged by the renamed pass above
                 checked_paths += 1
                 if not target.is_file():
-                    lowered = line.lower()
-                    if any(marker in lowered for marker in _PLANNED_MARKERS):
-                        planned_paths += 1   # documented as not existing yet
-                    elif any(marker in lowered for marker in _NONEXISTENT_MARKERS):
-                        # Назван потому, что его нет: разбор вымысла обязан
-                        # цитировать имя дословно.
-                        planned_paths += 1
+                    if _absence_is_declared(line):
+                        planned_paths += 1   # documented as not existing (yet)
+                    elif transcript:
+                        transcript_paths += 1  # quoted from a run log, not claimed
                     else:
                         missing_paths.append(f"{rel_doc}:{lineno}  {path_text}")
                     continue
@@ -385,7 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  documents scanned      : {docs_scanned}")
     print(f"  code paths referenced  : {checked_paths}  "
           f"(valid: {valid_paths}, missing: {len(genuinely_missing)}, "
-          f"declared not-yet-written: {planned_paths})")
+          f"declared not-yet-written: {planned_paths}, "
+          f"quoted in a transcript: {transcript_paths})")
     print(f"  renamed-path refs      : {renamed_refs}  "
           f"(declared historical: {historical_renamed}, "
           f"live references: {len(live_renamed)}, "
@@ -394,32 +422,40 @@ def main(argv: list[str] | None = None) -> int:
           f"(out of range: {len(stale_anchors)}, declared historical: {historical_anchors})")
     print(f"  :command tokens        : {checked_commands}  (unknown: {len(set(unknown_commands))})")
 
-    failed = False
-    if missing_paths:
-        failed = True
-        print("\n  MISSING PATHS — the document points at a file that does not exist:")
-        for item in missing_paths:
-            print(f"    {item}")
-    if live_renamed:
-        failed = True
-        print("\n  RENAMED MODULE PRESENTED AS CURRENT — the module no longer exists;")
-        print("  fix the sentence, or declare the line historical with"
-              f" '{_HISTORICAL_REF_MARKER} -->':")
-        for item in live_renamed:
-            print(f"    {item}")
-    if stale_anchors:
-        failed = True
-        print("\n  STALE LINE ANCHORS in documents not declared historical:")
-        for item in stale_anchors:
-            print(f"    {item}")
-    if unknown_commands:
-        failed = True
-        print("\n  UNKNOWN COMMANDS — documented but not in the registry:")
-        for item in sorted(set(unknown_commands)):
-            print(f"    {item}")
-
+    failed = _print_findings(missing_paths, live_renamed, stale_anchors, unknown_commands)
     print("\n  RESULT:", "DRIFT FOUND" if failed else "every code reference resolves.")
     return 1 if failed else 0
+
+
+def _print_findings(
+    missing_paths: list[str],
+    live_renamed: list[str],
+    stale_anchors: list[str],
+    unknown_commands: list[str],
+) -> bool:
+    """Print each non-empty finding block; True when anything was printed."""
+    sections: list[tuple[list[str], list[str]]] = [
+        (missing_paths,
+         ["\n  MISSING PATHS — the document points at a file that does not exist:"]),
+        (live_renamed,
+         ["\n  RENAMED MODULE PRESENTED AS CURRENT — the module no longer exists;",
+          ("  fix the sentence, or declare the line historical with"
+           f" '{_HISTORICAL_REF_MARKER} -->':")]),
+        (stale_anchors,
+         ["\n  STALE LINE ANCHORS in documents not declared historical:"]),
+        (sorted(set(unknown_commands)),
+         ["\n  UNKNOWN COMMANDS — documented but not in the registry:"]),
+    ]
+    failed = False
+    for items, heading in sections:
+        if not items:
+            continue
+        failed = True
+        for line in heading:
+            print(line)
+        for item in items:
+            print(f"    {item}")
+    return failed
 
 
 if __name__ == "__main__":
