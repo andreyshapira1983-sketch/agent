@@ -26,8 +26,8 @@ from tools.file_read import FileReadTool
 from tools.read_logs import ReadLogsTool
 
 
-@pytest.fixture
-def numbered_file(workspace: Path) -> Path:
+@pytest.fixture(name="numbered_file")
+def _numbered_file(workspace: Path) -> Path:
     target = workspace / "core" / "sample.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(

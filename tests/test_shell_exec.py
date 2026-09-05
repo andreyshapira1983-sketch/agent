@@ -259,7 +259,7 @@ class TestReadOnlyExecution:
         if not self._expected_present("whoami"):
             pytest.skip("whoami not on PATH")
         tool = self._tool(workspace)
-        with mock.patch("subprocess.Popen", wraps=__import__("subprocess").Popen) as spy:
+        with mock.patch("subprocess.Popen", wraps=__import__("subprocess").Popen) as spy:  # nosec B404 — spying on the tool's own call
             tool.run(["whoami"])
             kwargs = spy.call_args.kwargs
             assert Path(kwargs["cwd"]).resolve() == workspace.resolve()
@@ -356,7 +356,7 @@ class TestMutatingExecution:
 class TestTimeout:
     def test_subprocess_timeout_surfaces_as_timed_out(self, workspace: Path):
         """We monkey-patch Popen so `communicate(timeout=)` raises TimeoutExpired."""
-        import subprocess
+        import subprocess  # nosec B404 — only the exception class is used
 
         tool = ShellExecTool(workspace_root=workspace, timeout_seconds=0.1)
 
