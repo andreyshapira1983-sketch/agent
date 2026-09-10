@@ -75,6 +75,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "actuation_gateway", "gateway_consult", "tool_receipts", "receipt_consumer",
         "backup_cleanup",
         "compensation", "safe_vcs", "supply_chain",
+        "bounded_subprocess",
     ]),
     ("Runtime, State & Orchestration (§6)", "Autonomous loop, scheduling, budgets, state durability.", [
         "capability_events",
