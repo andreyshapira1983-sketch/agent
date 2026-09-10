@@ -108,11 +108,37 @@ def _states_external_fact(text: str) -> bool:
 
 #: Признаки предложения о будущей работе: наклонение намерения и нумерованные
 #: шаги. Одного признака мало — он должен встретиться в тексте, который НЕ
-#: утверждает о внешнем мире (см. `_states_external_fact`).
+#: утверждает о внешнем мире (см. `_states_external_fact`) и НЕ отчитывается
+#: о сделанном (см. `_reports_a_result`).
 _PLAN_MARKERS: tuple[str, ...] = (
     "шаг ", "шаг:", "сначала", "затем", "потом", "предлагаю", "сделаю",
-    "план:", "план ", "поставк", "1.", "2.", "3.",
+    "план:", "план ", "поставк",
 )
+#: Нумерованный список — только в начале строки. Экзамен 2026-09-05 (ход 43):
+#: `"1."` совпадало с дробью «601.23 с», и отчёт об измерении освобождался от
+#: улик как «план».
+_NUMBERED_LINE_RE = re.compile(r"(?m)^\s*\d{1,2}\.\s")
+
+#: Отчёт о результате — не предложение. Экзамен 2026-09-05 (ход 41): «Шаг 1
+#: (last_n=60) вернул events_returned=4» прошёл как план, ворота улик отключились,
+#: и ложное число (инструмент вернул 60) ушло оператору как проверенное.
+#: Признаки: глагол свершившегося действия или запись `поле=значение` из вывода
+#: инструмента.
+_REPORT_VERB_MARKERS: tuple[str, ...] = (
+    "вернул", "выполнен", "выполнил", "получен", "прочитан", "найден", "найдено",
+    "показал", "завершил", "завершён", "обнаружен", "составил", "выдал", "записан",
+    "измерил", "измерен",
+    "returned", "executed", "found ", "reported", "yielded", "completed", "measured",
+)
+_KEY_VALUE_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*=\S")
+
+
+def _reports_a_result(text: str) -> bool:
+    """True, когда текст отчитывается о сделанном, а не предлагает сделать."""
+    lowered = text.lower()
+    if any(marker in lowered for marker in _REPORT_VERB_MARKERS):
+        return True
+    return _KEY_VALUE_RE.search(text) is not None
 
 
 def _carries_plan_proposal(answer: str) -> bool:
@@ -120,7 +146,10 @@ def _carries_plan_proposal(answer: str) -> bool:
     if not answer:
         return False
     lowered = answer.lower()
-    if not any(marker in lowered for marker in _PLAN_MARKERS):
+    has_marker = any(marker in lowered for marker in _PLAN_MARKERS)
+    if not has_marker and _NUMBERED_LINE_RE.search(answer) is None:
+        return False
+    if _reports_a_result(answer):
         return False
     return not _states_external_fact(answer)
 

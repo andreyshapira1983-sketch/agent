@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 221 modules across 12 groups._
+_Total: 222 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -180,6 +180,7 @@ _Effect gateways, receipts, compensation, VCS safety._
 | `core/compensation` | Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec. |
 | `core/safe_vcs` | Narrow, safe VCS helper for the trusted self-apply lane (TD-023). |
 | `core/supply_chain` | Release/supply-chain audit helpers. |
+| `core/bounded_subprocess` | Bounded subprocess: a timeout that ends the wait, not one that promises to. |
 
 ## Runtime, State & Orchestration (§6)
 
