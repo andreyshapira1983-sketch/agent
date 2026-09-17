@@ -73,3 +73,10 @@ config/model_registry.json
 # runner. Untracked but not ignored, they were scanned by every repo-wide
 # tool — ruff counted 1136 findings that belonged to copies (2026-08-20).
 .claude/worktrees/
+
+# Память опыта самоприменения (ревизия PR #334). Полоса делает `git add -A`,
+# и без этих строк указатель головы уезжает в коммит кандидата, а возврат на
+# исходную ветку его удаляет — цепочка принятий обнуляется молча.
+state/burn_in_head.json
+state/burn_in_offers.jsonl
+state/burn_in_adoptions.jsonl

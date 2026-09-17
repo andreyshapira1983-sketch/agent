@@ -60,12 +60,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from core.file_lock import exclusive_file_lock
+
 __all__ = [
     "AdoptionVerdict",
     "SUPERVISOR_FENCE",
     "adopt_offer",
     "adoption_log",
     "experiment_head",
+    "materialise_next_cycle",
     "next_start_point",
     "offer_verified_commit",
     "offer_ledger",
@@ -83,8 +86,17 @@ SUPERVISOR_FENCE: frozenset[str] = frozenset({
     "core/policy.py",
     "core/rule_approved_apply.py",
     "core/autonomous_runtime.py",
+    "core/approval_inbox.py",
     "core/actuation_gateway.py",
     "core/safe_vcs.py",
+    # Память опыта. Не код, но полномочие: коммит, несущий свой указатель
+    # головы, назначил бы опыту стартовую точку сам — ровно то, ради изъятия
+    # чего принимающего и вынесли наружу. Полоса сгребает нетрекаемое через
+    # `git add -A` (`core/safe_vcs.py:133`), так что попасть сюда можно и не
+    # целясь; поэтому эти три имени ещё и в `.gitignore`.
+    "state/burn_in_head.json",
+    "state/burn_in_offers.jsonl",
+    "state/burn_in_adoptions.jsonl",
     "config/burn_in_sandbox.json",
     "scripts/install_daemon.ps1",
 })
@@ -192,22 +204,85 @@ def experiment_head(repo: Path) -> str:
     Пока принято ничего не было — это нынешняя голова репозитория. Дальше это
     файл, и именно поэтому цепочка переживает перезапуск: без записанного
     указателя опыт не длиннее одного шага.
+
+    ОТСУТСТВУЮЩИЙ файл и ИСПОРЧЕННЫЙ файл — разные события, и сводить их к
+    одному ответу нельзя (ревизия PR #334). Первое значит «опыт ещё не
+    начинался». Второе значит «опыт шёл, и его память повреждена»: ответить на
+    это головой репозитория — значит тихо отмотать цепочку к тому коду, с
+    которого всё начиналось, и записать это в журнал как честный первый шаг.
+    Повреждённая память останавливает опыт.
     """
     repo = Path(repo)
     path = _head_file(repo)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        sha = str(raw.get("sha", ""))
-        if _SHA_RE.match(sha):
-            return sha
-    except (OSError, ValueError, TypeError):
-        pass
-    return _git(repo, "rev-parse", "HEAD")
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return _git(repo, "rev-parse", "HEAD")
+    except OSError as exc:
+        raise SupervisorError(f"указатель опыта {path} не читается: {exc}") from exc
+
+    try:
+        sha = str(json.loads(raw).get("sha", ""))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise SupervisorError(
+            f"указатель опыта {path} повреждён: {exc}. Опыт остановлен нарочно: "
+            f"молчаливый откат к голове репозитория стёр бы всю цепочку"
+        ) from exc
+
+    if not _SHA_RE.match(sha):
+        raise SupervisorError(
+            f"указатель опыта {path} содержит не полное имя объекта: {sha!r}"
+        )
+    return sha
 
 
 def next_start_point(repo: Path) -> str:
     """Имя для следующего цикла. Отдельное имя, потому что смысл другой."""
     return experiment_head(repo)
+
+
+def materialise_next_cycle(
+    repo: Path, workspace: Path, *, sha: str | None = None
+) -> str:
+    """Поставить рабочее дерево следующего цикла на голову опыта.
+
+    Недостающее звено (ревизия PR #334). До этого принятие двигало указатель,
+    но `run_self_apply_lane` ответвлялся от головы ТЕКУЩЕГО checkout
+    (`core/self_apply_lane.py:644`), а указателя не читал никто, — значит
+    следующий цикл снова работал на том коде, который только что сломался, и
+    цепочка была метаданными.
+
+    Дерево заводит ПРИНИМАЮЩИЙ, и в этом всё свойство: у кода, который сам
+    себя меняет, нет способа выбрать себе commit, потому что он не выбирает
+    дерево, в котором его запустят. `sha` здесь — не выбор, а сверка: назвать
+    можно только то, что уже принято, и назвать неправильно значит получить
+    отказ.
+
+    Дерево каждый раз заводится заново, а не переставляется: остатки прошлого
+    цикла не вправе доехать до следующего — иначе «стартовали из принятого»
+    перестало бы быть правдой.
+    """
+    repo = Path(repo)
+    workspace = Path(workspace)
+    head = next_start_point(repo)
+
+    if sha is not None and str(sha) != head:
+        raise SupervisorError(
+            f"дерево следующего цикла ставится только на голову опыта {head}; "
+            f"запрошен {sha!r}. Выбор коммита принадлежит принимающему"
+        )
+
+    if workspace.exists():
+        try:
+            _git(repo, "worktree", "remove", "--force", str(workspace))
+        except SupervisorError as exc:
+            raise SupervisorError(
+                f"{workspace} существует и не является рабочим деревом этого "
+                f"репозитория; принимающий не станет его удалять: {exc}"
+            ) from exc
+    _git(repo, "worktree", "prune")
+    _git(repo, "worktree", "add", "--detach", str(workspace), head)
+    return head
 
 
 def _write_head(repo: Path, sha: str, *, previous: str) -> None:
@@ -276,16 +351,33 @@ def _was_offered(repo: Path, sha: str) -> bool:
         if not line:
             continue
         try:
-            if json.loads(line).get("sha") == sha:
-                return True
+            row = json.loads(line)
         except ValueError:
             # Испорченная строка не разрешает и не запрещает — читаем дальше.
             # Умолчание всего чтения и так «не предъявлен», то есть отказ.
             continue
+        # Не словарь — тоже законный JSON: `[1, 2]`, `"строка"`, `17`, `null`
+        # разбираются без ошибки, а `.get` на них даёт `AttributeError`
+        # (ревизия PR #334). Тогда кто угодно, кто умеет дописать строку в
+        # журнал, останавливал бы принятие навсегда.
+        if isinstance(row, dict) and row.get("sha") == sha:
+            return True
     return False
 
 
 # ── решение ──────────────────────────────────────────────────────────────────
+
+def _fence_key(path: str) -> str:
+    """Один вид записи для сличения с забором.
+
+    Забор песочницы (`core/burn_in_sandbox._fence_prints`) к этому времени уже
+    сверяет приведённый путь, а принимающий сверял сырую строку
+    `git diff --name-only` (ревизия PR #334). На файловой системе,
+    безразличной к регистру, `Core/Policy.py` и `core/policy.py` — один файл и
+    две разные строки, то есть забор обходился написанием имени.
+    """
+    return os.path.normcase(str(path).replace("\\", "/").strip().strip('"'))
+
 
 def adopt_offer(
     repo: Path,
@@ -300,9 +392,26 @@ def adopt_offer(
     `(зелено, подробность)`. Он вынесен наружу нарочно: принимающий решает,
     ЧТО считается доказательством, а чем его добывать — дело вызывающего
     (в опыте это `pytest`, в тестах — детерминированная подделка).
+
+    Решение целиком стоит под замком: между чтением головы и её записью лежит
+    полная батарея, то есть минуты (ревизия PR #334). Без сериализации два
+    кандидата-брата от одной головы оба читали бы одну `previous`, оба
+    признавались бы шагом вперёд и оба писали бы голову — цепочка теряла бы
+    ветвь молча, и журнал показывал бы два честных принятия.
     """
     repo = Path(repo)
-    guard = frozenset(fence) if fence is not None else SUPERVISOR_FENCE
+    with exclusive_file_lock(_head_file(repo).with_suffix(".lock")):
+        return _adopt_offer_locked(repo, sha=sha, battery=battery, fence=fence)
+
+
+def _adopt_offer_locked(
+    repo: Path,
+    *,
+    sha: str,
+    battery: Callable[[Path], tuple[bool, str]],
+    fence: Any = None,
+) -> AdoptionVerdict:
+    guard = frozenset(_fence_key(p) for p in (fence if fence is not None else SUPERVISOR_FENCE))
     previous = experiment_head(repo)
 
     def refuse(reason: str, **checks: Any) -> AdoptionVerdict:
@@ -336,7 +445,7 @@ def adopt_offer(
     touched = _changed_paths(repo, previous, sha)
     if not touched:
         return refuse("кандидат ничего не меняет", changed=touched)
-    crossed = sorted(p for p in touched if p in guard)
+    crossed = sorted(p for p in touched if _fence_key(p) in guard)
     if crossed:
         return refuse(f"кандидат трогает забор: {', '.join(crossed)}",
                       changed=touched, crossed=crossed)

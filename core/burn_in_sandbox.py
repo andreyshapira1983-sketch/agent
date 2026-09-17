@@ -69,6 +69,13 @@ _ON_VALUES: frozenset[str] = frozenset({"on", "1", "true", "yes"})
 #: песочница вправе переписать своего счетовода, не тронув ни одной записи
 #: забора. Существование названного проверяет
 #: `test_every_fence_entry_names_a_real_file`.
+#:
+#: Ревизия PR #334 показала, что правило было верным, а список — нет.
+#: `active_standing_grant` не ищет грант сам, он перебирает
+#: `approval_inbox.list(status="approved")`: решает и тот, кто отвечает, а не
+#: только тот, кто спрашивает. И `core/safe_vcs.py` — тоже полномочие: список
+#: разрешённых глаголов git определяет, что полоса вправе сделать с
+#: репозиторием.
 _FENCE: frozenset[str] = frozenset({
     SANDBOX_MARKER,
     "core/burn_in_sandbox.py",
@@ -77,7 +84,9 @@ _FENCE: frozenset[str] = frozenset({
     "core/policy.py",
     "core/rule_approved_apply.py",
     "core/autonomous_runtime.py",
+    "core/approval_inbox.py",
     "core/actuation_gateway.py",
+    "core/safe_vcs.py",
     "core/self_apply_lane.py",
     "scripts/install_daemon.ps1",
 })
@@ -109,6 +118,24 @@ class SandboxAuthority:
     max_applies_per_day: int
     expires_at: str
     reason: str
+
+    def is_live(self, now: datetime | None = None) -> bool:
+        """Не истёк ли срок ПРЯМО СЕЙЧАС. Нечитаемая отметка — «истёк».
+
+        Отдельный метод, потому что спрашивают в двух местах и в разное время:
+        при выдаче полномочия и при каждом занятии единицы потолка. Между ними
+        лежит полная батарея, то есть минуты.
+        """
+        raw = str(self.expires_at or "").strip()
+        if not raw:
+            return False
+        try:
+            deadline = datetime.fromisoformat(raw)
+        except ValueError:
+            return False
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return deadline > (now or datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -232,8 +259,22 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
             return False, f"{rel!r} resolves outside the sandbox workspace"
         if os.path.normcase(str(target)) in fence:
             return False, f"{rel!r} is the sandbox fence; it is not moved from inside"
-        if _is_denied(rel):
-            return False, f"{rel!r} is a denied class (secrets, CI, infrastructure)"
+        # Класс файла определяется тем, ЧТО меняется, а не тем, как названо.
+        # Ревизия PR #334: забор и сдерживание уже сверяли `target.resolve()`,
+        # а классы спрашивались о СЫРОМ `rel`. Ссылка внутри копии с невинным
+        # именем (`core/innocent.py` -> `.github/workflows/ci.yml`) проходила
+        # оба класса, а `_write_file` (`core/self_apply_lane.py:481`) резолвит
+        # её и пишет в рабочий процесс CI.
+        names = [rel]
+        try:
+            resolved_rel = target.relative_to(root).as_posix()
+        except ValueError:
+            resolved_rel = rel
+        if resolved_rel != rel:
+            names.append(resolved_rel)
+        for name in names:
+            if _is_denied(name):
+                return False, f"{name!r} is a denied class (secrets, CI, infrastructure)"
         # Разрешённые классы полосы спрашиваются ЗДЕСЬ, а не только там.
         # Ревизия Copilot по PR #333: ворота проверяли лишь запрещённое, а
         # полоса проверяет и разрешённое (`classify_patch_risk` -> `_is_allowed`).
@@ -242,8 +283,11 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
         # не ворота, а задержка. Шире производства песочница остаётся: код и
         # тесты (`core`, `cli`, `tools`, `tests`) здесь разрешены, тогда как
         # автономное производство пропускает один класс — новый документ.
-        if not _is_allowed(rel):
-            return False, f"{rel!r} is outside the lane allowlist; the lane would refuse it"
+        for name in names:
+            if not _is_allowed(name):
+                return False, (
+                    f"{name!r} is outside the lane allowlist; the lane would refuse it"
+                )
     return True, "sandbox authority: workspace-local change, verified by the lane"
 
 
@@ -267,9 +311,16 @@ def reserve_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> bool:
     Тот же общий журнал и тот же атомарный примитив, что у стоячего гранта:
     два счётчика одного полномочия — это ноль счётчиков, а два ОДНОВРЕМЕННЫХ
     слива на одном счётчике без замка — потолок, который можно превысить.
+
+    Срок сверяется ЗДЕСЬ, а не только при выдаче (ревизия PR #334). Слив
+    перебирает заявки, каждая тянет полосу с полной батареей; полномочие,
+    истёкшее посреди прохода, продолжало занимать единицы и разрешать
+    изменения. Этот же класс уже закрыт для стоков памяти (`TermedSinks`).
     """
     from core.autonomous_runtime import reserve_standing_grant_use
 
+    if not authority.is_live():
+        return False
     return reserve_standing_grant_use(
         workspace, authority.id, max_per_day=authority.max_applies_per_day
     )

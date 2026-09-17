@@ -76,9 +76,15 @@ def _claim_pattern(key: str, value: str) -> re.Pattern[str]:
     `status=ready`: критерий говорит об утверждении, а не о синтаксисе. Между
     ключом и значением допускаются только разделители — так `status` и `ready`,
     разбросанные по разным строкам, парой не считаются.
+
+    Границы по краям — ревизия PR #334. Без них `status=ready` засчитывался на
+    `{"status": "ready_to_fail"}` и на `{"my_status": "ready"}`. Первое хуже
+    второго: это ложное ПОДТВЕРЖДЕНИЕ, то есть критерий «готово» закрывался
+    файлом, буквально говорящим «готово провалиться».
     """
     return re.compile(
-        rf"[\"']?{re.escape(key)}[\"']?\s*[:=]\s*[\"']?{re.escape(value)}[\"']?",
+        rf"(?<![\w.-])[\"']?{re.escape(key)}[\"']?\s*[:=]\s*"
+        rf"[\"']?{re.escape(value)}(?![\w-])[\"']?",
         re.IGNORECASE,
     )
 
@@ -106,6 +112,24 @@ def _claims_met(target: Path, claims: tuple[tuple[str, str], ...]) -> tuple[bool
     return True, ""
 
 
+def _artifact_tokens(text: str) -> list[tuple[int, str]]:
+    """Путеподобные токены вместе с местом, где они названы.
+
+    Место нужно привязке утверждений: «result.json содержит status=ready»
+    ставит утверждение ПОСЛЕ своего следа, и это единственный признак
+    принадлежности, который есть в свободном тексте.
+    """
+    found: list[tuple[int, str]] = []
+    for match in _PATH_TOKEN.finditer(str(text or "")):
+        token = match.group(0).strip(_TRIM).replace("\\", "/")
+        if not token or token.endswith("/"):
+            continue
+        if token.rsplit(".", 1)[-1].lower() in _IGNORED_SUFFIXES:
+            continue
+        found.append((match.start(), token))
+    return found
+
+
 def named_artifacts(success_check: str) -> tuple[str, ...]:
     """Пути, НАЗВАННЫЕ в критерии успеха, в порядке появления, без повторов.
 
@@ -114,15 +138,42 @@ def named_artifacts(success_check: str) -> tuple[str, ...]:
     проходят: расширение обязано начинаться с буквы.
     """
     seen: list[str] = []
-    for match in _PATH_TOKEN.finditer(str(success_check or "")):
-        token = match.group(0).strip(_TRIM).replace("\\", "/")
-        if not token or token.endswith("/"):
-            continue
-        if token.rsplit(".", 1)[-1].lower() in _IGNORED_SUFFIXES:
-            continue
+    for _pos, token in _artifact_tokens(success_check):
         if token not in seen:
             seen.append(token)
     return tuple(seen)
+
+
+def claims_by_artifact(success_check: str) -> dict[str, tuple[tuple[str, str], ...]]:
+    """Какие утверждения о содержимом к какому следу относятся.
+
+    Ревизия PR #334: утверждения были общими и проверялись у КАЖДОГО
+    названного следа. Критерий «result.json содержит status=ready, и создан
+    log.txt» требовал `status=ready` ещё и от `log.txt` — ложный отказ, после
+    которого агент принимался чинить работающее.
+
+    Признак принадлежности один: утверждение относится к последнему следу,
+    названному ПЕРЕД ним. Утверждение, стоящее раньше всех следов («в
+    result.json должно быть status=ready» с обратным порядком слов не бывает,
+    но «status=ready должен появиться в result.json» бывает), достаётся
+    первому следу. Для критерия с одним следом поведение прежнее.
+    """
+    text = str(success_check or "")
+    tokens = _artifact_tokens(text)
+    if not tokens:
+        return {}
+    bound: dict[str, list[tuple[str, str]]] = {}
+    for pattern in (_KV_JSON, _KV_PLAIN):
+        for match in pattern.finditer(text):
+            owner = tokens[0][1]
+            for pos, token in tokens:
+                if pos < match.start():
+                    owner = token
+            pair = (match.group(1), match.group(2))
+            slot = bound.setdefault(owner, [])
+            if pair not in slot:
+                slot.append(pair)
+    return {name: tuple(pairs) for name, pairs in bound.items()}
 
 
 def observe_success_check(success_check: str, workspace: Any) -> dict:
@@ -148,6 +199,7 @@ def observe_success_check(success_check: str, workspace: Any) -> dict:
     except OSError:
         root_resolved = root
     claims = content_claims(success_check)
+    owned = claims_by_artifact(success_check)
     observed: dict[str, dict] = {}
     missing: list[str] = []
     reasons: list[str] = []
@@ -176,7 +228,7 @@ def observe_success_check(success_check: str, workspace: Any) -> dict:
             observed[relpath] = entry
             missing.append(relpath)
             continue
-        met, why = _claims_met(target, claims)
+        met, why = _claims_met(target, owned.get(relpath, ()))
         entry["claims_met"] = met
         observed[relpath] = entry
         if not met:

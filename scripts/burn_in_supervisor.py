@@ -24,15 +24,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core.bounded_subprocess import run_with_tree_kill  # noqa: E402
 from core.burn_in_supervisor import (  # noqa: E402
     adopt_offer,
     experiment_head,
+    materialise_next_cycle,
     offer_ledger,
 )
 
@@ -53,31 +54,42 @@ def _pending_offers(repo: Path, head: str) -> list[str]:
         if not line:
             continue
         try:
-            sha = str(json.loads(line).get("sha") or "")
+            row = json.loads(line)
         except ValueError:
             continue
+        # Не словарь — тоже законный JSON. `[1, 2]` и `"строка"` разбираются
+        # без ошибки, а `.get` на них даёт `AttributeError`, и внешний
+        # принимающий падает целиком (ревизия PR #334). Одна испорченная
+        # строка не вправе остановить десятичасовой опыт.
+        if not isinstance(row, dict):
+            continue
+        sha = str(row.get("sha") or "")
         if sha and sha != head and sha not in seen:
             seen.append(sha)
     return seen
 
 
 def _battery(worktree: Path) -> tuple[bool, str]:
-    """Полная батарея в дереве кандидата. Зелено — значит зелено целиком."""
-    try:
-        done = subprocess.run(  # noqa: S603 — фиксированный argv
-            [sys.executable, "-m", "pytest", "-q", "--no-header"],
-            cwd=str(worktree),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_BATTERY_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
+    """Полная батарея в дереве кандидата. Зелено — значит зелено целиком.
+
+    Ждём через `core/bounded_subprocess`, а не через `subprocess.run(timeout=)`:
+    последний убивает только прямого потомка, после чего `communicate` без
+    потолка продолжает ждать трубу, которую держит внук. Батарея pytest
+    порождает внуков по устройству, а докстринг ограничителя несёт два замера
+    от 2026-09-05 — 30 с превратились в 16 минут, 20 с в 600 с. Зависшая
+    проверка неотличима от отказа и обязана им стать.
+    """
+    stdout, _stderr, code, timed_out = run_with_tree_kill(
+        [sys.executable, "-m", "pytest", "-q", "--no-header"],
+        cwd=str(worktree),
+        env=None,
+        timeout=_BATTERY_TIMEOUT_SECONDS,
+    )
+    if timed_out:
         return False, f"батарея не уложилась в {_BATTERY_TIMEOUT_SECONDS} с"
-    tail = (done.stdout or "").strip().splitlines()[-1:] or [""]
-    return done.returncode == 0, tail[0]
+    text = stdout.decode("utf-8", "replace") if isinstance(stdout, bytes) else str(stdout)
+    tail = text.strip().splitlines()[-1:] or [""]
+    return code == 0, tail[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,11 +98,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sha", default="", help="принять именно этот SHA")
     parser.add_argument("--show", action="store_true",
                         help="только показать голову опыта и ожидающие предложения")
+    parser.add_argument("--next", default="", metavar="PATH",
+                        help="поставить рабочее дерево следующего цикла на голову опыта")
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).resolve()
     head = experiment_head(repo)
     pending = _pending_offers(repo, head)
+
+    if args.next:
+        # Единственный потребитель указателя опыта, и потому единственное
+        # место, где цепочка принятий превращается в работающий код. Дерево
+        # заводит принимающий: у кода, который сам себя меняет, нет способа
+        # выбрать себе commit, потому что он не выбирает дерево.
+        started = materialise_next_cycle(repo, Path(args.next))
+        print(f"следующий цикл стартует из {started}")
+        print(f"дерево: {Path(args.next).resolve()}")
+        return 0
 
     if args.show:
         print(f"голова опыта: {head}")

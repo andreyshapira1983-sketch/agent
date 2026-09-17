@@ -642,3 +642,133 @@ def test_an_exhausted_sandbox_is_not_reported_as_a_standing_grant(
     assert any("sandbox" in k and "exhaust" in k for k in kinds), (
         "исчерпание песочницы не названо своим именем: " + repr(kinds)
     )
+
+
+def test_the_fence_covers_the_place_the_grant_is_served_from() -> None:
+    """Ревизия PR #334: `core/approval_inbox.py` не был за забором.
+
+    Полномочие песочницы упирается в `active_standing_grant`
+    (`core/autonomous_runtime.py:319`), а тот НЕ ищет грант сам — он
+    перебирает `approval_inbox.list(status="approved")`. Значит решает не
+    только тот, кто спрашивает, но и тот, кто отвечает: переписав хранилище
+    одобрений, песочница выдаёт себе постоянный грант, не тронув ни одной
+    записи забора.
+
+    Это нарушение правила, записанного в докстринге самого забора: «за забором
+    стоит КАЖДЫЙ, кто решает о полномочии». Правило было верным, список — нет.
+    """
+    from core.burn_in_sandbox import _FENCE
+
+    assert "core/approval_inbox.py" in _FENCE, (
+        "хранилище одобрений отвечает на вопрос о полномочии и не за забором"
+    )
+    assert "core/safe_vcs.py" in _FENCE, (
+        "список разрешённых глаголов git — тоже полномочие: он решает, "
+        "что полоса вправе сделать с репозиторием"
+    )
+
+
+def test_the_two_fences_do_not_disagree_about_authority() -> None:
+    """Забор песочницы не вправе быть шире забора принимающего.
+
+    Перечисление ловит только ту запись, которую вспомнили. Это утверждение
+    ловит КЛАСС пропусков: два забора обязаны сходиться, иначе файл, который
+    песочнице трогать нельзя, окажется тем, что принимающий пропускает, — и
+    запрет, обойдённый один раз, станет принятым изменением.
+    """
+    from core.burn_in_sandbox import _FENCE
+    from core.burn_in_supervisor import SUPERVISOR_FENCE
+
+    outside = sorted(set(_FENCE) - set(SUPERVISOR_FENCE))
+
+    assert not outside, (
+        f"песочнице запрещено трогать {outside}, а принимающий примет "
+        f"кандидата, который их тронул"
+    )
+
+
+def test_a_symlink_does_not_launder_a_denied_class(workspace: Path) -> None:
+    """Ревизия PR #334: классы спрашивались о СЫРОМ пути, а писал резолвленный.
+
+    Забор к этому времени уже сверяет `target.resolve()`, и сдерживание тоже:
+    ссылка ЗА пределы копии ловится. Осталась ссылка ВНУТРИ копии — с
+    невинным именем на запрещённый класс. `core/innocent.py` проходит и
+    `_is_denied`, и `_is_allowed`, а `_write_file`
+    (`core/self_apply_lane.py:481`) резолвит ссылку и пишет в рабочий процесс
+    CI. Класс файла определяется тем, ЧТО меняется, а не тем, как названо.
+    """
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    ci = workspace / ".github" / "workflows" / "ci.yml"
+    ci.parent.mkdir(parents=True, exist_ok=True)
+    ci.write_text("on: push\n", encoding="utf-8")
+    link = workspace / "core" / "innocent.py"
+    try:
+        link.symlink_to(ci)
+    except (OSError, NotImplementedError) as exc:  # Windows без права на ссылки
+        pytest.skip(f"символические ссылки недоступны: {exc}")
+
+    allowed, reason = sandbox_execution_verdict(
+        _proposal(workspace, "core/innocent.py"), workspace=workspace
+    )
+
+    assert not allowed, "ссылка отмыла запрещённый класс: правка уедет в CI"
+    assert "denied" in reason or "allowlist" in reason
+
+
+def test_an_honest_code_file_is_still_allowed(workspace: Path) -> None:
+    """Сосед: обычный файл кода в копии по-прежнему разрешён.
+
+    Иначе починка классов превратила бы песочницу в запрет на эксперимент.
+    """
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    (workspace / "core" / "widget.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    allowed, reason = sandbox_execution_verdict(
+        _proposal(workspace, "core/widget.py"), workspace=workspace
+    )
+
+    assert allowed, reason
+
+
+def test_the_term_is_checked_again_when_a_unit_is_reserved(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ревизия PR #334: срок проверялся один раз, при выдаче полномочия.
+
+    `load_sandbox_authority` сверяет `expires_at` и больше никто. Слив
+    перебирает заявки, каждая тянет полосу с полной батареей, то есть минуты;
+    полномочие, истёкшее посреди прохода, продолжало занимать единицы потолка
+    и разрешать изменения. Ровно этот класс уже был закрыт для стоков памяти
+    (`TermedSinks`) — тем же доводом и по тому же замеру.
+    """
+    from core.burn_in_sandbox import SandboxAuthority, reserve_sandbox_apply
+
+    expired = SandboxAuthority(
+        id="sandbox:2020-01-01T00:00:00+00:00",
+        workspace=str(Path(workspace).resolve()),
+        max_applies_per_day=20,
+        expires_at="2020-01-01T00:00:00+00:00",
+        reason="истёкшее полномочие",
+    )
+
+    assert not reserve_sandbox_apply(workspace, expired), (
+        "истёкшее полномочие заняло единицу потолка и разрешило изменение"
+    )
+
+
+def test_a_live_term_still_reserves(workspace: Path) -> None:
+    """Сосед: действующее полномочие по-прежнему занимает единицу."""
+    from datetime import datetime, timedelta, timezone
+
+    from core.burn_in_sandbox import SandboxAuthority, reserve_sandbox_apply
+
+    later = (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat()
+    live = SandboxAuthority(
+        id=f"sandbox:{later}",
+        workspace=str(Path(workspace).resolve()),
+        max_applies_per_day=20,
+        expires_at=later,
+        reason="действующее полномочие",
+    )
+
+    assert reserve_sandbox_apply(workspace, live)

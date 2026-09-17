@@ -48,6 +48,12 @@ PRODUCTION_DIRS = ("core", "cli", "app", "scripts", "tools")
 #: ради которого список и заведён: дерево создал тест, а не репозиторий.
 _FIXTURE_ANCHORS = frozenset({
     "tmp_path", "tmp", "ws", "workspace", "repo", "root", "target_dir", "worktree",
+    # 2026-09-17: дерево следующего цикла опыта самоприменения. Как и
+    # `worktree`, это git-worktree ВРЕМЕННОГО синтетического репозитория, и
+    # `core/widget.py` в нём — выдуманный файл, а не поставляемый код.
+    # Цена названа честно: настоящий закол под именем `cycle` пройдёт мимо
+    # сенсора — ровно как уже условлено для `root`, `repo` и `workspace`.
+    "cycle",
 })
 
 #: Known pins on 2026-09-03 — `file :: pinned path`. Ratchet, not amnesty:
