@@ -40,6 +40,7 @@ from typing import Any, Literal
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
+    _cost_totals,
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -197,6 +198,44 @@ _BACKOFF_STEP_SECONDS = 60
 _BACKOFF_MAX_SECONDS = 900
 
 
+def _ask_for_a_goal(
+    agent: Any, next_goal: Callable[[], Any], current_goal: str, cycle: int,
+) -> tuple[str, str, int, int]:
+    """Спросить источник о новой цели и вернуть её вместе с ценой вопроса.
+
+    Выбор цели — такой же платный вызов модели, как работа цикла, но он не
+    проходит ни через один `CampaignActionOutcome`, и до 18.09 не попадал в
+    счёт кампании вовсе. Замер живого прогона
+    `trace_f24a00c45aa4a20c77686b069208ba8b`: реестр отдал 13 вызовов, а
+    кампания записала 3 — ровно десять обращений за целью прошли мимо книг,
+    и `--max-cost-units 300` не видел реально потраченных 195.
+
+    Цена снимается вокруг ВСЕХ попыток, а не вокруг удачной: отказ стоит
+    столько же, сколько согласие, а три попытки на смену умножают счёт.
+    """
+    before_calls, before_cost = _cost_totals(agent)
+    candidate = check = ""
+    for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
+        try:
+            proposed = next_goal()
+        except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
+            # уронить прогон: не вышло — останавливаемся прежним путём.
+            _log(agent, "campaign_goal_switch_failed",
+                 {"cycle": cycle, "error": repr(exc)[:200]})
+            break
+        # Источник целей вправе отдать отчёт (цель + её критерий) или просто
+        # строку. Строка означает «критерий не назван» — честное состояние, а
+        # не ошибка: так задают цель четыре точки входа.
+        asked = str(getattr(proposed, "goal", proposed) or "").strip()
+        if asked and asked != current_goal:
+            candidate = asked
+            check = str(getattr(proposed, "success_check", "") or "").strip()
+            break
+    after_calls, after_cost = _cost_totals(agent)
+    return (candidate, check,
+            max(0, after_calls - before_calls), max(0, after_cost - before_cost))
+
+
 def run_campaign(
     config: CampaignConfig,
     *,
@@ -257,28 +296,13 @@ def run_campaign(
         попытка убивала прогон на любом молчании модели.
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
-        nonlocal current_success_check
+        nonlocal current_success_check, llm_calls_used, cost_units_used
         if next_goal is None or goal_switches >= _MAX_GOAL_SWITCHES:
             return False
-        switched = ""
-        switched_check = ""
-        for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
-            try:
-                proposed = next_goal()
-            except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
-                # уронить прогон: не вышло — останавливаемся прежним путём.
-                _log(agent, "campaign_goal_switch_failed",
-                     {"cycle": cycle, "error": repr(exc)[:200]})
-                return False
-            # Источник целей вправе отдать отчёт (цель + её критерий) или
-            # просто строку. Строка означает «критерий не назван» — честное
-            # состояние, а не ошибка: так задают цель четыре точки входа.
-            candidate = str(getattr(proposed, "goal", proposed) or "").strip()
-            candidate_check = str(getattr(proposed, "success_check", "") or "").strip()
-            if candidate and candidate != current_goal:
-                switched = candidate
-                switched_check = candidate_check
-                break
+        switched, switched_check, spent_calls, spent_cost = _ask_for_a_goal(
+            agent, next_goal, current_goal, cycle)
+        llm_calls_used += spent_calls
+        cost_units_used += spent_cost
         if not switched:
             return False
         goal_switches += 1
