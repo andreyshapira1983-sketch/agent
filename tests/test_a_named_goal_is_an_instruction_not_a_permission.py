@@ -189,3 +189,129 @@ def test_a_named_file_absent_from_the_backlog_is_refused_not_swapped(
     assert _default_grounded_selector(
         workspace, only_targets=frozenset({_ASKED}),
     )() is None
+
+
+def test_a_named_file_survives_the_slash_the_goal_was_written_with(
+    workspace: Path, monkeypatch,
+) -> None:
+    """Обратный слэш в цели не вправе отменить работу над названным файлом.
+
+    Ревизия PR #342 указала на сравнение голых строк, и она права, но живая
+    дверь одна, и я её измерил: `_PY_TARGET_RE` пропускает `\\`, а
+    `_named_target` отдаёт совпадение ДОСЛОВНО и без нормализации, и этот
+    дословный результат кладётся в `target_path` (`core/best_next_action.py`,
+    ветка намерения). Дальше он доезжает до `only_targets`. Кандидаты же
+    нормализованы у себя (`_candidate_concrete_targets` сам зовёт
+    `.replace("\\\\", "/")`), пересечение пусто — и агент отказывается от файла,
+    который его же просили починить, на одном лишь написании косой черты.
+
+    До PR #342 это было незаметно: названное лежало в РАЗРЕШЁННОМ, и промах
+    сравнения просто возвращал прежнюю подмену. PR #342 сделал названное
+    заданием и тем превратил промах в громкий отказ. Дефект мой.
+    """
+    import core.backlog_selector as sel
+    from core.self_build_producer import _default_grounded_selector
+
+    monkeypatch.setattr(sel, "load_backlog", lambda *a, **k: [_Candidate(_FOUND)])
+
+    windows_spelling = _FOUND.replace("/", "\\")
+    got = _default_grounded_selector(
+        workspace, only_targets=frozenset({windows_spelling}),
+    )()
+    assert got is not None and got.target_path == _FOUND, (
+        f"цель назвала {windows_spelling!r}, кандидат на {_FOUND!r} лежит в "
+        f"бэклоге, а отбор вернул {got!r}"
+    )
+
+
+def test_the_manager_reads_the_named_file_in_either_dialect(
+    workspace: Path,
+) -> None:
+    """Тот же промах жил во второй половине — у управляющего, и отдельно.
+
+    Отбор внутри селектора по умолчанию и сверка в `_manager_from_grounded` —
+    два разных сравнения; починить одно и объявить победу значило бы повторить
+    тот самый зазор, за который меня ловили. `./` здесь свидетель НЕ живого
+    пути: `\\b` в `_PY_TARGET_RE` и `strip(".")` в `resolve_goal_subject`
+    сегодня до него не пускают. Он тут потому, что нормализация обязана быть
+    одна на оба написания, а не заплата под один измеренный случай.
+    """
+    from core.self_build_producer import _manager_from_grounded
+
+    for spelling in (_FOUND, _FOUND.replace("/", "\\"), f"./{_FOUND}"):
+        out = _manager_from_grounded(
+            lambda: _Candidate(_FOUND), (_FOUND,), workspace=workspace,
+            named_targets=frozenset({spelling}),
+        )
+        assert out.decision == "selected", f"{spelling!r} -> {out.detail}"
+
+
+def test_normalising_a_slash_does_not_launder_a_path_that_escapes(
+    workspace: Path, monkeypatch,
+) -> None:
+    """Контроль: нормализация — не отмывание. Побег остаётся побегом.
+
+    Ревизия отдельно оговорила «сохранив существующее отклонение небезопасных
+    путей», и оговорка законная: сводить `\\` к `/` и срезать `./` дёшево, а
+    соблазн заодно свернуть `..` — это молча превратить выход из рабочей
+    области в совпадение с файлом внутри неё.
+    """
+    import core.backlog_selector as sel
+    from core.self_build_producer import _default_grounded_selector, _manager_from_grounded
+
+    monkeypatch.setattr(sel, "load_backlog", lambda *a, **k: [_Candidate(_FOUND)])
+
+    escape = f"../{_FOUND}"
+    assert _default_grounded_selector(
+        workspace, only_targets=frozenset({escape}),
+    )() is None
+    out = _manager_from_grounded(
+        lambda: _Candidate(_FOUND), (_FOUND,), workspace=workspace,
+        named_targets=frozenset({escape}),
+    )
+    assert out.decision == "no_target", out.detail
+
+
+def test_a_refusal_before_the_mapping_still_names_what_was_asked(
+    workspace: Path,
+) -> None:
+    """Отказ, случившийся раньше сверки, обязан назвать спрошенный файл.
+
+    Сверка с названным стоит ПОСЛЕ `map_backlog_candidate`, а тот умеет
+    отказывать сам — абстрактной целью, заповедным деревом, отсутствующим
+    модулем. На этом пути журнал печатал «split target has no module path» и
+    ни слова о том, что хартия называла файл. Двадцать циклов прогона
+    2026-09-17 были неразличимы именно так: в журнале стоял отказ, по которому
+    нельзя понять, что просьбу вообще уронили.
+
+    Молчаливый отказ и молчаливая подмена в журнале неразличимы — та же
+    строка, которой открывается этот файл.
+    """
+    from core.self_build_producer import _manager_from_grounded
+
+    out = _manager_from_grounded(
+        lambda: _Candidate("split:"), (_ASKED,), workspace=workspace,
+        named_targets=frozenset({_ASKED}),
+    )
+
+    assert out.decision == "no_target"
+    assert _ASKED in out.detail, out.detail
+    assert out.data.get("named_targets") == [_ASKED], out.data
+    # Причина самого отображения не вправе пропасть: она говорит, ПОЧЕМУ
+    # кандидат не годится, а названное — О ЧЁМ просили. Нужны обе.
+    assert "split target has no module path" in out.detail, out.detail
+
+
+def test_without_a_named_subject_the_mapping_refusal_is_unchanged(
+    workspace: Path,
+) -> None:
+    """Сторож против перечинки: никто не называл — прежний текст отказа цел."""
+    from core.self_build_producer import _manager_from_grounded
+
+    out = _manager_from_grounded(
+        lambda: _Candidate("split:"), (_ASKED,), workspace=workspace,
+    )
+
+    assert out.decision == "no_target"
+    assert out.detail == "split target has no module path"
+    assert "named_targets" not in out.data

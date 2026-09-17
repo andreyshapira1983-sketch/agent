@@ -103,3 +103,67 @@ def test_two_goals_about_one_file_share_one_permission() -> None:
         AutonomousRuntime._effects_dedup_key("split core/x.py")
         == AutonomousRuntime._effects_dedup_key("rewrite core/x.py")
     )
+
+
+@pytest.mark.parametrize("spelling", [
+    r"split core\self_build_producer.py",
+    "split ./core/self_build_producer.py",
+    "split CORE/self_build_producer.py",
+])
+def test_one_file_spelled_two_ways_asks_permission_once(spelling: str) -> None:
+    """Написание пути — тоже формулировка, и она тоже не вправе плодить заявки.
+
+    Ревизия PR #343 нашла дыру ровно там, где я закрывал предыдущую: ключ стал
+    предметным, но предмет берётся сырым. `_PY_TARGET_RE` — это
+    `[\\w/\\\\.-]+\\.py`, то есть обратный слэш он ПРОПУСКАЕТ, а `_named_target`
+    отдаёт совпадение дословно. Замер до починки: пять написаний одного файла
+    дали ТРИ разных ключа. Заявленная цель этого PR — «человек одобряет один
+    раз» — на двух из пяти написаний не выполнялась.
+
+    Дефект мой и того же рода, что чинился: я переставил ключ с фразы на
+    предмет и не спросил, сколько написаний у предмета.
+
+    `./` здесь свидетель НЕ живого пути: `\\b` в начале регулярки словом
+    границу не даёт, и точка в совпадение не попадает — эта строка сегодня
+    зелена и до починки. Оставлена, чтобы нормализация была одна на все
+    написания, а не заплата под два измеренных.
+    """
+    canonical = AutonomousRuntime._effects_dedup_key(
+        "split core/self_build_producer.py"
+    )
+
+    assert AutonomousRuntime._effects_dedup_key(spelling) == canonical, (
+        f"написание {spelling!r} завело бы отдельную заявку на тот же файл"
+    )
+
+
+def test_case_folding_the_key_does_not_fold_the_path_itself() -> None:
+    """Граница уступки по регистру: свёрнут КЛЮЧ, а не путь к файлу.
+
+    Складывать регистр в ключе — расширение: на POSIX `core/x.py` и `CORE/x.py`
+    могут быть двумя разными файлами, и одно право накроет оба. Беру его
+    сознательно, потому что рабочая область владельца — Windows, где это ОДИН
+    файл, и потому что под этим правом стоит второй забор: сама заплата
+    отдельно просит `self_apply_lane.run` с настоящим путём.
+
+    Чего делать нельзя — сворачивать регистр там, где путь потом открывают.
+    `_named_target` кормит `target_path` в `core/best_next_action.py`, и
+    свёрнутый там регистр сломал бы поиск файла на POSIX. Поэтому регистр
+    складывается ТОЛЬКО при счёте ключа.
+    """
+    from core.best_next_action_helpers import _named_target
+
+    assert _named_target("split CORE/Smart_Memory.py") == "CORE/Smart_Memory.py"
+    assert _named_target(r"split core\smart_memory.py") == "core/smart_memory.py"
+
+
+def test_a_worded_goal_is_not_folded_by_case() -> None:
+    """Сторож против перечинки: свёртка регистра не утекла в текстовую ветвь.
+
+    Цель без названного файла ключуется текстом, и текст — это текст: две
+    разные фразы, отличающиеся регистром, остаются двумя разными замыслами.
+    """
+    assert (
+        AutonomousRuntime._effects_dedup_key("найди и почини свои дефекты")
+        != AutonomousRuntime._effects_dedup_key("НАЙДИ и почини свои дефекты")
+    )
