@@ -197,15 +197,23 @@ def recover_orphaned_tasks(
     *,
     lock: Any,
     timeout_minutes: int = DEFAULT_ORPHAN_TIMEOUT_MINUTES,
+    finalise_exhausted: bool = True,
 ) -> list[RuntimeTask]:
-    """Finalise tasks abandoned by a dead process — startup only, under a lock."""
+    """Finalise tasks abandoned by a dead process — startup only, under a lock.
+
+    ``finalise_exhausted=False`` is the dry caller's word: re-queue what can be
+    re-queued, and leave the terminal verdict to a pass that applies effects.
+    """
     if not getattr(lock, "held", False):
         raise RuntimeError(
             "recover_orphaned_tasks requires the single-instance lock to be "
             "held; recovering while another consumer may hold a task in flight "
             "can run the same task twice"
         )
-    return store.recover_stuck(timeout_minutes=timeout_minutes)
+    return store.recover_stuck(
+        timeout_minutes=timeout_minutes,
+        finalise_exhausted=finalise_exhausted,
+    )
 
 
 #: How long a budget-parked checkpoint waits before it is offered again. The

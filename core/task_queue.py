@@ -730,6 +730,7 @@ class TaskQueueStore:
         *,
         timeout_minutes: int = 30,
         now: datetime | None = None,
+        finalise_exhausted: bool = True,
     ) -> list[RuntimeTask]:
         """Finalise tasks left ``running`` by a process that died mid-run.
 
@@ -754,6 +755,15 @@ class TaskQueueStore:
         it rather than this method. Called concurrently with a live consumer,
         this reclaims a task that is still executing and two processes run the
         same work.
+
+        ``finalise_exhausted=False`` keeps the second bullet from happening:
+        an orphan past its cap is left ``running`` for a later pass instead of
+        being buried. That is what a dry tick asks for. The narrow line was
+        drawn by measurement (burn-in review, 2026-09-17): the attempt itself
+        is spent by :meth:`mark_running`, and :func:`_failure_transition` never
+        spends one — it either re-queues with backoff, which is reversible, or
+        issues the terminal verdict, which is not. A pass that applies no
+        effects may do the first and may not do the second.
         """
         moment = (now or _now()).astimezone(timezone.utc)
         cutoff_ts = moment.timestamp() - timeout_minutes * 60
@@ -771,6 +781,9 @@ class TaskQueueStore:
                     live_ts = 0.0  # unparseable → treat as very old
                 if live_ts >= cutoff_ts:
                     out.append(task)  # still beating: leave it alone
+                    continue
+                if not finalise_exhausted and task.attempts >= task.max_attempts:
+                    out.append(task)  # dry pass: no verdict it cannot take back
                     continue
                 error = (
                     f"orphaned: no heartbeat for over {timeout_minutes} min "

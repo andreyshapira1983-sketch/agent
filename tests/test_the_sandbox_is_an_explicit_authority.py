@@ -27,6 +27,7 @@ WHY THIS EXISTS. Аудит автономности 2026-09-17, находки 
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,7 @@ def _marker(
     days: int = 1,
     max_applies: int = 20,
     sandbox: bool = True,
+    expires_at: str | None = None,
 ) -> None:
     (workspace / SANDBOX_MARKER).parent.mkdir(parents=True, exist_ok=True)
     (workspace / SANDBOX_MARKER).write_text(
@@ -65,7 +67,8 @@ def _marker(
             "sandbox": sandbox,
             "workspace": path if path is not None else str(workspace),
             "max_applies_per_day": max_applies,
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(),
+            "expires_at": expires_at if expires_at is not None else
+            (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(),
             "reason": "10-часовой burn-in, слово оператора",
         }),
         encoding="utf-8",
@@ -99,6 +102,7 @@ class _Lane:
     def __init__(self, status: str = "committed_local") -> None:
         self.status = status
         self.item_ids: list[str] = []
+        self.commit_hash: str | None = None
 
     def __call__(self, **kwargs: Any) -> dict:
         self.item_ids.append(kwargs["item_id"])
@@ -109,6 +113,7 @@ class _Lane:
             "files_changed": [],
             "tests_run": ["tests"],
             "rollback_status": "none",
+            "commit_hash": self.commit_hash,
         }
 
 
@@ -221,6 +226,91 @@ def test_the_sandbox_cannot_move_its_own_fence(workspace: Path) -> None:
         assert "fence" in reason or "забор" in reason or "sandbox" in reason
 
 
+def test_every_fence_entry_names_a_real_file() -> None:
+    """Забор, сторожащий несуществующий файл, не сторожит ничего.
+
+    Свидетель ревизии PR #333. В первом заходе в заборе стоял
+    `core/policy_gate.py` — файла с таким именем в дереве НЕТ вовсе, настоящий
+    `PolicyGate` живёт в `core/policy.py`. Запись выглядела как охрана ворот и
+    не охраняла их: предложение изменить `core/policy.py` проходило.
+    Проверять надо не написание, а существование названного.
+    """
+    from core.burn_in_sandbox import _FENCE, SANDBOX_MARKER
+
+    root = Path(__file__).resolve().parents[1]
+    # Метка — единственная запись, которой в производстве нет ПО ЗАМЫСЛУ: она
+    # появляется только внутри подготовленной копии. Остальные записи забора
+    # обязаны называть живой файл этого дерева.
+    missing = sorted(
+        rel for rel in _FENCE
+        if rel != SANDBOX_MARKER and not (root / rel).exists()
+    )
+    assert missing == [], (
+        f"забор называет несуществующие файлы: {missing} — "
+        "такая запись создаёт видимость охраны"
+    )
+
+
+def test_the_fence_covers_who_holds_authority() -> None:
+    """За забором обязаны быть все, кто решает, чем разрешено изменение.
+
+    Полномочие проверяется не в одном месте: ворота (`core/policy.py`),
+    замыкание петли одобрений (`core/rule_approved_apply.py`), учёт расхода
+    постоянного гранта (`core/autonomous_runtime.py`) и сама полоса. Оставить
+    хоть один снаружи — значит позволить песочнице переписать счетовода
+    собственных полномочий, не трогая ни одной записи забора.
+    """
+    from core.burn_in_sandbox import _FENCE
+
+    for rel in (
+        "core/policy.py",
+        "core/rule_approved_apply.py",
+        "core/autonomous_runtime.py",
+        "core/self_apply_lane.py",
+        "core/burn_in_sandbox.py",
+    ):
+        assert rel in _FENCE, f"{rel} решает о полномочии и не за забором"
+
+
+@pytest.mark.skipif(
+    os.path.normcase("A") != "a",
+    reason="файловая система различает регистр: вариант регистра — другой файл",
+)
+def test_a_case_variant_does_not_move_the_fence(workspace: Path) -> None:
+    """Забор сверялся по СТРОКЕ пути, а не по тому, на какой файл он указывает.
+
+    На файловой системе, не различающей регистр, `CORE/Burn_In_Sandbox.PY` —
+    тот же самый файл, но другая строка. Сравнение имён пропускало его.
+    """
+    allowed, reason = sandbox_execution_verdict(
+        _proposal(workspace, "CORE/Burn_In_Sandbox.PY"), workspace=workspace
+    )
+    assert not allowed, "вариант регистра снял забор: сверка идёт по строке"
+    assert "fence" in reason or "забор" in reason
+
+
+def test_a_symlink_does_not_move_the_fence(workspace: Path) -> None:
+    """Вторая форма того же обхода: ссылка с невинным именем.
+
+    `core/innocent.py` может указывать на модуль полномочия. Сверка по строке
+    этого не видит; сверка по тому, КУДА путь разрешается, видит.
+    """
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    fence_file = workspace / "core" / "burn_in_sandbox.py"
+    fence_file.write_text("# забор\n", encoding="utf-8")
+    link = workspace / "core" / "innocent.py"
+    try:
+        link.symlink_to(fence_file)
+    except (OSError, NotImplementedError) as exc:  # Windows без права на ссылки
+        pytest.skip(f"символические ссылки недоступны: {exc}")
+
+    allowed, reason = sandbox_execution_verdict(
+        _proposal(workspace, "core/innocent.py"), workspace=workspace
+    )
+    assert not allowed, "ссылка провела предложение за забор"
+    assert "fence" in reason or "забор" in reason
+
+
 def test_the_sandbox_cannot_touch_secrets_or_ci(workspace: Path) -> None:
     """Запрещённые классы полосы остаются запрещёнными и в песочнице."""
     for rel in (".env", ".github/workflows/ci.yml"):
@@ -327,4 +417,228 @@ def test_every_sandbox_attempt_is_logged(workspace: Path, lane: _Lane) -> None:
     assert "sandbox_authority_active" in kinds, "включённое полномочие не объявлено"
     assert any(k.startswith("rule_approval_refused") for k in kinds), (
         "отказ песочницы не записан"
+    )
+
+
+# ── Ревизия PR #333, дефект 5: кандидат доходит до принимающего ──────────────
+
+
+def test_a_sandbox_candidate_reaches_the_offer_ledger(
+    workspace: Path, lane: _Lane
+) -> None:
+    """Проверенный кандидат песочницы предъявляется принимающему.
+
+    Полоса делает локальный commit и возвращает дерево на исходную ветку. Без
+    предъявления этот SHA не знает никто, и `core/burn_in_supervisor` —
+    мёртвый код: принимать нечего. Свидетель стоит здесь, потому что
+    предъявление разрешено ТОЛЬКО полномочию песочницы.
+    """
+    import json
+
+    from core.burn_in_supervisor import offer_ledger
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _marker(workspace)
+    item = _pending_code(inbox, workspace, "core/foo.py")
+    lane.commit_hash = "b" * 40
+
+    events: list[tuple[str, dict]] = []
+    drain_rule_approved_proposals(
+        workspace, dry_run=False, env=_env(True),
+        log=lambda e, p: events.append((e, p)),
+    )
+
+    offered = [p for e, p in events if e == "burn_in_offer"]
+    assert offered, f"кандидат не предъявлен: {[e for e, _ in events]}"
+    assert offered[0]["sha"] == "b" * 40
+
+    rows = [
+        json.loads(line)
+        for line in offer_ledger(workspace).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [r["sha"] for r in rows] == ["b" * 40]
+    assert rows[0]["proposal_id"] == item.id
+
+
+def test_a_rolled_back_candidate_is_not_offered(workspace: Path, monkeypatch: Any) -> None:
+    """Откаченное не предъявляется: принимать нечего и незачем."""
+    import core.self_apply_bridge as bridge
+
+    from core.burn_in_supervisor import offer_ledger
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    fake = _Lane(status="rolled_back")
+    monkeypatch.setattr(bridge, "run_approved_self_apply", fake)
+
+    inbox = _inbox(workspace)
+    _marker(workspace)
+    _pending_code(inbox, workspace, "core/foo.py")
+
+    drain_rule_approved_proposals(workspace, dry_run=False, env=_env(True))
+
+    assert not offer_ledger(workspace).exists()
+
+
+# ── Ревизия PR #333: срок полномочия переживает построение профиля ───────────
+
+
+def test_the_extra_sinks_close_when_the_term_ends(workspace: Path) -> None:
+    """Расширенные стоки ЗАКРЫВАЮТСЯ по сроку, а не живут до конца процесса.
+
+    Кампания строит агента ОДИН раз (`agent_tick.py:1832`) и работает часами.
+    Срок песочницы проверялся только при построении профиля, поэтому полномочие,
+    истёкшее на втором часу, продолжало действовать до конца прогона: список
+    стоков — обычное множество строк, и о времени оно ничего не знает.
+
+    Почему не «перестроить агента»: `_durable_learning_suppressed` прямо
+    говорит, что `durable_writes` привязан к экземпляру на всю его жизнь и
+    API на прогон нет нарочно. Значит срок обязан ехать ВНУТРИ самого
+    списка — расширение носит свой срок с собой.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from core.burn_in_sandbox import memory_profile_for
+
+    base = {"durable_writes": frozenset({"episode", "hygiene"})}
+    soon = datetime.now(timezone.utc) + timedelta(seconds=1)
+    _marker(workspace, expires_at=soon.isoformat())
+
+    profile = memory_profile_for(base, workspace, env=_env(True))
+    sinks = profile["durable_writes"]
+
+    assert "procedure" in sinks, "полномочие не открыло сток вовсе"
+    assert hasattr(sinks, "contains_at"), (
+        "список стоков не носит срока: расширение переживёт полномочие, "
+        "потому что о времени множество строк ничего не знает"
+    )
+
+    later = soon + timedelta(seconds=1)
+    assert not sinks.contains_at("procedure", later), (
+        "истёкшее полномочие продолжает открывать сток обучения"
+    )
+    assert sinks.contains_at("episode", later), (
+        "производственный сток закрылся вместе со сроком песочницы — "
+        "закрываться обязано только расширение"
+    )
+
+
+def test_a_production_profile_is_a_plain_set(workspace: Path) -> None:
+    """Без полномочия профиль остаётся ровно тем, чем был. Ни одной новой строки."""
+    from core.burn_in_sandbox import memory_profile_for
+
+    base = {"durable_writes": frozenset({"episode", "hygiene"})}
+    profile = memory_profile_for(base, workspace, env={})
+
+    assert profile["durable_writes"] == base["durable_writes"]
+    assert type(profile["durable_writes"]) is frozenset
+
+
+def test_a_marker_that_does_not_name_an_absolute_path_is_not_authority(
+    workspace: Path, monkeypatch
+) -> None:
+    """Метка обязана называть АБСОЛЮТНЫЙ путь, а не «здесь».
+
+    Ревизия Copilot по PR #333. Докстринг модуля обещает, что требование
+    «метка называет свой путь» закрывает единственный по-настоящему опасный
+    случай: песочницу склонировали в производственное дерево ВМЕСТЕ с меткой.
+    Относительный путь это обещание отменяет: `"."` резолвится относительно
+    текущего каталога, а тик как раз и запускают из корня рабочей копии. Такая
+    метка переносима — она включает полномочие в ЛЮБОМ дереве, куда её
+    скопировали, то есть ровно в том случае, ради которого проверка заведена.
+    """
+    monkeypatch.chdir(workspace)
+    _marker(workspace, path=".")
+
+    assert load_sandbox_authority(workspace, env=_env(True)) is None, (
+        "метка с относительным путём включила полномочие: скопированная в "
+        "производственное дерево, она включит его и там"
+    )
+
+
+def test_a_marker_naming_this_copy_absolutely_is_still_authority(
+    workspace: Path, monkeypatch
+) -> None:
+    """Обратная сторона: строгость не должна ломать честную метку.
+
+    Без этого свидетеля правку выше можно «починить» отказом всегда.
+    """
+    monkeypatch.chdir(workspace)
+    _marker(workspace, path=str(workspace))
+
+    assert load_sandbox_authority(workspace, env=_env(True)) is not None, (
+        "метка назвала абсолютный путь именно этой копии и была отвергнута"
+    )
+
+
+def test_the_sandbox_verdict_refuses_what_the_lane_would_refuse(
+    workspace: Path,
+) -> None:
+    """Вердикт песочницы не вправе одобрять то, что полоса потом отвергнет.
+
+    Ревизия Copilot по PR #333. Вердикт проверял только запрещённые классы, а
+    полоса проверяет И разрешённые (`classify_patch_risk` -> `_is_allowed`).
+    Разрыв стоит дорого: заявка проходит ворота, ЗАНИМАЕТ единицу суточного
+    потолка, уезжает в полосу и там отвергается. Потолок потрачен на то, что
+    не могло примениться ни при каких условиях.
+    """
+    from core.self_apply_lane import classify_patch_risk
+
+    class _Change:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self.content = "{}\n"
+
+    class _Proposal:
+        files = (_Change("data/foo.json"),)
+
+    lane_ok, _, _ = classify_patch_risk(_Proposal.files)
+    assert not lane_ok, (
+        "предпосылка свидетеля рассыпалась: полоса теперь принимает "
+        "data/foo.json, и разрыва между воротами и полосой здесь нет"
+    )
+
+    allowed, reason = sandbox_execution_verdict(_Proposal(), workspace=workspace)
+    assert not allowed, (
+        "ворота песочницы одобрили то, что полоса отвергнет: потолок будет "
+        f"потрачен впустую (вердикт: {reason!r})"
+    )
+
+
+def test_an_exhausted_sandbox_is_not_reported_as_a_standing_grant(
+    workspace: Path, lane: _Lane
+) -> None:
+    """Исчерпанная песочница обязана назваться песочницей.
+
+    Ревизия Copilot по PR #333. `grant_id` в событии несёт префикс `sandbox:`
+    и потому не врёт, но повод отказа, который читает человек, и ИМЯ события
+    говорят про стоячий грант — полномочие другой природы, с другим сроком и
+    другим владельцем. Журнал, называющий не то разрешение, хуже молчания:
+    оператор пойдёт искать грант, которого нет.
+    """
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _marker(workspace, max_applies=1)
+    _pending_code(inbox, workspace, "core/a.py")
+    _pending_code(inbox, workspace, "core/b.py")
+
+    events: list[tuple[str, dict]] = []
+    out = drain_rule_approved_proposals(
+        workspace, dry_run=False, env=_env(True),
+        log=lambda e, p: events.append((e, p)),
+    )
+
+    assert out["applied"] == 1, out
+    assert "standing grant" not in out["blocked"], (
+        f"повод отказа называет стоячий грант, а работала песочница: "
+        f"{out['blocked']!r}"
+    )
+    kinds = [e for e, _ in events]
+    assert "standing_grant_exhausted" not in kinds, (
+        "исчерпание песочницы записано именем стоячего гранта: " + repr(kinds)
+    )
+    assert any("sandbox" in k and "exhaust" in k for k in kinds), (
+        "исчерпание песочницы не названо своим именем: " + repr(kinds)
     )

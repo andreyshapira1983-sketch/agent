@@ -27,7 +27,12 @@ AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclusive", "clarify"]
 
 
-@dataclass(frozen=True)
+#: `kw_only` не украшение. Ревизия PR #333: `success_check` встал ВТОРЫМ
+#: полем, и любой позиционный вызывающий с этого дня молча получал
+#: критерий успеха там, где передавал что-то другое. Порядок полей у
+#: растущей настройки — не договор, и притворяться договором он не
+#: должен: пусть ошибка будет громкой, а не тихой.
+@dataclass(frozen=True, kw_only=True)
 class AutonomousRuntimeConfig:
     goal: str = "project health"
     #: Критерий успеха ЭТОЙ цели — дословно тот, с которым её выбрала хартия.
