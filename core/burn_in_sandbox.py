@@ -126,7 +126,16 @@ def _flag_is_on(env: Any) -> bool:
 
 
 def _same_place(declared: str, workspace: Path) -> bool:
+    """Называет ли метка ИМЕННО эту копию — и называет ли абсолютно.
+
+    Относительный путь резолвится от текущего каталога, а тик запускают из
+    корня рабочей копии. Значит метка с `"."` переносима: она включит
+    полномочие в любом дереве, куда её скопировали, — ровно в том случае,
+    ради которого проверка и заведена (ревизия Copilot по PR #333).
+    """
     try:
+        if not Path(declared).is_absolute():
+            return False
         return Path(declared).resolve() == Path(workspace).resolve()
     except (OSError, ValueError):
         return False
@@ -206,7 +215,7 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
     строже или столь же строго: за пределы копии не писать, забор не двигать,
     запрещённые классы полосы не трогать.
     """
-    from core.self_apply_lane import _is_denied, _normalize_rel
+    from core.self_apply_lane import _is_allowed, _is_denied, _normalize_rel
 
     files = tuple(getattr(proposal, "files", ()) or ())
     if not files:
@@ -225,6 +234,16 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
             return False, f"{rel!r} is the sandbox fence; it is not moved from inside"
         if _is_denied(rel):
             return False, f"{rel!r} is a denied class (secrets, CI, infrastructure)"
+        # Разрешённые классы полосы спрашиваются ЗДЕСЬ, а не только там.
+        # Ревизия Copilot по PR #333: ворота проверяли лишь запрещённое, а
+        # полоса проверяет и разрешённое (`classify_patch_risk` -> `_is_allowed`).
+        # Разрыв стоил суточного потолка: заявка проходила ворота, ЗАНИМАЛА
+        # единицу и отвергалась полосой. Ворота, одобряющие неприменимое, —
+        # не ворота, а задержка. Шире производства песочница остаётся: код и
+        # тесты (`core`, `cli`, `tools`, `tests`) здесь разрешены, тогда как
+        # автономное производство пропускает один класс — новый документ.
+        if not _is_allowed(rel):
+            return False, f"{rel!r} is outside the lane allowlist; the lane would refuse it"
     return True, "sandbox authority: workspace-local change, verified by the lane"
 
 

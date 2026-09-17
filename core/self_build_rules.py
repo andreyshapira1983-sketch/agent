@@ -208,18 +208,30 @@ def lesson_from_apply_result(
     )
     tests = [str(t) for t in (result.get("tests_run") or []) if t]
     rollback = str(result.get("rollback_status") or "none")
+    lane_says = str(result.get("reason") or "").strip()
     verification = "; ".join(
         [
             f"tests: {', '.join(tests) if tests else 'none'}",
             f"status: {status}",
             f"rollback: {rollback}",
         ]
+        # Слово полосы о ПРИНЯТОМ кандидате — свидетельство проверки, и оно
+        # переезжает сюда, а не пропадает: иначе починка поля `failure` просто
+        # меняла бы одну потерю на другую. У отката это слово уходит в `failure`
+        # ниже, потому что там оно и есть сбой.
+        + ([lane_says] if lane_says and outcome != "rolled_back" else [])
     )
-    failure = str(result.get("reason") or "").strip()
+    # Сбой урока — то, ОТКУДА он вырос. Ревизия Copilot по PR #333: у принятого
+    # кандидата `reason` полосы — это её успех («targeted + full tests passed»),
+    # непустой всегда, поэтому запасной ход на повод заявки не срабатывал
+    # никогда, и «сбой» с «проверкой» несли один текст. У отката наоборот:
+    # повод полосы и ЕСТЬ сбой — что именно покраснело при проверке.
+    if outcome == "rolled_back":
+        failure = lane_says or str(reason or "").strip()
+    else:
+        failure = str(reason or "").strip() or lane_says
     if not failure:
-        # Принятая правка не несёт текста провала — исходным сбоем для неё
-        # служит повод, по которому её вообще предложили.
-        failure = str(reason or "").strip() or f"no failure recorded ({status})"
+        failure = f"no failure recorded ({status})"
     return Lesson(
         created_at=datetime.now(timezone.utc).isoformat(),
         origin=str(origin or "unknown"),

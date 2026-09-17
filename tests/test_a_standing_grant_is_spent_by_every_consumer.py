@@ -280,3 +280,56 @@ def test_a_grant_without_a_ceiling_reserves_nothing(workspace: Path) -> None:
 
     assert reserve_standing_grant_use(workspace, "g", max_per_day=0) is False
     assert standing_runs_today(workspace, "g") == 0
+
+
+def test_a_world_condition_does_not_burn_the_rest_of_the_grant(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Условие МИРА останавливает проход, а не съедает потолок заявка за заявкой.
+
+    Ревизия Copilot по PR #333 (замечание про нетерминальные исходы). Доказано
+    по коду: `core/self_apply_bridge._pending_excluding` считает ОСТАЛЬНЫЕ
+    ожидающие заявки, и полоса отвечает `approval_wait`, пока их число не ноль.
+    В сливе это значит вот что: заявки одобряются по одной, каждая ЗАНИМАЕТ
+    единицу суточного потолка, и почти каждая упирается в очередь, которую
+    сама же и составляет.
+
+    Нетерминальный исход — про состояние мира (очередь, бюджет, шлюз), а не
+    про заявку. Следующая заявка упрётся в ту же стену. Продолжать проход
+    значит тратить потолок на то, что заведомо не применится.
+
+    Что здесь НЕ утверждается: что расход надо возвращать. Резерв стоит до
+    применения нарочно — оборванный тик обязан оставить пережатую оценку
+    расхода, а не незамеченное полномочие.
+    """
+    import core.self_apply_bridge as bridge
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    seen: list[str] = []
+
+    def _wall(**kwargs: Any) -> dict:
+        seen.append(kwargs["item_id"])
+        return {
+            "status": "approval_wait",
+            "proposal_id": kwargs["item_id"],
+            "reason": "2 approval item(s) pending",
+        }
+
+    monkeypatch.setattr(bridge, "run_approved_self_apply", _wall)
+
+    inbox = _inbox(workspace)
+    grant = _grant(inbox, runs_per_day=5)
+    for name in ("first", "second", "third"):
+        _pending_document(inbox, workspace, name)
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert len(seen) == 1, (
+        "стена мира не остановила проход: полоса звана "
+        f"{len(seen)} раз(а), и каждый раз это стоило единицы потолка"
+    )
+    assert out["applied"] == 0, out
+    assert standing_runs_today(workspace, grant.id) == 1, (
+        "потолок потрачен на заявки, которые упёрлись бы в ту же стену: "
+        f"израсходовано {standing_runs_today(workspace, grant.id)}"
+    )

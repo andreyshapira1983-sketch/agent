@@ -461,3 +461,74 @@ def test_a_rollback_is_not_counted_as_applied(workspace: Path, monkeypatch: Any)
     assert out["applied"] == 0, f"откат засчитан применением: {out}"
     assert out["unapplied"] == 1
     assert out["attempted"] == 1, "попытка потеряна — расход стал невидимым"
+
+
+# ── Ревизия Copilot по PR #333: происхождение урока ─────────────────────────
+
+
+def test_an_accepted_lesson_carries_the_failure_it_came_from(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Поле `failure` принятого урока — ИСХОДНЫЙ сбой, а не текст проверки.
+
+    Урок обязан нести происхождение: из какого сбоя он вырос, что изменили,
+    чем проверили. Для принятого кандидата полоса кладёт в `reason` свой успех
+    («targeted + full tests passed; committed locally on temp branch»), и
+    запасной ход на повод заявки не срабатывал НИКОГДА — у принятого исхода
+    `reason` непуст всегда. В итоге «сбой» и «проверка» несли один и тот же
+    текст, а настоящий повод починки терялся в тот единственный момент, когда
+    урок и записывается.
+    """
+    from core.self_build_rules import lesson_from_apply_result
+
+    lesson = lesson_from_apply_result(
+        {
+            "status": "committed_local",
+            "reason": "targeted + full tests passed; committed locally on temp branch",
+            "files_changed": ["core/widget.py"],
+            "tests_run": ["tests/test_widget.py"],
+            "rollback_status": "none",
+        },
+        origin="burn_in_sandbox",
+        reason="ImportError: cannot import name _ToolRun",
+    )
+
+    assert lesson is not None
+    assert "tests passed" not in lesson.failure, (
+        f"«сбой» урока — это текст успешной проверки: {lesson.failure!r}"
+    )
+    assert "ImportError" in lesson.failure, (
+        f"исходный сбой не дошёл до урока: {lesson.failure!r}"
+    )
+    assert "tests passed" in lesson.verification, (
+        "текст проверки пропал из поля проверки"
+    )
+
+
+def test_a_rollback_lesson_still_carries_the_lane_reason(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Обратная сторона: у ОТКАЧЕННОГО повод полосы и есть сбой.
+
+    Без этого свидетеля правку выше можно «починить», всегда предпочитая повод
+    заявки, и тогда урок отката перестал бы говорить, ЧТО именно упало при
+    проверке — а это единственное, ради чего откат и запоминают.
+    """
+    from core.self_build_rules import lesson_from_apply_result
+
+    lesson = lesson_from_apply_result(
+        {
+            "status": "rolled_back",
+            "reason": "full battery failed: 3 tests red",
+            "files_changed": ["core/widget.py"],
+            "tests_run": ["tests/test_widget.py"],
+            "rollback_status": "restored",
+        },
+        origin="burn_in_sandbox",
+        reason="ImportError: cannot import name _ToolRun",
+    )
+
+    assert lesson is not None
+    assert "3 tests red" in lesson.failure, (
+        f"урок отката потерял то, что упало: {lesson.failure!r}"
+    )

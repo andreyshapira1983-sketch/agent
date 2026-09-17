@@ -533,3 +533,112 @@ def test_a_production_profile_is_a_plain_set(workspace: Path) -> None:
 
     assert profile["durable_writes"] == base["durable_writes"]
     assert type(profile["durable_writes"]) is frozenset
+
+
+def test_a_marker_that_does_not_name_an_absolute_path_is_not_authority(
+    workspace: Path, monkeypatch
+) -> None:
+    """Метка обязана называть АБСОЛЮТНЫЙ путь, а не «здесь».
+
+    Ревизия Copilot по PR #333. Докстринг модуля обещает, что требование
+    «метка называет свой путь» закрывает единственный по-настоящему опасный
+    случай: песочницу склонировали в производственное дерево ВМЕСТЕ с меткой.
+    Относительный путь это обещание отменяет: `"."` резолвится относительно
+    текущего каталога, а тик как раз и запускают из корня рабочей копии. Такая
+    метка переносима — она включает полномочие в ЛЮБОМ дереве, куда её
+    скопировали, то есть ровно в том случае, ради которого проверка заведена.
+    """
+    monkeypatch.chdir(workspace)
+    _marker(workspace, path=".")
+
+    assert load_sandbox_authority(workspace, env=_env(True)) is None, (
+        "метка с относительным путём включила полномочие: скопированная в "
+        "производственное дерево, она включит его и там"
+    )
+
+
+def test_a_marker_naming_this_copy_absolutely_is_still_authority(
+    workspace: Path, monkeypatch
+) -> None:
+    """Обратная сторона: строгость не должна ломать честную метку.
+
+    Без этого свидетеля правку выше можно «починить» отказом всегда.
+    """
+    monkeypatch.chdir(workspace)
+    _marker(workspace, path=str(workspace))
+
+    assert load_sandbox_authority(workspace, env=_env(True)) is not None, (
+        "метка назвала абсолютный путь именно этой копии и была отвергнута"
+    )
+
+
+def test_the_sandbox_verdict_refuses_what_the_lane_would_refuse(
+    workspace: Path,
+) -> None:
+    """Вердикт песочницы не вправе одобрять то, что полоса потом отвергнет.
+
+    Ревизия Copilot по PR #333. Вердикт проверял только запрещённые классы, а
+    полоса проверяет И разрешённые (`classify_patch_risk` -> `_is_allowed`).
+    Разрыв стоит дорого: заявка проходит ворота, ЗАНИМАЕТ единицу суточного
+    потолка, уезжает в полосу и там отвергается. Потолок потрачен на то, что
+    не могло примениться ни при каких условиях.
+    """
+    from core.self_apply_lane import classify_patch_risk
+
+    class _Change:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self.content = "{}\n"
+
+    class _Proposal:
+        files = (_Change("data/foo.json"),)
+
+    lane_ok, _, _ = classify_patch_risk(_Proposal.files)
+    assert not lane_ok, (
+        "предпосылка свидетеля рассыпалась: полоса теперь принимает "
+        "data/foo.json, и разрыва между воротами и полосой здесь нет"
+    )
+
+    allowed, reason = sandbox_execution_verdict(_Proposal(), workspace=workspace)
+    assert not allowed, (
+        "ворота песочницы одобрили то, что полоса отвергнет: потолок будет "
+        f"потрачен впустую (вердикт: {reason!r})"
+    )
+
+
+def test_an_exhausted_sandbox_is_not_reported_as_a_standing_grant(
+    workspace: Path, lane: _Lane
+) -> None:
+    """Исчерпанная песочница обязана назваться песочницей.
+
+    Ревизия Copilot по PR #333. `grant_id` в событии несёт префикс `sandbox:`
+    и потому не врёт, но повод отказа, который читает человек, и ИМЯ события
+    говорят про стоячий грант — полномочие другой природы, с другим сроком и
+    другим владельцем. Журнал, называющий не то разрешение, хуже молчания:
+    оператор пойдёт искать грант, которого нет.
+    """
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _marker(workspace, max_applies=1)
+    _pending_code(inbox, workspace, "core/a.py")
+    _pending_code(inbox, workspace, "core/b.py")
+
+    events: list[tuple[str, dict]] = []
+    out = drain_rule_approved_proposals(
+        workspace, dry_run=False, env=_env(True),
+        log=lambda e, p: events.append((e, p)),
+    )
+
+    assert out["applied"] == 1, out
+    assert "standing grant" not in out["blocked"], (
+        f"повод отказа называет стоячий грант, а работала песочница: "
+        f"{out['blocked']!r}"
+    )
+    kinds = [e for e, _ in events]
+    assert "standing_grant_exhausted" not in kinds, (
+        "исчерпание песочницы записано именем стоячего гранта: " + repr(kinds)
+    )
+    assert any("sandbox" in k and "exhaust" in k for k in kinds), (
+        "исчерпание песочницы не названо своим именем: " + repr(kinds)
+    )

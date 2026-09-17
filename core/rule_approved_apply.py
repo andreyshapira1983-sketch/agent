@@ -134,6 +134,7 @@ def drain_rule_approved_proposals(
     from core.safe_vcs import SafeVCS
     from core.self_apply_bridge import (
         SELF_APPLY_OPERATION,
+        TERMINAL_LANE_STATUSES,
         rehydrate_proposal,
         run_approved_self_apply,
     )
@@ -160,6 +161,13 @@ def drain_rule_approved_proposals(
         out["blocked"] = "no active standing grant"
         return out
     remaining = authority.remaining
+    # Полномочие называет себя СВОИМ именем. Ревизия Copilot по PR #333:
+    # исчерпанная песочница отказывала словами «стоячий грант» и событием
+    # `standing_grant_exhausted` — разрешением другой природы, с другим сроком
+    # и другим владельцем. Журнал, называющий не то разрешение, хуже молчания:
+    # оператор идёт искать грант, которого нет.
+    spent_word = "sandbox daily cap reached" if authority.sandbox else "standing grant spent for today"
+    spent_event = "sandbox_cap_exhausted" if authority.sandbox else "standing_grant_exhausted"
 
     for item in list(inbox.pending()):
         if getattr(item, "operation", "") != SELF_APPLY_OPERATION:
@@ -167,8 +175,8 @@ def drain_rule_approved_proposals(
         out["considered"] += 1
         if remaining <= 0:
             out["refused"] += 1
-            out["blocked"] = "standing grant spent for today"
-            _say("standing_grant_exhausted", {
+            out["blocked"] = spent_word
+            _say(spent_event, {
                 "approval_id": item.id, "grant_id": authority.id,
             })
             continue
@@ -204,8 +212,8 @@ def drain_rule_approved_proposals(
         # потратить одну и ту же последнюю единицу (ревизия PR #333).
         if not authority.reserve():
             out["refused"] += 1
-            out["blocked"] = "standing grant spent for today"
-            _say("standing_grant_exhausted", {
+            out["blocked"] = spent_word
+            _say(spent_event, {
                 "approval_id": item.id, "grant_id": authority.id,
             })
             continue
@@ -219,21 +227,40 @@ def drain_rule_approved_proposals(
             test_runner=RunTestsTool(workspace_root=Path(workspace)),
         )
         out["attempted"] += 1
+        status = str(result.get("status") or "")
         # `applied` считает ПРИМЕНЁННОЕ, а не начатое. Ревизия PR #333: счётчик
         # рос на любом исходе, включая откат и обрыв, поэтому по журналу выходило
         # больше применений, чем изменений в дереве, и разница молча копилась.
         # Расход полномочия при этом остаётся потраченным — попытка стоила
         # прогона батареи, — а `attempted` хранит честный итог.
-        if str(result.get("status") or "") == "committed_local":
+        if status == "committed_local":
             out["applied"] += 1
         else:
             out["unapplied"] += 1
+        # Нетерминальный исход — про состояние МИРА, а не про заявку: очередь
+        # одобрений, бюджет, шлюз. Следующая заявка упрётся в ту же стену,
+        # заняв ещё единицу потолка. Ревизия Copilot по PR #333; замерено:
+        # `core/self_apply_bridge._pending_excluding` считает ОСТАЛЬНЫЕ
+        # ожидающие, поэтому слив из трёх заявок тратил три единицы и не
+        # применял ничего. Заявка остаётся одобренной — так и задумано
+        # (`TERMINAL_LANE_STATUSES`, self_apply_bridge.py:438): оператор
+        # повторяет её сам, когда стена уйдёт.
+        if status not in TERMINAL_LANE_STATUSES:
+            out["blocked"] = out["blocked"] or f"lane refused: {status or 'unknown'}"
+            _say("rule_approved_lane_wall", {
+                "approval_id": item.id,
+                "grant_id": authority.id,
+                "status": status,
+                "reason": str(result.get("reason") or "")[:200],
+                "grant_runs_left": remaining,
+            })
+            break
         # Проверенный кандидат ПРЕДЪЯВЛЯЕТСЯ принимающему. Не принимается:
         # предъявление прав не даёт и голову опыта не двигает — оно лишь
         # сужает множество того, что `core/burn_in_supervisor.adopt_offer`
         # вообще станет рассматривать. Только в песочнице: производственный
         # путь никакого опыта не ведёт и предъявлять ему нечему.
-        if authority.sandbox and result.get("status") == "committed_local":
+        if authority.sandbox and status == "committed_local":
             _offer_to_supervisor(workspace, result, item_id=item.id, log=_say)
         # Исход становится знанием ЗДЕСЬ, без команды человека. До 2026-09-17
         # запись уроков жила ровно в одном месте — `cli/commands_self_apply.py`,
