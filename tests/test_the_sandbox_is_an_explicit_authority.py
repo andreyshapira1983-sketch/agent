@@ -26,8 +26,10 @@ WHY THIS EXISTS. Аудит автономности 2026-09-17, находки 
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -831,6 +833,108 @@ def test_every_fenced_tree_names_a_real_directory() -> None:
         assert (root / tree).is_dir(), f"{tree!r} не называет живой каталог"
 
 
+def _module_level_names(source: str) -> set[str]:
+    """Имена, которые модуль ДЕЙСТВИТЕЛЬНО заводит в своём пространстве.
+
+    Ревизия PR #340: первая редакция ходила `ast.walk` по всему дереву, то есть
+    засчитывала ввоз и присваивание внутри функции. Замер показал, что охват
+    ещё шире: засчитывались и имена методов, и присваивания в теле класса.
+    Сенсор, принимающий локальное имя за атрибут модуля, разрешает ровно тот
+    фантом, от которого заведён, — и мой собственный промах это доказывает:
+    в PR #340 я заметил, что `_is_denied` ввозится в песочницу ВНУТРИ функции,
+    поправил из-за этого комментарий и не поправил сенсор, который такую
+    ссылку принял бы.
+
+    Обходится только верхний уровень. В тела функций и классов не заходим:
+    метод — атрибут класса, а не модуля. В ветви модульного уровня (`if
+    TYPE_CHECKING`, `try/except ImportError`) заходим, потому что они заводят
+    настоящие атрибуты.
+    """
+    found: set[str] = set()
+
+    def target_names(node: ast.expr) -> set[str]:
+        if isinstance(node, ast.Name):
+            return {node.id}
+        if isinstance(node, ast.Starred):
+            return target_names(node.value)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return {n for el in node.elts for n in target_names(el)}
+        return set()  # атрибут или подписка модульного имени не заводит
+
+    def visit(body: list[ast.stmt]) -> None:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                found.add(node.name)  # тело НЕ обходим
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    found.add((alias.asname or alias.name).split(".")[0])
+            elif isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    found.update(target_names(tgt))
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                found.update(target_names(node.target))
+            elif isinstance(node, (ast.If, ast.Try, ast.For, ast.AsyncFor,
+                                   ast.While, ast.With, ast.AsyncWith)):
+                visit(node.body)
+                visit(getattr(node, "orelse", []))
+                visit(getattr(node, "finalbody", []))
+                for handler in getattr(node, "handlers", []):
+                    visit(handler.body)
+
+    visit(ast.parse(source).body)
+    return found
+
+
+def test_a_local_name_is_not_an_attribute_of_its_module(tmp_path: Path) -> None:
+    """Свидетель ревизии PR #340, и он о цене ошибки самого сенсора.
+
+    Сенсор фантомных ссылок отличает названное-и-существующее от
+    названного-и-вымышленного. Если он считает атрибутом модуля всё, что
+    где-либо в файле присвоено, то ссылка на местную переменную чужой функции
+    проходит — и инвариант, ради которого сенсор заведён, обходится.
+
+    Сверяется с истиной, а не с моим представлением о ней: модуль исполняется,
+    и ожидание берётся из его собственного пространства имён.
+    """
+    src = (
+        "import os\n"
+        "from pathlib import Path as _P\n"
+        "VERHNIJ = 1\n"
+        "A, B = 2, 3\n"
+        "if os.name:\n"
+        "    VETKA = 4\n"
+        "try:\n"
+        "    import json as _j\n"
+        "except ImportError:  # pragma: no cover\n"
+        "    _j = None\n"
+        "class K:\n"
+        "    pole_klassa = 5\n"
+        "    def metod(self):\n"
+        "        vnutri_metoda = 6\n"
+        "        return vnutri_metoda\n"
+        "def vneshnjaja():\n"
+        "    from core.self_apply_lane import _is_denied\n"
+        "    mestnaja = 7\n"
+        "    return _is_denied, mestnaja\n"
+    )
+    module = tmp_path / "obrazec.py"
+    module.write_text(src, encoding="utf-8")
+
+    namespace: dict[str, object] = {}
+    exec(compile(src, str(module), "exec"), namespace)  # noqa: S102
+    truth = {n for n in namespace if not n.startswith("__")}
+
+    assert _module_level_names(src) == truth
+
+    # Названы поимённо: именно их принимала первая редакция.
+    for local in ("mestnaja", "_is_denied", "vnutri_metoda", "pole_klassa",
+                  "metod"):
+        assert local not in _module_level_names(src), (
+            f"{local!r} — не атрибут модуля, сенсор принял бы фантом"
+        )
+
+
 def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
     """Третий в той же семье, и заведён на моей собственной ошибке.
 
@@ -854,10 +958,10 @@ def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
     `core.planner.SYNTHESIZER_SYSTEM` в `core/verifier.py`, который смягчён
     оговоркой «/ equivalents» и к охране отношения не имеет. Расширять охват
     на весь репозиторий — отдельное решение, и его принимает не этот тест.
-    """
-    import ast
-    import re
 
+    Что считать атрибутом модуля — у `_module_level_names`, и это правка
+    ревизии PR #340.
+    """
     root = Path(__file__).resolve().parents[1]
     guards = (
         "core/burn_in_sandbox.py",
@@ -868,18 +972,6 @@ def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
     # и `core.burn_in_sandbox._fence_prints`, и `core/burn_in_sandbox.py`.
     ref = re.compile(r"`(core|scripts|cli|app)[./](\w+)\.([A-Za-z_]\w*)`")
 
-    def defined_in(module: Path) -> set[str]:
-        found: set[str] = set()
-        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef)):
-                found.add(node.name)
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                found.add(node.id)
-            elif isinstance(node, ast.alias):
-                found.add((node.asname or node.name).split(".")[0])
-        return found
-
     phantoms = []
     for rel in guards:
         text = (root / rel).read_text(encoding="utf-8")
@@ -889,7 +981,9 @@ def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
             target = root / pkg / f"{mod}.py"
             if not target.exists():
                 continue  # намеренный фантом или приманка — не наше дело
-            if sym not in defined_in(target):
+            if sym not in _module_level_names(
+                target.read_text(encoding="utf-8")
+            ):
                 phantoms.append(f"{rel}: `{pkg}.{mod}.{sym}`")
 
     assert phantoms == [], (
