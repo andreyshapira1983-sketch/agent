@@ -104,8 +104,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).resolve()
-    head = experiment_head(repo)
-    pending = _pending_offers(repo, head)
 
     if args.next:
         # Единственный потребитель указателя опыта, и потому единственное
@@ -118,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
         # да ещё и выходил с успехом. Сверка, которую можно не заметить, — не
         # сверка. Отказ печатается словами, а не трассировкой: принимающего
         # читает человек.
+        #
+        # Голова здесь нарочно НЕ читается заранее (ревизия PR #336): раньше
+        # `experiment_head` звался до разбора глагола, и испорченный указатель
+        # давал трассировку прежде, чем управление доходило до этого
+        # обработчика, — то есть комментарий выше опровергался файлом, в
+        # котором он написан. `materialise_next_cycle` читает голову сам и
+        # делает это под замком, так что читать её здесь было и незачем.
         try:
             started = materialise_next_cycle(
                 repo, Path(args.next), sha=args.sha or None,
@@ -128,6 +133,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"следующий цикл стартует из {started}")
         print(f"дерево: {Path(args.next).resolve()}")
         return 0
+
+    # Тот же отказ словами и на остальных глаголах. Fail-closed чтение головы
+    # завёл PR #335: до него испорченный указатель вообще не был отказом.
+    # Значит трассировку на `--show` и на принятии завёл тот же мой коммит.
+    try:
+        head = experiment_head(repo)
+    except SupervisorError as exc:
+        print(f"отказ: {exc}")
+        return 2
+    pending = _pending_offers(repo, head)
 
     if args.show:
         print(f"голова опыта: {head}")
