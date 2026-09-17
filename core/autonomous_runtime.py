@@ -1202,8 +1202,22 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
     @staticmethod
     def _effects_dedup_key(goal: str) -> str:
-        """Один ключ на цель — им и заводят заявку, и находят её одобренной."""
-        digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()[:16]
+        """Один ключ на ПРЕДМЕТ цели, а не на её формулировку.
+
+        Прогон 2026-09-17 завёл восемь заявок об одном и том же за сто секунд:
+        ключ был хэшем ТЕКСТА, а текст цели хартия сочиняет моделью заново
+        каждый цикл — MIR-072 в новом платье. Уступка названа вслух: предмет
+        шире фразы, два замысла об одном файле делят одно право. Она ограничена
+        тем, что это право УРОВНЯ ПРОГОНА — сама заплата ниже по течению просит
+        отдельного одобрения `self_apply_lane.run`. Цель без названного файла
+        ключуется как раньше. Замер и границы:
+        tests/test_a_permission_outlives_the_wording_of_its_goal.py.
+        """
+        from core.best_next_action_helpers import _named_target
+
+        subject = _named_target(goal or "")
+        basis = f"subject:{subject}" if subject else (goal or "")
+        digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
         return f"autonomous_runtime.allow_effects:{digest}"
 
 
