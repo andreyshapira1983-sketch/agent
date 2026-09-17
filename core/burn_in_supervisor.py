@@ -211,6 +211,12 @@ def experiment_head(repo: Path) -> str:
     это головой репозитория — значит тихо отмотать цепочку к тому коду, с
     которого всё начиналось, и записать это в журнал как честный первый шаг.
     Повреждённая память останавливает опыт.
+
+    Испорченные БАЙТЫ — тоже повреждённая память (ревизия PR #337).
+    `read_text` падает раньше разбора, а `UnicodeDecodeError` — подкласс
+    `ValueError`, но не `OSError`, поэтому он пролетал мимо обоих
+    обработчиков: договор держался только для файла, который удалось
+    прочитать как текст.
     """
     repo = Path(repo)
     path = _head_file(repo)
@@ -218,6 +224,12 @@ def experiment_head(repo: Path) -> str:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return _git(repo, "rev-parse", "HEAD")
+    except UnicodeDecodeError as exc:
+        raise SupervisorError(
+            f"указатель опыта {path} повреждён на уровне байтов: {exc}. Опыт "
+            f"остановлен нарочно: молчаливый откат к голове репозитория стёр "
+            f"бы всю цепочку"
+        ) from exc
     except OSError as exc:
         raise SupervisorError(f"указатель опыта {path} не читается: {exc}") from exc
 
@@ -355,7 +367,12 @@ def _was_offered(repo: Path, sha: str) -> bool:
     path = offer_ledger(Path(repo))
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # `UnicodeDecodeError` — не `OSError` (ревизия PR #337), и без него
+        # реестр, испорченный на уровне байтов, ронял принимающего целиком.
+        # Соседняя оговорка ниже гласит, что одна испорченная строка не вправе
+        # остановить десятичасовой опыт; испорченные байты не вправе тем более,
+        # а умолчание здесь и так «не предъявлен», то есть отказ.
         return False
     for line in lines:
         line = line.strip()
