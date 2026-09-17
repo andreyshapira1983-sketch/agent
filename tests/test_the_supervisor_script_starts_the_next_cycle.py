@@ -257,19 +257,105 @@ def test_a_broken_head_is_refused_in_words_not_a_traceback(
     assert not (tmp_path / "cycle").exists()
 
 
+@pytest.mark.parametrize(
+    "verb",
+    [
+        pytest.param(["--show"], id="show"),
+        pytest.param(["--sha", "0" * 40], id="принять-названный"),
+        pytest.param([], id="принять-последнего"),
+    ],
+)
 def test_a_broken_head_is_refused_in_words_on_every_verb(
-    repo: Path, capsys: pytest.CaptureFixture[str]
+    repo: Path, capsys: pytest.CaptureFixture[str], verb: list[str]
 ) -> None:
-    """То же и для `--show`: трассировку завёл я, значит убирать мне.
+    """Трассировку завёл я, значит убирать мне — и на всех глаголах сразу.
 
     Ревизия назвала только `--next`, но до fail-closed чтения (PR #335)
     испорченный указатель вообще не был отказом. Значит трассировку на
     остальных глаголах завёл тот же мой коммит, и чинится она здесь же, а не
     когда-нибудь.
+
+    Имя обещало «на каждом глаголе», а тело спрашивало один `--show` (ревизия
+    PR #337). Обещание теста — такое же утверждение, как и его проверка; если
+    имя шире тела, читатель верит имени. Теперь спрошены все три глагола,
+    которым нужна голова.
     """
     _break_the_head(repo)
 
-    code = script.main(["--repo", str(repo), "--show"])
+    code = script.main(["--repo", str(repo), *verb])
 
     assert code == 2, "трассировка вместо отказа"
     assert "отказ:" in capsys.readouterr().out
+
+
+# ── ревизия PR #337: испорчены БАЙТЫ, а не только синтаксис ──────────────────
+
+
+def _break_the_bytes_of_the_head(repo: Path) -> None:
+    """Испортить указатель так, как его портит обрыв записи на уровне байтов.
+
+    Прошлый свидетель ломал только синтаксис JSON, а `read_text(encoding=
+    "utf-8")` падает РАНЬШЕ разбора. `UnicodeDecodeError` — подкласс
+    `ValueError`, но не `OSError`, поэтому он пролетал мимо обоих обработчиков.
+    """
+    from core.burn_in_supervisor import _head_file
+
+    head = _head_file(repo)
+    head.parent.mkdir(parents=True, exist_ok=True)
+    head.write_bytes(b'{"sha": "\xff\xfe\x00"}')
+
+
+def test_a_head_broken_at_the_byte_level_is_also_a_refusal(repo: Path) -> None:
+    """Договор «испорченный указатель — это отказ» знал только про синтаксис.
+
+    Ревизия PR #337. Обещание было дано про повреждённую память опыта вообще,
+    а держалось только для файла, который удалось прочитать как текст. Файл,
+    испорченный на уровне байтов, — та же повреждённая память и тот же отказ.
+    """
+    from core.burn_in_supervisor import SupervisorError, experiment_head
+
+    _break_the_bytes_of_the_head(repo)
+
+    with pytest.raises(SupervisorError):
+        experiment_head(repo)
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        pytest.param(["--show"], id="show"),
+        pytest.param([], id="принять-последнего"),
+    ],
+)
+def test_bytes_broken_at_the_byte_level_are_refused_in_words(
+    repo: Path, capsys: pytest.CaptureFixture[str], verb: list[str]
+) -> None:
+    """И то же самое целиком, через внешний запуск."""
+    _break_the_bytes_of_the_head(repo)
+
+    code = script.main(["--repo", str(repo), *verb])
+
+    assert code == 2, "трассировка вместо отказа"
+    assert "отказ:" in capsys.readouterr().out
+
+
+def test_a_ledger_broken_at_the_byte_level_does_not_stop_the_experiment(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Тот же провал был у обоих читателей реестра, и он мой же.
+
+    `_pending_offers` и `core.burn_in_supervisor._was_offered` оба берегутся
+    `except OSError`, который `UnicodeDecodeError` не ловит. Соседняя строка в
+    тех же функциях гласит: «одна испорченная строка не вправе остановить
+    десятичасовой опыт» — испорченные байты не вправе тем более.
+    """
+    from core.burn_in_supervisor import offer_ledger
+
+    ledger = offer_ledger(repo)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_bytes(b'{"sha": "\xff\xfe"}\n')
+
+    code = script.main(["--repo", str(repo), "--show"])
+
+    assert code == 0, "испорченные байты реестра остановили опыт"
+    assert "ожидают: нет" in capsys.readouterr().out
