@@ -207,13 +207,69 @@ def test_a_wrong_sha_is_refused_even_when_a_tree_is_asked_for(
     глагол `--next` звал `materialise_next_cycle` без него, и
     `--next --sha <чужой>` заводил дерево на текущей голове да ещё и выходил
     с успехом. Сверка, которую можно не заметить, — не сверка.
-    """
-    import scripts.burn_in_supervisor as cli
 
-    code = cli.main([
+    Печать спрашивается вслух (ревизия PR #336): `capsys` был объявлен и не
+    использован, а ведь именно словесный отказ и есть половина утверждения —
+    принимающего читает человек, и «не 0» ему ни о чём не говорит.
+    """
+    code = script.main([
         "--repo", str(repo), "--next", str(tmp_path / "cycle"),
         "--sha", "0" * 40,
     ])
 
     assert code != 0, "дерево заведено вопреки названному не тому коммиту"
     assert not (tmp_path / "cycle").exists()
+    printed = capsys.readouterr().out
+    assert "отказ:" in printed, "отказ молчит"
+    assert "0" * 40 in printed, "отказ не называет коммит, из-за которого он случился"
+
+
+# ── ревизия PR #336: отказ словами на всех глаголах ──────────────────────────
+
+
+def _break_the_head(repo: Path) -> None:
+    """Испортить указатель опыта ровно так, как это делает обрыв питания."""
+    from core.burn_in_supervisor import _head_file
+
+    head = _head_file(repo)
+    head.parent.mkdir(parents=True, exist_ok=True)
+    head.write_text("{\"sha\": \"обор", encoding="utf-8")
+
+
+def test_a_broken_head_is_refused_in_words_not_a_traceback(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`experiment_head` звался ДО разбора глагола (ревизия PR #336).
+
+    В PR #335 чтение головы стало fail-closed: испорченный указатель — это
+    `SupervisorError`, а не «опыт не начинался». В PR #336 я обернул `--next`
+    и написал в комментарии «отказ печатается словами, а не трассировкой:
+    принимающего читает человек». Тремя строками выше стояло
+    `head = experiment_head(repo)` вне всякого обработчика, то есть комментарий
+    опровергался собственным файлом.
+    """
+    _break_the_head(repo)
+
+    code = script.main(["--repo", str(repo), "--next", str(tmp_path / "cycle")])
+
+    assert code == 2, "трассировка вместо отказа"
+    assert "отказ:" in capsys.readouterr().out
+    assert not (tmp_path / "cycle").exists()
+
+
+def test_a_broken_head_is_refused_in_words_on_every_verb(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """То же и для `--show`: трассировку завёл я, значит убирать мне.
+
+    Ревизия назвала только `--next`, но до fail-closed чтения (PR #335)
+    испорченный указатель вообще не был отказом. Значит трассировку на
+    остальных глаголах завёл тот же мой коммит, и чинится она здесь же, а не
+    когда-нибудь.
+    """
+    _break_the_head(repo)
+
+    code = script.main(["--repo", str(repo), "--show"])
+
+    assert code == 2, "трассировка вместо отказа"
+    assert "отказ:" in capsys.readouterr().out
