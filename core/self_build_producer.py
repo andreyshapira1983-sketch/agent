@@ -521,6 +521,7 @@ def _manager_from_grounded(
         workspace=workspace,
         allowed_targets=effective_allowed,
     )
+    wanted = {_norm_target(t) for t in named_targets} - {""}
     if not mapping.ok or mapping.candidate is None:
         rejected = str(getattr(candidate, "target_path", "") or "").strip()
         data = {
@@ -529,7 +530,15 @@ def _manager_from_grounded(
         }
         if mapping.mapping_rule:
             data["mapping_rule"] = mapping.mapping_rule
-        return RoleOutput("manager", "no_target", mapping.reason, data)
+        reason = mapping.reason
+        # Ревизия PR #342: сверка с названным стоит НИЖЕ, а отображение умеет
+        # отказывать само. На этом пути журнал печатал одну лишь причину
+        # отображения — по ней нельзя понять, что просьбу вообще уронили, и
+        # отказ становился неотличим от подмены, против которой писался #342.
+        if wanted:
+            data["named_targets"] = sorted(wanted)
+            reason = f"the goal named {', '.join(sorted(wanted))}; {reason}"
+        return RoleOutput("manager", "no_target", reason, data)
 
     mapped_candidate = mapping.candidate
     target = mapped_candidate.target_path
@@ -537,14 +546,14 @@ def _manager_from_grounded(
     evidence_ref = mapped_candidate.evidence_ref
     if not target:
         return RoleOutput("manager", "no_target", "grounded candidate has no target")
-    if named_targets and target not in named_targets:
-        asked = ", ".join(sorted(named_targets))
+    if wanted and _norm_target(target) not in wanted:
+        asked = ", ".join(sorted(wanted))
         return RoleOutput(
             "manager",
             "no_target",
             f"the goal named {asked}; the grounded backlog offered {target!r} "
             f"instead, and a named subject is an instruction, not a permission",
-            {"rejected_target": target, "named_targets": sorted(named_targets)},
+            {"rejected_target": target, "named_targets": sorted(wanted)},
         )
     if mapping.decision != "mapped" and target not in effective_allowed:
         return RoleOutput(
@@ -609,10 +618,32 @@ def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> boo
     )
 
 
+def _norm_target(raw: Any) -> str:
+    """Одно написание пути для СРАВНЕНИЯ — и ничего сверх того.
+
+    Ревизия PR #342: названный предмет сверялся голой строкой, а написаний у
+    одного пути несколько. Живая дверь измерена одна — `_PY_TARGET_RE`
+    пропускает `\\`, `_named_target` отдаёт совпадение дословно, и
+    `core/best_next_action.py` кладёт это дословное в `target_path`. Кандидаты
+    же нормализованы у себя, пересечение пусто, и агент отказывается от файла,
+    который его же просили починить. `./` сюда сегодня не доезжает, но
+    нормализация обязана быть одна на оба написания, иначе это заплата под
+    один случай, а не правило.
+
+    `..` НЕ сворачивается намеренно: свести побег из рабочей области к
+    совпадению с файлом внутри неё — это не нормализация, а отмывание. Путь,
+    который никуда не годится, обязан остаться негодным.
+    """
+    cleaned = str(raw or "").replace("\\", "/").strip()
+    while cleaned.startswith("./"):
+        cleaned = cleaned[2:]
+    return cleaned
+
+
 def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[str]:
     """Best-effort set of concrete paths a backlog candidate resolves to."""
     out: set[str] = set()
-    raw = str(getattr(candidate, "target_path", "") or "").replace("\\", "/").strip()
+    raw = _norm_target(getattr(candidate, "target_path", ""))
     if raw:
         out.add(raw)
     try:
@@ -622,7 +653,7 @@ def _candidate_concrete_targets(candidate: Any, workspace: str | Path) -> set[st
             allowed_targets=DEFAULT_CANDIDATE_TARGETS,
         )
         if mapping.ok and mapping.candidate is not None:
-            concrete = str(mapping.candidate.target_path or "").replace("\\", "/").strip()
+            concrete = _norm_target(mapping.candidate.target_path)
             if concrete:
                 out.add(concrete)
     except Exception:  # noqa: BLE001, S110 — a broken mapper must never break selection
@@ -679,11 +710,13 @@ def _default_grounded_selector(
                 ]
             # Названный предмет сужает бэклог до себя: иначе кандидат на него,
             # лежащий ниже верхушки, до управляющего не доедет никогда.
+            # Написание косой черты не вправе решать, дойдёт ли (ревизия #342).
             if only_targets:
+                wanted = {_norm_target(t) for t in only_targets} - {""}
                 candidates = [
                     c
                     for c in candidates
-                    if _candidate_concrete_targets(c, workspace) & only_targets
+                    if _candidate_concrete_targets(c, workspace) & wanted
                 ]
             # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
             # top-ranked candidate the producer can actually act on — directly

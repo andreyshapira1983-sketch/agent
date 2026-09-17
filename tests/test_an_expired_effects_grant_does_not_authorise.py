@@ -126,9 +126,19 @@ def test_the_standing_grant_already_did_this(tmp_path) -> None:
 
 @pytest.mark.parametrize("goal", ["цель один", "цель два"])
 def test_the_key_is_still_scoped_by_goal(goal: str) -> None:
-    """Граница: ключ остаётся привязкой к цели, а не к чему-то шире."""
-    from core.autonomous_runtime import AutonomousRuntime
+    """Граница: ключ остаётся привязкой к цели, а не к чему-то шире.
 
+    Обещание СУЖЕНО 2026-09-17 и зелено здесь не случайно: эти цели не называют
+    файла, поэтому ключ по-прежнему берётся от текста. Цель, называющая файл,
+    с тех пор ключуется ПРЕДМЕТОМ и переживает переформулировку — замер и
+    граница в `tests/test_a_permission_outlives_the_wording_of_its_goal.py`.
+    """
+    from core.autonomous_runtime import AutonomousRuntime
+    from core.best_next_action_helpers import _named_target
+
+    assert _named_target(goal) is None, (
+        "цель стала называть файл — этот свидетель проверяет уже не ту ветвь"
+    )
     key = AutonomousRuntime._effects_dedup_key(goal)
     assert key.startswith("autonomous_runtime.allow_effects:")
     assert key != AutonomousRuntime._effects_dedup_key(goal + " ещё")
