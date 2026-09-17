@@ -829,3 +829,70 @@ def test_every_fenced_tree_names_a_real_directory() -> None:
     for tree in SUPERVISOR_FENCED_TREES:
         assert tree.endswith("/"), f"{tree!r}: дерево записывается со слэшем"
         assert (root / tree).is_dir(), f"{tree!r} не называет живой каталог"
+
+
+def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
+    """Третий в той же семье, и заведён на моей собственной ошибке.
+
+    Ревизия PR #339: комментарий над `SUPERVISOR_FENCED_TREES` ссылался на
+    `core/burn_in_sandbox._FENCED_TREES` — символа с таким именем нет. Я завёл
+    забор дерева и в песочнице, померил, увидел, что он там лишний, откатил
+    код — и не откатил указатель на него. Получилась запись ровно той формы,
+    от которой заведены два соседних сенсора: она называет механизм, которого
+    нет, и следующий читатель пошёл бы искать охрану не туда.
+
+    Отличие от соседей в том, ЧТО проверяется: не запись забора, а прозаическая
+    ссылка. Поэтому проверка нарочно узка и берёт только ссылки вида
+    `модуль.СИМВОЛ` в модуль, который РЕАЛЬНО существует. Этот репозиторий
+    намеренно называет несуществующее, когда описывает дефект или приманку
+    (`core/policy_gate.py` — фантом ревизии PR #333, `core/innocent.py` — имя
+    в примере обхода), и такие ссылки обязаны остаться разрешены.
+
+    Охвачены только файлы охраны: в них цена вымышленного механизма выше
+    всего. Замер на 2026-09-17: по `core/`, `scripts/`, `cli/`, `app/` таких
+    ссылок 47 и фантомов среди них два — этот и предсуществующий
+    `core.planner.SYNTHESIZER_SYSTEM` в `core/verifier.py`, который смягчён
+    оговоркой «/ equivalents» и к охране отношения не имеет. Расширять охват
+    на весь репозиторий — отдельное решение, и его принимает не этот тест.
+    """
+    import ast
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    guards = (
+        "core/burn_in_sandbox.py",
+        "core/burn_in_supervisor.py",
+        "scripts/burn_in_supervisor.py",
+    )
+    # Пакет, модуль, символ. Разделитель и точка, и слэш: репозиторий пишет
+    # и `core.burn_in_sandbox._fence_prints`, и `core/burn_in_sandbox.py`.
+    ref = re.compile(r"`(core|scripts|cli|app)[./](\w+)\.([A-Za-z_]\w*)`")
+
+    def defined_in(module: Path) -> set[str]:
+        found: set[str] = set()
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                found.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                found.add(node.id)
+            elif isinstance(node, ast.alias):
+                found.add((node.asname or node.name).split(".")[0])
+        return found
+
+    phantoms = []
+    for rel in guards:
+        text = (root / rel).read_text(encoding="utf-8")
+        for pkg, mod, sym in ref.findall(text):
+            if sym == "py":
+                continue  # это имя файла, а не символ
+            target = root / pkg / f"{mod}.py"
+            if not target.exists():
+                continue  # намеренный фантом или приманка — не наше дело
+            if sym not in defined_in(target):
+                phantoms.append(f"{rel}: `{pkg}.{mod}.{sym}`")
+
+    assert phantoms == [], (
+        f"комментарий называет несуществующий символ: {phantoms} — "
+        "такая ссылка создаёт видимость механизма"
+    )
