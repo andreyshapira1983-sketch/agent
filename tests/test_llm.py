@@ -956,11 +956,11 @@ class TestLargeOutputContinuation:
         assert len(llm._client.messages.calls) == 1
 
     def test_empty_continuation_escalates_then_stops(self):
-        # A model that reports truncation but returns no further text must not
-        # be re-asked with the SAME budget — that request already proved it
-        # cannot produce visible output. The chain escalates the per-leg budget
-        # instead, and stops once the ceiling is reached. It must still be
-        # bounded: no infinite loop, and whatever text we have is returned.
+        # A model that reports truncation must not be re-asked with the SAME
+        # budget — that request already proved it cannot finish. The chain
+        # escalates the per-leg budget instead, and stops once the ceiling is
+        # reached. It must still be bounded: no infinite loop, and whatever
+        # text we have is returned.
         llm = _scripted_anthropic_llm([
             ("AAAA", 5, 5, "max_tokens"),
             ("", 1, 0, "max_tokens"),
@@ -973,11 +973,16 @@ class TestLargeOutputContinuation:
         assert out == "AAAA"
         calls = llm._client.messages.calls
         budgets = [c["max_tokens"] for c in calls]
-        # First retry reuses the original budget (the leg that produced "AAAA"
-        # DID return text, so there is no evidence the budget is the problem).
-        assert budgets[0] == budgets[1]
-        # After an empty leg the budget escalates, and never repeats a value
-        # that already came back empty.
+        # This line used to read `budgets[0] == budgets[1]`, justified as "the
+        # leg that produced AAAA DID return text, so there is no evidence the
+        # budget is the problem". A live run on 2026-09-17 refuted it: five
+        # productive legs, each cut at the same 2048, 10 240 output tokens and
+        # 80 810 input tokens for one answer worth ~11 000. A leg that wrote
+        # text AND hit max_tokens is evidence the budget is exactly the
+        # problem — it says the answer did not fit, not that the model is mute.
+        assert budgets[1] > budgets[0]
+        # The budget keeps escalating, and never repeats a value below the
+        # ceiling that already came back truncated.
         assert budgets[2] > budgets[1]
         assert budgets == sorted(budgets)
         # Bounded: capped by the escalation ceiling and the continuation cap.

@@ -373,12 +373,21 @@ class LLM:
         budget_ceiling = max(round_budget, round_budget * _CONTINUE_ESCALATION_CAP)
         last_leg_empty = not text
         while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
-            if last_leg_empty:
-                if round_budget >= budget_ceiling:
-                    # Already at the ceiling and still nothing came back.
-                    # Stop paying for a request that cannot succeed.
-                    break
-                round_budget = min(round_budget * 2, budget_ceiling)
+            # Escalate on EVERY truncated leg, not only on an empty one. A leg
+            # that wrote text and still hit the ceiling proved the same thing
+            # an empty leg proves — this budget cannot finish the answer — and
+            # re-asking at the identical number re-sends the WHOLE prompt for
+            # nothing. Measured live 2026-09-17: one synthesizer answer spent
+            # 5 x 2048 output tokens (every leg, still cut) and was billed
+            # 80 810 input tokens for a prompt worth ~11 000, because the flat
+            # budget bought five legs that could never reach the end. The
+            # answer's completion marker sits at the end, so it never arrived
+            # either — the cost and the "parse=missing" verdict are one defect.
+            if last_leg_empty and round_budget >= budget_ceiling:
+                # Already at the ceiling and still nothing came back.
+                # Stop paying for a request that cannot succeed.
+                break
+            round_budget = min(round_budget * 2, budget_ceiling)
             rounds += 1
             cont_text, stop_reason = self._complete_once(
                 system, user, round_budget, temperature, prior=combined
