@@ -68,12 +68,27 @@ def repo(tmp_path: Path) -> Path:
     (root / "core").mkdir()
     (root / "core" / "widget.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "core" / "policy.py").write_text("GATE = True\n", encoding="utf-8")
+    # Ровно те строки, что стоят в `.gitignore` настоящего репозитория. Без
+    # них снасть расходится с жизнью в существенном месте: полоса делает
+    # `git add -A`, и указатель опыта уезжал бы в коммит кандидата.
+    (root / ".gitignore").write_text(
+        "state/burn_in_head.json\n"
+        "state/burn_in_offers.jsonl\n"
+        "state/burn_in_adoptions.jsonl\n",
+        encoding="utf-8",
+    )
     _git(root, "add", "-A")
     _git(root, "commit", "--quiet", "-m", "seed")
     return root
 
 
-def _candidate(repo: Path, *, path: str = "core/widget.py", text: str = "VALUE = 2\n") -> str:
+def _candidate(
+    repo: Path,
+    *,
+    path: str = "core/widget.py",
+    text: str = "VALUE = 2\n",
+    force: bool = False,
+) -> str:
     """Проверенный кандидат в боковой ветке — ровно то, что оставляет полоса."""
     base = _git(repo, "rev-parse", "HEAD")
     branch = f"self-apply-candidate-{_git(repo, 'rev-list', '--count', '--all')}-{len(text)}"
@@ -81,6 +96,8 @@ def _candidate(repo: Path, *, path: str = "core/widget.py", text: str = "VALUE =
     target = repo / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
+    if force:
+        _git(repo, "add", "-f", path)
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "self-apply: candidate")
     sha = _git(repo, "rev-parse", "HEAD")
@@ -389,3 +406,302 @@ def test_the_lane_still_leaves_the_repository_where_it_found_it() -> None:
         "полоса перестала возвращать дерево на исходную ветку — "
         "принятие переехало внутрь того, кто себя меняет"
     )
+
+
+# ── 6. петля замыкается: следующий цикл СТАРТУЕТ из принятого ────────────────
+#
+# Ревизия Copilot по PR #334, замечание к `next_start_point`:
+#
+#     «`next_start_point()` только читает указатель; ни один производственный
+#     путь его не потребляет. `run_self_apply_lane` по-прежнему создаёт свою
+#     временную ветку от головы ТЕКУЩЕГО checkout, а принятие нарочно не
+#     трогает main, поэтому после успешного принятия следующая полоса снова
+#     работает на старом коде.»
+#
+# Замер по живому дереву подтверждает буквально: `core/self_apply_lane.py:644`
+# берёт `original_branch = vcs.current_branch()`, а :673 —
+# `vcs.create_temp_branch(branch)` — ответвляется оттуда же. Указателя опыта
+# не читает никто. Значит PR #334 научился ЗАПИСЫВАТЬ принятие и не научился
+# из него СТАРТОВАТЬ: цепочка была метаданными.
+#
+# Замыкает её не агент, а принимающий: он и ставит рабочее дерево следующего
+# цикла. Так у кода, который сам себя меняет, нет способа выбрать себе
+# commit — он не выбирает дерево, в котором его запустят.
+
+
+def test_the_next_cycle_starts_from_the_adopted_commit(repo: Path, tmp_path: Path) -> None:
+    """После принятия следующий цикл работает на коде кандидата.
+
+    Это и есть недостающее звено последовательности: ошибка → ремонт → тесты
+    → ПРИНЯТИЕ → новый работающий агент. До правки голова опыта двигалась, а
+    работать продолжал старый код.
+    """
+    from core.burn_in_supervisor import (
+        adopt_offer, materialise_next_cycle, offer_verified_commit,
+    )
+
+    sha = _candidate(repo, text="VALUE = 42\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+    assert adopt_offer(repo, sha=sha, battery=_Battery()).accepted
+
+    cycle = tmp_path / "cycle_next"
+    got = materialise_next_cycle(repo, cycle)
+
+    assert got == sha, f"следующий цикл поставлен не на принятое: {got!r}"
+    assert (cycle / "core" / "widget.py").read_text(encoding="utf-8") == "VALUE = 42\n", (
+        "дерево следующего цикла несёт СТАРЫЙ код — принятие осталось "
+        "записью в файле, а работает по-прежнему то, что сломалось"
+    )
+
+
+def test_the_next_cycle_cannot_be_asked_for_another_commit(
+    repo: Path, tmp_path: Path
+) -> None:
+    """Дерево ставится на ГОЛОВУ ОПЫТА, а не на то, что попросили.
+
+    Иначе замыкание петли само стало бы дырой: код, которому дали назвать
+    SHA, выбрал бы себе любой — включая свой непринятый.
+    """
+    from core.burn_in_supervisor import (
+        SupervisorError, adopt_offer, materialise_next_cycle,
+        offer_verified_commit,
+    )
+
+    good = _candidate(repo, text="VALUE = 7\n")
+    offer_verified_commit(repo, sha=good, proposal_id="p-1", tests_run=["full"])
+    assert adopt_offer(repo, sha=good, battery=_Battery()).accepted
+    unadopted = _candidate(repo, path="core/widget.py", text="VALUE = 999\n")
+
+    with pytest.raises(SupervisorError):
+        materialise_next_cycle(repo, tmp_path / "cycle_bad", sha=unadopted)
+
+
+def test_materialising_the_next_cycle_leaves_the_checkout_alone(
+    repo: Path, tmp_path: Path
+) -> None:
+    """Репозиторий человека остаётся там, где стоял.
+
+    Принятие двигает ОТДЕЛЬНЫЙ указатель. Ни ветка рабочего дерева, ни main
+    не трогаются — это условие всего замысла, а не деталь.
+    """
+    from core.burn_in_supervisor import (
+        adopt_offer, materialise_next_cycle, offer_verified_commit,
+    )
+
+    before_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    before_head = _git(repo, "rev-parse", "HEAD")
+    sha = _candidate(repo, text="VALUE = 5\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+    adopt_offer(repo, sha=sha, battery=_Battery())
+
+    materialise_next_cycle(repo, tmp_path / "cycle_x")
+
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == before_branch
+    assert _git(repo, "rev-parse", "HEAD") == before_head, (
+        "принятие переставило голову рабочей копии человека"
+    )
+
+
+def test_the_second_cycle_reuses_its_tree(repo: Path, tmp_path: Path) -> None:
+    """Десять часов — это много циклов, и каждый не заводит новое дерево.
+
+    Второй вызов по тому же пути обязан переставить существующее дерево на
+    новую голову, а не упасть на «worktree уже существует».
+    """
+    from core.burn_in_supervisor import (
+        adopt_offer, materialise_next_cycle, offer_verified_commit,
+    )
+
+    first = _candidate(repo, text="VALUE = 2\n")
+    offer_verified_commit(repo, sha=first, proposal_id="p-1", tests_run=["full"])
+    adopt_offer(repo, sha=first, battery=_Battery())
+    cycle = tmp_path / "cycle_same"
+    materialise_next_cycle(repo, cycle)
+
+    _git(repo, "checkout", "--quiet", "-b", "candidate-second", first)
+    (repo / "core" / "widget.py").write_text("VALUE = 3\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "--quiet", "-m", "self-apply: candidate")
+    second = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "--quiet", "main")
+    offer_verified_commit(repo, sha=second, proposal_id="p-2", tests_run=["full"])
+    assert adopt_offer(repo, sha=second, battery=_Battery()).accepted
+
+    got = materialise_next_cycle(repo, cycle)
+
+    assert got == second
+    assert (cycle / "core" / "widget.py").read_text(encoding="utf-8") == "VALUE = 3\n", (
+        "второй цикл остался на дереве первого"
+    )
+
+
+# ── 7. испорченный указатель не отматывает опыт назад ────────────────────────
+#
+# Ревизия PR #334, замечание к `experiment_head`: при ЛЮБОМ сбое чтения он
+# возвращает `git rev-parse HEAD`. Отсутствующий файл и испорченный файл —
+# разные события: первое значит «опыт ещё не начинался», второе значит «опыт
+# шёл, и его память повреждена». Свести их к одному ответу — значит тихо
+# начать цепочку заново на старом коде, и в журнале это будет выглядеть как
+# добросовестный первый шаг.
+
+
+def test_a_damaged_head_pointer_stops_the_experiment(repo: Path) -> None:
+    """Повреждённая память опыта — отказ, а не молчаливый откат к HEAD."""
+    from core.burn_in_supervisor import SupervisorError, experiment_head
+
+    head_file = repo / "state" / "burn_in_head.json"
+    head_file.parent.mkdir(parents=True, exist_ok=True)
+    head_file.write_text("{\"sha\": \"not-a-sha\"", encoding="utf-8")
+
+    with pytest.raises(SupervisorError):
+        experiment_head(repo)
+
+
+def test_a_missing_head_pointer_still_means_the_first_cycle(repo: Path) -> None:
+    """Сосед: отсутствие файла — по-прежнему законное начало опыта."""
+    from core.burn_in_supervisor import experiment_head
+
+    assert experiment_head(repo) == _git(repo, "rev-parse", "HEAD")
+
+
+# ── 8. память опыта лежит внутри дерева, которое опыт переписывает ───────────
+#
+# Замерено при постройке теста выше, сверх ревизии. Полоса на
+# `core/self_apply_lane.py:738` зовёт `vcs.stage_all()`, то есть буквально
+# `git add -A` (`core/safe_vcs.py:133`). Указатель опыта лежит в
+# `state/burn_in_head.json`, git его не отслеживает и не игнорирует. Отсюда
+# две беды подряд:
+#
+#   1. кандидат ЗАБИРАЕТ указатель в свой коммит, а `vcs.checkout(original)`
+#      следом его УДАЛЯЕТ — и `experiment_head` читает это как «опыт ещё не
+#      начинался», молча отматывая цепочку к исходному коду;
+#   2. принятый коммит, несущий свой `state/burn_in_head.json`, назначил бы
+#      опыту стартовую точку — ровно то полномочие, ради изъятия которого
+#      принимающего и вынесли наружу.
+#
+# Замер (временный репозиторий, та же последовательность, что у полосы):
+# голова после принятия — кандидат; после `add -A` во втором кандидате и
+# `checkout main` файла НЕТ, `experiment_head` возвращает seed.
+
+
+def test_a_candidate_may_not_carry_the_experiments_memory(repo: Path) -> None:
+    """Кандидат, тронувший указатель опыта, отвергается забором."""
+    from core.burn_in_supervisor import (
+        SUPERVISOR_FENCE, adopt_offer, offer_verified_commit,
+    )
+
+    assert "state/burn_in_head.json" in SUPERVISOR_FENCE, (
+        "указатель опыта не под забором: принятый коммит смог бы сам "
+        "назначить, откуда стартует следующий цикл"
+    )
+    sha = _candidate(
+        repo, path="state/burn_in_head.json", text='{"sha": "x"}\n', force=True
+    )
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
+
+    assert not verdict.accepted
+
+
+def test_the_experiments_memory_cannot_be_staged_by_the_lane() -> None:
+    """`git add -A` в настоящем репозитории не вправе подобрать указатель.
+
+    Забор ловит кандидата, который тронул память ОСОЗНАННО. Эта проверка про
+    случайность: полоса сгребает всё нетрекаемое, и без игнора указатель
+    уезжает в коммит без единого намерения.
+    """
+    root = Path(__file__).resolve().parents[1]
+    for name in ("state/burn_in_head.json", "state/burn_in_offers.jsonl",
+                 "state/burn_in_adoptions.jsonl"):
+        done = subprocess.run(
+            ["git", "check-ignore", "-q", name], cwd=str(root),
+            capture_output=True, text=True,
+        )
+        assert done.returncode == 0, f"{name} не игнорируется; `git add -A` его заберёт"
+
+
+# ── 9. три оставшихся замечания ревизии по принимающему ──────────────────────
+
+
+def test_a_non_dict_ledger_row_does_not_break_adoption(repo: Path) -> None:
+    """I4. `[1, 2]` — законный JSON и не словарь.
+
+    `json.loads(line).get("sha")` ловилось только на `ValueError`, а `.get` на
+    списке даёт `AttributeError`. Одна испорченная строка реестра роняла
+    принятие целиком — то есть кто угодно, кто умеет дописать строку в
+    журнал, останавливал опыт.
+    """
+    from core.burn_in_supervisor import adopt_offer, offer_ledger, offer_verified_commit
+
+    sha = _candidate(repo)
+    ledger = offer_ledger(repo)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    # Именно ПЕРЕД годной строкой: чтение возвращается на первом совпадении,
+    # и мусор позади него ничего бы не доказал.
+    ledger.write_text("[1, 2]\n\"строка\"\n17\nnull\n", encoding="utf-8")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    assert adopt_offer(repo, sha=sha, battery=_Battery()).accepted
+
+
+def test_the_fence_is_not_fooled_by_the_spelling_of_a_path(repo: Path) -> None:
+    """I3. Забор принимающего сверял сырые строки `git diff --name-only`.
+
+    Забор песочницы к этому времени уже сверяет приведённый путь
+    (`core/burn_in_sandbox.py:_fence_prints`), а принимающий — нет. На
+    файловой системе, безразличной к регистру, `Core/Policy.py` и
+    `core/policy.py` — один файл и две разные строки.
+    """
+    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
+
+    sha = _candidate(repo, path="core/policy.py", text="GATE = False\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    verdict = adopt_offer(
+        repo, sha=sha, battery=_Battery(), fence={"Core/Policy.py"},
+    )
+
+    assert not verdict.accepted
+    assert "забор" in verdict.reason
+
+
+def test_two_adoptions_cannot_race_past_the_same_head(repo: Path) -> None:
+    """S4. Между чтением головы и её записью не было замка.
+
+    Два кандидата-брата от одной головы: принять можно ровно одного. Без
+    сериализации оба читали одну `previous`, оба видели себя шагом вперёд и
+    оба писали голову — цепочка теряла ветвь молча.
+    """
+    import threading
+
+    from core.burn_in_supervisor import (
+        adopt_offer, experiment_head, offer_verified_commit,
+    )
+
+    base = _git(repo, "rev-parse", "HEAD")
+    left = _candidate(repo, text="VALUE = 10\n")
+    right = _candidate(repo, text="VALUE = 20\n")
+    assert _git(repo, "rev-parse", "HEAD") == base
+    for sha in (left, right):
+        offer_verified_commit(repo, sha=sha, proposal_id="p", tests_run=["full"])
+
+    verdicts: list[Any] = []
+    gate = threading.Barrier(2)
+
+    def adopt(sha: str) -> None:
+        gate.wait()
+        verdicts.append(adopt_offer(repo, sha=sha, battery=_Battery()))
+
+    threads = [threading.Thread(target=adopt, args=(s,)) for s in (left, right)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    accepted = [v for v in verdicts if v.accepted]
+    assert len(accepted) == 1, (
+        f"принято {len(accepted)} кандидатов от одной головы; "
+        f"исходы: {[(v.accepted, v.reason) for v in verdicts]}"
+    )
+    assert experiment_head(repo) == accepted[0].sha
