@@ -101,6 +101,16 @@ SUPERVISOR_FENCE: frozenset[str] = frozenset({
     "scripts/install_daemon.ps1",
 })
 
+#: Заповедные деревья принимающего — тот же второй вид записи, что и у
+#: песочницы (`core/burn_in_sandbox._FENCED_TREES`). Забор перечислял
+#: полномочие и память опыта и не перечислял СУДЬЮ: батарея описана в
+#: `.github/workflows`, указания ревизору — в `.github/skills`. Кандидат,
+#: переписывающий того, кто выносит о нём приговор, проходил принятие, потому
+#: что проверка забора — точное сравнение имён, а судья — это дерево.
+SUPERVISOR_FENCED_TREES: frozenset[str] = frozenset({
+    ".github/",
+})
+
 #: Полное имя объекта git и ничего короче. Сорок знаков, нижний регистр.
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -415,6 +425,16 @@ def _fence_key(path: str) -> str:
     return str(path).replace("\\", "/").strip().strip('"').casefold()
 
 
+def _in_fenced_tree(key: str) -> bool:
+    """Лежит ли приведённый путь внутри заповедного дерева.
+
+    Сверяется приведённой записью, как и имя: иначе второй вид записи оказался
+    бы слабее первого и обход, закрытый ревизиями PR #334 и #335 для имён,
+    снова открылся бы для деревьев.
+    """
+    return any(key.startswith(t.casefold()) for t in SUPERVISOR_FENCED_TREES)
+
+
 def adopt_offer(
     repo: Path,
     *,
@@ -481,7 +501,10 @@ def _adopt_offer_locked(
     touched = _changed_paths(repo, previous, sha)
     if not touched:
         return refuse("кандидат ничего не меняет", changed=touched)
-    crossed = sorted(p for p in touched if _fence_key(p) in guard)
+    crossed = sorted(
+        p for p in touched
+        if _fence_key(p) in guard or _in_fenced_tree(_fence_key(p))
+    )
     if crossed:
         return refuse(f"кандидат трогает забор: {', '.join(crossed)}",
                       changed=touched, crossed=crossed)

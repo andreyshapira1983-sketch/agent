@@ -847,3 +847,48 @@ def test_an_offer_ledger_broken_at_the_byte_level_is_refused_not_raised(
 
     assert not verdict.accepted
     assert "не предъявлен" in verdict.reason, verdict.reason
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        ".github/workflows/ci.yml",
+        ".github/skills/code-review/SKILL.md",
+    ],
+)
+def test_the_accepting_side_refuses_a_candidate_that_rewrites_its_judge(
+    repo: Path, rel: str
+) -> None:
+    """У принимающего тот же пробел, что и у песочницы.
+
+    `SUPERVISOR_FENCE` перечисляет полномочие и память опыта, но не того, кто
+    выносит приговор. Кандидат, переписывающий батарею или указания ревизору,
+    проходил принятие: проверка забора — точное сравнение имён, а судья — это
+    дерево.
+    """
+    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
+
+    sha = _candidate(repo, path=rel, text="что угодно\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
+
+    assert not verdict.accepted
+    assert "забор" in verdict.reason, verdict.reason
+
+
+def test_a_fenced_tree_is_not_fooled_by_the_spelling_of_a_path(repo: Path) -> None:
+    """Дерево сверяется так же, как и имя: приведённой записью.
+
+    Иначе второй вид записи оказался бы слабее первого, и обход, закрытый
+    ревизиями PR #334 и #335 для имён, снова открылся бы для деревьев.
+    """
+    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
+
+    sha = _candidate(repo, path=".GitHub/workflows/ci.yml", text="x\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
+
+    assert not verdict.accepted
+    assert "забор" in verdict.reason, verdict.reason

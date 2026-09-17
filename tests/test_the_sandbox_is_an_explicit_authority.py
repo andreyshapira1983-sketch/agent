@@ -772,3 +772,60 @@ def test_a_live_term_still_reserves(workspace: Path) -> None:
     )
 
     assert reserve_sandbox_apply(workspace, live)
+
+
+# ── тот, кто судит, тоже за забором ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        ".github/workflows/ci.yml",
+        ".github/skills/code-review/SKILL.md",
+        ".github/github-app.yml",
+    ],
+)
+def test_the_sandbox_may_not_rewrite_who_judges_it(workspace: Path, rel: str) -> None:
+    """Свойство держится, и держит его КЛАСС ФАЙЛА, а не забор.
+
+    Заведено при попытке внести `.github/` в забор поимённым деревом. Замер
+    показал, что песочница отказывает всем трём путям и без этого:
+    «denied class (secrets, CI, infrastructure)». Второй забор оказался бы
+    лишним и, хуже того, срабатывал бы раньше классовой проверки — то есть
+    отнял бы у соседа `test_a_symlink_does_not_launder_a_denied_class` его
+    доказательство: тот сосед ловит ссылку `core/innocent.py` именно на
+    `.github/workflows/ci.yml` и требует отказа ПО КЛАССУ.
+
+    Поэтому здесь свидетель, а не починка: у принимающего тот же путь
+    проходил, и правка сделана там. Этот тест закрепляет, что в песочнице
+    судья недосягаем уже сегодня, и называет, каким именно механизмом, —
+    чтобы починка соседнего слоя не увела его молча.
+    """
+    (workspace / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (workspace / ".github" / "skills" / "code-review").mkdir(
+        parents=True, exist_ok=True
+    )
+    (workspace / rel).write_text("x\n", encoding="utf-8")
+
+    allowed, why = sandbox_execution_verdict(
+        _proposal(workspace, rel), workspace=workspace,
+    )
+
+    assert not allowed, why
+    assert "denied class" in why, why
+
+
+def test_every_fenced_tree_names_a_real_directory() -> None:
+    """Второй вид записи — та же цена ошибки, что и у первого.
+
+    Сосед `test_every_fence_entry_names_a_real_file` заведён ревизией PR #333
+    ровно потому, что запись, называющая несуществующее, выглядит охраной и не
+    охраняет. У дерева это вернее вдвойне: опечатка в имени каталога молча
+    открывает всё, что он должен был закрыть.
+    """
+    from core.burn_in_supervisor import SUPERVISOR_FENCED_TREES
+
+    root = Path(__file__).resolve().parents[1]
+    for tree in SUPERVISOR_FENCED_TREES:
+        assert tree.endswith("/"), f"{tree!r}: дерево записывается со слэшем"
+        assert (root / tree).is_dir(), f"{tree!r} не называет живой каталог"
