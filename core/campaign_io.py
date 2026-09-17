@@ -967,7 +967,6 @@ def _default_execute_action(
             ),
         )
     )
-    llm_after, cost_after = _cost_totals(agent)
     proposal = _approvals_born(_inbox, _pending_before)
     goal_answer, artifact = _goal_answer_and_digest(report)
     # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
@@ -1016,6 +1015,11 @@ def _default_execute_action(
         work_done, artifact = _engineering_product_only(
             agent, work_done=work_done, proposal=proposal, artifact=artifact,
         )
+    # Показания снимаются ЗДЕСЬ, за руками, а не сразу после рабочей сессии.
+    # Замер 2026-09-17 23:09: реестр 19 вызовов, книги кампании «llm_calls: 0»
+    # — и нулём платил не журнал, а `--max-llm-calls` и детектор петли.
+    # Свидетель: tests/test_the_hands_spend_on_the_campaigns_own_meter.py.
+    llm_after, cost_after = _cost_totals(agent)
     return CampaignActionOutcome(
         result=semantic,
         llm_calls_spent=max(0, llm_after - llm_before),
