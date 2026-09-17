@@ -652,6 +652,18 @@ class AgentLoopSynthesis:
                     "attempt": _attempt.index,
                     "parse": _parsed.status,
                     "declared": _parsed.declared,
+                    # Обрыв — не забывчивость. Маркер стоит в КОНЦЕ ответа, и
+                    # ответ, срезанный потолком, не мог его донести. Без этого
+                    # поля `parse=missing` от обрыва неотличим от `missing` от
+                    # модели, которая маркер просто не написала: живой прогон
+                    # 2026-09-17 дал ровно первое (выход 5 x 2048, все ноги
+                    # израсходованы), а читался как второе. Клиент знал факт,
+                    # строка вердикта — нет.
+                    "truncated": bool(getattr(
+                        _synth_llm if _synth_llm is not None else self.llm,
+                        "last_answer_was_truncated",
+                        False,
+                    )),
                     **({"detail": _parsed.detail} if _parsed.detail else {}),
                 },
             )
