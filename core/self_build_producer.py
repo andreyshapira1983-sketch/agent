@@ -484,9 +484,19 @@ def _manager_from_grounded(
     candidate_targets: tuple[str, ...],
     *,
     workspace: str | Path,
+    named_targets: frozenset[str] = frozenset(),
 ) -> RoleOutput:
     """Manager variant (TD-036) that takes its target + diagnosis from a
     grounded backlog candidate instead of inventing one via the LLM.
+
+    ``named_targets`` — предмет, НАЗВАННЫЙ вызывающим (цель кампании дошла до
+    рук через `campaign_io._engineering_hands`). Живой прогон 2026-09-17 показал,
+    что он сюда доезжал и не значил ничего: попадал в `effective_allowed`, то
+    есть в РАЗРЕШЁННОЕ, а выбор всё равно делала верхушка бэклога — хартия
+    просила `core/self_build_producer.py`, руки брали `core/smart_memory.py`.
+    Названный предмет — задание, а не разрешение: если обоснованный кандидат не
+    он, честный ответ «не нашёл по названному», а не работа над чужим файлом.
+    Пустое множество (никто не называл) оставляет прежний ход бэклога.
     """
     try:
         candidate = provider()
@@ -527,6 +537,15 @@ def _manager_from_grounded(
     evidence_ref = mapped_candidate.evidence_ref
     if not target:
         return RoleOutput("manager", "no_target", "grounded candidate has no target")
+    if named_targets and target not in named_targets:
+        asked = ", ".join(sorted(named_targets))
+        return RoleOutput(
+            "manager",
+            "no_target",
+            f"the goal named {asked}; the grounded backlog offered {target!r} "
+            f"instead, and a named subject is an instruction, not a permission",
+            {"rejected_target": target, "named_targets": sorted(named_targets)},
+        )
     if mapping.decision != "mapped" and target not in effective_allowed:
         return RoleOutput(
             "manager",
@@ -615,6 +634,7 @@ def _default_grounded_selector(
     workspace: str | Path,
     *,
     exclude_targets: frozenset[str] = frozenset(),
+    only_targets: frozenset[str] = frozenset(),
 ) -> Callable[[], Any]:
     """Build the DEFAULT grounded backlog selector for a workspace (TD-036
     follow-up).
@@ -624,6 +644,11 @@ def _default_grounded_selector(
     run advances to the NEXT grounded candidate instead of re-picking the
     same wall (which would only be vetoed again). An empty set (the default)
     is a no-op.
+
+    ``only_targets`` — предмет, названный целью. Верхушка бэклога отвечает на
+    вопрос «что вообще стоит чинить», а не на вопрос «почини вот это»; без
+    отбора названный файл был бы отвергнут управляющим, даже если кандидат на
+    него лежит в бэклоге строкой ниже. Пустое множество — прежний ход.
 
     It never calls an LLM, never touches the network/git, and is fully best-
     effort: any import/load failure yields a selector that returns ``None``,
@@ -651,6 +676,14 @@ def _default_grounded_selector(
                     c
                     for c in candidates
                     if not (_candidate_concrete_targets(c, workspace) & exclude_targets)
+                ]
+            # Названный предмет сужает бэклог до себя: иначе кандидат на него,
+            # лежащий ниже верхушки, до управляющего не доедет никогда.
+            if only_targets:
+                candidates = [
+                    c
+                    for c in candidates
+                    if _candidate_concrete_targets(c, workspace) & only_targets
                 ]
             # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
             # top-ranked candidate the producer can actually act on — directly
@@ -1482,14 +1515,13 @@ def produce_self_apply_proposal(
     if legacy_llm_manager:
         manager = _manager_select(llm, targets)
     else:
+        named = frozenset(explicit)
+        excluded = (frozenset(recently_vetoed_targets or ())
+                    | (waiting or frozenset()) | denied_cooldown)
         selector = grounded_selector or _default_grounded_selector(
-            workspace,
-            exclude_targets=(
-                frozenset(recently_vetoed_targets or ())
-                | (waiting or frozenset()) | denied_cooldown
-            ),
-        )
-        manager = _manager_from_grounded(selector, targets, workspace=workspace)
+            workspace, exclude_targets=excluded, only_targets=named)
+        manager = _manager_from_grounded(
+            selector, targets, workspace=workspace, named_targets=named)
     roles.append(manager)
     if manager.decision != "selected":
         # A rejected grounded candidate is not evidence of a defect. In

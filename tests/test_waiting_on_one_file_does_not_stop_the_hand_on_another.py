@@ -81,8 +81,10 @@ def test_the_chooser_excludes_waiting_and_denied_files(tmp_path, monkeypatch) ->
     """When the producer picks the target itself, both sets are cooldowns."""
     captured: dict = {}
 
-    def _fake_selector(workspace, *, exclude_targets=frozenset()):
+    def _fake_selector(workspace, *, exclude_targets=frozenset(),
+                       only_targets=frozenset()):
         captured["exclude"] = frozenset(exclude_targets)
+        captured["only"] = frozenset(only_targets)
         return lambda: None
 
     monkeypatch.setattr(prod, "_default_grounded_selector", _fake_selector)
@@ -94,6 +96,9 @@ def test_the_chooser_excludes_waiting_and_denied_files(tmp_path, monkeypatch) ->
     report = _produce(tmp_path, llm=FakeLLM([]), inbox=inbox, legacy_llm_manager=False)
 
     assert {"core/a.py", "core/b.py"} <= captured["exclude"], captured
+    # Здесь предмет НЕ назван, и сужать бэклог не за что: отбор по названному
+    # (прогон 2026-09-17) не смеет подменять собой остывание.
+    assert captured["only"] == frozenset(), captured
     assert report.status == "no_grounded_target"
 
 
