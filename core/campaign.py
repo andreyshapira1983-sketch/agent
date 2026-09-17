@@ -108,7 +108,8 @@ def _cross_run_signature_spend(ledger: CampaignLedger | None) -> dict[str, int]:
 
 
 def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
-                     spent: int, cap: int) -> CampaignCycleRecord:
+                     spent: int, cap: int,
+                     success_check: str = "") -> CampaignCycleRecord:
     """Строка эскалации MIR-149: потолок пал — исполнение становится вопросом.
 
     Потолок — бюджетная политика (число 400 одобрено оператором 2026-08-27),
@@ -117,7 +118,7 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
     сюда не попадают по построению.
     """
     return CampaignCycleRecord(
-        cycle=cycle, ts=ts, goal=goal,
+        cycle=cycle, ts=ts, goal=goal, success_check=success_check,
         action=action.action, action_title=action.title,
         severity=action.severity, priority=action.priority,
         risk=action.risk, grounds=action.grounds, decided_by=action.decided_by,
@@ -232,6 +233,10 @@ def run_campaign(
     #: Текущая цель прогона: она может смениться, поэтому читается отсюда,
     #: а не из замороженного config (право смены — слово оператора 2026-09-01).
     current_goal = config.goal
+    #: ...и её критерий успеха, который обязан ехать ВМЕСТЕ с ней. Смена цели
+    #: без смены критерия судила бы новую работу по чужой мерке — это хуже
+    #: отсутствия мерки: неверная проверка выглядит как проверка.
+    current_success_check = config.success_check
     goal_switches = 0
     # Does the current no-progress streak contain repeat cycles? A streak of
     # pure priority-0 observations means the world was checked and found
@@ -252,24 +257,33 @@ def run_campaign(
         попытка убивала прогон на любом молчании модели.
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
+        nonlocal current_success_check
         if next_goal is None or goal_switches >= _MAX_GOAL_SWITCHES:
             return False
         switched = ""
+        switched_check = ""
         for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
             try:
-                candidate = str(next_goal() or "").strip()
+                proposed = next_goal()
             except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
                 # уронить прогон: не вышло — останавливаемся прежним путём.
                 _log(agent, "campaign_goal_switch_failed",
                      {"cycle": cycle, "error": repr(exc)[:200]})
                 return False
+            # Источник целей вправе отдать отчёт (цель + её критерий) или
+            # просто строку. Строка означает «критерий не назван» — честное
+            # состояние, а не ошибка: так задают цель четыре точки входа.
+            candidate = str(getattr(proposed, "goal", proposed) or "").strip()
+            candidate_check = str(getattr(proposed, "success_check", "") or "").strip()
             if candidate and candidate != current_goal:
                 switched = candidate
+                switched_check = candidate_check
                 break
         if not switched:
             return False
         goal_switches += 1
         previous_goal, current_goal = current_goal, switched
+        current_success_check = switched_check
         # Новая цель — новая тема: память о повторах прежней темы не должна
         # объявлять повтором первый же шаг по новой.
         attempted_signatures.clear()
@@ -307,7 +321,7 @@ def run_campaign(
         семантика остановки сохраняется. Просыпается по журналу перемен мира
         или новому одобрению; иначе — по периодической перепроверке.
         """
-        nonlocal idle_streak, streak_repeats, unproductive_streak, goal_switches
+        nonlocal idle_streak, streak_repeats, goal_switches
         if next_goal is None:
             return False
         mark = last_capability_change_ts(workspace)
@@ -334,6 +348,7 @@ def run_campaign(
                 break
         record = CampaignCycleRecord(
             cycle=cycle, ts=now_fn().isoformat(), goal=current_goal,
+            success_check=current_success_check,
             action="<backoff>", action_title="waiting for the world to change",
             severity="low", priority=0, risk="read_only", idle=True,
             llm_calls_spent=0, cost_units_spent=0, result="waiting",
@@ -344,12 +359,26 @@ def run_campaign(
         records.append(record)
         _log(agent, "campaign_backoff", record.to_dict())
         _emit_cycle(record)
-        idle_streak = 0
-        streak_repeats = False
-        unproductive_streak = 0
-        attempted_signatures.clear()
-        action_steps.clear()
-        goal_switches = 0  # новая эра выбора: потолок смен сторожит перебор, не смену
+        # Ожидание — НЕ событие мира. Аудит автономности 2026-09-17 нашёл здесь
+        # безусловное обнуление всех счётчиков застоя: двенадцать смен цели,
+        # пауза, ещё двенадцать — десять часов перебора тем, и ни один датчик
+        # не срабатывал, потому что каждая пауза стирала улики.
+        #
+        # Право на сброс даёт только НАСТОЯЩАЯ перемена: новая строка в журнале
+        # перемен мира или новое одобрение. Тогда прежний вердикт «здесь
+        # больше нечего делать» вынесен в другом мире (core/capability_events.py),
+        # и новая эра выбора честна. Пустая перепроверка такого права не даёт.
+        #
+        # `unproductive_streak` не сбрасывается и при перемене мира: это память
+        # о том, что исполненные циклы не дали пользы, и она гаснет сама от
+        # первого же полезного цикла. Сбросить её здесь значило бы обещать
+        # пользу вместо того, чтобы её дождаться.
+        if woke:
+            idle_streak = 0
+            streak_repeats = False
+            attempted_signatures.clear()
+            action_steps.clear()
+            goal_switches = 0
         return True
 
     def _stall(cycle: int, why: str, stall: str) -> bool:
@@ -456,6 +485,7 @@ def run_campaign(
                     cycle=cycle,
                     ts=now.isoformat(),
                     goal=current_goal,
+                    success_check=current_success_check,
                     action=action.action,
                     action_title=action.title,
                     severity=action.severity,
@@ -517,6 +547,7 @@ def run_campaign(
                     cycle=cycle,
                     ts=now.isoformat(),
                     goal=current_goal,
+                    success_check=current_success_check,
                     action=action.action,
                     action_title=action.title,
                     severity=action.severity,
@@ -552,6 +583,7 @@ def run_campaign(
                     and spent_before >= config.max_cost_units_per_signature):
                 record = _cost_cap_record(
                     cycle=cycle, ts=now.isoformat(), goal=current_goal,
+                    success_check=current_success_check,
                     action=action, spent=spent_before,
                     cap=config.max_cost_units_per_signature)
                 ledger.append(record)
@@ -594,9 +626,16 @@ def run_campaign(
                     workspace=workspace,
                     action=action,
                     # L1 (2026-09-03): исполнитель слышит ТЕКУЩУЮ цель — после
-                    # смены ему уходила замороженная стартовая.
-                    config=(replace(config, goal=current_goal)
-                            if current_goal != config.goal else config),
+                    # смены ему уходила замороженная стартовая. Вместе с целью
+                    # едет её критерий успеха: судить выполнение по мерке
+                    # прежней цели — не проверка, а её видимость.
+                    config=(
+                        replace(config, goal=current_goal,
+                                success_check=current_success_check)
+                        if (current_goal != config.goal
+                            or current_success_check != config.success_check)
+                        else config
+                    ),
                     approval_inbox=approval_inbox,
                 )
             llm_calls_used += max(0, outcome.llm_calls_spent)
@@ -621,6 +660,7 @@ def run_campaign(
                 cycle=cycle,
                 ts=now.isoformat(),
                 goal=current_goal,
+                success_check=current_success_check,
                 action=action.action,
                 action_title=action.title,
                 severity=action.severity,
@@ -701,6 +741,7 @@ def run_campaign(
                 cycle=cycle,
                 ts=err_now.isoformat(),
                 goal=current_goal,
+                success_check=current_success_check,
                 action="<cycle_error>",
                 action_title="cycle raised an exception",
                 severity="error",

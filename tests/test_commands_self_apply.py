@@ -280,7 +280,14 @@ def test_failure_rules_are_recorded_and_logged(agent, tmp_path, monkeypatch, lan
 
     assert seen["result"]["status"] == "rolled_back"
     logged = agent.log.payload("self_build_rules_recorded")
-    assert logged == {"proposal_id": "ap-1", "rules_added": ["no ImportError from core.y"]}
+    # `lessons_added` появилось 2026-09-17 вместе с уроком о происхождении:
+    # откат теперь учит дважды — узкому правилу для Критика и уроку, который
+    # читает автономный путь применения перед повтором по тому же адресу.
+    assert logged == {
+        "proposal_id": "ap-1",
+        "rules_added": ["no ImportError from core.y"],
+        "lessons_added": 1,
+    }
 
 
 def test_no_rules_learned_means_no_event(agent, tmp_path, monkeypatch, lane):

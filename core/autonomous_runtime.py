@@ -27,6 +27,7 @@ from core.learning_planner import LearningPlanner
 from core.models import ToolCall
 from core.reflection import ReflectionConfig, ReflectionEngine
 from core.run_context import run_restrictions
+from core.success_check import observe_success_check
 from core.task_lifecycle import (
     apply_run_exception,
     apply_run_outcome,
@@ -152,8 +153,14 @@ def _standing_usage_path(workspace: Any) -> Path:
     return Path(workspace or ".") / "data" / _STANDING_USAGE_FILE
 
 
-def _record_standing_use(workspace: Any, grant_id: str) -> None:
-    """Одна строка журнала на один прогон, пропущенный стоячим грантом."""
+def record_standing_grant_use(workspace: Any, grant_id: str) -> None:
+    """Одна строка журнала на одно полномочие, выданное стоячим грантом.
+
+    Публичная намеренно: потребителей гранта двое (этот рантайм и
+    `core.rule_approved_apply`), а журнал расхода — один. Аудит автономности
+    2026-09-17 нашёл второго потребителя, который спрашивал грант и не
+    записывал ничего: дневной потолок держался только на одном пути.
+    """
     from core.state_integrity import append_state_jsonl
 
     path = _standing_usage_path(workspace)
@@ -162,6 +169,10 @@ def _record_standing_use(workspace: Any, grant_id: str) -> None:
         "grant_id": grant_id,
         "ts": datetime.now(timezone.utc).isoformat(),
     }])
+
+
+#: Прежнее внутреннее имя: на него ссылаются рантайм и тесты гранта.
+_record_standing_use = record_standing_grant_use
 
 
 def standing_runs_today(workspace: Any, grant_id: str) -> int:
@@ -287,6 +298,18 @@ def active_standing_grant(approval_inbox, workspace, *, log=None):
             continue
         return item
     return None
+
+
+def standing_grant_remaining_runs(workspace: Any, grant: Any) -> int:
+    """Сколько полномочий у этого гранта ОСТАЛОСЬ на сегодня.
+
+    Потолок один на всех потребителей, поэтому остаток считается из общего
+    журнала расхода, а не из счётчика вызывающего.
+    """
+    cap = int((getattr(grant, "payload", None) or {}).get("max_runs_per_day") or 0)
+    if cap <= 0:
+        return 0
+    return max(0, cap - standing_runs_today(workspace, str(getattr(grant, "id", ""))))
 
 
 class AutonomousRuntime(AutonomousRuntimeProposals):
@@ -1048,11 +1071,50 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             # A9 (2026-09-03): пустой ответ замечался («(no answer)») и всё
             # равно уезжал как done. Ничего не сделано — «inconclusive».
             return AutonomousTaskReport(task, "inconclusive", "(no answer)", {"answer": answer})
+        return self._settle_goal_answer(task, answer, config)
+
+    def _settle_goal_answer(
+        self, task: AutonomousTask, answer: str, config: AutonomousRuntimeConfig
+    ) -> AutonomousTaskReport:
+        """Решить исход цели по миру, а не по тексту ответа.
+
+        Ответ — не выполнение (аудит автономности 2026-09-17, находка 5). До
+        этой проверки единственным признаком «сделано» был непустой текст от
+        модели: «я создал файл» и созданный файл были одним событием.
+
+        Универсального проверяющего здесь нет и быть не может: критерий —
+        свободный текст. Наблюдается ровно та его часть, которую можно
+        прочесть с диска, не спрашивая ту же модель (core/success_check.py).
+        Исход «unverifiable» сохраняет прежнее поведение и НАЗЫВАЕТ его:
+        «не проверяли» — не «сошлось».
+        """
+        observation = observe_success_check(config.goal_success_check, self.workspace)
+        details = {
+            "answer": answer,
+            "success_check": config.goal_success_check,
+            "success_check_verdict": observation["verdict"],
+            "success_check_artifacts": observation["artifacts"],
+            "success_check_missing": observation["missing"],
+            "success_check_observed": observation["observed"],
+        }
+        self._log("goal_success_check", {
+            "goal": config.goal[:200],
+            "verdict": observation["verdict"],
+            "reason": observation["reason"],
+        })
+        if observation["verdict"] == "missing":
+            missing = ", ".join(observation["missing"])
+            return AutonomousTaskReport(
+                task,
+                "inconclusive",
+                f"ответ есть, следа нет: {missing}"[:120],
+                details,
+            )
         return AutonomousTaskReport(
             task,
             "done",
             answer[:120].replace("\n", " "),
-            {"answer": answer},
+            details,
         )
 
 

@@ -36,6 +36,7 @@ Run scripts/install_daemon.ps1 to register the scheduled task automatically.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -131,6 +132,29 @@ UNATTENDED_MEMORY_PROFILE = {
     "episodic_replay": False,
     "durable_writes": frozenset({"episode", "hygiene"}),
 }
+
+
+def unattended_memory_profile(workspace, env=None) -> dict:
+    """Профиль памяти для безнадзорной сборки агента.
+
+    Производственный ответ — константа выше, буква в букву. Единственное
+    исключение названо и ограничено сроком: включённое полномочие песочницы
+    (`core/burn_in_sandbox.py`, две независимые подписи) добавляет два стока,
+    чтобы проверенный урок мог пережить прогон. Без полномочия функция
+    возвращает ровно `UNATTENDED_MEMORY_PROFILE`.
+
+    Функция, а не константа, потому что ответ зависит от рабочей копии: одна и
+    та же сборка в песочнице и в производстве обязана давать разные списки, и
+    место, где эта разница решается, должно быть одно.
+
+    Зовите её с переменной, названной `workspace`: четыре производственных
+    места сборки агента сверяются сторожем
+    `tests/test_ownership_must_not_change_authority.py` БУКВАЛЬНО, и разные
+    имена переменной читаются там как разный конверт полномочий.
+    """
+    from core.burn_in_sandbox import memory_profile_for
+
+    return memory_profile_for(UNATTENDED_MEMORY_PROFILE, workspace, env=env)
 
 
 def _now_iso() -> str:
@@ -497,6 +521,17 @@ def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> st
     return files[0] if len(files) == 1 else None
 
 
+def _repair_dedup_key(target_path: str, failed_names: list[str]) -> str:
+    """Устойчивое имя ОДНОЙ поломки: цель починки + множество упавших тестов.
+
+    Порядок имён не значим (pytest выдаёт их как придётся), поэтому множество
+    сортируется. Зачем ключ вообще: см. место вызова в `_maybe_propose_repair`.
+    """
+    fingerprint = "|".join(sorted({str(n) for n in failed_names}))
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
+    return f"repair:{target_path}:{digest}"
+
+
 def _maybe_propose_repair(
     workspace: Path,
     test_report: dict,
@@ -548,6 +583,19 @@ def _maybe_propose_repair(
                     f"{failed} failing test(s)",
                     f"evidence: {', '.join(report.evidence[:3])}",
                 ),
+                # Одна неустранённая поломка — одна просьба. Без ключа
+                # `ApprovalInbox.add` не дедуплицирует вовсе, а починка ждёт
+                # человека, значит каждый следующий тик видел ТУ ЖЕ поломку и
+                # клал в ящик ещё одну такую же заявку (аудит автономности
+                # 2026-09-17). Ящик — не только вход человека, но и ворота:
+                # полоса самоприменения отказывается работать, пока в нём есть
+                # ожидающие. Размножение заявок глушило настоящие просьбы и
+                # само себя блокировало.
+                #
+                # Ключ описывает ПОЛОМКУ (цель починки + имена упавших тестов),
+                # а не предложенное лечение: перефразированный диагноз — та же
+                # беда, а другой упавший тест — уже другая.
+                dedup_key=_repair_dedup_key(target_path, failed_names),
                 payload={
                     "failed_count": failed,
                     "failed_tests": failed_names,
@@ -875,9 +923,10 @@ def _maybe_produce_self_build(
             # should not pay for loading it.
             from app.bootstrap import build_agent as _build_agent
 
-            def builder(ws_path):
+            def builder(workspace):
                 return _build_agent(
-                    ws_path, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+                    workspace, approval_provider=None,
+                    **unattended_memory_profile(workspace),
                 )
 
         agent = builder(workspace)
@@ -1041,7 +1090,7 @@ def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
                                   "tasks": _summarise(freed)})
 
 
-def _sweep_episodic_duplicates(workspace: Path) -> int:
+def _sweep_episodic_duplicates(workspace: Path, *, dry_run: bool = False) -> int:
     """Collapse byte-identical episodes; return how many rows were dropped.
 
     Exactly ONE of MIR-131's thirteen CLI-only maintenance actions crosses to
@@ -1050,16 +1099,26 @@ def _sweep_episodic_duplicates(workspace: Path) -> int:
     while staleness pruning decides which memories are WORTH keeping — the
     resolver-seat hazard MIR-128 records. Widening this sweep is a decision,
     not a refactor. Full account: docs/CODE_NOTES.md, "The sweep the tick owns".
+
+    ``dry_run`` propagates the tick's own promise. The burn-in audit
+    (2026-09-17) found this call site passing no flag at all, so a run that
+    announced itself as dry still deleted rows — an irreversible change inside
+    a pass whose whole contract is that it changes nothing. The count is still
+    measured and journalled in dry-run, because "what WOULD have been removed"
+    is exactly what the shadow mode elsewhere in this tick reports.
     """
     try:
         from core.episodic_hygiene import collapse_duplicate_episodes
         from core.smart_memory import EpisodicMemoryStore
 
         store = EpisodicMemoryStore(path=workspace / DATA_DIR / "episodic_memory.jsonl")
-        dropped = collapse_duplicate_episodes(store)
+        dropped = collapse_duplicate_episodes(store, dry_run=dry_run)
         if dropped:
             _log_tick(workspace, {
-                "event": "episodic_duplicates_collapsed", "count": len(dropped),
+                "event": "episodic_duplicates_collapsed",
+                "count": len(dropped),
+                "dry_run": dry_run,
+                "applied": not dry_run,
             })
         return len(dropped)
     except Exception as exc:  # noqa: BLE001 — hygiene must not cost the tick its work
@@ -1278,7 +1337,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             # Same slot, same reason: the unattended path generates the most
             # repeats and was the only path that could not clean them up —
             # 43 identical episodes accumulated here on 2026-08-16 (MIR-131).
-            _sweep_episodic_duplicates(workspace)
+            _sweep_episodic_duplicates(workspace, dry_run=dry_run)
             # `pending()` rather than `list(status="pending")`: it honours
             # `run_after`, so a task re-queued behind the retry backoff is not
             # immediately re-run by this consumer.
@@ -1290,7 +1349,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
             # Still check approval inbox below
         else:
             agent = build_agent(
-                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+                workspace, approval_provider=None,
+                **unattended_memory_profile(workspace),
             )
             inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
             incident_log = IncidentLog(path=workspace / INCIDENT_LOG_PATH)
@@ -1505,14 +1565,23 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     #   off              — skip entirely
     # Shadow is the default deliberately: these thresholds have only ever been
     # exercised against synthetic data, and the pass deletes.
+    #
+    # `on` is the operator's consent to DELETE, not a repeal of `dry_run`. The
+    # burn-in audit (2026-09-17) found the mode variable deciding alone, so an
+    # env var set once could make every "dry" tick destructive. Two permissions
+    # must now agree: the tick must be live AND the mode must say `on`.
     _hygiene_mode = os.environ.get("AGENT_AUTO_HYGIENE", "shadow").strip().lower()
     if _hygiene_mode in {"shadow", "on"}:
         try:
             _hyg_agent = build_agent(
-                workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+                workspace, approval_provider=None,
+                **unattended_memory_profile(workspace),
             )
-            _hyg = _hyg_agent.run_maintenance_pass(dry_run=_hygiene_mode == "shadow")
-            _log_tick(workspace, {"event": "maintenance_pass", **_hyg})
+            _hyg_shadow = dry_run or _hygiene_mode == "shadow"
+            _hyg = _hyg_agent.run_maintenance_pass(dry_run=_hyg_shadow)
+            _log_tick(workspace, {"event": "maintenance_pass",
+                                  "mode": _hygiene_mode,
+                                  "tick_dry_run": dry_run, **_hyg})
         except Exception as exc:  # noqa: BLE001
             _log_tick(workspace, {"event": "maintenance_error",
                                   "error": type(exc).__name__})
@@ -1620,6 +1689,7 @@ def run_paced_campaign(
     *,
     dry_run: bool = True,
     goal: str = "project health",
+    success_check: str = "",
     max_cycles: int = 24,
     cycle_pause_seconds: int = 0,
     max_wall_clock_seconds: int = 0,
@@ -1676,6 +1746,7 @@ def run_paced_campaign(
     try:
         config = CampaignConfig(
             goal=goal,
+            success_check=success_check,
             dry_run=dry_run,
             max_cycles=max_cycles,
             max_llm_calls=max_llm_calls,
@@ -1710,7 +1781,8 @@ def run_paced_campaign(
         ensure_roster_home(workspace)  # дом реестра молчавших (Д5)
         from app.bootstrap import build_agent
         agent = build_agent(
-            workspace, approval_provider=None, **UNATTENDED_MEMORY_PROFILE
+            workspace, approval_provider=None,
+            **unattended_memory_profile(workspace),
         )
 
     from core.approval_inbox import ApprovalInbox
@@ -1733,7 +1805,17 @@ def run_paced_campaign(
     # исчерпывается за ОДИН цикл (предложение произведено и ушло ждать
     # человека), после чего кампания умирала за четыре минуты, повторяя одно и
     # то же; с широкой целью тот же агент дал 21 полезный цикл из 21.
-    def _pick_next_goal() -> str:
+    def _pick_next_goal() -> Any:
+        """Вернуть ОТЧЁТ о выбранной цели, а не одну её строку.
+
+        Аудит автономности 2026-09-17, находка 4: хартия требует от каждой
+        цели критерий успеха («цель без проверки — желание»), отчёт его несёт,
+        а здесь наружу уезжала одна строка `pick.goal`. Критерий умирал в
+        месте выбора, и исполнителю было НЕЧЕМ судить собственную работу.
+
+        Кампания принимает и строку, и отчёт; пустая строка по-прежнему
+        означает отказ.
+        """
         try:
             from core.charter_goal import propose_charter_goal
             router = _charter_goal_router(workspace)
@@ -1747,7 +1829,8 @@ def run_paced_campaign(
             return ""
         print(f"[CHARTER] next goal: {pick.goal}")
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
-        return pick.goal
+        print(f"[CHARTER] success check: {pick.success_check}")
+        return pick
 
     def _call_run_campaign(**extra):
         try:
@@ -1899,6 +1982,9 @@ if __name__ == "__main__":
         dry = False
 
     goal = args.goal
+    # Критерий успеха цели. Пустая строка = «не назван»: цель из командной
+    # строки приходит без него, и это честное состояние (core/success_check.py).
+    success_check = ""
     if args.campaign and args.charter:
         # Цель выбирает агент — от хартии; отказ выходит с названными воротами,
         # а не подменяется целью по умолчанию (см. core/charter_goal.py).
@@ -1953,12 +2039,14 @@ if __name__ == "__main__":
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
         print(f"[CHARTER] success check: {pick.success_check}")
         goal = pick.goal
+        success_check = pick.success_check
 
     if args.campaign:
         sys.exit(run_paced_campaign(
             ws,
             dry_run=dry,
             goal=goal,
+            success_check=success_check,
             max_cycles=args.max_cycles,
             cycle_pause_seconds=args.cycle_pause_seconds,
             max_wall_clock_seconds=args.max_wall_clock_seconds,
