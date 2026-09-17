@@ -949,6 +949,9 @@ def _default_execute_action(
     report = runtime.run(
         AutonomousRuntimeConfig(
             goal=focused_goal,
+            # Критерий едет вместе с целью: без него исполнитель судит
+            # выполнение по собственному ответу (аудит автономности 2026-09-17).
+            goal_success_check=config.success_check,
             dry_run=config.dry_run,
             limit=3,
             include_tests=False,

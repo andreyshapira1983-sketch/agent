@@ -39,12 +39,18 @@ class CampaignCycleRecord:
     #: `charter_goal._recent_goals` спрашивал это поле с 2026-09-02, а писатель
     #: его не писал: 0 из 479 строк. `None` = строка старого формата.
     work_done: bool | None = None
+    #: Критерий успеха цели этого цикла — дословно тот, с которым её выбрала
+    #: хартия. Без него запись цикла не позволяет ответить «сошлось ли», не
+    #: повторяя десятичасовой прогон (аудит автономности 2026-09-17).
+    #: Пустая строка = критерий не назван.
+    success_check: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "cycle": self.cycle,
             "ts": self.ts,
             "goal": self.goal,
+            "success_check": self.success_check,
             "action": self.action,
             "action_title": self.action_title,
             "severity": self.severity,

@@ -55,7 +55,8 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "reasoning_action_check", "best_next_action",
         "best_next_action_helpers", "task_complexity", "low_evidence_policy",
         "unsupported_claims", "subsystem_disagreement", "completion_marker",
-        "completion_obligation", "completion_contract", "response_draft", "synth_resilience",
+        "completion_obligation", "completion_contract", "success_check",
+        "response_draft", "synth_resilience",
         "strategy_router", "role_router", "prompt_registry", "runtime_self",
         "compactor",
     ]),
@@ -99,7 +100,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Learning & Self-Improvement (§9)", "Reflection-driven repair, self-build, value gating.", [
         "self_repair", "self_repair_models", "self_repair_utils", "repair_proposal",
-        "self_apply_bridge", "self_apply_lane",
+        "self_apply_bridge", "self_apply_lane", "burn_in_sandbox",
         "self_build_producer", "anatomy_sync", "self_build_supervisor", "self_build_memory",
         "self_build_rules", "veto_cause", "builder_reply_diagnosis",
         "self_task_producer", "self_task_builder",
