@@ -34,6 +34,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -705,3 +706,113 @@ def test_two_adoptions_cannot_race_past_the_same_head(repo: Path) -> None:
         f"исходы: {[(v.accepted, v.reason) for v in verdicts]}"
     )
     assert experiment_head(repo) == accepted[0].sha
+
+
+# ── 10. ревизия PR #335: четыре замечания по замыканию петли ─────────────────
+
+
+def test_the_fence_folds_case_on_every_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`os.path.normcase` на POSIX — тождество, то есть забора там не было.
+
+    Самое неприятное из ревизии PR #335, и потому что это МОЯ ошибка метода:
+    свидетель `test_the_fence_is_not_fooled_by_the_spelling_of_a_path` зелен
+    на Windows и красен на Linux, а я показал только зелёный. Соседний тест
+    песочницы про регистр несёт `skipif` ровно по этой причине — я его правило
+    не перенёс.
+
+    Здесь POSIX подделывается честно: `normcase` заменяется тождеством,
+    то есть ровно тем, чем он там и является.
+    """
+    import os.path as ospath
+
+    from core import burn_in_supervisor as sup
+
+    monkeypatch.setattr(ospath, "normcase", lambda s: s)
+
+    assert sup._fence_key("Core/Policy.py") == sup._fence_key("core/policy.py"), (
+        "на файловой системе, различающей регистр, забор обходится "
+        "написанием имени"
+    )
+
+
+def test_the_fence_still_refuses_a_case_variant_on_a_posix_runner(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """То же утверждение целиком, через настоящее решение."""
+    import os.path as ospath
+
+    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
+
+    monkeypatch.setattr(ospath, "normcase", lambda s: s)
+    sha = _candidate(repo, path="core/policy.py", text="GATE = False\n")
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+
+    verdict = adopt_offer(
+        repo, sha=sha, battery=_Battery(), fence={"Core/Policy.py"},
+    )
+
+    assert not verdict.accepted
+
+
+def test_the_next_cycle_tree_is_placed_where_the_caller_meant(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Относительный путь дерева читался в двух разных системах координат.
+
+    `workspace.exists()` считал от текущего каталога, а `git worktree add`
+    через `cwd=repo` — от корня репозитория. Запуск
+    `--repo /tmp/repo --next cycle` из другого места заводил
+    `/tmp/repo/cycle`, а проверка существования и печать говорили о
+    `<cwd>/cycle`. Следующий вызов падал или сообщал не о том дереве.
+    """
+    from core.burn_in_supervisor import materialise_next_cycle
+
+    here = tmp_path / "откуда-запустили"
+    here.mkdir()
+    monkeypatch.chdir(here)
+
+    materialise_next_cycle(repo, Path("cycle"))
+
+    assert (here / "cycle" / "core" / "widget.py").exists(), (
+        "дерево заведено не там, где просил вызывающий"
+    )
+    assert not (repo / "cycle").exists(), "дерево уехало внутрь репозитория"
+
+
+def test_the_head_is_read_under_the_same_lock_that_creates_the_tree(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Между чтением головы и заведением дерева не было замка.
+
+    Замечание ревизии, помеченное как suppressed, и оно верное: другой
+    принимающий вправе сдвинуть голову ровно в этот промежуток, и тогда цикл
+    стартует из устаревшего коммита, а функция назовёт его следующим.
+    """
+    from core import burn_in_supervisor as sup
+
+    events: list[str] = []
+    real_lock = sup.exclusive_file_lock
+    real_git = sup._git
+
+    @contextlib.contextmanager
+    def watched_lock(path):  # noqa: ANN001, ANN202
+        events.append("замок взят")
+        with real_lock(path):
+            yield
+        events.append("замок отпущен")
+
+    def watched_git(where, *args):  # noqa: ANN001, ANN202
+        if args[:2] == ("worktree", "add"):
+            events.append("дерево заведено")
+        return real_git(where, *args)
+
+    monkeypatch.setattr(sup, "exclusive_file_lock", watched_lock)
+    monkeypatch.setattr(sup, "_git", watched_git)
+
+    sup.materialise_next_cycle(repo, tmp_path / "cycle_locked")
+
+    assert "дерево заведено" in events, "дерево не заводилось вовсе"
+    assert events.index("замок взят") < events.index("дерево заведено"), (
+        "голова прочитана и дерево заведено вне замка"
+    )
+    assert events.index("дерево заведено") < events.index("замок отпущен")

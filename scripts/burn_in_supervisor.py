@@ -35,6 +35,7 @@ from core.burn_in_supervisor import (  # noqa: E402
     experiment_head,
     materialise_next_cycle,
     offer_ledger,
+    SupervisorError,
 )
 
 #: Потолок батареи. Десятичасовой опыт не вправе застрять на одном кандидате:
@@ -111,7 +112,19 @@ def main(argv: list[str] | None = None) -> int:
         # место, где цепочка принятий превращается в работающий код. Дерево
         # заводит принимающий: у кода, который сам себя меняет, нет способа
         # выбрать себе commit, потому что он не выбирает дерево.
-        started = materialise_next_cycle(repo, Path(args.next))
+        #
+        # `--sha` здесь протянут насквозь (ревизия PR #335): раньше он молча
+        # пропадал, и `--next --sha <чужой>` заводил дерево на текущей голове
+        # да ещё и выходил с успехом. Сверка, которую можно не заметить, — не
+        # сверка. Отказ печатается словами, а не трассировкой: принимающего
+        # читает человек.
+        try:
+            started = materialise_next_cycle(
+                repo, Path(args.next), sha=args.sha or None,
+            )
+        except SupervisorError as exc:
+            print(f"отказ: {exc}")
+            return 2
         print(f"следующий цикл стартует из {started}")
         print(f"дерево: {Path(args.next).resolve()}")
         return 0
