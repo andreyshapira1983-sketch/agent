@@ -475,3 +475,100 @@ def test_a_config_cannot_be_built_positionally() -> None:
         AutonomousRuntimeConfig("цель")
 
     assert CampaignConfig(goal="цель").goal == "цель"
+
+
+# ── признаки успеха: два замечания ревизии PR #334 ───────────────────────────
+#
+# Оба про одно: проверяющий обязан отвечать на критерий, а не на что-то
+# похожее. Пока он отвечает похожим, «answer is not execution» остаётся
+# наполовину закрытым — вердикт `verified` снова становится пересказом.
+
+
+def test_a_claim_is_not_met_by_a_value_that_merely_starts_the_same(tmp_path):
+    """I6. `status=ready` не вправе засчитываться на `status=ready_to_fail`.
+
+    Ложное ПОДТВЕРЖДЕНИЕ, а не ложный отказ: у `_claim_pattern` не было
+    границ, и значение-приставка считалось совпадением. Критерий «готово»
+    закрывался файлом, буквально говорящим «готово провалиться».
+    """
+    from core.success_check import observe_success_check
+
+    (tmp_path / "result.json").write_text(
+        '{"status": "ready_to_fail"}', encoding="utf-8"
+    )
+
+    seen = observe_success_check(
+        "result.json существует и содержит status=ready", tmp_path
+    )
+
+    assert seen["verdict"] == "missing", seen["reason"]
+
+
+def test_a_claim_is_not_met_by_a_key_that_merely_ends_the_same(tmp_path):
+    """I6, вторая половина: приставка у КЛЮЧА."""
+    from core.success_check import observe_success_check
+
+    (tmp_path / "result.json").write_text(
+        '{"my_status": "ready"}', encoding="utf-8"
+    )
+
+    seen = observe_success_check(
+        "result.json существует и содержит status=ready", tmp_path
+    )
+
+    assert seen["verdict"] == "missing", seen["reason"]
+
+
+def test_a_claim_that_is_actually_met_is_still_met(tmp_path):
+    """Сосед: границы не вправе сломать обычное совпадение.
+
+    Три записи одного утверждения — критерий говорит об утверждении, а не о
+    синтаксисе.
+    """
+    from core.success_check import observe_success_check
+
+    for body in ('{"status": "ready"}', "status: ready", "status=ready"):
+        (tmp_path / "result.json").write_text(body, encoding="utf-8")
+        seen = observe_success_check(
+            "result.json существует и содержит status=ready", tmp_path
+        )
+        assert seen["verdict"] == "verified", f"{body}: {seen['reason']}"
+
+
+def test_a_claim_belongs_to_the_artifact_it_was_said_about(tmp_path):
+    """S3. Утверждения применялись К КАЖДОМУ названному следу.
+
+    Критерий «result.json содержит status=ready, и создан log.txt» требовал
+    `status=ready` ещё и от `log.txt`. Ложный ОТКАЗ: честно выполненная цель
+    объявлялась невыполненной, и агент принимался чинить работающее.
+    """
+    from core.success_check import observe_success_check
+
+    (tmp_path / "result.json").write_text('{"status": "ready"}', encoding="utf-8")
+    (tmp_path / "log.txt").write_text("работа шла\n", encoding="utf-8")
+
+    seen = observe_success_check(
+        "result.json содержит status=ready, и создан log.txt", tmp_path
+    )
+
+    assert seen["verdict"] == "verified", seen["reason"]
+
+
+def test_the_artifact_that_owns_the_claim_still_has_to_meet_it(tmp_path):
+    """Сосед к S3: привязка не вправе стать поблажкой.
+
+    Тот же критерий, но `result.json` утверждения НЕ несёт. Отказ обязан
+    остаться, иначе «привязали к своему» превратилось бы в «не проверяем».
+    """
+    from core.success_check import observe_success_check
+
+    (tmp_path / "result.json").write_text('{"status": "broken"}', encoding="utf-8")
+    (tmp_path / "log.txt").write_text("работа шла\n", encoding="utf-8")
+
+    seen = observe_success_check(
+        "result.json содержит status=ready, и создан log.txt", tmp_path
+    )
+
+    assert seen["verdict"] == "missing"
+    assert "result.json" in seen["missing"]
+    assert "log.txt" not in seen["missing"]
