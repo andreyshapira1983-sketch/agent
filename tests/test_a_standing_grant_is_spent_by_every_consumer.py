@@ -193,6 +193,90 @@ def test_the_drain_still_applies_what_the_rule_allows(
 
     out = drain_rule_approved_proposals(workspace, dry_run=False)
 
-    assert out == {"considered": 1, "applied": 1, "refused": 0, "blocked": ""}
+    assert out == {"considered": 1, "applied": 1, "unapplied": 0,
+                   "attempted": 1, "refused": 0, "blocked": ""}
     assert lane.item_ids == [item.id]
     assert inbox.get(item.id).status == "approved"
+
+
+# ── Ревизия PR #333: потолок обязан быть неделимым ────────────────────────────
+#
+# Учёт общим журналом был верной половиной починки, но схема осталась из двух
+# шагов: прочитать остаток, затем дописать расход. Между ними помещается второй
+# слив, и `run_tick` к этому месту замок задачи уже отпустил. Потолок, который
+# можно превысить, сговорившись во времени, потолком не является.
+
+
+def test_two_simultaneous_drains_cannot_spend_the_same_last_unit(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Последняя единица достаётся ровно одному из двух одновременных потребителей.
+
+    Чередование не случайное, а вынужденное: счёт расхода нарочно замедлен, и
+    второй поток приходит ровно в тот миг, когда первый уже посчитал остаток,
+    но ещё не записал трату. Пара «прочитать → дописать» здесь проигрывает
+    всегда; неделимый резерв — никогда.
+    """
+    import threading
+    import time
+
+    import core.autonomous_runtime as runtime
+
+    real_count = runtime._standing_runs_today_unlocked
+
+    def _slow_count(path: Any, grant_id: str) -> int:
+        # Замедление стоит ПОСЛЕ чтения файла и до возврата — ровно в окне
+        # между «прочитал остаток» и «записал расход». Замедление ПЕРЕД
+        # чтением ничего не доказывает: потоки тогда расходятся сами и
+        # свидетель зеленеет даже на сломанной схеме (проверено пробником).
+        seen = real_count(path, grant_id)
+        time.sleep(0.4)
+        return seen
+
+    monkeypatch.setattr(runtime, "_standing_runs_today_unlocked", _slow_count)
+
+    verdicts: list[bool] = []
+    lock = threading.Lock()
+
+    def _try() -> None:
+        taken = runtime.reserve_standing_grant_use(
+            workspace, "grant:only-one", max_per_day=1
+        )
+        with lock:
+            verdicts.append(taken)
+
+    first = threading.Thread(target=_try)
+    second = threading.Thread(target=_try)
+    first.start()
+    time.sleep(0.1)  # второй приходит ВНУТРЬ окна между чтением и записью
+    second.start()
+    first.join(10)
+    second.join(10)
+
+    assert sorted(verdicts) == [False, True], (
+        f"потолок в одну единицу выдал {verdicts.count(True)} разрешений: "
+        "проверка остатка и запись расхода расходятся во времени"
+    )
+    assert standing_runs_today(workspace, "grant:only-one") == 1
+
+
+def test_a_reserve_refuses_when_the_day_is_spent(workspace: Path) -> None:
+    """Исчерпанный потолок отказывает, и отказ ничего не записывает."""
+    from core.autonomous_runtime import reserve_standing_grant_use
+
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is True
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is True
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is False
+    assert standing_runs_today(workspace, "g") == 2
+
+
+def test_a_grant_without_a_ceiling_reserves_nothing(workspace: Path) -> None:
+    """Потолок в ноль или без числа — это запрет, а не «без ограничений».
+
+    Тот же выбор умолчания, что у H-33: из двух ошибок настройки тихо проходила
+    ровно та, что СНИМАЕТ ограничение.
+    """
+    from core.autonomous_runtime import reserve_standing_grant_use
+
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=0) is False
+    assert standing_runs_today(workspace, "g") == 0

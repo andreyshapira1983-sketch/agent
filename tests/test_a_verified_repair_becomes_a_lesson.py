@@ -114,6 +114,22 @@ def _lessons(workspace: Path) -> list:
     return LessonStore(default_lessons_path(workspace)).load()
 
 
+#: Профиль памяти, ОТКРЫВАЮЩИЙ сток урока. Ровно тот, что даёт полномочие
+#: песочницы (`core/burn_in_sandbox.SANDBOX_DURABLE_SINKS`). До ревизии PR #333
+#: тесты этого файла доказывали запись урока под обычным стоячим грантом, то
+#: есть доказывали ровно то, на что ревизия и указала: урок шёл мимо политики
+#: памяти. Сам факт управляемости проверяется отдельными свидетелями ниже; эти
+#: тесты говорят о СОДЕРЖАНИИ урока и потому приходят с открытым стоком.
+_OPEN_SINKS = frozenset({"procedure", "knowledge"})
+
+
+def _drain(workspace: Path, **kwargs: Any) -> dict:
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    kwargs.setdefault("durable_writes", _OPEN_SINKS)
+    return drain_rule_approved_proposals(workspace, dry_run=False, **kwargs)
+
+
 def test_a_rolled_back_autonomous_apply_leaves_a_lesson(
     workspace: Path, monkeypatch: Any
 ) -> None:
@@ -129,7 +145,7 @@ def test_a_rolled_back_autonomous_apply_leaves_a_lesson(
     _pending_document(inbox, workspace, "alpha")
     _install(monkeypatch, _Lane("rolled_back", reason="ImportError: cannot import name 'X' from 'core.y'"))
 
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     lessons = _lessons(workspace)
     assert len(lessons) == 1, "откат прошёл, урока нет — опыт снова потерян"
@@ -139,10 +155,17 @@ def test_a_rolled_back_autonomous_apply_leaves_a_lesson(
     )
 
 
-def test_an_accepted_autonomous_apply_leaves_a_lesson(
+def test_a_verified_candidate_leaves_a_lesson(
     workspace: Path, monkeypatch: Any
 ) -> None:
-    """Принятая починка — тоже опыт: «так сработало» знание не меньшее, чем «так нет»."""
+    """Проверенный кандидат — тоже опыт: «так сработало» знание не меньшее, чем «так нет».
+
+    Слово исхода именно `verified_candidate`, а не `accepted`: в этот момент
+    полоса сделала локальный commit и вернула дерево на исходную ветку, то
+    есть работающий агент остался на прежнем коде. Принятие — отдельное
+    событие и делает его `core/burn_in_supervisor.adopt_offer`
+    (ревизия PR #333, дефект 5).
+    """
     from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
@@ -150,11 +173,11 @@ def test_an_accepted_autonomous_apply_leaves_a_lesson(
     _pending_document(inbox, workspace, "beta")
     _install(monkeypatch, _Lane("committed_local"))
 
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     lessons = _lessons(workspace)
     assert len(lessons) == 1
-    assert lessons[0].outcome == "accepted"
+    assert lessons[0].outcome == "verified_candidate"
 
 
 def test_a_lesson_carries_its_provenance(workspace: Path, monkeypatch: Any) -> None:
@@ -170,7 +193,7 @@ def test_a_lesson_carries_its_provenance(workspace: Path, monkeypatch: Any) -> N
     _pending_document(inbox, workspace, "gamma")
     _install(monkeypatch, _Lane("rolled_back", reason="тесты упали: 3 failed", tests=("tests/test_x.py",)))
 
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     lesson = _lessons(workspace)[0]
     assert lesson.failure, "исходный сбой не записан"
@@ -197,12 +220,12 @@ def test_a_later_similar_change_consumes_the_lesson(
     _pending_document(inbox, workspace, "delta")
     lane = _install(monkeypatch, _Lane("rolled_back", reason="батарея покраснела"))
 
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
     assert len(lane.item_ids) == 1
 
     # Тот же адрес, новая заявка — ровно та ситуация, которую урок описывает.
     _pending_document(inbox, workspace, "delta")
-    out = drain_rule_approved_proposals(workspace, dry_run=False)
+    out = _drain(workspace)
 
     assert out["applied"] == 0, "урок записан и не прочитан — это не память, а архив"
     assert out["refused"] == 1
@@ -223,11 +246,11 @@ def test_a_different_target_is_not_shadowed_by_the_lesson(
     _grant(inbox)
     _pending_document(inbox, workspace, "epsilon")
     lane = _install(monkeypatch, _Lane("rolled_back", reason="батарея покраснела"))
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     lane.status = "committed_local"
     _pending_document(inbox, workspace, "zeta")
-    out = drain_rule_approved_proposals(workspace, dry_run=False)
+    out = _drain(workspace)
 
     assert out["applied"] == 1, "чужой адрес заблокирован уроком про другой файл"
 
@@ -243,7 +266,7 @@ def test_the_lesson_store_is_machine_readable(workspace: Path, monkeypatch: Any)
     _grant(inbox)
     _pending_document(inbox, workspace, "eta")
     _install(monkeypatch, _Lane("rolled_back", reason="батарея покраснела"))
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     lines = default_lessons_path(workspace).read_text(encoding="utf-8").splitlines()
     assert lines, "файл уроков пуст"
@@ -272,8 +295,169 @@ def test_an_import_rollback_still_yields_its_hard_rule(
         reason="ImportError: cannot import name 'observe' from 'core.success_check'",
     ))
 
-    drain_rule_approved_proposals(workspace, dry_run=False)
+    _drain(workspace)
 
     rules = RuleStore(default_rules_path(workspace)).load()
     assert [r.symbol for r in rules] == ["observe"]
     assert rules[0].target == "core/success_check.py"
+
+
+# ── Ревизия PR #333: урок обязан идти ЧЕРЕЗ ворота памяти ─────────────────────
+#
+# Первый заход замкнул петлю и открыл `procedure`/`knowledge` профилю
+# песочницы. Но сам урок писался `LessonStore.add()` напрямую в
+# `data/self_build_lessons.jsonl` — мимо `MemoryWritePolicy`, и звался в том
+# числе на производственном `rule_approved_apply`. Требование «никаких
+# неуправляемых прямых записей» выполнено не было: ворота открыли одну дверь, а
+# урок ходил другой.
+
+
+def test_production_unattended_does_not_write_a_lesson(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Безнадзорное производство урок НЕ пишет: сток `procedure` там закрыт.
+
+    Производственная политика памяти не меняется — это и было условием
+    эксперимента. Петля замыкается в песочнице, а не везде.
+    """
+    inbox = _inbox(workspace)
+    _grant(inbox)
+    _pending_document(inbox, workspace, "prod")
+    _install(monkeypatch, _Lane("rolled_back", reason="тесты упали"))
+
+    # durable_writes не назван: слив безнадзорен, и умолчание обязано быть
+    # самым узким, а не самым широким.
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert _lessons(workspace) == [], (
+        "урок записан на производственном безнадзорном пути — "
+        "прямая запись мимо политики памяти"
+    )
+
+
+def test_the_refusal_is_logged_not_silent(workspace: Path, monkeypatch: Any) -> None:
+    """Отказ обязан быть СЛЫШНЫМ: молчащие ворота неотличимы от отсутствующих."""
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _grant(inbox)
+    _pending_document(inbox, workspace, "silent")
+    _install(monkeypatch, _Lane("rolled_back", reason="тесты упали"))
+
+    events: list[tuple[str, dict]] = []
+    drain_rule_approved_proposals(
+        workspace, dry_run=False, log=lambda e, p: events.append((e, p))
+    )
+
+    refusals = [p for e, p in events if e == "lesson_write_refused"]
+    assert refusals, f"отказ записи урока не попал в журнал: {[e for e, _ in events]}"
+    assert refusals[0]["sink"] == "procedure"
+
+
+def test_an_open_sink_lets_the_lesson_through(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Обратная сторона: профиль с открытым стоком урок пропускает."""
+    inbox = _inbox(workspace)
+    _grant(inbox)
+    _pending_document(inbox, workspace, "sandboxed")
+    _install(monkeypatch, _Lane("rolled_back", reason="тесты упали"))
+
+    _drain(workspace)
+
+    assert len(_lessons(workspace)) == 1
+
+
+def test_the_verdict_repeats_the_ladder_not_a_second_one() -> None:
+    """Лестница одна: `None` — человек, набор — его содержимое решает."""
+    from core.self_build_rules import LESSON_SINK, lesson_write_verdict
+
+    assert lesson_write_verdict(None)[0] is True
+    assert lesson_write_verdict(frozenset({LESSON_SINK}))[0] is True
+    assert lesson_write_verdict(frozenset({"episode", "hygiene"}))[0] is False
+    assert lesson_write_verdict(frozenset())[0] is False
+
+
+def test_an_unreadable_lesson_journal_blocks_instead_of_allowing(
+    workspace: Path
+) -> None:
+    """Испорченная строка журнала уроков ЗАПРЕЩАЕТ повтор, а не разрешает его.
+
+    До ревизии PR #333 любое исключение чтения отвечало «препятствий нет».
+    У ворот незнание обязано означать отказ, иначе порча одной строки снимает
+    защиту, ради которой ворота и стоят.
+    """
+    from core.self_build_rules import blocking_lesson, default_lessons_path
+
+    path = default_lessons_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{это не json\n", encoding="utf-8")
+
+    verdict = blocking_lesson(workspace, ["core/foo.py"])
+
+    assert verdict is not None, "нечитаемый журнал уроков снял ворота"
+    assert "не прочитан" in verdict.failure or "не целиком" in verdict.failure
+
+
+# ── Ревизия PR #333, дефект 5: предъявление принимающему ──────────────────────
+
+
+def test_a_sandbox_candidate_is_offered_to_the_supervisor(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Проверенный кандидат песочницы попадает в реестр предложений.
+
+    Без этой проводки `core/burn_in_supervisor` — мёртвый код: принимать ему
+    было бы нечего, и петля осталась бы разомкнутой при полностью написанном
+    принимающем. Отсутствие события неотличимо от отсутствия органа.
+    """
+    from core.burn_in_supervisor import offer_ledger
+
+    inbox = _inbox(workspace)
+    _grant(inbox)
+    _pending_document(inbox, workspace, "offered")
+    lane = _Lane("committed_local")
+    _install(monkeypatch, lane)
+
+    events: list[tuple[str, dict]] = []
+    _drain(workspace, log=lambda e, p: events.append((e, p)))
+
+    offers = [p for e, p in events if e == "burn_in_offer"]
+    # Обычный стоячий грант песочницей НЕ является, и предъявлять ему нечего.
+    assert offers == [], "производственный путь предъявил кандидата опыту"
+    assert not offer_ledger(workspace).exists()
+
+
+def test_the_offer_names_the_sha_not_the_branch(tmp_path: Path) -> None:
+    """Реестр берёт только полный SHA: имя ветки — не неподвижное имя.
+
+    Ветку можно переставить; принять ветку значит принять то, что окажется
+    под ней к моменту проверки.
+    """
+    from core.burn_in_supervisor import offer_verified_commit
+
+    assert offer_verified_commit(tmp_path, sha="a" * 40, proposal_id="p") is True
+    assert offer_verified_commit(tmp_path, sha="main", proposal_id="p") is False
+    assert offer_verified_commit(tmp_path, sha="a" * 8, proposal_id="p") is False
+
+
+def test_a_rollback_is_not_counted_as_applied(workspace: Path, monkeypatch: Any) -> None:
+    """Счётчик `applied` считает ПРИМЕНЁННОЕ, а не начатое.
+
+    Ревизия PR #333: он рос на любом исходе, включая откат. По журналу выходило
+    больше применений, чем изменений в дереве, и эта разница — ровно тот
+    молчаливый счёт, из-за которого десятичасовой прогон нельзя прочитать
+    задним числом.
+    """
+    inbox = _inbox(workspace)
+    _grant(inbox)
+    _pending_document(inbox, workspace, "rolled")
+    _install(monkeypatch, _Lane("rolled_back", reason="тесты упали"))
+
+    out = _drain(workspace)
+
+    assert out["applied"] == 0, f"откат засчитан применением: {out}"
+    assert out["unapplied"] == 1
+    assert out["attempted"] == 1, "попытка потеряна — расход стал невидимым"

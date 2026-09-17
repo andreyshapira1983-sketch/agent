@@ -40,11 +40,11 @@ SKIP_DIRS = frozenset({
 WATCH: dict[str, int] = {
     #: 188 (2026-09-01): пейсер впервые пересёк порог 150 — в него въехал
     #: выбор СЛЕДУЮЩЕЙ цели по хартии (право смены цели внутри прогона).
-    "agent_tick.py:run_paced_campaign": 203,  # +13 (2026-09-17, ремедиация аудита автономности, находка 4): критерий успеха выбранной цели доезжает до кампании вместе с целью — `_pick_next_goal` отдаёт отчёт, а не строку, и `success_check` кладётся в CampaignConfig. Срезать нечего: это протяжка одного поля через точку входа, у которой нет промежуточного объекта. +1 (2026-09-17, находка 9): профиль памяти собирается функцией `unattended_memory_profile`, чтобы песочница могла его расширить.
+    "agent_tick.py:run_paced_campaign": 207,  # +4 (2026-09-18, ревизия PR #333): проводка набора стоков в слив кампании (тот же профиль, что у сборки агента)  # +13 (2026-09-17, ремедиация аудита автономности, находка 4): критерий успеха выбранной цели доезжает до кампании вместе с целью — `_pick_next_goal` отдаёт отчёт, а не строку, и `success_check` кладётся в CampaignConfig. Срезать нечего: это протяжка одного поля через точку входа, у которой нет промежуточного объекта. +1 (2026-09-17, находка 9): профиль памяти собирается функцией `unattended_memory_profile`, чтобы песочница могла его расширить.
     "core/loop.py:AgentLoop._run_inner": 430,  # +2 (2026-09-04 exam, turn 3: the sensor blocks folded into the evidence chain).  # +1 (2026-09-04 exam, turn 2: the spend/roster block now reaches the synthesizer through SynthesisState).  # замер 417 (2213 до раскола) + запас 10
     "core/step_sanitizer.py:sanitize_step": 788,  # -46 (2026-09-05 evening, the read_logs branch moved out to `_sanitize_read_logs`, where last_n is clamped instead of dropped; the file_read window lives in `_line_range_arguments` — the first two branches to leave the ladder).  # +22 (2026-09-04 22:20, his routing door «model_route»: role/provider/reason required, model unless release).  #+19 (2026-09-04 night, the read door «memory_recall»: one string argument, same shape as memory_bank).  #+17 (2026-09-04, the eye «model_roster»): one more argument-less branch, same shape as current_time; the registered-tool guard demands it.  # +42 (2026-09-01, Fable строит за агента): ветка semantic_scholar_search — лечение МЁРТВОЙ способности: инструмент стоял в поясе и в промпте планировщика, а шаг с ним молча выбрасывался. Найден новым сторожем tests/test_a_registered_tool_is_not_silently_dead.py. Лекарство остаётся прежним и всё нужнее: диспетчеризация по словарю (названо агентом 2026-09-01).  # +37 (2026-09-01): ветка journal_append — легитимный обработчик, не раздувание; настоящее лекарство названо — диспетчеризация по словарю (решение и подпись — агента, append_ratchets.md).  # +29 (2026-08-31): added memory_bank dispatch block; one tool branch is not a reason to cut (решение и подпись — агента, sanitizer_ratchet.md).
     "core/loop_step_execution.py:AgentLoopStepExecution._execute_step": 568,
-    "agent_tick.py:run_tick": 478,  # +2 (2026-09-17, ремедиация аудита автономности, находка 1): сухой тик передаёт `dry_run` в уборку дублей и не даёт режиму гигиены перекрыть сухость — две строки в самом тике, потому что решают они именно здесь. +2 (2026-09-17, находка 9): профиль памяти безнадзорного прогона собирается функцией, а не константой, иначе песочница не может его расширить, не тронув производственный.
+    "agent_tick.py:run_tick": 483,  # +5 (2026-09-18, ревизия PR #333): сухость доведена до починки застрявших строк и та же проводка стоков в слив  # +2 (2026-09-17, ремедиация аудита автономности, находка 1): сухой тик передаёт `dry_run` в уборку дублей и не даёт режиму гигиены перекрыть сухость — две строки в самом тике, потому что решают они именно здесь. +2 (2026-09-17, находка 9): профиль памяти безнадзорного прогона собирается функцией, а не константой, иначе песочница не может его расширить, не тронув производственный.
     "core/loop_synthesis.py:AgentLoopSynthesis._synthesize": 397,  # +7 (2026-09-04 exam, turn 3: sensor citations offered on a no-tool turn).  # уехал целиком из core/loop.py
     "core/loop_response_deciders.py:AgentLoopResponseDeciders._build_response_draft": 161,  # +3 (2026-08-10): контракт завершения приходит сюда параметром — распознанный и непроверяемый запрет обязан дойти до оператора, а не умереть в журнале. +3 (2026-08-13): вердикт применимости улик передаётся композитору сводки — иначе хвост объявлял «нулевую уверенность» ходу, которому улики не полагались.  # +1 (2026-08-15): седьмой решатель — раскрытие подмены модели. Рост это сам контракт: ответ обязан говорить, кем он написан, когда его написал не выбранный маршрутом поставщик (docs/CODE_NOTES.md, «The answer was not written by the model you chose»).
     "core/self_build_producer.py:produce_self_apply_proposal": 392,  # 375 → 392 (2026-09-03, block 3 L9): gate 3 per file — waiting files hold only their own candidate, a denied file is «denied_cooldown», both sets feed the grounded chooser's exclusions; the refused-repeat report at the publish site. Extraction would move the gate's reason text away from the gate that states it.
@@ -99,6 +99,19 @@ WATCH: dict[str, int] = {
     "core/loop_run_tail.py:AgentLoopRunTail._finalize_run_tail": 203,
     "core/loop_attempt.py:AgentLoopAttempt._run_attempt_loop": 433,
     "core/loop_verify_replan.py:AgentLoopVerifyReplan._verify_and_settle_answer": 385,  # +27 (2026-08-29, авторство агента): крючок настойчивости — helper исполнения шагов, одноразовый fallback иной формы и settled-выход; правило mem_8b36eb3c, ставшее механизмом
+    #: 162 (2026-09-18, ревизия PR #333): расход стоячего гранта переведён на
+    #: атомарную резервацию. Рост — не новая ветка, а объяснение при ней:
+    #: прежняя схема «прочитать остаток → отдельно дозаписать → применить»
+    #: пропускала два одновременных слива на потолке в одну единицу, и это
+    #: измерено пробником, а не выведено из общих соображений.
+    "core/autonomous_runtime.py:AutonomousRuntime.run": 162,
+    #: 162 (2026-09-18, ревизия PR #333): слив стал делать три вещи, которых
+    #: раньше не делал никто — резервировать право атомарно, ПРЕДЪЯВЛЯТЬ
+    #: проверенный SHA принимающему (`core/burn_in_supervisor.py`) и вести
+    #: урок через ворота памяти вместо прямой записи. Два первых вынесены в
+    #: отдельные функции (`_offer_to_supervisor`, `reserve_standing_grant_use`);
+    #: здесь остались решение и его причина.
+    "core/rule_approved_apply.py:drain_rule_approved_proposals": 162,
 }
 
 

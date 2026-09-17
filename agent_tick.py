@@ -39,6 +39,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import traceback
 from collections.abc import Callable
@@ -521,13 +522,39 @@ def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> st
     return files[0] if len(files) == 1 else None
 
 
-def _repair_dedup_key(target_path: str, failed_names: list[str]) -> str:
-    """Устойчивое имя ОДНОЙ поломки: цель починки + множество упавших тестов.
+#: Имена исключений — устойчивая часть диагноза. Всё прочее в нём
+#: переформулируется от тика к тику.
+_CAUSE_RE = re.compile(r"\b([A-Z][A-Za-z0-9]*(?:Error|Exception|Warning|Timeout))\b")
+
+
+def _cause_fingerprint(text: str) -> str:
+    """Причина сбоя, сведённая к устойчивому следу.
+
+    Ревизия PR #333: прежний ключ склеивал цель починки и имена упавших
+    тестов, поэтому ТОТ ЖЕ тест, упавший по ДРУГОЙ причине, давал ту же
+    строку — материально другая беда молча пряталась за первой заявкой.
+
+    Осторожность обратной стороны важнее прямой. Диагноз — свободный текст, и
+    взять его целиком значило бы вернуть размножение заявок с другого конца:
+    каждая переформулировка открывала бы новую. Поэтому берётся только
+    множество имён исключений; диагноз без такого имени даёт пустой след,
+    то есть прежнее поведение и никакой выдуманной причины.
+    """
+    found = sorted({m.group(1) for m in _CAUSE_RE.finditer(text or "")})
+    return "|".join(found)
+
+
+def _repair_dedup_key(
+    target_path: str, failed_names: list[str], cause: str = ""
+) -> str:
+    """Устойчивое имя ОДНОЙ поломки: цель починки + упавшие тесты + причина.
 
     Порядок имён не значим (pytest выдаёт их как придётся), поэтому множество
     сортируется. Зачем ключ вообще: см. место вызова в `_maybe_propose_repair`.
     """
     fingerprint = "|".join(sorted({str(n) for n in failed_names}))
+    if cause:
+        fingerprint += "##" + cause
     digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
     return f"repair:{target_path}:{digest}"
 
@@ -592,10 +619,16 @@ def _maybe_propose_repair(
                 # ожидающие. Размножение заявок глушило настоящие просьбы и
                 # само себя блокировало.
                 #
-                # Ключ описывает ПОЛОМКУ (цель починки + имена упавших тестов),
-                # а не предложенное лечение: перефразированный диагноз — та же
-                # беда, а другой упавший тест — уже другая.
-                dedup_key=_repair_dedup_key(target_path, failed_names),
+                # Ключ описывает ПОЛОМКУ (цель починки + имена упавших тестов
+                # + устойчивый след причины), а не предложенное лечение:
+                # перефразированный диагноз — та же беда, другой упавший тест
+                # или другое исключение — уже другая.
+                dedup_key=_repair_dedup_key(
+                    target_path, failed_names,
+                    _cause_fingerprint(
+                        f"{report.diagnosis or ''} {' '.join(report.evidence or ())}"
+                    ),
+                ),
                 payload={
                     "failed_count": failed,
                     "failed_tests": failed_names,
@@ -1061,11 +1094,20 @@ def _charter_goal_router(workspace: Path) -> Any:
     )
 
 
-def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
+def _free_stranded_rows(
+    task_store: Any, *, lock: Any, workspace: Path, dry_run: bool = False
+) -> None:
     """Startup-only, under the lock: return rows nothing else can free.
 
     Two resting states, one contract — see docs/CODE_NOTES.md, "Rows nothing
     frees" (MIR-039 / MIR-040 for the orphan half).
+
+    ``dry_run`` carries the tick's own promise one step further than the first
+    remediation pass did. The burn-in review (2026-09-17) found this call site
+    passing no flag, one line above the sweep that had just been taught the
+    flag. The line is drawn at reversibility, by the owner's word: a dry pass
+    still re-queues an orphan that has attempts left, and no longer buries one
+    that does not — a terminal ``failed`` is a verdict nothing takes back.
     """
     from core.task_lifecycle import reactivate_resumable_work, recover_orphaned_tasks
 
@@ -1073,13 +1115,14 @@ def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
         return [{"id": t.id, "status": t.status,
                  "attempts": t.attempts, "error": t.last_error} for t in tasks]
 
-    for event, error_event, action in (
-        ("tasks_recovered", "task_recovery_error", recover_orphaned_tasks),
+    for event, error_event, action, extra in (
+        ("tasks_recovered", "task_recovery_error", recover_orphaned_tasks,
+         {"finalise_exhausted": not dry_run}),
         ("paused_work_reactivated", "task_reactivation_error",
-         reactivate_resumable_work),
+         reactivate_resumable_work, {}),
     ):
         try:
-            freed = action(task_store, lock=lock)
+            freed = action(task_store, lock=lock, **extra)
         except Exception as exc:  # noqa: BLE001 — one pass failing must not
             _log_tick(workspace, {  # stop the other, nor the tick
                 "event": error_event, "error": f"{type(exc).__name__}: {exc}",
@@ -1087,6 +1130,7 @@ def _free_stranded_rows(task_store: Any, *, lock: Any, workspace: Path) -> None:
             continue
         if freed:
             _log_tick(workspace, {"event": event, "count": len(freed),
+                                  "dry_run": dry_run,
                                   "tasks": _summarise(freed)})
 
 
@@ -1333,7 +1377,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 
         pending_tasks = []
         if _consumer_lock is not None:
-            _free_stranded_rows(task_store, lock=_consumer_lock, workspace=workspace)
+            _free_stranded_rows(task_store, lock=_consumer_lock,
+                                workspace=workspace, dry_run=dry_run)
             # Same slot, same reason: the unattended path generates the most
             # repeats and was the only path that could not clean them up —
             # 43 identical episodes accumulated here on 2026-08-16 (MIR-131).
@@ -1592,6 +1637,10 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         summary["rule_approved"] = drain_rule_approved_proposals(
             workspace, dry_run=dry_run,
             log=lambda e, p: _log_tick(workspace, {"event": e, **p}),
+            # Один источник истины о стоках: тот же профиль, которым собирается
+            # безнадзорный агент. Урок — долговременная запись и идёт теми же
+            # воротами (ревизия PR #333).
+            durable_writes=unattended_memory_profile(workspace)["durable_writes"],
         )
     except Exception as exc:  # noqa: BLE001 — замыкание петли не вправе ронять тик
         _log_tick(workspace, {"event": "rule_approval_error",
@@ -1884,7 +1933,11 @@ def run_paced_campaign(
         "cycles_run": result.cycles_run,
         "totals": result.totals,
     })
-    drain_and_log(workspace, dry_run=dry_run, log_tick=lambda p: _log_tick(workspace, p))
+    drain_and_log(
+        workspace, dry_run=dry_run,
+        log_tick=lambda p: _log_tick(workspace, p),
+        durable_writes=unattended_memory_profile(workspace)["durable_writes"],
+    )
     print(result.user_summary(), file=sys.stderr)
     return 0
 

@@ -42,7 +42,13 @@ import pathlib
 PRODUCTION_DIRS = ("core", "cli", "app", "scripts", "tools")
 
 #: Names that anchor a path in a FIXTURE tree, not in the repository.
-_FIXTURE_ANCHORS = frozenset({"tmp_path", "tmp", "ws", "workspace", "repo", "root", "target_dir"})
+#: `worktree` добавлено 2026-09-18: принимающий (`core/burn_in_supervisor.py`)
+#: отдаёт батарее СВЕЖЕЕ рабочее дерево под tmp, и проверка «батарея видела
+#: код кандидата» обязана прочитать файл именно там. Это ровно тот случай,
+#: ради которого список и заведён: дерево создал тест, а не репозиторий.
+_FIXTURE_ANCHORS = frozenset({
+    "tmp_path", "tmp", "ws", "workspace", "repo", "root", "target_dir", "worktree",
+})
 
 #: Known pins on 2026-09-03 — `file :: pinned path`. Ratchet, not amnesty:
 #: until: 2026-09-30 — migrate each to `Path(module.__file__)` /

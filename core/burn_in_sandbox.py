@@ -60,10 +60,23 @@ SANDBOX_MARKER = "config/burn_in_sandbox.json"
 _ON_VALUES: frozenset[str] = frozenset({"on", "1", "true", "yes"})
 
 #: Забор, который песочница не вправе двигать изнутри.
+#:
+#: Ревизия PR #333 нашла здесь фантом: стоял `core/policy_gate.py`, файла с
+#: таким именем в дереве нет вовсе, а настоящий `PolicyGate` живёт в
+#: `core/policy.py`. Запись выглядела охраной ворот и не была ею. Отсюда
+#: правило: за забором стоит КАЖДЫЙ, кто решает о полномочии, — ворота, место
+#: замыкания петли одобрений и счетовод расхода постоянного гранта; иначе
+#: песочница вправе переписать своего счетовода, не тронув ни одной записи
+#: забора. Существование названного проверяет
+#: `test_every_fence_entry_names_a_real_file`.
 _FENCE: frozenset[str] = frozenset({
     SANDBOX_MARKER,
     "core/burn_in_sandbox.py",
-    "core/policy_gate.py",
+    "core/burn_in_supervisor.py",
+    "scripts/burn_in_supervisor.py",
+    "core/policy.py",
+    "core/rule_approved_apply.py",
+    "core/autonomous_runtime.py",
     "core/actuation_gateway.py",
     "core/self_apply_lane.py",
     "scripts/install_daemon.ps1",
@@ -172,6 +185,19 @@ def load_sandbox_authority(
     )
 
 
+def _fence_prints(root: Path) -> frozenset[str]:
+    """Забор в том виде, в каком его можно сравнивать: разрешённые пути.
+
+    Сверять имя — значит сверять написание. Ссылка с невинным именем и вариант
+    регистра на файловой системе, регистр не различающей, дают ДРУГУЮ строку и
+    ТОТ ЖЕ файл; обе формы обхода нашла ревизия PR #333. `resolve()` снимает
+    первую, `normcase` — вторую.
+    """
+    return frozenset(
+        os.path.normcase(str((root / rel).resolve())) for rel in _FENCE
+    )
+
+
 def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, str]:
     """Можно ли применить это предложение в песочнице, и если нет — почему.
 
@@ -186,6 +212,7 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
     if not files:
         return False, "no files in the proposal"
     root = Path(workspace).resolve()
+    fence = _fence_prints(root)
     for change in files:
         raw = str(getattr(change, "path", "") or "")
         rel = _normalize_rel(raw)
@@ -194,7 +221,7 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
         target = (root / rel).resolve()
         if root != target and root not in target.parents:
             return False, f"{rel!r} resolves outside the sandbox workspace"
-        if rel in _FENCE:
+        if os.path.normcase(str(target)) in fence:
             return False, f"{rel!r} is the sandbox fence; it is not moved from inside"
         if _is_denied(rel):
             return False, f"{rel!r} is a denied class (secrets, CI, infrastructure)"
@@ -215,21 +242,82 @@ def record_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> None:
     record_standing_grant_use(workspace, authority.id)
 
 
+def reserve_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> bool:
+    """Занять одну единицу дневного потолка песочницы, или отказать.
+
+    Тот же общий журнал и тот же атомарный примитив, что у стоячего гранта:
+    два счётчика одного полномочия — это ноль счётчиков, а два ОДНОВРЕМЕННЫХ
+    слива на одном счётчике без замка — потолок, который можно превысить.
+    """
+    from core.autonomous_runtime import reserve_standing_grant_use
+
+    return reserve_standing_grant_use(
+        workspace, authority.id, max_per_day=authority.max_applies_per_day
+    )
+
+
+class TermedSinks(frozenset):
+    """Список стоков, в котором РАСШИРЕНИЕ носит свой срок с собой.
+
+    Ревизия PR #333: кампания строит агента один раз и работает часами, а срок
+    полномочия проверялся только при построении профиля. Полномочие, истёкшее
+    на втором часу, продолжало открывать обучение до конца прогона.
+
+    Перестроить агента нельзя по устройству: `_durable_learning_suppressed`
+    (`core/loop_memory_write.py`) прямо оговаривает, что `durable_writes`
+    привязан к экземпляру на всю его жизнь и API на прогон нет нарочно.
+    Поэтому срок едет внутрь самого списка: проверка `sink not in allowlist`
+    остаётся той же строкой кода, но после срока расширение отвечает «нет».
+
+    Производственная часть списка сроку не подчинена — закрывается ровно то,
+    что полномочие открыло.
+    """
+
+    __slots__ = ("_granted", "_deadline")
+
+    def __new__(cls, base, granted, deadline):
+        self = super().__new__(cls, frozenset(base) | frozenset(granted))
+        self._granted = frozenset(granted) - frozenset(base)
+        self._deadline = deadline
+        return self
+
+    def contains_at(self, sink: object, now: datetime) -> bool:
+        if not frozenset.__contains__(self, sink):
+            return False
+        if sink in self._granted and now >= self._deadline:
+            return False
+        return True
+
+    def __contains__(self, sink: object) -> bool:
+        return self.contains_at(sink, datetime.now(timezone.utc))
+
+
 def memory_profile_for(base: dict, workspace: Any, *, env: Any = None) -> dict:
     """Безнадзорный профиль памяти: производственный, либо профиль песочницы.
 
     Без включённого полномочия возвращается КОПИЯ базового профиля — ни одна
-    его строка не меняется, и производственная политика остаётся той же, что
-    была до 2026-09-17.
+    его строка не меняется, производственная политика остаётся той же, что
+    была до 2026-09-17, и тип списка остаётся обычным `frozenset`.
 
-    С полномочием список стоков расширяется ровно на `SANDBOX_DURABLE_SINKS`.
-    Это не «разрешение писать что угодно»: каждая запись по-прежнему проходит
+    С полномочием список стоков расширяется ровно на `SANDBOX_DURABLE_SINKS`,
+    и расширение носит СРОК полномочия с собой (`TermedSinks`). Это не
+    «разрешение писать что угодно»: каждая запись по-прежнему проходит
     `MemoryWritePolicy` и сторожа `_durable_learning_suppressed`, у которого
-    сухость прогона и режим аудита стоят ВЫШЕ любого списка. Здесь двигается
-    ровно одно — две строки списка разрешённых стоков.
+    сухость прогона и режим аудита стоят ВЫШЕ любого списка.
     """
     profile = dict(base)
-    if load_sandbox_authority(workspace, env=env) is None:
+    authority = load_sandbox_authority(workspace, env=env)
+    if authority is None:
         return profile
-    profile["durable_writes"] = frozenset(profile.get("durable_writes") or ()) | SANDBOX_DURABLE_SINKS
+    try:
+        deadline = datetime.fromisoformat(authority.expires_at)
+    except ValueError:  # pragma: no cover — полномочие уже разобрало эту строку
+        return profile
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    profile["durable_writes"] = TermedSinks(
+        frozenset(profile.get("durable_writes") or ()),
+        SANDBOX_DURABLE_SINKS,
+        deadline,
+    )
     return profile

@@ -25,9 +25,21 @@ class _Authority:
     id: str
     actor: str
     verdict: Callable[[Any], tuple[bool, str]]
-    spend: Callable[[], None]
+    #: Занять одну единицу потолка. True — занято, можно применять; False —
+    #: остатка нет. Решение и запись неразделимы (ревизия PR #333): пара
+    #: «спросить остаток → записать расход» пропускала два одновременных слива.
+    reserve: Callable[[], bool]
+    #: Снимок остатка на входе. Только для быстрого отказа и журнала; истина о
+    #: потолке живёт в `reserve`, и спорить надо с ней.
     remaining: int
     sandbox: bool
+
+
+#: Умолчание набора стоков для слива. Это НЕ `None`: `None` на лестнице
+#: означает «человек за клавиатурой, ограничений нет», а слив по своей природе
+#: безнадзорен. Вызывающий, забывший назвать профиль, обязан получить самый
+#: узкий, а не самый широкий ответ (ревизия PR #333).
+_UNATTENDED: frozenset[str] = frozenset()
 
 
 def _authority_for(
@@ -40,12 +52,12 @@ def _authority_for(
     """
     from core.autonomous_runtime import (
         active_standing_grant,
-        record_standing_grant_use,
+        reserve_standing_grant_use,
         standing_grant_remaining_runs,
     )
     from core.burn_in_sandbox import (
         load_sandbox_authority,
-        record_sandbox_apply,
+        reserve_sandbox_apply,
         sandbox_applies_today,
         sandbox_execution_verdict,
     )
@@ -58,7 +70,7 @@ def _authority_for(
             id=sandbox.id,
             actor="sandbox:burn_in",
             verdict=lambda p: sandbox_execution_verdict(p, workspace=workspace),
-            spend=lambda: record_sandbox_apply(workspace, sandbox),
+            reserve=lambda: reserve_sandbox_apply(workspace, sandbox),
             remaining=sandbox.max_applies_per_day - sandbox_applies_today(workspace, sandbox),
             sandbox=True,
         )
@@ -66,11 +78,14 @@ def _authority_for(
     if grant is None:
         return None
     grant_id = getattr(grant, "id", "")
+    grant_cap = int((getattr(grant, "payload", None) or {}).get("max_runs_per_day") or 0)
     return _Authority(
         id=grant_id,
         actor="rule:documents_only",
         verdict=autonomous_execution_verdict,
-        spend=lambda: record_standing_grant_use(workspace, grant_id),
+        reserve=lambda: reserve_standing_grant_use(
+            workspace, grant_id, max_per_day=grant_cap
+        ),
         # Остаток на сегодня, а не потолок: журнал расхода общий с рантаймом.
         # Аудит автономности 2026-09-17 нашёл здесь проход без учёта — «3
         # прогона в день» означало 3 прогона рантайма ПЛЮС неограниченное
@@ -86,6 +101,7 @@ def drain_rule_approved_proposals(
     dry_run: bool,
     log: Callable[[str, dict], None] | None = None,
     env: Any = None,
+    durable_writes: Any = _UNATTENDED,
 ) -> dict:
     """Применить предложения, которые правило разрешает без человека.
 
@@ -128,7 +144,10 @@ def drain_rule_approved_proposals(
         if log is not None:
             log(event, payload)
 
-    out: dict[str, Any] = {"considered": 0, "applied": 0, "refused": 0, "blocked": ""}
+    out: dict[str, Any] = {
+        "considered": 0, "applied": 0, "unapplied": 0, "attempted": 0,
+        "refused": 0, "blocked": "",
+    }
     if dry_run:
         out["blocked"] = "effects disabled"
         return out
@@ -179,9 +198,17 @@ def drain_rule_approved_proposals(
                 "learned_at": lesson.created_at,
             })
             continue
-        # Расход записывается ДО применения: прерванный тик должен оставить
-        # пережатую оценку расхода, а не незамеченное полномочие.
-        authority.spend()
+        # Расход занимается ДО применения и НЕРАЗДЕЛИМО с проверкой остатка:
+        # прерванный тик должен оставить пережатую оценку расхода, а не
+        # незамеченное полномочие, а два одновременных слива не должны
+        # потратить одну и ту же последнюю единицу (ревизия PR #333).
+        if not authority.reserve():
+            out["refused"] += 1
+            out["blocked"] = "standing grant spent for today"
+            _say("standing_grant_exhausted", {
+                "approval_id": item.id, "grant_id": authority.id,
+            })
+            continue
         remaining -= 1
         inbox.approve(item.id, reason=reason, actor=authority.actor)
         result = run_approved_self_apply(
@@ -191,7 +218,23 @@ def drain_rule_approved_proposals(
             vcs=SafeVCS(workspace=Path(workspace)),
             test_runner=RunTestsTool(workspace_root=Path(workspace)),
         )
-        out["applied"] += 1
+        out["attempted"] += 1
+        # `applied` считает ПРИМЕНЁННОЕ, а не начатое. Ревизия PR #333: счётчик
+        # рос на любом исходе, включая откат и обрыв, поэтому по журналу выходило
+        # больше применений, чем изменений в дереве, и разница молча копилась.
+        # Расход полномочия при этом остаётся потраченным — попытка стоила
+        # прогона батареи, — а `attempted` хранит честный итог.
+        if str(result.get("status") or "") == "committed_local":
+            out["applied"] += 1
+        else:
+            out["unapplied"] += 1
+        # Проверенный кандидат ПРЕДЪЯВЛЯЕТСЯ принимающему. Не принимается:
+        # предъявление прав не даёт и голову опыта не двигает — оно лишь
+        # сужает множество того, что `core/burn_in_supervisor.adopt_offer`
+        # вообще станет рассматривать. Только в песочнице: производственный
+        # путь никакого опыта не ведёт и предъявлять ему нечему.
+        if authority.sandbox and result.get("status") == "committed_local":
+            _offer_to_supervisor(workspace, result, item_id=item.id, log=_say)
         # Исход становится знанием ЗДЕСЬ, без команды человека. До 2026-09-17
         # запись уроков жила ровно в одном месте — `cli/commands_self_apply.py`,
         # то есть опыт появлялся только когда за клавиатурой сидел человек.
@@ -199,6 +242,10 @@ def drain_rule_approved_proposals(
             workspace, result,
             origin="burn_in_sandbox" if authority.sandbox else "rule_approved_apply",
             reason=getattr(proposal, "reason", ""),
+            # Тот же набор стоков, что у сборки агента: урок — долговременная
+            # запись, и проходит он теми же воротами, а не мимо них.
+            durable_writes=durable_writes,
+            log=log,
         )
         _say("rule_approved_applied", {
             "approval_id": item.id,
@@ -212,7 +259,39 @@ def drain_rule_approved_proposals(
     return out
 
 
-def drain_and_log(workspace: Path, *, dry_run: bool, log_tick: Callable[[dict], None]) -> None:
+def _offer_to_supervisor(
+    workspace: Path, result: dict, *, item_id: str, log: Callable[[str, dict], None]
+) -> None:
+    """Положить SHA проверенного кандидата в реестр предложений.
+
+    Best-effort по образцу соседей: сбой реестра не вправе ронять применение —
+    но и не вправе пройти молча, иначе разомкнутая петля выглядит как
+    замкнутая. Отсутствие события неотличимо от мёртвого кода.
+    """
+    sha = str(result.get("commit_hash") or "")
+    try:
+        from core.burn_in_supervisor import offer_verified_commit
+
+        taken = offer_verified_commit(
+            Path(workspace), sha=sha, proposal_id=item_id,
+            tests_run=result.get("tests_run") or (),
+            reason=str(result.get("reason") or ""),
+        )
+    except Exception as exc:  # noqa: BLE001 — реестр не роняет применение
+        log("burn_in_offer_failed", {"approval_id": item_id,
+                                     "error": type(exc).__name__})
+        return
+    log("burn_in_offer" if taken else "burn_in_offer_rejected",
+        {"approval_id": item_id, "sha": sha})
+
+
+def drain_and_log(
+    workspace: Path,
+    *,
+    dry_run: bool,
+    log_tick: Callable[[dict], None],
+    durable_writes: Any = _UNATTENDED,
+) -> None:
     """Обёртка для живого пути кампании: след пишется ВСЕГДА, ошибки глотаются.
 
     Первая проводка (MIR-173) стояла в хвосте `run_tick`, а плановая задача
@@ -225,6 +304,7 @@ def drain_and_log(workspace: Path, *, dry_run: bool, log_tick: Callable[[dict], 
         drain = drain_rule_approved_proposals(
             workspace, dry_run=dry_run,
             log=lambda e, p: log_tick({"event": e, **p}),
+            durable_writes=durable_writes,
         )
         log_tick({"event": "rule_approved_drain", **drain})
     except Exception as exc:  # noqa: BLE001 — петля не вправе ронять кампанию
