@@ -30,6 +30,11 @@ AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclu
 @dataclass(frozen=True)
 class AutonomousRuntimeConfig:
     goal: str = "project health"
+    #: Критерий успеха ЭТОЙ цели — дословно тот, с которым её выбрала хартия.
+    #: До аудита автономности 2026-09-17 поля не существовало: критерий
+    #: обязателен при выборе цели и умирал в месте выбора, а исполнение
+    #: судилось по непустому ответу модели. См. core/success_check.py.
+    goal_success_check: str = ""
     dry_run: bool = True
     effects_approved: bool = False
     #: Узкая разблокировка целевого пути (пересекается с _UNBLOCKABLE_TOOLS).

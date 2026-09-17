@@ -77,14 +77,24 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
     # Rollback -> HARD RULE: machine-readable failure causes (e.g. ImportError:
     # cannot import name 'X' from 'core.y') become durable rules the Critic
     # enforces deterministically on every later produce run for that target.
+    # Рядом с правилом пишется урок с происхождением — тот же орган, что на
+    # автономном пути (2026-09-17): опыт CLI и опыт безнадзорного слива обязаны
+    # лежать в одном месте и в одной форме, иначе «что агент уже знает» зависит
+    # от того, кто нажал кнопку.
     try:
-        from core.self_build_rules import record_rules_from_result
+        from core.self_build_rules import record_lessons_from_result
 
-        added = record_rules_from_result(workspace, result)
-        if added:
+        added = record_lessons_from_result(
+            workspace, result, origin="cli:self-apply-run"
+        )
+        if added.get("rules") or added.get("lessons"):
             agent.log.log(
                 "self_build_rules_recorded",
-                {"proposal_id": result.get("proposal_id"), "rules_added": added},
+                {
+                    "proposal_id": result.get("proposal_id"),
+                    "rules_added": added.get("rules", 0),
+                    "lessons_added": added.get("lessons", 0),
+                },
             )
     except Exception:  # noqa: BLE001, S110 — rule recording must never break the command
         pass

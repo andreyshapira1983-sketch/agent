@@ -11,6 +11,10 @@ from typing import Any
 @dataclass(frozen=True)
 class CampaignConfig:
     goal: str = "project health"
+    #: Критерий успеха цели — дословно тот, с которым её выбрала хартия.
+    #: Пустая строка значит «критерий не назван», и это честное состояние:
+    #: четыре точки входа задают цель строкой без всякой проверки.
+    success_check: str = ""
     max_cycles: int = 24
     max_llm_calls: int = 100
     max_cost_units: int = 0

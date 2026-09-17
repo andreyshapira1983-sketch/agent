@@ -95,6 +95,19 @@ def _production_build_sites() -> list[dict]:
     return sorted(sites, key=lambda s: s["line"])
 
 
+def _resolve_profile(expr: str, workspace: Path) -> dict:
+    """Развернуть `**`-аргумент площадки сборки: имя или вызов на agent_tick.
+
+    Форм ровно две и обе объявлены здесь нарочно: любая третья (выражение,
+    которое этот свидетель не умеет исполнить) должна упасть, а не быть
+    молча пропущена — иначе конверт полномочий перестанет проверяться.
+    """
+    if expr.endswith(")"):
+        name, _, _ = expr.partition("(")
+        return dict(getattr(agent_tick, name)(workspace))
+    return dict(getattr(agent_tick, expr))
+
+
 def test_all_four_production_organs_are_built_the_same_way() -> None:
     """The membership half: every organ is handed the same envelope.
 
@@ -129,12 +142,20 @@ def test_what_those_sites_pass_yields_the_unattended_envelope(
     """The behavioural half of the same link: whatever those sites pass must
     produce the envelope the contract below pins. Reading the arguments is not
     enough — a renamed profile constant with different contents would pass the
-    membership test and fail this one."""
+    membership test and fail this one.
+
+    2026-09-17: the profile stopped being a bare constant and became
+    `unattended_memory_profile(workspace)`, so that the burn-in sandbox can
+    widen its OWN copy without touching the production envelope. This witness
+    now resolves either form — a name or a one-argument call on `agent_tick` —
+    and it got STRONGER, not weaker: it no longer reads a dict, it runs the
+    very expression the production site runs and probes what comes out.
+    """
     for site in _production_build_sites():
         kwargs = {}
         for key, value in site["keywords"].items():
             if key.startswith("**"):
-                kwargs.update(getattr(agent_tick, key[2:]))
+                kwargs.update(_resolve_profile(key[2:], workspace))
             else:
                 kwargs[key] = value
         observed = probe_authority(build_agent(workspace, **kwargs))
