@@ -261,27 +261,38 @@ def materialise_next_cycle(
     Дерево каждый раз заводится заново, а не переставляется: остатки прошлого
     цикла не вправе доехать до следующего — иначе «стартовали из принятого»
     перестало бы быть правдой.
+
+    Голова читается под тем же замком, под которым заводится дерево (ревизия
+    PR #335): между чтением и `worktree add` чужое принятие вправе сдвинуть
+    указатель, и тогда цикл стартовал бы из устаревшего коммита, а функция
+    назвала бы его следующим. Путь дерева приводится к полному до обеих
+    проверок — `_git` ходит с `cwd=repo`, поэтому относительное имя иначе
+    читалось в двух разных системах координат.
     """
     repo = Path(repo)
-    workspace = Path(workspace)
-    head = next_start_point(repo)
+    workspace = Path(workspace).resolve()
 
-    if sha is not None and str(sha) != head:
-        raise SupervisorError(
-            f"дерево следующего цикла ставится только на голову опыта {head}; "
-            f"запрошен {sha!r}. Выбор коммита принадлежит принимающему"
-        )
+    with exclusive_file_lock(_head_file(repo).with_suffix(".lock")):
+        head = next_start_point(repo)
 
-    if workspace.exists():
-        try:
-            _git(repo, "worktree", "remove", "--force", str(workspace))
-        except SupervisorError as exc:
+        if sha is not None and str(sha) != head:
             raise SupervisorError(
-                f"{workspace} существует и не является рабочим деревом этого "
-                f"репозитория; принимающий не станет его удалять: {exc}"
-            ) from exc
-    _git(repo, "worktree", "prune")
-    _git(repo, "worktree", "add", "--detach", str(workspace), head)
+                f"дерево следующего цикла ставится только на голову опыта "
+                f"{head}; запрошен {sha!r}. Выбор коммита принадлежит "
+                f"принимающему"
+            )
+
+        if workspace.exists():
+            try:
+                _git(repo, "worktree", "remove", "--force", str(workspace))
+            except SupervisorError as exc:
+                raise SupervisorError(
+                    f"{workspace} существует и не является рабочим деревом "
+                    f"этого репозитория; принимающий не станет его удалять: "
+                    f"{exc}"
+                ) from exc
+        _git(repo, "worktree", "prune")
+        _git(repo, "worktree", "add", "--detach", str(workspace), head)
     return head
 
 
@@ -375,8 +386,16 @@ def _fence_key(path: str) -> str:
     `git diff --name-only` (ревизия PR #334). На файловой системе,
     безразличной к регистру, `Core/Policy.py` и `core/policy.py` — один файл и
     две разные строки, то есть забор обходился написанием имени.
+
+    Регистр складывается ВСЕГДА, а не через `os.path.normcase` (ревизия
+    PR #335). На POSIX `normcase` — тождество, поэтому починка держалась
+    только на Windows, а батарея репозитория ходит по Linux: там забора
+    по-прежнему не было, и мой свидетель был бы красным. Складывать всюду —
+    отказ строже нужного на файловой системе, различающей регистр (там
+    `Core/Policy.py` — честно другой файл), но цена отказа здесь — один
+    лишний круг, а цена пропуска — код за забором.
     """
-    return os.path.normcase(str(path).replace("\\", "/").strip().strip('"'))
+    return str(path).replace("\\", "/").strip().strip('"').casefold()
 
 
 def adopt_offer(
