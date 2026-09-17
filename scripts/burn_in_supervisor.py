@@ -47,7 +47,10 @@ def _pending_offers(repo: Path, head: str) -> list[str]:
     """SHA из реестра, ещё не принятые. Порядок предъявления сохраняется."""
     try:
         lines = offer_ledger(repo).read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # `UnicodeDecodeError` — не `OSError` (ревизия PR #337). Без него
+        # реестр, испорченный на уровне байтов, давал трассировку вместо
+        # пустого списка ожидающих.
         return []
     seen: list[str] = []
     for line in lines:

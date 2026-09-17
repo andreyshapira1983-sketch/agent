@@ -816,3 +816,34 @@ def test_the_head_is_read_under_the_same_lock_that_creates_the_tree(
         "голова прочитана и дерево заведено вне замка"
     )
     assert events.index("дерево заведено") < events.index("замок отпущен")
+
+
+def test_an_offer_ledger_broken_at_the_byte_level_is_refused_not_raised(
+    repo: Path,
+) -> None:
+    """Ревизия PR #338: правку `_was_offered` не спрашивал никто.
+
+    В PR #338 я починил трёх читателей состояния, а свидетель реестра ходил
+    через `--show`. Этот глагол печатает ожидающих и возвращается ДО принятия
+    (`scripts/burn_in_supervisor.py`), то есть `_was_offered` в ядре при
+    испорченных байтах не исполнялся ни разу, и регрессия в нём прошла бы все
+    добавленные тесты, а упала бы на `adopt_offer`.
+
+    Замечание верное и по существу: незакрытая правка — это не починка, а
+    заявление о починке. Ожидаемый исход — отказ «не предъявлен»: реестр,
+    который нельзя прочитать, ничего не разрешает.
+    """
+    from core.burn_in_supervisor import (
+        adopt_offer,
+        offer_ledger,
+        offer_verified_commit,
+    )
+
+    sha = _candidate(repo)
+    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
+    offer_ledger(repo).write_bytes(b'{"sha": "\xff\xfe\x00"}')
+
+    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
+
+    assert not verdict.accepted
+    assert "не предъявлен" in verdict.reason, verdict.reason
