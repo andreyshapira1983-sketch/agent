@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass(frozen=True)
+#: `kw_only` не украшение. Ревизия PR #333: `success_check` встал ВТОРЫМ
+#: полем, и любой позиционный вызывающий с этого дня молча получал
+#: критерий успеха там, где передавал что-то другое. Порядок полей у
+#: растущей настройки — не договор, и притворяться договором он не
+#: должен: пусть ошибка будет громкой, а не тихой.
+@dataclass(frozen=True, kw_only=True)
 class CampaignConfig:
     goal: str = "project health"
     #: Критерий успеха цели — дословно тот, с которым её выбрала хартия.

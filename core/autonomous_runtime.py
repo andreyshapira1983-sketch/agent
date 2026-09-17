@@ -175,19 +175,61 @@ def record_standing_grant_use(workspace: Any, grant_id: str) -> None:
 _record_standing_use = record_standing_grant_use
 
 
-def standing_runs_today(workspace: Any, grant_id: str) -> int:
-    """Сколько прогонов этот грант пропустил сегодня (UTC). Журнал — истина."""
-    from core.state_integrity import read_state_jsonl
+def _standing_runs_today_unlocked(path: Path, grant_id: str) -> int:
+    """Счёт расхода за сегодня БЕЗ взятия замка: для вызова изнутри замка."""
+    from core.state_integrity import read_state_jsonl_unlocked
 
-    path = _standing_usage_path(workspace)
     if not path.is_file():
         return 0
     today = datetime.now(timezone.utc).date().isoformat()
     return sum(
-        1 for row in read_state_jsonl(path)
+        1 for row in read_state_jsonl_unlocked(path)
         if str(row.get("grant_id")) == grant_id
         and str(row.get("ts") or "").startswith(today)
     )
+
+
+def reserve_standing_grant_use(
+    workspace: Any, grant_id: str, *, max_per_day: int
+) -> bool:
+    """Занять одну единицу дневного потолка — или отказать. Неразделимо.
+
+    Ревизия PR #333: пары «спросить остаток → записать расход» недостаточно.
+    Два слива, идущие одновременно, оба видят `remaining=1` и оба проходят, а
+    `run_tick` к этому месту замок задачи уже отпустил. Потолок, который можно
+    превысить, сговорившись во времени, — не потолок.
+
+    Поэтому решение и запись живут под ОДНИМ замком того же файла, которым
+    пользуется `append_state_jsonl`. Отказ — это отказ: вызывающий не вправе
+    применять ничего, а не «применить и потом уточнить».
+    """
+    from core.file_lock import exclusive_file_lock
+    from core.state_integrity import append_state_jsonl_unlocked, state_lock_path
+
+    if max_per_day <= 0:
+        return False
+    path = _standing_usage_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with exclusive_file_lock(state_lock_path(path)):
+        if _standing_runs_today_unlocked(path, grant_id) >= max_per_day:
+            return False
+        append_state_jsonl_unlocked(path, [{
+            "grant_id": grant_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }])
+        return True
+
+
+def standing_runs_today(workspace: Any, grant_id: str) -> int:
+    """Сколько прогонов этот грант пропустил сегодня (UTC). Журнал — истина."""
+    from core.file_lock import exclusive_file_lock
+    from core.state_integrity import state_lock_path
+
+    path = _standing_usage_path(workspace)
+    if not path.is_file():
+        return 0
+    with exclusive_file_lock(state_lock_path(path)):
+        return _standing_runs_today_unlocked(path, grant_id)
 
 
 # --- Proposal hygiene: canonical signature + token-Jaccard semantic dedup ---
@@ -492,12 +534,26 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         if not config.dry_run and not config.effects_approved:
             standing = self._active_standing_grant()
             if standing is not None:
-                config = replace(config, effects_approved=True)
-                _record_standing_use(self.workspace, standing.id)
-                self._log("autonomous_effects_standing", {
-                    "approval_id": standing.id,
-                    "runs_today": standing_runs_today(self.workspace, standing.id),
-                })
+                # Занять единицу и ТОЛЬКО потом разрешать эффекты: между
+                # вопросом «есть ли остаток» и записью расхода помещается
+                # второй потребитель (ревизия PR #333). Отказ здесь означает,
+                # что потолок исчерпан кем-то другим за то же мгновение, и
+                # прогон честно уходит к следующим воротам.
+                cap = int((standing.payload or {}).get("max_runs_per_day") or 0)
+                if reserve_standing_grant_use(
+                    self.workspace, standing.id, max_per_day=cap
+                ):
+                    config = replace(config, effects_approved=True)
+                    self._log("autonomous_effects_standing", {
+                        "approval_id": standing.id,
+                        "runs_today": standing_runs_today(
+                            self.workspace, standing.id
+                        ),
+                    })
+                else:
+                    self._log("standing_grant_exhausted", {
+                        "approval_id": standing.id, "cap": cap,
+                    })
         if not config.dry_run and not config.effects_approved:
             _pending_before = {i.id for i in self.approval_inbox.pending()}
             item = self.approval_inbox.add(

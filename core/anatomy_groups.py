@@ -100,7 +100,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Learning & Self-Improvement (§9)", "Reflection-driven repair, self-build, value gating.", [
         "self_repair", "self_repair_models", "self_repair_utils", "repair_proposal",
-        "self_apply_bridge", "self_apply_lane", "burn_in_sandbox",
+        "self_apply_bridge", "self_apply_lane", "burn_in_sandbox", "burn_in_supervisor",
         "self_build_producer", "anatomy_sync", "self_build_supervisor", "self_build_memory",
         "self_build_rules", "veto_cause", "builder_reply_diagnosis",
         "self_task_producer", "self_task_builder",

@@ -67,6 +67,68 @@ def test_the_criterion_is_read_from_the_world_not_from_the_answer(tmp_path: Path
     assert found["missing"] == []
 
 
+# ── Ревизия PR #333: наличие файла — ещё не критерий ──────────────────────────
+#
+# Первый заход довёл проверку до вопроса «существует ли названный файл», и это
+# было больше, чем «модель сказала, что сделала». Но критерий говорит не только
+# про существование: `_BURN_IN_CHECK` требует `status=ready`, а проверялся
+# только размер. Файл со словом `broken` объявлялся `verified`. Второе: путь
+# брался как `root / relpath`, то есть `tmp/../../outside/result.json` уводил
+# проверяющего ЗА пределы рабочей копии — и след, положенный снаружи, засчитывал
+# цель внутри.
+
+
+def test_a_criterion_is_not_met_by_the_wrong_content(tmp_path: Path) -> None:
+    """Названная пара «ключ=значение» обязана найтись в названном файле.
+
+    Иначе вердикт `verified` означает «файл есть», притворяясь, что означает
+    «критерий сошёлся».
+    """
+    (tmp_path / "result.json").write_text('{"status": "broken"}', encoding="utf-8")
+
+    verdict = observe_success_check(_BURN_IN_CHECK, tmp_path)
+
+    assert verdict["verdict"] != "verified", (
+        "критерий требовал status=ready, а файл говорит broken — "
+        "проверялось только существование файла"
+    )
+
+
+def test_a_criterion_cannot_point_outside_the_workspace(tmp_path: Path) -> None:
+    """След снаружи копии не засчитывает цель внутри неё.
+
+    Без этого критерий сам по себе становится способом расширить область
+    наблюдения: `../..` уводит проверяющего к чужому файлу, который положил
+    кто угодно.
+    """
+    inside = tmp_path / "workspace" / "copy"
+    inside.mkdir(parents=True)
+    # Куда УВОДИТ путь: copy/tmp/../.. это workspace, то есть на уровень выше
+    # объявленной копии. Именно там и кладётся чужой след.
+    outside = tmp_path / "workspace" / "outside" / "result.json"
+    outside.parent.mkdir(parents=True)
+    outside.write_text('{"status": "ready"}', encoding="utf-8")
+    assert (inside / "tmp/../../outside/result.json").resolve() == outside.resolve()
+
+    verdict = observe_success_check(
+        "готово, когда tmp/../../outside/result.json содержит status=ready", inside
+    )
+
+    assert verdict["verdict"] != "verified", (
+        "критерий увёл проверяющего за пределы рабочей копии"
+    )
+
+
+def test_a_criterion_without_a_content_claim_still_checks_existence(
+    tmp_path: Path
+) -> None:
+    """Сужения не произошло: критерий без пары по-прежнему проверяет наличие."""
+    (tmp_path / "plan.md").write_text("черновик", encoding="utf-8")
+
+    assert observe_success_check("создан plan.md", tmp_path)["verdict"] == "verified"
+    assert observe_success_check("создан other.md", tmp_path)["verdict"] == "missing"
+
+
 # --------------------------------------------------------------------------- #
 # 2. Контракт доезжает: выбор -> кампания -> исполнитель -> журнал             #
 # --------------------------------------------------------------------------- #
@@ -392,3 +454,24 @@ def test_a_goal_without_a_criterion_keeps_the_old_behaviour(tmp_path: Path) -> N
 
     assert report.status == "done"
     assert report.details["success_check_verdict"] == "unverifiable"
+
+
+def test_a_config_cannot_be_built_positionally() -> None:
+    """Порядок полей растущей настройки — не договор, и притворяться им не должен.
+
+    Ревизия PR #333: `success_check` встал ВТОРЫМ полем `CampaignConfig`, и
+    любой позиционный вызывающий с этого дня молча получал критерий успеха
+    там, где передавал `max_cycles`. Молчаливая подмена смысла хуже падения:
+    прогон продолжается, а настройка уже не та.
+    """
+    import pytest as _pytest
+
+    from core.autonomous_runtime_types import AutonomousRuntimeConfig
+    from core.campaign_types import CampaignConfig
+
+    with _pytest.raises(TypeError):
+        CampaignConfig("цель")
+    with _pytest.raises(TypeError):
+        AutonomousRuntimeConfig("цель")
+
+    assert CampaignConfig(goal="цель").goal == "цель"

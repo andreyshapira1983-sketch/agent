@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 224 modules across 12 groups._
+_Total: 225 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -261,6 +261,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_apply_bridge` | Approval -> trusted self-apply lane bridge (TD-024). |
 | `core/self_apply_lane` | Trusted low-risk self-apply lane (TD-023). |
 | `core/burn_in_sandbox` | Явное полномочие песочницы: самопочинка изолированной копии без человека. |
+| `core/burn_in_supervisor` | Принимающий: кто переводит проверенный кандидат в рабочее состояние опыта. |
 | `core/self_build_producer` | Writes at most ONE low-risk ``self_apply_lane.run`` proposal into the approval inbox, with full file content, for a human to bless. |
 | `core/anatomy_sync` | Keeping the anatomy map and its group table in step with a proposal. |
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
