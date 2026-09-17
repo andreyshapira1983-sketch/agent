@@ -196,3 +196,24 @@ def test_a_green_battery_is_still_green(repo: Path) -> None:
         script.run_with_tree_kill = original
 
     assert ok and tail == "5 passed"
+
+
+def test_a_wrong_sha_is_refused_even_when_a_tree_is_asked_for(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--sha` при `--next` молча пропадал (ревизия PR #335).
+
+    `sha` объявлен сверкой: назвать можно только то, что уже принято. Но
+    глагол `--next` звал `materialise_next_cycle` без него, и
+    `--next --sha <чужой>` заводил дерево на текущей голове да ещё и выходил
+    с успехом. Сверка, которую можно не заметить, — не сверка.
+    """
+    import scripts.burn_in_supervisor as cli
+
+    code = cli.main([
+        "--repo", str(repo), "--next", str(tmp_path / "cycle"),
+        "--sha", "0" * 40,
+    ])
+
+    assert code != 0, "дерево заведено вопреки названному не тому коммиту"
+    assert not (tmp_path / "cycle").exists()
