@@ -169,6 +169,48 @@ def test_a_refused_switch_still_bills_what_it_spent(tmp_path) -> None:
         f"отказ стоил {picker.asked * picker.calls} вызовов и не попал в счёт: "
         f"реестр {ledger.calls}, кампания {result.totals['llm_calls']}"
     )
+    # Ревизия PR #346: стоимость отказа проверялась только для согласия,
+    # и регрессия, выронившая её обратно, осталась бы зелёной.
+    assert result.totals["cost_units"] == ledger.cost, (
+        f"отказ стоил {picker.asked * picker.cost} единиц и не попал в счёт: "
+        f"реестр {ledger.cost}, кампания {result.totals['cost_units']}"
+    )
+
+
+def test_the_goal_bought_before_the_campaign_is_billed_to_it(tmp_path) -> None:
+    """Ревизия PR #346: счёт не вправе начинаться с нуля.
+
+    Первый выбор цели делает хартия в `agent_tick` ДО входа в кампанию
+    (`propose_charter_goal`, до `run_paced_campaign`). Прежняя правка ловила
+    только смены внутри цикла, и арифметика живого прогона 18.09 это
+    показывала: 3 в книгах + 9 смен = 12 против 13 в реестре. Не хватало
+    ровно стартового вызова — того самого `[CHARTER] goal:`.
+    """
+    ledger = _Ledger()
+    execute = _Execute(ledger)
+    opening = (4, 11)  # хартия уже потратила это до входа сюда
+    ledger.spend(calls=opening[0], cost=opening[1])
+
+    result = run_campaign(
+        CampaignConfig(goal="цель, купленная снаружи", max_cycles=3,
+                       max_idle_streak=2, dry_run=False, cycle_pause_seconds=0,
+                       max_wall_clock_seconds=0, max_llm_calls=0,
+                       max_cost_units=0),
+        agent=_agent(ledger), workspace=str(tmp_path),
+        gather_signals=_Gather(), execute_action=execute,
+        ledger=CampaignLedger(), opening_spend=opening,
+        now_fn=lambda: _NOW, sleep_fn=lambda seconds: None,
+        approval_inbox=None,
+    )
+
+    assert result.totals["llm_calls"] == ledger.calls, (
+        f"стартовый выбор стоил {opening[0]} вызовов и не попал в счёт: "
+        f"реестр {ledger.calls}, кампания {result.totals['llm_calls']}"
+    )
+    assert result.totals["cost_units"] == ledger.cost, (
+        f"стартовый выбор стоил {opening[1]} единиц и не попал в счёт: "
+        f"реестр {ledger.cost}, кампания {result.totals['cost_units']}"
+    )
 
 
 # ── контроли ──────────────────────────────────────────────────────────────

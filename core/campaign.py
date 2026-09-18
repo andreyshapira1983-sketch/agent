@@ -246,6 +246,7 @@ def run_campaign(
     gather_signals: GatherSignals | None = None,
     execute_action: ExecuteAction | None = None,
     next_goal: Callable[[], str] | None = None,
+    opening_spend: tuple[int, int] = (0, 0),
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
     on_cycle: Callable[[dict], None] | None = None,
@@ -320,8 +321,14 @@ def run_campaign(
         })
         return True
 
-    llm_calls_used = 0
-    cost_units_used = 0
+    # Ревизия PR #346: счёт НЕ начинается с нуля. Первый выбор цели делается
+    # хартией в `agent_tick` ДО входа сюда (и при отказе — трижды), поэтому
+    # обнулённые счётчики врали кампании ровно на стартовый вызов: замер
+    # прогона 18.09 давал 13 вызовов в реестре против 12 в книгах даже после
+    # починки смены цели. Кто цель купил, тот её и оплачивает.
+    llm_calls_used, cost_units_used = (
+        max(0, int(opening_spend[0])), max(0, int(opening_spend[1])),
+    )
     proposals = 0
     artifacts = 0
     idle_cycles = 0
