@@ -366,16 +366,38 @@ def _recent_verdicts(root: Path) -> tuple[tuple[str, str, str], ...]:
 
 
 def _backlog_lines(root: Path) -> tuple[str, ...]:
-    """Top real engineering candidates, one line each; failures = empty."""
+    """Top real engineering candidates the agent MAY act on; failures = empty.
+
+    Живой прогон 18.09 01:59: этот список уходит в запрос со словами «real,
+    measured candidates» и просьбой «name ONE ... and repair it». Запретные
+    файлы лежали в нём наравне с рабочими, и хартия взяла `core/
+    self_build_producer.py` — сам механизм самосборки, стоящий в
+    `CRITICAL_DENY`. Двадцать один цикл ушёл в отказ при пяти доступных
+    кандидатах рядом. Список поручений не вправе называть работой то, что
+    исполнителю заповедано; сомнение о кандидате — тоже не предлагать.
+    """
     try:
         from core.backlog_selector import load_backlog
+        from core.self_build_producer import (
+            _candidate_concrete_targets,
+            _is_self_build_target_allowed,
+        )
+
+        def actionable(candidate: object) -> bool:
+            try:
+                targets = _candidate_concrete_targets(candidate, root)
+            except Exception:  # noqa: BLE001 — неясный кандидат не предлагается
+                return False
+            return any(_is_self_build_target_allowed(t) for t in targets)
 
         out = []
-        for c in list(load_backlog(root))[:6]:
+        for c in (x for x in load_backlog(root) if actionable(x)):
             out.append(
                 f"{getattr(c, 'signal_source', '?')}: "
                 f"{str(getattr(c, 'problem_quote', ''))[:110]}"
             )
+            if len(out) == 6:
+                break
         return tuple(out)
     except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
         return ()
