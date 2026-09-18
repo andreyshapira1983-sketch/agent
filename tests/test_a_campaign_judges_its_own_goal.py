@@ -262,3 +262,49 @@ def test_an_unwritable_journal_does_not_swallow_the_failure(tmp_path: Path) -> N
 
     assert verdict["verdict"] == "unverifiable", "судья обязан отсудить и без журнала"
     assert error, "ошибка записи обязана дойти наружу, а не исчезнуть"
+
+
+def test_a_dry_campaign_records_its_verdict_beside_its_ledger(tmp_path: Path) -> None:
+    """Свидетель границы `dry_run`: он гасит РУКИ, а не приборы.
+
+    Ревизия PR #351 прочла `dry_run` как «не писать на диск» и потребовала
+    спрятать вердикт под этот флаг. Замер сказал иначе: сухая кампания и до
+    этого PR писала `data/campaign_ledger.jsonl` — по строке на цикл, то есть
+    БОЛЬШЕ записей, чем добавляет вердикт. Спрашивают `dry_run` в
+    `core/campaign_io.py` ровно руки: `propose_engineering_task`,
+    `draft_doctrine_document`, `study_external_source` — все под
+    `and not config.dry_run`.
+
+    Мой долг, признанный в ответе ревизору: границу пришлось восстанавливать
+    по местам вызова, потому что у поля не было слов. Здесь она сказана делом.
+
+    Чем эта правка платит. Спрячь вердикт под `dry_run` — и реестр с журналом
+    вердиктов разойдутся: кампания в реестре есть, вердикта у неё нет, и
+    молчание «не судили» станет неотличимо от «судили и не записали». Недоста-
+    вать будет ровно дешёвых диагностических прогонов, ради которых судья и
+    заведён. Оба журнала обязаны молчать вместе и говорить вместе.
+    """
+    def _execute(*, agent, workspace, action, config, approval_inbox=None):
+        assert config.dry_run, "прогон обязан быть сухим, иначе свидетель не о том"
+        return CampaignActionOutcome(result="idle", work_done=False)
+
+    result = run_campaign(
+        CampaignConfig(goal=_GOAL, success_check="knowledge/note.md",
+                       max_cycles=1, dry_run=True),
+        agent=SimpleNamespace(log=None),
+        workspace=str(tmp_path),
+        gather_signals=_gather,
+        execute_action=_execute,
+        ledger=CampaignLedger(path=tmp_path / "data" / "campaign_ledger.jsonl"),
+        now_fn=lambda: _START,
+    )
+
+    ledger_path = tmp_path / "data" / "campaign_ledger.jsonl"
+    assert ledger_path.is_file(), (
+        "предпосылка свидетеля: сухой прогон пишет реестр и до этого PR"
+    )
+
+    rows = _verdict_rows(tmp_path)
+    assert rows, "сухой прогон судил — и обязан сказать это тем же журналом"
+    assert rows[-1]["verdict"] == "missing"
+    assert result.success_verdict, "вердикт обязан доехать и в результат прогона"

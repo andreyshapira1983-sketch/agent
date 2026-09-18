@@ -24,6 +24,17 @@ class CampaignConfig:
     max_llm_calls: int = 100
     max_cost_units: int = 0
     max_idle_streak: int = 3
+    #: Гасит РУКИ, а не приборы. Спрашивают его в `core/campaign_io.py` ровно
+    #: производители эффектов (`propose_engineering_task`,
+    #: `draft_doctrine_document`, `study_external_source` — все под
+    #: `and not config.dry_run`): сухой прогон не рождает заявок, черновиков и
+    #: правок мира. Журналы прогона — `data/campaign_ledger.jsonl` и
+    #: `data/campaign_verdicts.jsonl` — пишутся ВСЕГДА: это показания, а не
+    #: эффекты, и молчать они обязаны вместе. Повод сказать это словами:
+    #: ревизия PR #351 прочла флаг как «не писать на диск», потому что поле
+    #: молчало, и границу приходилось восстанавливать по местам вызова.
+    #: Свидетель: tests/test_a_campaign_judges_its_own_goal.py::
+    #: test_a_dry_campaign_records_its_verdict_beside_its_ledger.
     dry_run: bool = True
     report_every: int = 1
     idle_recheck_seconds: int = 600
