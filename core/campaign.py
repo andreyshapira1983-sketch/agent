@@ -305,6 +305,8 @@ def run_campaign(
     goal_drove_cycles = 0
     repeat_cycles = 0
     error_cycles = 0
+    #: Отказы ДЕЙСТВИЯ — не исключения цикла (`error_cycles`); см. сводку.
+    failed_cycles = 0
     consecutive_errors = 0
     unproductive_streak = 0
     unproductive_cycles = 0
@@ -399,6 +401,7 @@ def run_campaign(
             "idle_cycles": idle_cycles,
             "repeat_cycles": repeat_cycles,
             "error_cycles": error_cycles,
+            "failed_cycles": failed_cycles,
         })
 
     _log(agent, "campaign_start", {
@@ -676,7 +679,10 @@ def run_campaign(
                 proposal=outcome.proposal,
                 artifact=outcome.artifact,
                 work_done=outcome.did_work,
+                outcome_reason=getattr(outcome, "note", "") or "",
             )
+            # Без ветки: run_campaign и так за обоими потолками ruff.
+            failed_cycles += int(outcome.result == "failed")
             ledger.append(record)
             records.append(record)
             _log(agent, "campaign_cycle_work", record.to_dict())
@@ -791,6 +797,7 @@ def run_campaign(
         "useful_cycles": useful_cycles,
         "repeat_cycles": repeat_cycles,
         "error_cycles": error_cycles,
+        "failed_cycles": failed_cycles,
         "unproductive_cycles": unproductive_cycles,
         # Считалось с MIR-163, в итог не попадало: сводка печатала умолчание.
         "goal_drove_cycles": goal_drove_cycles,

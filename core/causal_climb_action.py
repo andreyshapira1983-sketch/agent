@@ -82,12 +82,26 @@ def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
 
 
 def _decline(agent: Any, reason: str, *, llm_calls_spent: int = 0,
-             **payload: Any) -> CampaignActionOutcome:
+             attempted: bool = False, **payload: Any) -> CampaignActionOutcome:
     """Отказ не носит продукта: artifact = работа (MIR-117), а причина —
     в журнале `causal_climb_declined`, молчаливых отказов нет. Потраченные
-    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3)."""
+    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3).
+
+    Причина едет ещё и в исход (`note`): журнал агента и реестр кампании
+    читают разные люди, и девять падений замера 2026-09-20 были в реестре
+    беспричинными. Предмет берётся из той же приметы, которой отказ назван в
+    журнале, — ключ заявки у суда, отпечаток наблюдения у объяснителя. Без
+    него кампания банит голое имя действия и останавливает ВСЕ заявки разом.
+
+    `attempted` поднимает тот, чья работа реально шла и ничего не стоила:
+    иначе подпись не банится, и бесплатный отказ возвращается каждым циклом.
+    """
     _log(agent, "causal_climb_declined", {"reason": reason, **payload})
-    return CampaignActionOutcome(result="failed", llm_calls_spent=llm_calls_spent)
+    subject = str(payload.get("claim_key") or payload.get("fingerprint") or "")
+    return CampaignActionOutcome(
+        result="failed", llm_calls_spent=llm_calls_spent,
+        attempted=attempted, subject=subject, note=reason,
+    )
 
 
 def _log(agent: Any, event: str, payload: dict) -> None:
@@ -131,7 +145,7 @@ def explain_causal_observation(
         ) or "")
     except Exception as exc:  # noqa: BLE001 — провод не роняет кампанию
         return _decline(agent, f"model_error:{type(exc).__name__}",
-                        fingerprint=record.fingerprint)
+                        fingerprint=record.fingerprint, attempted=True)
 
     pairs = _parse_hypotheses(raw)
     # Ворота рождения (проект агента): проба в несуществующий файл убивает
@@ -145,6 +159,7 @@ def explain_causal_observation(
             f"нужны конкурирующие фальсифицируемые объяснения: выжило {len(pairs)}",
             fingerprint=record.fingerprint,
             answer_head=" ".join((raw or "").split())[:200],
+            attempted=True,
         )
 
     claim = CausalClaim(
@@ -579,7 +594,7 @@ def run_claim_experiment(
 
     if verdicts == 0:
         return _decline(agent, "эксперименты не дали ни одного вердикта",
-                        claim_key=extra["key"])
+                        claim_key=extra["key"], attempted=True)
 
     updated = dataclasses.replace(
         claim, explanations=tuple(new_explanations),
@@ -673,7 +688,7 @@ def discriminate_causal_claim(
         save_claim(marked, workspace=ws, directive=extra["directive"],
                    machine_action=extra["machine_action"])
         return _decline(agent, "ни одного вердикта: пробы не решили ничего",
-                        claim_key=extra["key"])
+                        claim_key=extra["key"], attempted=True)
 
     updated = dataclasses.replace(
         claim, explanations=tuple(new_explanations),
@@ -788,5 +803,5 @@ def birth_experiment_specs(
     _log(agent, "spec_unexpressible", {"claim_key": extra["key"]})
     return _decline(
         agent, "спецификация невыразима песочными целями",
-        llm_calls_spent=birth_calls, claim_key=extra["key"],
+        llm_calls_spent=birth_calls, claim_key=extra["key"], attempted=True,
     )
