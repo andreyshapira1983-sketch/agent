@@ -28,6 +28,26 @@
 со спецификациями эксперимента») попыткой по-прежнему не является — иначе
 кампания солжёт «прежний проход не снял сигнал» там, где прохода не было
 (MIR-117). Стенд повторяет tests/test_campaign.py: сборка курьером.
+
+Дополнено по замечанию ревизии (2026-09-18), и замечание оказалось мягче
+правды. У прогона ДВА читателя: сводка в памяти и `summarise_ledger`,
+который читает пережившие перезапуск строки. Первый чинился выше, второй
+не знал ни о причинах отказа, ни о самих отказах:
+
+* `_format_ledger_row` печатал «failed action=… llm=0 cost=0» и молчал о
+  причине, хотя строка её уже несла.
+* `useful` считался вычитанием «всё минус простой, повтор и исключение»,
+  поэтому КАЖДОЕ падение шло в полезные. Замер живого реестра владельца
+  (data/campaign_ledger.jsonl, 160 строк): реестр объявлял `useful=144`,
+  тогда как работу или продукт несут ВОСЕМЬ строк. Ошибка в восемнадцать
+  раз. На тех же 21 строке разобранного прогона сводка в памяти говорит
+  `useful=3`, а долговечный реестр — `useful=14`: два читателя одного
+  прогона расходятся впятеро, и врёт именно тот, что переживает
+  перезапуск.
+
+Лечится не вычитанием ещё одного слова, а той же меркой, какой судит сама
+кампания: полезен цикл, сделавший работу (`work_done`). Строки старого
+формата (до 2026-09-03) этого поля не несут — их судит продукт.
 """
 from __future__ import annotations
 
@@ -36,7 +56,12 @@ from types import SimpleNamespace
 
 import core.causal_climb_action as climb
 from core.campaign import run_campaign
-from core.campaign_ledger import CampaignCycleRecord, CampaignLedger
+from core.campaign_ledger import (
+    CampaignCycleRecord,
+    CampaignLedger,
+    _format_ledger_row,
+    summarise_ledger,
+)
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 
 _CLAIM_KEY = "cclaim_b922d54b5774"
@@ -276,15 +301,21 @@ def test_the_failed_line_says_why_out_loud() -> None:
 
 
 def test_a_finished_cycle_does_not_grow_a_reason() -> None:
-    """Контроль: удавшийся цикл строку не удлиняет."""
+    """Контроль: удавшийся цикл строку не удлиняет.
+
+    Причина в записи ЕСТЬ — иначе контроль слеп к снятию оговорки про
+    `completed` (та же дыра, что ломка N2 вскрыла у долговечного читателя).
+    """
     record = CampaignCycleRecord(
         cycle=1, ts="t", goal="g", action="a", action_title="t",
         severity="info", priority=1, risk="low", idle=False,
         llm_calls_spent=2, cost_units_spent=72, result="completed",
-        reason="повод", outcome_reason="",
+        reason="повод", outcome_reason="причина, которой тут не место",
     )
 
-    assert record.user_summary().endswith("cost=72")
+    assert record.user_summary().endswith("cost=72"), (
+        "удачный цикл потащил за собой причину отказа"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -330,3 +361,115 @@ def test_a_clean_run_shows_no_failures() -> None:
     ).user_summary()
 
     assert "failed=0" in summary
+
+
+# --------------------------------------------------------------------------
+# 6. Долговечный реестр: второй читатель того же прогона
+# --------------------------------------------------------------------------
+
+def _row(**over):
+    row = {
+        "cycle": 1, "action": "run_claim_experiment", "idle": False,
+        "result": "completed", "reason": "повод выбрать действие",
+        "llm_calls_spent": 0, "cost_units_spent": 0,
+        "proposal": None, "artifact": None, "work_done": True,
+        "outcome_reason": "", "goal": "g",
+    }
+    row.update(over)
+    return row
+
+
+_FAILED_ROW = _row(
+    cycle=7, result="failed", work_done=False,
+    outcome_reason="эксперименты не дали ни одного вердикта",
+)
+
+
+def test_the_persisted_ledger_says_why_a_cycle_failed() -> None:
+    """Свидетель: реестр, переживший перезапуск, называет причину падения.
+
+    Причина доехала до строки (см. выше), но читатель долговечного реестра
+    её не печатал — человек видел ровно то же «failed llm=0 cost=0», что и
+    в замере, только уже без надежды спросить журнал.
+    """
+    line = _format_ledger_row(_FAILED_ROW)
+
+    assert "эксперименты не дали ни одного вердикта" in line, (
+        f"долговечная строка падения молчит о причине: {line}"
+    )
+
+
+def test_a_completed_row_in_the_ledger_stays_short() -> None:
+    """Контроль: удавшийся цикл причиной не обрастает.
+
+    Строка НЕСЁТ причину, и именно поэтому контроль что-то стоит: если снять
+    оговорку про `completed`, удачный цикл начнёт таскать за собой слово
+    отказа. Первая редакция этого контроля брала строку без причины и была
+    слепа — ломка N2 не покраснела ни одним свидетелем.
+    """
+    row = _row(artifact="a", outcome_reason="причина, которой тут не место")
+
+    assert _format_ledger_row(row).endswith("artifact=a"), (
+        "удачный цикл потащил за собой причину отказа"
+    )
+
+
+def test_a_failed_cycle_is_not_counted_as_useful() -> None:
+    """Свидетель: падение не выдаётся за полезный цикл.
+
+    Замер живого реестра: из 160 строк четырнадцать падений, и все
+    четырнадцать шли в `useful`. Полезность считалась вычитанием, а падений
+    в вычитаемом не было.
+    """
+    head = summarise_ledger([_row(), _FAILED_ROW]).splitlines()[1]
+
+    assert "useful=1 " in head, (
+        f"падение зачтено полезным: {head}"
+    )
+
+
+def test_the_ledger_judges_usefulness_by_the_campaign_own_measure() -> None:
+    """Свидетель: полезен цикл, сделавший работу, а не просто не упавший.
+
+    Вычитание зачитывало полезным любой цикл, кроме простоя, повтора и
+    исключения, — включая ожидание и упёршийся в потолок расход. Кампания
+    же судит `did_work`, и реестр обязан судить той же меркой, иначе два
+    читателя одного прогона расходятся впятеро.
+    """
+    rows = [
+        _row(cycle=1, result="waiting", work_done=False),
+        _row(cycle=2, result="cost_cap", work_done=False),
+        _row(cycle=3, result="completed", work_done=True),
+    ]
+
+    head = summarise_ledger(rows).splitlines()[1]
+
+    assert "useful=1 " in head, (
+        f"полезным зачтено то, что работы не делало: {head}"
+    )
+
+
+def test_an_old_row_without_the_work_flag_is_judged_by_its_product() -> None:
+    """Контроль: строка старого формата судится продуктом, а не нулём.
+
+    Поле `work_done` пишется с 2026-09-03; в живом реестре 63 строки из 160
+    его не несут. Объявить их все бесполезными значило бы стереть историю,
+    а не исправить счёт.
+    """
+    rows = [
+        _row(cycle=1, work_done=None, artifact="реальный продукт"),
+        _row(cycle=2, work_done=None, proposal="реальное предложение"),
+        _row(cycle=3, work_done=None),
+    ]
+
+    head = summarise_ledger(rows).splitlines()[1]
+
+    assert "useful=2 " in head, (
+        f"продукт старой строки потерян: {head}"
+    )
+
+
+def test_an_empty_ledger_still_answers() -> None:
+    """Контроль: пустой реестр не падает и не считает."""
+    assert "empty" in summarise_ledger([])
+

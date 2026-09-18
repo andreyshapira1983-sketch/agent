@@ -158,12 +158,38 @@ def _format_ledger_row(row: dict[str, Any]) -> str:
         return f"[cycle {cycle}] ERROR (no LLM, recovered) reason={reason}"
     proposal = row.get("proposal")
     artifact = row.get("artifact")
+    outcome_reason = row.get("outcome_reason") or ""
     return (
         f"[cycle {cycle}] {row.get('result', '?')} action={action} "
         f"llm={row.get('llm_calls_spent', 0)} cost={row.get('cost_units_spent', 0)}"
         + (f" proposal={proposal}" if proposal else "")
         + (f" artifact={artifact}" if artifact else "")
+        # Причина едет со строкой с 2026-09-18; до этого читатель долговечного
+        # реестра печатал «failed llm=0 cost=0» и молчал, хотя причина в строке
+        # уже лежала. Удавшийся цикл причиной не обрастает.
+        + (f" reason={outcome_reason}"
+           if outcome_reason and row.get("result") != "completed" else "")
     )
+
+
+def _row_was_useful(row: dict[str, Any]) -> bool:
+    """Полезен цикл, СДЕЛАВШИЙ работу, — той же меркой, что судит кампания.
+
+    До 2026-09-18 полезность считалась вычитанием: всё, кроме простоя, повтора
+    и исключения. Падений в вычитаемом не было, поэтому каждое падение шло в
+    полезные — как и ожидание, и упёршийся в потолок расход. Замер живого
+    реестра владельца (160 строк): реестр объявлял `useful=144`, тогда как
+    работу или продукт несут ВОСЕМЬ строк, и на одном прогоне сводка в памяти
+    говорила `useful=3` против `useful=14` у долговечного читателя.
+
+    `work_done` пишется с 2026-09-03; в том же живом реестре 63 строки из 160
+    его не несут. Их судит продукт: объявить старые строки бесполезными значило
+    бы стереть историю, а не исправить счёт.
+    """
+    recorded = row.get("work_done")
+    if isinstance(recorded, bool):
+        return recorded
+    return bool(row.get("proposal") or row.get("artifact"))
 
 
 def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
@@ -182,9 +208,10 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
     idle = sum(1 for r in rows if r.get("idle"))
     repeats = sum(1 for r in rows if r.get("result") == "repeat")
     errors = sum(1 for r in rows if r.get("result") == "error")
+    failed = sum(1 for r in rows if r.get("result") == "failed")
     artifacts = sum(1 for r in rows if r.get("artifact"))
     proposals = sum(1 for r in rows if r.get("proposal"))
-    useful = total - idle - repeats - errors
+    useful = sum(1 for r in rows if _row_was_useful(r))
     result_counts: dict[str, int] = {}
     for r in rows:
         key = "idle" if r.get("idle") else str(r.get("result", "?"))
@@ -199,6 +226,7 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
         "=== campaign ledger ===",
         (
             f"cycles_logged={total}  useful={useful}  idle={idle}  repeats={repeats}  errors={errors}  "
+            f"failed={failed}  "
             f"llm_calls={llm_calls}  cost_units={cost_units}  proposals={proposals}  artifacts={artifacts}"
         ),
         f"by_result: {by_result}",
