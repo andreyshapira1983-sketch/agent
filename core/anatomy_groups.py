@@ -92,6 +92,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Security, Policy & Autonomy Governance (§7)", "Policy gate, approvals, escalation, domain limits.", [
         "policy", "governance", "approval", "approval_inbox", "approval_triage",
+        "standing_grant",
         "deep_escalation", "operational_domain", "incident", "capability_request",
     ]),
     ("Evaluation & Monitoring (§8)", "Logging, identifiers, architecture auditing.", [

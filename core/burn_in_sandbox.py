@@ -85,6 +85,10 @@ _FENCE: frozenset[str] = frozenset({
     "core/rule_approved_apply.py",
     "core/autonomous_runtime.py",
     "core/approval_inbox.py",
+    # Писатель стоячего гранта. Орган власти наравне с ящиком: он
+    # превращает флаг оператора в действующее право. Без забора полоса
+    # правила бы сам источник своего полномочия.
+    "core/standing_grant.py",
     "core/actuation_gateway.py",
     "core/safe_vcs.py",
     "core/self_apply_lane.py",

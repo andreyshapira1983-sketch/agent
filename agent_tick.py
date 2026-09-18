@@ -28,6 +28,7 @@ python agent_tick.py                    # run once, workspace = .
 python agent_tick.py --workspace C:/x   # explicit workspace
 python agent_tick.py --allow-effects    # disable dry-run (use with care)
 python agent_tick.py --status           # print pending inbox items and exit
+python agent_tick.py --standing-grant 20 48   # open unattended permission, exit
 
 Windows Task Scheduler quick-start
 -----------------------------------
@@ -1962,6 +1963,11 @@ def _parse_args() -> argparse.Namespace:
         help="Only print pending inbox items and exit; do not run a tick.",
     )
     parser.add_argument(
+        "--standing-grant", nargs="+", metavar="N",
+        help="Open a standing grant for unattended runs, then exit: "
+             "<runs per day> [hours, default 48].",
+    )
+    parser.add_argument(
         "--campaign",
         action="store_true",
         help="Run a long PACED campaign in this process (heartbeat per cycle) "
@@ -2026,6 +2032,12 @@ if __name__ == "__main__":
 
     if args.status:
         sys.exit(_print_status(ws))
+
+    if args.standing_grant:
+        # Право выдаёт РАЗБОР АРГУМЕНТОВ, а не код агента: вердикт подписан
+        # человеком, набравшим флаг (см. core/standing_grant.py).
+        from core.standing_grant import open_grant_from_command_line
+        sys.exit(open_grant_from_command_line(ws, *args.standing_grant))
 
     _require_budget_config(ws)
 
