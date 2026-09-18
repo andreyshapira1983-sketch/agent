@@ -36,6 +36,24 @@ def _cost_totals(agent: Any) -> tuple[int, int]:
         return (0, 0)
 
 
+def router_spend(router: Any) -> tuple[int, int]:
+    """Расход по общему реестру, измеренный с ОДНОГО роутера, без агента.
+
+    Первый выбор цели делает хартия до постройки агента (`agent_tick`), и
+    мерить его было нечем. Реестр бюджета один на процесс, поэтому роутера
+    достаточно. Сомнение = `(0, 0)`.
+    """
+    from types import SimpleNamespace
+
+    return _cost_totals(SimpleNamespace(model_router=router))
+
+
+def spend_since(router: Any, before: tuple[int, int]) -> tuple[int, int]:
+    """Дельта расхода с отметки `before`; убыль реестра читается как ноль."""
+    after = router_spend(router)
+    return (max(0, after[0] - before[0]), max(0, after[1] - before[1]))
+
+
 def _action_focused_goal(goal: str, action: BestNextAction) -> str:
     reason = (action.reason or "").strip()
     evidence = "; ".join(e for e in action.evidence[:3] if e)

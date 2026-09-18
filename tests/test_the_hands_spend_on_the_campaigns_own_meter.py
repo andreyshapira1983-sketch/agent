@@ -57,10 +57,26 @@ class _Ledger:
         return {"totals": {"llm_calls": self.calls, "model_cost_units": self.cost}}
 
 
-def _agent(ledger: _Ledger):
+class _Log:
+    """Журнал, который можно прочитать: без него отказ рук был бы не виден.
+
+    Ревизия PR #345 поймала ровно это: контроли шли по пути
+    `campaign_engineering_error:AttributeError`, потому что заглушка агента не
+    знала `for_role`, а `_propose_engineering_step` этот отказ проглатывает.
+    Тест утверждал «цикл ничего не потратил», а доказывал «руки упали».
+    """
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def log(self, event: str, payload: dict) -> None:
+        self.events.append((event, payload))
+
+
+def _agent(ledger: _Ledger, log: _Log):
     return SimpleNamespace(
         model_router=SimpleNamespace(usage_ledger=SimpleNamespace(budget_ledger=ledger)),
-        log=None,
+        log=log,
         llm=None,
     )
 
@@ -97,11 +113,17 @@ def _rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(rt, "AutonomousRuntime", _SilentRuntime)
     monkeypatch.setattr(mod, "_goal_answer_and_digest", lambda report: ("a", None))
     monkeypatch.setattr(mod, "_approvals_born", lambda inbox, before: None)
-    monkeypatch.setattr(mod, "_propose_repair_from_diagnosis",
-                        lambda **kw: None)
+    monkeypatch.setattr(mod, "_propose_repair_from_diagnosis", lambda **kw: None)
+    # Руки по умолчанию молчат и НЕ падают. Настоящий `_engineering_hands`
+    # спотыкался бы о неполную заглушку агента и уходил в
+    # `campaign_engineering_error`, а тест, идущий через обработчик ошибки, не
+    # проверяет то, что заявляет (ревизия PR #345). Тесты, которым нужна
+    # трата, подменяют эту заглушку своей.
+    monkeypatch.setattr(mod, "_engineering_hands", lambda **kw: None)
 
     ledger = _Ledger()
-    agent = _agent(ledger)
+    log = _Log()
+    agent = _agent(ledger, log)
     inbox = ApprovalInbox(path=tmp_path / "data" / "approval_inbox.jsonl")
 
     def _run(action_name: str = "propose_engineering_task"):
@@ -113,7 +135,19 @@ def _rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             approval_inbox=inbox,
         )
 
-    return SimpleNamespace(mod=mod, ledger=ledger, run=_run, monkeypatch=monkeypatch)
+    return SimpleNamespace(mod=mod, ledger=ledger, log=log, run=_run,
+                           monkeypatch=monkeypatch)
+
+
+def _no_failure(rig) -> None:
+    """Забор против возврата на путь ошибки.
+
+    Если руки снова упадут молча, счёт станет нулевым по неверной причине и
+    контроль снова начнёт доказывать не то.
+    """
+    broken = [e for e, _ in rig.log.events
+              if e in ("campaign_engineering_error", "campaign_hands_declined")]
+    assert not broken, f"цикл ушёл в обработчик отказа: {rig.log.events}"
 
 
 def test_what_the_engineering_hands_spend_reaches_the_cycles_bill(_rig) -> None:
@@ -130,6 +164,7 @@ def test_what_the_engineering_hands_spend_reaches_the_cycles_bill(_rig) -> None:
 
     outcome = _rig.run()
 
+    _no_failure(_rig)
     assert outcome.llm_calls_spent == 19, (
         "руки сделали 19 вызовов, цикл записал "
         f"{outcome.llm_calls_spent}: счётчик снят до рук"
@@ -159,9 +194,20 @@ def test_what_the_repair_hands_spend_reaches_the_cycles_bill(_rig) -> None:
 
 
 def test_a_cycle_that_spent_nothing_still_bills_nothing(_rig) -> None:
-    """Контроль: пустая трата остаётся нулём, а не становится мусором."""
+    """Контроль: руки СРАБОТАЛИ и ничего не потратили — счёт остаётся нулём.
+
+    Важна именно эта постановка. Пока руки падали в `AttributeError`, тот же
+    ноль получался обработчиком отказа, и контроль доказывал не своё имя.
+    """
+    _rig.monkeypatch.setattr(
+        _rig.mod, "_engineering_hands",
+        lambda **kw: "engineering_proposed:ain_free",
+    )
+
     outcome = _rig.run()
 
+    _no_failure(_rig)
+    assert outcome.proposal == "engineering_proposed:ain_free"
     assert outcome.llm_calls_spent == 0
     assert outcome.cost_units_spent == 0
 
@@ -179,8 +225,13 @@ def test_what_the_work_session_spends_was_always_counted(_rig) -> None:
 
     import core.autonomous_runtime as rt
     _rig.monkeypatch.setattr(rt, "AutonomousRuntime", _SpendingRuntime)
+    _rig.monkeypatch.setattr(
+        _rig.mod, "_engineering_hands",
+        lambda **kw: "engineering_proposed:ain_free",
+    )
 
     outcome = _rig.run()
 
+    _no_failure(_rig)
     assert outcome.llm_calls_spent == 2
     assert outcome.cost_units_spent == 5

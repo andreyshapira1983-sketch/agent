@@ -1733,6 +1733,35 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 
 # ── paced campaign daemon mode ────────────────────────────────────────────────
 
+def _pick_next_charter_goal(workspace: Path) -> Any:
+    """Вернуть ОТЧЁТ о выбранной цели, а не одну её строку.
+
+    Аудит автономности 2026-09-17, находка 4: хартия требует от каждой
+    цели критерий успеха («цель без проверки — желание»), отчёт его несёт,
+    а здесь наружу уезжала одна строка `pick.goal`. Критерий умирал в
+    месте выбора, и исполнителю было НЕЧЕМ судить собственную работу.
+
+    Кампания принимает и строку, и отчёт; пустая строка по-прежнему
+    означает отказ. На уровне модуля, а не внутри пейсера (ревизия PR #346):
+    замыкание по `workspace` было единственной причиной вложенности.
+    """
+    try:
+        from core.charter_goal import propose_charter_goal
+        router = _charter_goal_router(workspace)
+        pick = propose_charter_goal(router.for_role("planner"), workspace)
+    except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
+        # уронить прогон: не вышло — останавливаемся прежним путём.
+        print(f"[CHARTER] next goal failed: {type(exc).__name__}: {exc}")
+        return ""
+    if pick.status != "proposed":
+        print(f"[CHARTER] no next goal: {pick.reason}")
+        return ""
+    print(f"[CHARTER] next goal: {pick.goal}")
+    print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
+    print(f"[CHARTER] success check: {pick.success_check}")
+    return pick
+
+
 def run_paced_campaign(
     workspace: Path,
     *,
@@ -1745,6 +1774,7 @@ def run_paced_campaign(
     max_llm_calls: int = 100,
     max_cost_units: int = 0,
     max_unproductive_streak: int = 3,
+    opening_spend: tuple[int, int] = (0, 0),
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     charter_goals: bool = False,
     run_campaign_fn: Callable[..., Any] | None = None,
@@ -1854,33 +1884,6 @@ def run_paced_campaign(
     # исчерпывается за ОДИН цикл (предложение произведено и ушло ждать
     # человека), после чего кампания умирала за четыре минуты, повторяя одно и
     # то же; с широкой целью тот же агент дал 21 полезный цикл из 21.
-    def _pick_next_goal() -> Any:
-        """Вернуть ОТЧЁТ о выбранной цели, а не одну её строку.
-
-        Аудит автономности 2026-09-17, находка 4: хартия требует от каждой
-        цели критерий успеха («цель без проверки — желание»), отчёт его несёт,
-        а здесь наружу уезжала одна строка `pick.goal`. Критерий умирал в
-        месте выбора, и исполнителю было НЕЧЕМ судить собственную работу.
-
-        Кампания принимает и строку, и отчёт; пустая строка по-прежнему
-        означает отказ.
-        """
-        try:
-            from core.charter_goal import propose_charter_goal
-            router = _charter_goal_router(workspace)
-            pick = propose_charter_goal(router.for_role("planner"), workspace)
-        except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
-            # уронить прогон: не вышло — останавливаемся прежним путём.
-            print(f"[CHARTER] next goal failed: {type(exc).__name__}: {exc}")
-            return ""
-        if pick.status != "proposed":
-            print(f"[CHARTER] no next goal: {pick.reason}")
-            return ""
-        print(f"[CHARTER] next goal: {pick.goal}")
-        print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
-        print(f"[CHARTER] success check: {pick.success_check}")
-        return pick
-
     def _call_run_campaign(**extra):
         try:
             return run_campaign(
@@ -1900,7 +1903,8 @@ def run_paced_campaign(
 
     try:
         result = _call_run_campaign(
-            **({"next_goal": _pick_next_goal} if charter_goals else {}),
+            opening_spend=opening_spend,
+            **({"next_goal": lambda: _pick_next_charter_goal(workspace)} if charter_goals else {}),
         )
     except Exception as exc:  # noqa: BLE001 — the failure lands in the heartbeat
         write_heartbeat(workspace, {
@@ -2038,6 +2042,7 @@ if __name__ == "__main__":
     # Критерий успеха цели. Пустая строка = «не назван»: цель из командной
     # строки приходит без него, и это честное состояние (core/success_check.py).
     success_check = ""
+    opening_spend = (0, 0)
     if args.campaign and args.charter:
         # Цель выбирает агент — от хартии; отказ выходит с названными воротами,
         # а не подменяется целью по умолчанию (см. core/charter_goal.py).
@@ -2048,6 +2053,11 @@ if __name__ == "__main__":
         from core.charter_goal import propose_charter_goal
 
         _charter_router = _charter_goal_router(ws)
+        # Ревизия PR #346: стартовый выбор платный и делается ЗДЕСЬ, до
+        # кампании; мерка снимается вокруг ВСЕХ попыток — отказ стоит столько
+        # же, сколько согласие.
+        from core.campaign_io import router_spend, spend_since
+        _spend_before = router_spend(_charter_router)
         # Несколько попыток выбрать цель на СТАРТЕ. Замер 2026-09-01T23:27:
         # прогон умирал на первой же отвергнутой цели, потому что попытка была
         # ровно одна — притом внутри прогона право сменить исчерпанную цель уже
@@ -2092,6 +2102,7 @@ if __name__ == "__main__":
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
         print(f"[CHARTER] success check: {pick.success_check}")
         goal = pick.goal
+        opening_spend = spend_since(_charter_router, _spend_before)
         success_check = pick.success_check
 
     if args.campaign:
@@ -2106,6 +2117,7 @@ if __name__ == "__main__":
             max_llm_calls=args.max_llm_calls,
             max_cost_units=args.max_cost_units,
             max_unproductive_streak=args.max_unproductive_streak,
+            opening_spend=opening_spend,
             charter_goals=bool(args.charter),
         ))
 
