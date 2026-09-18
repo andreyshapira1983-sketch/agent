@@ -590,6 +590,13 @@ def _propose_engineering_step(
     _log(agent, "campaign_engineering_proposed", {
         "status": status, "approval_id": approval_id,
         "target": str(getattr(report, "target_path", "") or ""),
+        # Живой прогон 18.09 01:59: докстринг выше обещает «a refusal is
+        # surfaced by name», но имени тут не было. Управляющий отвечал
+        # «grounded target 'core/self_build_producer.py' is critical», а
+        # наверх уходило голое `no_grounded_target` — оно читается как
+        # «работы не осталось», хотя правда была «предмет вне твоих
+        # полномочий». Двадцать один цикл подряд прошёл под этой подменой.
+        "reason": str(getattr(report, "reason", "") or ""),
     })
     if approval_id:
         return f"engineering_proposed:{approval_id}"
