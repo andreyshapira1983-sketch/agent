@@ -44,6 +44,12 @@ class CampaignCycleRecord:
     #: повторяя десятичасовой прогон (аудит автономности 2026-09-17).
     #: Пустая строка = критерий не назван.
     success_check: str = ""
+    #: Почему цикл кончился так, словами ИСПОЛНИТЕЛЯ. Поле `reason` выше
+    #: отвечает на другой вопрос — почему это действие выбрали, — и девять
+    #: падений замера 2026-09-20 несли в нём повод выбора, а причину отказа
+    #: («эксперименты не дали ни одного вердикта») знал только журнал агента.
+    #: Пустая строка = исполнитель причины не назвал или строка старого формата.
+    outcome_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +73,7 @@ class CampaignCycleRecord:
             "grounds": self.grounds,
             "decided_by": self.decided_by,
             "work_done": self.work_done,
+            "outcome_reason": self.outcome_reason,
         }
 
     def user_summary(self) -> str:
@@ -81,6 +88,11 @@ class CampaignCycleRecord:
             f"cost={self.cost_units_spent}"
             + (f" proposal={self.proposal}" if self.proposal else "")
             + (f" artifact={self.artifact}" if self.artifact else "")
+            # Причина показывается там, где цикл не дошёл до конца: девять
+            # строк «failed llm=0 cost=0» без причины читаются как поломка
+            # без повода (замер 2026-09-20).
+            + (f" reason={self.outcome_reason}"
+               if self.outcome_reason and self.result != "completed" else "")
         )
 
 
