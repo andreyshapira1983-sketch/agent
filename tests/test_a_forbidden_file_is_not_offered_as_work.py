@@ -151,6 +151,71 @@ def test_a_forbidden_file_is_not_offered_to_the_charter(monkeypatch) -> None:
         )
 
 
+def test_the_fence_is_applied_before_the_list_is_cut_to_six(
+    monkeypatch,
+) -> None:
+    """Ревизия PR #347: срез в шесть обязан браться ПОСЛЕ отсева.
+
+    Свидетель выше держал пять кандидатов и потому не отличал порядок
+    действий: `[:6]` от пяти — те же пять. Здесь запретных ровно столько,
+    сколько мест в списке, и они стоят первыми. Прежний ход (сперва срез,
+    потом ничего) отдал бы хартии шесть запретных строк и ни одной рабочей.
+    """
+    fenced = tuple(f"core/self_build_producer.py#{i}" for i in range(6))
+    allowed = tuple(f"core/model_router.py#{i}" for i in range(7))
+    monkeypatch.setattr(
+        "core.backlog_selector.load_backlog",
+        lambda root, **kw: [_candidate(t) for t in fenced + allowed],
+    )
+    monkeypatch.setattr(
+        sbp, "_is_self_build_target_allowed",
+        lambda t: "self_build_producer" not in t,
+    )
+
+    lines = charter._backlog_lines(Path("."))
+
+    assert len(lines) == 6, f"срез в шесть не соблюдён: {len(lines)}"
+    offered = " | ".join(lines)
+    assert "self_build_producer" not in offered, (
+        f"запретные съели места рабочих: {offered}"
+    )
+    for i in range(6):
+        assert f"core/model_router.py#{i} " in offered, (
+            f"рабочий кандидат #{i} не доехал: {offered}"
+        )
+
+
+def test_the_live_backlog_offers_the_charter_nothing_fenced(
+    monkeypatch,
+) -> None:
+    """Свидетель на НАСТОЯЩЕМ бэклоге этого репозитория, без подделок.
+
+    Ревизия PR #347: соседний контроль сверял забор лишь с руками
+    выписанным списком и остался бы зелёным, заведись в бэклоге другой
+    запретный файл. Здесь бэклог читается живьём, и мерка та же самая:
+    ни одна предложенная строка не вправе указывать на заповеданный файл.
+    """
+    from core.backlog_selector import load_backlog
+
+    root = Path(__file__).resolve().parent.parent
+    fenced = [
+        c for c in load_backlog(root)
+        if not any(sbp._is_self_build_target_allowed(t)
+                   for t in sbp._candidate_concrete_targets(c, root))
+    ]
+    if not fenced:
+        pytest.skip("в живом бэклоге сейчас нет запретных кандидатов")
+
+    offered = " | ".join(charter._backlog_lines(root))
+
+    for candidate in fenced:
+        evidence = str(getattr(candidate, "evidence_ref", "")).split(":")[0]
+        assert evidence and evidence not in offered, (
+            f"живому бэклогу удалось предложить запретный {evidence}: "
+            f"{offered}"
+        )
+
+
 # ── контроли ──────────────────────────────────────────────────────────────
 
 
@@ -170,11 +235,13 @@ def test_the_allowed_candidates_are_still_offered(monkeypatch) -> None:
         assert good in offered, f"рабочий кандидат {good} потерян: {offered}"
 
 
-def test_the_fence_matches_the_live_backlog(monkeypatch) -> None:
-    """Контроль: забор судит ровно так же, как судил живой прогон.
+def test_the_fence_refuses_the_self_build_machinery_by_policy() -> None:
+    """Контроль ПОЛИТИКИ забора, не бэклога (ревизия PR #347).
 
-    Если эта мерка разойдётся с `_is_self_build_target_allowed`, свидетель
-    выше станет проверять собственную выдумку, а не поведение агента.
+    Прежнее имя обещало сверку с живым бэклогом, а тело сверяло лишь руками
+    выписанные списки — ровно та подмена имени содержанием, против которой
+    написан этот файл. Живой бэклог проверяет сосед выше; здесь измеряется
+    одно: как забор судит те семь путей, что вскрыл прогон 18.09.
     """
     for fenced in _FENCED:
         assert not sbp._is_self_build_target_allowed(fenced), fenced
