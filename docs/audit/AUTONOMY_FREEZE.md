@@ -368,7 +368,15 @@ exam's turn 42 found the same 600-second hang in `repo_provenance.py`'s
 обязательны, риск объявлен, срок конечен, а вердикт подписан автором
 `operator:agent_tick --standing-grant` и «_unattributed_» не пишет никогда. Путь
 живёт в разборе аргументов и коду агента недостижим — иначе автомат открывал бы
-право сам себе, и подпись стала бы ложью).
+право сам себе, и подпись стала бы ложью.
+ЗАБОР ЗАВЕДЁН ПО ЗАМЕЧАНИЮ РЕВИЗИИ, а не сразу: первая редакция завела орган
+власти и оставила его НЕОГОРОЖЕННЫМ. `core/standing_grant.py` теперь стоит и в
+`core.burn_in_sandbox._FENCE`, и в `core.burn_in_supervisor.SUPERVISOR_FENCE`
+рядом с `approval_inbox.py` и `rule_approved_apply.py`: без этого безнадзорная
+полоса вправе была править сам источник своего полномочия. Там же исправлено,
+что просьба подписывалась умолчанием `autonomous_runtime`, то есть ящик
+утверждал, будто право себе просил АВТОМАТ; `ApprovalInbox.add` получил
+`requested_by`, и поле перестало быть читаемым без достижимого писателя).
 
 This ledger carries a DISCLOSURE SENSOR, not a permission gate — the honest
 name is the second examiner's: since 2026-08-28,

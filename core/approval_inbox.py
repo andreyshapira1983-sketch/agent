@@ -231,6 +231,7 @@ class ApprovalInbox:
         payload: dict | None = None,
         expires_at: str | None = None,
         dedup_key: str | None = None,
+        requested_by: str = "autonomous_runtime",
     ) -> ApprovalInboxItem:
         self._sync()
         # Structural duplicate guard: if a dedup_key is supplied and an
@@ -280,6 +281,7 @@ class ApprovalInbox:
             risk=risk,
             reasons=safe_reasons,
             payload=safe_payload,
+            requested_by=requested_by,
             expires_at=expires_at,
         )
         self.items.append(item)
