@@ -51,6 +51,7 @@ from core.campaign_ledger import (
     spent_units_by_action,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
+from core.campaign_verdict import judge_and_record
 from core.capability_events import last_capability_change_ts
 from core.run_context import run_cost_envelope
 from core.self_stop_record import record_self_stop, record_stop_observation
@@ -807,11 +808,25 @@ def run_campaign(
         totals=totals,
         clarification=clarification,
     )
+    # Кампания судит СВОЮ цель её же критерием — впервые с появления
+    # `success_check`. Судья читает мир, а не слово исполнителя, и отделяет
+    # след, сделанный этим прогоном, от следа, лежавшего здесь до него
+    # (см. core/campaign_verdict.py: замер 4 ложных «сошлось» из 31).
+    verdict, verdict_error = judge_and_record(
+        goal=current_goal, success_check=current_success_check,
+        workspace=workspace, started_at=started_at, ts=now_fn(),
+        stop_reason=stop_reason, cycles_run=len(records),
+        proposals=proposals, artifacts=artifacts,
+    )
+    result.success_verdict = verdict
+    if verdict_error:
+        _log(agent, "campaign_verdict_unrecorded", {"error": verdict_error})
     _log(agent, "campaign_stop", {
         "status": result.status,
         "goal": result.goal,
         "stop_reason": result.stop_reason,
         "cycles_run": result.cycles_run,
         "totals": totals,
+        "success_verdict": verdict,
     })
     return result

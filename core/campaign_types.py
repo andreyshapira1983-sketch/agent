@@ -112,6 +112,9 @@ class CampaignResult:
     records: list[Any] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     clarification: dict[str, Any] | None = None
+    #: Вердикт по СОБСТВЕННОМУ критерию цели (core/campaign_verdict.py).
+    #: `None` = не судили: так выглядит результат, собранный не кампанией.
+    success_verdict: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +125,7 @@ class CampaignResult:
             "totals": self.totals,
             "records": [r.to_dict() for r in self.records],
             "clarification": self.clarification,
+            "success_verdict": self.success_verdict,
         }
 
     def user_summary(self) -> str:
@@ -145,6 +149,12 @@ class CampaignResult:
                 f"{round(self.totals.get('cost_units', 0) / u, 1) if (u := self.totals.get('useful_cycles', 0)) else '-'}"
             ),
         ]
+        # Вердикт по цели стоит ВЫШЕ циклов: `status=completed` у прогона,
+        # который цели не достиг, формально верен («смена отработана»), а
+        # человеку читается как успех.
+        if self.success_verdict:
+            from core.campaign_verdict import verdict_summary_line
+            lines.append(verdict_summary_line(self.success_verdict))
         for record in self.records:
             lines.append(f"  {record.user_summary()}")
         if self.clarification and self.clarification.get("questions"):
