@@ -129,6 +129,22 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
     без вердиктов: сам журнал пишет `core/self_stop_record.py` из рантайма.
     Нечитаемый журнал — не отказ выбора: отсутствие подсказки хуже, чем
     остановка всей работы из-за неё.
+
+    Окно считает РАЗНЫЕ СТЕНЫ, а не строки. Замер живого журнала 2026-09-18:
+    35 строк на 3 подписи, и хвост из 20 строк нёс только 2 стены — третья
+    (`goal_parse`, три удара днём раньше) не доходила до выбора цели вообще.
+    Причина не в сроке и не в объёме: `agent_tick.py` пишет остановку внутри
+    цикла трёх попыток, поэтому шесть мёртвых прогонов за 112 секунд оставили
+    двадцать одинаковых строк и вымыли соседей.
+
+    Писатель при этом не виноват: разные попытки одного прогона могут
+    удариться о РАЗНЫЕ стены, и такую запись терять нельзя. Виновата единица
+    счёта у читателя.
+
+    Повторяемость не выбрасывается, а становится числом (`hits`): стена,
+    ударенная двадцать раз, и стена, ударенная однажды, — разные новости.
+    Двадцать одинаковых строк читаются как двадцать свидетельств, а это
+    ложный вес — свидетельство одно.
     """
     path = workspace / "data" / "self_stops.jsonl"
     if not path.is_file():
@@ -137,16 +153,25 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
         rows = read_state_jsonl_unlocked(path)
     except (OSError, ValueError):
         return ()
-    stops: list[dict[str, str]] = []
-    for row in rows[-_RECENT_STOPS:]:
+    # Ключ сворачивания — подпись; строки без подписи сворачивать НЕЛЬЗЯ:
+    # объявить их одной стеной значило бы выдумать за журнал.
+    collapsed: dict[str, dict[str, str]] = {}
+    for index, row in enumerate(rows):
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
-        stops.append({
+        stop = {
             "kind": str(payload.get("kind") or ""),
             "reason": str(payload.get("reason") or ""),
             "signature": str(payload.get("signature") or ""),
             "ts": str(payload.get("ts") or ""),
-        })
-    return tuple(stops)
+        }
+        key = stop["signature"] or f"#unsigned:{index}"
+        seen = collapsed.pop(key, None)
+        # Показывается ПОСЛЕДНИЙ удар: иначе стена, о которую бьются прямо
+        # сейчас, выглядела бы вчерашней. Перевставка держит порядок по
+        # последнему удару.
+        stop["hits"] = (seen["hits"] + 1) if seen else 1
+        collapsed[key] = stop
+    return tuple(list(collapsed.values())[-_RECENT_STOPS:])
 
 
 def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
@@ -549,8 +574,9 @@ def _ask(
         # Низкодоверенная подсказка: совпавшая подпись значит «проверь прошлую
         # стену», а не «эта причина истинна» (контракт оператора 2026-09-01).
         stop_lines = "\n".join(
-            "- [{kind}] {reason} (signature {sig}, {ts})".format(
+            "- [{kind}] {reason} (hit {hits}x, signature {sig}, latest {ts})".format(
                 kind=st["kind"], reason=st["reason"],
+                hits=st.get("hits", 1),
                 sig=st["signature"][:12], ts=st["ts"][:19],
             )
             for st in stops
