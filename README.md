@@ -12,7 +12,8 @@
 
 An autonomous, self-diagnosing research agent that answers with **verified
 evidence**, records its own defects, and — under explicit human approval —
-proposes repairs to its own code.
+proposes repairs to its own code. An operator-started isolated repair session
+can verify and adopt those repairs automatically, without approval per file.
 
 The design bet of this repository: an agent should become *harder to deceive*,
 not merely more confident — including deception by its own past conclusions.
@@ -80,6 +81,47 @@ escalation.
 
 ## Self-repair ladder
 
+### Isolated automatic repair
+
+From the source checkout, with model credentials and explicit limits in
+`config/budget_limits.json`, run:
+
+```powershell
+python scripts\autonomous_repair.py --passes 3 --seconds 900
+```
+
+This single operator action authorises bounded repair **in a separate copy**.
+The controller snapshots the current working files into a new local repository
+under `.autonomous-repair`, with no remote. It does not commit, switch branches,
+merge or push in the source checkout.
+
+Each pass runs the agent in a fresh process with a finite sandbox authority and
+standing effects grant. Eligible proposals are approved by the sandbox rule.
+The existing lane performs targeted and full tests; an external supervisor then
+independently checks the commit and reruns the suite in a fresh tree. Only an
+accepted commit becomes the next pass's starting code. Failed candidates do not
+replace the accepted version.
+
+Memory, approvals, lessons and spend are carried between passes; a new pass does
+not reset the daily allowance. Unrelated pending approvals do not block an
+already-authorised sandbox repair and are not themselves approved. The normal
+production approval policy is unchanged. Protected authority, infrastructure
+and secret files remain outside the delegated edit scope.
+
+`--cycles`, `--llm-calls` and `--cost-units` bound each campaign;
+`--passes` and `--seconds` bound the session, and `--applies-per-day` bounds
+the sandbox allowance. Zero/unlimited values are rejected. The source budget
+configuration is copied, not enlarged. The run prints its session directory;
+`report.json` there records starting commits, acceptance decisions and stop
+reasons. Per-pass output is in each copy's `logs` directory. Copies and the
+accepted-head pointer are retained for inspection; a new invocation starts a
+new session, not an implicit deployment of the previous experiment.
+
+This is repository isolation, **not an OS security sandbox**. It still consumes
+model budget and local resources. GitHub does not back up ignored credentials,
+runtime memory or logs. Missing prerequisites, campaign errors and timeouts stop
+with a stated reason; a completed session does not imply its goal was achieved.
+
 A defect the agent finds in itself travels:
 
 ```
@@ -123,7 +165,9 @@ carries a 1–3 line contract comment; the narrative goes to
 
 The diagnostic loop closes: the agent finds real defects in its own traces,
 verifies the diagnosis claim-by-claim, and routes it toward repair. The
-*repair* loop has not yet closed end-to-end without a human: every campaign
-run still starts from an explicit operator grant, and no scheduler is enabled
+isolated repair controller connects proposal, verification, acceptance and
+the next process without a human decision per patch. This does not establish
+that the model can diagnose and repair every defect. Ordinary campaigns still
+use their existing approval policy, and no scheduler is enabled
 by default (`scripts/install_daemon.ps1` exists for when it is wanted). That
 is a design posture, not a limitation to hide.
