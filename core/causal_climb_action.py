@@ -82,12 +82,26 @@ def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
 
 
 def _decline(agent: Any, reason: str, *, llm_calls_spent: int = 0,
-             **payload: Any) -> CampaignActionOutcome:
+             attempted: bool = False, **payload: Any) -> CampaignActionOutcome:
     """Отказ не носит продукта: artifact = работа (MIR-117), а причина —
     в журнале `causal_climb_declined`, молчаливых отказов нет. Потраченные
-    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3)."""
+    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3).
+
+    Причина едет ещё и в исход (`note`): журнал агента и реестр кампании
+    читают разные люди, и девять падений замера 2026-09-20 были в реестре
+    беспричинными. Предмет берётся из той же приметы, которой отказ назван в
+    журнале, — ключ заявки у суда, отпечаток наблюдения у объяснителя. Без
+    него кампания банит голое имя действия и останавливает ВСЕ заявки разом.
+
+    `attempted` поднимает тот, чья работа реально шла и ничего не стоила:
+    иначе подпись не банится, и бесплатный отказ возвращается каждым циклом.
+    """
     _log(agent, "causal_climb_declined", {"reason": reason, **payload})
-    return CampaignActionOutcome(result="failed", llm_calls_spent=llm_calls_spent)
+    subject = str(payload.get("claim_key") or payload.get("fingerprint") or "")
+    return CampaignActionOutcome(
+        result="failed", llm_calls_spent=llm_calls_spent,
+        attempted=attempted, subject=subject, note=reason,
+    )
 
 
 def _log(agent: Any, event: str, payload: dict) -> None:
@@ -131,7 +145,7 @@ def explain_causal_observation(
         ) or "")
     except Exception as exc:  # noqa: BLE001 — провод не роняет кампанию
         return _decline(agent, f"model_error:{type(exc).__name__}",
-                        fingerprint=record.fingerprint)
+                        fingerprint=record.fingerprint, attempted=True)
 
     pairs = _parse_hypotheses(raw)
     # Ворота рождения (проект агента): проба в несуществующий файл убивает
@@ -145,6 +159,7 @@ def explain_causal_observation(
             f"нужны конкурирующие фальсифицируемые объяснения: выжило {len(pairs)}",
             fingerprint=record.fingerprint,
             answer_head=" ".join((raw or "").split())[:200],
+            attempted=True,
         )
 
     claim = CausalClaim(
@@ -250,10 +265,14 @@ def _birth_experiment_spec(agent, claim):
 
         h1, h2 = alive[0], alive[1]
         targets = ", ".join(_EXPERIMENT_TARGETS.keys())
+        example_a, example_b, example_effect = _SPEC_PLACEHOLDERS
         system = (
             "Ты разводишь ДВЕ конкурирующие гипотезы одним песочным экспериментом. "
-            "Верни РОВНО ОДНУ строку в формате [exp: цель | A=рукав для гипотезы 1 | B=рукав для гипотезы 2 | след=наблюдаемое различие]. "
-            "Цель - только из списка. Не можешь выразить развод доступными целями - верни ровно слово НЕВЫРАЗИМО."
+            f"Верни РОВНО ОДНУ строку в формате [exp: цель | A={example_a} | "
+            f"B={example_b} | след={example_effect}]. "
+            "Цель - только из списка. Не можешь выразить развод доступными целями - верни ровно слово НЕВЫРАЗИМО. "
+            "Слова из примера в ответ не переписывай: рукава и след опиши "
+            "своими словами по существу, иначе ответ будет отвергнут."
         )
         user = (
             f"Гипотеза 1: {h1.predicts}\n"
@@ -434,6 +453,23 @@ def _run_probe(workspace: Path, probe: Probe) -> bool | None:
 # Нигде → эксперимент не воспроизвёл явление: неведение, не вердикт.
 # Цели — ТОЛЬКО белый список чистых функций: ни файлов, ни сети, ни состояния.
 
+#: Слова-заглушки из ПРИМЕРА в промпте рождения. Один источник правды: из них
+#: собирается пример (`_birth_experiment_spec`), и ими же отказывает парсер.
+#: Замер 2026-09-18 (живой реестр владельца, 105 циклов после открытия права):
+#: 45 циклов — 45 провалов `run_claim_experiment`, 0 успехов; за всю историю
+#: 48 из 48. Причина одна: модель вернула этот пример ДОСЛОВНО, подставив
+#: только цель, а парсер спрашивал лишь «непусто ли» — и три слова из примера
+#: ответили «непусто». Ворота рождения (`parse_experiment(spec_text) is None`)
+#: были единственной охраной и пропустили эхо собственного примера.
+#: Держать их списком, а не строкой в промпте, обязательно: разойдись пример
+#: и запрет — дыра вернулась бы тихо. Свидетель:
+#: tests/test_a_filled_form_is_not_a_blank_one.py.
+_SPEC_PLACEHOLDERS: tuple[str, ...] = (
+    "рукав для гипотезы 1",
+    "рукав для гипотезы 2",
+    "наблюдаемое различие",
+)
+
 _EXP_RE = re.compile(
     r"\[exp:\s*(?P<target>[A-Za-z_][A-Za-z0-9_]*)\s*\|\s*"
     r"A=(?P<arm_a>[^|\]]+?)\s*\|\s*B=(?P<arm_b>[^|\]]+?)\s*\|\s*"
@@ -482,6 +518,13 @@ def parse_experiment(predicts: str) -> Experiment | None:
     arm_b = m.group("arm_b").strip()
     effect = m.group("effect").strip()
     if not arm_a or not arm_b or not effect:
+        return None
+    # Заполненный бланк и пустой бланк — не одно и то же: слово из ПРИМЕРА
+    # непусто, но об мире не говорит ничего (замер 2026-09-18: 48 провалов
+    # подряд на эхе собственного промпта). Хватает одной подделки: опыт
+    # держится на РАЗНИЦЕ рукавов, и заглушка в любом поле судила бы шаблон.
+    lowered = {arm_a.lower(), arm_b.lower(), effect.lower()}
+    if lowered & {word.lower() for word in _SPEC_PLACEHOLDERS}:
         return None
     return Experiment(target=target, arm_a=arm_a, arm_b=arm_b, effect=effect)
 
@@ -579,7 +622,7 @@ def run_claim_experiment(
 
     if verdicts == 0:
         return _decline(agent, "эксперименты не дали ни одного вердикта",
-                        claim_key=extra["key"])
+                        claim_key=extra["key"], attempted=True)
 
     updated = dataclasses.replace(
         claim, explanations=tuple(new_explanations),
@@ -673,7 +716,7 @@ def discriminate_causal_claim(
         save_claim(marked, workspace=ws, directive=extra["directive"],
                    machine_action=extra["machine_action"])
         return _decline(agent, "ни одного вердикта: пробы не решили ничего",
-                        claim_key=extra["key"])
+                        claim_key=extra["key"], attempted=True)
 
     updated = dataclasses.replace(
         claim, explanations=tuple(new_explanations),
@@ -788,5 +831,5 @@ def birth_experiment_specs(
     _log(agent, "spec_unexpressible", {"claim_key": extra["key"]})
     return _decline(
         agent, "спецификация невыразима песочными целями",
-        llm_calls_spent=birth_calls, claim_key=extra["key"],
+        llm_calls_spent=birth_calls, claim_key=extra["key"], attempted=True,
     )

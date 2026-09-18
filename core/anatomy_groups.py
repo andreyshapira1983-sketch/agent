@@ -81,7 +81,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("Runtime, State & Orchestration (§6)", "Autonomous loop, scheduling, budgets, state durability.", [
         "capability_events",
         "autonomous_runtime", "autonomous_runtime_proposals", "autonomous_runtime_types", "scheduler", "campaign", "campaign_io", "campaign_ledger",
-        "campaign_types", "work_session", "task_queue", "task_lifecycle",
+        "campaign_types", "campaign_verdict", "work_session", "task_queue", "task_lifecycle",
         "checkpoint", "circuit_breaker", "termination_guard", "step_repetition",
         "rate_limiter", "budget_governor", "budget_ledger", "budget_kill_switch",
         "spend_report",
@@ -92,6 +92,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ]),
     ("Security, Policy & Autonomy Governance (§7)", "Policy gate, approvals, escalation, domain limits.", [
         "policy", "governance", "approval", "approval_inbox", "approval_triage",
+        "standing_grant",
         "deep_escalation", "operational_domain", "incident", "capability_request",
     ]),
     ("Evaluation & Monitoring (§8)", "Logging, identifiers, architecture auditing.", [

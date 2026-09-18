@@ -40,6 +40,7 @@ from typing import Any, Literal
 
 from core.best_next_action import BestNextAction
 from core.campaign_io import (
+    _cost_totals,
     _default_execute_action,
     _default_gather_signals,
     _log,
@@ -51,6 +52,7 @@ from core.campaign_ledger import (
     spent_units_by_action,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
+from core.campaign_verdict import judge_and_record
 from core.capability_events import last_capability_change_ts
 from core.run_context import run_cost_envelope
 from core.self_stop_record import record_self_stop, record_stop_observation
@@ -197,6 +199,44 @@ _BACKOFF_STEP_SECONDS = 60
 _BACKOFF_MAX_SECONDS = 900
 
 
+def _ask_for_a_goal(
+    agent: Any, next_goal: Callable[[], Any], current_goal: str, cycle: int,
+) -> tuple[str, str, int, int]:
+    """Спросить источник о новой цели и вернуть её вместе с ценой вопроса.
+
+    Выбор цели — такой же платный вызов модели, как работа цикла, но он не
+    проходит ни через один `CampaignActionOutcome`, и до 18.09 не попадал в
+    счёт кампании вовсе. Замер живого прогона
+    `trace_f24a00c45aa4a20c77686b069208ba8b`: реестр отдал 13 вызовов, а
+    кампания записала 3 — ровно десять обращений за целью прошли мимо книг,
+    и `--max-cost-units 300` не видел реально потраченных 195.
+
+    Цена снимается вокруг ВСЕХ попыток, а не вокруг удачной: отказ стоит
+    столько же, сколько согласие, а три попытки на смену умножают счёт.
+    """
+    before_calls, before_cost = _cost_totals(agent)
+    candidate = check = ""
+    for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
+        try:
+            proposed = next_goal()
+        except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
+            # уронить прогон: не вышло — останавливаемся прежним путём.
+            _log(agent, "campaign_goal_switch_failed",
+                 {"cycle": cycle, "error": repr(exc)[:200]})
+            break
+        # Источник целей вправе отдать отчёт (цель + её критерий) или просто
+        # строку. Строка означает «критерий не назван» — честное состояние, а
+        # не ошибка: так задают цель четыре точки входа.
+        asked = str(getattr(proposed, "goal", proposed) or "").strip()
+        if asked and asked != current_goal:
+            candidate = asked
+            check = str(getattr(proposed, "success_check", "") or "").strip()
+            break
+    after_calls, after_cost = _cost_totals(agent)
+    return (candidate, check,
+            max(0, after_calls - before_calls), max(0, after_cost - before_cost))
+
+
 def run_campaign(
     config: CampaignConfig,
     *,
@@ -207,6 +247,7 @@ def run_campaign(
     gather_signals: GatherSignals | None = None,
     execute_action: ExecuteAction | None = None,
     next_goal: Callable[[], str] | None = None,
+    opening_spend: tuple[int, int] = (0, 0),
     now_fn: Callable[[], datetime] = _utc_now,
     sleep_fn: Callable[[float], None] = time.sleep,
     on_cycle: Callable[[dict], None] | None = None,
@@ -257,28 +298,13 @@ def run_campaign(
         попытка убивала прогон на любом молчании модели.
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
-        nonlocal current_success_check
+        nonlocal current_success_check, llm_calls_used, cost_units_used
         if next_goal is None or goal_switches >= _MAX_GOAL_SWITCHES:
             return False
-        switched = ""
-        switched_check = ""
-        for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
-            try:
-                proposed = next_goal()
-            except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
-                # уронить прогон: не вышло — останавливаемся прежним путём.
-                _log(agent, "campaign_goal_switch_failed",
-                     {"cycle": cycle, "error": repr(exc)[:200]})
-                return False
-            # Источник целей вправе отдать отчёт (цель + её критерий) или
-            # просто строку. Строка означает «критерий не назван» — честное
-            # состояние, а не ошибка: так задают цель четыре точки входа.
-            candidate = str(getattr(proposed, "goal", proposed) or "").strip()
-            candidate_check = str(getattr(proposed, "success_check", "") or "").strip()
-            if candidate and candidate != current_goal:
-                switched = candidate
-                switched_check = candidate_check
-                break
+        switched, switched_check, spent_calls, spent_cost = _ask_for_a_goal(
+            agent, next_goal, current_goal, cycle)
+        llm_calls_used += spent_calls
+        cost_units_used += spent_cost
         if not switched:
             return False
         goal_switches += 1
@@ -296,8 +322,14 @@ def run_campaign(
         })
         return True
 
-    llm_calls_used = 0
-    cost_units_used = 0
+    # Ревизия PR #346: счёт НЕ начинается с нуля. Первый выбор цели делается
+    # хартией в `agent_tick` ДО входа сюда (и при отказе — трижды), поэтому
+    # обнулённые счётчики врали кампании ровно на стартовый вызов: замер
+    # прогона 18.09 давал 13 вызовов в реестре против 12 в книгах даже после
+    # починки смены цели. Кто цель купил, тот её и оплачивает.
+    llm_calls_used, cost_units_used = (
+        max(0, int(opening_spend[0])), max(0, int(opening_spend[1])),
+    )
     proposals = 0
     artifacts = 0
     idle_cycles = 0
@@ -305,6 +337,8 @@ def run_campaign(
     goal_drove_cycles = 0
     repeat_cycles = 0
     error_cycles = 0
+    #: Отказы ДЕЙСТВИЯ — не исключения цикла (`error_cycles`); см. сводку.
+    failed_cycles = 0
     consecutive_errors = 0
     unproductive_streak = 0
     unproductive_cycles = 0
@@ -399,6 +433,7 @@ def run_campaign(
             "idle_cycles": idle_cycles,
             "repeat_cycles": repeat_cycles,
             "error_cycles": error_cycles,
+            "failed_cycles": failed_cycles,
         })
 
     _log(agent, "campaign_start", {
@@ -676,7 +711,10 @@ def run_campaign(
                 proposal=outcome.proposal,
                 artifact=outcome.artifact,
                 work_done=outcome.did_work,
+                outcome_reason=getattr(outcome, "note", "") or "",
             )
+            # Без ветки: run_campaign и так за обоими потолками ruff.
+            failed_cycles += int(outcome.result == "failed")
             ledger.append(record)
             records.append(record)
             _log(agent, "campaign_cycle_work", record.to_dict())
@@ -791,6 +829,7 @@ def run_campaign(
         "useful_cycles": useful_cycles,
         "repeat_cycles": repeat_cycles,
         "error_cycles": error_cycles,
+        "failed_cycles": failed_cycles,
         "unproductive_cycles": unproductive_cycles,
         # Считалось с MIR-163, в итог не попадало: сводка печатала умолчание.
         "goal_drove_cycles": goal_drove_cycles,
@@ -807,11 +846,25 @@ def run_campaign(
         totals=totals,
         clarification=clarification,
     )
+    # Кампания судит СВОЮ цель её же критерием — впервые с появления
+    # `success_check`. Судья читает мир, а не слово исполнителя, и отделяет
+    # след, сделанный этим прогоном, от следа, лежавшего здесь до него
+    # (см. core/campaign_verdict.py: замер 4 ложных «сошлось» из 31).
+    verdict, verdict_error = judge_and_record(
+        goal=current_goal, success_check=current_success_check,
+        workspace=workspace, started_at=started_at, ts=now_fn(),
+        stop_reason=stop_reason, cycles_run=len(records),
+        proposals=proposals, artifacts=artifacts,
+    )
+    result.success_verdict = verdict
+    if verdict_error:
+        _log(agent, "campaign_verdict_unrecorded", {"error": verdict_error})
     _log(agent, "campaign_stop", {
         "status": result.status,
         "goal": result.goal,
         "stop_reason": result.stop_reason,
         "cycles_run": result.cycles_run,
         "totals": totals,
+        "success_verdict": verdict,
     })
     return result

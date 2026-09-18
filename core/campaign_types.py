@@ -24,6 +24,17 @@ class CampaignConfig:
     max_llm_calls: int = 100
     max_cost_units: int = 0
     max_idle_streak: int = 3
+    #: Гасит РУКИ, а не приборы. Спрашивают его в `core/campaign_io.py` ровно
+    #: производители эффектов (`propose_engineering_task`,
+    #: `draft_doctrine_document`, `study_external_source` — все под
+    #: `and not config.dry_run`): сухой прогон не рождает заявок, черновиков и
+    #: правок мира. Журналы прогона — `data/campaign_ledger.jsonl` и
+    #: `data/campaign_verdicts.jsonl` — пишутся ВСЕГДА: это показания, а не
+    #: эффекты, и молчать они обязаны вместе. Повод сказать это словами:
+    #: ревизия PR #351 прочла флаг как «не писать на диск», потому что поле
+    #: молчало, и границу приходилось восстанавливать по местам вызова.
+    #: Свидетель: tests/test_a_campaign_judges_its_own_goal.py::
+    #: test_a_dry_campaign_records_its_verdict_beside_its_ledger.
     dry_run: bool = True
     report_every: int = 1
     idle_recheck_seconds: int = 600
@@ -87,6 +98,18 @@ class CampaignActionOutcome:
     # предмет шага - отпечаток наблюдения у объяснителя, ключ заявки у суда;
     # пустая строка у действий без предмета (WEAVE ЗАЗОР 1, авторство агента)
     subject: str = ""
+    #: Слово исполнителя «работа была, продукта нет» (замер 2026-09-20).
+    #: Отказ ПОСЛЕ отработавшей работы неотличим от отказа ДО её начала, пока
+    #: единственный свидетель попытки — потраченные деньги: эксперимент из
+    #: двух рукавов исполняется бесплатно, и девять его безвердиктных проходов
+    #: подряд кампания приняла за девять первых. Ставит это слово только тот,
+    #: кто знает, что работа шла; умолчание сохраняет прежний смысл `ran`.
+    attempted: bool = False
+    #: Причина ИСХОДА словами исполнителя — не путать с `reason` записи цикла,
+    #: где лежит повод ВЫБРАТЬ действие. До 2026-09-20 причина отказа жила
+    #: только в журнале агента, и девять падений в реестре кампании выглядели
+    #: беспричинными. Пустая строка = исполнитель причины не назвал.
+    note: str = ""
 
     @property
     def did_work(self) -> bool:
@@ -95,12 +118,20 @@ class CampaignActionOutcome:
 
     @property
     def ran(self) -> bool:
-        """Попытка была: что-то потрачено или что-то сделано.
+        """Попытка была: что-то потрачено, что-то сделано или работа шла.
 
-        Отказ до старта (0 трат, 0 продукта) попыткой НЕ является — банить его
-        подпись значило бы лгать «прежний проход не снял сигнал» (MIR-117).
+        Отказ до старта (0 трат, 0 продукта, `attempted` не поднят) попыткой
+        НЕ является — банить его подпись значило бы лгать «прежний проход не
+        снял сигнал» (MIR-117). Но работа, которая ничего не стоила, — всё
+        ещё работа: без `attempted` бесплатное действие повторялось вечно,
+        а платное отсекалось со второго захода (замер 2026-09-20).
         """
-        return self.did_work or self.llm_calls_spent > 0 or self.cost_units_spent > 0
+        return (
+            self.did_work
+            or self.attempted
+            or self.llm_calls_spent > 0
+            or self.cost_units_spent > 0
+        )
 
 
 @dataclass
@@ -112,6 +143,9 @@ class CampaignResult:
     records: list[Any] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     clarification: dict[str, Any] | None = None
+    #: Вердикт по СОБСТВЕННОМУ критерию цели (core/campaign_verdict.py).
+    #: `None` = не судили: так выглядит результат, собранный не кампанией.
+    success_verdict: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +156,7 @@ class CampaignResult:
             "totals": self.totals,
             "records": [r.to_dict() for r in self.records],
             "clarification": self.clarification,
+            "success_verdict": self.success_verdict,
         }
 
     def user_summary(self) -> str:
@@ -134,6 +169,11 @@ class CampaignResult:
                 f"idle={self.totals.get('idle_cycles', 0)}  "
                 f"repeats={self.totals.get('repeat_cycles', 0)}  "
                 f"errors={self.totals.get('error_cycles', 0)}  "
+                # Падение действия и вылетевшее исключение — разные события, и
+                # сливать их нельзя. Но показывать только вылеты значит
+                # отчитаться `errors=0` о прогоне, где девять циклов упали
+                # (замер 2026-09-20): формально верно, человеку — ложь.
+                f"failed={self.totals.get('failed_cycles', 0)}  "
                 f"llm_calls={self.totals.get('llm_calls', 0)}  "
                 f"cost_units={self.totals.get('cost_units', 0)}  "
                 f"proposals={self.totals.get('proposals', 0)}  "
@@ -145,6 +185,12 @@ class CampaignResult:
                 f"{round(self.totals.get('cost_units', 0) / u, 1) if (u := self.totals.get('useful_cycles', 0)) else '-'}"
             ),
         ]
+        # Вердикт по цели стоит ВЫШЕ циклов: `status=completed` у прогона,
+        # который цели не достиг, формально верен («смена отработана»), а
+        # человеку читается как успех.
+        if self.success_verdict:
+            from core.campaign_verdict import verdict_summary_line
+            lines.append(verdict_summary_line(self.success_verdict))
         for record in self.records:
             lines.append(f"  {record.user_summary()}")
         if self.clarification and self.clarification.get("questions"):

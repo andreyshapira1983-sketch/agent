@@ -36,6 +36,24 @@ def _cost_totals(agent: Any) -> tuple[int, int]:
         return (0, 0)
 
 
+def router_spend(router: Any) -> tuple[int, int]:
+    """Расход по общему реестру, измеренный с ОДНОГО роутера, без агента.
+
+    Первый выбор цели делает хартия до постройки агента (`agent_tick`), и
+    мерить его было нечем. Реестр бюджета один на процесс, поэтому роутера
+    достаточно. Сомнение = `(0, 0)`.
+    """
+    from types import SimpleNamespace
+
+    return _cost_totals(SimpleNamespace(model_router=router))
+
+
+def spend_since(router: Any, before: tuple[int, int]) -> tuple[int, int]:
+    """Дельта расхода с отметки `before`; убыль реестра читается как ноль."""
+    after = router_spend(router)
+    return (max(0, after[0] - before[0]), max(0, after[1] - before[1]))
+
+
 def _action_focused_goal(goal: str, action: BestNextAction) -> str:
     reason = (action.reason or "").strip()
     evidence = "; ".join(e for e in action.evidence[:3] if e)
@@ -572,6 +590,13 @@ def _propose_engineering_step(
     _log(agent, "campaign_engineering_proposed", {
         "status": status, "approval_id": approval_id,
         "target": str(getattr(report, "target_path", "") or ""),
+        # Живой прогон 18.09 01:59: докстринг выше обещает «a refusal is
+        # surfaced by name», но имени тут не было. Управляющий отвечал
+        # «grounded target 'core/self_build_producer.py' is critical», а
+        # наверх уходило голое `no_grounded_target` — оно читается как
+        # «работы не осталось», хотя правда была «предмет вне твоих
+        # полномочий». Двадцать один цикл подряд прошёл под этой подменой.
+        "reason": str(getattr(report, "reason", "") or ""),
     })
     if approval_id:
         return f"engineering_proposed:{approval_id}"
