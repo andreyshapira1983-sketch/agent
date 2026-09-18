@@ -2041,7 +2041,7 @@ if __name__ == "__main__":
         # Право выдаёт РАЗБОР АРГУМЕНТОВ, а не код агента: вердикт подписан
         # человеком, набравшим флаг (см. core/standing_grant.py).
         from core.standing_grant import open_grant_from_command_line
-        sys.exit(open_grant_from_command_line(ws, *args.standing_grant[:2]))
+        sys.exit(open_grant_from_command_line(ws, *args.standing_grant))
 
     _require_budget_config(ws)
 

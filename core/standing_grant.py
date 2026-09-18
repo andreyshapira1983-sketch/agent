@@ -55,11 +55,29 @@ def _bounds(runs_per_day: Any, hours: Any) -> tuple[int, int]:
     return runs, span
 
 
+def _named(who: Any, field: str) -> str:
+    """Имя автора обязательно и проверяется ДО любой записи.
+
+    `ApprovalInbox._verdict` превращает пустого автора в «unattributed» —
+    в слово, которым помечено разрешение, которого никто не давал. Модуль
+    обещает, что по этим путям его не будет; держать обещание должен код,
+    а не вежливость вызывающего.
+    """
+    name = str(who or "").strip()
+    if not name:
+        raise ValueError(
+            f"{field} обязателен: неподписанная запись неотличима от той, "
+            "которой никто не делал"
+        )
+    return name
+
+
 def file_standing_grant(
     inbox: Any, *, runs_per_day: Any, hours: Any, requested_by: str,
 ) -> Any:
     """Положить заявку на стоячий грант. Кладёт, а не выдаёт."""
     runs, span = _bounds(runs_per_day, hours)
+    asked_by = _named(requested_by, "проситель")
     expires_at = (
         datetime.now(timezone.utc) + timedelta(hours=span)
     ).isoformat()
@@ -71,11 +89,12 @@ def file_standing_grant(
         ),
         risk="irreversible",
         reasons=(
-            f"запрошен оператором: {requested_by}",
+            f"запрошен оператором: {asked_by}",
             "без гранта каждое срабатывание расписания упирается в ворота",
             f"границы: {runs} прогонов в сутки, срок {span} ч",
         ),
         payload={"max_runs_per_day": runs},
+        requested_by=asked_by,
         expires_at=expires_at,
     )
 
@@ -101,6 +120,7 @@ def open_standing_grant(
     иначе автомат открывал бы право сам себе, и подпись стала бы ложью.
     """
     runs, span = _bounds(runs_per_day, hours)
+    signed_by = _named(actor, "автор вердикта")
     if inbox is None:
         from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
 
@@ -108,7 +128,7 @@ def open_standing_grant(
             path=Path(workspace) / DEFAULT_APPROVAL_INBOX_PATH
         )
     item = file_standing_grant(
-        inbox, runs_per_day=runs, hours=span, requested_by=actor,
+        inbox, runs_per_day=runs, hours=span, requested_by=signed_by,
     )
     return inbox.approve(
         item.id,
@@ -116,15 +136,13 @@ def open_standing_grant(
             f"открыт оператором из точки входа: {runs} прогонов в сутки, "
             f"срок {span} ч"
         ),
-        actor=actor,
+        actor=signed_by,
     )
 
 
 def open_grant_from_command_line(
     workspace: Any,
-    runs_per_day: Any,
-    hours: Any = DEFAULT_GRANT_HOURS,
-    *,
+    *values: Any,
     out: Any = None,
 ) -> int:
     """Открыть грант флагом и сказать, что именно открыто.
@@ -133,10 +151,25 @@ def open_grant_from_command_line(
     не прогон. Печатает границы, срок и автора: оператор должен увидеть,
     что именно он выдал, а не только услышать «готово».
 
+    Границы принимает ЦЕЛИКОМ и сама же судит их число. Прежде точка входа
+    резала список до двух, и `--standing-grant 20 48 999` завершался нулём,
+    открыв совсем другое право, чем набрал человек. Необратимое право —
+    не место для догадок о намерении.
+
     Отказ возвращает ненулевой код и не кладёт заявки: молчаливый нуль
     при негодных границах прочитался бы в расписании как «грант есть».
     """
     stream = sys.stdout if out is None else out
+    if not 1 <= len(values) <= 2:
+        got = " ".join(str(v) for v in values) or "(ничего)"
+        print(
+            "Грант не открыт: ожидаются прогонов в сутки и, необязательно, "
+            f"часов — не больше двух чисел (получено: {got})",
+            file=stream,
+        )
+        return 2
+    runs_per_day = values[0]
+    hours = values[1] if len(values) == 2 else DEFAULT_GRANT_HOURS
     try:
         item = open_standing_grant(
             workspace,
