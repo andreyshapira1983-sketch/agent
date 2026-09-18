@@ -24,6 +24,17 @@ class CampaignConfig:
     max_llm_calls: int = 100
     max_cost_units: int = 0
     max_idle_streak: int = 3
+    #: Гасит РУКИ, а не приборы. Спрашивают его в `core/campaign_io.py` ровно
+    #: производители эффектов (`propose_engineering_task`,
+    #: `draft_doctrine_document`, `study_external_source` — все под
+    #: `and not config.dry_run`): сухой прогон не рождает заявок, черновиков и
+    #: правок мира. Журналы прогона — `data/campaign_ledger.jsonl` и
+    #: `data/campaign_verdicts.jsonl` — пишутся ВСЕГДА: это показания, а не
+    #: эффекты, и молчать они обязаны вместе. Повод сказать это словами:
+    #: ревизия PR #351 прочла флаг как «не писать на диск», потому что поле
+    #: молчало, и границу приходилось восстанавливать по местам вызова.
+    #: Свидетель: tests/test_a_campaign_judges_its_own_goal.py::
+    #: test_a_dry_campaign_records_its_verdict_beside_its_ledger.
     dry_run: bool = True
     report_every: int = 1
     idle_recheck_seconds: int = 600
@@ -112,6 +123,9 @@ class CampaignResult:
     records: list[Any] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     clarification: dict[str, Any] | None = None
+    #: Вердикт по СОБСТВЕННОМУ критерию цели (core/campaign_verdict.py).
+    #: `None` = не судили: так выглядит результат, собранный не кампанией.
+    success_verdict: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -122,6 +136,7 @@ class CampaignResult:
             "totals": self.totals,
             "records": [r.to_dict() for r in self.records],
             "clarification": self.clarification,
+            "success_verdict": self.success_verdict,
         }
 
     def user_summary(self) -> str:
@@ -145,6 +160,12 @@ class CampaignResult:
                 f"{round(self.totals.get('cost_units', 0) / u, 1) if (u := self.totals.get('useful_cycles', 0)) else '-'}"
             ),
         ]
+        # Вердикт по цели стоит ВЫШЕ циклов: `status=completed` у прогона,
+        # который цели не достиг, формально верен («смена отработана»), а
+        # человеку читается как успех.
+        if self.success_verdict:
+            from core.campaign_verdict import verdict_summary_line
+            lines.append(verdict_summary_line(self.success_verdict))
         for record in self.records:
             lines.append(f"  {record.user_summary()}")
         if self.clarification and self.clarification.get("questions"):
