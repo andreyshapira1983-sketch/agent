@@ -34,6 +34,7 @@ REPORT_THRESHOLD = 150
 SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache",
     ".pytest_cache", ".ruff_cache", "htmlcov", "logs", "data", ".claude",
+    ".autonomous-repair",
 })
 
 #: "path:function" -> ceiling. Measured 2026-08-04.
@@ -119,7 +120,7 @@ WATCH: dict[str, int] = {
     #: применял ничего, потому что `_pending_excluding` считает остальные
     #: ожидающие заявки, а их составляет сам слив. Обе вставки — решение и
     #: его причина; выносить их в helper значило бы спрятать причину.
-    "core/rule_approved_apply.py:drain_rule_approved_proposals": 189,
+    "core/rule_approved_apply.py:drain_rule_approved_proposals": 190,  # +1: sandbox-authorised repairs no longer wait for unrelated approvals; production keeps the queue gate.
 }
 
 

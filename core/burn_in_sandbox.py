@@ -81,6 +81,7 @@ _FENCE: frozenset[str] = frozenset({
     "core/burn_in_sandbox.py",
     "core/burn_in_supervisor.py",
     "scripts/burn_in_supervisor.py",
+    "scripts/autonomous_repair.py",
     "core/policy.py",
     "core/rule_approved_apply.py",
     "core/autonomous_runtime.py",

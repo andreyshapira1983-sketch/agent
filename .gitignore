@@ -80,3 +80,5 @@ config/model_registry.json
 state/burn_in_head.json
 state/burn_in_offers.jsonl
 state/burn_in_adoptions.jsonl
+config/burn_in_sandbox.json
+.autonomous-repair/

@@ -109,4 +109,7 @@ def run_with_tree_kill(
     except subprocess.TimeoutExpired as exc:
         kill_process_tree(proc)
         return exc.stdout or b"", exc.stderr or b"", None, True
+    except KeyboardInterrupt:
+        kill_process_tree(proc)
+        raise
     return stdout_bytes or b"", stderr_bytes or b"", proc.returncode, False

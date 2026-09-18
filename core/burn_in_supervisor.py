@@ -80,6 +80,7 @@ __all__ = [
 SUPERVISOR_FENCE: frozenset[str] = frozenset({
     "core/burn_in_supervisor.py",
     "scripts/burn_in_supervisor.py",
+    "scripts/autonomous_repair.py",
     "core/burn_in_sandbox.py",
     "core/self_apply_lane.py",
     "core/self_apply_bridge.py",
