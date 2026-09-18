@@ -355,6 +355,59 @@ def test_the_sandbox_applies_code_without_a_standing_grant(
     assert inbox.get(item.id).status in {"approved", "executed", "aborted"}
 
 
+def test_unrelated_requests_do_not_veto_an_authorised_sandbox_repair(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sandbox already authorised this patch, not the other inbox items."""
+    from functools import partial
+
+    import core.self_apply_bridge as bridge
+    from core.rule_approved_apply import drain_rule_approved_proposals
+    from core.self_apply_lane import SelfApplyReport
+
+    inbox = _inbox(workspace)
+    _marker(workspace)
+    unrelated = inbox.add(operation="external_action", summary="not delegated")
+    patch = _pending_code(inbox, workspace, "core/widget.py")
+    seen = []
+
+    def lane(proposal, **kwargs):
+        seen.append(kwargs["approvals_pending"])
+        return SelfApplyReport(
+            status="approval_wait" if kwargs["approvals_pending"] else "committed_local",
+            reason="",
+        )
+
+    monkeypatch.setattr(
+        bridge, "run_approved_self_apply",
+        partial(bridge.run_approved_self_apply, lane=lane),
+    )
+    out = drain_rule_approved_proposals(workspace, dry_run=False, env=_env(True))
+
+    assert out["applied"] == 1, out
+    assert seen == [0]
+    assert inbox.get(patch.id).decided_by == "sandbox:burn_in"
+    assert inbox.get(unrelated.id).status == "pending"
+
+
+def test_a_sandbox_retries_its_own_approved_request_after_a_transient_wall(
+    workspace: Path, lane: _Lane,
+) -> None:
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _marker(workspace)
+    patch = _pending_code(inbox, workspace, "core/widget.py")
+    inbox.approve(patch.id, actor="sandbox:burn_in")
+    human_patch = _pending_code(inbox, workspace, "core/human.py")
+    inbox.approve(human_patch.id, actor="operator")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False, env=_env(True))
+
+    assert out["applied"] == 1
+    assert lane.item_ids == [patch.id]
+
+
 def test_the_sandbox_is_off_without_the_env_flag(workspace: Path, lane: _Lane) -> None:
     """Та же заявка без второго жеста: обычный производственный отказ."""
     from core.rule_approved_apply import drain_rule_approved_proposals

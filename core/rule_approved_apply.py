@@ -95,6 +95,17 @@ def _authority_for(
     )
 
 
+def _authorised_candidates(inbox: Any, authority: _Authority) -> list[Any]:
+    """Retry only this sandbox's approvals; a human's approval is not its queue."""
+    candidates = list(inbox.pending())
+    if authority.sandbox:
+        candidates += [
+            item for item in inbox.list(status="approved")
+            if item.decided_by == authority.actor
+        ]
+    return candidates
+
+
 def drain_rule_approved_proposals(
     workspace: Path,
     *,
@@ -110,9 +121,8 @@ def drain_rule_approved_proposals(
     все 11 — документы. Каждое ждало человека, который откроет ящик; здесь и
     рвалась петля.
 
-    Новых полномочий шаг не даёт: создавать файлы агент уже вправе через
-    `file_write` — без тестов и без отката, — а полоса делает то же самое с
-    прицельными тестами, полной батареей и автоматическим откатом.
+    Производственное правило не даёт новых полномочий: `file_write` уже умеет
+    создавать файлы; полоса добавляет тесты и автоматический откат.
 
     Двое ворот перед любым действием: эффекты включены И стоячий грант
     действует. Второе спрашивается ТОЙ ЖЕ функцией, что у рантайма: вторая
@@ -169,7 +179,7 @@ def drain_rule_approved_proposals(
     spent_word = "sandbox daily cap reached" if authority.sandbox else "standing grant spent for today"
     spent_event = "sandbox_cap_exhausted" if authority.sandbox else "standing_grant_exhausted"
 
-    for item in list(inbox.pending()):
+    for item in _authorised_candidates(inbox, authority):
         if getattr(item, "operation", "") != SELF_APPLY_OPERATION:
             continue
         out["considered"] += 1
@@ -225,6 +235,8 @@ def drain_rule_approved_proposals(
             workspace=Path(workspace),
             vcs=SafeVCS(workspace=Path(workspace)),
             test_runner=RunTestsTool(workspace_root=Path(workspace)),
+            # Sandbox authority is per proposal, not a veto from unrelated requests.
+            approvals_pending=0 if authority.sandbox else None,
         )
         out["attempted"] += 1
         status = str(result.get("status") or "")
@@ -242,9 +254,9 @@ def drain_rule_approved_proposals(
         # заняв ещё единицу потолка. Ревизия Copilot по PR #333; замерено:
         # `core/self_apply_bridge._pending_excluding` считает ОСТАЛЬНЫЕ
         # ожидающие, поэтому слив из трёх заявок тратил три единицы и не
-        # применял ничего. Заявка остаётся одобренной — так и задумано
-        # (`TERMINAL_LANE_STATUSES`, self_apply_bridge.py:438): оператор
-        # повторяет её сам, когда стена уйдёт.
+        # применял ничего. Заявка остаётся одобренной: песочница повторяет
+        # собственное решение при следующем сливе, снова проверяя полномочие.
+        # Производственное решение по-прежнему повторяет оператор.
         if status not in TERMINAL_LANE_STATUSES:
             out["blocked"] = out["blocked"] or f"lane refused: {status or 'unknown'}"
             _say("rule_approved_lane_wall", {

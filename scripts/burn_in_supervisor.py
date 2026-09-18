@@ -73,7 +73,10 @@ def _pending_offers(repo: Path, head: str) -> list[str]:
     return seen
 
 
-def _battery(worktree: Path) -> tuple[bool, str]:
+def _battery(
+    worktree: Path, *, timeout_seconds: float = _BATTERY_TIMEOUT_SECONDS,
+    env: dict[str, str] | None = None,
+) -> tuple[bool, str]:
     """Полная батарея в дереве кандидата. Зелено — значит зелено целиком.
 
     Ждём через `core/bounded_subprocess`, а не через `subprocess.run(timeout=)`:
@@ -86,11 +89,11 @@ def _battery(worktree: Path) -> tuple[bool, str]:
     stdout, _stderr, code, timed_out = run_with_tree_kill(
         [sys.executable, "-m", "pytest", "-q", "--no-header"],
         cwd=str(worktree),
-        env=None,
-        timeout=_BATTERY_TIMEOUT_SECONDS,
+        env=env,
+        timeout=timeout_seconds,
     )
     if timed_out:
-        return False, f"батарея не уложилась в {_BATTERY_TIMEOUT_SECONDS} с"
+        return False, f"батарея не уложилась в {timeout_seconds} с"
     text = stdout.decode("utf-8", "replace") if isinstance(stdout, bytes) else str(stdout)
     tail = text.strip().splitlines()[-1:] or [""]
     return code == 0, tail[0]
