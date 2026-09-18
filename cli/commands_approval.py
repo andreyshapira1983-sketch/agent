@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from core.standing_grant import (  # noqa: F401 — пере-экспорт, см. ниже
+    STANDING_GRANT_OPERATION,
+    file_standing_grant,
+)
 from core.subagent_contract import canonical_from_approval_payload
 from core.subagent_runner import SubagentContractRefused
 
@@ -404,10 +408,10 @@ def _handle_alert_ack_clear(rest: str, agent: AgentLoop, workspace: Path) -> boo
     return True
 
 
-#: Операция стоячего гранта. Автомат её ЧИТАЕТ
-#: (`AutonomousRuntime._active_standing_grant`); до MIR-166 её не заводил
-#: никакой боевой путь, только тест.
-STANDING_GRANT_OPERATION = "autonomous_runtime.standing_grant"
+#: Операция стоячего гранта переехала к писателю (`core/standing_grant.py`) и
+#: здесь только пере-экспортируется: дверей стало две — эта команда и флаг
+#: точки входа, — а форма записи обязана остаться одна, иначе читатель молча
+#: не узнает заявку второй двери.
 
 
 def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -438,23 +442,11 @@ def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool
         return True
 
     inbox = _approval_inbox_for(agent, workspace)
-    expires_at = (
-        datetime.now(timezone.utc) + timedelta(hours=hours)
-    ).isoformat()
-    item = inbox.add(
-        operation=STANDING_GRANT_OPERATION,
-        summary=(
-            f"Стоячий грант на автономные прогоны с эффектами: "
-            f"{runs_per_day} в сутки, {hours} ч."
-        ),
-        risk="irreversible",
-        reasons=(
-            "запрошен оператором командой :standing-grant",
-            "без гранта каждое срабатывание расписания упирается в ворота",
-            f"границы: {runs_per_day} прогонов в сутки, срок {hours} ч",
-        ),
-        payload={"max_runs_per_day": runs_per_day},
-        expires_at=expires_at,
+    item = file_standing_grant(
+        inbox,
+        runs_per_day=runs_per_day,
+        hours=hours,
+        requested_by="командой :standing-grant",
     )
     print(f"Заявка положена: {item.id}")
     print(f"  {runs_per_day} прогонов в сутки, истекает {item.expires_at}")
