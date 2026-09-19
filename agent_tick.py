@@ -1762,6 +1762,21 @@ def _pick_next_charter_goal(workspace: Path) -> Any:
     return pick
 
 
+def _pick_next_drive_goal(workspace: Path) -> Any:
+    """Следующая цель — от самого сильного драйва (core/drive_goal.py, шаг 3)."""
+    try:
+        from core.drive_goal import propose_drive_goal
+        pick = propose_drive_goal(_charter_goal_router(workspace).for_role("planner"), workspace)
+    except Exception as exc:  # noqa: BLE001 — смена цели не роняет прогон
+        print(f"[DRIVES] next goal failed: {type(exc).__name__}: {exc}")
+        return ""
+    if pick.status != "proposed":
+        print(f"[DRIVES] no next goal ({pick.drive}): {pick.reason}")
+        return ""
+    print(f"[DRIVES] {pick.drive} -> {pick.goal}")
+    return pick
+
+
 def run_paced_campaign(
     workspace: Path,
     *,
@@ -1779,6 +1794,7 @@ def run_paced_campaign(
     opening_spend: tuple[int, int] = (0, 0),
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     charter_goals: bool = False,
+    drive_goals: bool = False,
     run_campaign_fn: Callable[..., Any] | None = None,
     build_agent_fn: Callable[[Path], Any] | None = None,
     drain_fn: Callable[..., Any] | None = None,
@@ -1847,6 +1863,9 @@ def run_paced_campaign(
             max_unproductive_streak=max_unproductive_streak,
             max_goal_switches=max_goal_switches,
             pursue_goal_when_idle=pursue_goal_when_idle,
+            # От драйвов цель — один заход: выполненная цель сменяется сразу,
+            # а не после трёх пустых циклов.
+            **({"max_idle_streak": 1} if drive_goals else {}),
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
@@ -1918,7 +1937,8 @@ def run_paced_campaign(
     try:
         result = _call_run_campaign(
             opening_spend=opening_spend,
-            **({"next_goal": lambda: _pick_next_charter_goal(workspace)} if charter_goals else {}),
+            **({"next_goal": lambda: _pick_next_drive_goal(workspace)} if drive_goals
+               else {"next_goal": lambda: _pick_next_charter_goal(workspace)} if charter_goals else {}),
         )
     except Exception as exc:  # noqa: BLE001 — the failure lands in the heartbeat
         write_heartbeat(workspace, {
@@ -2036,6 +2056,12 @@ def _parse_args() -> argparse.Namespace:
              "(only used with --campaign).",
     )
     parser.add_argument(
+        "--drives",
+        action="store_true",
+        help="Campaign goals come from the agent's measured drives (core/drives.py, "
+             "core/drive_goal.py) instead of the charter (only used with --campaign).",
+    )
+    parser.add_argument(
         "--pursue-goal-when-idle",
         action="store_true",
         help="When no menu action binds the chosen goal, work on the goal itself "
@@ -2134,6 +2160,19 @@ if __name__ == "__main__":
         opening_spend = spend_since(_charter_router, _spend_before)
         success_check = pick.success_check
 
+    if args.campaign and args.drives:
+        _ensure_env_loaded(ws)
+        _first = None
+        from core.campaign import goal_pick_attempts
+        for _attempt in range(goal_pick_attempts()):
+            _first = _pick_next_drive_goal(ws)
+            if _first:
+                break
+        if not _first:
+            print("[DRIVES] no start goal; stopping honestly")
+            sys.exit(3)
+        goal, success_check = _first.goal, _first.success_check
+
     if args.campaign:
         sys.exit(run_paced_campaign(
             ws,
@@ -2150,6 +2189,7 @@ if __name__ == "__main__":
             pursue_goal_when_idle=args.pursue_goal_when_idle,
             opening_spend=opening_spend,
             charter_goals=bool(args.charter),
+            drive_goals=bool(args.drives),
         ))
 
     sys.exit(run_tick(ws, dry_run=dry))

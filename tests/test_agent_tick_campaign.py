@@ -199,3 +199,23 @@ def test_live_campaign_applies_authorised_proposals_after_every_cycle(workspace:
         drain_fn=lambda ws, **kw: dry.append(kw["dry_run"]),
     )
     assert dry == [True], "a dry run drains once at the end, where the drain itself refuses"
+
+
+def test_drive_goals_feed_the_campaign(workspace: Path, monkeypatch):
+    """Step 3 of endogenous activation: with drive_goals the next goal comes from
+    the drives and a done goal is replaced after one idle cycle, not three."""
+    import agent_tick
+
+    seen: dict = {}
+
+    def _run(config, *, agent, workspace, approval_inbox, ledger, on_cycle, **extra):
+        seen["idle"] = config.max_idle_streak
+        seen["next"] = extra.get("next_goal")
+        return _fake_result(1)
+
+    monkeypatch.setattr(agent_tick, "_pick_next_drive_goal", lambda ws: "from-drives")
+    run_paced_campaign(workspace, dry_run=False, max_cycles=1, heartbeat_fn=_HBRecorder(),
+                       run_campaign_fn=_run, build_agent_fn=lambda ws: SimpleNamespace(log=None),
+                       drain_fn=lambda ws, **kw: None, drive_goals=True)
+    assert seen["idle"] == 1
+    assert seen["next"] is not None and seen["next"]() == "from-drives"
