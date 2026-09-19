@@ -63,3 +63,16 @@ def test_a_task_the_executor_would_bounce_back_is_refused(tmp_path: Path) -> Non
     assert "переспросит человека" in _problem(bounced, tmp_path)
     assert _problem("Найди в math_study/library/txt/Judson_AbstractAlgebra.txt теорему Коши и проверь её расчётом",
                     tmp_path) == ""
+
+
+def test_a_check_naming_files_that_are_not_there_is_refused(tmp_path: Path) -> None:
+    """Live pass of step 3: «Theorem 9.x» in Judson_AbstractAlgebra.txt — the
+    theorem was found right, the outcome was recorded «no trace», the drive punished."""
+    book = tmp_path / "math_study" / "library" / "txt" / "Judson_AbstractAlgebra.txt"
+    book.parent.mkdir(parents=True)
+    book.write_text("Theorem 9.12 Cayley", encoding="utf-8")
+    goal = "В книге math_study/library/txt/Judson_AbstractAlgebra.txt найди теорему Кэли и проверь её расчётом"
+    guessed = "Цитата из Judson_AbstractAlgebra.txt с номером теоремы (например, Theorem 9.x)"
+    assert "которых нет на диске" in _problem(goal, tmp_path, guessed)
+    assert _problem(goal, tmp_path, "Цитата из math_study/library/txt/Judson_AbstractAlgebra.txt "
+                                    "с номером теоремы и страницей") == ""

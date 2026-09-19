@@ -167,7 +167,8 @@ def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str =
         "проверяемую (точный файл или источник, что найти или посчитать, как проверить — "
         "цитата со страницей, расчёт в python_probe, первоисточник в интернете). Не повторяй "
         "недавние задачи. Задачу формулируй по-русски, как просьбу найти, прочитать, "
-        "посчитать, проверить, объяснить. Верни только JSON: "
+        "посчитать, проверить, объяснить. В success_check файлы называй только полным путём "
+        "от корня рабочей папки и не угадывай заранее номера и страницы. Верни только JSON: "
         '{"goal": "<текст задачи>", "success_check": "<как понять, что выполнено>"}'
     )
     parts = ["Что тебе сейчас нужно:\n" + need_text(drive, info, root)]
@@ -192,9 +193,19 @@ def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str =
     return data if isinstance(data, dict) and str(data.get("goal") or "").strip() else None
 
 
-def _problem(goal: str, root: Path) -> str:
-    """Почему задачу нельзя выдать, или пусто."""
+def _problem(goal: str, root: Path, success_check: str = "") -> str:
+    """Почему задачу нельзя выдать, или пусто.
+
+    Критерий успеха исполнитель сверяет с диском (core/success_check.py):
+    каждый названный в нём файл обязан существовать. Живой проход шага 3:
+    модель написала «цитата из Judson_AbstractAlgebra.txt (например, Theorem
+    9.x)» — голое имя без пути и заглушка; теорему агент нашёл верно, а
+    исход записан как «следа нет», и драйв математики наказан за сделанную
+    работу. Задачи здесь — чтение и расчёт, новых файлов они не создают,
+    поэтому критерий сверяется тем же проверяющим ДО выдачи.
+    """
     from core.completion_contract import derive_completion_contract
+    from core.success_check import observe_success_check
 
     contract = derive_completion_contract(goal)
     if contract.ambiguities:
@@ -203,6 +214,11 @@ def _problem(goal: str, root: Path) -> str:
     recent = [line.split("] ", 1)[-1] for line in _recent_tasks(root, 20)]
     if any(_similarity([goal, old]) >= _REPEAT_SIMILARITY for old in recent):
         return "задача повторяет недавнюю — возьми другой материал или другой вопрос"
+    missing = observe_success_check(success_check, root)["missing"] if success_check else []
+    if missing:
+        return ("критерий успеха называет файлы, которых нет на диске: " + ", ".join(missing)
+                + " — называй файлы полным путём от корня рабочей папки, не угадывай номера "
+                  "и страницы заранее; что должно быть в ответе, опиши словами")
     return ""
 
 
@@ -226,9 +242,10 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
                 feedback = "ответ не разобран как JSON с полем goal"
                 continue
             goal = " ".join(str(data["goal"]).split())
-            feedback = _problem(goal, root)
+            check = str(data.get("success_check") or "").strip()
+            feedback = _problem(goal, root, check)
             if not feedback:
-                report = DriveGoal("proposed", goal, str(data.get("success_check") or "").strip(), drive)
+                report = DriveGoal("proposed", goal, check, drive)
                 state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
                 break
             report = DriveGoal("declined", goal, "", drive, feedback)
