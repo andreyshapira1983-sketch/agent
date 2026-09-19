@@ -554,6 +554,10 @@ ONE targeted step that CONFIRMS the value at the source (find_in_files for the
 key phrase or number, a file_read window, or a python_probe count) instead of
 answering from memory alone; a whole re-search is not needed. When the source
 cannot be read this turn, answer from memory and say it was not re-checked.
+A web-knowledge line («Цитата: «…» Источник: <URL> (прочитан <date>)») was
+read on the web: when the answer depends on it, confirm with ONE web_fetch of
+that exact URL and check the quote is still on the page. If the page changed or
+is gone, say so and answer from what the page says now, not from memory.
 
 Output format - return ONLY a JSON object, no markdown fences, no preface:
 {

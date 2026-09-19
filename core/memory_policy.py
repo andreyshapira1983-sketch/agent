@@ -71,6 +71,30 @@ MAX_CONTENT_LEN = 4_000
 _TOOL_DUMP_HINT = re.compile(r'"url"\s*:\s*"https?://', re.IGNORECASE)
 
 
+#: Строка родословной записи: «Источник: URL (прочитан …)» / «Источники: file:…».
+_PROVENANCE_LINE = re.compile(r"^(?:Источник|Источники):[^\n]*$", re.MULTILINE)
+
+
+def cut_keeping_provenance(text: str, limit: int) -> str:
+    """Укоротить запись до `limit`, сохранив её последнюю строку родословной.
+
+    Цепочка веб-знания, 2026-09-19: строка «Источник: …» стоит в конце записи,
+    и срез по 400 символам отрезал её у КАЖДОЙ записи вывода — модели велено
+    «подтверди у источника», а источника она не видела. Укорачивается середина.
+    """
+    found = list(_PROVENANCE_LINE.finditer(text))
+    tail = found[-1].group(0)[:200] if found else ""
+    if not tail or len(tail) >= limit // 2:
+        return text[: limit - 1].rstrip() + "…"
+    # Вопрос уступает первым: вывод и источник важнее его полного текста.
+    lines = text[: found[-1].start()].rstrip().splitlines()
+    lines = [ln[:90].rstrip() + "…" if ln.startswith("Вопрос:") and len(ln) > 91 else ln for ln in lines]
+    head = "\n".join(lines)
+    if len(head) + len(tail) + 1 <= limit:
+        return head + "\n" + tail
+    return head[: limit - len(tail) - 2].rstrip() + "…\n" + tail
+
+
 @dataclass
 class MemoryWriteDecision:
     decision: Literal["save", "reject"]
@@ -497,7 +521,7 @@ class MemoryRetrievalPolicy:
             text = r.content if isinstance(r.content, str) else str(r.content)
             note = _record_prompt_note(r)
             if len(text) > self.per_record_chars:
-                text = text[: self.per_record_chars - 1].rstrip() + "…"
+                text = cut_keeping_provenance(text, self.per_record_chars)
             tag_str = ",".join(r.tags) if r.tags else "-"
             lines.append(f"- [{r.id} | tags: {tag_str}] {note}{text}")
         return "\n".join(lines)

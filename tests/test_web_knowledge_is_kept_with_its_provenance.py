@@ -67,3 +67,18 @@ def test_the_loop_writes_it_tagged_as_web_knowledge(workspace: Path) -> None:
     assert URL in records[0].content
     loop._remember_conclusion(_episode())
     assert len(loop.persistent_store.load()) == 1, "тот же вывод дважды — дубль"
+
+
+def test_the_prompt_line_keeps_the_source_and_the_planner_knows_how_to_recheck() -> None:
+    """Chain step 6: records were cut at 400 chars and the «Источник» line — the
+    only thing that makes a re-check possible — was always the part cut off."""
+    from core.memory_policy import cut_keeping_provenance
+    from core.planner_prompt import PLANNER_SYSTEM
+
+    text = web_knowledge_memory(_episode())
+    assert text is not None and len(text) > 400
+    shown = cut_keeping_provenance(text, 400)
+    assert len(shown) <= 400
+    assert shown.endswith(f"Источник: {URL} (прочитан 2026-09-19)")
+    assert "Вывод: Первая теорема Гёделя" in shown
+    assert "ONE web_fetch of\nthat exact URL" in PLANNER_SYSTEM
