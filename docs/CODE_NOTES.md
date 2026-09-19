@@ -5967,3 +5967,9 @@ not you») — every 30 s, no work, no spend. The failed-action guard counted on
 `result == "failed"`. It now counts any outcome with no work and no spend
 (`not did_work and not ran`), whatever its name. Witness:
 `test_any_empty_outcome_counts_not_only_failed`.
+The picker's own prompt also told the agent a falsehood about its hands: «a
+goal that names a study verb together with the outside world opens web_search
+and web_fetch for that run; nothing else opens them». Web reading has been open
+on every unattended run since 2026-09-01; the sentence was never updated, and
+after 18:36 the run made no web call at all. The sentence now states the fact:
+both are open in every run, no special wording needed (operator's word).
