@@ -59,14 +59,18 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
         # Цель выбрана агентом и она сама — задание: делать, а не советовать
         # человеку. Прежняя формула («the ONE step a human should take … do not
         # perform any effects») превращала каждый заход в записку оператору.
-        return (f"{goal.strip()}\n\nThis is your own chosen goal. Do the work yourself now with "
+        # Ни одного слова свежести («now», «right now», «current»): обёртка
+        # читается ранжиром источников как часть вопроса, и «now» 2026-09-19
+        # делало КАЖДЫЙ заход «вопросом реального времени» — любая веб-цитата
+        # (Гёдель 1931, Нётер 1918) получала insufficient_for_realtime.
+        return (f"{goal.strip()}\n\nThis is your own chosen goal. Do the work yourself with "
                 "your tools and produce the checkable result it names; if something is missing, "
                 "say exactly what, instead of handing the step to a human.")
     reason = (action.reason or "").strip()
     evidence = "; ".join(e for e in action.evidence[:3] if e)
     parts = [
         f"Campaign goal: {goal.strip()}.",
-        f"The single highest-priority signal right now is '{action.action}' — {action.title}.",
+        f"The single highest-priority signal is '{action.action}' — {action.title}.",
     ]
     if reason:
         parts.append(f"Why it matters: {reason}")

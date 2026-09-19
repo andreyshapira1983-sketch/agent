@@ -134,3 +134,17 @@ def test_goal_first_the_goal_is_done_not_the_menu(tmp_path: Path) -> None:
 def test_goal_first_a_real_breakage_still_wins(tmp_path: Path) -> None:
     execute, _ = _goal_first_run(tmp_path, _SelfRepairWins(severity="high"))
     assert execute.actions[0] == "improve_failure_to_idea_pipeline"
+
+
+def test_the_campaign_wrapper_never_makes_a_question_realtime() -> None:
+    """2026-09-19: «Do the work yourself now» made every pursue pass a realtime
+    question for the source ranker; every web quote (Gödel 1931, Noether 1918)
+    got insufficient_for_realtime and a 0.35 confidence ceiling."""
+    from core.source_ranker import is_realtime_question
+
+    timeless = "Найди в интернете формулировку теоремы Гёделя о неполноте и проверь её"
+    assert not is_realtime_question(timeless)
+    for action in (BestNextAction(action=PURSUE_GOAL, title="t", severity="medium", priority=1, reason="r"),
+                   BestNextAction(action="explain_causal_observation", title="Explain", severity="medium",
+                                  priority=50, reason="r")):
+        assert not is_realtime_question(_action_focused_goal(timeless, action)), action.action
