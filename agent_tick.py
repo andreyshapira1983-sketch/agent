@@ -1865,7 +1865,7 @@ def run_paced_campaign(
             pursue_goal_when_idle=pursue_goal_when_idle,
             # От драйвов цель — один заход: выполненная цель сменяется сразу,
             # а не после трёх пустых циклов.
-            **({"max_idle_streak": 1} if drive_goals else {}),
+            **({"max_idle_streak": 1, "goal_first": True} if drive_goals else {}),
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)

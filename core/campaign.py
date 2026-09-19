@@ -161,20 +161,33 @@ def _approved_ids(approval_inbox) -> frozenset[str]:
 PURSUE_GOAL = "pursue_goal"
 
 
-def _pursue_goal_action(idle: BestNextAction) -> BestNextAction:
+def _pursue_goal_action(idle: BestNextAction, reason: str = "") -> BestNextAction:
     """Простой по цели превращается в работу над целью."""
     return BestNextAction(
         action=PURSUE_GOAL,
         title="Work on the chosen goal directly",
         severity="medium",
         priority=1,
-        reason=("no menu action binds the goal (" + str(idle.reason or "")[:200]
-                + "); the goal itself is the work"),
+        reason=reason or ("no menu action binds the goal (" + str(idle.reason or "")[:200]
+                          + "); the goal itself is the work"),
         evidence=tuple(idle.evidence[:3]),
         risk="reversible",
         grounds="operator_goal",
         decided_by="no_candidate",
     )
+
+
+def _goal_first(action: BestNextAction, attempted: set[str]) -> BestNextAction:
+    """Режим «цель первой» (CampaignConfig.goal_first): поломка — меню, иначе цель."""
+    if action.severity in ("critical", "high"):
+        return action
+    if PURSUE_GOAL not in attempted:
+        return _pursue_goal_action(action, "goal first: the goal itself is the work; the menu would "
+                                           f"have taken {action.action!r} ({action.grounds})")
+    return BestNextAction(
+        action="observe", title="The goal had its pass", severity="none", priority=0,
+        reason="goal first: the goal had its pass this cycle series; the next goal comes from the drives",
+        grounds="operator_goal", decided_by="goal_first")
 
 
 def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
@@ -552,7 +565,9 @@ def run_campaign(
                 except TypeError:
                     signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
-            if (action.priority <= 0 and config.pursue_goal_when_idle and not config.dry_run
+            if config.goal_first and current_goal and not config.dry_run:
+                action = _goal_first(action, attempted_signatures)
+            elif (action.priority <= 0 and config.pursue_goal_when_idle and not config.dry_run
                     and current_goal and PURSUE_GOAL not in attempted_signatures):
                 action = _pursue_goal_action(action)
             goal_drove_cycles += int(action.grounds == "operator_goal")  # MIR-163

@@ -210,6 +210,7 @@ def test_drive_goals_feed_the_campaign(workspace: Path, monkeypatch):
 
     def _run(config, *, agent, workspace, approval_inbox, ledger, on_cycle, **extra):
         seen["idle"] = config.max_idle_streak
+        seen["goal_first"] = config.goal_first
         seen["next"] = extra.get("next_goal")
         return _fake_result(1)
 
@@ -217,5 +218,5 @@ def test_drive_goals_feed_the_campaign(workspace: Path, monkeypatch):
     run_paced_campaign(workspace, dry_run=False, max_cycles=1, heartbeat_fn=_HBRecorder(),
                        run_campaign_fn=_run, build_agent_fn=lambda ws: SimpleNamespace(log=None),
                        drain_fn=lambda ws, **kw: None, drive_goals=True)
-    assert seen["idle"] == 1
+    assert seen["idle"] == 1 and seen["goal_first"] is True
     assert seen["next"] is not None and seen["next"]() == "from-drives"
