@@ -32,7 +32,13 @@ from core.drives import DOMAINS, _rows, _similarity, compute_drives, open_obliga
 STATE_RELPATH = Path("data") / "drive_state.json"
 DECISIONS_RELPATH = Path("data") / "drive_decisions.jsonl"
 WAKE_THRESHOLD = 0.5
-MIN_CONTENT = 0.2
+#: Порог — на значение С УЧЁТОМ привыкания. Замер 2026-09-19 (20 мин «цель
+#: первой»): порог стоял на сыром значении 0.2, предметные драйвы дорастают до
+#: него ~40 мин (tau 3 ч), а `uncertainty` (0.89, растёт от собственных
+#: детекторов) оставался единственным над порогом — 12 из 14 задач «разобрать
+#: наблюдение о детекторах» при его весе 0.1. Приевшееся 0.09 не должно
+#: выигрывать у растущего предмета 0.17.
+MIN_CONTENT = 0.05
 _NOT_CONTENT = frozenset({"idle_time", "economic_opportunity"})
 _REPEAT_SIMILARITY = 0.6
 
@@ -80,8 +86,8 @@ def choose_drive(drives: dict[str, dict[str, Any]], state: dict[str, Any],
     for name in list(weights):
         weights[name] = min(1.0, weights[name] + 0.1 * max(0.0, hours))
     state["updated"] = now.isoformat()
-    scored = {n: info["value"] * weights.get(n, 1.0) for n, info in drives.items()
-              if n not in _NOT_CONTENT and info["value"] >= MIN_CONTENT}
+    scored = {n: info["value"] * weights.get(n, 1.0) for n, info in drives.items() if n not in _NOT_CONTENT}
+    scored = {n: v for n, v in scored.items() if v >= MIN_CONTENT}
     if not scored:
         return None, state
     return max(scored, key=scored.get), state

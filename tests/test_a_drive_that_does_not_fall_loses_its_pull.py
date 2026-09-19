@@ -76,3 +76,13 @@ def test_a_check_naming_files_that_are_not_there_is_refused(tmp_path: Path) -> N
     assert "которых нет на диске" in _problem(goal, tmp_path, guessed)
     assert _problem(goal, tmp_path, "Цитата из math_study/library/txt/Judson_AbstractAlgebra.txt "
                                     "с номером теоремы и страницей") == ""
+
+
+def test_a_stale_need_does_not_outrank_a_growing_subject() -> None:
+    """20 min of goal-first, 2026-09-19: the threshold sat on the raw value, the
+    subject drives were under 0.2, and uncertainty (0.89, weight 0.1) won 12 of 14."""
+    drives = _drives(uncertainty=0.89, unfinished_obligations=0.0, competence_world=0.03,
+                     competence_math=0.17, idle_time=0.03)
+    state = {"weights": {"uncertainty": 0.1}, "updated": NOW.isoformat()}
+    drive, _ = choose_drive(drives, state, NOW)
+    assert drive == "competence_math"
