@@ -5880,3 +5880,31 @@ forbade the retry forever. The detail now says «timed out — no verdict», and
 gate refusal, it says nothing about the change). The campaign runs with
 `AGENT_TEST_TIMEOUT_SECONDS=3600`. The earlier step_sanitizer lesson stays in
 the journal as written. Witness: `test_a_timed_out_battery_is_not_a_failed_change`.
+
+**Addendum: why the unattended agent only ever split its own modules.** After
+two hours of the 24h run the operator asked: is it stuck? Measured, yes — 63
+cycles: 12 with a product, 25 failures, 18 idle, every goal after the first a
+variant of «read module X and propose its split». Four causes, none of them the
+agent's choice:
+(1) the charter (`CORPORATE_MODEL.md`, 278 lines) is entirely about its own
+architecture — «math», «physics», «learn», «internet», «economics»: 0
+occurrences — and a goal must anchor on a verbatim charter line, of which only
+the first 80 are offered. A section «Work directions for the unattended
+agent» was written and REVERTED the same hour by the operator's word: a
+charter listing what to study is work assigned, and the run is about what an
+agent does when nobody assigns any. The charter stays as it was; what changed
+is the environment — what exists in the workspace and which tools it may use;
+(2) the library was not in its workspace at all: the exams copied it into
+their own folders. `math_study/` and `knowledge_library/` (1 999 text files,
+113 MB, the exams' copy) are now in agent-main, excluded from git via
+`.git/info/exclude`;
+(3) the reading tools were closed on the unattended path — the comments said
+«open only by the operator's word». The operator's word came
+(«разрешения у него будут все»): `find_in_files`, `python_probe`, `rss_fetch`
+are open, each with its reason in the inventory test; `spawn_subagent`, the
+agent's own two self-closures and `semantic_scholar_search` (the only subject
+of the per-run unblock mechanism) stay closed;
+(4) `run_claim_experiment` failed 25 times in 12 minutes: the signature bank
+and the step ceiling count only an action that RAN, and an inconclusive
+experiment spends nothing. Three failures in a row without work now skip the
+action as a repeat. Witness: `test_a_failing_action_is_not_retried_forever`.

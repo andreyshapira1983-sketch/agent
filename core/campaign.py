@@ -66,6 +66,12 @@ _SUBJECT_AWARE_ACTIONS = frozenset({
     "birth_experiment_specs",
 })
 _MAX_STEPS_PER_ACTION = 10
+#: Провалов одного действия подряд без работы, после которых оно пропускается.
+#: Суточный прогон 2026-09-19: `run_claim_experiment` 25 раз за 12 минут дал
+#: «следствие не воспроизвелось» — ноль вызовов модели, `ran` ложно, и ни
+#: банк подписей, ни потолок шагов его не видели: оба считают только
+#: ОТРАБОТАВШЕЕ действие.
+_MAX_FAILED_REPEATS = 3
 
 CampaignStatus = Literal["completed", "stopped"]
 
@@ -147,8 +153,11 @@ def _approved_ids(approval_inbox) -> frozenset[str]:
         return frozenset()
 
 
-def _repeat_reason(action_name, hit_ceiling):
+def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
     """Return the reason a repeated action is being skipped, based on whether it hit the per-campaign step ceiling."""
+    if failed_in_a_row:
+        return (f"'{action_name}' failed {failed_in_a_row} times in a row without doing work; "
+                "repeating it cannot change the result — skipping")
     if hit_ceiling:
         return f"потолок шагов действия за кампанию: {_MAX_STEPS_PER_ACTION} — одно действие не монополизирует прогон"
     return f"already attempted '{action_name}' this campaign; the earlier pass did not clear the signal — skipping re-execution"
@@ -267,6 +276,7 @@ def run_campaign(
     records: list[CampaignCycleRecord] = []
     attempted_signatures: set[str] = set()
     action_steps: dict[str, int] = {}  # WEAVE ред.2 §1: шаги по имени действия
+    failed_in_a_row: dict[str, int] = {}  # провалы подряд без работы (_MAX_FAILED_REPEATS)
     # MIR-149: единственная память, переживающая запуски, — леджер; страж
     # повторов слеп к траектории (146 из 150 циклов были циклом №1).
     signature_spend = _cross_run_signature_spend(ledger)
@@ -569,7 +579,8 @@ def run_campaign(
                 subject_aware
                 and action_steps.get(signature, 0) >= _MAX_STEPS_PER_ACTION
             )
-            if hit_ceiling or (not subject_aware and signature in attempted_signatures):
+            hit_failures = failed_in_a_row.get(signature, 0) >= _MAX_FAILED_REPEATS
+            if hit_ceiling or hit_failures or (not subject_aware and signature in attempted_signatures):
                 if not subject_aware:
                     action_steps[signature] = action_steps.get(signature, 0) + 1  # L2
                 idle_streak += 1
@@ -591,7 +602,8 @@ def run_campaign(
                     llm_calls_spent=0,
                     cost_units_spent=0,
                     result="repeat",
-                    reason=_repeat_reason(action.action, hit_ceiling),
+                    reason=_repeat_reason(action.action, hit_ceiling,
+                                          failed_in_a_row.get(signature, 0) if hit_failures else 0),
                     work_done=False,
                 )
                 ledger.append(record)
@@ -685,6 +697,10 @@ def run_campaign(
                 streak_repeats = streak_repeats or stalled
             if outcome.did_work:
                 useful_cycles += 1
+            failed_in_a_row[signature] = (
+                failed_in_a_row.get(signature, 0) + 1
+                if outcome.result == "failed" and not outcome.did_work else 0
+            )
             # MIR-149: межзапусковая память цены пополняется и внутри запуска.
             signature_spend[signature] = spent_before + max(0, outcome.cost_units_spent)
 

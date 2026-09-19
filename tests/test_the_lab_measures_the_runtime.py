@@ -93,13 +93,11 @@ def test_the_lab_is_wired_into_the_default_registry():
     assert "PythonProbeTool(" in src
 
 
-def test_the_unattended_path_keeps_the_lab_closed():
-    """Одни ворота за раз: безнадзорный путь остаётся repo-local и read-only;
-    лабораторию ему откроет отдельное решение, не эта стройка.
-    """
+def test_the_unattended_path_opens_the_lab_by_the_operators_word():
+    """Отдельное решение, которого ждала лаборатория, принято: 2026-09-19, слово оператора перед суточным прогоном: «разрешения у него будут все»."""
     from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
-    assert "python_probe" in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+    assert "python_probe" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
 
 def test_the_doorman_admits_a_lab_step():

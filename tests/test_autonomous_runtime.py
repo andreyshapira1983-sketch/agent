@@ -952,11 +952,10 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
     # 2026-09-01, слово оператора: ЧТЕНИЕ веба (web_search/web_fetch) выведено
     # из блокировки — агент сам потянулся за чужим решением своей же проблемы,
     # а ключ висел на формулировке цели. Остальной выход наружу закрыт.
-        assert {
-            "spawn_subagent",
-            "rss_fetch",
-            "semantic_scholar_search",
-        } <= seen["blocked"]
+        # 2026-09-19, слово оператора перед суточным прогоном: «разрешения у него будут все»: rss_fetch/semantic_scholar_search открыты вслед за вебом.
+        assert "spawn_subagent" in seen["blocked"]
+        assert "rss_fetch" not in seen["blocked"]
+        assert "semantic_scholar_search" in seen["blocked"]
         assert not ({"web_search", "web_fetch"} & seen["blocked"])
         assert seen["blocked"] >= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
         # Planner surface is pruned too (not just policy-blocked at execution).

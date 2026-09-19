@@ -28,7 +28,8 @@ def test_memory_bank_is_no_longer_blocked_on_the_unattended_goal_path() -> None:
 
     assert "memory_bank" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
     # Controls: the rest of the freeze stands.
-    assert {"spawn_subagent", "python_probe", "journal_append"} <= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+    # python_probe вышел из этого множества 2026-09-19 словом оператора.
+    assert {"spawn_subagent", "journal_append"} <= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
 
 def test_a_write_is_stored_only_after_a_readback(tmp_path) -> None:

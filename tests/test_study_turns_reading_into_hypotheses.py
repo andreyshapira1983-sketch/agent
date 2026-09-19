@@ -140,7 +140,8 @@ def test_study_unblocks_only_the_web_on_the_goal_path():
     assert "web_search" not in blocked
     assert "web_fetch" not in blocked
     assert "spawn_subagent" in blocked
-    assert "python_probe" in blocked
+    # python_probe на безнадзорном пути не заблокирован вовсе — 2026-09-19, слово оператора перед суточным прогоном: «разрешения у него будут все».
+    assert "python_probe" not in blocked
     assert _goal_block_set(unblock_tools=frozenset(), include_tests=True) == \
         _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
