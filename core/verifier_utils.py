@@ -383,6 +383,25 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
     return None
 
 
+def best_run_of_source(ev: Evidence, chain: ProvenanceChain, claim: str) -> Evidence:
+    """Из прогонов ОДНОГО источника — тот, что называет литералы утверждения.
+
+    `match_citation` отдаёт первую улику с подходящим адресом. У инструмента
+    адрес один на все вызовы (`tool_output:python_probe`), и цитата садилась на
+    первый прогон: прогон драйвов 2026-09-19 — верное «a_f = 1.142e+26» из
+    второго запуска python_probe получило [claim-refuted], за вечер 12 из 15
+    опровержений были этим гейтом на выводах инструментов. Цитата называет
+    источник, каждый его прогон в этом ходе — этот источник. Улики с ДРУГИМ
+    адресом не участвуют: чужой текст значения не отмывает (MIR-060).
+    """
+    from .verifier_absence import literals_absent_from_excerpt
+
+    runs = [e for e in chain.evidences if e.source_id == ev.source_id and e.kind == ev.kind]
+    if len(runs) < 2:
+        return ev
+    return min(runs, key=lambda e: len(literals_absent_from_excerpt(claim, e.excerpt or "", e.source_id or "")))
+
+
 def _semantic_nli_check(claim: str, excerpt: str, llm: Any) -> bool:
     try:
         prompt = f"Source excerpt:\n{excerpt[:_MAX_EXCERPT_FOR_NLI]}\n\nClaim: {claim[:300]}\n\nDoes the source excerpt support the claim? Answer yes or no."

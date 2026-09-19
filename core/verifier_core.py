@@ -37,6 +37,7 @@ from .verifier_utils import (
     _merge_citation_only_chunks,
     _output_contract_header_name,
     _tool_citation_for,
+    best_run_of_source,
     enumeration_count_reason,
     extract_statistical_figures,
     is_statistical_claim,
@@ -186,6 +187,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 ev = match_citation(c, chain)
                 if ev is None:
                     continue
+                ev = best_run_of_source(ev, chain, chunk_text)
                 if getattr(ev, "kind", "") == "user_explicit":
                     # Operator ruling 2026-08-03 (MIR-028): a citation of the
                     # operator's own turn confirms the words were said — it is
