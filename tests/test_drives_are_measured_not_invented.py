@@ -52,3 +52,29 @@ def test_idling_is_not_counted_as_breakage(tmp_path: Path) -> None:
            + [{"ts": NOW.isoformat(), "result": "completed", "goal": "g"},
               {"ts": NOW.isoformat(), "result": "failed", "goal": "g"}])
     assert compute_drives(tmp_path, now=NOW)["maintenance_need"]["value"] == 0.5
+
+
+def test_a_locked_obligation_is_not_an_obligation(tmp_path: Path) -> None:
+    """Live pass of step 3: every «unfinished» item was locked — rollback lessons
+    or a permission only a human grants. The drive called to them; the agent hit
+    approval_wait."""
+    import json
+
+    from core.drives import open_obligations
+    from core.self_build_rules import Lesson, LessonStore, default_lessons_path
+
+    inbox = tmp_path / "data" / "approval_inbox.jsonl"
+    inbox.parent.mkdir(parents=True)
+    rows = [
+        {"id": "a", "status": "pending", "operation": "autonomous_runtime.allow_effects", "payload": {}},
+        {"id": "b", "status": "pending", "operation": "self_apply_lane.run",
+         "payload": {"files": [{"path": "core/x.py"}]}},
+        {"id": "c", "status": "pending", "operation": "self_apply_lane.run",
+         "payload": {"files": [{"path": "core/y.py"}]}},
+    ]
+    inbox.write_text("\n".join(json.dumps({"payload": r}) for r in rows), encoding="utf-8")
+    LessonStore(default_lessons_path(tmp_path)).add(Lesson(
+        created_at="2026-09-19T11:00:00+00:00", origin="rule_approved_apply", proposal_id="b",
+        failure="targeted tests failed", change="split core/x.py", verification="tests red",
+        outcome="rolled_back", scope=("core/x.py",)))
+    assert [r["id"] for r in open_obligations(tmp_path)] == ["c"]

@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.drives import DOMAINS, _rows, _similarity, compute_drives
+from core.drives import DOMAINS, _rows, _similarity, compute_drives, open_obligations
 
 STATE_RELPATH = Path("data") / "drive_state.json"
 DECISIONS_RELPATH = Path("data") / "drive_decisions.jsonl"
@@ -143,8 +143,7 @@ def need_text(drive: str, info: dict[str, Any], root: Path) -> str:
         return ("Есть вещи, которые ты наблюдал и не можешь объяснить:\n" + "\n".join(f"- {i}" for i in items)
                 + "\nХочется разобраться в ОДНОЙ из них до проверяемого вывода или честного «данных нет».")
     if drive == "unfinished_obligations":
-        items = [str(r.get("summary") or r.get("operation"))[:200]
-                 for r in _rows(root / "data" / "approval_inbox.jsonl") if r.get("status") == "pending"][:5]
+        items = [str(r.get("summary") or r.get("operation"))[:200] for r in open_obligations(root)][:5]
         return ("Незавершённые дела ждут:\n" + "\n".join(f"- {i}" for i in items)
                 + "\nХочется закрыть или честно разобрать одно из них.")
     if drive == "maintenance_need":

@@ -102,6 +102,33 @@ def _similarity(goals: list[str]) -> float:
     return sum(len(a & b) / len(a | b) for a, b in pairs) / len(pairs)
 
 
+#: Заявки о правах самого прогона: сдвинуть их может только человек.
+_HUMAN_ONLY_OPERATIONS = frozenset({"autonomous_runtime.allow_effects", "autonomous_runtime.standing_grant"})
+
+
+def open_obligations(root: Path) -> list[dict[str, Any]]:
+    """Ожидающие заявки, которые агент САМ может сдвинуть.
+
+    Живой проход шага 3 (2026-09-19): все четыре «незавершённых дела» были
+    заперты — три разбиения модулей закрыты уроками отката (полоса их больше
+    не возьмёт), четвёртое — просьба о правах, ждущая человека. Драйв звал к
+    ним, агент упирался в approval_wait, и гасило это одно привыкание. Дело,
+    которое агент не может сдвинуть, — не его незавершённое дело.
+    """
+    from core.self_build_rules import blocking_lesson
+
+    out = []
+    for r in _rows(root / "data" / "approval_inbox.jsonl"):
+        if r.get("status") != "pending" or r.get("operation") in _HUMAN_ONLY_OPERATIONS:
+            continue
+        files = (r.get("payload") or {}).get("files") or []
+        targets = [f.get("path") if isinstance(f, dict) else f for f in files]
+        if targets and blocking_lesson(root, targets) is not None:
+            continue
+        out.append(r)
+    return out
+
+
 def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[str, dict[str, Any]]:
     """Все драйвы: {имя: {"value": 0..1, "why": строка}}. Только чтение диска."""
     root = Path(workspace)
@@ -134,9 +161,9 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     drives["novelty_need"] = {"value": sim,
                               "why": f"схожесть последних {len(recent_goals)} целей между собой: {sim:.2f}"}
 
-    pending = [r for r in _rows(root / "data" / "approval_inbox.jsonl") if r.get("status") == "pending"]
+    pending = open_obligations(root)
     drives["unfinished_obligations"] = {"value": 1.0 - math.exp(-len(pending) / 5),
-                                        "why": f"незавершённых заявок в ящике: {len(pending)}"}
+                                        "why": f"незавершённых дел, которые можно сдвинуть: {len(pending)}"}
 
     tail = ledger[-20:]
     acted = [r for r in tail if r.get("result") in _BROKEN_RESULTS | _WORK_RESULTS]
