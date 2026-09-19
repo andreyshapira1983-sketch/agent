@@ -32,6 +32,15 @@ def test_the_tier_survives_the_crossing(model: str, provider: str):
     """Формы, под которые правку не подгоняли: оба направления, все три
     уровня. Правило одно — уровень переносится, имя нет.
     """
+    from core.model_catalog import tier_model_for
+
+    if not tier_model_for(classify_model(model), provider):
+        # Посылка теста — «там, где каталог его знает». Каталог строится из
+        # ключей установки; без ключа провайдера в нём нет ни одной его модели
+        # (суточный прогон 2026-09-19: в каталоге только openai). Тест здесь
+        # падал всегда — и полоса самопочинки откатывала ЛЮБУЮ правку агента
+        # в core/model_router.py по «упавшим прицельным тестам».
+        pytest.skip(f"каталог этой установки не знает провайдера {provider!r}")
     peer = _peer_model_at_same_tier(model, provider)
 
     assert peer, "равного не нашлось там, где каталог его знает"

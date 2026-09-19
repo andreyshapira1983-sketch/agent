@@ -351,6 +351,24 @@ class LessonStore:
         return [lesson for lesson in self.load() if norm in lesson.scope]
 
 
+#: Служебные файлы, которые обновляет ЛЮБОЕ разбиение модуля: карта анатомии,
+#: её генерат, карты census и потолки. Суточный прогон 2026-09-19: откат
+#: правки core/model_router.py (упали тесты, зависящие от ключей установки)
+#: записал урок с областью, включающей карту анатомии, — и все следующие
+#: заявки на разбиение ДРУГИХ модулей (step_sanitizer, smart_memory, …)
+#: отвергались «prior rollback lesson»: пересекались только по этим файлам.
+#: Урок запрещает повторить ту же правку, а не любую, задевшую общий реестр.
+SHARED_BOOKKEEPING = frozenset({
+    "core/anatomy_groups.py",
+    "knowledge/generated/AGENT_ANATOMY.md",
+    "knowledge/maps/cns_census.json",
+    "knowledge/maps/cns_model.json",
+    "docs/PROJECT_MAP.ru.md",
+    "scripts/check_ceo_file_baseline.py",
+    "scripts/check_function_length_baseline.py",
+})
+
+
 def blocking_lesson(workspace: Path, targets) -> Lesson | None:
     """Урок, запрещающий ПОВТОРИТЬ автономную правку по этим адресам.
 
@@ -385,8 +403,12 @@ def blocking_lesson(workspace: Path, targets) -> Lesson | None:
             "журнал уроков прочитан не целиком: "
             + ("файл недоступен" if bad < 0 else f"нечитаемых строк: {bad}"),
         )
+    own = wanted - SHARED_BOOKKEEPING or wanted
     for lesson in reversed(lessons):
-        if lesson.outcome == "rolled_back" and wanted & set(lesson.scope):
+        if lesson.outcome != "rolled_back":
+            continue
+        lesson_own = set(lesson.scope) - SHARED_BOOKKEEPING or set(lesson.scope)
+        if own & lesson_own:
             return lesson
     return None
 

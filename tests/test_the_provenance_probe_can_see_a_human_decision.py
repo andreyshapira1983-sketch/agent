@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from scripts.authority_provenance import (
     _HAND_REJECTED,
     AUTHORITIES,
@@ -31,6 +33,14 @@ def test_a_right_from_the_initial_lump_is_marked_as_such() -> None:
     Один токен, а не все четырнадцать: полный обход стоит 43 секунды, потому
     что `git log -S` идёт по всей истории на каждый токен.
     """
+    import subprocess
+
+    roots = subprocess.run(["git", "log", "--max-parents=0", "--format=%s"], capture_output=True,
+                           text=True, check=False).stdout.split("\n")
+    if "Initial commit" not in (r.strip() for r in roots):
+        # Замер делается на истории проекта; у локальной копии без неё
+        # (архив, заново инициализированный git) начального коммита нет.
+        pytest.skip("история репозитория — не история проекта (нет «Initial commit»)")
     found = introducing_commit(AUTHORITIES["budget_ledger"])
 
     assert found is not None

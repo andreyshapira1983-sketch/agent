@@ -532,3 +532,35 @@ def test_a_rollback_lesson_still_carries_the_lane_reason(
     assert "3 tests red" in lesson.failure, (
         f"урок отката потерял то, что упало: {lesson.failure!r}"
     )
+
+
+def test_a_shared_registry_does_not_make_two_changes_the_same(workspace: Path) -> None:
+    """Суточный прогон 2026-09-19: откат разбиения core/model_router.py записал
+    урок с областью, включающей карту анатомии, — и заявки на разбиение
+    core/step_sanitizer.py и core/smart_memory.py отвергались «prior rollback
+    lesson», пересекаясь с ним только по этой общей карте."""
+    from core.self_build_rules import Lesson, LessonStore, blocking_lesson, default_lessons_path
+
+    store = LessonStore(default_lessons_path(workspace))
+    store.add(Lesson(
+        created_at="2026-09-19T11:01:40+00:00", origin="burn_in_sandbox", proposal_id="ain_x",
+        failure="targeted tests failed", change="split", verification="rolled_back", outcome="rolled_back",
+        scope=("core/model_router.py", "core/model_router_helpers.py", "core/anatomy_groups.py",
+               "knowledge/generated/AGENT_ANATOMY.md"),
+    ))
+    other = ["core/step_sanitizer.py", "core/step_sanitizer_helpers.py", "core/anatomy_groups.py",
+             "knowledge/generated/AGENT_ANATOMY.md"]
+    assert blocking_lesson(workspace, other) is None, "a different module was blocked by a shared registry"
+    same = ["core/model_router.py", "core/model_router_helpers.py", "core/anatomy_groups.py"]
+    assert blocking_lesson(workspace, same) is not None, "the lesson must still stop the same change"
+    assert blocking_lesson(workspace, ["core/anatomy_groups.py"]) is None, (
+        "editing only the registry is not the rolled-back split"
+    )
+    store.add(Lesson(
+        created_at="2026-09-19T12:00:00+00:00", origin="burn_in_sandbox", proposal_id="ain_y",
+        failure="targeted tests failed", change="regroup", verification="rolled_back", outcome="rolled_back",
+        scope=("core/anatomy_groups.py",),
+    ))
+    assert blocking_lesson(workspace, ["core/anatomy_groups.py"]) is not None, (
+        "a rolled-back edit OF the registry still blocks repeating it"
+    )

@@ -5848,3 +5848,23 @@ NOT find SQLAlchemy's (2026-09-15; its JSON is >1 MB, cut inside `releases`, so
 side measured and a missing date is not an earlier date; `web_fetch` drops
 whitespace-only lines (the PyPI page shrinks by a quarter). Witness for the
 fetch: `test_space_only_lines_do_not_eat_the_window`.
+
+**Addendum: the first hour of the 24h run — why the agent could not change
+itself.** The agent chose its own goal and, on cycle 4, proposed splitting
+`core/model_router.py`. Three things stood between the proposal and the tree:
+(1) in `--campaign` mode `drain_and_log` ran once, after the whole campaign —
+now after every live cycle (commit d49e0ce, `test_live_campaign_applies_…`);
+(2) the lane rolled the split back on «targeted tests failed» — the two
+`test_failover_keeps_the_tier[*-anthropic]` cases, red in any install whose
+model catalog has no Anthropic key (the test's own premise, «where the catalog
+knows it», was false). They now skip on that premise, as do the provenance
+probe without the project's «Initial commit» history and the live-store floor
+(1000 → 100 lines: it guards «read nothing», not one install's size). With
+these, the full battery is green on this copy — the lane's precondition for
+any apply;
+(3) the rollback lesson's scope included `core/anatomy_groups.py` and
+`knowledge/generated/AGENT_ANATOMY.md`, which EVERY split updates, so every
+later split (step_sanitizer, smart_memory, operator_intent_patterns) was
+refused «prior rollback lesson». `blocking_lesson` now ignores
+`SHARED_BOOKKEEPING` files when both sides have their own targets. Witness:
+`test_a_shared_registry_does_not_make_two_changes_the_same`.
