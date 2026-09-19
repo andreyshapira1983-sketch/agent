@@ -426,9 +426,17 @@ class AgentLoopMemoryWrite:
 
     def _remember_conclusion(self, episode: Any) -> None:
         """Вывод допущенного эпизода — в долговременную память (`core/learned_conclusion.py`)."""
-        from core.learned_conclusion import TAGS, conclusion_memory, superseded_by
+        from core.learned_conclusion import (
+            TAGS,
+            WEB_TAGS,
+            conclusion_memory,
+            superseded_by,
+            web_knowledge_memory,
+        )
 
-        content = conclusion_memory(episode)
+        content, tags = conclusion_memory(episode), list(TAGS)
+        if content is None:
+            content, tags = web_knowledge_memory(episode), list(WEB_TAGS)
         if content is None or self._durable_learning_suppressed("knowledge"):
             return
         try:
@@ -437,7 +445,7 @@ class AgentLoopMemoryWrite:
             if known:
                 return  # тот же вывод по тому же вопросу уже в памяти
             decision, record = self.remember(
-                content, list(TAGS), source="agent-auto", record_type="semantic", owner="self",
+                content, tags, source="agent-auto", record_type="semantic", owner="self",
                 existing=[r for r in existing if r not in old], supersedes=bool(old),
             )
             archived = ([r.id for r in old if self.persistent_store.archive_record(r.id)]
@@ -450,6 +458,7 @@ class AgentLoopMemoryWrite:
             "decision": decision.decision,
             "reasons": list(decision.reasons),
             "record_id": record.id if record is not None else None,
+            "kind": "web-knowledge" if "web-knowledge" in tags else "conclusion",
             "superseded": archived,
         })
 
