@@ -1,0 +1,65 @@
+"""Step 2 of endogenous activation: a drive chooses the need, the model the task.
+
+Pinned from the live passes of 2026-09-19:
+* the strongest drives at first were the agent's own unexplained detectors and
+  blocked obligations — needs that work does not satisfy; «take the strongest»
+  would have looped. A drive that does not fall after its task loses half its
+  weight (habituation), and weight comes back with time;
+* the model was shown «uncertainty = 0.70» and proposed «find in the logs when
+  the drive uncertainty decreased» — a task about the mechanism. It now sees the
+  need in words with its material, never the variable name;
+* a task the executor would bounce back to a human is refused before it is given.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from core.drive_goal import _problem, choose_drive, need_text
+
+NOW = datetime(2026, 9, 19, 19, 5, tzinfo=timezone.utc)
+
+
+def _drives(**values: float) -> dict:
+    base = {"idle_time": 0.9, "uncertainty": 0.7, "unfinished_obligations": 0.55,
+            "competence_world": 0.54, "competence_math": 0.4, "economic_opportunity": 0.0}
+    base.update(values)
+    return {k: {"value": v, "why": "t"} for k, v in base.items()}
+
+
+def test_the_alarm_is_not_the_content() -> None:
+    drive, _ = choose_drive(_drives(), {"weights": {}}, NOW)
+    assert drive == "uncertainty", "idle_time wakes; it never becomes the task"
+
+
+def test_a_drive_that_did_not_fall_yields_to_the_next() -> None:
+    state = {"weights": {}, "last": {"drive": "uncertainty", "value": 0.7, "ts": NOW.isoformat()},
+             "updated": NOW.isoformat()}
+    drive, state = choose_drive(_drives(uncertainty=0.7), state, NOW)
+    assert state["weights"]["uncertainty"] == 0.5
+    assert drive == "unfinished_obligations"
+
+
+def test_a_drive_that_fell_keeps_its_full_weight() -> None:
+    state = {"weights": {"competence_math": 0.5}, "last": {"drive": "competence_math", "value": 0.8},
+             "updated": NOW.isoformat()}
+    _, state = choose_drive(_drives(competence_math=0.1), state, NOW)
+    assert state["weights"]["competence_math"] == 1.0
+
+
+def test_weight_comes_back_with_time() -> None:
+    state = {"weights": {"uncertainty": 0.5}, "updated": (NOW - timedelta(hours=3)).isoformat()}
+    _, state = choose_drive(_drives(), state, NOW)
+    assert abs(state["weights"]["uncertainty"] - 0.8) < 1e-9
+
+
+def test_the_model_sees_the_need_not_the_variable(tmp_path: Path) -> None:
+    text = need_text("competence_physics", {"value": 0.42, "why": "последняя успешная задача: 97 мин назад"}, tmp_path)
+    assert "физике" in text and "competence" not in text and "0.42" not in text
+
+
+def test_a_task_the_executor_would_bounce_back_is_refused(tmp_path: Path) -> None:
+    bounced = ("Прочитай core/a.py и core/b.py и напиши в ответе, что стоило бы изменить")
+    assert "переспросит человека" in _problem(bounced, tmp_path)
+    assert _problem("Найди в math_study/library/txt/Judson_AbstractAlgebra.txt теорему Коши и проверь её расчётом",
+                    tmp_path) == ""
