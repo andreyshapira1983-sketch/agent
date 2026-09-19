@@ -1,0 +1,430 @@
+"""Tests for the multi-file (module-split) self-build path.
+
+The oversized-module organ emits abstract ``split:<rel>`` targets. This suite
+proves the head can now:
+
+* map a ``split:<rel>`` signal to its concrete, low-risk, existing .py module
+  (and refuse missing / non-Python / critical-by-classifier targets);
+* have the Builder emit MULTIPLE files (the shrunk target plus new sibling
+  modules) while keeping the single-file path byte-identical;
+* have the Critic validate EVERY file (a critical extra file is vetoed);
+* publish one approval item whose payload carries all files.
+
+Every dependency is faked — no real provider, network, or git.
+"""
+from __future__ import annotations
+
+import json
+import types
+from pathlib import Path
+
+from core.approval_inbox import ApprovalInbox
+from core.backlog_target_mapper import map_backlog_candidate
+from core.self_build_producer import (
+    _builder_generate,
+    _critic_review,
+    _new_core_module_stems,
+    _normalize_builder_files,
+    _sync_anatomy_index,
+    produce_self_apply_proposal,
+)
+
+_ANATOMY_DOC = (
+    "# Agent anatomy\n\n"
+    "## Module index\n\n"
+    "| Module | Role |\n"
+    "| --- | --- |\n"
+    "| `core/loop` | main loop. |\n"
+    "| `core/sample_big` | sample engine. |\n"
+)
+
+
+class FakeLLM:
+    def __init__(self, responses: list[str] | None = None) -> None:
+        self.responses = list(responses or [])
+        self.calls: list[dict] = []
+
+    def complete(self, *, system: str, user: str, max_tokens: int = 2000,
+                 temperature: float = 0.0) -> str:
+        self.calls.append({"system": system, "user": user})
+        if self.responses:
+            return self.responses.pop(0)
+        return "{}"
+
+
+class FakeVCS:
+    def __init__(self, clean: bool = True) -> None:
+        self._clean = clean
+
+    def is_clean(self) -> bool:
+        return self._clean
+
+
+class FakeKillSwitch:
+    def __init__(self, active: bool = False, reason: str = "") -> None:
+        self.active = active
+        self.reason = reason
+
+
+def _headroom_budget() -> dict:
+    return {
+        "windows": [
+            {
+                "name": "hour",
+                "counters": {
+                    "llm_calls": {"used": 1, "limit": 100},
+                    "model_tokens": {"used": 10, "limit": 1000},
+                },
+            }
+        ]
+    }
+
+
+def _candidate(target_path: str) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        target_path=target_path,
+        signal_source="oversized_module",
+        evidence_ref=f"oversized_module:{target_path}",
+        problem_quote="module is oversized (900 lines)",
+        proposed_change="split into cohesive smaller modules",
+        proof_of_value="",
+        expected_effect="",
+        confidence=0.4,
+    )
+
+
+# ── mapper ───────────────────────────────────────────────────────────────────
+
+
+def test_mapper_resolves_split_to_concrete_low_risk_module(workspace: Path):
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    (workspace / "core" / "sample_mod.py").write_text("x = 1\n", encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/sample_mod.py"), workspace=workspace
+    )
+    assert result.decision == "mapped"
+    assert result.ok
+    assert result.candidate.target_path == "core/sample_mod.py"
+    assert result.mapping_rule == "split_module"
+
+
+def test_mapper_refuses_missing_split_target(workspace: Path):
+    result = map_backlog_candidate(
+        _candidate("split:core/does_not_exist.py"), workspace=workspace
+    )
+    assert result.decision == "no_target"
+    assert not result.ok
+
+
+def test_mapper_refuses_non_python_split_target(workspace: Path):
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    (workspace / "core" / "notes.md").write_text("hi\n", encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/notes.md"), workspace=workspace
+    )
+    assert result.decision == "no_target"
+
+
+def test_mapper_maps_split_target_above_the_one_shot_budget(workspace: Path):
+    """Перевёрнутый пин: прежний отказ держался на умершей предпосылке (MIR-179).
+
+    Отказ «needs an incremental splitter» был написан, когда расщепителя не
+    было. Расщепитель давно есть, и затвор масштаба производителя (>900 строк)
+    сам маршрутизирует к нему — но ветка была недостижима: картограф отказывал
+    РАНЬШЕ, ровно с причиной «нет того, что уже есть». Цена за одни сутки
+    безнадзорной работы: 234 единицы на циклы со структурно невозможным
+    продуктом.
+    """
+    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    big = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES + 50)) + "\n"
+    (workspace / "core" / "huge_mod.py").write_text(big, encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/huge_mod.py"), workspace=workspace
+    )
+    assert result.decision == "mapped", result.reason
+    assert result.candidate is not None
+    assert result.candidate.target_path == "core/huge_mod.py"
+
+
+def test_mapper_allows_split_target_within_one_shot_budget(workspace: Path):
+    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    ok = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES - 100)) + "\n"
+    (workspace / "core" / "okay_mod.py").write_text(ok, encoding="utf-8")
+    result = map_backlog_candidate(
+        _candidate("split:core/okay_mod.py"), workspace=workspace
+    )
+    assert result.decision == "mapped"
+    assert result.candidate.target_path == "core/okay_mod.py"
+
+
+# ── normaliser ───────────────────────────────────────────────────────────────
+
+
+def test_normalize_single_file_reply_is_backward_compatible():
+    files, primary = _normalize_builder_files({"content": "A = 1\n"}, "core/x.py")
+    assert files == [{"path": "core/x.py", "content": "A = 1\n"}]
+    assert primary == "A = 1\n"
+
+
+def test_normalize_multi_file_reply_surfaces_target_primary():
+    parsed = {
+        "files": [
+            {"path": "core/x.py", "content": "from core.x_util import helper\n"},
+            {"path": "core/x_util.py", "content": "def helper():\n    return 1\n"},
+        ]
+    }
+    files, primary = _normalize_builder_files(parsed, "core/x.py")
+    assert len(files) == 2
+    assert primary == "from core.x_util import helper\n"
+
+
+# ── builder (split mode) ─────────────────────────────────────────────────────
+
+
+def test_builder_split_mode_emits_multiple_files():
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": "core/x.py", "content": "from core.x_util import a\n"},
+                {"path": "core/x_util.py", "content": "def a():\n    return 1\n"},
+            ],
+            "test_paths": ["tests"],
+            "reason": "split module",
+            "confidence": 0.9,
+        }
+    )
+    out = _builder_generate(
+        FakeLLM([reply]), "core/x.py", "big old content\n", "oversized", split_mode=True
+    )
+    assert out.decision == "built"
+    assert len(out.data["files"]) == 2
+    assert out.data["content"] == "from core.x_util import a\n"
+
+
+def test_builder_split_prompt_requests_multiple_files():
+    llm = FakeLLM(["{}"])
+    _builder_generate(llm, "core/x.py", "content\n", "oversized", split_mode=True)
+    assert '"files"' in llm.calls[0]["system"]
+    assert "Split the oversized" in llm.calls[0]["system"]
+
+
+# ── critic (per-file guard) ──────────────────────────────────────────────────
+
+
+def test_critic_vetoes_when_extra_file_is_critical():
+    build = {
+        "content": "from core.loop import x\n",
+        "files": [
+            {"path": "core/x.py", "content": "from core.loop import x\n"},
+            {"path": "core/loop.py", "content": "y = 2\n"},  # critical file
+        ],
+        "test_paths": ["tests"],
+        "confidence": 0.9,
+    }
+    out = _critic_review("core/x.py", "old\n", build, confidence_threshold=0.5)
+    assert out.decision == "veto"
+    assert any("core/loop.py" in r and "critical" in r for r in out.data["veto_reasons"])
+
+
+def test_critic_vetoes_unparseable_extra_file():
+    build = {
+        "content": "import core.x_util\n",
+        "files": [
+            {"path": "core/x.py", "content": "import core.x_util\n"},
+            {"path": "core/x_util.py", "content": "def broken(:\n"},
+        ],
+        "test_paths": ["tests"],
+        "confidence": 0.9,
+    }
+    out = _critic_review("core/x.py", "old\n", build, confidence_threshold=0.5)
+    assert out.decision == "veto"
+    assert any("does not parse" in r for r in out.data["veto_reasons"])
+
+
+# ── end to end ───────────────────────────────────────────────────────────────
+
+
+def test_split_produces_multifile_proposal(workspace: Path):
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/sample_big.py"
+    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    (workspace / target_rel).write_text(current, encoding="utf-8")
+
+    inbox = ApprovalInbox(path=None)
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": target_rel, "content": "from core.sample_big_helpers import a, b\n"},
+                {
+                    "path": "core/sample_big_helpers.py",
+                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
+                },
+            ],
+            "test_paths": ["tests"],
+            "reason": "split oversized module into helpers",
+            "confidence": 0.9,
+        }
+    )
+    llm = FakeLLM([reply])
+
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(),
+        file_reader=lambda p: current if p == target_rel else None,
+        grounded_selector=lambda: _candidate(f"split:{target_rel}"),
+    )
+
+    assert report.status == "proposed", report.reason
+    items = inbox.list()
+    assert len(items) == 1
+    files = items[0].payload["files"]
+    paths = sorted(f["path"] for f in files)
+    assert paths == ["core/sample_big.py", "core/sample_big_helpers.py"]
+    assert "split" in items[0].summary
+
+
+def test_split_critical_target_is_refused(workspace: Path):
+    # core/loop.py is critical: even though the file exists in the real repo, the
+    # Manager critical-gate must refuse the split (report-only for the riskiest).
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    (workspace / "core" / "loop.py").write_text("x = 1\n", encoding="utf-8")
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(),
+        file_reader=lambda p: "x = 1\n",
+        grounded_selector=lambda: _candidate("split:core/loop.py"),
+    )
+    assert report.status == "no_grounded_target"
+    assert llm.calls == []  # refused before any builder work
+    assert inbox.list() == []
+
+
+# ── anatomy-index auto-sync ──────────────────────────────────────────────────
+
+
+def test_new_core_module_stems_lists_only_core_py_files():
+    files = [
+        {"path": "core/x.py", "content": ""},
+        {"path": "core/x_helpers.py", "content": ""},
+        {"path": "knowledge/generated/AGENT_ANATOMY.md", "content": ""},
+        {"path": "cli/thing.py", "content": ""},
+        {"path": "core/sub/pkg.py", "content": ""},
+    ]
+    assert _new_core_module_stems(files) == ["x", "x_helpers"]
+
+
+def test_sync_anatomy_index_appends_row_for_new_module():
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "def a():\n    return 1\n"},
+        ],
+    }
+    def reader(p):
+        return _ANATOMY_DOC if p == "knowledge/generated/AGENT_ANATOMY.md" else None
+    _sync_anatomy_index(build, "core/sample_big.py", reader)
+    doc = next(
+        f["content"] for f in build["files"] if f["path"] == "knowledge/generated/AGENT_ANATOMY.md"
+    )
+    import re
+
+    documented = set(re.findall(r"core/([a-zA-Z0-9_]+)", doc))
+    # new module registered AND no existing rows dropped
+    assert "sample_big_helpers" in documented
+    assert {"loop", "sample_big"} <= documented
+
+
+def test_sync_anatomy_index_noop_when_already_documented():
+    doc = _ANATOMY_DOC + "| `core/sample_big_helpers` | already here. |\n"
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
+        ],
+    }
+    def reader(p):
+        return doc if p == "knowledge/generated/AGENT_ANATOMY.md" else None
+    _sync_anatomy_index(build, "core/sample_big.py", reader)
+    # no anatomy doc added to the proposal (already in sync)
+    assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
+
+
+def test_sync_anatomy_index_skips_when_doc_unavailable():
+    build = {
+        "content": "wrapper\n",
+        "files": [
+            {"path": "core/sample_big.py", "content": "wrapper\n"},
+            {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
+        ],
+    }
+    _sync_anatomy_index(build, "core/sample_big.py", lambda p: None)
+    assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
+
+
+def test_split_registers_new_core_module_in_anatomy_index_end_to_end(workspace: Path):
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/sample_big.py"
+    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    (workspace / target_rel).write_text(current, encoding="utf-8")
+
+    inbox = ApprovalInbox(path=None)
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": target_rel, "content": "from core.sample_big_helpers import a, b\n"},
+                {
+                    "path": "core/sample_big_helpers.py",
+                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
+                },
+            ],
+            "test_paths": ["tests"],
+            "reason": "split oversized module into helpers",
+            "confidence": 0.9,
+        }
+    )
+    llm = FakeLLM([reply])
+
+    def reader(p: str):
+        if p == target_rel:
+            return current
+        if p == "knowledge/generated/AGENT_ANATOMY.md":
+            return _ANATOMY_DOC
+        return None
+
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(),
+        file_reader=reader,
+        grounded_selector=lambda: _candidate(f"split:{target_rel}"),
+    )
+
+    assert report.status == "proposed", report.reason
+    files = inbox.list()[0].payload["files"]
+    paths = sorted(f["path"] for f in files)
+    assert paths == [
+        "core/sample_big.py",
+        "core/sample_big_helpers.py",
+        "knowledge/generated/AGENT_ANATOMY.md",
+    ]
+    doc = next(f["content"] for f in files if f["path"] == "knowledge/generated/AGENT_ANATOMY.md")
+    assert "core/sample_big_helpers" in doc

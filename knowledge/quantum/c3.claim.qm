@@ -1,0 +1,104 @@
+{
+  "_what_this_is": "The SECOND experimental claim certificate, chosen by a bounded selector rather than by taste. Same disposable field names as C2, same rule: the semantic decisions here are executed by scripts/qm_claim_check.py, not duplicated inside it.",
+  "_why_this_claim": "A consumer-discovery pass over a declared universe — 280 repository .py files outside tests/ and outside the producer, plus every .ps1 — asked which of build_agent's seventeen session_start keys are read BY NAME anywhere. Most are read nowhere; five match common English words and are almost certainly coincidences; exactly one was read by name at all. This is that one. CORRECTED: the earlier wording said 'a single, unambiguous named consumer'. The selector counted KEYS with a named read, not consumers; this key has three consumer regimes across four sites. `llm_model`, the field C2 certifies, is read by name NOWHERE — recorded because it is uncomfortable and true.",
+  "claim_id": "C3",
+  "claim": {
+    "prose": "In the declared evaluation, the run journal's session_start record carries knowledge_auto_write = true.",
+    "expected": true
+  },
+  "evaluation_domain": {
+    "command": [
+      "main.py",
+      "--ask",
+      ":budget-status",
+      "--auto-approve",
+      "deny"
+    ],
+    "workspace": "supplied to the evaluation; its `.env` is part of the evaluation",
+    "preconditions": [],
+    "_no_preconditions": "unlike C2, this claim needs none. C2's value came through a credential-healing branch and was therefore only true inside an unstated environment; this one is read straight from one environment variable with a literal default, and the dependency model below covers both cases instead of excluding one."
+  },
+  "observation": {
+    "carrier_glob": "logs/run_*.jsonl",
+    "bind_to_current_evaluation": true,
+    "require_event": "session_start",
+    "projection_path": [
+      "payload",
+      "knowledge_auto_write"
+    ]
+  },
+  "environment_resolution": {
+    "sources": [
+      {
+        "id": "E2",
+        "source": "process_env",
+        "note": "highest precedence"
+      },
+      {
+        "id": "E1",
+        "source": "workspace_dotenv",
+        "note": "loaded without override, so it loses to an already-set process variable"
+      }
+    ]
+  },
+  "dependency_model": {
+    "rules": [
+      {
+        "id": "K1",
+        "what": "AGENT_KNOWLEDGE_AUTO_WRITE, resolved through environment_resolution",
+        "when": {
+          "key_present": "AGENT_KNOWLEDGE_AUTO_WRITE"
+        },
+        "value_from": {
+          "key": "AGENT_KNOWLEDGE_AUTO_WRITE",
+          "map": {
+            "0": false,
+            "false": false,
+            "no": false,
+            "off": false,
+            "1": true,
+            "true": true,
+            "yes": true,
+            "on": true
+          }
+        },
+        "_why_the_map_is_here": "the truthiness of the string is a semantic fact about this variable, so it belongs in the certificate. Putting it in the validator would make the validator authoritative again."
+      },
+      {
+        "id": "K0",
+        "what": "the literal default at the producer",
+        "when": {
+          "always": true
+        },
+        "value_from": {
+          "literal": true
+        },
+        "_evidence": "app/bootstrap.py:224 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True)"
+      }
+    ]
+  },
+  "causal_path": {
+    "_status": "PROVEN by mutation on both sides, not by reading.",
+    "report_side": [
+      "app/bootstrap.py:224 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True) is placed in the session_start payload",
+      "the journal record is written by the same call that C2's causal closure traced"
+    ],
+    "causal_mutation": "AGENT_KNOWLEDGE_AUTO_WRITE=0 -> the journal records false. Baseline with the variable unset records true.",
+    "non_causal_mutation": "AGENT_SYNTHESIZER_MODEL=gpt-5.4 -> the journal still records true. That mutation provably LANDS elsewhere: it moves the synthesizer route reason to env:AGENT_SYNTHESIZER, measured during C2's closure.",
+    "control_side_and_consequence": {
+      "consumer": "core/ingestion.py:120 and :268 -- write_memory = bool(getattr(agent, \"knowledge_auto_write\", False))",
+      "consequence": "the consumer decides whether ingested knowledge is written to memory. This is a control-flow consequence, stronger than C2's, whose only consumer returns a report through a tool boundary.",
+      "measured": "build_agent yields agent.knowledge_auto_write True with the variable unset and False with it set to 0 — so the input the consumer reads follows the same lever as the reported value.",
+      "IMPORTANT_the_two_are_siblings": "app/bootstrap.py reads the variable TWICE: line 224 for the journal and line 288 for the agent attribute. The reported value and the controlling value are therefore SIBLINGS of one source, not parent and child. They agree by construction and NOTHING CHECKS THAT THEY AGREE. A change to one read alone would make the journal lie about the control state, and no test in this repository would notice. Recorded as a finding of this certificate, not fixed by it."
+    }
+  },
+  "currency": {
+    "instead": "re-evaluation, as in C2. No cached verdict, no repository hash — the same reasoning applies: the lever is an environment variable no file hash can see."
+  },
+  "status_vocabulary": {
+    "VALID": "in domain, evidence bound, observed equals expected, and the dependency model predicted it",
+    "INVALID": "in domain, evidence bound, observed differs from expected",
+    "OUT_OF_DOMAIN": "no evidence could be bound to this evaluation",
+    "PRECEDENCE_VIOLATED": "the observation disagrees with the dependency model — a defect of this certificate, reported even when the claim holds"
+  }
+}

@@ -1,0 +1,99 @@
+"""Current Time tool — pure read-only clock query.
+
+No arguments, no side effects, no network. Always `read_only` risk.
+"""
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+from tools.base import Tool
+
+
+def format_duration_seconds(seconds: float) -> str:
+    """Format a non-negative duration in seconds."""
+    if seconds < 0:
+        raise ValueError("seconds must be non-negative")
+
+    total_seconds = int(seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+class CurrentTimeTool(Tool):
+    name = "current_time"
+    description = (
+        "Return the current date and time. Use this whenever the answer "
+        "depends on 'now' (today's date, age of a document, freshness of "
+        "a fact). Returns a dict with iso_utc, iso_local, unix epoch, "
+        "weekday, and calendar fields. No arguments. No side effects."
+    )
+    risk = "read_only"
+
+    def __init__(self, *, clock: Any = None):
+        # `clock` is an injection seam for tests — must be a callable
+        # returning a `datetime`. Production uses real wall-clock time.
+        self._clock = clock
+
+    def _now_utc(self) -> datetime:
+        if self._clock is not None:
+            value = self._clock()
+            if not isinstance(value, datetime):
+                raise TypeError(
+                    f"current_time clock must return datetime, "
+                    f"got {type(value).__name__}"
+                )
+            if value.tzinfo is None:
+                # Treat naive datetime as UTC — never assume local.
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        return datetime.now(timezone.utc)
+
+    def run(self, **kwargs: Any) -> dict[str, Any]:
+        if kwargs:
+            raise PermissionError(
+                f"current_time accepts no arguments, got {sorted(kwargs)}"
+            )
+
+        utc = self._now_utc()
+        local = utc.astimezone()  # uses system local tz
+
+        tz_name: str | None = None
+        try:
+            tz_name = time.tzname[time.daylight] if time.daylight else time.tzname[0]
+        except (IndexError, AttributeError):
+            tz_name = None
+
+        return {
+            "iso_utc": utc.isoformat(),
+            "iso_local": local.isoformat(),
+            "unix": int(utc.timestamp()),
+            "tz_name": tz_name,
+            "weekday": utc.strftime("%A"),
+            "year": utc.year,
+            "month": utc.month,
+            "day": utc.day,
+        }
+
+    def validate_output(self, output: Any) -> tuple[bool, list[str]]:
+        reasons: list[str] = []
+        if not isinstance(output, dict):
+            return False, [f"expected dict, got {type(output).__name__}"]
+        for key in ("iso_utc", "iso_local", "weekday"):
+            if not isinstance(output.get(key), str):
+                reasons.append(f"{key} must be a string")
+        for key in ("unix", "year", "month", "day"):
+            if not isinstance(output.get(key), int):
+                reasons.append(f"{key} must be an int")
+        if "tz_name" in output and output["tz_name"] is not None and not isinstance(
+            output["tz_name"], str
+        ):
+            reasons.append("tz_name must be a string or None")
+        return (not reasons), reasons

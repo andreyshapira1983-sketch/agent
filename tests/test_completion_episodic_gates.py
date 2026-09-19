@@ -1,0 +1,527 @@
+"""An episode may steer a later answer only if the task was actually done.
+
+Until now every episodic reader keyed on `outcome`, which measures whether the
+claims were supported. So the live store's one admitted episode was a blocked
+non-answer: the evidence budget truncated the file, the agent said so honestly
+with citations, and a well-supported non-answer read as `success` (MIR-057).
+
+This commit gives the three episodic readers the second axis:
+
+    decide_usage_eligibility   admission at banking
+    the retrieval filter       what reaches the planner
+    the fast path              what is replayed verbatim
+
+All three consult the FROZEN `completion_state`, through one accessor, so
+`None` cannot come to mean three different things. None of them looks at
+`declared_completion` — what the model claimed is auditable history, not a
+gate input — and none re-derives the verdict at read time, because feedback
+for these episodes has already been spent under the rule in force when they
+were banked.
+
+Procedural credit and debit are deliberately untouched here; they are the next
+commit, and one test pins that nothing moved.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
+from core.loop import AgentLoop
+from core.smart_memory import (
+    EpisodeRecord,
+    EpisodicMemoryStore,
+    ProcedureRecord,
+    _compute_quality_score,
+    decide_usage_eligibility,
+    effective_completion,
+    is_usage_eligible,
+)
+
+QUESTION = "how do I deploy the service"
+
+
+@pytest.fixture(autouse=True)
+def _offline_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AGENT_ALLOW_MOCK_ROUTING", "1")
+
+
+def _episode(
+    eid: str = "ep-1",
+    *,
+    outcome: str = "success",
+    completion: str | None = "achieved",
+    tags: tuple[str, ...] = (),
+    verified: int = 3,
+    unverified: int = 0,
+    eligible: bool | None = True,
+    tools: tuple[str, ...] = (),
+    answer: str = "The service deploys with `make deploy`.",
+) -> EpisodeRecord:
+    return EpisodeRecord(
+        goal="deploy", question=QUESTION, outcome=outcome,  # type: ignore[arg-type]
+        summary="deployed the service", tools_used=tools,
+        verified_chunks=verified, unverified_chunks=unverified,
+        # Computed the way the factory and `from_dict` compute it — the
+        # dataclass default is None, and a None score is refused by the
+        # quality gate (MIR-002), which would mask what these tests measure.
+        answer_quality_score=_compute_quality_score(verified, unverified, 0),
+        usage_eligible=eligible, completion_state=completion,  # type: ignore[arg-type]
+        tags=tags, full_answer=answer, id=eid,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _agent(workspace: Path) -> AgentLoop:
+    return build_agent(workspace, with_memory=True, approval_provider=None)
+
+
+def _seed(workspace: Path, episodes: list[EpisodeRecord]) -> None:
+    store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
+    for episode in episodes:
+        store.save(episode)
+
+
+def _retrieved(agent: AgentLoop) -> list[str]:
+    agent._retrieve_experience_memory(QUESTION)
+    return [ep.id for ep in agent._last_episode_records]
+
+
+def _replayed(agent: AgentLoop, episode: EpisodeRecord) -> bool:
+    """Does the fast path serve this episode instead of running a cycle?"""
+    agent._last_best_similar_episode = episode
+    agent._last_best_similar_score = 0.99
+    return agent._fast_path_allows_replay(episode, 0.99)
+
+
+# ==========================================================================
+# 1. A well-supported non-answer is refused by all three readers.
+# ==========================================================================
+def test_a_blocked_success_fails_eligibility() -> None:
+    """The live case: outcome says the claims held, completion says it did
+    not answer."""
+    assert decide_usage_eligibility(_episode(completion="blocked")) is False
+
+
+def test_a_blocked_success_is_not_retrieved(tmp_path: Path) -> None:
+    _seed(tmp_path, [_episode("blocked-ep", completion="blocked")])
+    agent = _agent(tmp_path)
+
+    assert _retrieved(agent) == []
+
+
+def test_a_blocked_success_is_not_replayed(tmp_path: Path) -> None:
+    agent = _agent(tmp_path)
+
+    assert _replayed(agent, _episode(completion="blocked")) is False
+
+
+# ==========================================================================
+# 2 & 9. What worked before still works, and `achieved` buys nothing extra.
+# ==========================================================================
+def test_an_achieved_success_keeps_its_prior_behaviour(tmp_path: Path) -> None:
+    _seed(tmp_path, [_episode("good")])
+    agent = _agent(tmp_path)
+
+    assert decide_usage_eligibility(_episode()) is True
+    assert _retrieved(agent) == ["good"]
+    assert _replayed(agent, _episode()) is True
+
+
+@pytest.mark.parametrize(
+    "kwargs,why",
+    [
+        ({"verified": 0, "unverified": 0}, "no measured evidence"),
+        ({"answer": ""}, "nothing stored to replay"),
+        ({"tools": ("shell_exec",)}, "the answer depends on world state"),
+    ],
+)
+def test_achieved_does_not_bypass_the_existing_gates(kwargs: dict, why: str) -> None:
+    """Monotonicity: the new axis only ever subtracts permission."""
+    episode = _episode(**kwargs)
+    assert effective_completion(episode) == "achieved"
+
+    passes = decide_usage_eligibility(episode) and _quality_ok(episode)
+    replayed = _fast_path_pure(episode)
+
+    assert not (passes and replayed), f"achieved must not override: {why}"
+
+
+def _quality_ok(episode: EpisodeRecord) -> bool:
+    return AgentLoop._quality_allows_replay(episode)
+
+
+def test_the_declared_threshold_gates_replay() -> None:
+    """That the declared threshold participates — NOT that it should be 0.85.
+
+    The number is read off the class instead of written here on purpose: no
+    justification for 0.85 exists anywhere in the repository, and pinning it
+    in a test would dress the absence of a rationale up as a contract. What
+    is asserted is the wiring — deleting the comparison from
+    `_fast_path_allows_replay` failed none of the 7139 tests (2026-08-07).
+    """
+    threshold = AgentLoop._REPLAY_MIN_SIMILARITY
+    episode = _episode()
+
+    assert AgentLoop._fast_path_allows_replay(episode, threshold), (
+        "control: at the declared threshold this episode must clear the gate, "
+        "or the refusal below says nothing about similarity"
+    )
+    assert not AgentLoop._fast_path_allows_replay(episode, threshold - 0.01), (
+        "a less similar question must not be answered with the stored answer"
+    )
+
+
+def test_a_file_scoped_question_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """A named file forbids replay — the stored answer is not about this file.
+
+    Deleting `and not file_hint` from `_episodic_fast_path` reddened only
+    `test_the_body_moved_symbol_for_symbol`, the guard that fires on ANY edit
+    to that body. Behavioural protection was therefore absent, and the whole
+    function was uncheckable through it (measured 2026-08-07).
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: with no hint this question IS served from memory, or the "
+        "refusal below says nothing about the hint"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint="core/loop.py", goal=goal, local_critique_active=False
+    ) is None, "an answer tied to a named file must not be replayed verbatim"
+
+
+def test_an_operator_command_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """A ':' command is an instruction to the program, never a question.
+
+    Same shape of hole as the file-hint one above, measured 2026-08-08 (M41):
+    deleting `and not user_question.strip().startswith(":")` reddened only
+    `test_the_body_moved_symbol_for_symbol` — the AST guard that fires on any
+    edit to the body. Without this, a stored answer whose text merely
+    resembles the command could be served instead of running it.
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: this question IS served from memory, or the refusal below "
+        "says nothing about the ':' prefix"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        f": {QUESTION}", file_hint=None, goal=goal, local_critique_active=False
+    ) is None, "an operator command must be executed, not answered from memory"
+
+
+def test_a_local_critique_turn_is_not_answered_from_memory(tmp_path: Path) -> None:
+    """Critique the referent in front of us — never replay an old answer.
+
+    The first of the four `local_critique_active` consumers deferred here
+    from C05. Measured 2026-08-08 (M43): deleting `and not
+    local_critique_active` reddened only the AST guard, so the contract that
+    a critique turn must not be served from memory had no behavioural
+    observer at all.
+    """
+    from core.models import Goal
+
+    agent = _agent(tmp_path)
+    episode = _episode()
+    goal = Goal(description="d", success_criteria="c")
+
+    def _arm() -> None:
+        agent._last_best_similar_episode = episode
+        agent._last_best_similar_score = 0.99
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=False
+    ) == episode.full_answer, (
+        "control: the same turn without the critique flag IS replayed"
+    )
+
+    _arm()
+    assert agent._episodic_fast_path(
+        QUESTION, file_hint=None, goal=goal, local_critique_active=True
+    ) is None, (
+        "a critique turn was answered from memory: the analysis would be of "
+        "a stored answer rather than of the referent the operator named"
+    )
+
+
+def _fast_path_pure(episode: EpisodeRecord) -> bool:
+    """The real gate, asked without building an agent — never a copy of it.
+
+    This used to restate the gate's conditions inline. Restating them makes
+    every assertion below true of the test's own copy rather than of the
+    code: deleting `not tools_used` from `_fast_path_allows_replay` left the
+    whole file green, including the case parametrised as "the answer depends
+    on world state". Measured 2026-08-07; the same deletion fails here now.
+    """
+    return AgentLoop._fast_path_allows_replay(episode, 1.0)
+
+
+# ==========================================================================
+# 3. The evidence axis still does its own job.
+# ==========================================================================
+@pytest.mark.parametrize("outcome", ["partial", "failed"])
+def test_achieved_with_a_bad_outcome_is_still_refused(outcome: str) -> None:
+    """Both axes must agree; neither is a substitute for the other."""
+    assert decide_usage_eligibility(_episode(outcome=outcome, completion="achieved")) is False
+
+
+# ==========================================================================
+# 4. Every non-achieved state is refused for an ordinary episode.
+# ==========================================================================
+@pytest.mark.parametrize(
+    "completion",
+    ["blocked", "refused", "failed", "cancelled", "unknown", None],
+)
+def test_no_other_completion_state_admits_an_ordinary_episode(completion) -> None:
+    episode = _episode(completion=completion)
+
+    assert decide_usage_eligibility(episode) is False
+    assert _fast_path_pure(episode) is False
+
+
+def test_a_verified_partial_run_may_inform_but_not_be_replayed() -> None:
+    """Одна ось несла ДВА права, и частичная работа заслужила только первое.
+
+    Вред, ради которого ось заводили (MIR-057), — заблокированный НЕ-ОТВЕТ,
+    прочитанный как успех. Он остаётся закрытым: `blocked` отвергается обеими
+    проверками. Но честно объявленная ЧАСТИЧНАЯ работа с подтверждённой уликой
+    — не не-ответ, и запрещать ей подсказывать планировщику значило наказывать
+    за честность.
+
+    Замер 2026-08-27 по 144 живым записям: из 65 подтверждённых в память
+    попадали 10, из 79 неподтверждённых — 65. Живой случай той же ночи: прогон
+    собрал шесть подтверждённых кусков улики, объявил цель достигнутой частично
+    и был отвергнут, а соседний эпизод без единого подтверждения вошёл меткой.
+
+    Дословное ПЕРЕИГРЫВАНИЕ по-прежнему требует полного «достигнуто»: выдать
+    частичный ответ за ответ — ровно тот вред, что описан выше. Подробности:
+    MIR-169.
+    """
+    episode = _episode(completion="partially_achieved")
+
+    assert decide_usage_eligibility(episode) is True
+    assert _fast_path_pure(episode) is False
+
+
+# ==========================================================================
+# 5. Readers key on the frozen state, never on the claim.
+# ==========================================================================
+@pytest.mark.parametrize("frozen", ["failed", "cancelled"])
+def test_a_declared_achieved_cannot_override_the_frozen_state(frozen: str) -> None:
+    """The model said it succeeded; the run says otherwise, and the run won at
+    banking time. A reader must not re-open that."""
+    episode = EpisodeRecord(
+        goal="g", question=QUESTION, outcome="success", summary="s",
+        verified_chunks=3, usage_eligible=True, full_answer="answer",
+        declared_completion="achieved", completion_state=frozen,  # type: ignore[arg-type]
+    )
+
+    assert decide_usage_eligibility(episode) is False
+    assert _fast_path_pure(episode) is False
+
+
+def test_readers_never_consult_the_declaration() -> None:
+    """A declaration with no frozen state is inert — that pairing only exists
+    if something wrote the record by hand, and it must not be trusted."""
+    episode = _episode(completion=None)
+    object.__setattr__(episode, "declared_completion", "achieved")
+
+    assert decide_usage_eligibility(episode) is False
+
+
+# ==========================================================================
+# 6. Legacy is withheld, not reconstructed.
+# ==========================================================================
+def test_a_legacy_row_is_withheld_without_reconstruction(tmp_path: Path) -> None:
+    row = {
+        "id": "ep-legacy", "goal": "g", "question": QUESTION, "outcome": "success",
+        "summary": "s", "verified_chunks": 3, "unverified_chunks": 0,
+        "usage_eligible": True, "full_answer": "answer",
+    }
+    episode = EpisodeRecord.from_dict(row)
+
+    assert episode.completion_state is None
+    assert effective_completion(episode) == "unknown", "one accessor, one answer"
+    assert decide_usage_eligibility(episode) is False
+    assert _fast_path_pure(episode) is False
+
+
+def test_a_new_row_cannot_land_without_the_completion_axis(tmp_path: Path) -> None:
+    """The D-6 boundary rule (operator, 2026-08-02, closing MIR-064).
+
+    Every NEW record must get an explicit completion verdict at the shared
+    save boundary; a writer that cannot classify yields the explicit
+    ``"unknown"``. On disk the key must be PRESENT — its absence is the legacy
+    signature, and a row banked today must not impersonate that population.
+    """
+    store = EpisodicMemoryStore(tmp_path / "episodes.jsonl")
+    stored = store.save(EpisodeRecord(
+        goal="g", question="hand-built", outcome="success", summary="s",
+        tags=("lesson",),
+    ))
+    assert stored.completion_state == "unknown", "boundary did not settle the axis"
+
+    raw = (tmp_path / "episodes.jsonl").read_text(encoding="utf-8")
+    assert '"completion_state": "unknown"' in raw, (
+        "the key is absent on disk — byte-identical to a pre-axis legacy row, "
+        "which is exactly the provenance break MIR-064 measured"
+    )
+
+
+def test_the_boundary_never_overwrites_a_writers_verdict(tmp_path: Path) -> None:
+    """An explicit value is a decision already taken — passed through untouched,
+    same contract as the eligibility rule beside it."""
+    store = EpisodicMemoryStore(tmp_path / "episodes.jsonl")
+    stored = store.save(EpisodeRecord(
+        goal="g", question="q", outcome="failed", summary="s",
+        completion_state="blocked",
+    ))
+    assert stored.completion_state == "blocked"
+
+
+def test_reading_legacy_stays_none_no_reconstruction(tmp_path: Path) -> None:
+    """The ruling's read half: absence is legal ONLY for true legacy rows, and
+    old ambiguous rows are not reconstructed without proof. Reading must not
+    quietly stamp them."""
+    path = tmp_path / "episodes.jsonl"
+    path.write_text(
+        '{"id": "ep-legacy", "goal": "g", "question": "q", "outcome": "success",'
+        ' "summary": "s", "usage_eligible": true}\n',
+        encoding="utf-8",
+    )
+    episode = EpisodicMemoryStore(path).load()[0]
+    assert episode.completion_state is None, "read-side reconstruction is forbidden"
+    assert effective_completion(episode) == "unknown"
+
+
+def test_no_legacy_episode_in_the_live_store_is_ever_admitted(tmp_path: Path) -> None:
+    """Legacy stays withheld — the invariant, not a snapshot.
+
+    This first asserted that EVERY live episode read `unknown`, which was true
+    the day it was written and false the moment the agent ran: new cycles bank
+    real completion states, as they should. A test that pins a snapshot of
+    mutable production data reports its own staleness as a regression.
+
+    What must hold forever is narrower: an episode carrying no verdict — a row
+    written before the axis existed — is never replayed, whatever else lands
+    in the store around it.
+    """
+    live = Path("data/episodic_memory.jsonl")
+    if not live.exists():
+        # Checked BEFORE the store is built: constructing it mkdirs `data/`
+        # and `load()` takes the lock, which leaves `data/*.lock` behind in a
+        # clean clone — and that stray directory reads as a live workspace to
+        # `test_the_live_workspace_actually_carries_the_file`.
+        pytest.skip("no live store in this environment")
+    store = EpisodicMemoryStore(live)
+    episodes = store.load()
+    if not episodes:
+        pytest.skip("no live store in this environment")
+
+    legacy = [ep for ep in episodes if ep.completion_state is None]
+    assert all(effective_completion(ep) == "unknown" for ep in legacy)
+    assert not [ep for ep in legacy if _fast_path_pure(ep)]
+    # Modelled on what RETRIEVAL does, not on `decide_usage_eligibility`.
+    # The banking-time policy admits a lesson whatever its stored bit says;
+    # retrieval reads that bit, and a legacy row carries none. Asserting the
+    # policy here would fail on the 108 legacy lessons while the live agent
+    # admits none of them — the same conflation this suite exists to prevent.
+    def _retrieval_admits(ep) -> bool:
+        if "lesson" in ep.tags:
+            return is_usage_eligible(ep)
+        return effective_completion(ep) == "achieved" and is_usage_eligible(ep)
+
+    assert not [ep for ep in legacy if _retrieval_admits(ep)], (
+        "an unclassified episode must not reach a prompt as the store fills"
+    )
+
+
+# ==========================================================================
+# 7. A lesson keeps its context arm and loses replay.
+# ==========================================================================
+def test_an_unknown_lesson_is_still_retrievable_as_context(tmp_path: Path) -> None:
+    _seed(tmp_path, [
+        _episode("a-lesson", outcome="failed", completion="unknown", tags=("lesson",))
+    ])
+    agent = _agent(tmp_path)
+
+    assert decide_usage_eligibility(
+        _episode(outcome="failed", completion="unknown", tags=("lesson",))
+    ) is True, "learning from failure is what the tag is for"
+    assert _retrieved(agent) == ["a-lesson"]
+
+
+def test_an_unknown_lesson_is_not_replayable(tmp_path: Path) -> None:
+    """Retrievable as a warning is not the same as reusable as an answer."""
+    agent = _agent(tmp_path)
+    lesson = _episode(outcome="failed", completion="unknown", tags=("lesson",))
+
+    assert _replayed(agent, lesson) is False
+
+
+# ==========================================================================
+# 8. Nothing procedural moves in this commit.
+# ==========================================================================
+def test_no_procedural_counter_changes(tmp_path: Path) -> None:
+    agent = _agent(tmp_path)
+    seeded = ProcedureRecord(
+        name="Workflow using file_read", workflow_key="tools:file_read",
+        trigger_tags=("file_read",), steps=("Run tool: file_read",),
+        source_episode_ids=(), success_count=2, failure_count=0,
+        confidence=0.75, status="active",
+    )
+    agent.procedural_store.rewrite([seeded])
+    _seed(tmp_path, [_episode("blocked-ep", completion="blocked")])
+
+    agent._retrieve_experience_memory(QUESTION)
+
+    after = agent.procedural_store.load()[0]
+    assert (after.success_count, after.failure_count, after.confidence) == (2, 0, 0.75)
+
+
+def test_the_rejection_reason_names_completion(tmp_path: Path) -> None:
+    """The trace must say WHY, in the bounded vocabulary (MIR-055/056)."""
+    import json
+
+    _seed(tmp_path, [_episode("blocked-ep", completion="blocked")])
+    agent = _agent(tmp_path)
+    agent._retrieve_experience_memory(QUESTION)
+
+    payload = [
+        json.loads(line)["payload"]
+        for line in Path(agent.log.path).read_text(encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line).get("event") == "experience_memory_inject"
+    ][-1]
+    assert payload["rejected_by"].get("not_achieved") == 1

@@ -1,0 +1,538 @@
+"""Гигиена памяти: просрочка, дедупликация, сводка, архивация."""
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from typing import Protocol
+
+from core.models import MemoryRecord
+
+DEFAULT_DEDUP_THRESHOLD = 0.85
+
+#: Потолок числа слов в сравнении ПОРЯДКА. `SequenceMatcher` квадратичен в
+#: худшем случае, а тексты памяти приходят извне; ограничение делает стоимость
+#: сравнения предсказуемой, не меняя исхода на реальных записях.
+_ORDER_TOKEN_CAP = 400
+
+_WS_RE = re.compile(r"\s+")
+
+def _normalise(text: str) -> str:
+    """Case-insensitive, whitespace-collapsed comparison key."""
+    return _WS_RE.sub(" ", (text or "").strip().lower())
+
+def _similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
+    """Cheap Jaccard over word sets, then boosted by substring containment.
+
+    `order_sensitive` разводит ДВУХ потребителей с противоположной ценой ошибки,
+    и разводит явно, а не молчанием (F-2 в docs/audit/FIELD_CHECK_QUEUE.md):
+
+    * ворота записи (`find_duplicate`) отвергают дубликат, поэтому ложное
+      слияние ТЕРЯЕТ ПОПРАВКУ. Перестановка слов должна их настораживать —
+      `True`, и это дефолт, чтобы будущий потребитель по умолчанию получал
+      осторожную половину;
+    * антитело эха ловит, как агент ПОВТОРЯЕТ САМ СЕБЯ. Пересказ теми же
+      словами в другом порядке — это и есть эхо, и пропустить его значит
+      разрешить петлю. Оно передаёт `False` осознанно.
+
+    Одна реализация на обоих нарочно: комментарий в антителе прямо называет
+    причину — иначе меры разойдутся молча.
+    """
+    na, nb = _normalise(a), _normalise(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+
+    tokens_a = set(na.split())
+    tokens_b = set(nb.split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    if order_sensitive and tokens_a == tokens_b:
+        # ПЕРЕСТАНОВКА: те же слова, другой порядок. Жаккар по множествам даёт
+        # здесь 1.00 и не различает «openai падает, anthropic работает» от
+        # обратного, а на записи дубликат ОТВЕРГАЕТСЯ — то есть поправка,
+        # меняющая роли местами, в память не попадала (F-2 в
+        # docs/audit/FIELD_CHECK_QUEUE.md).
+        #
+        # Порогом это не лечится: развёртка 0.70…1.00 показала, что ложные
+        # слияния стоят ровно на 1.00 и не отсекаются ничем ниже единицы, а
+        # порог 1.00 оставляет их и роняет верные слияния с 75% до 50%. Менять
+        # надо МЕРУ, и только для этого случая.
+        #
+        # Порядок меряется по последовательности слов. Русский порядок слов
+        # свободен, поэтому перестановка ЧАСТО безобидна — и цена ошибки
+        # несимметрична: лишняя запись в памяти стоит мало, потерянная
+        # поправка стоит дорого. Ошибаться здесь положено в сторону «сохранить».
+        return SequenceMatcher(
+            None, na.split()[:_ORDER_TOKEN_CAP], nb.split()[:_ORDER_TOKEN_CAP]
+        ).ratio()
+
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    jaccard = len(intersection) / len(union)
+
+    # Containment boost: if one normalised string contains the other,
+    # this is a near-duplicate even when Jaccard is borderline.
+    if na in nb or nb in na:
+        shorter = min(len(na), len(nb))
+        longer = max(len(na), len(nb))
+        containment = shorter / longer
+        # Take the max so we never penalise a clear containment match
+        # because Jaccard happened to be lower.
+        return max(jaccard, containment)
+
+    return jaccard
+
+def find_duplicate(
+    text: str,
+    existing: Sequence[MemoryRecord],
+    threshold: float = DEFAULT_DEDUP_THRESHOLD,
+) -> tuple[MemoryRecord, float] | None:
+    """Highest-scoring existing record above `threshold`, or None.
+
+    Used by both write-time (refuse to persist a near-duplicate) and
+    post-hoc (collapse near-duplicates that already made it to disk).
+    """
+    if not text or not existing:
+        return None
+    best: tuple[MemoryRecord, float] | None = None
+    for rec in existing:
+        rec_text = rec.content if isinstance(rec.content, str) else str(rec.content)
+        score = _similarity(text, rec_text)
+        if score >= threshold and (best is None or score > best[1]):
+            best = (rec, score)
+    return best
+
+@dataclass(frozen=True)
+class DuplicateGroup:
+    canonical_id: str
+    canonical_content_preview: str
+    duplicate_ids: list[str]
+
+@dataclass
+class DedupReport:
+    threshold: float
+    scanned: int = 0
+    groups: list[DuplicateGroup] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    dry_run: bool = False
+
+    def summary(self) -> dict:
+        return {
+            "threshold": self.threshold,
+            "scanned": self.scanned,
+            "groups": len(self.groups),
+            "deleted_count": len(self.deleted),
+            "deleted_ids": list(self.deleted),
+            "dry_run": self.dry_run,
+        }
+
+class _StoreProto(Protocol):
+    """Minimal interface deduplicate_memory / expire_memory need."""
+
+    def load(self) -> list[MemoryRecord]: ...
+    def _load_raw(self) -> list[MemoryRecord]: ...
+    def _rewrite(self, records: list[MemoryRecord]) -> None: ...
+
+def deduplicate_memory(
+    store: _StoreProto,
+    *,
+    threshold: float = DEFAULT_DEDUP_THRESHOLD,
+    dry_run: bool = False,
+) -> DedupReport:
+    """Collapse near-duplicates already on disk.
+
+    The OLDEST record in every duplicate group is treated as canonical
+    (oldest = first to be deliberately remembered). Newer near-copies are
+    deleted. This makes dedup idempotent: a second run finds zero new
+    groups.
+    """
+    if not 0.0 < threshold <= 1.0:
+        raise ValueError(f"threshold must be in (0, 1], got {threshold}")
+
+    records = store.load()
+    report = DedupReport(threshold=threshold, scanned=len(records), dry_run=dry_run)
+
+    if len(records) < 2:
+        return report
+
+    # Stable sort by creation time, oldest first. Ties broken by id so
+    # the result is deterministic even when timestamps collide.
+    ordered = sorted(records, key=lambda r: (r.created_at, r.id))
+
+    keep: list[MemoryRecord] = []
+    canonical_for_dup: dict[str, MemoryRecord] = {}
+
+    for rec in ordered:
+        text = rec.content if isinstance(rec.content, str) else str(rec.content)
+        match = find_duplicate(text, keep, threshold=threshold)
+        if match is None:
+            keep.append(rec)
+        else:
+            canonical_for_dup[rec.id] = match[0]
+
+    if not canonical_for_dup:
+        return report
+
+    # Build the per-canonical group list for the audit trail.
+    by_canonical: dict[str, list[str]] = {}
+    for dup_id, canon in canonical_for_dup.items():
+        by_canonical.setdefault(canon.id, []).append(dup_id)
+
+    for canon_id, dup_ids in by_canonical.items():
+        canon = next(r for r in keep if r.id == canon_id)
+        canon_text = canon.content if isinstance(canon.content, str) else str(canon.content)
+        preview = canon_text[:80] + ("…" if len(canon_text) > 80 else "")
+        report.groups.append(
+            DuplicateGroup(
+                canonical_id=canon_id,
+                canonical_content_preview=preview,
+                duplicate_ids=sorted(dup_ids),
+            )
+        )
+        report.deleted.extend(sorted(dup_ids))
+
+    report.deleted.sort()
+    if not dry_run:
+        store._rewrite(keep)
+    return report
+
+@dataclass
+class ExpiryReport:
+    scanned: int = 0
+    expired: list[str] = field(default_factory=list)   # record ids
+    dry_run: bool = False
+
+    def summary(self) -> dict:
+        return {
+            "scanned": self.scanned,
+            "expired_count": len(self.expired),
+            "expired_ids": list(self.expired),
+            "dry_run": self.dry_run,
+        }
+
+def _is_expired(record: MemoryRecord, now: datetime) -> bool:
+    if record.ttl_seconds is None or record.ttl_seconds <= 0:
+        return False
+    age = (now - record.created_at).total_seconds()
+    return age >= record.ttl_seconds
+
+def expire_memory(
+    store: _StoreProto,
+    *,
+    now: datetime | None = None,
+    dry_run: bool = False,
+) -> ExpiryReport:
+    """Remove records whose `created_at + ttl_seconds` has passed.
+
+    Records with `ttl_seconds=None` (the default) are NEVER expired —
+    they were saved as "keep until manually forgotten".
+    """
+    now = now or datetime.now(timezone.utc)
+    # Use _load_raw() to see all records including expired ones — load()
+    # would silently evict them before we can report their IDs.
+    records = store._load_raw()
+    report = ExpiryReport(scanned=len(records), dry_run=dry_run)
+
+    keep: list[MemoryRecord] = []
+    for rec in records:
+        if _is_expired(rec, now):
+            report.expired.append(rec.id)
+        else:
+            keep.append(rec)
+
+    report.expired.sort()
+    if report.expired and not dry_run:
+        store._rewrite(keep)
+    return report
+
+@dataclass
+class SummaryReport:
+    tag: str
+    scanned: int = 0                 # records considered (after tag filter)
+    summarised_ids: list[str] = field(default_factory=list)
+    new_record_id: str | None = None
+    skipped_reason: str | None = None
+    dry_run: bool = False
+
+    def summary(self) -> dict:
+        return {
+            "tag": self.tag,
+            "scanned": self.scanned,
+            "summarised_count": len(self.summarised_ids),
+            "summarised_ids": list(self.summarised_ids),
+            "new_record_id": self.new_record_id,
+            "skipped_reason": self.skipped_reason,
+            "dry_run": self.dry_run,
+        }
+
+class _LLMProto(Protocol):
+    def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = ...,
+        temperature: float = ...,
+    ) -> str: ...
+
+SUMMARY_TAG = "summarised"
+
+DEFAULT_SUMMARY_MAX_RECORDS = 10
+
+_SUMMARY_SYSTEM = (
+    "You are compressing a list of long-term memory records into ONE "
+    "concise note. Preserve every distinct fact, drop redundancy, drop "
+    "opinions, drop chronology unless essential. Output plain text, no "
+    "bullets unless the source items were already enumerated. Maximum "
+    "800 characters."
+)
+
+def summarise_memory(
+    store: _StoreProto,
+    llm: _LLMProto,
+    *,
+    tag: str,
+    max_records: int = DEFAULT_SUMMARY_MAX_RECORDS,
+    dry_run: bool = False,
+) -> SummaryReport:
+    """Merge records sharing `tag` into a single summarised record.
+
+    Behaviour: - 0 matching records -> no-op (skipped_reason='no records') -
+    1 matching record -> no-op (skipped_reason='single record') -
+    2..max_records -> LLM called, summary saved, originals removed -
+    >max_records -> only the oldest `max_records` are merged
+    """
+    if not tag or not tag.strip():
+        raise ValueError("tag must be a non-empty string")
+    if max_records < 2:
+        raise ValueError(f"max_records must be >= 2, got {max_records}")
+
+    tag_norm = tag.strip().lower()
+    if tag_norm == SUMMARY_TAG:
+        # Refuse to chain-summarise our own output.
+        return SummaryReport(
+            tag=tag, skipped_reason=f"cannot summarise the '{SUMMARY_TAG}' tag itself",
+            dry_run=dry_run,
+        )
+
+    records = store.load()
+    matching = [r for r in records if tag_norm in {t.lower() for t in (r.tags or [])}]
+    # Already-summarised records are excluded.
+    matching = [r for r in matching if SUMMARY_TAG not in {t.lower() for t in (r.tags or [])}]
+
+    report = SummaryReport(tag=tag, scanned=len(matching), dry_run=dry_run)
+
+    if not matching:
+        report.skipped_reason = "no records"
+        return report
+    if len(matching) < 2:
+        report.skipped_reason = "single record (nothing to merge)"
+        return report
+
+    # Oldest first; cap to max_records.
+    matching.sort(key=lambda r: (r.created_at, r.id))
+    selected = matching[:max_records]
+
+    user_prompt_lines = [
+        f"You are summarising {len(selected)} records tagged '{tag}'.",
+        "Combine them into ONE record. Keep every distinct fact.",
+        "",
+    ]
+    for i, r in enumerate(selected, 1):
+        text = r.content if isinstance(r.content, str) else str(r.content)
+        user_prompt_lines.append(f"--- record {i} (id={r.id}) ---")
+        user_prompt_lines.append(text)
+    user_prompt_lines.append("")
+    user_prompt_lines.append("Output the merged summary now:")
+    user_prompt = "\n".join(user_prompt_lines)
+
+    try:
+        raw = llm.complete(
+            system=_SUMMARY_SYSTEM,
+            user=user_prompt,
+            max_tokens=1024,
+            temperature=0.2,
+        )
+    # Not silent: the failure is written INTO the report as
+    # `skipped_reason`, so a summarisation that could not run is visible
+    # to the operator instead of looking like a summarisation that found
+    # nothing. Hygiene must not take the caller down with it.
+    except Exception as exc:  # noqa: BLE001
+        report.skipped_reason = f"llm_error: {type(exc).__name__}: {exc}"
+        return report
+
+    summary_text = (raw or "").strip()
+    # Hard cap: never let the summary be larger than the originals
+    # combined (sanity check against runaway model output).
+    combined_chars = sum(
+        len(r.content if isinstance(r.content, str) else str(r.content))
+        for r in selected
+    )
+    if not summary_text:
+        report.skipped_reason = "llm returned empty summary"
+        return report
+    if len(summary_text) > max(800, combined_chars):
+        summary_text = summary_text[:800].rstrip() + "…"
+
+    # Preserve the canonical tag + add the marker so summarised records
+    # are excluded from future summarisation passes.
+    new_tags = sorted({tag_norm, SUMMARY_TAG})
+
+    selected_ids = sorted(r.id for r in selected)
+    report.summarised_ids = selected_ids
+
+    if dry_run:
+        return report
+
+    # Build the kept list: every non-selected record + the new summary.
+    selected_id_set = set(selected_ids)
+    new_record = MemoryRecord(
+        type="semantic",
+        content=summary_text,
+        tags=new_tags,
+        owner="self",
+    )
+    keep = [r for r in records if r.id not in selected_id_set]
+    keep.append(new_record)
+    store._rewrite(keep)
+    report.new_record_id = new_record.id
+    return report
+
+# Tag importance weights — higher = more valuable
+_TAG_WEIGHTS: dict[str, float] = {
+    "decision":     1.0,
+    "insight":      0.9,
+    "fact":         0.8,
+    "preference":   0.8,
+    "project":      0.7,
+    "user-approved": 0.6,
+}
+
+# Curated categories that must NEVER be archived, regardless of age or access
+# (they are hand-authored lessons/bugs/reflections/decisions, not auto-ingested
+# facts). Mirrors EpisodicMemoryStore.PROTECTED_TAGS for persistent memory.
+_ARCHIVE_PROTECTED_TAGS: frozenset[str] = frozenset({
+    "lesson", "bug", "bug-fix", "regression-guard", "reflection", "repair",
+    "preference", "decision", "insight", "code-audit", "curriculum",
+})
+
+# Archive if importance score is below this threshold
+DEFAULT_ARCHIVE_THRESHOLD = 0.25
+
+# Records younger than this (in days) are never archived regardless of score
+DEFAULT_ARCHIVE_MIN_AGE_DAYS = 7
+
+@dataclass
+class ArchiveReport:
+    threshold: float
+    min_age_days: int
+    scanned: int = 0
+    archived: list[str] = field(default_factory=list)   # record ids moved to archive
+    dry_run: bool = False
+
+    def summary(self) -> dict:
+        return {
+            "threshold": self.threshold,
+            "min_age_days": self.min_age_days,
+            "scanned": self.scanned,
+            "archived_count": len(self.archived),
+            "archived_ids": list(self.archived),
+            "dry_run": self.dry_run,
+        }
+
+def _importance_score(record: MemoryRecord, now: datetime) -> float:
+    """Score a memory record 0.0-1.0. Higher = more worth keeping active.
+
+    Formula: base = best tag weight (or 0.3 if no known tags) access = +0.05
+    per access, capped at +0.3 (logarithmic feel) recency = -0.01 per day
+    since last access, capped at -0.3 (records never accessed use created_at
+    as reference)
+    """
+    tags_lower = {t.strip().lower() for t in (record.tags or [])}
+    base = max((_TAG_WEIGHTS.get(t, 0.0) for t in tags_lower), default=0.3)
+    # MIR-074 (operator ruling): the pipeline stamps every auto-extracted
+    # claim with `fact` (weight 0.8) AND `source-backed` — with the idle
+    # penalty capped at 0.3 that floor (0.5 > threshold 0.25) made auto
+    # records unarchivable FOREVER, however useless. An auto record with
+    # zero CAUSAL credit no longer inherits the tag's immortality: its tag
+    # base is capped so pure idleness can carry it below the threshold —
+    # «пока не пригодилось — отодвинем подальше», dormant, not destroyed.
+    causal_use = int(getattr(record, "causal_use", 0) or 0)
+    if "source-backed" in tags_lower and causal_use == 0:
+        base = min(base, 0.4)
+    # Honour an explicitly-stored importance as a floor — a record hand-marked
+    # important must not be scored down to the archive by tag/access heuristics.
+    base = max(base, float(record.importance or 0.0))
+
+    # Access boost — each use bumps importance; CAUSAL use (the record was
+    # cited in a verified answer) weighs four times an injection, per the
+    # ruling: «совпадение слов при вставке ≈ нулевой кредит».
+    access_boost = min(0.3, record.access_count * 0.05)
+    access_boost += min(0.6, causal_use * 0.2)
+
+    # Recency penalty — unused records slowly drift toward the archive
+    reference_dt = record.last_accessed_at or record.created_at
+    days_idle = max(0.0, (now - reference_dt).total_seconds() / 86400)
+    recency_penalty = min(0.3, days_idle * 0.01)
+
+    return max(0.0, min(1.0, base + access_boost - recency_penalty))
+
+class _ArchiveStoreProto(Protocol):
+    """Minimal interface required by archive_low_value_memory."""
+
+    def load(self) -> list[MemoryRecord]: ...
+    def archive_record(self, record_id: str) -> bool: ...
+    def _rewrite(self, records: list[MemoryRecord]) -> None: ...
+
+def archive_low_value_memory(
+    store: _ArchiveStoreProto,
+    *,
+    threshold: float = DEFAULT_ARCHIVE_THRESHOLD,
+    min_age_days: int = DEFAULT_ARCHIVE_MIN_AGE_DAYS,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> ArchiveReport:
+    """Move low-value records from active memory to the archive.
+
+    A record is archivable when ALL three conditions hold:
+      1. importance_score < threshold
+      2. age (since created_at) >= min_age_days
+      3. access_count == 0  OR  (days since last access) >= min_age_days
+
+    Records are NEVER deleted — only moved to archive. The archive is a
+    permanent reference store (like an old filing cabinet). This ensures
+    no knowledge is ever lost, just deprioritised.
+    """
+    now = now or datetime.now(timezone.utc)
+    records = store.load()
+    report = ArchiveReport(threshold=threshold, min_age_days=min_age_days,
+                           scanned=len(records), dry_run=dry_run)
+
+    for rec in records:
+        if _ARCHIVE_PROTECTED_TAGS & {t.strip().lower() for t in (rec.tags or [])}:
+            continue  # curated (lesson/bug/decision/…) — never archived
+
+        age_days = (now - rec.created_at).total_seconds() / 86400
+        if age_days < min_age_days:
+            continue  # too young — give it time
+
+        score = _importance_score(rec, now)
+        if score >= threshold:
+            continue  # valuable enough to stay active
+
+        # Check last-access recency separately
+        if rec.last_accessed_at is not None:
+            days_since_access = (now - rec.last_accessed_at).total_seconds() / 86400
+            if days_since_access < min_age_days:
+                continue  # recently used — keep it active
+
+        report.archived.append(rec.id)
+
+    if not dry_run:
+        for record_id in report.archived:
+            store.archive_record(record_id)
+
+    return report

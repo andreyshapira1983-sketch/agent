@@ -1,0 +1,209 @@
+"""Universal redaction layer (§7).
+
+Three surfaces MUST never receive raw secrets or sensitive PII:
+
+  1. JSONL trace logs   — `TraceLogger` runs every payload through `redact_payload`.
+  2. LLM prompts        — `LLMPlanner` and `AgentLoop._synthesize` run
+                          `redact_dlp_text` before calling `LLM.complete(...)`.
+  3. User-facing output — `AgentLoop.run` redacts the final answer string.
+
+The redactor is intentionally NON-reversible: once a secret is replaced
+with `[REDACTED:<kind>]`, the kernel does not keep a mapping back. The
+raw value only ever exists inside `SecretFinding.matched`, which lives
+on the stack and is discarded after the redaction call returns.
+
+Why not stream-level redaction? Because we want classification to see the
+raw text first (so `data_classifier` can decide DataClass.SECRET) and
+*then* call the redactor before anything leaves the kernel boundary.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from core.dlp import DlpFinding, pii_replacement, scan_pii
+from core.secret_scanner import SecretFinding, is_credential_key, scan
+
+
+def _replacement(kind: str) -> str:
+    return f"[REDACTED:{kind}]"
+
+
+def redact_text(text: str) -> tuple[str, list[SecretFinding]]:
+    """Replace every secret span with a `[REDACTED:<kind>]` token."""
+    if not isinstance(text, str) or not text:
+        return text, []
+
+    findings = scan(text)
+    if not findings:
+        return text, []
+
+    # Sort by start ascending, then end descending so the WIDEST match at
+    # each starting offset wins. We then replace right-to-left so earlier
+    # offsets are not invalidated by replacements that happen after them.
+    findings_sorted = sorted(findings, key=lambda f: (f.start, -f.end))
+    kept: list[SecretFinding] = []
+    last_end = -1
+    for f in findings_sorted:
+        # Skip a finding whose entire span is already covered by a wider
+        # match starting at the same or earlier position.
+        if f.start < last_end:
+            continue
+        kept.append(f)
+        last_end = f.end
+
+    # Apply replacements right-to-left.
+    out = text
+    for f in sorted(kept, key=lambda f: f.start, reverse=True):
+        out = out[: f.start] + _replacement(f.kind) + out[f.end :]
+    return out, kept
+
+
+def redact_dlp_text(
+    text: str,
+) -> tuple[str, list[SecretFinding], list[DlpFinding]]:
+    """Redact both credentials and sensitive PII from `text`.
+
+    `redact_text` remains the secret-only primitive for compatibility.
+    Boundary surfaces should call this function so email / phone / SSN
+    values do not reach logs, LLM prompts, output, or durable memory raw.
+    """
+    if not isinstance(text, str) or not text:
+        return text, [], []
+
+    secret_findings = scan(text)
+    pii_findings = scan_pii(text)
+    if not secret_findings and not pii_findings:
+        return text, [], []
+
+    replacements: list[tuple[int, int, str, str, Any]] = []
+    for finding in secret_findings:
+        replacements.append(
+            (
+                finding.start,
+                finding.end,
+                _replacement(finding.kind),
+                "secret",
+                finding,
+            )
+        )
+    for finding in pii_findings:
+        replacements.append(
+            (
+                finding.start,
+                finding.end,
+                pii_replacement(finding.kind),
+                "pii",
+                finding,
+            )
+        )
+
+    replacements.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    kept: list[tuple[int, int, str, str, Any]] = []
+    last_end = -1
+    for item in replacements:
+        start, end, _replacement_text, _category, _finding = item
+        if start < last_end:
+            continue
+        kept.append(item)
+        last_end = end
+
+    out = text
+    kept_secrets: list[SecretFinding] = []
+    kept_pii: list[DlpFinding] = []
+    for start, end, replacement_text, category, finding in sorted(
+        kept, key=lambda item: item[0], reverse=True
+    ):
+        out = out[:start] + replacement_text + out[end:]
+        if category == "secret":
+            kept_secrets.append(finding)
+        else:
+            kept_pii.append(finding)
+    kept_secrets.sort(key=lambda item: item.start)
+    kept_pii.sort(key=lambda item: item.start)
+    return out, kept_secrets, kept_pii
+
+
+def redact_payload(obj: Any) -> Any:
+    """Deep-walk a logging payload, redacting every string field.
+
+    Mapping keys are also read as evidence about their value. `redact_text`
+    already masks `password: hunter2`, because the scanner treats those
+    names as proof that what follows is a secret. Structured payloads are
+    the form the logger actually receives, and an opaque value there matches
+    no regex, so without the key it is indistinguishable from prose. Keys
+    themselves are never rewritten — they describe schema, and losing them
+    loses the log.
+    """
+    if isinstance(obj, str):
+        red, _secret_findings, _pii_findings = redact_dlp_text(obj)
+        return red
+    if isinstance(obj, dict):
+        out_map: dict[Any, Any] = {}
+        for key, value in obj.items():
+            redacted = redact_payload(value)
+            # Fallback, never a replacement. Only mask by name when the value
+            # revealed nothing on its own, so a recognisable secret keeps its
+            # precise kind (`github-pat`) instead of degrading to a generic
+            # marker. Empty values are left alone: there is nothing to hide,
+            # and a false `[REDACTED]` would misreport the recorded state.
+            if (
+                isinstance(value, str)
+                and value.strip()
+                and redacted == value
+                and is_credential_key(key)
+            ):
+                redacted = _replacement("credential-assignment")
+            out_map[key] = redacted
+        return out_map
+    if isinstance(obj, (list, tuple)):
+        redacted = [redact_payload(x) for x in obj]
+        return tuple(redacted) if isinstance(obj, tuple) else redacted
+    # H-34: множества и байты доходили до `logs/*.jsonl` СЫРЫМИ. Логгер их
+    # принимает — несериализуемое он приводит к строке, — а обход в них не
+    # заходил, и §7 объявляет при этом, что эти поверхности НИКОГДА не получают
+    # сырых секретов. Замер сквозной, по файлу, а не по коду.
+    if isinstance(obj, (set, frozenset)):
+        # Список, а не множество: после редакции два разных секрета дают одну и
+        # ту же метку, и множество молча потеряло бы один из элементов. В
+        # журнале лучше видеть две одинаковые метки, чем недосчитаться записи.
+        return [redact_payload(x) for x in sorted(obj, key=repr)]
+    if isinstance(obj, (bytes, bytearray)):
+        # Тип меняется на строку намеренно: значение, которое нельзя показать
+        # безопасно, стоит меньше, чем показанное безопасно. Декодируется с
+        # заменой, потому что журналу нужен читаемый след, а не точный байт.
+        return redact_payload(bytes(obj).decode("utf-8", errors="replace"))
+    return obj
+
+
+def collect_findings(text: str) -> list[SecretFinding]:
+    """Convenience for callers that need the findings without rewriting text."""
+    if not isinstance(text, str):
+        return []
+    return scan(text)
+
+
+def collect_pii_findings(text: str) -> list[DlpFinding]:
+    """Convenience for callers that need PII findings without rewriting text."""
+    if not isinstance(text, str):
+        return []
+    return scan_pii(text)
+
+
+def prepare_text_for_llm_boundary(text: str) -> tuple[str, dict[str, Any]]:
+    """Redact secrets and sensitive PII before text is assembled into an LLM prompt.
+
+    Reuses ``redact_dlp_text`` — no new scanner/DLP rules. Returns
+    ``(safe_text, log_payload)``; *log_payload* is empty when nothing was redacted.
+    """
+    if not isinstance(text, str):
+        return "", {}
+    safe, secret_findings, pii_findings = redact_dlp_text(text)
+    if not secret_findings and not pii_findings:
+        return safe, {}
+    return safe, {
+        "redaction": True,
+        "secret_count": len(secret_findings),
+        "pii_count": len(pii_findings),
+        "secret_kinds": sorted({f.kind for f in secret_findings}),
+        "pii_kinds": sorted({f.kind for f in pii_findings}),
+    }

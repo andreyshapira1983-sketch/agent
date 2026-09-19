@@ -1,0 +1,730 @@
+{
+  "_what_this_is": "Resumable state for the Quantum CNS Full-Agent Mapping Program. Context windows end; this file is how the next one restarts without asking anybody. Everything here is derivable from the repository — nothing depends on a conversation being remembered. Read it, run the subject guard, continue at next_admissible_unit.",
+  "program": "Quantum CNS Full-Agent Mapping Program",
+  "opened": "2026-08-09",
+  "updated": "2026-08-09",
+  "snapshot": {
+    "sha": "f88997395abd7ade9f5a7bbb7e7e57db7a2cd1ee",
+    "branch_at_open": "audit/startup-path-and-doc-cleanup",
+    "subject_paths": [
+      "core",
+      "cli",
+      "app",
+      "api",
+      "tools",
+      "agent_tick.py",
+      "main.py"
+    ],
+    "guard": "scripts/qm_subject_freeze.py",
+    "guard_last_result": "INTACT (exit 0)",
+    "note": "The branch head moves as the laboratory grows. The SUBJECT does not: every claim is about the production runtime as of this SHA."
+  },
+  "evaluation_domain_of_this_checkpoint": {
+    "code": "f889973",
+    "held": [],
+    "observed": [
+      "Python 3.11.9",
+      "Windows 11",
+      "git 2.x",
+      "working tree clean at open"
+    ],
+    "durable_state": "none required — the units closed so far read git history and the repository tree only",
+    "external": "none — no network, no credentials, no model calls used by the units closed so far"
+  },
+  "completed_units": [
+    {
+      "id": "P00-subject-guard",
+      "question": "Can the program detect, mechanically, that its own subject moved?",
+      "result": "YES for both conditions. scripts/qm_subject_freeze.py returns INTACT / TRACKED_DRIFT / UNTRACKED_ADDITION / BOTH / UNREADABLE.",
+      "evidence": "Bitten against the real repository: an untracked core/_qm_freeze_probe.py gave exit 2; an appended newline in main.py gave exit 1; both together gave exit 3; main.py restored byte-identically (git hash-object 204c6a93 before and after); baseline exit 0 each time. Made durable in tests/test_qm_subject_freeze.py against a throwaway git repository, including the case that motivates it — a new module under core/ while `git diff --stat` against the snapshot stays empty.",
+      "anti_vacuity": "The one-operation ratchet was asked directly whether it governs the new file: in scope, one definition counted, six files governed. A guard nobody governs is the failure mode this program cannot afford.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "The bites exercise git and the filesystem, not the agent runtime. Every held condition is captured in tests/test_qm_subject_freeze.py, which builds a throwaway repository, and in commit b976c1b, which records the exit codes and the byte-identical hash 204c6a93."
+    },
+    {
+      "id": "P01-carry-forward",
+      "question": "Do the eight already-closed clusters (C00-C07) still hold at snapshot S, and where exactly do they live?",
+      "result": "All eight CARRIED_FORWARD. Two map defects found, one code defect banked.",
+      "evidence": "Sites resolved mechanically against the 247 production module stems present at S; each site's last commit compared against the commit where its cluster first read PROVEN. Three sites had moved after closure and each was adjudicated on its diff: core/loop_context.py (C01) proven docstring-only by comparing ASTs with every docstring stripped; agent_tick.py (C00) confined to the AGENT_TEST_TIMEOUT_SECONDS literal, which no C00 arc reads; core/loop_memory_read.py (C06) deleted _episodic_store_mtime, which is none of C06's six certified arcs.",
+      "anti_vacuity": "The first detection pass used a path-shaped regex, reported zero sites for C00 and C03, and missed core/loop_memory_read.py in C06 — silence that would have read as stability. The widened stem index was probed (it resolves 'loop_memory_read') before its silence was trusted, and the sites for C00/C03 were recovered from their closure commits' test imports.",
+      "found": [
+        "MAP: C00 and C03 closed without naming a single production path. A closed cluster with no site index cannot enter a bidirectional coverage index at all. Recovered and recorded in quantum_cns.coverage.unit_to_physical.",
+        "MAP: C06's scope said 'caches' for a planner cache deleted at a990e48. Corrected with a dated note.",
+        "CODE (banked, not fixed): core/loop_memory_read.py:330 describes the deleted planner cache in the present tense. It was written as the correction of an earlier lying comment and outlived its subject by hours."
+      ],
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "UNPROVEN"
+      },
+      "protection_note": "UNPROVEN deliberately. Nothing mechanically prevents a future production change from staling a carried-forward cluster silently; the carry-forward derivation is a script run by hand, not a guard in the suite. Whether that instrument should exist is a question for a later unit, not an assumption now.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static git and AST analysis. Reconstructible from scratchpad/carry.py and carry2.py and from commit b976c1b."
+    },
+    {
+      "id": "P02-anchor-and-writer-integrity",
+      "question": "Do the map's `file:line` anchors still point at what they name, and are its writer sets complete?",
+      "result": "NO on both, on the map's own acceptance case. Four drifted anchors and a writer set of three where eleven exist. Both classes now guarded.",
+      "evidence": "tests/test_cns_anchor_integrity.py was written first and run against the map as it stood: four failures, every one a real pre-existing defect, none synthetic. The four anchors were all in core/loop_attempt.py and all off by exactly the 24 lines a990e48 removed when it deleted the planner cache — one pointed at a blank line, one at a lone ')', one at 'action_spec={' inside _build_plan, a method that reads nothing of that carrier. The writer finding is stronger than drift: _step_trigger_tls recorded three writers with properties.writers reading PROVEN, and the three are exactly the policy_blocked family, the one path C08 had certified. Checked against history — eleven write sites already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. The record was wrong when written, not stale.",
+      "anti_vacuity": "The census is asserted to find something before completeness is asserted (>=11 for the thread-local slot, exactly 4 for the list, exactly 0 for the dead field). Rule 1's sub-checks were probed directly: the corrected anchor names its carrier and carries .extend(, the old anchor does not name it at all.",
+      "found": [
+        "MAP: four anchors on failure_history describing sites they no longer occupy.",
+        "MAP: _step_trigger_tls understated its producers by 8 of 11. The missing codes are verify_failed, web_empty, timeout, injection_blocked, unknown twice and two variable codes; every one is exercised by tests, so all eight are live sites. injection_blocked is a security-relevant producer that the map's writer set did not contain.",
+        "MAP: the existing anchor guard silently skips any anchor whose text carries a suffix, because its digit test fails on 'path:110 (consume)'. Every _step_trigger_tls anchor was therefore unchecked."
+      ],
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "scope_limitation": "Proves that what the map says about writers and anchors matches the code it points at. Does NOT prove the carrier list is complete, nor that a named consumer really consumes.",
+      "reopens": "C08. Its certified arc policy_deny_stops_the_step (M51) rests on the same three writers; the eight unlisted producers of the same carrier were never walked. Per the program's carry-forward rule, a newly discovered producer reopens the unit that generalised from a partial walk.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static AST plus git history. Reconstructible from tests/test_cns_anchor_integrity.py and scratchpad/anchor_rule.py, tls.py, tls2.py."
+    },
+    {
+      "id": "C08-U1-failure-code-delivery",
+      "cluster": "C08",
+      "question": "Is the failure CODE a semantically distinguishable value, or is only the fact of failure observed?",
+      "result": "The distinction is real and was entirely unobserved. Now protected at delivery.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=1",
+          "single-step plan via FakePlanner",
+          "one echo tool with a fixed payload",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer — the final hop is mock-blind by construction",
+          "the GLOBAL replan cap fires before any per-type budget here, so the code's budget effect was not exercised"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "preconditions_proven": "Before mutating: tool.calls=1, <failure_context> present, and `code=injection_blocked` present in the synthesizer prompt.",
+      "mutation": "ONE literal, core/loop_step_execution.py:656, code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort is unchanged and only the code text moves.",
+      "prediction": "GREEN — stated before the run.",
+      "observed": "GREEN. Full suite on the mutant: 7285 passed, 1 xfail, pytest exit 0. The mutation was live: the prompt carried code=unknown and the journal's triggers list read ['unknown']. Restore byte-identical, hash 4eaa5500 before and after, subject guard INTACT.",
+      "diagnosis": "Not unreachable, not vacuous, not equivalent, not journal-only. Partial redundancy for the OPERATOR observer only — the injection_blocked EVENT is written from the scan itself and stayed in the journal unchanged through the mutation, so a human still saw it while the synthesizer did not. Classification: a real unprotected distinction at delivery to a live-model consumer.",
+      "made_durable": "tests/test_tool_output_passes_the_injection_guard.py::test_the_refusal_travels_as_injection_blocked_and_not_merely_as_a_failure — reds on exactly this mutation, greens on the restored file, and carries a precondition assertion so it cannot pass on an empty prompt.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE -> now PROVEN at delivery"
+      },
+      "scope_limitation": "One of fourteen codes, one of eleven write sites, delivery only. The other thirteen codes are unmeasured and the per-type budget effect was never exercised — the global cap fired first."
+    },
+    {
+      "id": "C08-U2-per-type-budget",
+      "cluster": "C08",
+      "question": "Does the per-type budget decide anything, and if so what?",
+      "result": "Yes, and not what its own comment says. The injection budget decides DISCLOSURE, not repetition. Unprotected across 7286 tests; now held.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3 — the SHIPPED default, chosen deliberately after C08-U1 showed that 1 pre-empts the per-type rule",
+          "FakePlanner, which filters its own sources against forbidden_actions as the real sanitiser would",
+          "one echo tool with a contaminated payload",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "at max_replan_attempts=1 the global cap wins and this constant is invisible"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "two_mutations": [
+        "code=\"injection_blocked\" -> \"verify_failed\" (budget 2) under the default cap: the run took a SECOND attempt and touched the world twice. Full suite with my own delivery guard deselected: 7285 passed, exit 0 — before this program nothing observed that the failure code decides how many times the agent acts.",
+        "max_occurrences 1 -> 2 for injection_blocked: full suite 7286 passed, exit 0."
+      ],
+      "the_surprise": "The budget's comment says blocked content must not be retried with the same tool and query. Measured, that half is held by a DIFFERENT mechanism: requires_different_action=True forbids the (tool, args) pair, so at budget 2 the poisoned call is not repeated — attempt 2's plan comes back empty. What the budget actually decides is whether the user is told: the empty plan takes the SUCCESS branch, replan_exhausted is never set, loop_synthesis.py:637 withholds the failure context, and a blocked prompt-injection becomes a confident general-knowledge answer. Both poles measured: budget 1 gives replan_exhausted / <failure_context> / 'injection' all present, budget 2 all absent.",
+      "my_own_trap_recorded": "The delivery guard added earlier the same day could not see this, because it holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice inside one cluster — the first time in the subject, the second time in my own instrument.",
+      "made_durable": "tests/test_tool_output_passes_the_injection_guard.py::test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer. It asserts the stop comes from the injection budget BY NAME, so a stop produced by the global cap cannot satisfy it. Fail-before verified; restore byte-identical (core/replan.py 80c00c36, core/loop_step_execution.py 4eaa5500).",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE -> now PROVEN"
+      },
+      "spawned_candidate": "core/loop_attempt.py:441 reads an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools. UNPROVEN, unbitten — registered in the registry finding."
+    },
+    {
+      "id": "C08-U3-empty-plan-provenance",
+      "cluster": "C08",
+      "question": "Can the attempt loop tell an intentional zero-tool plan from a plan something else emptied?",
+      "result": "No — and the run that was denied its tool is indistinguishable from one that needed none at EVERY consumer outside the journal. Measured on the shipped path with nothing mutated.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3 — the shipped default",
+          "an EMPTY tool registry so the policy gate refuses the only step",
+          "FakePlanner, which filters its sources against forbidden_actions as the real validator does",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "NO production mutation — this is not a bite, it is a measurement of shipped behaviour"
+        ],
+        "durable_state": "temporary workspace, no stores",
+        "external": "none"
+      },
+      "evidence": "Two runs compared. Denied run: attempt 1 plans one step, policy_blocked (budget 2, requires_different_action), continue, attempt 2's plan comes back empty from the forbidden filter, break on the SUCCESS branch. Control run: planner returns no sources at all. Their non-journal observation dictionaries are literally equal — failure_context_reached_synthesis False, obligation_count 0, answer_mentions_a_block False, replan_exhausted False. The journal differs (one `policy` event, one `replan_attempt`); nothing else does.",
+      "the_sharp_part": "The obligation arbiter exists to catch a silently missing observation. It receives the denial — loop_run_tail.py:301 reads policy_blocked out of a non-empty failure_history into denied_tools — and builds its obligations from plan_steps, which is the LAST attempt's empty plan. The mechanism that emptied the plan removed the obligation the denial would have marked.",
+      "made_durable": "tests/test_empty_plan_provenance.py. The MECHANISM is asserted plainly (step stopped, retry empty, no artifact invented). The COLLAPSE is xfail(strict=True) on a claim that prescribes no design — a denied run should differ from a no-tool run somewhere outside the journal. Verified with --runxfail that it fails on the assertion, not on an error. Any repair XPASSes and strict turns that into a failure.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE — announced, not closed"
+      },
+      "scope_limitation": "Driven through policy_blocked only. The other three retry-and-forbid codes (approval_deny, approval_abort, claim_refuted) are expected to behave the same and were not measured. Multi-step plans, where a surviving sibling keeps the plan non-empty, are untouched.",
+      "not_fixed_on_purpose": "Production is read-only for this program, and whether the answer path ought to learn about a denied tool is a design decision for its owner."
+    },
+    {
+      "id": "C08-U4-partial-attempt-denial-downgrade",
+      "cluster": "C08",
+      "question": "A plan where one step fails and another produces an artifact breaks before the triggers reach failure_history. Does the failed step reach any consumer?",
+      "result": "Yes — the arbiter still sees it through step.status, so the loss is MASKED for the missing/reported distinction. What is genuinely lost is the blocked/failed distinction: a policy denial in such an attempt can never read as blocked_and_disclosed.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "registry holding file_read only, so a planned web_search is refused",
+          "two-step plan: one readable file, one web_search",
+          "artifact labels in the sanitiser's real format",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "the consumer comparison was made by calling evaluate_completion_obligations directly, so only the trigger differs between poles"
+        ],
+        "durable_state": "temporary workspace with one file",
+        "external": "none"
+      },
+      "evidence": "Three end-to-end poles: silent answer gives silently_missing, an answer naming web_search gives failed_but_reported, and the successful sibling stays satisfied. Then at the consumer with everything else held equal — same answer, same step, same status, only the trigger differing — blocked_and_disclosed versus failed_but_reported.",
+      "hypothesis_withdrawn": "The expectation before measuring was that such an attempt could never be credited for disclosing. FALSE: _discloses takes the tool NAME as a needle alongside the codes, so an answer naming web_search reaches failed_but_reported with no trigger at all.",
+      "probe_artifact_caught": "The first probe reported the successfully read file as silently_missing. It was the probe's own hand-written label 'ok:1'; core/step_sanitizer.py:161 builds 'file:{path}', and the arbiter looks for the file name inside artifact labels. With the real format the obligation is satisfied. A harness that invents a label tests its own invention — this one nearly became a published finding.",
+      "made_durable": "tests/test_partial_attempt_failure_reporting.py — the arbiter's distinction pinned plainly in both directions plus a silent-answer guard, and the loop-level gap as xfail(strict=True) on a property that prescribes no design.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PARTIAL"
+      },
+      "scope_limitation": "One denial kind, one observing tool. Nothing claimed about several denied steps in one attempt, nor about consumers downstream of the arbiter's log payload."
+    },
+    {
+      "id": "C08-U5-sensor-silence",
+      "cluster": "C08",
+      "question": "Two `except Exception: pass` handlers sit beside two that report. Is the difference a decision, and can either silent one swallow something that matters?",
+      "result": "Both silent handlers hide a real loss with no trace at all, and the contrast sits eleven lines away in the same method.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "one-step plan over a real file for the silent sensors; a refused ghost tool for the stagnation sensor, whose only path is the failure branch",
+          "artifact labels in the sanitiser's real format",
+          "memory=None"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "each guarded call was made to raise by rebinding the name the loop calls — no production file edited"
+        ],
+        "durable_state": "temporary workspace with one file",
+        "external": "none"
+      },
+      "evidence": "extract_from_plan broken: assumptions_registered 1 -> 0, the arc C01 certified as assumption_seeding switched off in silence. check_reasoning_actions broken: reasoning_action_mismatch 1 -> 0 and _defect_signals ['reasoning_action_mismatch'] -> [], which is durable because that list is banked with the episode. sensor_failed stays 0 in both. Contrast: breaking TerminationGuard.observe_attempt emits sensor_failed with sensor='stagnation_shadow'.",
+      "two_probe_misreadings_recorded": "The loop REPLACES self._termination_guard on every run(), so patching the instance is undone before the sensor is consulted — the class must be patched. And the event is spelled sensor_failed, not sensor_failure, so a counter on the wrong name reported zero for a handler that had reported perfectly; the silent-handler measurement was re-run under the correct name before anything was written down.",
+      "made_durable": "tests/test_attempt_loop_sensor_silence.py — the reporting behaviour and both losses asserted plainly, plus one parametrized test of the uniform property whose marks record exactly who fails it.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PARTIAL"
+      },
+      "scope_limitation": "Four handlers in one method. Nothing claimed about the other journal-silent handlers the existing ratchet counts."
+    },
+    {
+      "id": "C08-closure-review",
+      "cluster": "C08",
+      "question": "With the attempt loop's body exhausted, what is actually open in C08, and does anything found there reach a sibling cluster?",
+      "result": "C08 stays OPEN, with its debt restated from a page count to seven unwalked producers. Two findings registered against C13 before that cluster is ever walked. Three stale lines corrected in the operator's map.",
+      "bookkeeping_done": [
+        "C08's standing open item — 'the 423-line body still not read line by line' — is CLOSED; all 628 lines were read and the five candidates that read produced are all closed as units. The old wording's number was wrong too: _run_attempt_loop is 401 lines, the file is 628.",
+        "C08's open list re-derived: the seven still-unwalked producers of _step_trigger_tls, and whether the empty-plan and partial-attempt findings change anything C13 owns.",
+        "C13 gains _inherited_from_C08_2026_08_09 so its future walk starts from the two findings that ran into its consumer rather than rediscovering them.",
+        "path_ledger.next_edge re-derived to match."
+      ],
+      "echoes_hunted": [
+        "docs/PROJECT_MAP.ru.md:1440 carried the drifted anchor loop_attempt:472 — corrected to :448 with the reason.",
+        "docs/PROJECT_MAP.ru.md:1441 listed the _step_trigger_tls writers as '362,385,416…' — replaced with all eleven and the note that the record was wrong when written, not stale.",
+        "docs/PROJECT_MAP.ru.md's proven chain policy_blocked -> denied_tools -> blocked_and_disclosed stated without scope — the C08-U4 qualification added: it holds for an attempt that failed ENTIRELY, and is unreachable when the same attempt produced any artifact."
+      ],
+      "a_reformatting_error_caught": "The first attempt at these edits round-tripped cns_model.json through json.dump, which reformatted 761 lines of a hand-formatted file and would have buried a three-line change. Reverted and redone as text edits; the diff is now 3 insertions and 3 deletions.",
+      "verdicts": {
+        "REACHABILITY": "N/A",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A bookkeeping unit. No new behaviour was measured, and no verdict is claimed.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "Bookkeeping. No measurement was made, so there is no domain to record."
+    },
+    {
+      "id": "C08-U6-producer-reachability-census",
+      "cluster": "C08",
+      "question": "Of the eleven producers of _step_trigger_tls, which are live and which were never producers at all?",
+      "result": "Eleven sites, but not eleven live producers. One is unreachable, one was already certified under another name, and four plus a last-resort guard remain genuinely unwalked.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [],
+        "observed": [
+          "static reachability derived from the type system and from every construction site in core/ cli/ app/ api/ tools/"
+        ],
+        "durable_state": "none",
+        "external": "none"
+      },
+      "census": {
+        ":362 :385 :416": "policy_blocked family — certified M51.",
+        ":451": "the approval verdict (approval_deny / approval_abort / approval_unavailable) — ALREADY certified as approval_verdict_stops_the_step, M54/M55. The carrier record simply never named the site, so it read as unwalked debt.",
+        ":462": "UNREACHABLE. It fires only when action.type != 'tool_call'. Action.type is Literal[tool_call, llm_synthesize, output]; both production plan builders write tool_call (loop_attempt.py:550, self_repair.py:274); and no code in core/cli/app/api/tools deserialises a Plan or PlanStep from external data — no Plan(**...), no model_validate. A defensive branch, not a producer.",
+        ":496": "LIVE, unwalked — replan_code, the tool-error path.",
+        ":528": "LIVE, unwalked — verify_failed, tool result validation.",
+        ":555": "LIVE, unwalked — web_empty.",
+        ":576": "LIVE, unwalked — timeout, shell_exec.",
+        ":653": "injection_blocked — walked end to end by this program (C08-U1, C08-U2).",
+        ":789": "a last-resort guard around postprocessing writing code=unknown; reachable only if classify/redact/cache_store raises, and not yet driven."
+      },
+      "corrects_my_own_earlier_statement": "The closure review one commit earlier said 'seven unwalked producers'. The count was right and the characterisation was not: one of the seven cannot fire at all and one was already certified under a different name. The debt is four live producers and one guard.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A census, not a bite. Nothing was mutated and no behaviour is claimed beyond reachability."
+    },
+    {
+      "id": "C08-U7-verify-failed-producer",
+      "cluster": "C08",
+      "question": "Does the verify_failed producer deliver a distinguishable value, and is anything watching?",
+      "result": "PROTECTED. The prediction of another unobserved delivery was wrong, and the way it was wrong is the finding.",
+      "prediction": "GREEN, stated before the run.",
+      "observed": "RED. Three pre-existing tests caught the mutation — 3 failed, 7294 passed. Restore byte-identical (4eaa5500).",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "one tool that succeeds and then rejects its own output through validate_output",
+          "a CONCRETE question — a vague one is stopped by the C04 clarification gate before the planner is ever called"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "verify_failed carries budget 2, so it BUYS a retry, which is what makes the advice consumer reachable at all"
+        ],
+        "durable_state": "temporary workspace",
+        "external": "none"
+      },
+      "mutation": "ONE literal at core/loop_step_execution.py:531, verify_failed -> web_empty. Both budget 2, both requires_different_action=False, so control flow is identical and only the advice text moves. The ErrorObject at :521 left alone so the trigger is isolated from the journal.",
+      "the_finding": "An unwalked producer is not an unprotected one. And the test that caught it — test_failure_context_contains_code_tool_reason — asserts `code=verify_failed` inside the planner's failure_context, which is exactly the assertion shape injection_blocked lacked. The pattern existed in this repository, in an MVP-8-era file, and was not carried to the newer security path.",
+      "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys: planner call 1 carries 436 characters containing both the code and the advice, call 0 carries none. That is the consumer C08-U2 could not exercise.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "no_new_test": "None written. The existing protection is stronger than what this unit would have added.",
+      "harness_error_recorded": "The first probe reported zero of everything. Not the subject: the question was «сделай что-нибудь» and the C04 clarification gate stopped the run before the planner. The gate was working; the probe was asking something the agent is designed to refuse."
+    },
+    {
+      "id": "C08-U8-remaining-producers",
+      "cluster": "C08",
+      "question": "Are web_empty, timeout and the tool-error path watched the way verify_failed is, or the way injection_blocked was?",
+      "result": "Mixed, and the mixture is the finding. web_empty PROTECTED (2 tests, as predicted). timeout UNPROTECTED (7297 passed with the code swapped) — now guarded. The two variable-code producers remain unmeasured by this method.",
+      "predictions_before_the_runs": "web_empty RED (named in an acceptance test) — correct. timeout GREEN (its sixteen mentions are about tool timeouts, not the trigger) — correct. tool_error RED — untested this round, the producer selects its code at runtime.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3, the shipped default",
+          "a stand-in shell_exec returning {'timed_out': True}, because the loop's condition is the tool NAME plus that key",
+          "a concrete question — a vague one is stopped by the clarification gate before the planner runs"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "timeout and web_empty both carry budget 2 and requires_different_action=False, so swapping one for the other leaves control flow identical"
+        ],
+        "durable_state": "temporary workspace",
+        "external": "none"
+      },
+      "reachability_proven_first": "The timeout site fires: the tool runs twice under budget 2, and the retry prompt changes from the timeout advice (414 chars) to the web_empty advice (478 chars). The green was therefore about the observer, not about the site.",
+      "the_shape_of_the_gap": "Protection is inherited, not uniform. MVP-8-era files assert that the planner's retry context NAMES the code; where that pattern was carried the producer is protected, where a newer path was added it was not. injection_blocked is a security path whose test asserted the consequence deliberately; timeout is an operational path with sixteen files mentioning the word and none watching the trigger.",
+      "why_it_matters": "Each code selects its own advice. timeout says REDUCE SCOPE; web_empty says REFORMULATE the query. A shell command that ran out of time and is told to rephrase its query has been handed advice for a different failure.",
+      "made_durable": "tests/test_shell_timeout_replan_code.py — the same assertion shape the protected producers already had, plus the advice text itself. Fail-before verified: two of three red on the mutation, the precondition test stays green because the budget is unchanged.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN after this unit; NEGATIVE for timeout before it"
+      },
+      "scope_limitation": "Four literal producers measured. The variable-code producers (:489/:497 replan_code, :451 the approval verdict) select their code at runtime and were not measured this way; :451 is separately certified as M54/M55."
+    },
+    {
+      "id": "C08-U9-variable-code-producers-and-last-guard",
+      "cluster": "C08",
+      "question": "The two producers whose code is computed rather than written — the failure classifier and the last-resort postprocessing guard — are they watched?",
+      "result": "The classifier is PROTECTED, as predicted. The last-resort guard is NOT, and is now guarded. The producer set of _step_trigger_tls is fully accounted for.",
+      "the_classifier": "raw_error.startswith(('FileNotFoundError:', 'IsADirectoryError:')) -> file_not_found, else tool_error. A textual discrimination on an error string whose outcomes carry different budgets (1 vs 2) and different requires_different_action flags, so misclassification changes control. Replacing the prefix tuple with one that never matches reddens three tests in TestFileNotFoundReplan.",
+      "the_last_resort_guard": "Wraps classify, injection scan, redact and cache store at :780. It behaves WELL — logs the error, invents no artifact, writes a trigger — unlike the two silent handlers in the attempt loop. Its code is `unknown`, whose max_occurrences=1 turns 'postprocessing is broken' into 'stop' rather than 'retry the same broken pipeline'. Changed to tool_error: the tool is invoked TWICE, the same error is logged twice, and 7300 tests pass.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "max_replan_attempts=3",
+          "a tool that succeeds and returns harmless output so the break is strictly downstream",
+          "classify() rebound to raise, inside the guarded stretch",
+          "a concrete question"
+        ],
+        "observed": [
+          "FakeLLM synthesizer"
+        ],
+        "durable_state": "temporary workspace",
+        "external": "none"
+      },
+      "made_durable": "tests/test_postprocessing_guard_stops_the_run.py — both halves asserted, because asserting only the stop would pass equally against a system that never ran the tool.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN after this unit"
+      },
+      "closes": "The _step_trigger_tls producer debt that P02 opened. Eleven sites: three policy_blocked (M51), one approval verdict (M54/M55), one unreachable, four literal producers, and these two. Three of the nine reachable ones had no observer and are now guarded."
+    },
+    {
+      "id": "C09-U1-fold-guard-granularity",
+      "cluster": "C09",
+      "question": "Is the per-record guard granularity in the evidence fold protected, or only commented?",
+      "result": "PROTECTED. Second falsified prediction in a row.",
+      "prediction": "GREEN — the one test found by grepping the event name saves a SINGLE record, and with one record a per-record guard and a per-loop guard are observationally identical. The premise was verified on a shim first: one record gives chain 0 and one skip event either way; two records with the first failing give chain 1 under the real code.",
+      "mutation": "ONE relation: a `break` at the end of the except block, reproducing the historical behaviour the MIR-061 comment describes.",
+      "observed": "RED, by tests/test_evidence_integration.py::TestMalformedMemoryRecordDoesNotTruncateChain::test_one_bad_record_only_skips_itself — a test named for exactly this property. Restore byte-identical (cbedbdc5).",
+      "why_the_prediction_was_wrong": "The grep found the event name in one test and I stopped there. The class holds a second case, with two records, that discriminates precisely this. Grepping an event name finds the tests that LOG it, not the tests that discriminate on it.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "PROVEN"
+      },
+      "no_new_test": "None. Adding one would duplicate a better-named existing case.",
+      "scope_limitation": "One of the three folds. The working-memory fold reports through _sensor_failed and the dialogue fold through dialogue_evidence_skipped; neither was measured, and no test names either event.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Held values recoverable without a rerun: the premise shim is scratchpad/probe_fold.py (one record versus two, first failing), the mutation is stated in commit 6714db7, and the suite result sits under the ambient domain above."
+    },
+    {
+      "id": "C09-U2-the-other-two-folds",
+      "cluster": "C09",
+      "question": "Do the working-memory and dialogue folds hold the granularity the persistent fold is guarded for?",
+      "result": "They hold it, and nothing behavioural was watching. Now guarded.",
+      "prediction": "GREEN — and this time the check was for a test that DISCRIMINATES rather than one that logs: no test names either skip event, and both uses of evidence_from_prior_turn in the suite construct evidence directly instead of injecting a failure.",
+      "premise_verified_first": "On a shim, both folds are granular under the real code: a malformed artifact and a failing turn conversion each skip only themselves, and the dialogue fold's admitted count reports 1 rather than 2.",
+      "mutation": "The same one relation applied to both — a break at the end of each except block. Both live: the chain drops 1 -> 0 in each case.",
+      "observed": "One failure in the whole suite, and not a behavioural one: test_logic_moved_symbol_for_symbol, an AST body-equivalence ratchet from the module split. 7302 passed with both folds truncating. Restore byte-identical (cbedbdc5).",
+      "why_that_is_not_protection": "C06 already ruled on this shape: a guard that fires on any edit cannot tell a deliberate change from a deleted safety condition. It would redden identically for a renamed local.",
+      "made_durable": "tests/test_evidence_fold_granularity.py — all three properties behaviourally, plus a fourth test asserting three items land when nothing fails so the others cannot pass on an empty fold. Fail-before verified: three of four red.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before, PROVEN after"
+      },
+      "scope_limitation": "The new tests drive the method through a shim, so they would not notice if _fold_evidence_chain stopped being called; the evidence_collected assertions elsewhere would. Stated in the file rather than hidden.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Same shape: scratchpad/probe_fold2.py holds the two-item fixtures for both folds, tests/test_evidence_fold_granularity.py holds them permanently, commit 0344a12 states the mutation."
+    },
+    {
+      "id": "C09-U3-catalogue-decision-surface",
+      "cluster": "C09",
+      "question": "What values cross into a decision in the ranking and cataloguing half of C09?",
+      "result": "Five values enumerated by reading both methods end to end. One of them is explicitly NOT a decision, and the best-covered one shows the protection shape the evidence folds lacked.",
+      "the_surface": [
+        "may_source_registry — chooses whether source_store is passed, therefore whether the registry is PERSISTED. Two test files name it.",
+        "may_knowledge — chooses `remember` and `auto_write_memory`; gates a write to LONG-TERM MEMORY. Two test files name it.",
+        "_unattended_run() -> require_verified — an unattended run must have corroboration before a claim reaches memory; read from gateway_path.",
+        "cheap_path_active — selects or skips the whole catalogue branch; already measured under C08's cheap-path candidate.",
+        "_premature_keyword_fired — explicitly NOT a decision: a shadow detector retained for comparison, measured at 1/12 recall, firing on «объясни разницу…» because `разниц` is a diff-tool keyword. Carried into an event, never acted on."
+      ],
+      "already_protected": "The unattended gate is the best covered: tests/test_verified_memory_gate_follows_gateway_path.py drives _unattended_run() across gateway paths AND asserts by AST that require_verified is passed _unattended_run at the call site. Behaviour plus wiring — exactly the pairing the two evidence folds lacked, and worth naming as the pattern to look for.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "UNPROVEN",
+        "SEMANTICS": "UNPROVEN",
+        "PROTECTION": "UNPROVEN"
+      },
+      "note": "A read, not a bite. Nothing is claimed beyond where these values are and what they gate.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "A read. No experiment, no domain."
+    },
+    {
+      "id": "C09-U4-catalogue-sink-permissions",
+      "cluster": "C09",
+      "question": "may_source_registry and may_knowledge each gate a durable write. Is either observed, or only the flag?",
+      "result": "Neither was observed at the DERIVATION. A one-string swap left 7307 tests green. Now guarded behaviour-plus-wiring.",
+      "prediction": "GREEN — stated after establishing that no test uses a partial allowlist, and that the two answers are equal under every non-partial one.",
+      "premise_verified_first": "The gate was measured across all four allowlist shapes: None allows both, frozenset() denies both, and only a partial allowlist makes them differ.",
+      "mutation": "ONE string at core/loop.py:312 — may_knowledge asks about source_registry.",
+      "observed": "GREEN, 7307 passed, exit 0. Restore byte-identical (8671c8f1).",
+      "what_the_neighbour_could_not_see": "test_catalogue_core_is_shared.py::test_permissions_reach_the_pipeline covers the hop AFTER this one and supplies the booleans itself, so a swap upstream is invisible to it.",
+      "my_own_trap_recorded": "The behavioural tests were written first and did NOT redden on the swap: they call _durable_learning_suppressed directly, exercising a restatement of core/loop.py rather than core/loop.py. Same shape this project recorded once before, with a replay gate restated inside a test instead of called. Caught by the break-did-not-redden rule.",
+      "made_durable": "tests/test_catalogue_permissions_name_their_own_sink.py — behaviour (a partial allowlist permits only its own sink, both directions, plus a guard naming the configurations that cannot discriminate) and wiring (an AST assertion that each derivation passes its own name). The pairing test_verified_memory_gate_follows_gateway_path.py already uses; not a body-equivalence ratchet.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before, PROVEN after"
+      },
+      "scope_limitation": "The wiring assertion reads the call site statically. A full turn reaching the catalogue branch under a partial allowlist would be stronger and was not written.",
+      "evaluation_domain_class": "DOMAIN_RECONSTRUCTED",
+      "evaluation_domain_note": "Two halves. The gate enumeration over all four allowlist shapes is runtime-domain-free and is preserved in tests/test_catalogue_permissions_name_their_own_sink.py. The full-suite mutation result sits under the ambient domain above. Commit ec63e0a states the mutation."
+    },
+    {
+      "id": "C09-closure-review",
+      "cluster": "C09",
+      "question": "With four units done, what does C09 still owe?",
+      "result": "Not closable. Two of the five values on its decision surface are untouched and a third is accepted on the code's own word.",
+      "bookkeeping_done": [
+        "C09 gains partial_walk and open in the ledger; it had neither, so the cluster read as untouched while four units had landed on it.",
+        "Three open items named: rank_chain itself (never entered, though its output reaches the synthesis prompt and the source registry); the knowledge pipeline's own contract (this cluster proved the three permissions REACH it, not what it does with them); and _premature_keyword_fired, recorded as a non-decision on the strength of its own docstring rather than a walked consumer.",
+        "path_ledger.next_edge re-derived to name the admissible fronts: those three items, C08's remainder, or C10."
+      ],
+      "verdicts": {
+        "REACHABILITY": "N/A",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "note": "A bookkeeping unit. Nothing measured. The one judgement it makes is that a cluster is not closed because its best-lit half is finished — the same correction C08's closure review had to make.",
+      "evaluation_domain_class": "NOT_APPLICABLE",
+      "evaluation_domain_note": "Bookkeeping."
+    },
+    {
+      "id": "C09-U5-premature-detector-consumers",
+      "cluster": "C09",
+      "question": "Is _premature_keyword_fired's status as a non-decision measured, or is it the code's claim about itself?",
+      "result": "CONFIRMED, and by a stronger argument than the claim carried.",
+      "method": "COMPLETE ENUMERATION rather than a mutation. A mutation shows only that the TESTED consumers ignore a value; the enumeration shows no consumer exists to act on it.",
+      "the_whole_path": "Produced at loop_evidence_chain.py:294, returned at :341, unpacked at loop.py:508, passed at loop.py:641, received at loop_run_tail.py:279, and written at :324 as _payload['shadow_keyword_detector'] = bool(...). That assignment is the terminus; no occurrence anywhere is a condition. The key itself appears exactly once in production and in one test file that asserts its presence and value.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "N/A"
+      },
+      "no_test_added": "There is no behaviour to protect. A test pinning 'nothing reads it' would be an enumeration frozen in amber, and the enumeration is cheap to redo.",
+      "scope_limitation": "Static, over the production tree. A consumer reaching the field through the journal FILE after the fact — an operator, an analysis script outside these paths — is not covered, and is exactly what the field exists for.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Complete static enumeration over the production tree. Commit d7cc6d5 records the whole path from producer to terminus."
+    },
+    {
+      "id": "C09-U6-rank-chain",
+      "cluster": "C09",
+      "question": "Does the ORDER of the evidence ranking change any consumer, or only a field that travels on the same object?",
+      "result": "The order reaches NO decision. Every production consumer is order-invariant; the order surfaces only in the journal.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Complete static enumeration over the production tree at f889973. No runtime domain exists; the three admissibility conditions for enumeration were verified, not assumed.",
+      "method": "Enumeration rather than mutation, per C09-U5. Conditions checked: unique unshadowed attribute names; the only indirect accesses are three getattr sites, all reading realtime_required; the derived key (to_log_payload) enumerated as well.",
+      "consumers": "output_policy filters by support_level (set membership) and takes min(confidence_ceiling) (aggregate); support_counts counts; source_registry builds a dict keyed by evidence_id; three sites read the realtime_required FIELD. All order-invariant.",
+      "where_the_order_reaches": ".best, whose max() tie-break is order-sensitive and whose only consumer in the entire tree is to_log_payload; and the ranks list order inside that same payload. Nothing reads either key, and the ranking is never serialised into durable state.",
+      "the_collapse": "Under the enumerated production observer set, 'ordering of evidence' collapses to (multiset of support_levels, min confidence_ceiling among direct, realtime_required). rank_chain is named as a ranker and consumed as a classifier.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "NEGATIVE for the order; PROVEN for the labelling, aggregate and flag",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "N/A"
+      },
+      "no_test_added": "No behaviour depends on the order, so there is nothing to protect. The INVARIANCE is unguarded — a later consumer reading ranks[0] would make the order semantic silently — and that is registered as a candidate, not claimed here.",
+      "validation": "Ledger-only change: targeted guards (test_cns_model.py, test_cns_anchor_integrity.py) and the subject guard. No full suite, which for a ledger-only change establishes nothing."
+    },
+    {
+      "id": "C08-U10-actuation-outcome-census",
+      "cluster": "C08",
+      "question": "Is the actuation certification a claim about the outcome SET, or about the paths a walk happened to touch?",
+      "result": "About the walk. The outcome space is SIX values wide; the record accounts for at most three.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Static census over core/actuation_gateway.py and core/gateway_consult.py at f889973. No runtime domain.",
+      "the_six": "passthrough (:121), block (:104), deny (:137), escalate (:144), simulate (:153), allow (:160).",
+      "the_record": "gateway_refusal_stops_the_effect CERTIFIED (M52, M53) — 'both refusals ... while only simulate was covered end to end'. Simulate plus two refusals = at most three of six. WHICH two is not stated and is deliberately not guessed here.",
+      "provenance_collapse": "The `block` outcome is produced by collect_hard_stop_reasons from at least three independent sources — a kill switch whose status derives from the budget snapshot, and readiness blockers gated by check_readiness. Distinct causes, one value. Unmeasured whether any consumer distinguishes them.",
+      "unmentioned_entry_point": "ActuationGateway.evaluate_self_apply (:167-193) appears in no C08 certification.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN for the enumeration",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "N/A"
+      },
+      "method_note": "Census, not a bite. It establishes the debt precisely and nothing about behaviour — the same instrument and the same limits as C08-U6."
+    },
+    {
+      "id": "C08-U11-identify-the-certified-refusals",
+      "cluster": "C08",
+      "question": "Which two of the six gateway outcomes did M52/M53 certify, and what does that leave uncovered?",
+      "result": "M52 = deny, M53 = block, plus a prior observer for simulate. The gap is not where the census predicted: it is INSIDE `block`, whose second producer was never driven through the loop.",
+      "evaluation_domain_class": "RUNTIME_DOMAIN_FREE",
+      "evaluation_domain_note": "Read the certifying test file and the reason collector at f889973. No runtime domain.",
+      "guess_replaced_by_evidence": "The census refused to name which two refusals M52/M53 certified. tests/test_gateway_refusals_stop_the_effect_c08.py answers it in its own docstring and test names: M52 is `deny` (test_a_gateway_deny_prevents_the_write) and M53 is `block` (test_a_gateway_hard_stop_prevents_the_write). `simulate` had a prior end-to-end observer. The certified set at the LOOP level is deny + block + simulate.",
+      "census_corrected_both_ways": "AGAINST the census: escalate has a loop-level and runtime-level contract file, and allow/passthrough are permissive outcomes whose failure mode end-to-end tests already catch. IN FAVOUR: the gap that does exist is sharper than the census could see — `block` has two producers and M53 walked only the kill switch.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN for the enumeration",
+        "CAUSALITY": "N/A",
+        "SEMANTICS": "N/A",
+        "PROTECTION": "UNPROVEN for the readiness_blocker producer at the loop level"
+      },
+      "what_is_not_claimed": "That the loop disobeys a readiness-blocker block. Nothing here measures behaviour. The claim is exactly that no observer was found for it at the loop level, which is a statement about the search."
+    },
+    {
+      "id": "C08-U12-readiness-blocker-block-through-the-loop",
+      "cluster": "C08",
+      "question": "Does the loop obey a `block` produced by a readiness blocker, and does anything observe it?",
+      "result": "It obeys. Nothing observed it. Now guarded.",
+      "prediction": "GREEN, stated before the run, on the C08-U11 grounds that this producer is exercised only by direct class and function calls.",
+      "evaluation_domain": {
+        "code": "f889973",
+        "held": [
+          "approval_provider=AutoApprover(default='approve') — so nothing but the gateway can stop the effect",
+          "NO kill switch engaged at any point — the other producer is the subject",
+          "max_replan_attempts=1, clarification_enabled=False",
+          "a one-step plan whose only step is an effectful file_write"
+        ],
+        "observed": [
+          "FakeLLM synthesizer",
+          "the ambient suite domain declared once in ambient_evaluation_domain"
+        ],
+        "durable_state": "temporary workspace; the write target is the observable",
+        "external": "none"
+      },
+      "evaluation_domain_class": "DOMAIN_RECORDED",
+      "premise_proven_first": "Three poles measured on the real code. Readiness blocker plus check_readiness=True: gateway returns `block` with reason 'readiness_blocker: 2 approval item(s) pending', the file is NOT written, and gateway_blocked plus replan_exhausted are journalled. Same blockers with check_readiness=False: `allow`, file written. Nothing engaged: `allow`, file written. So the behaviour is CORRECT and the gate is check_readiness, not the tuple.",
+      "mutation": "ONE relation at the wiring, core/loop_step_execution.py:322: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
+      "observed": "The mutation is live: the subject probe's gateway returned `allow`, the file reached the disk. FULL SUITE GREEN — 7313 passed, 5 xfailed, exit 0. A readiness blocker stopped being able to stop an effectful write and nothing in the suite noticed. Restore byte-identical (4eaa5500), subject INTACT.",
+      "the_certifying_test_stayed_green": "Under the same mutation, tests/test_gateway_refusals_stop_the_effect_c08.py passed both its cases, because M53 drives `block` through a latched kill switch. A certification of an OUTCOME is not a certification of its PRODUCERS — measured here, not argued.",
+      "made_durable": "tests/test_gateway_readiness_block_stops_the_effect.py asserts the same three facts the kill-switch test does — the effect does not happen, the refusal is journalled under its own code, the failure reaches the replan machinery — and additionally requires the block to be attributed to the readiness producer BY NAME, so a block arriving from the kill switch cannot satisfy it. Two controls carry the anti-vacuity: with the gate off, and with nothing engaged, the write goes through. Fail-before verified.",
+      "verdicts": {
+        "REACHABILITY": "PROVEN",
+        "CAUSALITY": "PROVEN",
+        "SEMANTICS": "PROVEN",
+        "PROTECTION": "NEGATIVE before this unit; PROVEN after"
+      },
+      "scope_limitation": "One producer of one outcome, driven through the repl path with an auto-approver. Nothing is claimed about the runtime path, nor about what happens when both producers fire at once."
+    }
+  ],
+  "current_unit": null,
+  "next_admissible_unit": {
+    "id": "C08-U13-evaluate-self-apply",
+    "cluster": "C08",
+    "entry_question": "ActuationGateway.evaluate_self_apply is a second public entry to the same gateway and appears in no C08 certification. What outcomes does it produce, which producers feed them, and is the caller's obedience observed?",
+    "why_this_one": "It is the last item the actuation census turned up and the only remaining entry point with no certification at all. The same question that has now paid three times on this cluster — which producers did the walk actually touch — applies to it untouched.",
+    "method_note": "tests/test_gateway_self_apply.py exists and names block, deny and escalate. Read it FIRST to see which of those it drives through a caller and which it asserts on the class, exactly as C08-U11 did for M52/M53. Do not guess."
+  },
+  "last_proven_causal_front": "C00-C07 carried forward. C09's own scope exhausted apart from the knowledge pipeline's contract. C08 actuation: outcome space enumerated at six; the certified pair named by evidence; the readiness producer of `block` proven correct, proven unobserved and now guarded. evaluate_self_apply remains uncertified.",
+  "unresolved_contradiction": null,
+  "open_questions": [
+    "Should the carry-forward derivation become a guard in the suite, or does a guard that re-derives site sets on every run cost more than the staleness it catches?",
+    "C00 and C03 site sets are over-approximations recovered from test imports. Tightening them is admissible work but has not been done; the over-approximation is safe for staleness and unsafe for coverage claims.",
+    "C08 candidate: cheap_path_active crosses out of the attempt loop to FOUR consumers (loop_evidence_chain:309, loop_synthesis:584 and :641, loop.py:684), and its own docstring at loop_attempt.py:83-84 names three — omitting the only one that reaches durable state (skip_consolidation -> memory consolidation). Three of the four have two-pole end-to-end tests; the lean_context wire at :641 is a disjunction with adapt_context and may be masked.",
+    "C08 candidate: attempt_failures is discarded on the SUCCESS path. A plan where one step fails and another produces an artifact breaks at loop_attempt.py:441 before the extend at :448, so the failed step's trigger never enters failure_history. The obligation arbiter at loop_run_tail.py:301/315 reads failure codes; step.status == 'failed' may mask the loss at completion_obligation.py:250.",
+    "C08 candidate: inconsistent failure semantics inside one method — two naked `except Exception: pass` (loop_attempt.py:335, :359) beside two handlers that report through _sensor_failed (:470, :627).",
+    "C08 candidate: force_file_hint_read_when_explicit is applied to every planner substitution EXCEPT the forced_sources branch on attempt 1."
+  ],
+  "changed_files_this_checkpoint": [
+    "scripts/qm_subject_freeze.py (new)",
+    "tests/test_qm_subject_freeze.py (new)",
+    "knowledge/quantum/PROGRAM_CHECKPOINT.json (new)",
+    "knowledge/maps/cns_model.json (quantum_cns._program, .carry_forward, .defect_bank, .coverage; C06 scope correction; epilogue on the stale-comment record)"
+  ],
+  "checks_run_on_this_tree": {
+    "scripts/qm_subject_freeze.py": "INTACT",
+    "targeted": "test_cns_model.py, test_cns_anchor_integrity.py, the new gateway file and the certifying C08 file",
+    "mutant_run": "readiness producer disabled: 7313 passed, 5 xfailed, exit 0 — the green that made the finding",
+    "full_suite": "not run on the final tree: the change is a new test file plus ledger, and the mutant run above is the load-bearing measurement"
+  },
+  "units_completed_count": 16,
+  "ambient_evaluation_domain": {
+    "_why_here_and_not_per_unit": "Declared ONCE. A unit records only the values it HELD that could have been otherwise and that its conclusion depends on; repeating the ambient conditions in every record made them look like unit-specific choices and hid the ones that were.",
+    "established_by": "reading tests/conftest.py, not by re-running anything",
+    "applies_to": "every full-suite and targeted pytest result recorded by this program",
+    "conditions": [
+      "outbound network denied session-wide by the autouse _deny_outbound_network fixture unless AGENT_TESTS_ALLOW_NETWORK=1",
+      "operator model-routing env stripped before each test by _neutralize_operator_model_env",
+      "a placeholder credential guaranteed by _ensure_placeholder_credential — read only to answer 'is one present?'; no test constructs a real client",
+      "Python 3.11.9, Windows 11, pytest 9.0.3"
+    ]
+  },
+  "evaluation_domain_audit_E2": {
+    "run": "2026-08-09, zero pytest executions — reading only",
+    "question": "Can the held values of every unit lacking a structured evaluation_domain be recovered from durable artifacts without re-running the experiment?",
+    "result": "YES for all ten. Four are RUNTIME_DOMAIN_FREE (static analysis has no runtime domain), three are NOT_APPLICABLE (no measurement), three are DOMAIN_RECONSTRUCTED from probe scripts, test files and commit messages that all still exist. DOMAIN_IRRECOVERABLE: none.",
+    "hypothesis_corrected": "The previous review asserted 'zero reruns required' as a conclusion. It was a hypothesis. This audit establishes it; before the audit it was not evidence.",
+    "term_corrected": "RUNTIME_DOMAIN_FREE, not DOMAIN_FREE. A static unit still depends on the snapshot, on the tool version and on its discovery rule — it is free of a RUNTIME domain, not of all conditions.",
+    "artifacts_verified_present": [
+      "carry.py",
+      "carry2.py",
+      "anchor_rule.py",
+      "tls.py",
+      "tls2.py",
+      "probe_rule1.py",
+      "probe_fold.py",
+      "probe_fold2.py"
+    ],
+    "rule_going_forward": "Ambient conditions are declared once in ambient_evaluation_domain. A unit records only the values it HELD that could have been otherwise and that its conclusion depends on. Quotienting or equivalence claims across units with incompatible held values are forbidden — this is the rule that C08-U1 (max_replan_attempts=1) and C08-U2 (=3) needed and did not have."
+  },
+  "execution_directive_2026_08_09": {
+    "_status": "Operator execution directive for the overnight run, as CORRECTED by the operator on 2026-08-09 after an adversarial critique round. It governs the execution regime; the mapping program's evidence rules, proof axes and fixpoint criteria remain authoritative where they are actually stated.",
+    "authority_is_claim_specific": {
+      "_replaces": "The directive's original §19 linear source hierarchy. There is NO universal linear source hierarchy. Operator ruling, 2026-08-09.",
+      "normative / program claim": "the explicit operator or program source is authoritative",
+      "structural existence / site inventory": "frozen source, or mechanically complete structural analysis",
+      "runtime reachability": "positive controlled execution can PROVE reachability within its evaluation domain. Failure to observe execution does NOT prove unreachability. Unreachability requires an exhaustive structural/semantic argument relative to an explicit domain.",
+      "runtime behavioural / consequence": "controlled measurement is primary; source is used to explain the mechanism",
+      "historical / provenance": "repository and git history",
+      "mutant observation": "describes the MUTANT directly. A controlled baseline-vs-mutant differential may establish causal dependence or protection of a relation in S under the stated preconditions. The mutant's ordinary behaviour is NEVER generalised into behaviour of S."
+    },
+    "instrument_fits_the_claim": {
+      "_replaces": "The directive's original §6 read as mutation-mandatory. Operator ruling, 2026-08-09.",
+      "rule": "A mutation is not mandatory for every semantic unit. Census, exhaustive enumeration, static proof, controlled observation and mutation are all admissible WHEN THEIR COMPLETENESS ASSUMPTIONS ARE EXPLICIT. The mutation-specific steps (predict, mutate, observe, restore, re-verify) apply only when mutation is the selected instrument.",
+      "limit_on_enumeration": "Enumeration may establish CONSUMER ABSENCE only within a mechanically justified complete discovery domain. It does NOT automatically establish downstream semantic equivalence or consequence."
+    },
+    "mutation_journal": {
+      "_implements": "The directive's §15C, as corrected. Operator ruling, 2026-08-09.",
+      "tool": "scripts/qm_mutation_journal.py, guarded by tests/test_qm_mutation_journal.py",
+      "before_every_production_mutation": "persist path(s), baseline hash(es), snapshot and intent",
+      "close_only_after": "byte-identical restoration verified by hash",
+      "recovery_is_authorised_only_for": "paths recorded in an OPEN entry whose baseline is mechanically tied to S. The tool refuses to open over a path that already differs from S, precisely because such an entry could not authorise recovery.",
+      "unexplained_drift": "NOT restored, NOT deleted. Reported as an INTEGRITY CONFLICT and left for adjudication. A recovery tool that destroys an unexplained change destroys the evidence that something else is happening.",
+      "bitten_on_every_branch": "clean status, open, refusal of a second open, refusal to close while mutated, authorised restore, and the conflict branch with one modified and one untracked unexplained path — both of which survived."
+    },
+    "two_closure_criteria_that_do_not_imply_each_other": {
+      "cluster closure": "SOURCE: knowledge/maps/cns_model.json -> path_ledger._mandate, operator mandate 2026-08-08. 'A cluster is closed only when its report (SCOPE -> EXECUTION PATH -> SIGNALS/STATE -> OWNERSHIP -> FAILURE SEMANTICS -> TEST EVIDENCE -> MUTATION EVIDENCE -> VERDICT -> NEXT EDGE) exists and its critical contracts have proven bites.'",
+      "program completion": "SOURCE: the plan's closure section — a repeated discovery pass over anatomy, state spaces, consumers, env reads, command surfaces and graph checks, until a pass produces no unclassified reachable candidate.",
+      "ruling": "Keep them distinct. Do not infer either from the other. Operator, 2026-08-09.",
+      "my_error_both_ways": "I claimed first that PARTIAL made the fixpoint unreachable by construction (importing a completion requirement the plan does not contain), and then that no cluster-closure criterion existed at all (having grepped ONE file and not the registry). Both wrong. The same failure shape as C09-U1: search one place, find nothing, declare absence."
+    },
+    "new_normative_claims_require_a_source": {
+      "rule": "Before any claimed program obligation, completion criterion, ordering rule or scope rule governs execution, name its authoritative source. If none exists, write INFERRED — NOT AN OPERATOR REQUIREMENT and continue on the actual program. Never invent a rule in order to prove the system obeys it.",
+      "instance_caught_by_this_rule_today": "I cited 'three enumeration-admissibility conditions' as established by C09-U5. They appear at exactly ONE registry location — the method field of the_ranker_is_consumed_as_a_classifier — where I wrote them myself while attributing them to C09-U5, whose own record does not contain them. SOURCE-BACKED: the two-step practice (enumerate the name, then the derived key). INFERRED — NOT AN OPERATOR REQUIREMENT: the generalised three-condition rule, plus a false self-citation."
+    },
+    "executor_identity": {
+      "finding": "Every commit of this run and eight before it carry 'Co-Authored-By: Claude Fable 5'. The harness instruction says Claude Opus 5 and the environment declares the model as Opus 5. The trailer contradicts the only authority available.",
+      "resolution": "History is NOT rewritten. Future trailers follow the harness-declared Claude Opus 5. WITHDRAWN: my claim that rewriting history is 'directly prohibited by §10' — §10 concerns production repair authority and contains no such prohibition. The decision stands; the cited authority was overstated."
+    }
+  }
+}

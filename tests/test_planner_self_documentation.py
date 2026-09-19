@@ -1,0 +1,277 @@
+"""MVP-14.4.x — planner's self-documentation allowlist.
+
+`file_read` USED to require a `--file hint` from the user. That made
+introspective questions like "what do you understand about yourself?"
+impossible to answer with verified evidence: planner had no way to
+reach for README.md, so it called weak tools (read_logs, shell_exec)
+or fell back to LLM-prior knowledge.
+
+This module pins the narrow exception we added:
+
+  * `file_read README.md` is allowed even without `--file hint`;
+  * any OTHER path without a hint still gets dropped;
+  * the allowlist is overridable via the constructor with strict
+    validation (no absolute paths, no traversal, ASCII only).
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from core.planner import LLMPlanner
+from tools.base import ToolRegistry
+from tools.diff_file import DiffFileTool
+from tools.file_read import FileReadTool
+from tools.file_write import FileWriteTool
+from tools.read_logs import ReadLogsTool
+from tools.run_tests import RunTestsTool
+from tools.shell_exec import ShellExecTool
+from tools.web_fetch import WebFetchTool
+from tools.web_search import WebSearchTool
+
+
+def _planner(
+    workspace: Path,
+    self_documentation_paths: tuple[str, ...] | None = None,
+) -> LLMPlanner:
+    reg = ToolRegistry()
+    reg.register(FileReadTool(workspace_root=workspace))
+    reg.register(WebSearchTool())
+    reg.register(FileWriteTool(workspace_root=workspace))
+    reg.register(ShellExecTool(workspace_root=workspace))
+    reg.register(RunTestsTool(workspace_root=workspace))
+    reg.register(ReadLogsTool(workspace_root=workspace))
+    reg.register(DiffFileTool(workspace_root=workspace))
+    reg.register(WebFetchTool())
+
+    class _StubLLM:
+        def complete(self, **_kw):
+            raise AssertionError("LLM must not be called")
+
+    if self_documentation_paths is None:
+        return LLMPlanner(llm=_StubLLM(), registry=reg)
+    return LLMPlanner(
+        llm=_StubLLM(),
+        registry=reg,
+        self_documentation_paths=self_documentation_paths,
+    )
+
+
+def _run(planner: LLMPlanner, steps: list[dict[str, Any]], hint: str | None):
+    sources, warnings, _dropped = planner._validate_steps(steps, file_hint=hint)
+    return sources, warnings
+
+
+# ============================================================
+# Default allowlist
+# ============================================================
+
+class TestDefaultAllowlist:
+    def test_every_allowlisted_path_exists_in_this_repository(self):
+        """The guard that was missing for eight days.
+
+        README.md was deleted on 2026-08-06 and stayed in this allowlist until
+        2026-08-14. Rule 11 planned `file_read README.md`, the read raised
+        FileNotFoundError, and a failed read never enters the provenance chain —
+        so every question the agent was asked about itself came back "cannot be
+        determined". Measured on four live runs.
+
+        Asserted against the real repository, not a tmp workspace: the point is
+        that the shipped default names things that are actually here.
+        """
+        repo = Path(__file__).resolve().parent.parent
+        missing = [
+            rel for rel in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS
+            if not (repo / rel.rstrip("/")).exists()
+        ]
+        assert not missing, (
+            "the planner may read these without a --file hint, and they do not "
+            f"exist: {missing}. A read the planner is told to make and that "
+            "always fails is worse than no rule at all — the failure is not "
+            "evidence, so the agent cannot even report it."
+        )
+
+    def test_default_contains_the_generated_anatomy_map(self, workspace: Path):
+        p = _planner(workspace)
+        assert "knowledge/generated/AGENT_ANATOMY.md" in p.self_documentation_paths
+
+    def test_anatomy_map_passes_without_hint(self, workspace: Path):
+        p = _planner(workspace)
+        sources, warnings = _run(
+            p,
+            [{"tool": "file_read",
+              "arguments": {"path": "knowledge/generated/AGENT_ANATOMY.md"}}],
+            hint=None,
+        )
+        assert len(sources) == 1
+        assert sources[0]["arguments"]["path"] == "knowledge/generated/AGENT_ANATOMY.md"
+        # No "no --file hint" warning was emitted.
+        assert not any("no --file hint" in w for w in warnings)
+
+    def test_non_allowlisted_path_allowed_without_hint(self, workspace: Path):
+        """Regression Bug 6: file_read is now allowed for any ASCII
+        workspace-relative path without a --file hint. Security is
+        enforced by the tool executor, not the planner."""
+        p = _planner(workspace)
+        sources, warnings = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "core/loop.py"}}],
+            hint=None,
+        )
+        assert len(sources) == 1
+        assert sources[0]["arguments"]["path"] == "core/loop.py"
+        # No allowlist warning emitted.
+        assert not any("allowlist" in w for w in warnings)
+
+    def test_readme_still_passes_with_matching_hint(self, workspace: Path):
+        p = _planner(workspace)
+        sources, _ = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "README.md"}}],
+            hint="README.md",
+        )
+        assert len(sources) == 1
+        assert sources[0]["arguments"]["path"] == "README.md"
+
+    def test_hint_mismatch_remaps_to_hint(self, workspace: Path):
+        """The pre-MVP-14 behaviour is preserved: when a hint IS
+        provided, only that exact path is allowed. The allowlist
+        does NOT override an explicit hint."""
+        p = _planner(workspace)
+        sources, warnings = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "README.md"}}],
+            hint="doc.txt",
+        )
+        # Remapped to hinted path (not to README.md).
+        assert len(sources) == 1
+        assert sources[0]["arguments"]["path"] == "doc.txt"
+        assert any("does not match hint" in w for w in warnings)
+
+
+# ============================================================
+# Custom allowlist via constructor
+# ============================================================
+
+class TestCustomAllowlist:
+    def test_custom_paths_accepted(self, workspace: Path):
+        p = _planner(workspace, self_documentation_paths=("README.md", "AGENTS.md"))
+        assert p.self_documentation_paths == ("README.md", "AGENTS.md")
+
+    def test_agents_md_now_passes_without_hint(self, workspace: Path):
+        p = _planner(workspace, self_documentation_paths=("AGENTS.md",))
+        sources, _ = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "AGENTS.md"}}],
+            hint=None,
+        )
+        assert len(sources) == 1
+
+    def test_readme_allowed_even_when_not_in_custom_allowlist(self, workspace: Path):
+        """Regression Bug 6: file_read is allowed without hint regardless
+        of the self-documentation allowlist contents."""
+        p = _planner(workspace, self_documentation_paths=("AGENTS.md",))
+        sources, warnings = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "README.md"}}],
+            hint=None,
+        )
+        assert len(sources) == 1
+        assert not any("allowlist" in w for w in warnings)
+
+
+# ============================================================
+# Constructor validation: hostile inputs are silently filtered
+# ============================================================
+
+class TestAllowlistValidation:
+    def test_traversal_filtered(self, workspace: Path):
+        p = _planner(
+            workspace,
+            self_documentation_paths=("README.md", "../etc/passwd"),
+        )
+        assert "README.md" in p.self_documentation_paths
+        assert "../etc/passwd" not in p.self_documentation_paths
+
+    def test_absolute_path_filtered(self, workspace: Path):
+        p = _planner(
+            workspace,
+            self_documentation_paths=("README.md", "/etc/passwd", "\\Windows\\System32"),
+        )
+        assert "README.md" in p.self_documentation_paths
+        assert "/etc/passwd" not in p.self_documentation_paths
+        assert "\\Windows\\System32" not in p.self_documentation_paths
+
+    def test_drive_letter_filtered(self, workspace: Path):
+        p = _planner(
+            workspace,
+            self_documentation_paths=("README.md", "C:\\Windows\\notepad.exe"),
+        )
+        assert "C:\\Windows\\notepad.exe" not in p.self_documentation_paths
+
+    def test_non_ascii_filtered(self, workspace: Path):
+        p = _planner(
+            workspace,
+            self_documentation_paths=("README.md", "архитектура.txt"),
+        )
+        assert "README.md" in p.self_documentation_paths
+        assert "архитектура.txt" not in p.self_documentation_paths
+
+    def test_empty_and_non_string_filtered(self, workspace: Path):
+        p = _planner(
+            workspace,
+            self_documentation_paths=(
+                "README.md", "", "   ", None, 42, "valid.md"
+            ),  # type: ignore[arg-type]
+        )
+        assert "README.md" in p.self_documentation_paths
+        assert "valid.md" in p.self_documentation_paths
+        assert "" not in p.self_documentation_paths
+        assert "   " not in p.self_documentation_paths
+
+    def test_all_invalid_yields_empty_allowlist(self, workspace: Path):
+        """If the caller passes ONLY garbage, the allowlist is empty.
+        But file_read is now allowed without hint for any ASCII path —
+        the allowlist no longer gates reads."""
+        p = _planner(
+            workspace,
+            self_documentation_paths=("../bad", "/abs", "non\u00e1scii"),
+        )
+        assert p.self_documentation_paths == ()
+        # README.md is still allowed (no-hint restriction removed).
+        sources, _ = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "README.md"}}],
+            hint=None,
+        )
+        assert len(sources) == 1
+
+
+# ============================================================
+# Self-doc reads with hostile paths still rejected by other checks
+# ============================================================
+
+class TestSelfDocStillCheckedByOtherRules:
+    def test_non_ascii_path_in_allowlisted_position_still_dropped(self, workspace: Path):
+        """Even if a caller somehow allowlists a non-ASCII path (they
+        can't — the validator filters), a step asking for a non-ASCII
+        path stays dropped by the existing ASCII-only check."""
+        p = _planner(workspace)
+        sources, _warnings = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": "привет.md"}}],
+            hint=None,
+        )
+        # Either the allowlist check or the ASCII check rejects it —
+        # both are acceptable. The point: it doesn't sneak through.
+        assert sources == []
+
+    def test_empty_string_path_dropped(self, workspace: Path):
+        p = _planner(workspace)
+        sources, warnings = _run(
+            p,
+            [{"tool": "file_read", "arguments": {"path": ""}}],
+            hint=None,
+        )
+        assert sources == []
+        assert any("without path" in w for w in warnings)

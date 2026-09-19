@@ -1,0 +1,146 @@
+{
+  "_what_this_is": "ONE experimental claim certificate. Not a schema, not a format, not a generalisation of main.qm. Every field name here is disposable. What is NOT disposable is the property under test: the semantic decisions below are read and executed by scripts/qm_claim_check.py, not duplicated inside it. Changing a fact here changes what the machine does.",
+  "_not_claimed": [
+    "No general .qm claim format.",
+    "No architecture decision. Conservative artifact-wide invalidation remains sound and merely coarse.",
+    "No completeness of the dependency model — it is exactly as complete as the probes that forced it.",
+    "No claim that the status vocabulary is right."
+  ],
+  "claim_id": "C2",
+  "claim": {
+    "prose": "In the declared evaluation, the run journal's session_start record carries llm_model = gpt-4o-mini.",
+    "expected": "gpt-4o-mini"
+  },
+  "evaluation_domain": {
+    "command": [
+      "main.py",
+      "--ask",
+      ":budget-status",
+      "--auto-approve",
+      "deny"
+    ],
+    "_why_this_command": "a local command: it exercises session start and model routing without a model call, so the evaluation is cheap and deterministic in the projected dimension.",
+    "workspace": "supplied to the evaluation; its `.env` is part of the evaluation, not of the certificate",
+    "preconditions": [
+      {
+        "id": "P-anthropic-absent",
+        "env_absent": "ANTHROPIC_API_KEY",
+        "_why": "measured: with an anthropic credential present the same command records claude-sonnet-5, so this claim is simply not about that environment"
+      },
+      {
+        "id": "P-openai-present",
+        "env_present": "OPENAI_API_KEY",
+        "_why": "measured: the substitute provider chosen by the healing branch is openai, and its default is the value this claim expects"
+      }
+    ],
+    "_preconditions_are_authoritative": "the validator reads these and returns OUT_OF_DOMAIN when they do not hold. An unmet precondition is NOT an invalid claim -- the claim says nothing about that environment."
+  },
+  "observation": {
+    "_authority": "the validator reads these; it holds no hard-coded knowledge of where the evidence lives or what it is called.",
+    "carrier_glob": "logs/run_*.jsonl",
+    "bind_to_current_evaluation": true,
+    "_why_bind": "the workspace may already contain journals from earlier evaluations. Evidence must come from the run this validator launched, so the validator snapshots the carrier set before running and requires exactly one new file.",
+    "require_event": "session_start",
+    "_why_require_event": "a record that merely contains the projected key is not the record this claim is about. The event name is checked before the projection is read.",
+    "projection_path": [
+      "payload",
+      "llm_model"
+    ]
+  },
+  "environment_resolution": {
+    "_authority": "the ORDER below is the precedence the certificate asserts, and the validator applies it as written. Reversing it here changes the prediction the machine makes.",
+    "sources": [
+      {
+        "id": "D2",
+        "source": "process_env",
+        "note": "highest precedence"
+      },
+      {
+        "id": "D1",
+        "source": "workspace_dotenv",
+        "note": "cli/app.py calls load_dotenv without override=True, so it loses to an already-set process variable"
+      }
+    ]
+  },
+  "dependency_model": {
+    "_authority": "ordered rules, highest precedence first. The first rule whose `when` holds supplies the predicted value AND names the dependency the certificate says is active. Both are compared against the observation.",
+    "rules": [
+      {
+        "id": "D2/D1",
+        "what": "AGENT_MODEL, resolved through environment_resolution",
+        "when": {
+          "key_present": "AGENT_MODEL"
+        },
+        "value_from": {
+          "key": "AGENT_MODEL"
+        }
+      },
+      {
+        "id": "D3",
+        "what": "the source default in core/llm.py",
+        "when": {
+          "always": true
+        },
+        "value_from": {
+          "literal": "gpt-4o-mini"
+        },
+        "_evidence": "PROVEN, no longer a reading: the literal is returned by core/llm.py:_default_model('openai') when AGENT_MODEL is unset, and that is the value written to the journal. See causal_path."
+      }
+    ],
+    "_withdrawn_rules": [
+      {
+        "id": "D4",
+        "was": "AGENT_PROVIDER=local selects LOCAL_LLM_MODEL before AGENT_MODEL is consulted",
+        "source_reading": "core/llm.py:28 reads AGENT_PROVIDER, and :32 takes the local branch before the AGENT_MODEL override at :35",
+        "measurement": "WITHDRAWN. With AGENT_PROVIDER=local the observed llm_model stayed gpt-4o-mini, so the rule predicted qwen-local and the validator returned PRECEDENCE_VIOLATED — the certificate's own self-check caught the certificate.",
+        "status": "AGENT_PROVIDER is a source-visible dependency that measurement shows INERT for this claim in this evaluation — the QT5 pattern, found again from the inside",
+        "residue": "the mechanism that DOES produce the journal's llm_model is UNRESOLVED; the router in core/model_router.py is the next place to look, and until then D3 names a value that is right and an explanation that is not proven",
+        "mechanism_now_resolved": "AGENT_PROVIDER never reaches LLM in this domain: _llm_factory passes the SUBSTITUTE provider explicitly, so the provider argument LLM sees is openai regardless of AGENT_PROVIDER. Measured directly: _llm_factory(None,'gpt-5.4').model is 'gpt-4o-mini' with AGENT_PROVIDER=local set. The rule was withdrawn on the observation; here is the reason."
+      }
+    ]
+  },
+  "currency": {
+    "_why_no_repository_hash": "QT3 measured that the complete tracked snapshot — 751 files, 7043297867c02b8d — is unchanged by a mutation that falsifies this claim. A file hash would be a currency signal structurally blind to this claim's active dependency.",
+    "instead": "currency is re-established by RE-EVALUATION; there is no cached verdict to go stale.",
+    "known_gap": "re-evaluation costs a process launch and says nothing about evaluations other than the one it ran."
+  },
+  "status_vocabulary": {
+    "VALID": "in domain, evidence bound to this evaluation, observed value equals the expected value, and the dependency model predicted it",
+    "INVALID": "in domain, evidence bound, and the observed value differs from the expected value",
+    "OUT_OF_DOMAIN": "no evidence could be bound to this evaluation — no new journal, no matching event, or the projection is absent",
+    "PRECEDENCE_VIOLATED": "the observation disagrees with what the dependency model predicts. This is a defect of the CERTIFICATE, not of the claim, and it is reported even when the claim itself happens to hold."
+  },
+  "causal_path": {
+    "_status": "RESOLVED by instrumentation, not inference. Every hop below was measured; the two that were guessed first were both wrong.",
+    "chain": [
+      "app/bootstrap.py:145 -- ModelRouter.from_env()",
+      "app/bootstrap.py:161 -- llm = model_router.for_role(ModelRole.SYNTHESIZER)",
+      "ModelRouter.for_role -- model = route.model or self.default_model; provider = route.provider or self.default_provider",
+      "core/model_router.py:941 _llm_factory -- _default_provider_name(None) is 'anthropic'; anthropic has NO credentials here, so the healing branch substitutes the first credentialed provider (openai) and DROPS the requested model, by design and by comment: 'drop the model so the substitute's own default is used'",
+      "core/llm.py:134 LLM.__init__ -- self.model = None or _default_model('openai')",
+      "core/llm.py:35 _default_model -- returns AGENT_MODEL when set, otherwise the literal 'gpt-4o-mini'",
+      "app/bootstrap.py:204 -- 'llm_model': llm.model is written into the session_start record"
+    ],
+    "causal_mutation": "AGENT_MODEL=via-agent-model -> the journal records via-agent-model. The projected value changes.",
+    "non_causal_mutation": "AGENT_SYNTHESIZER_MODEL=gpt-5.4 -> the route reason changes to env:AGENT_SYNTHESIZER, proving the mutation LANDED, while the journal value stays gpt-4o-mini. A neighbour on the same table that this projection does not depend on.",
+    "why_the_role_model_is_inert_here": "the healing branch discards it before LLM is constructed. This is conditional, not structural.",
+    "measured_flip": "with ANTHROPIC_API_KEY present the condition lifts and the SAME role variable becomes CAUSAL: AGENT_SYNTHESIZER_MODEL=gpt-5.4 records gpt-5.4, and with no role variable the record is claude-sonnet-5 via policy:conservative. The active dependency frontier of this claim is gated by which provider credentials exist.",
+    "corrections_on_record": [
+      "core/model_router.py was suspected as the producer. It is ON the path but it is not the producer: the route it computes is discarded one hop later.",
+      "the cost cap _cap_role_route was suspected next. Also wrong: max_cost_tier is None with no environment set, so the cap returns the route untouched."
+    ]
+  },
+  "_frozen": {
+    "status": "FROZEN 2026-08-08, after the causal path was resolved by instrumentation.",
+    "what_frozen_means": "the claim, its evaluation domain, its preconditions, its observation and its dependency model are not to be edited to accommodate a new experiment. A future finding that contradicts them reopens the certificate; a future convenience does not.",
+    "verified_at_freeze": {
+      "clean": "VALID",
+      "AGENT_MODEL set": "INVALID",
+      "dotenv under process env": "VALID (inert)",
+      "AGENT_SYNTHESIZER_MODEL set": "VALID (the mutation lands on the route reason and not on this projection)",
+      "ANTHROPIC_API_KEY present": "OUT_OF_DOMAIN by declared precondition",
+      "graph": "main.qm binding B1 -> USABLE, whole graph GREEN"
+    },
+    "known_gap": "the precondition check tests presence of a key, not usability of it. Emptying OPENAI_API_KEY passes P-openai-present and the evaluation then fails later, still OUT_OF_DOMAIN but by a different route. Recorded, not fixed: a credential-validity check is a different experiment."
+  }
+}

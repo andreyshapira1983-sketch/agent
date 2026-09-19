@@ -1,0 +1,540 @@
+"""Approval -> trusted self-apply lane bridge (TD-024).
+
+It is deliberately *not*:
+
+* a daemon / scheduler / agent_tick hook (never auto-triggered), * a free-
+text patch executor (only a persisted, validated proposal is run), * a
+widening of ``shell_exec`` or the network surface (the lane still goes
+exclusively through :class:`core.safe_vcs.SafeVCS`, which has no push /
+fetch / pull / remote method at all).
+
+Only terminal lane statuses (``committed_local`` / ``rolled_back``) mark the
+inbox item executed; transient refusals (``budget_kill_switch`` /
+``budget_wait`` / ``approval_wait``) leave it approved so it can be retried.
+"""
+from __future__ import annotations
+
+import base64
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from core.directive_extractor import SourceText, extract
+from core.instruction_conflict_gate import AUTHORITY_RANK, Directive
+from core.self_apply_lane import (
+    FileChange,
+    SelfApplyProposal,
+    SelfApplyReport,
+    classify_patch_risk,
+    file_base_sha256,
+    run_self_apply_lane,
+)
+
+logger = logging.getLogger(__name__)
+
+# Only approval-inbox items carrying exactly this operation may be routed
+# through the self-apply lane. Anything else is refused.
+SELF_APPLY_OPERATION = "self_apply_lane.run"
+
+# Lane statuses that terminally consume the approval (mark_executed). Transient
+# refusals are intentionally excluded so the operator can retry the same item.
+TERMINAL_LANE_STATUSES = frozenset({"committed_local", "rolled_back"})
+
+# Self-apply rollback is built into the lane (reset_hard + delete temp branch);
+# a proposal records this rather than an ad-hoc script.
+DEFAULT_ROLLBACK = "self_apply_lane:reset_hard+delete_temp_branch"
+
+# Signature of the lane callable so tests can inject a fake.
+LaneFn = Callable[..., SelfApplyReport]
+
+
+class InvalidProposalError(ValueError):
+    """Raised when an inbox payload cannot yield a valid SelfApplyProposal."""
+
+
+def build_self_apply_payload(
+    *,
+    files: list[dict] | tuple[dict, ...],
+    reason: str = "",
+    evidence: list[str] | tuple[str, ...] = (),
+    test_paths: list[str] | tuple[str, ...] = ("tests",),
+    test_pattern: str | None = None,
+    origin: str = "manual",
+    rollback: str = DEFAULT_ROLLBACK,
+    workspace: Path | None = None,
+) -> dict:
+    """Build a well-formed ``self_apply_lane.run`` inbox payload.
+
+    Each file entry must carry a non-empty ``path`` and full ``content`` (a
+    diff-only entry is rejected). Validating here means producers
+    (repair / supervisor / manual) and the runtime agree on one shape.
+    """
+    normalized = _stamp_base_state(_normalize_files(files), workspace)
+    payload: dict[str, Any] = {
+        "files": normalized,
+        "reason": str(reason or ""),
+        "evidence": [str(e) for e in (evidence or ())],
+        "test_paths": [str(p) for p in (test_paths or ("tests",))],
+        "test_pattern": test_pattern,
+        "origin": str(origin or "manual"),
+        "rollback": str(rollback or DEFAULT_ROLLBACK),
+    }
+    return payload
+
+
+def _stamp_base_state(files: list[dict], workspace: Path | None) -> list[dict]:
+    """Записать, НА ЧЁМ построено предложение, пока пред-образ ещё под рукой.
+
+    Без рабочей папки отметка не ставится вовсе, и это отдельное состояние:
+    «не смотрели» — не то же самое, что «сошлось». Зачем: MIR-168.
+    """
+    if workspace is None:
+        return files
+    root = Path(workspace)
+    for entry in files:
+        target = root / str(entry["path"])
+        try:
+            before = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # Файла нет (или он не текст) — пустой хеш при поднятом флаге и
+            # означает «в тот момент файла не было».
+            entry["base_sha256"] = ""
+        else:
+            entry["base_sha256"] = file_base_sha256(before)
+        entry["base_checked"] = True
+    return files
+
+
+def _normalize_files(files: Any) -> list[dict]:
+    if not isinstance(files, (list, tuple)) or not files:
+        raise InvalidProposalError("proposal must list at least one file change")
+    out: list[dict] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise InvalidProposalError("each file change must be an object")
+        path = entry.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise InvalidProposalError("file change missing a non-empty 'path'")
+        # A file change is SOURCE CODE the lane writes verbatim, but the durable
+        # inbox runs every payload through the DLP/secret redactor
+        # (approval_inbox._redact_durable_payload). That would corrupt code that
+        # legitimately contains example PII/secret-shaped text (e.g. an email in
+        # a test fixture). We therefore keep a redaction-inert base64 copy
+        # (``content_b64``) and treat it as authoritative when present, so the
+        # applied bytes always match what was proposed.
+        content: str | None = None
+        b64 = entry.get("content_b64")
+        if isinstance(b64, str) and b64.strip():
+            try:
+                content = base64.b64decode(b64.encode("ascii")).decode("utf-8")
+            except Exception:  # noqa: BLE001 — fall back to the plaintext field
+                content = None
+        if content is None:
+            if "content" not in entry:
+                # Explicitly reject diff-only payloads: the lane overwrites whole
+                # files, so it needs the full post-image, never a unified diff.
+                if "diff" in entry:
+                    raise InvalidProposalError(
+                        f"diff-only change for {path!r} is not supported; full "
+                        "'content' is required"
+                    )
+                raise InvalidProposalError(
+                    f"file change for {path!r} missing 'content'"
+                )
+            content = entry.get("content")
+            if not isinstance(content, str):
+                raise InvalidProposalError(
+                    f"file change for {path!r} must carry string 'content'"
+                )
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        change = {"path": path, "content": content, "content_b64": encoded}
+        # Отметка состояния переносится, а не пересоздаётся: пересобрать её
+        # здесь значило бы снять хеш с СЕГОДНЯШНЕГО файла и объявить сходство
+        # там, где его никто не проверял (MIR-168).
+        if entry.get("base_checked"):
+            change["base_sha256"] = str(entry.get("base_sha256") or "")
+            change["base_checked"] = True
+        out.append(change)
+    return out
+
+
+def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
+    """Rebuild a :class:`SelfApplyProposal` from a persisted inbox payload.
+
+    Raises :class:`InvalidProposalError` when required fields are missing or a
+    file change is diff-only rather than full-content.
+    """
+    if not isinstance(payload, dict):
+        raise InvalidProposalError("proposal payload must be an object")
+    normalized = _normalize_files(payload.get("files"))
+    changes = tuple(
+        FileChange(
+            path=f["path"],
+            content=f["content"],
+            base_sha256=str(f.get("base_sha256") or ""),
+            base_checked=bool(f.get("base_checked")),
+        )
+        for f in normalized
+    )
+    test_paths_raw = payload.get("test_paths") or ("tests",)
+    if not isinstance(test_paths_raw, (list, tuple)) or not test_paths_raw:
+        raise InvalidProposalError("proposal 'test_paths' must be a non-empty list")
+    test_pattern = payload.get("test_pattern")
+    if test_pattern is not None and not isinstance(test_pattern, str):
+        raise InvalidProposalError("proposal 'test_pattern' must be a string or null")
+    evidence = payload.get("evidence") or ()
+    if not isinstance(evidence, (list, tuple)):
+        evidence = (str(evidence),)
+    return SelfApplyProposal(
+        files=changes,
+        reason=str(payload.get("reason") or ""),
+        evidence=tuple(str(e) for e in evidence),
+        test_paths=tuple(str(p) for p in test_paths_raw),
+        test_pattern=test_pattern,
+        directives=_directives_from_payload(payload),
+    )
+
+
+#: Authority levels a proposal payload may claim for itself. ``operator`` is
+#: excluded on purpose — only a human channel can confer operator authority,
+#: and a payload is machine-written.
+_PAYLOAD_DECLARABLE_LEVELS = frozenset(AUTHORITY_RANK) - {"operator"}
+
+
+def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
+    """Recover the requirements this patch is answering, with their authority.
+
+    Two channels, both optional:
+
+    * ``reason`` — the proposal's own statement of what it is doing, read as the
+      task contract;
+    * ``instructions`` — an explicit list of ``{level, source, text, locator}``
+      entries, which is how a review comment enters with the right (low)
+      authority rather than being mistaken for the task itself.
+
+    A payload may not claim ``operator``: it is written by the proposal
+    producer, not by the human. Without that restriction a producer could label
+    its own instruction ``operator``, and the conflict report and the stored
+    episode would then cite the operator as the source of something they never
+    said — the exact false authority claim ``docs/INSTRUCTION_AUTHORITY.md``
+    exists to prevent. Any level outside the declarable set, recognised or not,
+    is demoted to ``advisor``.
+    """
+    sources: list[SourceText] = []
+
+    reason = str(payload.get("reason") or "")
+    if reason.strip():
+        sources.append(SourceText(
+            text=reason,
+            source_level="task_contract",
+            source_name="обоснование заявки",
+        ))
+
+    raw = payload.get("instructions")
+    if isinstance(raw, (list, tuple)):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            text = str(entry.get("text") or "")
+            if not text.strip():
+                continue
+            level = str(entry.get("level") or "")
+            if level not in _PAYLOAD_DECLARABLE_LEVELS:
+                level = "advisor"
+            sources.append(SourceText(
+                text=text,
+                source_level=level,  # type: ignore[arg-type]
+                source_name=str(entry.get("source") or level),
+                locator=str(entry.get("locator") or ""),
+            ))
+
+    return extract(sources)
+
+
+def _refusal(
+    *, proposal_id: str, status: str, reason: str, next_human_action: str, **extra: Any
+) -> dict:
+    result = {
+        "proposal_id": proposal_id,
+        "status": status,
+        "reason": reason,
+        "branch": None,
+        "files_changed": [],
+        "tests_run": [],
+        "rollback_status": "none",
+        "commit_hash": None,
+        "rejected_files": [],
+        "risks": [],
+        "next_human_action": next_human_action,
+    }
+    result.update(extra)
+    return result
+
+
+def _pending_excluding(inbox: Any, item_id: str) -> int:
+    """Count *other* pending approvals — never the item being executed."""
+    try:
+        pending = inbox.pending()
+    except Exception:  # noqa: BLE001 — pragma: no cover - inbox contract is trusted
+        return 0
+    return sum(1 for it in pending if getattr(it, "id", None) != item_id)
+
+
+def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns are guard clauses
+    *,
+    inbox: Any,
+    item_id: str,
+    workspace: Path,
+    vcs: Any,
+    test_runner: Any,
+    kill_switch: Any | None = None,
+    budget_snapshot: dict | None = None,
+    approvals_pending: int | None = None,
+    now_iso: str | None = None,
+    lane: LaneFn = run_self_apply_lane,
+    registry: Any = None,
+    gateway: Any = None,
+    dry_run: bool = False,
+) -> dict:
+    """Route one approved inbox item through the trusted self-apply lane."""
+    item = inbox.get(item_id)
+    if item is None:
+        return _refusal(
+            proposal_id=item_id,
+            status="needs_validated_proposal",
+            reason=f"approval not found: {item_id}",
+            next_human_action="Check :approval-list for a valid approved id.",
+        )
+
+    # Gate 1: must be human-approved.
+    if getattr(item, "status", None) != "approved":
+        return _refusal(
+            proposal_id=item_id,
+            status="approval_required",
+            reason=f"item status={getattr(item, 'status', None)}; approve it first",
+            next_human_action=f"Approve it first: :approval-approve {item_id}",
+        )
+
+    # Gate 2a: only the self-apply operation is accepted here.
+    if getattr(item, "operation", None) != SELF_APPLY_OPERATION:
+        return _refusal(
+            proposal_id=item_id,
+            status="needs_validated_proposal",
+            reason=(
+                f"unsupported operation={getattr(item, 'operation', None)!r}; "
+                f"expected {SELF_APPLY_OPERATION!r}"
+            ),
+            next_human_action=(
+                "Route this item through its own handler; :self-apply-run only "
+                f"executes {SELF_APPLY_OPERATION} proposals."
+            ),
+        )
+
+    # Gate 2b: payload must yield a valid full-content proposal.
+    try:
+        proposal = rehydrate_proposal(getattr(item, "payload", None))
+    except InvalidProposalError as exc:
+        return _refusal(
+            proposal_id=item_id,
+            status="needs_validated_proposal",
+            reason=f"invalid proposal payload: {exc}",
+            next_human_action=(
+                "Recreate the proposal with full file content and required "
+                "fields (files, test_paths)."
+            ),
+        )
+
+    # Gate 3: low-risk classification (same classifier the lane uses).
+    ok, risk_reason, rejected = classify_patch_risk(proposal.files)
+    if not ok:
+        return _refusal(
+            proposal_id=item_id,
+            status="risk_rejected",
+            reason=risk_reason,
+            rejected_files=list(rejected),
+            risks=[risk_reason],
+            next_human_action=(
+                "Narrow the patch to allowlisted source/test/docs files, or "
+                "route sensitive changes through explicit human approval."
+            ),
+        )
+
+    # Gateway G3: single actuation door before ANY local mutation / SafeVCS op.
+    # Approval + validation + risk gates already passed above; the gateway adds
+    # the run-mode decision (simulate under dry-run) and is the choke where a
+    # future deny/block/escalate would stop a mutation. Fail closed on error.
+    gw = _gateway_for(
+        gateway,
+        dry_run,
+        kill_switch=kill_switch,
+        budget_snapshot=budget_snapshot,
+        check_readiness=False,
+    )
+    try:
+        decision = gw.evaluate_self_apply(operation=SELF_APPLY_OPERATION)
+        outcome = getattr(decision, "outcome", "deny")
+    except Exception as exc:  # noqa: BLE001 — reason stated above
+        # Fail closed. Best-effort G4 error receipt — never let a receipt failure
+        # affect the fail-closed outcome.
+        _record_self_apply_gateway_error(workspace, item_id)
+        return _refusal(
+            proposal_id=item_id,
+            status="gateway_error",
+            reason=(
+                f"actuation gateway error (fail-closed): {type(exc).__name__}: {exc}"
+            ),
+            next_human_action="No changes were applied; resolve the gateway error and retry.",
+        )
+
+    # G4: durable gateway decision receipt (kind="gateway"). Observation only —
+    # does not change the outcome handling below. Never raises.
+    try:
+        from core.tool_receipts import record_gateway_receipt
+
+        record_gateway_receipt(
+            decision, workspace=workspace, refs={"proposal_id": item_id}
+        )
+    except Exception as exc:  # noqa: BLE001 — reason stated above
+        # A receipt missing from the audit trail of an EFFECTFUL operation is
+        # the gap the trail exists to close: the self-apply ran, and nothing
+        # durable says under which decision (MIR-077).
+        logger.warning(
+            "self-apply gateway receipt not written for %s: %s: %s",
+            item_id, type(exc).__name__, exc,
+        )
+
+    if outcome == "simulate":
+        return _refusal(
+            proposal_id=item_id,
+            status="simulated",
+            reason="gateway dry_run: self-apply simulated; no files changed",
+            next_human_action="Re-run without dry-run to apply the approved proposal.",
+        )
+    if outcome != "allow":
+        return _refusal(
+            proposal_id=item_id,
+            status="gateway_blocked",
+            reason=f"actuation gateway outcome={outcome!r}; no mutation performed",
+            next_human_action="Resolve the gateway decision before applying.",
+        )
+
+    if approvals_pending is None:
+        approvals_pending = _pending_excluding(inbox, item_id)
+
+    report = lane(
+        proposal,
+        workspace=workspace,
+        vcs=vcs,
+        test_runner=test_runner,
+        budget_snapshot=budget_snapshot,
+        approvals_pending=approvals_pending,
+        kill_switch=kill_switch,
+        now_iso=now_iso,
+    )
+
+    result = {"proposal_id": item_id, "origin": _origin_of(item), **report.to_dict()}
+
+    # Only terminal statuses consume the approval; transient refusals leave the
+    # item approved so the operator can retry once budget/queue recovers.
+    # A7 (2026-09-03): «consumed» is not «applied». A commit is executed; a
+    # rollback is an attempt that reverted — it is aborted, so the value-review
+    # queue (which lists `executed` as "applied proposals") never asks a human
+    # to grade a change the suite discarded.
+    if report.status in TERMINAL_LANE_STATUSES:
+        if report.status == "committed_local":
+            inbox.mark_executed(item_id)
+        else:
+            inbox.abort(item_id)
+        _record_lane_outcome(registry, item, report.status)
+
+    return result
+
+
+def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:
+    """Best-effort G4 receipt for a gateway exception. Never raises, never blocks
+    the fail-closed path (a receipt failure must not change behavior)."""
+    try:
+        from core.actuation_gateway import GatewayDecision
+        from core.tool_receipts import record_gateway_receipt
+
+        decision = GatewayDecision(
+            outcome="deny", tool_name=SELF_APPLY_OPERATION, path="self_apply",
+            reasons=("gateway raised; fail-closed",),
+        )
+        record_gateway_receipt(
+            decision,
+            workspace=workspace,
+            status="error",
+            refs={"proposal_id": item_id},
+        )
+    except Exception as exc:  # noqa: BLE001 — reason stated above
+        # This IS the fail-closed path: it exists to leave a receipt saying the
+        # gateway raised. Failing it silently produces the state it was written
+        # to prevent — an effectful operation refused with no record that it
+        # was even attempted (MIR-077).
+        logger.warning(
+            "fail-closed gateway receipt not written for %s: %s: %s",
+            item_id, type(exc).__name__, exc,
+        )
+
+
+def _gateway_for(
+    gateway: Any,
+    dry_run: bool,
+    *,
+    kill_switch: Any | None = None,
+    budget_snapshot: dict | None = None,
+    readiness_blockers: tuple[str, ...] = (),
+    check_readiness: bool = False,
+) -> Any:
+    """Return the injected gateway or build a default self-apply ActuationGateway."""
+    if gateway is not None:
+        return gateway
+    from core.actuation_gateway import ActuationGateway  # local import: avoid cycles
+
+    return ActuationGateway(
+        policy=None,
+        path="self_apply",
+        dry_run=dry_run,
+        kill_switch=kill_switch,
+        budget_snapshot=budget_snapshot,
+        readiness_blockers=readiness_blockers,
+        check_readiness=check_readiness,
+    )
+
+
+def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
+    """Best-effort TD-031 ledger recording for a terminal lane outcome.
+
+    Guarded end to end: does nothing without a registry, only fires on terminal
+    statuses, strictly filters to producer-origin ``self_apply_lane.run`` items,
+    and swallows any registry write failure so the self-apply flow is untouched.
+    """
+    if registry is None:
+        return
+    if status not in TERMINAL_LANE_STATUSES:
+        return
+    if getattr(item, "operation", None) != SELF_APPLY_OPERATION:
+        return
+    try:
+        # Lazy import avoids a circular dependency (producer imports this module).
+        from core.self_build_producer import PRODUCER_ORIGIN
+        if _origin_of(item) != PRODUCER_ORIGIN:
+            return
+        registry.apply_lane_outcome(getattr(item, "id", None), status)
+    except Exception as exc:  # noqa: BLE001 — reason stated above
+        # The lane outcome is what stops the producer proposing the same target
+        # again. Losing it silently means the next cycle re-proposes work that
+        # has already been applied or refused (MIR-077).
+        logger.warning(
+            "self-apply lane outcome not recorded for %s: %s: %s",
+            getattr(item, "id", "?"), type(exc).__name__, exc,
+        )
+
+
+def _origin_of(item: Any) -> str:
+    payload = getattr(item, "payload", None)
+    if isinstance(payload, dict):
+        return str(payload.get("origin") or "unknown")
+    return "unknown"

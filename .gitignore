@@ -1,0 +1,84 @@
+.env
+.env.*
+!.env.example
+
+config/credentials.json
+config/token.json
+config/budget_limits.json
+config/*.secret.json
+!config/*.example.json
+
+# Private keys, certificates & OAuth client secrets — never commit these.
+# (release_hygiene.py rejects them at packaging time; this stops the accidental
+#  commit one step earlier.)
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+client_secret*.json
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+data/
+logs/
+
+# Throwaway agent workspaces used for live probes (e.g. runtime/mir003-live).
+# Each holds its own data/ and logs/ — already covered by the rules above — but
+# also probe fixtures and answers, which are local experiment artefacts, not
+# repository content. Ignoring the whole tree keeps a stray `git add -A` from
+# committing a live run's inputs and outputs.
+runtime/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-tmp/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+env/
+
+# Visual Studio / VS Code workspace state
+.vs/
+
+*.tmp
+*.bak
+# Self-repair writes `<path>.bak.<YYYYMMDDTHHMMSSZ>` (core/hygiene.py
+# BACKUP_NAME_RE, from FileWriteTool). That name ends in the timestamp, not in
+# `.bak`, so the line above never matched it — and on 2026-07-30 a full copy of
+# core/deep_escalation.py was committed to main by a `git add -A`.
+*.bak.*
+*.log
+
+.vscode/
+.codex/
+config/model_registry.json
+
+# Word documents are binary ZIP containers: they crash Codacy's SARIF writer
+# and neither git nor the agent can read them. Keep prose as .md instead.
+*.docx
+.codacy-cli-v2/
+
+# Tool caches and per-machine assistant settings: written by the tools
+# themselves, never repository content.
+.ruff_cache/
+.mypy_cache/
+.claude/settings.local.json
+# Agent worktrees: full checkouts placed inside the repo by the workflow
+# runner. Untracked but not ignored, they were scanned by every repo-wide
+# tool — ruff counted 1136 findings that belonged to copies (2026-08-20).
+.claude/worktrees/
+
+# Память опыта самоприменения (ревизия PR #334). Полоса делает `git add -A`,
+# и без этих строк указатель головы уезжает в коммит кандидата, а возврат на
+# исходную ветку его удаляет — цепочка принятий обнуляется молча.
+state/burn_in_head.json
+state/burn_in_offers.jsonl
+state/burn_in_adoptions.jsonl
+config/burn_in_sandbox.json
+.autonomous-repair/

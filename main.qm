@@ -1,0 +1,190 @@
+{
+  "_specimen": "FIRST PHYSICAL .qm SPECIMEN. Not a format, not a schema, not a language, not executable, not a replacement for main.py. The physical extension `.qm` is the thing under test; the bytes inside are JSON purely because that was convenient today. Every field name here is EXPERIMENTAL and unjustified — no other file may be written against it.",
+  "_derived_from": "knowledge/quantum/main.quantum.json, fourth edition. Only what this linking experiment needs was carried over; the audit prose was deliberately left behind.",
+  "_experiment": "Can a .qm artifact physically exist, carry a proven semantic object, and participate in a cross-file relationship that a machine can resolve and falsify? Validator: scripts/qm_link_check.py (experimental, outside the production runtime).",
+  "subject": {
+    "path": "main.py",
+    "commit": "6880462",
+    "sha256_prefix": "def397b4c33e51d3",
+    "_subject_identity_is_open": "OPEN FUNDAMENTAL, carried over unresolved. This specimen is NAMED after main.py, and the strongest established statement is narrow: main.py is NOT the semantic subject of the measured entry boundary. Probe QT1 falsified a claim by editing cli/app.py while main.py stayed byte-identical, and the audit found the claims are owned by five files. So for THIS subject the `subject` block is an address rather than a proof of ownership. No general file/subject law is claimed: that would need its own discriminator, and one measured case plus one later design decision is not one. The role name `transit` is not applied here -- whether that role is semantically empty is UNPROVEN, and the law that asserted it is dead."
+  },
+  "semantic_entities": {
+    "outcome.RETURNED": {
+      "kind": "outcome_variant",
+      "payload_states_observed": [
+        0,
+        2
+      ],
+      "evidence_status": "INSTANTIATED",
+      "_carried_for": "the collapse claim on observer.success_failure; not decomposed here"
+    },
+    "outcome.PROPAGATED_SYSTEMEXIT": {
+      "kind": "outcome_variant",
+      "payload_states_observed": [
+        0,
+        2
+      ],
+      "evidence_status": "INSTANTIATED",
+      "_carried_for": "the collapse claim on observer.success_failure; not decomposed here"
+    },
+    "observer.success_failure": {
+      "kind": "observer",
+      "evidence_status": "INSTANTIATED",
+      "_evidence_status_history": "HYPOTHETICAL_CLASS in editions 1-3; promoted by the third adversarial pass on evidence, not analogy.",
+      "reads": "zero vs non-zero",
+      "domain": "all three outcome variants",
+      "partition": "{0} | {non-zero}",
+      "collapses": {
+        "pair": [
+          "outcome.RETURNED@0",
+          "outcome.PROPAGATED_SYSTEMEXIT@0"
+        ],
+        "into": "one class",
+        "derivation": "DERIVED from property P2 of link L1, not independently probed: if the consumer's control surface is the predicate `$code -eq 0`, then both variants projecting to 0 are indistinguishable to it.",
+        "evidence_status": "DERIVED — weaker than INSTANTIATED, recorded as such"
+      },
+      "linked_by": [
+        "L1"
+      ]
+    }
+  },
+  "external_links": [
+    {
+      "link_id": "L1",
+      "from_entity": "observer.success_failure",
+      "relation": "EXTERNAL_CONSUMER_INSTANTIATES_THIS_OBSERVER",
+      "_relation_label_is_experimental": "chosen because the evidence is a consumer reading the subject's process outcome; not adopted as a vocabulary",
+      "target": {
+        "file": "scripts/selfcheck.ps1",
+        "anchor": {
+          "kind": "powershell_function",
+          "name": "Run-Step"
+        },
+        "sha256_prefix": "2b123deb503cac8a"
+      },
+      "freshness_semantics": {
+        "on_hash_mismatch": "STALE — the target moved, the properties must be re-verified; NOT by itself a broken relationship",
+        "on_property_failure": "BROKEN — the asserted semantic relationship is false",
+        "why_separate": "the audit's own finding: a structural signal that fires on any edit cannot be counted as behavioural evidence. The validator must be able to say STALE without saying BROKEN, and this specimen is the first place that distinction is machine-checked."
+      },
+      "resolver": {
+        "kind": "powershell_ast",
+        "bridge": "scripts/qm_ps_anchor.ps1",
+        "_why": "the first draft of this experiment matched braces textually. Rejected on the operator's ruling: the first .qm semantic link must not depend on a parser weaker than the language it claims to observe. Facts below are extracted with PowerShell's own Parser and the assertions are compared against those facts, not against the file's text."
+      },
+      "verified_properties": [
+        {
+          "id": "P1",
+          "claim": "the anchor exists in the target file and the target parses",
+          "assertions": [
+            {
+              "path": "parse_ok",
+              "op": "equals",
+              "value": true
+            },
+            {
+              "path": "anchor_found",
+              "op": "equals",
+              "value": true
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "claim": "the consumer's CONTROL surface is the partition {0} | {non-zero} — the boolean, not the exact integer",
+          "assertions": [
+            {
+              "path": "returns",
+              "op": "equals",
+              "value": [
+                "$ok"
+              ]
+            },
+            {
+              "path": "ok_predicate.binary_node_count",
+              "op": "equals",
+              "value": 1
+            },
+            {
+              "path": "ok_predicate.left",
+              "op": "equals",
+              "value": "$code"
+            },
+            {
+              "path": "ok_predicate.operator",
+              "op": "equals",
+              "value": "Ieq"
+            },
+            {
+              "path": "ok_predicate.right",
+              "op": "equals",
+              "value": "0"
+            }
+          ],
+          "_why_the_predicate_and_not_just_the_return": "returning a boolean is the CODOMAIN; the partition is the predicate that produces it. A mutation may preserve the codomain exactly and still move the cut — `$code -le 2` still returns a boolean and still returns `$ok`, but the observer is then a different observer, and observer.success_failure as recorded here is false of it. This is the property the fail-before test bites."
+        },
+        {
+          "id": "P3",
+          "claim": "the exact integer survives, but only to a non-control surface (console/log)",
+          "assertions": [
+            {
+              "path": "host_writes_carrying_code",
+              "op": "at_least",
+              "value": 1
+            }
+          ],
+          "_note": "this is what makes the consumer occupy TWO observer classes at once. This specimen gives an entity only to the control surface; the log surface has none, because the audit found the observer representation cannot express one consumer in two classes. Left visible rather than flattened silently."
+        },
+        {
+          "id": "P4",
+          "claim": "the anchor has 6 call sites, of which exactly 4 pass the subject as argv[0]",
+          "assertions": [
+            {
+              "path": "call_sites_total",
+              "op": "equals",
+              "value": 6
+            },
+            {
+              "path": "call_site_first_argv",
+              "op": "count_of_value",
+              "value": "main.py",
+              "expected": 4
+            }
+          ],
+          "_correction_on_record": "the quantum record said 'five invocations' in its third edition and 'six invocations of main.py' in its fourth. Both FALSE: six Run-Step call sites, four of which pass main.py — the other two run pytest and scripts/audit_release.py. The number was wrong twice in prose and nothing could catch it; here it is derived from the AST and a wrong number is a BROKEN link."
+        }
+      ]
+    }
+  ],
+  "open_fundamental": [
+    "subject identity — this specimen names one file and describes a process rooted at five",
+    "one consumer occupying two observer classes cannot be expressed; see P3",
+    "no temporal binding beyond two recorded hashes, which nothing outside the validator checks"
+  ],
+  "not_claimed": [
+    "No .qm format, schema, language, runtime, or executable semantics.",
+    "No generalization from main to any other subject.",
+    "No claim that JSON is the right serialization; it is today's convenience.",
+    "No claim that these field names should survive.",
+    "No claim that the link relation vocabulary is correct — L1 has one relation and it was chosen from one piece of evidence."
+  ],
+  "certified_claims": [
+    {
+      "binding_id": "B1",
+      "_what_this_is": "The first connection between two Quantum artifacts. It is not a merge and not a schema: main.qm names a carrier its own boundary emits, and delegates the certified STATE of that carrier to a claim certificate that can decide for itself.",
+      "certificate": "knowledge/quantum/c2.claim.qm",
+      "claim_id": "C2",
+      "relationship": "THIS boundary emits the carrier; THAT certificate certifies a projected state of it",
+      "carrier": "logs/run_*.jsonl, written under the evaluation workspace",
+      "evidence_that_it_is_the_same_boundary": "not a name coincidence: the A2 layered probe measured that the :budget-status path of THIS subject's boundary opens an FS_WRITE channel creating exactly that carrier, which the :file-preflight path does not; and the certificate's evaluation_domain launches this same subject.",
+      "dependent_state": "carrier.run_journal.model_at_session_start",
+      "usable_when": {
+        "certificate_status": [
+          "VALID"
+        ]
+      },
+      "on_any_other_status": "the dependent state is UNAVAILABLE and may not be read. main.qm asserts nothing about the model at session start on its own — it has no independent evidence for it, and inventing a fallback would be exactly the fabrication this lab exists to prevent.",
+      "_why_not_copied_here": "copying the certified value into main.qm would create the duplicated-derived-assertion disease the SUBJECT_MODEL note documents at length. The value is fetched by re-evaluation, never cached."
+    }
+  ]
+}

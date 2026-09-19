@@ -1,0 +1,182 @@
+# Roadmap — order in which capabilities are developed
+
+> **Status of this document:** authoritative for *intended order and current
+> state*. It is the source-of-truth entry #3 named by `README.md`.
+> **Facts are grounded in code** (`core/*.py`, `app/*.py`, `cli/*.py`,
+> `main.py`) and in `docs/audit/archive/daemon-progress.md`. A capability marked
+> **IMPLEMENTED** here means the code exists and is tested; it does **not**
+> claim the behaviour is production-hardened. **PLANNED** means the contract is
+> declared (module, doc, or test scaffold) but the full behaviour is not built.
+
+The existence of a module is **not** proof that a capability is complete. Read
+each track's status line, and cross-check `docs/audit/archive/daemon-progress.md` for the
+per-PR merge/acceptance state of the async-daemon work.
+
+---
+
+## Track A — Single-shot agent cycle (foundation)
+
+**Status: IMPLEMENTED.**
+Observe → Interpret → Plan → Act → Verify → Respond, driven by an LLM planner.
+
+- Control loop: `core/loop` (+ `loop_helpers`, `loop_methods`).
+- Planner: `core/planner`; deliberation kernel before the LLM: `core/strategy_router`.
+- Verifier: `core/verifier*`, `core/confidence_vector`. The layer that may
+  actually **rewrite or downgrade** a thinly supported answer is
+  `core/low_evidence_policy` + `core/unsupported_claims`.
+- Evidence-support telemetry (**observational**): `core/evidence_support`
+  reports applicability, support score, weak-support state and
+  citation-integrity violations. It is not a confidence gate and does not
+  trigger replan — operator ruling of 2026-07-27, see
+  `docs/audit/SENSOR_SIGNAL_MEASUREMENT.md`.
+- Evidence / provenance: `core/evidence`, `core/source_registry*`,
+  `core/source_ranker`, `core/evidence_budget`.
+- Entry point: `main.py --ask` (one-shot) or interactive REPL.
+
+## Track B — Memory & knowledge governance
+
+**Status: IMPLEMENTED (working + persistent + episodic/procedural).**
+
+- Working memory: `core/memory`; persistent records: `core/persistent_memory`.
+- Episodic / procedural / consolidation: `core/smart_memory`.
+  Procedure confidence is Beta(1,1)-smoothed, so one success reaches 0.667 —
+  active, but explicitly not certainty. **Two corrections to how this used to
+  be stated here** (both now fixed, see the registry): smoothing landed on
+  2026-07-11 and the rows written before it were never migrated, so 45 of 65
+  live procedures sat at a raw `1.0` until MIR-051 recomputed them; and until
+  MIR-048 no non-success episode could reach a procedure at all, leaving
+  `failure_count` at 0 across the whole store — the formula was sound while
+  demotion was unreachable. Feedback is now attributed (`used_procedure_ids`,
+  MIR-049) and bidirectional.
+- Experience memory reaches the **unattended** agent too (MIR-043): the
+  autonomous path holds episodic/procedural stores, banks episodes, and runs
+  bounded hygiene automatically. What an episode may influence is a separate
+  permission from whether it is stored (`usage_eligible`), and durable writes
+  are governed per sink with default-deny.
+- Write / retrieval policy + hygiene: `core/memory_policy`, `core/memory_hygiene`,
+  `core/episodic_hygiene`, `core/memory_echo_antibody`.
+- Controlled ingestion: `core/ingestion*`, `core/knowledge_pipeline`.
+
+## Track C — Safety, policy & autonomy governance
+
+**Status: IMPLEMENTED (gates in place); autonomy stays human-gated.**
+
+- Policy Gate — pre-execution checkpoint for **every** Action: `core/policy`.
+- Governance modes (`diagnostic`, `learning`, `repair`, `improvement`,
+  `governance`) + governed-operation verdicts (`allow` / `require_approval` /
+  `deny`): `core/governance`.
+- Human approval path: `core/approval`, `core/approval_inbox`,
+  `core/approval_triage` (REPL: `:inbox`, `:approve`, `:deny`, `:approval-run`).
+- Deep/Opus escalation is reason-gated — the agent never opens Opus for itself:
+  `core/deep_escalation` (`main.py --reason`).
+- See `knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md` for the full authority contract.
+
+## Track D — Budgets, durability & long-running work
+
+**Status: IMPLEMENTED (bounded runs); daemon is incremental — see progress doc.**
+
+- Budget governor / ledger / **persistent kill-switch**: `core/budget_governor`,
+  `core/budget_ledger`, `core/budget_kill_switch`, `core/model_usage`.
+- Durability: `core/checkpoint` (resume mid-run), `core/state_integrity`,
+  `core/file_lock`, `core/circuit_breaker`, `core/termination_guard`.
+- Autonomous runtime / scheduling / campaigns: `core/autonomous_runtime`,
+  `core/scheduler`, `core/task_queue`, `core/campaign*`, `core/work_session`.
+- **Production unattended path:** `agent_tick.py` (optionally supervised by
+  `docker/daemon_loop.py` under Compose). That supervisor is **not**
+  `app.daemon.DaemonLoop`.
+- **Async daemon plan** (`app/daemon.py` and related building blocks):
+  incremental, tracked per sub-item in `docs/audit/archive/daemon-progress.md`. Modules may
+  exist and be tested without being composed into a production entry point.
+- Durability/queue/retry failure classes to verify (queue-without-consumer,
+  dead runner, no retry backoff) are catalogued in
+  `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-008/009/010).
+
+## Track E — Learning & self-improvement (self-build)
+
+**Status: PARTIALLY IMPLEMENTED — every applied change stays human-approved.**
+
+- Self-repair loop: `core/self_repair` (+ `repair_proposal`); REPL `:repair`.
+- Coding-skill ladder **Ступень 1**:
+  - Stage A — turn a code TODO/FIXME into a task + *failing* acceptance test:
+    `core/self_task_producer` (`:self-task-propose`).
+  - Stage B — implement one **approved** task until its frozen test passes:
+    `core/self_task_builder` (`:self-task-build`).
+- Self-build / self-apply lane (TD-023/024/025): `core/self_apply_lane`,
+  `core/self_apply_bridge`, `core/self_build_producer`,
+  `core/proposal_value_gate`, `core/incremental_splitter` (no-LLM split).
+- **Human gate is mandatory:** applied steps go through `:approval-approve` +
+  `:self-apply-run`. There is no unattended self-modification of code; the
+  one rule-approved exception (documents-only items, `core/rule_approved_apply`,
+  since 2026-08-27) is recorded in `CENTRAL_AGENT_GOVERNANCE.md` §10.
+
+## Track F — Multi-agent / subagents
+
+**Status: PARTIALLY IMPLEMENTED — real bounded child loops, NOT full isolation.**
+
+What exists (`core/subagent_runner`, `core/team_executor`,
+`core/subagent_registry`, `core/subagent_memory_scope`, `core/team_plan`):
+
+- A subagent runs as a **real** child `AgentLoop` with its own trace and a
+  restricted tool set.
+- **Shared, not isolated:** the child reuses the parent's Policy Gate and
+  Model Router/budget (`policy=self.policy`, `model_router=self.model_router`).
+- **No persistent identity or memory:** `memory=None`, `persistent_store=None`.
+- **Bounded:** `max_replan_attempts=1`, `verifier_enabled=False` — the parent
+  reviews the child's answer (a subagent claim is a witness, not a verified
+  source).
+
+Not yet built: per-agent persistent memory, independent identity, independent
+budget, and self-directed multi-agent coordination. See
+`knowledge/doctrine/future/CORPORATE_MODEL.md` for that target (explicitly future).
+
+## Track G — Operator surface & observability
+
+**Status: IMPLEMENTED.**
+
+- REPL `:command` surface — see `COMMANDS_MAP.md` (built from `main.py`).
+- Natural-language routing (intent parity): plain-language operator messages
+  are mapped to their `:command` equivalents by the deterministic no-LLM router
+  in `core/operator_intent.py` / `core/operator_intent_patterns.py`. See the
+  "Natural-language routing (intent parity)" section in `COMMANDS_MAP.md`.
+- Model-assisted intent **veto**: `core/intent_understanding` (wired in
+  `cli/intent_bridge.py`). The keyword router cannot tell "please do X" from a sentence
+  that merely mentions X, so a conversational turn could be hijacked into a
+  command. The model is consulted only to *cancel* such a false positive — it
+  may never choose an action. Any uncertainty (model error, unparseable output,
+  an action outside the kernel's real capability list, low confidence, or no
+  model at all) keeps the deterministic routing. Kernel decides, model advises.
+- Structured JSONL logging: `core/logger`; trace ids: `core/ids`.
+- Read-only audits: `core/architecture_audit` (`:architecture-audit`),
+  `core/model_registry_audit`, `core/release_hygiene`, `core/supply_chain`.
+- Observability failure classes the operator surface must catch (dead runner,
+  silent failure, stale heartbeat) are catalogued in
+  `docs/OPERATIONAL_FAILURE_MODES.md` (OFM-009).
+
+## Track H — Project Intelligence (HISTORICAL: `project_intelligence/` was deleted on 2026-08-06; nothing below exists in the tree — audit D7, 2026-09-03)
+
+**Status: STANDALONE on `main` — not wired into the agent.**
+
+- Package: `project_intelligence/` (SQLite schema, migrations, DB access layer,
+  schema/idempotency tests).
+- **Present:** migration runner, connection layer, normalized idempotency helpers.
+- **Absent:** document/Git scanners, extractors, claim resolver materialization,
+  FastAPI surface, React/React Flow UI, integration with `main.py` /
+  `agent_tick.py` / Docker.
+- Do **not** treat this package as a production capability of the agent loop.
+
+---
+
+## What is deliberately NOT here yet
+
+- Full multi-agent isolation (own memory/identity/budget per agent).
+- Unattended self-modification of code (kept behind human approval on
+  purpose; documents-only items are the rule-approved exception since
+  2026-08-27).
+- A real installed Windows service (only the shell contract exists —
+  `app/windows_service.py`, every `*_implemented` flag is `False`).
+- The corporate/organisational model — future only, see `docs/future/`.
+- Project Intelligence scanners, graph UI, or agent integration (Track H).
+
+_Source of facts: repository code as of the referencing commit + module index
+in `AGENT_ANATOMY.md`. When this file and code disagree, code wins and this
+file should be corrected._

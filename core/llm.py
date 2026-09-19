@@ -1,0 +1,797 @@
+"""Thin LLM client wrapper."""
+from __future__ import annotations
+
+import os
+from typing import Any
+
+
+def _provider() -> str:
+    return os.getenv("AGENT_PROVIDER", "anthropic").lower().strip()
+
+
+def _default_model(provider: str) -> str:
+    if provider == "local":
+        return os.getenv("LOCAL_LLM_MODEL", "qwen-local")
+
+    override = os.getenv("AGENT_MODEL")
+    if override:
+        return override
+    if provider == "deepseek":
+        return "deepseek-chat"
+    if provider == "openai":
+        return "gpt-4o-mini"
+    if provider == "huggingface":
+        return "meta-llama/Llama-3.3-70B-Instruct"
+    if provider == "mock":
+        return "mock-1"
+    return "claude-sonnet-4-5"
+
+
+DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
+
+
+#: Home of the roster, chosen by the RUNTIME, never by this library. Unset
+#: means "no roster here": a store with a default location would be written by
+#: anything that ever truncates — the suite did exactly that on 2026-08-29 and
+#: banked three invented models into the live journal, after which real budget
+#: tests read 8192 where they had asked for 1024. Entry points set it (see
+#: `main.py`); libraries and tests get silence unless they ask for a home.
+#: Дом реестра молчавших внутри рабочей области. Библиотека сама хранилище
+#: НЕ выбирает (решение 2026-08-29: дефолт в библиотеке дал батарее тестов
+#: записать три выдуманные модели в живой журнал — и 2026-09-03 при пробе
+#: дефолта это повторилось). Дом задаёт РАНТАЙМ в точке входа —
+#: `ensure_roster_home` из agent_tick и REPL.
+ROSTER_RELPATH = "data/reasoning_roster.jsonl"
+
+
+def _roster_path() -> Any:
+    """Путь к реестру молчавших из окружения; None — рантайм дом не задал."""
+    from pathlib import Path
+
+    configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
+    return Path(configured) if configured else None
+
+
+def ensure_roster_home(workspace: Any) -> Any:
+    """Точка входа объявляет дом реестра, если оператор не задал свой.
+
+    Замер 2026-09-03: AGENT_REASONING_ROSTER не задавал никто, путь был None
+    в каждом живом процессе, реестр не читался и не писался, и думающая
+    модель получала лестницу 1200→2400→4800 вместо пола 8192 — три молчания
+    по 8 400 токенов за утро. Орган работал; подключения не было. Возвращает
+    действующий путь.
+    """
+    from pathlib import Path
+
+    configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
+    if configured:
+        return Path(configured)
+    home = Path(workspace) / ROSTER_RELPATH
+    os.environ["AGENT_REASONING_ROSTER"] = str(home)
+    return home
+
+
+def _roster_key(provider: str, model: str) -> str:
+    return f"{(provider or '').strip().lower()}:{(model or '').strip()}"
+
+
+def is_known_reasoning_model(provider: str, model: str) -> bool:
+    """Has this model already proved it spends the budget on thinking?
+
+    A missing or unreadable roster answers "not known" — ignorance must not
+    become a verdict, and the caller simply pays the blind leg once more.
+    """
+    from core.state_integrity import read_state_jsonl
+
+    path = _roster_path()
+    if path is None or not path.exists():
+        return False
+    try:
+        rows = read_state_jsonl(path)
+    except Exception:  # noqa: BLE001 — a damaged roster must never break a call
+        return False
+    key = _roster_key(provider, model)
+    return any(str(row.get("key")) == key for row in rows)
+
+
+def remember_reasoning_model(provider: str, model: str, *, spent: int) -> None:
+    """Record what silence taught us, so the next run does not buy it again."""
+    from core.state_integrity import append_state_jsonl
+
+    path = _roster_path()
+    if path is None or is_known_reasoning_model(provider, model):
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        append_state_jsonl(path, [{
+            "key": _roster_key(provider, model),
+            "provider": (provider or "").strip().lower(),
+            "model": (model or "").strip(),
+            "evidence": f"truncated with empty text at {int(spent)} output tokens",
+        }])
+    except Exception:  # noqa: BLE001 — learning is best-effort, answering is not
+        return
+
+# Provider stop/finish reasons that mean "I ran out of output budget mid-answer"
+# rather than "I finished naturally". When we see one of these we can ask the
+# model to continue where it left off instead of returning a truncated answer.
+_TRUNCATION_REASONS = frozenset({"max_tokens", "length"})
+
+# OpenAI reasoning models ("o-series" and gpt-5+) spend `max_completion_tokens`
+# on INTERNAL reasoning first and only then on visible output. A budget sized
+# for the answer alone can therefore be consumed entirely by reasoning, and the
+# API still returns success — with `content=None` and `finish_reason='length'`.
+#
+# Observed in production: the planner asked for 1024 tokens, got 0 characters
+# back, auto-continued once with the same 1024, got 0 characters again, and
+# reported `json_decode_error` on an answer that never existed (1024 + 1024 =
+# the 2048 output_tokens recorded in the run log).
+#
+# So for these models the requested budget is a FLOOR, not the whole story:
+# raise it so reasoning has room and the answer still fits. Applies only to
+# reasoning models; every other model keeps its exact requested budget.
+#
+# Parsed defensively: a malformed value must degrade to the default, never
+# raise at import time and take the process down. Same contract as
+# `_max_continuations()` below and `_plan_max_tokens()` in core/planner.py.
+def _reasoning_token_floor() -> int:
+    try:
+        return int(str(os.getenv("AGENT_REASONING_TOKEN_FLOOR", "8192")).strip())
+    except (TypeError, ValueError):
+        return 8192
+
+
+_REASONING_TOKEN_FLOOR = _reasoning_token_floor()
+
+#: Valid OpenAI reasoning-effort levels; anything else degrades to "unset".
+_REASONING_EFFORT_LEVELS = frozenset({"minimal", "low", "medium", "high", "max"})
+
+
+def _reasoning_effort_kwargs() -> dict[str, str]:
+    """`reasoning_effort` kwargs for gpt-5+/o-series calls, from the operator's
+    AGENT_OPENAI_REASONING_EFFORT. Unset or invalid → {} (provider default);
+    read per call so an exam session can flip it without a process restart."""
+    level = (os.getenv("AGENT_OPENAI_REASONING_EFFORT", "") or "").strip().lower()
+    return {"reasoning_effort": level} if level in _REASONING_EFFORT_LEVELS else {}
+
+
+# How far a continuation round may escalate the per-leg budget when the
+# previous leg came back empty. Bounded so a model that never answers cannot
+# drive unbounded spend; `AGENT_MAX_CONTINUATIONS` is the other backstop.
+# Clamped at 1 so a zero or negative value cannot collapse the ceiling below
+# the starting budget and disable continuation as a side effect.
+def _continue_escalation_cap() -> int:
+    try:
+        return max(1, int(str(os.getenv("AGENT_CONTINUE_ESCALATION_CAP", "4")).strip()))
+    except (TypeError, ValueError):
+        return 4
+
+
+_CONTINUE_ESCALATION_CAP = _continue_escalation_cap()
+
+
+def _auto_continue_enabled() -> bool:
+    """Whether truncated answers are auto-continued. Defaults to ON.
+
+    Disable with ``AGENT_AUTO_CONTINUE=0`` (or false/no/off).
+    """
+    value = os.getenv("AGENT_AUTO_CONTINUE")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _max_continuations() -> int:
+    """Max follow-up rounds when an answer is truncated (default 4).
+
+    A value of 0 disables continuation. Bounded so a misbehaving model can
+    never loop forever; the budget governor is the other backstop.
+    """
+    raw = os.getenv("AGENT_MAX_CONTINUATIONS", "4")
+    try:
+        return max(0, int(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 4
+
+
+# Instruction appended for OpenAI-compatible continuation turns. Anthropic does
+# not need this — it continues an assistant prefill natively.
+_CONTINUE_INSTRUCTION = (
+    "Continue the previous response exactly where it stopped. "
+    "Output only the continuation — no repetition of earlier text, no preamble, "
+    "no explanation."
+)
+
+
+class LLM:
+    """Minimal synchronous LLM wrapper with pluggable provider."""
+
+    def __init__(self, provider: str | None = None, model: str | None = None):
+        self.provider = (provider or _provider()).lower().strip()
+        self.model = model or _default_model(self.provider)
+        self._client = self._build_client()
+        # Usage counters — incremented by `complete()` after every
+        # successful call. Reset via `reset_usage()` between audit
+        # scenarios. Counters NEVER throw — when the provider doesn't
+        # report `usage` they simply stay flat.
+        self.call_count: int = 0
+        self.input_tokens: int = 0
+        self.output_tokens: int = 0
+        # `last_usage` carries the most recent per-call payload so an
+        # audit can attribute spend to a specific scenario without
+        # diffing the counters by hand.
+        self.last_usage: dict[str, int] = {
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+        }
+        #: Whether the last answer stopped on the token limit rather than
+        #: finishing. A caller that declined continuation needs this to tell a
+        #: short answer from a broken one.
+        self.last_answer_was_truncated: bool = False
+
+    # ------------------------------------------------------------------
+    # Usage helpers
+    # ------------------------------------------------------------------
+
+    def reset_usage(self) -> None:
+        """Zero every counter. Used by the audit harness between
+        scenarios so per-question budgets are independent."""
+        self.call_count = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.last_usage = {
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+        }
+
+    def usage_summary(self) -> dict[str, Any]:
+        """Snapshot of cumulative usage. Safe to read at any time."""
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "call_count": self.call_count,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.input_tokens + self.output_tokens,
+        }
+
+    def _record_usage(self, in_tok: int, out_tok: int) -> None:
+        """Internal: bump counters after a successful call. Bad inputs
+        (negative or non-int) become 0 — usage tracking must NEVER
+        crash a real API call."""
+        try:
+            in_int = max(0, int(in_tok))
+            out_int = max(0, int(out_tok))
+        except (TypeError, ValueError):
+            in_int = 0
+            out_int = 0
+        self.call_count += 1
+        self.input_tokens += in_int
+        self.output_tokens += out_int
+        self.last_usage = {
+            "input_tokens": in_int,
+            "output_tokens": out_int,
+            "total_tokens": in_int + out_int,
+        }
+
+    def _build_client(self):
+        if self.provider == "anthropic":
+            import anthropic
+            return anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        if self.provider == "openai":
+            from openai import OpenAI
+            return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        if self.provider == "huggingface":
+            from openai import OpenAI
+            return OpenAI(
+                base_url="https://router.huggingface.co/v1",
+                api_key=os.getenv("HF_TOKEN"),
+            )
+        if self.provider == "deepseek":
+            # OpenAI-совместимый API; счёт пополнен оператором 2026-08-28
+            # ($5, баланс проверен живым запросом) — эксперимент оси цены.
+            from openai import OpenAI
+            return OpenAI(
+                base_url="https://api.deepseek.com",
+                api_key=os.getenv("DEEPSEEK_API_KEY"),
+            )
+        if self.provider == "local":
+            from openai import OpenAI
+
+            try:
+                timeout = float(os.getenv("LOCAL_LLM_TIMEOUT", "60"))
+            except (TypeError, ValueError):
+                timeout = 60.0
+            if timeout <= 0:
+                timeout = 60.0
+            return OpenAI(
+                base_url=os.getenv(
+                    "LOCAL_LLM_BASE_URL",
+                    "http://127.0.0.1:1234/v1",
+                ),
+                api_key=os.getenv("LOCAL_LLM_API_KEY", "lm-studio"),
+                timeout=timeout,
+            )
+        if self.provider == "mock":
+            return None
+        raise ValueError(
+            f"Unsupported AGENT_PROVIDER: {self.provider!r}. "
+            "Use 'anthropic', 'openai', 'deepseek', 'huggingface', "
+            "'local', or 'mock'."
+        )
+
+    def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.7,
+        *,
+        allow_continuation: bool = True,
+    ) -> str:
+        """Send a single-turn prompt and return the text response."""
+        text, stop_reason = self._complete_once(
+            system, user, max_tokens, temperature, prior=None
+        )
+        self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
+        # Truncated with nothing to show: the whole budget went to internal
+        # reasoning. That is the BEHAVIOUR, and it is what the roster records —
+        # a name table recognises one generation and ages into a bug the moment
+        # the provider ships the next (see `_is_o_series` below, where that
+        # rule is written and applied to one provider out of six).
+        if not text and self.last_answer_was_truncated:
+            remember_reasoning_model(self.provider, self.model, spent=max_tokens)
+        if not allow_continuation:
+            return text if self.provider == "mock" else text.strip()
+        # The per-leg provider calls now return RAW text (no .strip()) so that
+        # whitespace at a truncation boundary is preserved when legs are
+        # concatenated below. Trimming happens once, centrally, on the final
+        # answer. Mock text is returned verbatim to keep its deterministic shape.
+        if self.provider == "mock":
+            return text
+        if not _auto_continue_enabled():
+            return text.strip()
+
+        max_rounds = _max_continuations()
+        if max_rounds <= 0:
+            return text.strip()
+
+        combined = text
+        agg_in = int(self.last_usage.get("input_tokens", 0))
+        agg_out = int(self.last_usage.get("output_tokens", 0))
+        rounds = 0
+        # Budget used for the NEXT leg. Reissuing an identical request after a
+        # leg that was truncated *and* returned nothing is guaranteed to fail
+        # the same way — the whole budget went to internal reasoning. So when a
+        # leg produces no text, escalate before retrying instead of repeating.
+        #
+        # Seeded from the EFFECTIVE budget, not the requested one: for reasoning
+        # models `_complete_openai_compatible` silently lifts the request to
+        # `_REASONING_TOKEN_FLOOR`. Doubling from the smaller requested number
+        # would re-send byte-identical calls until the doubling finally overtook
+        # that floor — paying repeatedly for the same failed request and then
+        # hitting the ceiling without ever exceeding what leg 1 already spent.
+        round_budget = self._effective_budget(max_tokens)
+        budget_ceiling = max(round_budget, round_budget * _CONTINUE_ESCALATION_CAP)
+        last_leg_empty = not text
+        while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
+            # Escalate on EVERY truncated leg, not only on an empty one. A leg
+            # that wrote text and still hit the ceiling proved the same thing
+            # an empty leg proves — this budget cannot finish the answer — and
+            # re-asking at the identical number re-sends the WHOLE prompt for
+            # nothing. Measured live 2026-09-17: one synthesizer answer spent
+            # 5 x 2048 output tokens (every leg, still cut) and was billed
+            # 80 810 input tokens for a prompt worth ~11 000, because the flat
+            # budget bought five legs that could never reach the end. The
+            # answer's completion marker sits at the end, so it never arrived
+            # either — the cost and the "parse=missing" verdict are one defect.
+            if last_leg_empty and round_budget >= budget_ceiling:
+                # Already at the ceiling and still nothing came back.
+                # Stop paying for a request that cannot succeed.
+                break
+            round_budget = min(round_budget * 2, budget_ceiling)
+            rounds += 1
+            cont_text, stop_reason = self._complete_once(
+                system, user, round_budget, temperature, prior=combined
+            )
+            agg_in += int(self.last_usage.get("input_tokens", 0))
+            agg_out += int(self.last_usage.get("output_tokens", 0))
+            last_leg_empty = not cont_text
+            if cont_text:
+                combined += cont_text
+            elif stop_reason not in _TRUNCATION_REASONS:
+                # Empty and NOT truncated: the model genuinely has nothing more
+                # to add. Escalating would not help.
+                break
+
+        # Expose the aggregate usage of the whole continuation chain so the
+        # budget wrapper records one honest total instead of just the last leg.
+        self.last_usage = {
+            "input_tokens": agg_in,
+            "output_tokens": agg_out,
+            "total_tokens": agg_in + agg_out,
+        }
+        # Still truncated here means the rounds ran out, not that the model
+        # finished — the caller is holding an answer that stops mid-sentence.
+        self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
+        return combined.strip()
+
+    def _complete_once(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        *,
+        prior: str | None,
+    ) -> tuple[str, str]:
+        """One provider call. Returns ``(text, stop_reason)``.
+
+        When *prior* is set this is a continuation round: the partial answer so
+        far is supplied so the provider resumes instead of restarting.
+        """
+        if self.provider == "anthropic":
+            return self._complete_anthropic(system, user, max_tokens, temperature, prior)
+        if self.provider in {"openai", "deepseek", "huggingface", "local"}:
+            return self._complete_openai_compatible(
+                system, user, max_tokens, temperature, self.model, prior
+            )
+        return self._complete_mock(system, user, max_tokens), "stop"
+
+    def stream_complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.7,
+        on_token: Any | None = None,
+    ) -> str:
+        """Stream a single-turn prompt, invoking *on_token(text)* for each
+        token chunk.
+        """
+        if self.provider == "anthropic":
+            return self._stream_anthropic(system, user, max_tokens, temperature, on_token)
+        if self.provider in {"openai", "local"}:
+            return self._stream_openai_compatible(
+                system, user, max_tokens, temperature, self.model, on_token
+            )
+        # HuggingFace and mock do not support true streaming — fall back to complete.
+        return self.complete(system, user, max_tokens, temperature)
+
+    def _stream_anthropic(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        on_token: Any | None,
+    ) -> str:
+        kwargs: dict = {
+            "model": self.model,
+            "system": system,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": user}],
+        }
+        if self._anthropic_supports_temperature(self.model):
+            kwargs["temperature"] = temperature
+        accumulated = []
+        with self._client.messages.stream(**kwargs) as stream:
+            for text in stream.text_stream:
+                accumulated.append(text)
+                if on_token is not None:
+                    try:
+                        on_token(text)
+                    except Exception:  # noqa: BLE001, S110 — a token consumer must never break the stream
+                        pass
+            # Capture final usage from the completed message
+            final_msg = stream.get_final_message()
+        usage = getattr(final_msg, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) if usage is not None else 0
+        out_tok = getattr(usage, "output_tokens", 0) if usage is not None else 0
+        self._record_usage(in_tok, out_tok)
+        return "".join(accumulated).strip()
+
+    def _stream_openai_compatible(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+        on_token: Any | None,
+    ) -> str:
+        kwargs: dict = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self._is_o_series(model):
+            kwargs["max_completion_tokens"] = max_tokens
+            kwargs.update(_reasoning_effort_kwargs())
+        else:
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = temperature
+        accumulated = []
+        in_tok = 0
+        out_tok = 0
+        for chunk in self._client.chat.completions.create(**kwargs):
+            delta = chunk.choices[0].delta if chunk.choices else None
+            text = getattr(delta, "content", None) or ""
+            if text:
+                accumulated.append(text)
+                if on_token is not None:
+                    try:
+                        on_token(text)
+                    except Exception:  # noqa: BLE001, S110 — a token consumer must never break the stream
+                        pass
+            # Final chunk carries usage when stream_options.include_usage=True
+            if chunk.usage is not None:
+                in_tok = getattr(chunk.usage, "prompt_tokens", 0)
+                out_tok = getattr(chunk.usage, "completion_tokens", 0)
+        self._record_usage(in_tok, out_tok)
+        return "".join(accumulated).strip()
+
+    @staticmethod
+    def _anthropic_generation(model: str) -> int | None:
+        """The Claude generation in *model*, or None when the name predates it.
+
+        Read as a NUMBER and compared, the way `_is_o_series` below reads the
+        GPT major version — never spelled as a literal digit. A generation
+        written into code recognises exactly one generation and ages into a bug
+        the moment the provider ships the next: that is the same defect the
+        model catalog exists to prevent, one layer down. Nothing here needs
+        editing for gen 6.
+
+        Anthropic changed the ordering at gen-4, and the two schemes must be
+        told apart before any number can be read as a generation:
+
+            gen-3 and earlier:  claude-<generation>-<minor>-<family>-<date>
+            gen-4 and later:    claude-<family>-<generation>[-<minor>][-<date>]
+
+        Requiring LETTERS where the family belongs is what distinguishes them.
+        A looser `\\w+` matches "3" in "claude-3-5-sonnet" and then reads the
+        MINOR version 5 as the generation, turning the oldest models into the
+        newest. So the gen-3 shapes return None here rather than a number, and
+        each caller decides what that means for its own rule.
+        """
+        import re
+        match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
+        return int(match.group(1)) if match else None
+
+    @classmethod
+    def _anthropic_supports_temperature(cls, model: str) -> bool:
+        """Whether *model* still accepts `temperature`. Generation 4 dropped it.
+
+        Sending it anyway is answered with HTTP 400 — the whole call lost, not
+        degraded. Pre-gen-4 names (no generation to read) still accept it.
+        """
+        generation = cls._anthropic_generation(model)
+        return generation is None or generation < 4
+
+    @classmethod
+    def _anthropic_supports_prefill(cls, model: str) -> bool:
+        """Whether *model* accepts a trailing assistant message to continue
+        from.
+
+        Anthropic's native prefill — end the conversation on a partial
+        assistant turn and let the model resume it — is how `complete`
+        continues a reply cut off at `max_tokens`. Generation 5 rejects it:
+        the request must end with a user message, and sending one anyway
+        costs the whole call.
+        """
+        generation = cls._anthropic_generation(model)
+        return generation is None or generation < 5
+
+    def _complete_anthropic(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        prior: str | None = None,
+    ) -> tuple[str, str]:
+        messages: list[dict] = [{"role": "user", "content": user}]
+        if prior:
+            # The partial answer goes back either way, or the model restarts
+            # instead of resuming. What differs is whether it is the LAST
+            # message, and that decides both points below.
+            needs_closing_turn = not self._anthropic_supports_prefill(self.model)
+            # Trailing whitespace is rejected only on a trailing assistant turn
+            # — that is what makes it a prefill. Once a user turn follows, the
+            # partial answer is ordinary history and its boundary whitespace has
+            # to survive: `complete` deliberately keeps the legs unstripped so a
+            # continuation is not glued on at the wrong place, and trimming here
+            # would throw that away at the one point it matters. The
+            # OpenAI-compatible path below sends `prior` raw for the same reason.
+            messages.append({
+                "role": "assistant",
+                "content": prior if needs_closing_turn else prior.rstrip(),
+            })
+            if needs_closing_turn:
+                # These models reject a trailing assistant turn outright, so ask
+                # for the continuation explicitly instead of prefilling it.
+                messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
+        kwargs: dict = {
+            "model": self.model,
+            "system": system,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+        if self._anthropic_supports_temperature(self.model):
+            kwargs["temperature"] = temperature
+        message = self._client.messages.create(**kwargs)
+        parts = [block.text for block in message.content if hasattr(block, "text")]
+        usage = getattr(message, "usage", None)
+        in_tok = getattr(usage, "input_tokens", 0) if usage is not None else 0
+        out_tok = getattr(usage, "output_tokens", 0) if usage is not None else 0
+        self._record_usage(in_tok, out_tok)
+        stop_reason = str(getattr(message, "stop_reason", "") or "")
+        return "".join(parts), stop_reason
+
+    @staticmethod
+    def _is_o_series(model: str) -> bool:
+        """OpenAI models that require max_completion_tokens instead of max_tokens.
+
+        Includes:
+        - o-series reasoning models (o1, o3, o4, o3-mini, o4-mini …)
+        - GPT-5+ generation (gpt-5.x, gpt-5-…) which share the same API surface
+        """
+        import re
+        m = model.casefold()
+        # o-series: o1, o3, o4, o1-mini, o3-mini, o4-mini, …
+        if re.search(r"\bo\d", m):
+            return True
+        # gpt-5 and beyond (major version >= 5)
+        match = re.search(r"\bgpt-(\d+)", m)
+        return bool(match and int(match.group(1)) >= 5)
+
+    def _reasoning_budget(self, max_tokens: int) -> int:
+        """Effective token budget for an OpenAI reasoning model.
+
+        Never lowers a caller's budget: a caller that already asked for more
+        than the floor keeps its own, larger value.
+        """
+        floor = _REASONING_TOKEN_FLOOR
+        if floor <= 0:
+            return max_tokens
+        return max(max_tokens, floor)
+
+    def _reasons_internally(self) -> bool:
+        """Does this model spend the output budget on thinking before speaking?
+
+        Two routes in, and the order matters: the name table answers instantly
+        for models it happens to know, and the roster answers for every model
+        that has ever proved it by going silent — including the ones released
+        after this code was written.
+        """
+        if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
+            return True
+        return is_known_reasoning_model(self.provider, self.model)
+
+    def _effective_budget(self, max_tokens: int) -> int:
+        """Tokens the next leg will really be allowed to spend."""
+        if self._reasons_internally():
+            return self._reasoning_budget(max_tokens)
+        return max_tokens
+
+    def _complete_openai_compatible(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+        prior: str | None = None,
+    ) -> tuple[str, str]:
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        if prior:
+            # OpenAI-compatible APIs have no native assistant-prefill continue,
+            # so replay the partial answer and ask the model to resume from it.
+            messages.append({"role": "assistant", "content": prior})
+            messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
+        # o-series reasoning models: use max_completion_tokens, no temperature param
+        if self._is_o_series(model):
+            response = self._client.chat.completions.create(
+                model=model,
+                max_completion_tokens=self._reasoning_budget(max_tokens),
+                messages=messages,
+                **_reasoning_effort_kwargs(),
+            )
+        else:
+            response = self._client.chat.completions.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=messages,
+            )
+        usage = getattr(response, "usage", None)
+        in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0
+        out_tok = getattr(usage, "completion_tokens", 0) if usage is not None else 0
+        self._record_usage(in_tok, out_tok)
+        choice = response.choices[0]
+        finish_reason = str(getattr(choice, "finish_reason", "") or "")
+        return (choice.message.content or ""), finish_reason
+
+    def _complete_mock(self, system: str, user: str, max_tokens: int) -> str:
+        """Deterministic offline stub.
+
+        Two modes (detected from the system prompt):
+          - Planner mode: emit a JSON plan picked by simple keyword heuristics.
+            Lets the full LLM-planning loop be tested with no API key.
+          - Synthesis mode: emit a structured echo so the rest of the loop
+            can be verified without any external LLM.
+        """
+        # Cheap deterministic "tokens": approximate as 1/4 char to give
+        # the audit harness non-zero numbers in mock mode.
+        in_tok = (len(system) + len(user)) // 4
+        if "PLANNER_MODE" in system or "the planner of an autonomous agent" in system:
+            text = self._mock_plan(user)
+            self._record_usage(in_tok, len(text) // 4)
+            return text
+
+        snippet = user[:200].replace("\n", " ")
+        text = (
+            "[mock-llm response]\n"
+            f"system_chars={len(system)} user_chars={len(user)} max_tokens={max_tokens}\n"
+            f"user_preview={snippet}\n"
+            "answer=This is a deterministic stub. Replace AGENT_PROVIDER with a real backend "
+            "(anthropic | openai | huggingface) and set the matching API key in .env to get a real answer."
+        )
+        self._record_usage(in_tok, len(text) // 4)
+        return text
+
+    @staticmethod
+    def _mock_plan(user: str) -> str:
+        """Heuristic stand-in for an LLM planner."""
+        import json as _json
+        import re as _re
+
+        # Only inspect the question line — NOT the full prompt — so that
+        # planner-scaffolding words like "current_date" don't trigger cues.
+        file_hint_match = _re.search(r"file hint[:\s]*([^\n]+)", user, flags=_re.IGNORECASE)
+        file_hint = file_hint_match.group(1).strip() if file_hint_match else ""
+        if file_hint.lower() in {"none", "(none)", "-"}:
+            file_hint = ""
+
+        question_match = _re.search(r"question[:\s]*([^\n]+)", user, flags=_re.IGNORECASE)
+        question = question_match.group(1).strip() if question_match else user.strip()
+        qtext = question.lower()
+
+        web_cues = (
+            "internet", "news", "today", "latest", "current",
+            "search the web", "интернет", "новост", "сегодня",
+            "актуальн", "последн", "найди в",
+        )
+        file_cues = (
+            "this file", "the file", "in the file", "section",
+            "файл", "в файле", "раздел",
+        )
+        compare_cues = ("compare", "vs", "versus", "differ", "сравн", "сопостав")
+
+        wants_web = any(c in qtext for c in web_cues)
+        wants_file = bool(file_hint) and any(c in qtext for c in file_cues)
+        wants_compare = any(c in qtext for c in compare_cues) and bool(file_hint)
+
+        steps: list[dict] = []
+        if wants_compare:
+            steps.append({"tool": "file_read", "arguments": {"path": file_hint}, "rationale": "mock: compare -> read file"})
+            steps.append({"tool": "web_search", "arguments": {"query": question, "max_results": 5}, "rationale": "mock: compare -> web"})
+            reasoning = "Mock heuristic detected a compare-question with a file hint."
+        elif wants_file:
+            steps.append({"tool": "file_read", "arguments": {"path": file_hint}, "rationale": "mock: question references file"})
+            reasoning = "Mock heuristic: question references the provided file."
+        elif wants_web:
+            steps.append({"tool": "web_search", "arguments": {"query": question, "max_results": 5}, "rationale": "mock: question needs external info"})
+            reasoning = "Mock heuristic: question needs external info."
+        elif file_hint and len(question) > 5:
+            steps.append({"tool": "file_read", "arguments": {"path": file_hint}, "rationale": "mock: file is hinted and question is substantive"})
+            reasoning = "Mock heuristic: file hint present, defaulting to file_read."
+        else:
+            reasoning = "Mock heuristic: general-knowledge question, no tools needed."
+
+        return _json.dumps({"reasoning": reasoning, "steps": steps}, ensure_ascii=False)

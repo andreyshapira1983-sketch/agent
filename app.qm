@@ -1,0 +1,430 @@
+{
+  "_specimen": "SECOND physical .qm specimen. Not a schema, not a format, and not a model of app/bootstrap.py. Its subject is a SEMANTIC BOUNDARY — the callable app.bootstrap.build_agent — because the lab's own subject work killed the file-centric model three times. Field names are disposable.",
+  "_seeded_with": "exactly one relationship that was already earned by measurement, and nothing else. This file does not attempt to model everything build_agent produces.",
+  "subject": {
+    "kind": "semantic_boundary",
+    "symbol": "app.bootstrap.build_agent",
+    "resolved_in": "app/bootstrap.py",
+    "_why_not_the_file": "the file is where the symbol currently lives. QT1 and the entry-point experiment both showed that a file is an address, not a subject; naming the callable is what survived.",
+    "_scope": "only the production of one carrier is represented here. build_agent emits at least four logged events and seventeen payload keys on the one modelled event; this specimen claims nothing about the rest."
+  },
+  "producer_bindings": [
+    {
+      "binding_id": "PB1",
+      "relationship": "THIS boundary produces the carrier that C2 certifies",
+      "produces": "the session_start record of the current evaluation's run journal",
+      "_why_this_edge_is_earned": "measured before it was written: the A2 layered probe showed the :budget-status path opens the FS_WRITE channel that creates logs/run_*.jsonl, and C2's causal closure traced the value in that record to app/bootstrap.py:204 inside this very callable.",
+      "resolver": {
+        "kind": "python_ast",
+        "bridge": "scripts/qm_py_anchor.py",
+        "module_file": "app/bootstrap.py",
+        "function": "build_agent",
+        "_why": "the same rule the PowerShell link follows — the anchor is resolved by the language's own parser, not by matching text."
+      },
+      "verified_properties": [
+        {
+          "id": "A1",
+          "claim": "the producer symbol resolves in the module the specimen names",
+          "assertions": [
+            {
+              "path": "parse_ok",
+              "op": "equals",
+              "value": true
+            },
+            {
+              "path": "anchor_found",
+              "op": "equals",
+              "value": true
+            }
+          ]
+        },
+        {
+          "id": "A2",
+          "claim": "the boundary emits the carrier record this binding is about",
+          "assertions": [
+            {
+              "path": "logged_events",
+              "op": "contains",
+              "value": "session_start"
+            }
+          ]
+        },
+        {
+          "id": "A3",
+          "claim": "that record carries the field the certificate projects",
+          "assertions": [
+            {
+              "path": "payload_keys.session_start",
+              "op": "contains",
+              "value": "llm_model"
+            }
+          ],
+          "_note": "the KEY is asserted here; the VALUE is not. What the value must be, what it depends on and whether it currently holds are the certificate's business, and duplicating any of it here would rebuild the duplicated-derived-assertion disease this lab spent a day documenting."
+        }
+      ],
+      "certified_by": {
+        "certificate": "knowledge/quantum/c2.claim.qm",
+        "claim_id": "C2",
+        "projection": "payload.llm_model",
+        "_no_duplication": "no expected value, no dependency model, no precedence rule and no verdict appears in this file. The certificate decides, by re-evaluation, and this binding only names which projection it defers."
+      },
+      "downstream": "main.qm binding B1 gates whether the certified state may be used"
+    },
+    {
+      "binding_id": "PB2",
+      "relationship": "ONE source, TWO projections: one reported, one controlling",
+      "_shape": "AGENT_KNOWLEDGE_AUTO_WRITE -> { session_start.knowledge_auto_write (report) , AgentLoop.knowledge_auto_write (control) }",
+      "_why_this_edge_is_earned": "chosen by a bounded selector, not by taste: of build_agent's seventeen session_start keys, this was the only one read BY NAME anywhere in the declared universe of 280 files. CORRECTED: the earlier wording said 'a single unambiguous named consumer'. That was true of what the SELECTOR counted -- one key with one hit -- and false of the field, which is read by three regimes across four physical sites. The selector counted keys, not consumers.",
+      "source": {
+        "kind": "environment_variable",
+        "key": "AGENT_KNOWLEDGE_AUTO_WRITE",
+        "default": true,
+        "read_at": [
+          "app/bootstrap.py:224 -- into the journal payload",
+          "app/bootstrap.py:288 -- into the AgentLoop constructor"
+        ]
+      },
+      "report_projection": {
+        "of": "session_start.knowledge_auto_write",
+        "certified_by": {
+          "certificate": "knowledge/quantum/c3.claim.qm",
+          "claim_id": "C3",
+          "projection": "payload.knowledge_auto_write",
+          "_no_duplication": "expected value, dependency model, value map and verdict all live in the certificate"
+        },
+        "_consequence": "none of its own -- a report is read by an operator or a tool, not by a branch"
+      },
+      "control_projection": {
+        "of": "AgentLoop.knowledge_auto_write",
+        "constructed_at": "app/bootstrap.py:268 returns AgentLoop(...), receiving the attribute at :288",
+        "_correction": "an earlier edition of this binding called these 'the named consumer', singular, and asserted only the getattr sites. That grouped three physical sites under one contract without proving one, which is precisely what this lab's own granularity clause forbids: a granularity note may group only the physical sites of the SAME value -> SAME consumer-contract pair. The grouping is withdrawn.",
+        "regimes": [
+          {
+            "id": "R-A",
+            "name": "default-with-override",
+            "sites": [
+              "core/ingestion.py:120 (ingest_web_topic)",
+              "core/ingestion.py:268 (ingest_rss_feed)"
+            ],
+            "contract": "the attribute is read via getattr with fallback False and used as the DEFAULT for write_memory; an explicit auto_write_memory argument overrides it, and dry_run forces it off",
+            "consequence": "whether ingested web/RSS knowledge is written to memory",
+            "_note_on_the_fallback": "the consumer's getattr default is False while the producer's default is True. That divergence only matters if the attribute can be absent, which is not established here.",
+            "behavioral_closure": {
+              "status": "PARTIAL. The two sites are NOT quotient-ed into one consumer class.",
+              "control_partition_measured_at_each_site": {
+                "method": "the effective control is read where each site computes it -- both build their report with auto_write_memory=write_memory before touching the registry, so a recording report class observes the real value and the missing registry then aborts the run. No network, no tool emulation, no re-implementation of the expression.",
+                "cells": {
+                  "attr=True, no override, dry=False": "True",
+                  "attr=False, no override, dry=False": "False",
+                  "attr=True, override=False, dry=False": "False",
+                  "attr=False, override=True, dry=False": "True",
+                  "attr=True, override=True, dry=True": "False",
+                  "attr=False, override=False, dry=True": "False"
+                },
+                "web": "[True, False, False, True, False, False]",
+                "rss": "[True, False, False, True, False, False]",
+                "identical": "yes, over all six cells"
+              },
+              "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
+              "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
+              "quotient_decision": "REFUSED, and now for a MEASURED reason rather than for missing evidence. Equivalence is relative to a named boundary and the two sites answer differently at two of them. Under the CONTROL-PARTITION / writer-invocation boundary they are INDISTINGUISHABLE: both follow the control in all six cells and attribute every suppression to auto_write_memory. Under the WRITE-ADMISSIBILITY boundary in the shipped configuration they are SHARPLY DISTINGUISHABLE: RSS produces claims the default policy admits, and Web cannot produce one at all -- 0.615 against a floor of 0.65, for every source-library entry. Quotienting them would erase that difference, so they stay separate semantic regimes.",
+              "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not.",
+              "preserved_failed_probe": {
+                "_kept_because": "it earned its place by proving that the first consequence test was not a consequence test at all.",
+                "REACHABILITY": "PROVEN -- both sites deliver the effective control into agent.knowledge_pipeline.run(auto_write_memory=...)",
+                "PRECONDITION(chain non-empty / claim exists)": "NEGATIVE in that probe -- the stub tools returned empty output, so the ProvenanceChain was empty and no claim existed that could exercise the memory-write decision",
+                "CAUSAL CONSEQUENCE": "UNPROVEN by that probe. writer_called=0 under a NEGATIVE precondition says nothing about control semantics.",
+                "classification": "ANTI-VACUITY FAILURE. Not an R-A success and not an R-A failure.",
+                "no_production_change": "the probe was not made to pass by repairing production code."
+              },
+              "rss_site_closure": {
+                "status": "PROVEN, non-vacuous. The subject was instantiated before the writer was read.",
+                "site": "core/ingestion.py:268 (ingest_rss_feed)",
+                "preconditions_proven_in_every_cell": {
+                  "1 function reached": "entries_ingested = 2",
+                  "2 valid entries accepted": "2 of 2, built from a feed whose entries carry title, url, summary and published_at",
+                  "3 chain non-empty": "chain_len = 2",
+                  "4 registry produces claims": "claims = 8",
+                  "5 memory writer wired": "remember is not None in every cell",
+                  "6 independent gates named and controlled": {
+                    "require_verified": "False, fixed by the stub agent's _unattended_run() -- the gate is controlled, not avoided",
+                    "source type": "'article' -- not forum and not unknown, so the write policy's source-type rejection cannot be the cause",
+                    "claim status": "'extracted' -- not unverified, so the write policy's status rejection cannot be the cause",
+                    "write policy": "accepted in the enabled cells with reasons naming confidence=0.68, trust=0.68 and type=article"
+                  }
+                },
+                "control_partition_with_consequence": [
+                  "attr=True,  no override, dry=False -> control True,  writer_called=8, skipped=0, policy knowledge-write-mvp",
+                  "attr=False, no override, dry=False -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=True,  override=False, dry=False -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=False, override=True,  dry=False -> control True,  writer_called=8, skipped=0, policy knowledge-write-mvp",
+                  "attr=True,  override=True,  dry=True  -> control False, writer_called=0, skipped=8, policy auto_write_memory",
+                  "attr=False, override=False, dry=True  -> control False, writer_called=0, skipped=8, policy auto_write_memory"
+                ],
+                "attribution": "every suppression carries policy_id 'auto_write_memory' and the reason 'auto_write_memory is off'. Not an empty chain, not a missing writer, not the verification gate, not a write-policy rejection.",
+                "held_fixed_across_arms": "same feed, same chain length, same 8 claims, same statuses, same source types, same writer availability, same require_verified. Only the R-A control input moved.",
+                "UNPROVEN": "that the memory write COMPLETES. The writer is reached and its record is stubbed, as in R-B."
+              },
+              "web_site_closure": {
+                "status": "PROVEN under a named configuration. In the shipped one the control-enabled STATE is reachable and its writer-invocation CONSEQUENCE is not. Both are stated because they differ.",
+                "site": "core/ingestion.py:120 (ingest_web_topic)",
+                "state_space_derived_from_the_web_path": "not inherited from RSS. Web needs a source-library entry, a search whose output survives _candidate_urls, and a fetch whose output evidence_from_tool_result will credit. Its chain carries TWO evidence kinds -- web_search_hit and web_page -- where RSS carried one, and its claim text is 'Fetched page <url>', unique per URL, so page claims can never corroborate each other.",
+                "preconditions_proven_in_every_cell": {
+                  "1 function reached": "report built",
+                  "2 source library resolves": "1 entry searched",
+                  "3 search validates and yields candidate urls": "2 pages fetched",
+                  "4 fetch credited as evidence": "pages_fetched = 2",
+                  "5 chain non-empty": "chain_len = 3 (1 search + 2 pages)",
+                  "6 registry produces claims": "claims = 4",
+                  "7 memory writer wired": "remember is not None in every cell",
+                  "8 require_verified": "False, fixed through the stub agent's _unattended_run"
+                },
+                "how_the_partition_was_obtained": "the write policy is an UNRELATED gate and was held IDENTICAL in every cell at min_claim_confidence=0.60, injected through the existing KnowledgePipeline(write_policy=...) seam. It was not disabled and not varied between arms; it was set once to a value that admits this path's own 0.615. No production code was changed.",
+                "control_partition_with_consequence": [
+                  "attr=True,  no override, dry=False -> control True,  writer_called=2, skipped=0, policy knowledge-write-mvp",
+                  "attr=False, no override, dry=False -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=True,  override=False, dry=False -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=False, override=True,  dry=False -> control True,  writer_called=2, skipped=0, policy knowledge-write-mvp",
+                  "attr=True,  override=True,  dry=True  -> control False, writer_called=0, skipped=4, policy auto_write_memory",
+                  "attr=False, override=False, dry=True  -> control False, writer_called=0, skipped=4, policy auto_write_memory"
+                ],
+                "attribution": "every suppression carries policy_id 'auto_write_memory'. Not an empty chain, not a missing writer, not the verification gate, not the write policy.",
+                "fail_before": "only the WEB read was cut (core/ingestion.py:120), leaving RSS and R-C intact. The module still parses, so the red is not syntax. S3 fails NAMING getattr_names_by_function.ingest_web_topic; S4 stays green, so it is not another regime. And the consequence follows: the enabled cell flips to control=False, writer_called=0, suppression still attributed to auto_write_memory rather than to another gate. Restored byte-identical, graph GREEN, writer_called=2 again.",
+                "UNPROVEN": "that the memory write COMPLETES -- the writer is reached and its record is stubbed, as in RSS and R-B.",
+                "_SUPERSEDED_wording": "kept as evidence. This field once began 'the ENABLED pole cannot exist at the default write policy'. Read a week later that says the True branch is unreachable, which the six cells directly contradict. Replaced below at the precision the measurement carries.",
+                "reachable_and_unreachable_in_the_shipped_configuration": "In the shipped configuration the R-A Web control-ENABLED STATE is REACHABLE -- control=True is produced by two of the six cells -- and its MEMORY-WRITER INVOCATION CONSEQUENCE is UNREACHABLE under the default write policy. evidence_from_tool_result gives a web_fetch evidence a base confidence of 0.75; freshness is already maximal at 1.0 (not_time_sensitive); final = base x tier x freshness, so clearing min_claim_confidence=0.65 needs a tier multiplier of at least 0.867. ALL SIX source-library entries -- wikipedia, wikibooks, project_gutenberg, internet_archive, open_library, arxiv -- rank `reputable` = 0.82, giving 0.615. The two higher tiers are not reachable for a web_page. So no page the web path can fetch reaches the memory writer while the policy is at its default, and no choice of input fixes that.",
+                "what_this_does_and_does_not_settle": {
+                  "proven": "default Web path + reachable source tiers + current evidence scoring + default write threshold => no writer invocation.",
+                  "NOT_settled": "whether that is an intended policy or a configuration defect. The experiment does not decide it and must not: intent is not derivable from behaviour. Earlier prose called it 'not a defect', which upgrades a scoped result into a verdict about intent. Withdrawn.",
+                  "the_two_readings": [
+                    "if the contract was that knowledge_auto_write=True should let Web ingestion save acceptable web knowledge automatically, then this is a real defect: the feature is nominally on and mathematically inert at the default policy",
+                    "if the contract was that Web knowledge must not be auto-written without a stronger provenance or trust category, then this is a working safety policy"
+                  ],
+                  "banked_question": "Is Web auto-write being unreachable under the shipped default policy an intended contract or an operational configuration defect?",
+                  "status_of_that_question": "OPEN, banked deliberately. Not opened as a unit here."
+                },
+                "observer_relative_result": {
+                  "O1": "R-A control -> writer invocation, with the shared downstream gate held fixed. Web and RSS are INDISTINGUISHABLE.",
+                  "O2": "shipped end-to-end admissibility. Web and RSS are DISTINGUISHABLE.",
+                  "_why_it_mattered": "observer-relative equivalence stopped being a sentence in a document here. Six identical cells under O1 would have justified quotienting Web with RSS, and that would have erased a real difference the system has under O2."
+                },
+                "quotient_strength": "the refusal is no longer 'we do not know enough to collapse them'. It is 'we know enough to prove a global collapse would be wrong'."
+              },
+              "_HISTORY_downstream_consequence_per_site": "SUPERSEDED, kept as evidence. This is what the record said at the time of the empty-chain probe, and it must not be read as a current status: NOT PROVEN. The probe's tools returned empty output, so the provenance chain was empty, so the pipeline had no claims and the memory writer was never exercised in EITHER arm. That cell is vacuous and is recorded as vacuous, not as a pass. Proving it requires emulating the web_search/web_fetch and rss_fetch contracts well enough to produce real evidence -- a larger unit than one bite.",
+              "CURRENT_downstream_consequence_per_site": {
+                "_where_authority_lives": "here. The _HISTORY_ field above records what was believed before the RSS closure.",
+                "rss": "PROVEN non-vacuously -- see rss_site_closure. Preconditions proven in every cell; every suppression attributed by the pipeline to auto_write_memory.",
+                "web": "UNPROVEN. No non-vacuous consequence bite exists for the web site."
+              },
+              "_site_count_correction": "this regime's own note above still says 'three physical sites' where it describes the WITHDRAWN grouping. That sentence is HISTORY and is left verbatim: it records what the withdrawn grouping covered. The current count of control reads of this field is FOUR -- two in R-A, one in R-B, one in R-C."
+            },
+            "_site_list_correction": "the earlier edition listed TWO sites. There are THREE physical reads of the attribute in core/ingestion.py -- 120, 268 and 457 -- and the third carries an extra suppressor the other two do not. It is not part of R-A; it is recorded below as its own untested regime."
+          },
+          {
+            "id": "R-B",
+            "name": "conjunct",
+            "sites": [
+              "core/loop_evidence_chain.py:133"
+            ],
+            "contract": "the attribute is read as self.knowledge_auto_write, ANDed with may_knowledge, and passed AS the auto_write_memory argument into knowledge_pipeline.run",
+            "consequence": "whether the evidence chain's knowledge pipeline writes memory",
+            "_note": "this regime supplies the very argument that overrides regime A's default. Whether either call path ever reaches the other's function is NOT established.",
+            "behavioral_closure": {
+              "status": "FROZEN 2026-08-08 -- three poles proven end to end through the production path. Only the memory WRITER was stubbed; everything between AgentLoop.knowledge_auto_write and the write decision ran for real.",
+              "ENABLED": "auto_write_memory=True with two file-kind evidences yielding verified claims -> the writer is REACHED (writer_called=1). The stub's return shape then raises, after the call, which is what was being measured and not more.",
+              "DISABLED": "identical claims, auto_write_memory=False -> writer_called=0, memory_skipped=2, and every decision carries policy_id 'auto_write_memory'. The pipeline distinguishes that from 'memory_writer_missing', so the refusal names THIS control value rather than a missing writer.",
+              "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:288 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written. S1 goes red here because the two structural reads stopped matching; that the journal and the control value must otherwise agree at runtime is not something S1 establishes. Restored byte-identical; report=True, control=True, delivered=True again.",
+              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:518 -> the memory writer",
+              "strongest_justified_statement": "R-B controls ADMISSION TO and INVOCATION OF the memory writer.",
+              "established": [
+                "source identity",
+                "control delivery from AgentLoop.knowledge_auto_write",
+                "the may_knowledge conjunct",
+                "delivery into KnowledgePipeline.run(auto_write_memory=...)",
+                "the distinction between an auto_write_memory refusal and memory_writer_missing",
+                "actual memory-writer invocation when enabled",
+                "suppression of writer invocation when disabled",
+                "WIRE-CUT causality: report projection held True while only the control delivery is cut makes S1 fail and suppresses the writer call"
+              ],
+              "UNPROVEN": "that durable memory writing COMPLETES. The writer was reached and its record was intentionally stubbed. Completion is a different claim and is not made."
+            }
+          },
+          {
+            "id": "R-C",
+            "name": "project-suppressed",
+            "status": "TESTED",
+            "sites": [
+              "core/ingestion.py:457 (_ingest_paths)"
+            ],
+            "contract": "the same three statements as R-A, plus a fourth: `if mode == \"project\": write_memory = False`. An extra unconditional suppressor that R-A's sites do not have.",
+            "_why_its_own_regime": "found while enumerating R-A's sites. It differs from R-A in the expression itself, so grouping it with R-A would be exactly the error the R-A/R-B split was made to avoid.",
+            "behavioral_closure": {
+              "status": "PROVEN at the DEFAULT write policy -- file evidence scores 0.9 x primary 0.95 = 0.855 against the 0.65 floor, so unlike Web nothing was held.",
+              "state_space_derived_from_ingest_paths": "FOUR control statements where R-A has three, and the fourth sits AFTER the override: attr read -> explicit override -> dry_run -> `if mode == \"project\": write_memory = False`. Order is the contract: in R-A an explicit override=True wins; in R-C mode='project' suppresses even it.",
+              "reachability": "both modes reachable from real commands: :ingest-source -> mode='source' (core/ingestion.py:62), :ingest-project -> mode='project' (:87). The probe used real files and real chunking; this path has no tool registry to stub.",
+              "preconditions_proven_in_every_cell": "files_ingested>0, chain non-empty, claims>0, writer wired, require_verified held False",
+              "control_partition_with_consequence": [
+                "source : attr=T over=-  dry=F -> True,  writer=1",
+                "source : attr=F over=-  dry=F -> False, writer=0",
+                "source : attr=T over=F  dry=F -> False, writer=0",
+                "source : attr=F over=T  dry=F -> True,  writer=1",
+                "source : attr=T over=T  dry=T -> False, writer=0",
+                "project: attr=T over=-  dry=F -> False, writer=0",
+                "project: attr=T over=T  dry=F -> False, writer=0  <- the decisive cell: override=True CANNOT rescue project mode",
+                "project: attr=F over=T  dry=F -> False, writer=0"
+              ],
+              "attribution_nuance": "every suppression carries policy_id 'auto_write_memory' -- the pipeline names the PARAMETER, and cannot say which of the four statements zeroed it. The fail-before is what attributes project cells to the suppressor.",
+              "fail_before": "only the two-line `if mode == \"project\"` suppressor was cut (unique in the file, asserted before mutating). The module still parses. Project cells 6-8 flip to control=True with the writer CALLED; source cells stay byte-for-byte the same, so the red is this suppressor and nothing else. Restored byte-identical; project cells suppressed again.",
+              "not_inferred_from_R_A": "nothing carried over. The shared three statements were re-measured here, and the fourth is R-C's own.",
+              "UNPROVEN": [
+                "that the memory write COMPLETES (writer stubbed, as everywhere)",
+                "structural protection of the suppressor itself: the frozen bridge does not extract if-comparisons, and the machinery is not being extended for convenience. The suppressor is protected behaviorally by this closure only."
+              ]
+            }
+          }
+        ],
+        "explicitly_not_claimed": [
+          "That R-A and R-B are one consumer contract. They are at least two conditional regimes over three physical sites.",
+          "That the two regimes ever meet at one callee.",
+          "Any ordering or precedence between them."
+        ],
+        "measured": "build_agent yields the attribute True with the variable unset and False with it set to 0. That is a fact about the PRODUCER side and is shared by both regimes; it says nothing about their contracts."
+      },
+      "resolver": {
+        "kind": "python_ast",
+        "bridge": "scripts/qm_py_anchor.py",
+        "module_file": "app/bootstrap.py",
+        "function": "build_agent"
+      },
+      "verified_properties": [
+        {
+          "id": "S1",
+          "claim": "the build_agent anchor contains exactly two structurally identical literal calls to _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True)",
+          "assertions": [
+            {
+              "path": "literal_calls._env_bool",
+              "op": "count_of_value",
+              "value": [
+                "AGENT_KNOWLEDGE_AUTO_WRITE",
+                true
+              ],
+              "expected": 2
+            }
+          ],
+          "_what_the_resolver_actually_emits": "qm_py_anchor.py records, per anchor, the CALLEE NAME and the LITERAL ARGUMENTS of calls that have no keywords and only constant arguments. It records no destination. S1 is therefore a statement about two expressions, at that granularity, and about nothing else.",
+          "_what_it_catches": "the single-edit case it was written for: change either read's key or default alone and the count falls to one, which is red.",
+          "UNPROVEN_by_S1": [
+            "equality of the runtime values produced by the two reads",
+            "temporal stability of the environment between the two reads -- they run at app/bootstrap.py:224 and :288, os.environ is process-global and mutable, and nothing pins that it does not change in between",
+            "identity of the callable resolved by both _env_bool names at runtime -- the name is resolved at call time and nothing pins it to one function",
+            "binding of these two structural reads to the report and control destinations",
+            "behavioral equivalence of the report and control projections"
+          ],
+          "_masking_hole": "S1 does not bind reads to destinations, so two matching calls may remain while one intended destination is no longer fed by one of them. Replacing the journal's read with a literal and adding another matching call elsewhere in the anchor keeps the count at two: S1 stays green and the journal lies. A coordinated edit, not a single one.",
+          "_not_S1_s_evidence": "R-B's behavioral result -- that the CONTROL projection reaches the memory writer -- is independent evidence about the control side. It says nothing about the report side matching it, and none of it is attributed to S1."
+        },
+        {
+          "id": "S2",
+          "claim": "the report projection still leaves the boundary",
+          "assertions": [
+            {
+              "path": "payload_keys.session_start",
+              "op": "contains",
+              "value": "knowledge_auto_write"
+            }
+          ]
+        }
+      ],
+      "certified_by": {
+        "certificate": "knowledge/quantum/c3.claim.qm",
+        "claim_id": "C3",
+        "projection": "payload.knowledge_auto_write",
+        "_gates": "only the REPORT projection. The control projection has no certificate yet, and this binding does not pretend otherwise."
+      },
+      "consumer_checks": [
+        {
+          "regime": "R-A",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/ingestion.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S3",
+              "claim": "each R-A site still reads the field by name, at its own anchor",
+              "assertions": [
+                {
+                  "path": "getattr_names_by_function.ingest_web_topic",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                },
+                {
+                  "path": "getattr_names_by_function.ingest_rss_feed",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ],
+              "_replaces": "a module-wide membership assertion, proved FALSE PROTECTION: with both R-A reads removed and only R-C's read left in the same module, it stayed green while the module still parsed."
+            }
+          ]
+        },
+        {
+          "regime": "R-B",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/loop_evidence_chain.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S4",
+              "claim": "regime R-B still reads the field off itself",
+              "assertions": [
+                {
+                  "path": "self_attribute_reads",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ],
+              "_why_separate": "S3 asserts a getattr read and is structurally blind to `self.NAME`. Until this property existed, regime R-B was inside the binding's prose and outside its verification."
+            }
+          ]
+        },
+        {
+          "regime": "R-C",
+          "resolver": {
+            "kind": "python_ast",
+            "bridge": "scripts/qm_py_anchor.py",
+            "module_file": "core/ingestion.py",
+            "function": "__module__"
+          },
+          "properties": [
+            {
+              "id": "S5",
+              "claim": "regime R-C still reads the field by name, at its own anchor",
+              "assertions": [
+                {
+                  "path": "getattr_names_by_function._ingest_paths",
+                  "op": "contains",
+                  "value": "knowledge_auto_write"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "not_claimed": [
+    "No claim about the other three events build_agent logs, or the other sixteen keys of session_start.",
+    "No claim that app/bootstrap.py is the subject.",
+    "No general .qm producer vocabulary — `producer_bindings` is one experiment's field name.",
+    "No independent assertion about the model at session start: this specimen produces the carrier and defers the state.",
+    "No certificate for the control projection. C3 certifies what is REPORTED; that the reported value equals the controlling value is asserted structurally by S1 and is not certified by re-evaluation.",
+    "No quotient of the web and RSS sites into one R-A consumer class: the decision matches over six cells, the downstream consequence is unproven, and the condition for quotienting requires both.",
+    "No claim that the FOUR control-read sites -- two in R-A, one in R-B, one in R-C -- form one consumer contract. Earlier editions said three, counting R-A and R-B before R-C was discovered."
+  ]
+}

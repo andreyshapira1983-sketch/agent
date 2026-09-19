@@ -1,0 +1,644 @@
+{
+  "_comment": "Machine-discovered census of the CNS perimeter. Complete only relative to the discovery rules in tests/test_cns_census.py. An empty list means UNPROVEN, never N/A.",
+  "taken": "2026-08-07",
+  "nodes": {
+    "loop.py::AgentLoop._fast_path_allows_replay": [
+      "discovery",
+      "callers",
+      "inputs",
+      "outputs",
+      "control_semantics",
+      "behavioral_test",
+      "mutation_bite"
+    ],
+    "loop.py::AgentLoop._file_read_workspace_root": [],
+    "loop.py::AgentLoop._quality_allows_replay": [
+      "discovery",
+      "callers",
+      "inputs",
+      "outputs",
+      "behavioral_test",
+      "mutation_bite"
+    ],
+    "loop.py::AgentLoop._run_inner": [
+      "discovery",
+      "callers",
+      "control_semantics"
+    ],
+    "loop.py::AgentLoop.run": [],
+    "loop_attempt.py::AgentLoopAttempt._build_plan": [],
+    "loop_attempt.py::AgentLoopAttempt._checkpoint_step_summaries": [],
+    "loop_attempt.py::AgentLoopAttempt._run_attempt_loop": [
+      "discovery",
+      "callers",
+      "inputs",
+      "outputs",
+      "control_semantics",
+      "failure_semantics"
+    ],
+    "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint": [],
+    "loop_attempt.py::AgentLoopAttempt._settle_run_objects": [],
+    "loop_context.py::AgentLoopContext._maybe_resolve_referent": [],
+    "loop_context.py::AgentLoopContext._model_roster_block": [],
+    "loop_context.py::AgentLoopContext._open_run": [],
+    "loop_context.py::AgentLoopContext._retrieve_turn_context": [],
+    "loop_context.py::AgentLoopContext._spend_mirror": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain": [
+      "discovery",
+      "callers",
+      "mutation_bite"
+    ],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence": [],
+    "loop_evidence_chain.py::_sensor_blocks": [],
+    "loop_evidence_chain.py::chain_has_tool_evidence": [],
+    "loop_gates.py::AgentLoopGates._check_clarification": [],
+    "loop_gates.py::AgentLoopGates._check_operational_domain": [],
+    "loop_gates.py::AgentLoopGates._clarification_gate": [
+      "discovery",
+      "callers",
+      "inputs",
+      "outputs"
+    ],
+    "loop_gates.py::AgentLoopGates._contract_ambiguity_gate": [],
+    "loop_gates.py::AgentLoopGates._episodic_fast_path": [
+      "discovery",
+      "callers",
+      "inputs",
+      "behavioral_test",
+      "mutation_bite"
+    ],
+    "loop_gates.py::AgentLoopGates._multi_file_refusal": [],
+    "loop_gates.py::AgentLoopGates._odd_gate": [
+      "discovery",
+      "callers",
+      "inputs",
+      "outputs"
+    ],
+    "loop_gates.py::AgentLoopGates._park_clarification": [],
+    "loop_gates.py::AgentLoopGates._prior_step_gate": [],
+    "loop_gates.py::AgentLoopGates._resume_clarification": [],
+    "loop_hygiene.py::AgentLoopHygiene._hygiene_suppressed_reason": [],
+    "loop_hygiene.py::AgentLoopHygiene.archive_persistent": [],
+    "loop_hygiene.py::AgentLoopHygiene.compact_assumptions": [],
+    "loop_hygiene.py::AgentLoopHygiene.dedupe_episodic": [],
+    "loop_hygiene.py::AgentLoopHygiene.dedupe_persistent": [],
+    "loop_hygiene.py::AgentLoopHygiene.expire_persistent": [],
+    "loop_hygiene.py::AgentLoopHygiene.prune_episodic": [],
+    "loop_hygiene.py::AgentLoopHygiene.run_maintenance_pass": [],
+    "loop_hygiene.py::AgentLoopHygiene.summarise_persistent": [],
+    "loop_knowledge.py::AgentLoopKnowledge._knowledge_remember_batch": [],
+    "loop_knowledge.py::AgentLoopKnowledge._remember_from_knowledge": [],
+    "loop_memory_commands.py::AgentLoopMemoryCommands.forget": [],
+    "loop_memory_commands.py::AgentLoopMemoryCommands.list_persistent": [],
+    "loop_memory_commands.py::AgentLoopMemoryCommands.remember": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._question_salience": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory": [
+      "discovery",
+      "callers"
+    ],
+    "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent": [],
+    "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines": [],
+    "loop_memory_read.py::AgentLoopMemoryRead.smart_memory_summary": [],
+    "loop_memory_read.py::_family_appendix": [],
+    "loop_memory_read.py::_merge_rejection_reasons": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed": [
+      "discovery",
+      "callers"
+    ],
+    "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._quarantine_conflicted_memory": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._record_aborted_episode": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory": [
+      "discovery",
+      "callers",
+      "inputs"
+    ],
+    "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._unattended_run": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite.set_audit_read_only": [],
+    "loop_observe.py::AgentLoopObserve._interpret": [],
+    "loop_observe.py::AgentLoopObserve._observe_and_route": [],
+    "loop_repair.py::AgentLoopRepair.cleanup_backups": [],
+    "loop_repair.py::AgentLoopRepair.propose_repair": [],
+    "loop_repair.py::AgentLoopRepair.repair": [],
+    "loop_repair.py::AgentLoopRepair.rollback": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._add_verification_summary": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._credit_memory_records_used_in_the_answer": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._disclose_substituted_model": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._enforce_answer_safety": [],
+    "loop_response_deciders.py::AgentLoopResponseDeciders._safe_answer_after_enforcement_failure": [],
+    "loop_run_tail.py::AgentLoopRunTail._check_completion_obligations": [
+      "discovery",
+      "callers",
+      "inputs",
+      "control_semantics",
+      "behavioral_test"
+    ],
+    "loop_run_tail.py::AgentLoopRunTail._finalize_run_tail": [],
+    "loop_sensor.py::AgentLoopSensor._sensor_failed": [
+      "discovery",
+      "callers",
+      "inputs"
+    ],
+    "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan": [],
+    "loop_step_execution.py::AgentLoopStepExecution._call_tool": [],
+    "loop_step_execution.py::AgentLoopStepExecution._capture_compensation_plan": [],
+    "loop_step_execution.py::AgentLoopStepExecution._execute_step": [
+      "discovery",
+      "callers",
+      "outputs",
+      "control_semantics",
+      "failure_semantics"
+    ],
+    "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel": [],
+    "loop_step_execution.py::AgentLoopStepExecution._request_approval": [],
+    "loop_step_execution.py::AgentLoopStepExecution._resolve_references_in": [],
+    "loop_step_execution.py::AgentLoopStepExecution._risk_probe_failed": [],
+    "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references": [],
+    "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel": [],
+    "loop_step_execution.py::AgentLoopStepExecution._step_only_reads": [],
+    "loop_synthesis.py::AgentLoopSynthesis._resolve_synthesis_contract": [],
+    "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder": [],
+    "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block": [],
+    "loop_synthesis.py::AgentLoopSynthesis._synthesize": [],
+    "loop_synthesis_helpers.py::_artifact_blocks": [],
+    "loop_synthesis_helpers.py::_log_budget_trim": [],
+    "loop_synthesis_helpers.py::_organ_map": [],
+    "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs": [],
+    "loop_verification.py::AgentLoopVerification._verify_draft": [],
+    "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
+    "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source": [],
+    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": []
+  },
+  "edges": [
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_context.py::AgentLoopContext._open_run"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_context.py::AgentLoopContext._retrieve_turn_context"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_sensor_evidence"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_subagent_evidence"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._clarification_gate"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._contract_ambiguity_gate"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._episodic_fast_path"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._multi_file_refusal"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._odd_gate"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._park_clarification"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._prior_step_gate"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._resume_clarification"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_observe.py::AgentLoopObserve._observe_and_route"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_run_tail.py::AgentLoopRunTail._check_completion_obligations"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_run_tail.py::AgentLoopRunTail._finalize_run_tail"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer"
+    ],
+    [
+      "loop.py::AgentLoop.run",
+      "loop.py::AgentLoop._run_inner"
+    ],
+    [
+      "loop.py::AgentLoop.run",
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_aborted_episode"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_attempt.py::AgentLoopAttempt._build_plan"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_attempt.py::AgentLoopAttempt._settle_run_objects"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint",
+      "loop_attempt.py::AgentLoopAttempt._checkpoint_step_summaries"
+    ],
+    [
+      "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._maybe_resolve_referent",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._maybe_resolve_referent",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._model_roster_block",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._open_run",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._retrieve_turn_context",
+      "loop_context.py::AgentLoopContext._maybe_resolve_referent"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._retrieve_turn_context",
+      "loop_context.py::AgentLoopContext._spend_mirror"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._retrieve_turn_context",
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._retrieve_turn_context",
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._spend_mirror",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_context.py::AgentLoopContext._spend_mirror",
+      "loop_context.py::AgentLoopContext._model_roster_block"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain",
+      "loop_knowledge.py::AgentLoopKnowledge._knowledge_remember_batch"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain",
+      "loop_memory_write.py::AgentLoopMemoryWrite._unattended_run"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._rank_and_catalog_evidence",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_gates.py::AgentLoopGates._clarification_gate",
+      "loop_gates.py::AgentLoopGates._check_clarification"
+    ],
+    [
+      "loop_gates.py::AgentLoopGates._episodic_fast_path",
+      "loop.py::AgentLoop._fast_path_allows_replay"
+    ],
+    [
+      "loop_gates.py::AgentLoopGates._episodic_fast_path",
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory"
+    ],
+    [
+      "loop_gates.py::AgentLoopGates._multi_file_refusal",
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory"
+    ],
+    [
+      "loop_gates.py::AgentLoopGates._odd_gate",
+      "loop_gates.py::AgentLoopGates._check_operational_domain"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_suppressed_reason",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.run_maintenance_pass",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.run_maintenance_pass",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_suppressed_reason"
+    ],
+    [
+      "loop_knowledge.py::AgentLoopKnowledge._knowledge_remember_batch",
+      "loop_memory_commands.py::AgentLoopMemoryCommands.remember"
+    ],
+    [
+      "loop_knowledge.py::AgentLoopKnowledge._remember_from_knowledge",
+      "loop_memory_commands.py::AgentLoopMemoryCommands.remember"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
+      "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
+      "loop_memory_read.py::AgentLoopMemoryRead._question_salience"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent",
+      "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._quarantine_conflicted_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_aborted_episode",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
+      "loop_memory_commands.py::AgentLoopMemoryCommands.remember"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_observe.py::AgentLoopObserve._observe_and_route",
+      "loop_observe.py::AgentLoopObserve._interpret"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._add_verification_summary"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._credit_memory_records_used_in_the_answer"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._disclose_substituted_model"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._enforce_answer_safety"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._build_response_draft",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._credit_memory_records_used_in_the_answer",
+      "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_response_deciders.py::AgentLoopResponseDeciders._enforce_answer_safety",
+      "loop_response_deciders.py::AgentLoopResponseDeciders._safe_answer_after_enforcement_failure"
+    ],
+    [
+      "loop_run_tail.py::AgentLoopRunTail._check_completion_obligations",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_run_tail.py::AgentLoopRunTail._finalize_run_tail",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._call_tool",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._call_tool",
+      "loop_step_execution.py::AgentLoopStepExecution._capture_compensation_plan"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step",
+      "loop_step_execution.py::AgentLoopStepExecution._blocked_output_or_replan"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step",
+      "loop_step_execution.py::AgentLoopStepExecution._call_tool"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step",
+      "loop_step_execution.py::AgentLoopStepExecution._request_approval"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel",
+      "loop_step_execution.py::AgentLoopStepExecution._step_only_reads"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references",
+      "loop_step_execution.py::AgentLoopStepExecution._resolve_references_in"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_after_references",
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._run_step_parallel",
+      "loop_step_execution.py::AgentLoopStepExecution._execute_step"
+    ],
+    [
+      "loop_step_execution.py::AgentLoopStepExecution._step_only_reads",
+      "loop_step_execution.py::AgentLoopStepExecution._risk_probe_failed"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._resolve_synthesis_contract",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
+      "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
+      "loop_synthesis.py::AgentLoopSynthesis._synthesize"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._synthesize",
+      "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._synthesize",
+      "loop_synthesis.py::AgentLoopSynthesis._resolve_synthesis_contract"
+    ],
+    [
+      "loop_synthesis.py::AgentLoopSynthesis._synthesize",
+      "loop_synthesis.py::AgentLoopSynthesis._runtime_self_prompt_block"
+    ],
+    [
+      "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_verification.py::AgentLoopVerification._verify_draft",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
+      "loop_verification.py::AgentLoopVerification._verify_draft",
+      "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_attempt.py::AgentLoopAttempt._build_plan"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_memory_write.py::AgentLoopMemoryWrite._quarantine_conflicted_memory"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_step_execution.py::AgentLoopStepExecution._execute_steps_parallel"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_verification.py::AgentLoopVerification._verification_receipt_kwargs"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_verification.py::AgentLoopVerification._verify_draft"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims"
+    ],
+    [
+      "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
+      "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source"
+    ]
+  ]
+}

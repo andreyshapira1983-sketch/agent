@@ -1,0 +1,724 @@
+"""Approval-inbox, alert-acknowledgement and best-next-action REPL commands.
+
+Split out of ``main.py``. Every function here depends only on ``core`` classes
+and on helpers within this module — never back into ``main`` — so there is no
+import cycle. ``main.py`` re-exports the shared helper ``_approval_inbox_for``
+(used by auto-run / work-session / campaign / operator-digest) and the command
+handlers wired into the REPL dispatch.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
+from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from core.subagent_contract import canonical_from_approval_payload
+from core.subagent_runner import SubagentContractRefused
+
+if TYPE_CHECKING:
+    from core.loop import AgentLoop
+
+
+DEFAULT_ALERT_ACK_PATH = Path("data") / "alert_acknowledgements.jsonl"
+
+_SELF_ISSUE_VERIFIERS = {
+    "repair_incremental_splitter_duplicate_mixin": (
+        "tests/test_incremental_splitter.py",
+        "test_repeated_mixin_split_uses_unique_base_class",
+    ),
+}
+
+
+def _approval_inbox_for(agent: AgentLoop, workspace: Path | None = None) -> ApprovalInbox:
+    inbox = getattr(agent, "approval_inbox", None)
+    if inbox is None:
+        path = (workspace / DEFAULT_APPROVAL_INBOX_PATH) if workspace is not None else None
+        inbox = ApprovalInbox(path=path)
+        agent.approval_inbox = inbox
+    return inbox
+
+
+def _alert_ack_store_for(workspace: Path | None = None):
+    """Build an :class:`AlertAckStore` bound to the workspace runtime state."""
+    from core.alert_ack import AlertAckStore
+
+    path = (workspace / DEFAULT_ALERT_ACK_PATH) if workspace is not None else None
+    return AlertAckStore(path=path)
+
+
+def _payload_bool(value: object, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"invalid boolean value: {value!r}")
+
+
+def _handle_approval_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    status = rest.strip().lower() or "pending"
+    items = _approval_inbox_for(agent, workspace).list(status=status)
+    if not items:
+        print(f"(no approvals: status={status})", file=sys.stderr)
+        return True
+    print(f"=== approval inbox ({len(items)}; status={status}) ===", file=sys.stderr)
+    for item in items:
+        print(
+            f"  {item.id} [{item.status}] risk={item.risk} "
+            f"operation={item.operation} summary={item.summary}",
+            file=sys.stderr,
+        )
+        if item.reasons:
+            print(f"    reasons={list(item.reasons)}", file=sys.stderr)
+    return True
+
+
+def _handle_approval_triage(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Read-only triage of the pending approval inbox.
+
+    Groups pending proposed_task items into clusters, flags duplicates / stale
+    / dangerous / low-value items, and prints a recommended_action per item.
+    Never deletes or executes anything — purely advisory.
+    """
+    from core.approval_triage import format_triage_report, triage_inbox
+
+    inbox = _approval_inbox_for(agent, workspace)
+    report = triage_inbox(inbox.pending())
+    print(format_triage_report(report), file=sys.stderr)
+    agent.log.log("approval_inbox_triage", report.to_dict())
+    return True
+
+
+def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Choose and explain the single most important next action — advisory only.
+
+    Gathers current signals (latest daemon heartbeat + a read-only inbox triage
+    pass) and asks the pure priority-intelligence selector for ONE action, with
+    evidence, risk, and an honest list of what the agent does not know. Nothing
+    is executed.
+    """
+    import agent_tick
+    from core.approval_triage import triage_inbox
+    from core.best_next_action import (
+        format_best_next_action,
+        select_best_next_action,
+    )
+    from core.self_build_memory import (
+        recent_unresolved_self_improvement_failures,
+        sync_self_improvement_issue_registry,
+    )
+
+    heartbeat = agent_tick._read_heartbeat(workspace)
+    age = agent_tick._heartbeat_age_seconds(heartbeat)
+    hb = heartbeat or {}
+
+    inbox = _approval_inbox_for(agent, workspace)
+    triage = triage_inbox(inbox.pending())
+
+    ack_store = _alert_ack_store_for(workspace)
+    acknowledged = ack_store.active_actions()
+
+    try:
+        issue_registry = sync_self_improvement_issue_registry(agent, workspace)
+        all_issues = issue_registry.list()
+        open_issues = tuple(issue.to_dict() for issue in issue_registry.unresolved())
+    except Exception:  # noqa: BLE001 — lifecycle storage must not break advice
+        all_issues = []
+        open_issues = ()
+    raw_failures = (
+        ()
+        if all_issues
+        else recent_unresolved_self_improvement_failures(agent, workspace)
+    )
+
+    action = select_best_next_action(
+        result_status=str(hb.get("result_status", "none")),
+        tests_health=str(hb.get("tests_health", "none")),
+        dry_run_streak=int(hb.get("dry_run_streak", 0) or 0),
+        heartbeat_missing=heartbeat is None,
+        heartbeat_stale=agent_tick._is_stale(age),
+        heartbeat_age_seconds=age,
+        last_event=str(hb.get("event", "")),
+        tick_error=hb.get("error"),
+        triage=triage,
+        inbox_pending=triage.total_pending,
+        acknowledged=acknowledged,
+        self_improvement_registry_available=bool(all_issues),
+        open_self_improvement_issues=open_issues,
+        recent_self_improvement_failures=raw_failures,
+    )
+
+    if rest.strip() == "--json":
+        print(json.dumps(action.to_dict(), ensure_ascii=False, indent=2), file=sys.stderr)
+    else:
+        print(format_best_next_action(action), file=sys.stderr)
+        if acknowledged:
+            print(
+                f"  (acknowledged alert(s) currently suppressed: {', '.join(sorted(acknowledged))} "
+                "— :ack-list to review, :ack-clear <action> to restore)",
+                file=sys.stderr,
+            )
+    agent.log.log("best_next_action", action.to_dict())
+    return True
+
+
+def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Run the issue's fixed regression test and record a matching resolution."""
+    from core.self_improvement_issues import (
+        DEFAULT_ISSUE_PATH,
+        SelfImprovementIssueRegistry,
+    )
+    from tools.run_tests import RunTestsTool
+
+    parts = rest.split()
+    if len(parts) != 1:
+        print("Usage: :self-issue-verify <issue_fingerprint>", file=sys.stderr)
+        return True
+    fingerprint = parts[0]
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    issue = next(
+        (item for item in registry.list() if item.fingerprint == fingerprint),
+        None,
+    )
+    if issue is None:
+        print(f"(self-issue verify refused: unknown fingerprint {fingerprint})", file=sys.stderr)
+        return True
+    if issue.status == "resolved":
+        print(f"self-improvement issue already resolved: {fingerprint}", file=sys.stderr)
+        return True
+    spec = _SELF_ISSUE_VERIFIERS.get(issue.action)
+    if spec is None:
+        print(
+            f"(self-issue verify refused: no targeted verifier for action {issue.action})",
+            file=sys.stderr,
+        )
+        return True
+
+    test_path, pattern = spec
+    try:
+        runner = RunTestsTool(workspace_root=workspace)
+        result = runner.run(paths=[test_path], pattern=pattern)
+        valid, _validation_issues = runner.validate_output(result)
+    except Exception as exc:  # noqa: BLE001 - verifier infrastructure is fallible
+        print(
+            f"self-improvement issue remains unresolved: {fingerprint}\n"
+            f"  verifier infrastructure error: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return True
+    passed = (
+        valid
+        and result.get("exit_code") == 0
+        and not result.get("timed_out")
+        and int(result.get("passed") or 0) > 0
+        and int(result.get("failed") or 0) == 0
+        and int(result.get("errors") or 0) == 0
+    )
+    if not passed:
+        print(
+            f"self-improvement issue remains open: {fingerprint}\n"
+            f"  verifier: {test_path} -k {pattern}\n"
+            f"  result: exit_code={result.get('exit_code')} passed={result.get('passed')} "
+            f"failed={result.get('failed')} errors={result.get('errors')} "
+            f"timed_out={result.get('timed_out')}",
+            file=sys.stderr,
+        )
+        return True
+
+    observed_at = datetime.now(timezone.utc).isoformat()
+    evidence = f"{test_path} -k {pattern}: {result.get('passed')} passed"
+    payload = {
+        "fingerprint": issue.fingerprint,
+        "action": issue.action,
+        "evidence": evidence,
+    }
+    verified = registry.transition(
+        status="verified",
+        observed_at=observed_at,
+        fingerprint=issue.fingerprint,
+        action=issue.action,
+        evidence=evidence,
+    )
+    if verified is None:
+        print(f"(self-issue verify refused: lifecycle mismatch for {fingerprint})", file=sys.stderr)
+        return True
+    agent.log.log("self_improvement_issue_verified", payload)
+
+    resolved = registry.transition(
+        status="resolved",
+        observed_at=observed_at,
+        fingerprint=issue.fingerprint,
+        action=issue.action,
+        evidence=evidence,
+    )
+    if resolved is None:
+        print(
+            f"self-improvement issue remains unresolved: {fingerprint}\n"
+            "  durable registry accepted verification but refused resolution; "
+            "registry state changed or became stale",
+            file=sys.stderr,
+        )
+        return True
+    agent.log.log("self_improvement_issue_resolved", payload)
+    print(
+        f"self-improvement issue resolved: {fingerprint}\n"
+        f"  evidence: {evidence}",
+        file=sys.stderr,
+    )
+    return True
+
+
+# Авторство агента (утренний груз 2026-08-30): дверь человеческого вердикта.
+# Вердикт помечен retired-by-operator — охрана close_proven_issue его со
+# свидетелем не спутает; у автономного тика дороги сюда нет.
+def _handle_self_issue_retire(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    from core.self_improvement_issues import (
+        DEFAULT_ISSUE_PATH,
+        SelfImprovementIssueRegistry,
+        retire_issue,
+    )
+
+    parts = rest.split(maxsplit=1)
+    if len(parts) < 2:
+        print("Usage: :self-issue-retire <fingerprint> <reason>", file=sys.stderr)
+        return True
+    fingerprint, reason = parts
+    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    ok = retire_issue(registry, fingerprint, reason=reason)
+    if ok:
+        print(f"{fingerprint} retired by operator verdict: {reason}")
+    else:
+        print(
+            f"{fingerprint} refused (unknown, already resolved, or empty reason)",
+            file=sys.stderr,
+        )
+    agent.log.log(
+        "self_improvement_issue_retired",
+        {"fingerprint": fingerprint, "reason": reason, "ok": ok},
+    )
+    return True
+
+
+def _handle_alert_ack(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Acknowledge an advisory alert so it stops dominating :best-next-action.
+
+    Usage: ``:ack <action> [--ttl <hours>] [reason words...]``. Only advisory
+    (medium/low) alerts can be acknowledged — objective breakages are rejected.
+    Read/write of runtime state only; never executes the alert's action.
+    """
+    from core.best_next_action import is_suppressible_alert
+
+    tokens = rest.split()
+    if not tokens:
+        print(
+            "Usage: :ack <action> [--ttl <hours>] [reason...]\n"
+            "  (advisory alerts only, e.g. review_dry_run_stall, "
+            "reduce_inbox_duplicate_debt, review_inbox_backlog)",
+            file=sys.stderr,
+        )
+        return True
+
+    action = tokens[0]
+    if not is_suppressible_alert(action):
+        print(
+            f"(ack refused: '{action}' is not an acknowledgeable advisory alert — "
+            "objective breakages (daemon/tests/tick errors) can never be suppressed)",
+            file=sys.stderr,
+        )
+        return True
+
+    ttl_hours: float | None = None
+    reason_parts: list[str] = []
+    i = 1
+    while i < len(tokens):
+        if tokens[i] == "--ttl" and i + 1 < len(tokens):
+            try:
+                ttl_hours = float(tokens[i + 1])
+            except ValueError:
+                print(f"(ack: invalid --ttl value '{tokens[i + 1]}', ignoring)", file=sys.stderr)
+            i += 2
+            continue
+        reason_parts.append(tokens[i])
+        i += 1
+
+    store = _alert_ack_store_for(workspace)
+    ack = store.acknowledge(
+        action=action,
+        acknowledged_by="operator",
+        reason=" ".join(reason_parts),
+        ttl_hours=ttl_hours,
+    )
+    ttl_note = f" (expires {ack.expires_at})" if ack.expires_at else " (no expiry)"
+    print(
+        f"acknowledged: {action}{ttl_note}\n"
+        f"  reason: {ack.reason or '(none given)'}\n"
+        "  note: the alert is suppressed from the top pick but still computed and "
+        "reported; use :ack-clear to restore it.",
+        file=sys.stderr,
+    )
+    agent.log.log("alert_acknowledged", ack.to_dict())
+    return True
+
+
+def _handle_alert_ack_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """List active operator acknowledgements. Read-only."""
+    store = _alert_ack_store_for(workspace)
+    active = store.list_active()
+    if not active:
+        print("no active acknowledgements.", file=sys.stderr)
+        return True
+    print(f"active acknowledgement(s): {len(active)}", file=sys.stderr)
+    for ack in active:
+        ttl = f"expires {ack.expires_at}" if ack.expires_at else "no expiry"
+        print(
+            f"  - {ack.action}  [{ttl}]  by={ack.acknowledged_by}  "
+            f"reason={ack.reason or '(none)'}",
+            file=sys.stderr,
+        )
+    print("  note: :ack-clear <action> to restore an alert to the top-pick race.", file=sys.stderr)
+    return True
+
+
+def _handle_alert_ack_clear(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Un-acknowledge an alert so it can dominate :best-next-action again."""
+    action = rest.strip()
+    if not action:
+        print("Usage: :ack-clear <action>", file=sys.stderr)
+        return True
+    store = _alert_ack_store_for(workspace)
+    removed = store.clear(action)
+    if removed:
+        print(f"cleared acknowledgement for: {action} (restored to top-pick race)", file=sys.stderr)
+        agent.log.log("alert_ack_cleared", {"action": action, "removed": removed})
+    else:
+        print(f"(no active acknowledgement found for '{action}')", file=sys.stderr)
+    return True
+
+
+#: Операция стоячего гранта. Автомат её ЧИТАЕТ
+#: (`AutonomousRuntime._active_standing_grant`); до MIR-166 её не заводил
+#: никакой боевой путь, только тест.
+STANDING_GRANT_OPERATION = "autonomous_runtime.standing_grant"
+
+
+def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """`:standing-grant <прогонов в сутки> [часов]` — ПОЛОЖИТЬ заявку.
+
+    Кладёт, а не выдаёт: просьба и разрешение — разные события (MIR-117,
+    правило B, ратифицировано оператором). Открывает грант отдельное слово
+    через `:approval-approve`.
+    """
+    tokens = rest.split()
+    usage = "Usage: :standing-grant <прогонов в сутки> [часов, по умолчанию 48]"
+    if not tokens:
+        print(usage, file=sys.stderr)
+        return True
+    try:
+        runs_per_day = int(tokens[0])
+        hours = int(tokens[1]) if len(tokens) > 1 else 48
+    except ValueError:
+        print(usage, file=sys.stderr)
+        return True
+    if runs_per_day <= 0 or hours <= 0:
+        # Ноль прогонов автомат читает как «гранта нет», а нулевой срок — как
+        # истёкший. Молча завести мёртвую заявку хуже, чем отказать.
+        print(
+            "Границы обязательны: и прогонов в сутки, и часов должно быть больше нуля.",
+            file=sys.stderr,
+        )
+        return True
+
+    inbox = _approval_inbox_for(agent, workspace)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=hours)
+    ).isoformat()
+    item = inbox.add(
+        operation=STANDING_GRANT_OPERATION,
+        summary=(
+            f"Стоячий грант на автономные прогоны с эффектами: "
+            f"{runs_per_day} в сутки, {hours} ч."
+        ),
+        risk="irreversible",
+        reasons=(
+            "запрошен оператором командой :standing-grant",
+            "без гранта каждое срабатывание расписания упирается в ворота",
+            f"границы: {runs_per_day} прогонов в сутки, срок {hours} ч",
+        ),
+        payload={"max_runs_per_day": runs_per_day},
+        expires_at=expires_at,
+    )
+    print(f"Заявка положена: {item.id}")
+    print(f"  {runs_per_day} прогонов в сутки, истекает {item.expires_at}")
+    print(f"  Открыть грант: :approval-approve {item.id} <причина>")
+    return True
+
+
+def _handle_approval_decision(
+    rest: str,
+    agent: AgentLoop,
+    workspace: Path,
+    *,
+    decision: str,
+) -> bool:
+    # Мост вердиктов (2026-08-19): всё после id — причина рецензента; она
+    # уезжает в approval_outcomes и станет опытом автора заявки.
+    item_id, _, reason = rest.strip().partition(" ")
+    reason = reason.strip()
+    if not item_id:
+        print(
+            f"Usage: :approval-{decision} <approval_id> [причина]",
+            file=sys.stderr,
+        )
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    try:
+        if decision == "approve":
+            item = inbox.approve(item_id, reason=reason)
+        elif decision == "deny":
+            if not reason:
+                # Требование причины живёт в инбоксе; здесь оно объясняется
+                # человеку, а не падает трассой стека.
+                print(
+                    "Отказ обязан нести причину: "
+                    f":approval-deny {item_id} <почему>",
+                    file=sys.stderr,
+                )
+                print(
+                    "  Одобрение говорит «да, как предложено» — его содержание "
+                    "в самой заявке.",
+                    file=sys.stderr,
+                )
+                print(
+                    "  У отказа содержания нет нигде, кроме причины, и её "
+                    "читает автор предложения",
+                    file=sys.stderr,
+                )
+                print(
+                    "  (data/approval_outcomes.jsonl -> выбор следующей цели).",
+                    file=sys.stderr,
+                )
+                return True
+            item = inbox.deny(item_id, reason=reason)
+        else:
+            raise ValueError(f"unknown approval decision: {decision}")
+    except KeyError as exc:
+        print(f"(approval {decision} failed: {exc})", file=sys.stderr)
+        return True
+    agent.log.log("approval_inbox_decision", item.to_dict())
+    if decision == "approve":
+        _record_producer_approval(workspace, item)
+    past = "approved" if decision == "approve" else "denied"
+    print(f"(approval {past}: {item.id}; operation={item.operation})", file=sys.stderr)
+    return True
+
+
+def _record_producer_approval(workspace: Path, item: Any) -> None:
+    """Best-effort TD-031 ledger recording of an ``approved`` outcome.
+
+    Only records for producer-origin ``self_apply_lane.run`` items, only the
+    ``approved`` outcome (this hook runs on the approve path only), and swallows
+    any registry failure so approval flow is never broken.
+    """
+    try:
+        if getattr(item, "operation", None) != "self_apply_lane.run":
+            return
+        from core.self_build_producer import PRODUCER_ORIGIN
+        payload = getattr(item, "payload", None)
+        origin = payload.get("origin") if isinstance(payload, dict) else None
+        if origin != PRODUCER_ORIGIN:
+            return
+        from core.subagent_registry import SubagentRegistry
+        registry = SubagentRegistry.load(workspace)
+        registry.apply_lane_outcome(getattr(item, "id", None), "approved")
+    except Exception:  # noqa: BLE001, S110 — advisory origin read; absence means not ours
+        pass
+
+
+def _handle_approval_abort(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    item_id = rest.strip()
+    if not item_id:
+        print("Usage: :approval-abort <approval_id>", file=sys.stderr)
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    try:
+        item = inbox.abort(item_id)
+    except KeyError as exc:
+        print(f"(approval abort failed: {exc})", file=sys.stderr)
+        return True
+    agent.log.log("approval_inbox_decision", item.to_dict())
+    print(f"(approval aborted: {item.id}; operation={item.operation})", file=sys.stderr)
+    return True
+
+
+def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    item_id = rest.strip()
+    if not item_id:
+        print("Usage: :approval-run <approval_id>", file=sys.stderr)
+        return True
+    inbox = _approval_inbox_for(agent, workspace)
+    item = inbox.get(item_id)
+    if item is None:
+        print(f"(approval run failed: approval not found: {item_id})", file=sys.stderr)
+        return True
+    if item.status != "approved":
+        print(
+            f"(approval run refused: {item.id} status={item.status}; approve it first)",
+            file=sys.stderr,
+        )
+        return True
+    if item.operation == "launch_subagent":
+        return _run_approved_subagent(item, agent, workspace, inbox)
+    if item.operation != "autonomous_runtime.allow_effects":
+        print(
+            f"(approval run refused: unsupported operation={item.operation})",
+            file=sys.stderr,
+        )
+        return True
+
+    payload = item.payload
+    try:
+        config = AutonomousRuntimeConfig(
+            goal=str(payload.get("goal") or "project health"),
+            dry_run=False,
+            effects_approved=True,
+            limit=max(1, int(payload.get("limit", 5))),
+            include_tests=_payload_bool(payload.get("include_tests"), default=True),
+            learning_limit=max(1, int(payload.get("learning_limit", 5))),
+            # Одобряли ЦЕЛЬ — она и должна выполниться. Умолчание False
+            # оставлено ради заявок, записанных до 2026-08-15: у них поля нет,
+            # и прежнее поведение (health-pass) для них не меняется.
+            include_goal=_payload_bool(payload.get("include_goal"), default=False),
+            include_proposals=_payload_bool(
+                payload.get("include_proposals"), default=False
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        print(f"(approval run failed: invalid payload: {exc})", file=sys.stderr)
+        return True
+
+    report = AutonomousRuntime(
+        agent,
+        workspace=workspace,
+        approval_inbox=inbox,
+    ).run(config)
+    # MIR-117 (слово оператора 2026-08-27): «да» сгорает ПОПЫТКОЙ — правило
+    # полосы. Прежний ключ `status == "completed"` был токеном «очередь
+    # дочерпана»: прогон, отвергнутый до старта, жёг одобрение, а
+    # остановленный ПОСЛЕ сделанной работы — сохранял его. Обе стороны лгали.
+    if report.attempted():
+        executed = inbox.mark_executed(item.id)
+        agent.log.log("approval_inbox_executed", executed.to_dict())
+    print(report.user_summary(), file=sys.stderr)
+    return True
+
+
+def _run_approved_subagent(
+    item: Any,
+    agent: AgentLoop,
+    workspace: Path,
+    inbox: ApprovalInbox,
+) -> bool:
+    """Run one approved canonical subagent using the registered tool/runner."""
+    try:
+        contract = canonical_from_approval_payload(item.payload)
+    except (TypeError, ValueError) as exc:
+        print(f"(approval run failed: invalid subagent payload: {exc})", file=sys.stderr)
+        return True
+
+    try:
+        spawn_tool = agent.registry.get("spawn_subagent")
+    except KeyError as exc:
+        print(f"(approval run failed: {exc})", file=sys.stderr)
+        return True
+    run_contract = getattr(spawn_tool, "run_contract", None)
+    if not callable(run_contract):
+        print(
+            "(approval run failed: spawn_subagent lacks canonical runner support)",
+            file=sys.stderr,
+        )
+        return True
+
+    try:
+        result = run_contract(contract, approved=True)
+    except SubagentContractRefused as exc:
+        _record_subagent_contract_outcome(workspace, contract, "refused")
+        agent.log.log(
+            "approval_subagent_refused",
+            {"approval_id": item.id, "contract_id": contract.contract_id, "reason": str(exc)},
+        )
+        print(f"(approval run refused: {exc})", file=sys.stderr)
+        return True
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
+        _record_subagent_contract_outcome(workspace, contract, "error")
+        agent.log.log(
+            "approval_subagent_error",
+            {
+                "approval_id": item.id,
+                "contract_id": contract.contract_id,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+        )
+        print(
+            f"(approval run failed: {type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+        return True
+
+    if getattr(result, "status", "error") != "success":
+        _record_subagent_contract_outcome(
+            workspace,
+            contract,
+            "error",
+            execution_receipt=getattr(result, "execution_receipt", None),
+            audit_report=getattr(result, "contract_audit", None),
+        )
+        error = str(getattr(result, "error", "") or "subagent returned error")
+        print(f"(approval run failed: {error})", file=sys.stderr)
+        return True
+
+    _record_subagent_contract_outcome(
+        workspace,
+        contract,
+        "executed",
+        execution_receipt=getattr(result, "execution_receipt", None),
+        audit_report=getattr(result, "contract_audit", None),
+    )
+    executed = inbox.mark_executed(item.id)
+    agent.log.log("approval_inbox_executed", executed.to_dict())
+    print(result.to_evidence_text(), file=sys.stderr)
+    return True
+
+
+def _record_subagent_contract_outcome(
+    workspace: Path,
+    contract: Any,
+    outcome: str,
+    *,
+    execution_receipt: Any | None = None,
+    audit_report: Any | None = None,
+) -> None:
+    """Best-effort contract ledger hook; approval flow remains authoritative."""
+    try:
+        from core.subagent_registry import SubagentRegistry
+
+        SubagentRegistry.load(workspace).record_contract_run(
+            contract,
+            outcome,
+            execution_receipt=execution_receipt,
+            audit_report=audit_report,
+        )
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
+        print(
+            "(approval run warning: contract registry write failed: "
+            f"{type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )

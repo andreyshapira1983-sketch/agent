@@ -1,0 +1,335 @@
+"""Стоячий грант расходуется КАЖДЫМ, кто им пользуется.
+
+WHY THIS EXISTS. Аудит автономности 2026-09-17, находка 7: в репозитории два
+потребителя одного и того же стоячего гранта.
+
+* `AutonomousRuntime.run` спрашивает грант, а потом ЗАПИСЫВАЕТ расход
+  (`_record_standing_use`) — дневной лимит для него настоящий;
+* `drain_rule_approved_proposals` спрашивал тот же грант и не записывал ничего,
+  а дальше сам же ставил «одобрено» от имени правила и применял изменение.
+
+Следствие проверено на живом коде: `max_runs_per_day=1` не мешал проходу
+применить сколько угодно предложений за один тик, а расход, посчитанный вторым
+потребителем, был не виден первому. «Одно да в неделю» превращалось в
+безлимитное да, и стены гранта существовали только на одном из двух путей.
+
+Здесь проверяется ровно это: у каждого применённого эффекта есть событие
+разрешения В ЖУРНАЛЕ РАСХОДА, и потолок считает обоих потребителей.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
+from core.autonomous_runtime import (
+    _record_standing_use,
+    active_standing_grant,
+    standing_runs_today,
+)
+from core.self_apply_bridge import SELF_APPLY_OPERATION, build_self_apply_payload
+
+
+@pytest.fixture()
+def workspace(tmp_path: Path) -> Path:
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "data").mkdir()
+    return tmp_path
+
+
+def _inbox(workspace: Path) -> ApprovalInbox:
+    return ApprovalInbox(path=workspace / DEFAULT_APPROVAL_INBOX_PATH)
+
+
+def _grant(inbox: ApprovalInbox, *, runs_per_day: int = 5, days: int = 7):
+    item = inbox.add(
+        operation="autonomous_runtime.standing_grant",
+        summary=f"standing effects grant: {runs_per_day} runs/day",
+        risk="irreversible",
+        payload={"max_runs_per_day": runs_per_day},
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=days)).isoformat(),
+    )
+    return inbox.approve(item.id)
+
+
+def _pending_document(inbox: ApprovalInbox, workspace: Path, name: str):
+    """Заявка ровно того класса, который правило разрешает: НОВЫЙ документ."""
+    payload = build_self_apply_payload(
+        files=[{"path": f"knowledge/doctrine/future/{name}.md", "content": "# заметка\n"}],
+        reason="черновик",
+        origin="test",
+        workspace=workspace,
+    )
+    return inbox.add(
+        operation=SELF_APPLY_OPERATION,
+        summary=f"self-apply: {name}.md",
+        risk="reversible",
+        payload=payload,
+    )
+
+
+class _Applications:
+    """Подделка полосы: считает применения, ничего не пишет на диск."""
+
+    def __init__(self) -> None:
+        self.item_ids: list[str] = []
+
+    def __call__(self, **kwargs: Any) -> dict:
+        self.item_ids.append(kwargs["item_id"])
+        return {"status": "committed_local", "proposal_id": kwargs["item_id"]}
+
+
+@pytest.fixture()
+def lane(monkeypatch: Any) -> _Applications:
+    import core.self_apply_bridge as bridge
+
+    fake = _Applications()
+    monkeypatch.setattr(bridge, "run_approved_self_apply", fake)
+    return fake
+
+
+def test_every_applied_effect_has_an_approval_event(
+    workspace: Path, lane: _Applications
+) -> None:
+    """Красный свидетель: два применения — ноль записей о расходе гранта.
+
+    Полномочие на применение бралось из гранта, а след расхода оставался
+    пустым, то есть по журналу нельзя было ответить, чем именно разрешено
+    каждое изменение.
+    """
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    grant = _grant(inbox, runs_per_day=5)
+    _pending_document(inbox, workspace, "first")
+    _pending_document(inbox, workspace, "second")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert out["applied"] == 2, out
+    assert len(lane.item_ids) == 2
+    assert standing_runs_today(workspace, grant.id) == 2, (
+        "применения без записи расхода: грант выдал полномочие бесследно"
+    )
+
+
+def test_standing_grant_cap_counts_all_consumers(
+    workspace: Path, lane: _Applications
+) -> None:
+    """Потолок общий: расход рантайма уменьшает остаток правила, и наоборот.
+
+    Иначе «3 прогона в день» означает 3 прогона рантайма ПЛЮС неограниченное
+    число применений правилом — то есть не означает ничего.
+    """
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    grant = _grant(inbox, runs_per_day=2)
+    # Первый потребитель уже израсходовал одно разрешение из двух.
+    _record_standing_use(workspace, grant.id)
+
+    _pending_document(inbox, workspace, "alpha")
+    _pending_document(inbox, workspace, "beta")
+    _pending_document(inbox, workspace, "gamma")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert out["applied"] == 1, (
+        f"остаток гранта — одно разрешение, применено {out['applied']}"
+    )
+    assert standing_runs_today(workspace, grant.id) == 2
+    assert active_standing_grant(inbox, workspace) is None, (
+        "исчерпанный грант обязан перестать быть действующим для ОБОИХ путей"
+    )
+
+
+def test_an_exhausted_grant_applies_nothing(
+    workspace: Path, lane: _Applications
+) -> None:
+    """Исчерпанный грант — это отказ по названной причине, а не тихий пропуск."""
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    grant = _grant(inbox, runs_per_day=1)
+    _record_standing_use(workspace, grant.id)
+    _pending_document(inbox, workspace, "alpha")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert out["applied"] == 0
+    assert out["blocked"] == "no active standing grant"
+    assert lane.item_ids == []
+
+
+def test_an_expired_grant_applies_nothing(
+    workspace: Path, lane: _Applications
+) -> None:
+    """Срок — тоже стена: вчерашнее «да» сегодня не полномочие."""
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _grant(inbox, runs_per_day=5, days=-1)
+    _pending_document(inbox, workspace, "alpha")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert out["applied"] == 0
+    assert out["blocked"] == "no active standing grant"
+    assert lane.item_ids == []
+
+
+def test_the_drain_still_applies_what_the_rule_allows(
+    workspace: Path, lane: _Applications
+) -> None:
+    """Учёт не отменяет саму петлю: разрешённый документ по-прежнему проходит."""
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    inbox = _inbox(workspace)
+    _grant(inbox, runs_per_day=5)
+    item = _pending_document(inbox, workspace, "alpha")
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert out == {"considered": 1, "applied": 1, "unapplied": 0,
+                   "attempted": 1, "refused": 0, "blocked": ""}
+    assert lane.item_ids == [item.id]
+    assert inbox.get(item.id).status == "approved"
+
+
+# ── Ревизия PR #333: потолок обязан быть неделимым ────────────────────────────
+#
+# Учёт общим журналом был верной половиной починки, но схема осталась из двух
+# шагов: прочитать остаток, затем дописать расход. Между ними помещается второй
+# слив, и `run_tick` к этому месту замок задачи уже отпустил. Потолок, который
+# можно превысить, сговорившись во времени, потолком не является.
+
+
+def test_two_simultaneous_drains_cannot_spend_the_same_last_unit(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Последняя единица достаётся ровно одному из двух одновременных потребителей.
+
+    Чередование не случайное, а вынужденное: счёт расхода нарочно замедлен, и
+    второй поток приходит ровно в тот миг, когда первый уже посчитал остаток,
+    но ещё не записал трату. Пара «прочитать → дописать» здесь проигрывает
+    всегда; неделимый резерв — никогда.
+    """
+    import threading
+    import time
+
+    import core.autonomous_runtime as runtime
+
+    real_count = runtime._standing_runs_today_unlocked
+
+    def _slow_count(path: Any, grant_id: str) -> int:
+        # Замедление стоит ПОСЛЕ чтения файла и до возврата — ровно в окне
+        # между «прочитал остаток» и «записал расход». Замедление ПЕРЕД
+        # чтением ничего не доказывает: потоки тогда расходятся сами и
+        # свидетель зеленеет даже на сломанной схеме (проверено пробником).
+        seen = real_count(path, grant_id)
+        time.sleep(0.4)
+        return seen
+
+    monkeypatch.setattr(runtime, "_standing_runs_today_unlocked", _slow_count)
+
+    verdicts: list[bool] = []
+    lock = threading.Lock()
+
+    def _try() -> None:
+        taken = runtime.reserve_standing_grant_use(
+            workspace, "grant:only-one", max_per_day=1
+        )
+        with lock:
+            verdicts.append(taken)
+
+    first = threading.Thread(target=_try)
+    second = threading.Thread(target=_try)
+    first.start()
+    time.sleep(0.1)  # второй приходит ВНУТРЬ окна между чтением и записью
+    second.start()
+    first.join(10)
+    second.join(10)
+
+    assert sorted(verdicts) == [False, True], (
+        f"потолок в одну единицу выдал {verdicts.count(True)} разрешений: "
+        "проверка остатка и запись расхода расходятся во времени"
+    )
+    assert standing_runs_today(workspace, "grant:only-one") == 1
+
+
+def test_a_reserve_refuses_when_the_day_is_spent(workspace: Path) -> None:
+    """Исчерпанный потолок отказывает, и отказ ничего не записывает."""
+    from core.autonomous_runtime import reserve_standing_grant_use
+
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is True
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is True
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=2) is False
+    assert standing_runs_today(workspace, "g") == 2
+
+
+def test_a_grant_without_a_ceiling_reserves_nothing(workspace: Path) -> None:
+    """Потолок в ноль или без числа — это запрет, а не «без ограничений».
+
+    Тот же выбор умолчания, что у H-33: из двух ошибок настройки тихо проходила
+    ровно та, что СНИМАЕТ ограничение.
+    """
+    from core.autonomous_runtime import reserve_standing_grant_use
+
+    assert reserve_standing_grant_use(workspace, "g", max_per_day=0) is False
+    assert standing_runs_today(workspace, "g") == 0
+
+
+def test_a_world_condition_does_not_burn_the_rest_of_the_grant(
+    workspace: Path, monkeypatch: Any
+) -> None:
+    """Условие МИРА останавливает проход, а не съедает потолок заявка за заявкой.
+
+    Ревизия Copilot по PR #333 (замечание про нетерминальные исходы). Доказано
+    по коду: `core/self_apply_bridge._pending_excluding` считает ОСТАЛЬНЫЕ
+    ожидающие заявки, и полоса отвечает `approval_wait`, пока их число не ноль.
+    В сливе это значит вот что: заявки одобряются по одной, каждая ЗАНИМАЕТ
+    единицу суточного потолка, и почти каждая упирается в очередь, которую
+    сама же и составляет.
+
+    Нетерминальный исход — про состояние мира (очередь, бюджет, шлюз), а не
+    про заявку. Следующая заявка упрётся в ту же стену. Продолжать проход
+    значит тратить потолок на то, что заведомо не применится.
+
+    Что здесь НЕ утверждается: что расход надо возвращать. Резерв стоит до
+    применения нарочно — оборванный тик обязан оставить пережатую оценку
+    расхода, а не незамеченное полномочие.
+    """
+    import core.self_apply_bridge as bridge
+    from core.rule_approved_apply import drain_rule_approved_proposals
+
+    seen: list[str] = []
+
+    def _wall(**kwargs: Any) -> dict:
+        seen.append(kwargs["item_id"])
+        return {
+            "status": "approval_wait",
+            "proposal_id": kwargs["item_id"],
+            "reason": "2 approval item(s) pending",
+        }
+
+    monkeypatch.setattr(bridge, "run_approved_self_apply", _wall)
+
+    inbox = _inbox(workspace)
+    grant = _grant(inbox, runs_per_day=5)
+    for name in ("first", "second", "third"):
+        _pending_document(inbox, workspace, name)
+
+    out = drain_rule_approved_proposals(workspace, dry_run=False)
+
+    assert len(seen) == 1, (
+        "стена мира не остановила проход: полоса звана "
+        f"{len(seen)} раз(а), и каждый раз это стоило единицы потолка"
+    )
+    assert out["applied"] == 0, out
+    assert standing_runs_today(workspace, grant.id) == 1, (
+        "потолок потрачен на заявки, которые упёрлись бы в ту же стену: "
+        f"израсходовано {standing_runs_today(workspace, grant.id)}"
+    )

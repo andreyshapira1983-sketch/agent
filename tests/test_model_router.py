@@ -1,0 +1,1257 @@
+"""Model router tests.
+
+The router is the boundary that lets the agent core swap/compare models by
+role instead of binding the whole runtime to one backend.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from core.approval import AutoApprover
+from core.logger import TraceLogger
+from core.loop import AgentLoop, new_trace_id
+from core.model_router import (
+    ModelRole,
+    ModelRoute,
+    ModelRouter,
+    UsageTrackedLLM,
+    ensure_known_model_role,
+)
+from core.model_usage import ModelUsageLedger
+from core.policy import PolicyGate
+from tests.conftest import FakeLLM, FakePlanner
+from tools.base import ToolRegistry
+from tools.file_read import FileReadTool
+from tools.file_write import FileWriteTool
+
+#: Ambient operator pins the router genuinely honours. Live 2026-08-17: the
+#: engine exam pinned Sol/Terra via env and six of these tests went red
+#: INSIDE the exam session — both engines then reported "model routing is
+#: broken" as their main limitation. A test must build its own env, not
+#: inherit the operator's (тесты целят органы в полигоны).
+_AMBIENT_PIN_VARS = (
+    "AGENT_PROVIDER", "AGENT_MODEL",
+    "AGENT_PLANNER_PROVIDER", "AGENT_PLANNER_MODEL",
+    "AGENT_SYNTHESIZER_PROVIDER", "AGENT_SYNTHESIZER_MODEL",
+    "AGENT_REPAIR_PROVIDER", "AGENT_REPAIR_MODEL",
+    "AGENT_OPENAI_REASONING_EFFORT",
+    "AGENT_TIER_PROVIDERS_LIGHT", "AGENT_TIER_PROVIDERS_STANDARD",
+    "AGENT_TIER_PROVIDERS_DEEP",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_ambient_pins(monkeypatch):
+    for name in _AMBIENT_PIN_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _proposal_json() -> str:
+    return json.dumps({
+        "diagnosis": "answer() returns 41 while the failing test expects 42",
+        "target_file": "buggy.py",
+        "proposed_content": "def answer():\n    return 42\n",
+        "evidence": ["tests/test_buggy.py::test_answer failed"],
+        "confidence": 0.82,
+    })
+
+
+def _seed_repair_workspace(workspace: Path) -> None:
+    (workspace / "tests").mkdir()
+    (workspace / "buggy.py").write_text("def answer():\n    return 41\n", encoding="utf-8")
+    (workspace / "tests" / "test_buggy.py").write_text(
+        "from buggy import answer\n\n\ndef test_answer():\n    assert answer() == 42\n",
+        encoding="utf-8",
+    )
+
+
+def _fake_failing_pytest(monkeypatch) -> None:
+    def fake_run(argv, **kwargs):
+        class C:
+            returncode = 1
+            stdout = b"1 failed in 0.01s\nFAILED tests/test_buggy.py::test_answer - AssertionError\n"
+            stderr = b""
+
+        return C()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+
+def test_single_router_preserves_legacy_one_llm_behavior():
+    llm = FakeLLM()
+    router = ModelRouter.single(llm)
+
+    assert router.for_role(ModelRole.PLANNER) is llm
+    assert router.for_role(ModelRole.SYNTHESIZER) is llm
+    assert router.for_role(ModelRole.REPAIR_PROPOSAL) is llm
+    assert router.routing_summary()[ModelRole.PLANNER.value]["provider"] == "fake"
+
+
+def test_router_reads_default_and_role_specific_env(monkeypatch):
+    monkeypatch.setenv("AGENT_PROVIDER", "mock")
+    monkeypatch.setenv("AGENT_MODEL", "base-model")
+    monkeypatch.setenv("AGENT_PLANNER_MODEL", "planner-model")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "repair-model")
+
+    created: list[tuple[str | None, str | None]] = []
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        created.append((provider, model))
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+
+    planner = router.for_role(ModelRole.PLANNER)
+    synth = router.for_role(ModelRole.SYNTHESIZER)
+    repair = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert (planner.provider, planner.model) == ("mock", "planner-model")
+    assert (synth.provider, synth.model) == ("mock", "base-model")
+    assert (repair.provider, repair.model) == ("openai", "repair-model")
+    assert created == [
+        ("mock", "planner-model"),
+        ("mock", "base-model"),
+        ("openai", "repair-model"),
+    ]
+
+
+def test_router_reuses_one_model_instance_for_identical_routes():
+    created = 0
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        nonlocal created
+        created += 1
+        llm = FakeLLM()
+        llm.provider = provider or "mock"
+        llm.model = model or "same"
+        return llm
+
+    router = ModelRouter(
+        default_provider="mock",
+        default_model="same",
+        llm_factory=factory,
+    )
+
+    assert router.for_role(ModelRole.PLANNER) is router.for_role(ModelRole.SYNTHESIZER)
+    assert router.for_role(ModelRole.REPAIR_PROPOSAL) is router.for_role(ModelRole.PLANNER)
+    assert created == 1
+
+
+def test_router_can_select_new_model_from_registry_json(monkeypatch):
+    monkeypatch.delenv("AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    # Pin the routing policy: this test asserts the *conservative* default
+    # reason, so it must not inherit an ambient AGENT_MODEL_POLICY (e.g. the
+    # daemon's .env sets it to "balanced").
+    monkeypatch.delenv("AGENT_MODEL_POLICY", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "future-coder",
+                "provider": "openai",
+                "model": "gpt-future-coder",
+                "roles": ["planner", "repair_proposal"],
+                "quality_tier": "frontier",
+                "cost_tier": "medium",
+                "context_window": 256000,
+            }
+        ]),
+    )
+
+    created: list[tuple[str | None, str | None]] = []
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        created.append((provider, model))
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+
+    planner = router.for_role(ModelRole.PLANNER)
+    synth = router.for_role(ModelRole.SYNTHESIZER)
+    summary = router.routing_summary()
+
+    assert (planner.provider, planner.model) == ("openai", "gpt-future-coder")
+    assert summary["planner"]["reason"] == "policy:conservative:future-coder"
+    # No custom synthesizer route exists, so the router keeps the normal LLM
+    # default path instead of guessing.
+    assert synth.provider == "anthropic"
+    assert created[0] == ("openai", "gpt-future-coder")
+
+
+def test_router_can_select_new_model_from_registry_file(tmp_path: Path, monkeypatch):
+    registry_path = tmp_path / "model_registry.json"
+    registry_path.write_text(
+        json.dumps({
+            "models": [
+                {
+                    "id": "fresh-planner",
+                    "provider": "openai",
+                    "model": "gpt-fresh-planner",
+                    "roles": ["planner"],
+                    "quality_tier": "frontier",
+                    "cost_tier": "medium",
+                }
+            ]
+        }),
+        encoding="utf-8",
+    )
+    # Same isolation as above: assert the conservative default, so strip any
+    # ambient policy override leaking from the environment / .env.
+    monkeypatch.delenv("AGENT_MODEL_POLICY", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER])
+    registry = router.registry_summary()
+
+    assert summary["planner"]["provider"] == "openai"
+    assert summary["planner"]["model"] == "gpt-fresh-planner"
+    assert summary["planner"]["reason"] == "policy:conservative:fresh-planner"
+    assert any(
+        spec["id"] == "fresh-planner" and spec["source"].startswith("file:")
+        for spec in registry["models"]
+    )
+
+
+def test_role_env_override_wins_over_model_registry(monkeypatch):
+    monkeypatch.setenv("AGENT_PROVIDER", "mock")
+    monkeypatch.setenv("AGENT_MODEL", "base")
+    monkeypatch.setenv("AGENT_PLANNER_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_PLANNER_MODEL", "explicit-planner")
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "registry-planner",
+                "provider": "anthropic",
+                "model": "registry-model",
+                "roles": ["planner"],
+                "quality_tier": "frontier",
+            }
+        ]),
+    )
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    planner = router.for_role(ModelRole.PLANNER)
+
+    assert (planner.provider, planner.model) == ("openai", "explicit-planner")
+    assert router.routing_summary()["planner"]["reason"] == "env:AGENT_PLANNER"
+
+
+def test_balanced_policy_uses_builtin_low_cost_routes_when_available(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    # Keep builtin balanced routing isolated from role overrides in .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_PLANNER_PROVIDER",
+        "AGENT_PLANNER_MODEL",
+        "AGENT_SYNTHESIZER_PROVIDER",
+        "AGENT_SYNTHESIZER_MODEL",
+        "AGENT_REPAIR_PROVIDER",
+        "AGENT_REPAIR_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+        "AGENT_VERIFIER_PROVIDER",
+        "AGENT_VERIFIER_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary()
+
+    assert summary["planner"]["provider"] == "anthropic"
+    assert summary["planner"]["reason"] == "policy:balanced:anthropic-default"
+    assert summary["memory_summary"]["provider"] == "openai"
+    assert summary["memory_summary"]["model"] == "gpt-4o-mini"
+    assert summary["memory_summary"]["reason"] == "policy:balanced:openai-default-small"
+    assert summary["verifier"]["provider"] == "openai"
+
+
+def test_balanced_policy_can_fall_back_to_available_provider_for_planning(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER])
+
+    assert summary["planner"]["provider"] == "openai"
+    assert summary["planner"]["model"] == "gpt-4o-mini"
+    assert summary["planner"]["reason"] == "policy:balanced:openai-default-small"
+
+
+def test_light_task_uses_openai_default_small_when_available(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    monkeypatch.delenv("AGENT_MODEL_TIER_LIGHT", raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    llm = router.for_task(ModelRole.PLANNER, "привет")
+
+    assert llm.provider == "openai"
+    assert llm.model == "gpt-4o-mini"
+
+
+def test_standard_task_stays_on_anthropic_balanced_route(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    # Isolate from the ambient config/model_catalog.json: its contents (and its
+    # freshness/TTL) must not steer this test. Without a live catalog the router
+    # falls back to the builtin registry's balanced routes, which is exactly the
+    # decision under test. This keeps the test deterministic across
+    # `:refresh-models` runs and calendar time.
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    for tier in ("LIGHT", "STANDARD", "DEEP"):
+        monkeypatch.delenv(f"AGENT_MODEL_TIER_{tier}", raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "unset"
+        llm.model = model or "unset"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    llm = router.for_task(ModelRole.PLANNER, "напиши функцию сортировки для списка чисел")
+
+    # Intent: a standard-tier task stays on Anthropic under the balanced policy.
+    # Assert the routing decision (provider), not a specific model version, so a
+    # newer Claude model never breaks this test.
+    assert llm.provider == "anthropic"
+    assert llm.model.startswith("claude-")
+
+
+def test_cost_policy_respects_max_cost_and_model_availability(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "cost")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+
+    # A provider credential decides whether its route is *selectable*, so this
+    # test has to own them instead of inheriting whatever the environment
+    # carries. It already dropped OPENAI_API_KEY for exactly that reason;
+    # HF_TOKEN was missed, and it only surfaced once CI began running with real
+    # secrets — huggingface became selectable and the reason turned into
+    # `policy:cost:hf-default` instead of `default`.
+    for key in ("OPENAI_API_KEY", "HF_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+
+    # This test verifies policy fallback, not explicit role routes from .env.
+    for key in (
+        "AGENT_PROVIDER",
+        "AGENT_MODEL",
+        "AGENT_MEMORY_PROVIDER",
+        "AGENT_MEMORY_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(
+        "AGENT_MODEL_REGISTRY_JSON",
+        json.dumps([
+            {
+                "id": "cheap-summary",
+                "provider": "openai",
+                "model": "gpt-cheap",
+                "roles": ["memory_summary"],
+                "quality_tier": "standard",
+                "cost_tier": "low",
+            },
+            {
+                "id": "local-summary",
+                "provider": "mock",
+                "model": "mock-1",
+                "roles": ["memory_summary"],
+                "quality_tier": "cheap",
+                "cost_tier": "free",
+            },
+        ]),
+    )
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "anthropic"
+        llm.model = model or "claude-sonnet-4-5"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.MEMORY_SUMMARY])
+
+    # OpenAI is below the cost cap, but it is not selectable without its key.
+    # Mock is not selected in real policies unless explicitly allowed.
+    assert summary["memory_summary"]["reason"] == "default"
+    assert summary["memory_summary"]["provider"] == "anthropic"
+
+
+def test_offline_policy_can_select_mock_route(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_POLICY", "offline")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        llm = FakeLLM()
+        llm.provider = provider or "fallback"
+        llm.model = model or "fallback"
+        return llm
+
+    router = ModelRouter.from_env(llm_factory=factory)
+    summary = router.routing_summary([ModelRole.PLANNER, ModelRole.SYNTHESIZER])
+
+    assert summary["planner"]["provider"] == "mock"
+    assert summary["planner"]["reason"] == "policy:offline:mock"
+    assert summary["synthesizer"]["provider"] == "mock"
+
+
+def test_agent_loop_uses_repair_proposal_route(tmp_path: Path, monkeypatch):
+    _seed_repair_workspace(tmp_path)
+    _fake_failing_pytest(monkeypatch)
+
+    synth_llm = FakeLLM(responses=["synth should not be called"])
+    repair_llm = FakeLLM(responses=[_proposal_json()])
+    planner_llm = FakeLLM(responses=["planner should not be called"])
+
+    def factory(provider: str | None, model: str | None) -> FakeLLM:
+        if model == "repair":
+            return repair_llm
+        if model == "planner":
+            return planner_llm
+        return synth_llm
+
+    router = ModelRouter(
+        default_provider="fake",
+        default_model="synth",
+        routes={
+            ModelRole.PLANNER: ModelRoute(
+                role=ModelRole.PLANNER.value,
+                provider="fake",
+                model="planner",
+            ),
+            ModelRole.REPAIR_PROPOSAL: ModelRoute(
+                role=ModelRole.REPAIR_PROPOSAL.value,
+                provider="fake",
+                model="repair",
+            ),
+        },
+        llm_factory=factory,
+    )
+
+    registry = ToolRegistry()
+    registry.register(FileReadTool(workspace_root=tmp_path))
+    registry.register(FileWriteTool(workspace_root=tmp_path))
+    trace_id = new_trace_id()
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=synth_llm,
+        logger=TraceLogger(trace_id=trace_id, log_dir=tmp_path / "logs", verbose=False),
+        planner=FakePlanner([]),
+        model_router=router,
+        approval_provider=AutoApprover(),
+        max_replan_attempts=1,
+    )
+
+    report = agent.propose_repair(
+        target_path="buggy.py",
+        workspace_root=tmp_path,
+        test_paths=("tests",),
+    )
+
+    assert report.ok
+    assert len(repair_llm.calls) == 1
+    assert synth_llm.calls == []
+    assert planner_llm.calls == []
+
+
+# ── Routing attribution integrity (teaching-harness repair) ──────────────────
+#
+# The factory may silently heal a forbidden/uncredentialed route to another
+# provider/model. The route metadata + usage ledger must never claim a model the
+# client did not actually call: either requested == actual, or a truthful
+# downgrade reason is stamped.
+
+
+def _tracked(route: ModelRoute, *, provider: str, model: str) -> UsageTrackedLLM:
+    llm = FakeLLM(responses=["ok"])
+    llm.provider = provider
+    llm.model = model
+    return UsageTrackedLLM(
+        llm,
+        role=route.role,
+        route=route,
+        cost_tier="medium",
+        ledger=ModelUsageLedger(),
+    )
+
+
+def test_tracked_llm_stamps_downgrade_when_client_diverges_from_request():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+
+    # Attribution must reflect the *actual* client, not the requested model.
+    assert tracked.provider == "openai"
+    assert tracked.model == "gpt-4o-mini"
+    downgrade = (
+        "route_downgrade:requested=anthropic/claude-sonnet-4-5"
+        "->actual=openai/gpt-4o-mini"
+    )
+    assert downgrade in tracked.route.reason
+    assert "diagnostic:forced-sonnet-4-5" in tracked.route.reason
+
+    attribution = tracked.attribution()
+    assert attribution["requested_provider"] == "anthropic"
+    assert attribution["requested_model"] == "claude-sonnet-4-5"
+    assert attribution["actual_provider"] == "openai"
+    assert attribution["actual_model"] == "gpt-4o-mini"
+
+
+def test_tracked_llm_ledger_never_pairs_forced_reason_with_other_model():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+    tracked.complete(system="s", user="u", max_tokens=8)
+
+    records = tracked.ledger.records
+    assert records, "usage ledger recorded nothing"
+    last = records[-1]
+    # The logged model and its route_reason must agree: model gpt-4o-mini must
+    # carry the honest downgrade, never a bare 'forced-sonnet-4-5'.
+    assert last.model == "gpt-4o-mini"
+    assert last.provider == "openai"
+    assert "route_downgrade:" in last.route_reason
+
+
+def test_tracked_llm_preserves_reason_when_client_matches_request():
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        reason="diagnostic:forced-sonnet-4-5",
+    )
+    tracked = _tracked(route, provider="anthropic", model="claude-sonnet-4-5")
+
+    assert tracked.route.reason == "diagnostic:forced-sonnet-4-5"
+    assert "route_downgrade" not in tracked.route.reason
+    attribution = tracked.attribution()
+    assert attribution["requested_model"] == attribution["actual_model"]
+
+
+def test_tracked_llm_leaves_role_default_route_untouched():
+    # Role-default routes leave provider/model as None; there is no explicit
+    # request to contradict, so no downgrade annotation should be added.
+    route = ModelRoute(role=ModelRole.PLANNER.value, reason="default")
+    tracked = _tracked(route, provider="openai", model="gpt-4o-mini")
+
+    assert tracked.route.reason == "default"
+    attribution = tracked.attribution()
+    assert attribution["requested_provider"] is None
+    assert attribution["actual_provider"] == "openai"
+
+
+def _tier_factory(provider: str | None, model: str | None) -> FakeLLM:
+    llm = FakeLLM()
+    llm.provider = provider or "unset"
+    llm.model = model or "unset"
+    return llm
+
+
+def _isolate_tier_env(monkeypatch) -> None:
+    """Neutralise ambient catalog/tier env so tier routing is deterministic."""
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    for tier in ("LIGHT", "STANDARD", "DEEP"):
+        monkeypatch.delenv(f"AGENT_MODEL_TIER_{tier}", raising=False)
+        monkeypatch.delenv(f"AGENT_TIER_PROVIDERS_{tier}", raising=False)
+    for var in ("AGENT_MODEL", "AGENT_PLANNER_PROVIDER", "AGENT_PLANNER_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_operator_tier_provider_survives_missing_catalog_entry(monkeypatch):
+    # Catalog discovery only covers providers that have a fetcher (anthropic,
+    # openai). An operator who names `local` in AGENT_TIER_PROVIDERS_LIGHT has
+    # already declared its model in LOCAL_LLM_MODEL, so "the catalog cannot
+    # describe it" must not silently hand the call to a different provider.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:1234/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen-local")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.LIGHT, ModelRole.PLANNER.value
+    )
+
+    assert provider == "local"
+    assert "no_model:local" not in skipped
+
+
+def test_operator_tier_provider_reaches_for_task_with_declared_model(monkeypatch):
+    # End-to-end: the explicitly named provider must actually serve the call,
+    # using the model the operator declared for it.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:1234/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen-local")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_task(ModelRole.PLANNER, "привет")
+
+    assert llm.provider == "local"
+    assert llm.model == "qwen-local"
+
+
+def test_builtin_tier_preference_is_unchanged_without_operator_override(monkeypatch):
+    # Guard: the fallback above is scoped to explicit operator intent. With no
+    # AGENT_TIER_PROVIDERS_* set, a provider the catalog cannot describe stays
+    # skipped exactly as before, so default routing does not silently move.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("HF_TOKEN", "hf-test-token")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.LIGHT, ModelRole.PLANNER.value
+    )
+
+    assert provider != "huggingface"
+    assert "no_model:huggingface" in skipped
+
+
+def test_cost_tier_uses_catalog_classification_when_model_is_not_in_registry():
+    # Catalog-discovered models are absent from config/model_registry.json, so
+    # _cost_tier_for_route fell through to "unknown" — which the usage ledger
+    # prices at 5 units/1k, just below "high". Measured live: claude-sonnet-5
+    # and gpt-5.6-terra (the models actually serving standard traffic) were both
+    # billed as unknown, over-charging a medium model by ~67%.
+    #
+    # The catalog already records a weight class per model (classify_model, and
+    # the persisted "tier" field). Reading it is not price invention: for the two
+    # providers the catalog can serve, its classification agrees with every
+    # hand-written registry cost tier (gpt-4o-mini/gpt-5.4-mini light↔low,
+    # claude-sonnet-4-5 standard↔medium).
+    router = ModelRouter(llm_factory=_tier_factory)
+
+    for model, expected in (
+        ("claude-haiku-4-5-20251001", "low"),
+        ("claude-sonnet-5", "medium"),
+        ("claude-opus-5", "high"),
+    ):
+        route = ModelRoute(
+            role=ModelRole.PLANNER.value,
+            provider="anthropic",
+            model=model,
+            reason="catalog",
+        )
+        assert router._cost_tier_for_route(route) == expected, model
+
+
+def test_registry_cost_tier_still_wins_over_catalog_classification(monkeypatch, tmp_path):
+    # Guard: the fallback is a fallback. A catalog-discovered model that the
+    # operator has since priced by hand keeps that price even when name-based
+    # classification disagrees — otherwise the fix would silently re-price
+    # declared models.
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "id": "hand-priced",
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-5",
+                        "cost_tier": "free",
+                        "roles": ["planner"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_PATH", str(registry_path))
+    monkeypatch.delenv("AGENT_MODEL_REGISTRY_JSON", raising=False)
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="claude-sonnet-5",
+        reason="registry",
+    )
+
+    # classify_model("claude-sonnet-5") is "standard" → would map to "medium".
+    assert router._cost_tier_for_route(route) == "free"
+
+
+def test_cost_tier_stays_unknown_when_nothing_declares_the_model():
+    # Honesty guard: "unknown" must remain reachable. With no model name there
+    # is nothing to classify, so the router must not invent a band.
+    router = ModelRouter(llm_factory=_tier_factory)
+    route = ModelRoute(
+        role=ModelRole.PLANNER.value,
+        provider="anthropic",
+        model="",
+        reason="empty",
+    )
+
+    assert router._cost_tier_for_route(route) == "unknown"
+
+
+def test_max_cost_limit_binds_on_the_complexity_route(monkeypatch):
+    # AGENT_MODEL_MAX_COST was only ever consulted by registry selection
+    # (_within_cost_limit, reached through best_for_role). The complexity route
+    # picks its model from the catalog and never asked, so an operator ceiling
+    # was silently ignored on exactly the path that serves normal traffic.
+    #
+    # Measured live: with AGENT_MODEL_MAX_COST=free the router still routed to
+    # anthropic/claude-sonnet-5 and billed it "medium" — contradicting itself
+    # inside a single call.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "free")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    # claude-sonnet-5 classifies "standard" → cost band "medium" > "free".
+    assert provider != "anthropic"
+    assert "cost_limit:anthropic" in skipped
+
+
+def test_max_cost_limit_allows_a_model_inside_the_ceiling(monkeypatch):
+    # Guard: the ceiling must not become a blanket ban on the complexity route.
+    # A model at or below the limit still routes normally.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "medium")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    assert provider == "anthropic"
+    assert "cost_limit:anthropic" not in skipped
+
+
+def test_no_cost_limit_leaves_the_complexity_route_untouched(monkeypatch):
+    # Guard: with no ceiling configured the route is byte-for-byte the old one.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    provider, _reason, skipped = router._resolve_tier_provider(
+        ComplexityTier.STANDARD, ModelRole.PLANNER.value
+    )
+
+    assert provider == "anthropic"
+    assert not any(entry.startswith("cost_limit:") for entry in skipped)
+
+
+def test_route_records_the_model_the_client_actually_resolved(monkeypatch):
+    # When no registry candidate satisfies the policy, best_for_role returns
+    # None, route_for yields an empty route, and default_provider/default_model
+    # are both None -- so the router builds LLM(None, None). That client quietly
+    # resolves a real provider and model from the environment and the call
+    # succeeds (verified live: it answered), but the ledger records
+    # provider=None, model=None, cost_tier="unknown".
+    #
+    # Real spend then lands in the ledger as unattributable. That is the same
+    # failure as reporting configuration instead of behaviour: the ledger has to
+    # describe the call that happened, not the one that could not be planned.
+    class _ResolvingLLM:
+        # Mirrors core.llm.LLM, which exposes the provider/model it resolved.
+        def __init__(self, provider, model):
+            self.provider = provider or "anthropic"
+            self.model = model or "claude-sonnet-4-5"
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    # Nothing in the registry is free, so every candidate is filtered out.
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "free")
+
+    router = ModelRouter.from_env(llm_factory=_ResolvingLLM)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_role(ModelRole.PLANNER)
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.model == "claude-sonnet-4-5"
+    # claude-sonnet-4-5 is hand-priced "medium" in the registry.
+    assert tracked.cost_tier == "medium"
+
+
+def test_explicit_route_still_wins_over_the_client_fallback(monkeypatch):
+    # Guard: the client's own resolution is a last resort only. A route that
+    # names a provider and model must be recorded exactly as routed.
+    class _ResolvingLLM:
+        def __init__(self, provider, model):
+            self.provider = "wrong-provider"
+            self.model = "wrong-model"
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("AGENT_PLANNER_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_PLANNER_MODEL", "claude-sonnet-4-5")
+
+    router = ModelRouter.from_env(llm_factory=_ResolvingLLM)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_role(ModelRole.PLANNER)
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.model == "claude-sonnet-4-5"
+
+
+def test_deep_downgrade_keeps_the_operator_standard_provider(monkeypatch):
+    # The deep gate downgrades an ungrounded DEEP request to the standard tier.
+    # Its docstring says it still serves "the normal standard-tier model", but
+    # it called _for_role_with_reason, which resolves the ROLE DEFAULT and never
+    # consults AGENT_TIER_PROVIDERS_STANDARD.
+    #
+    # Measured live with AGENT_TIER_PROVIDERS_STANDARD=anthropic:
+    #   ordinary question -> anthropic/claude-sonnet-5   (preference honoured)
+    #   harder question   -> openai/gpt-5.4-mini         (preference discarded)
+    # The router switched away from the requested provider exactly when the
+    # work was hardest.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("AGENT_TIER_PROVIDERS_STANDARD", "anthropic")
+    monkeypatch.setenv("AGENT_MODEL_TIER_STANDARD", "claude-sonnet-5")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    router.usage_ledger = ModelUsageLedger()
+    # No escalation reason -> the gate downgrades DEEP to standard.
+    tracked = router.for_task(
+        ModelRole.PLANNER, "anything", force_tier=ComplexityTier.DEEP
+    )
+
+    assert tracked.route.provider == "anthropic"
+    assert tracked.route.reason.startswith("deep_downgraded:")
+
+
+def test_deep_downgrade_falls_back_to_role_default_without_a_standard_provider(
+    monkeypatch,
+):
+    # Guard: with no operator standard preference the downgrade must behave
+    # exactly as before and land on the role default.
+    from core.task_complexity import ComplexityTier
+
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_MODEL", "gpt-5.4-mini")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    router.usage_ledger = ModelUsageLedger()
+    tracked = router.for_task(
+        ModelRole.PLANNER, "anything", force_tier=ComplexityTier.DEEP
+    )
+
+    assert tracked.route.provider == "openai"
+    assert tracked.route.reason.startswith("deep_downgraded:")
+
+
+def test_failover_reprices_the_call_for_the_substitute_provider():
+    # D3. provider/model are re-read on every loop iteration after a failover
+    # (model_router.py:479-480), but cost_tier is captured once at construction
+    # (:368) and reused at :488, :495, :513 and :544. So a call that starts on a
+    # free local model and fails over to an expensive hosted one is charged, and
+    # budget-checked, at the ORIGINAL tier. The ledger under-reports real spend,
+    # and assert_can_start() guards the wrong tier - a budget that would refuse
+    # the expensive model can be bypassed by failing over into it.
+    from unittest import mock
+
+    import core.model_router as mr
+
+    ledger = ModelUsageLedger()
+
+    class _DeadLocal:
+        provider = "local"
+        model = "qwen-local"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            raise RuntimeError("invalid api key")
+
+    class _LiveHosted:
+        provider = "anthropic"
+        model = "claude-opus-5"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            return "OK"
+
+    def factory(provider, model):
+        return _LiveHosted()
+
+    tracked = mr.UsageTrackedLLM(
+        _DeadLocal(),
+        role="planner",
+        route=ModelRoute(role="planner", provider="local", model="qwen-local", reason="t"),
+        cost_tier="free",
+        ledger=ledger,
+        llm_factory=factory,
+        reprice=lambda provider, model: "high" if provider == "anthropic" else "free",
+    )
+
+    with mock.patch.object(mr, "_provider_failover_enabled", lambda: True), \
+            mock.patch.object(mr, "_next_failover_provider", lambda tried: "anthropic"):
+        assert tracked.complete("sys", "usr") == "OK"
+
+    success = [r for r in ledger.records if r.status == "success"]
+    assert len(success) == 1
+    record = success[0]
+    assert record.provider == "anthropic"
+    assert record.model == "claude-opus-5"
+    # The expensive substitute must not be billed at the free tier it replaced.
+    assert record.cost_tier == "high"
+
+
+def test_failover_without_a_repricer_keeps_the_original_tier():
+    # Guard: callers that do not supply a repricer keep the previous behaviour.
+    from unittest import mock
+
+    import core.model_router as mr
+
+    ledger = ModelUsageLedger()
+
+    class _Dead:
+        provider = "local"
+        model = "qwen-local"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            raise RuntimeError("invalid api key")
+
+    class _Live:
+        provider = "anthropic"
+        model = "claude-opus-5"
+
+        def complete(self, system, user, max_tokens=2048, temperature=0.7):
+            return "OK"
+
+    tracked = mr.UsageTrackedLLM(
+        _Dead(),
+        role="planner",
+        route=ModelRoute(role="planner", provider="local", model="qwen-local", reason="t"),
+        cost_tier="free",
+        ledger=ledger,
+        llm_factory=lambda provider, model: _Live(),
+    )
+
+    with mock.patch.object(mr, "_provider_failover_enabled", lambda: True), \
+            mock.patch.object(mr, "_next_failover_provider", lambda tried: "anthropic"):
+        assert tracked.complete("sys", "usr") == "OK"
+
+    success = [r for r in ledger.records if r.status == "success"]
+    assert success[0].cost_tier == "free"
+
+
+def _ceiling_registry_json() -> str:
+    """Registry with one over-ceiling model and one affordable alternative."""
+    return json.dumps([
+        {
+            "id": "opus-expensive",
+            "provider": "anthropic",
+            "model": "claude-opus-4-20250514",
+            "roles": ["repair_proposal"],
+            "quality_tier": "frontier",
+            "cost_tier": "high",
+        },
+        {
+            "id": "cheap-repairer",
+            "provider": "openai",
+            "model": "gpt-cheap-repairer",
+            "roles": ["repair_proposal"],
+            "quality_tier": "standard",
+            "cost_tier": "low",
+        },
+    ])
+
+
+def test_cost_ceiling_binds_on_the_role_route(monkeypatch):
+    # AGENT_MODEL_MAX_COST filtered only the *preferences* inside
+    # _resolve_tier_provider. Every branch that fails there ends in the role
+    # route (for_role / _for_role_with_reason), and that path never asked about
+    # the ceiling — so the limit was bypassed exactly when it was supposed to
+    # bind: once all affordable candidates had been rejected.
+    #
+    # Measured live with the operator's real .env: AGENT_MODEL_MAX_COST=low
+    # plus AGENT_REPAIR_PROVIDER/MODEL still returned
+    # anthropic/claude-opus-4-20250514 priced "high", on both for_role and
+    # for_task ("...|fallback:role_default").
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    # The ceiling must move the call off the over-priced model.
+    assert (llm.provider, llm.model) != ("anthropic", "claude-opus-4-20250514")
+    assert (llm.provider, llm.model) == ("openai", "gpt-cheap-repairer")
+
+
+def test_cost_ceiling_records_why_the_role_route_was_downgraded(monkeypatch):
+    # A silent substitution would trade one lie for another: the ledger has to
+    # say which model the ceiling refused.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    router = ModelRouter.from_env(
+        llm_factory=_tier_factory, usage_ledger=ModelUsageLedger()
+    )
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert "cost_limit" in llm.route.reason
+    assert "claude-opus-4-20250514" in llm.route.reason
+    assert llm.cost_tier == "low"
+
+
+def test_role_route_inside_the_ceiling_is_untouched(monkeypatch):
+    # Guard: the ceiling must not become a blanket ban on explicit role routes.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_MODEL_MAX_COST", "low")
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "openai")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "gpt-cheap-repairer")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert (llm.provider, llm.model) == ("openai", "gpt-cheap-repairer")
+
+
+def test_role_route_without_a_ceiling_is_unchanged(monkeypatch):
+    # Guard: with no ceiling configured the route is byte-for-byte the old one,
+    # expensive model included.
+    _isolate_tier_env(monkeypatch)
+    monkeypatch.delenv("AGENT_MODEL_MAX_COST", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("AGENT_MODEL_REGISTRY_JSON", _ceiling_registry_json())
+    monkeypatch.setenv("AGENT_REPAIR_PROVIDER", "anthropic")
+    monkeypatch.setenv("AGENT_REPAIR_MODEL", "claude-opus-4-20250514")
+
+    router = ModelRouter.from_env(llm_factory=_tier_factory)
+    llm = router.for_role(ModelRole.REPAIR_PROPOSAL)
+
+    assert (llm.provider, llm.model) == ("anthropic", "claude-opus-4-20250514")
+
+
+# ---------------------------------------------------------------------------
+# A role name that does not exist must not be indistinguishable from a role
+# that exists but is simply unconfigured.
+#
+# `model_role` is a free string on both TeamContract and SubAgentContract, and
+# neither validates it — so a typo in a plan (which a model may have written)
+# reaches route_for() as data. The fallback to the default route is correct:
+# the agent should not crash mid-answer over a misspelling. What is wrong is
+# that the fallback is silent and reports the same `reason` as a deliberate
+# default, so nothing downstream can tell "you asked for a role I do not know"
+# from "that role has no configuration".
+#
+# The signal goes on the route reason rather than into a log line, following
+# the rule already stated in model_router: the router has no logger of its own,
+# and the route reason is written to the usage ledger with every call, so a
+# second channel would only be a second thing to keep in sync.
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_role_is_distinguishable_from_a_configured_default():
+    # A misspelling and a real-but-unconfigured role both fall back, but the
+    # caller must be able to tell them apart.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    real = router.route_for(ModelRole.VERIFIER)
+    typo = router.route_for("verifer")
+
+    assert real.reason != typo.reason
+    assert "unknown_role" in typo.reason
+    assert "unknown_role" not in real.reason
+
+
+def test_known_role_without_configuration_still_reports_a_plain_default():
+    # Guard: naming a role the runtime knows is not an error, so the reason
+    # stays exactly what it was before this distinction existed.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    for role in ModelRole:
+        assert router.route_for(role).reason == "default"
+
+
+def test_enum_member_name_is_not_mistaken_for_a_role():
+    # ModelRole.PLANNER.name is "PLANNER" but the role key is "planner".
+    # Passing the member name is a real mistake and must be reported as one.
+    router = ModelRouter(default_provider="openai", default_model="gpt-4o-mini")
+
+    route = router.route_for(ModelRole.PLANNER.name)
+
+    assert "unknown_role" in route.reason
+
+
+def test_unknown_role_still_serves_a_working_client():
+    # The point is observability, not refusal: the call must still be served,
+    # otherwise a typo in a plan would take down a live answer.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        llm_factory=_tier_factory,
+    )
+
+    llm = router.for_role("verifer")
+
+    assert (llm.provider, llm.model) == ("openai", "gpt-4o-mini")
+
+
+def test_an_explicitly_routed_custom_role_is_not_called_unknown():
+    # An operator who names their own role in `routes` meant it. Only the
+    # combination "not a known role AND nothing configured for it" is a typo.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        routes={"house_style": ModelRoute(role="house_style", provider="anthropic")},
+    )
+
+    route = router.route_for("house_style")
+
+    assert "unknown_role" not in route.reason
+    assert route.provider == "anthropic"
+
+
+def test_unknown_role_reason_reaches_the_usage_ledger():
+    # The ledger is the one channel this router writes to, so the signal has to
+    # survive the trip from route_for() into a recorded call.
+    ledger = ModelUsageLedger()
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        llm_factory=_tier_factory,
+        usage_ledger=ledger,
+    )
+
+    llm = router.for_role("verifer")
+    llm.complete(system="s", user="u")
+
+    assert ledger.records, "the call should have been recorded"
+    assert "unknown_role" in ledger.records[-1].route_reason
+
+
+def test_a_blank_role_is_refused_where_the_router_would_refuse_it_too() -> None:
+    # An empty value means "no preference" and stays legal. A whitespace-only
+    # one does not: it is truthy for callers yet empty for _coerce_role, which
+    # raises. Refusing it here keeps the guard from being weaker than routing.
+    ensure_known_model_role(None)
+    ensure_known_model_role("")
+
+    with pytest.raises(ValueError, match="model_role"):
+        ensure_known_model_role("   ")
+
+
+def test_a_route_only_custom_role_is_deliberately_not_contract_legal() -> None:
+    # A hand-built router serves any role named in `routes` (see
+    # test_an_explicitly_routed_custom_role_is_not_called_unknown), so this
+    # guard is narrower than one live router. That is the intended line:
+    # from_env — the only path the agent itself uses — builds routes solely
+    # from _ROLE_ENV_PREFIXES, so an operator cannot configure a custom role
+    # into a running agent, while a planner model can misspell one into a
+    # contract. The closed set matches _KNOWN_TOOLS beside it in team_plan.
+    router = ModelRouter(
+        default_provider="openai",
+        default_model="gpt-4o-mini",
+        routes={"house_style": ModelRoute(role="house_style", provider="anthropic")},
+    )
+    assert router.route_for("house_style").provider == "anthropic"
+
+    with pytest.raises(ValueError, match="model_role"):
+        ensure_known_model_role("house_style")
