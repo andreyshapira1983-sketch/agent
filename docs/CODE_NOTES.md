@@ -5949,3 +5949,15 @@ to the picker, neither as a stop nor as an unexplained observation: what it
 says is already in the DECLINED block. Other picker walls (`goal_parse`) are
 shown as before; the collapsing tests now use `goal_budget` as their frequent
 wall. Witness: `test_the_repeat_wall_is_not_fed_back_to_the_picker`.
+
+**Addendum: the goal was chosen blind.** The agent has hands — file tools, the
+lab, the web — but its goal is chosen by one model call with no tool at all,
+from a text of charter lines, its own defects and past goals. The library
+copied into its workspace, the lab and the web were not in that text, so every
+choice circled its own detectors («read the partially_achieved run logs…»),
+nine refusals out of ten as repeats. Operator: «he has hands; he should see
+what exists». Before each choice the workspace is now listed from disk
+(`_workspace_inventory`: folders, file counts and kinds, service folders
+skipped) and the tools open to an unattended run are computed
+(`_unattended_tools`: registered minus blocked). Facts only — no word about
+what to do with them. Witness: `test_the_picker_sees_what_is_on_disk`.

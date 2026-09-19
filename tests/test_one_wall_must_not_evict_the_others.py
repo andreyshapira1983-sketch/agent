@@ -382,3 +382,29 @@ def test_the_repeat_wall_is_not_fed_back_to_the_picker(tmp_path) -> None:
             _stop("goal_parse", _SIG_PARSE, "2026-09-19T15:43:05+00:00")]
     stops = _recent_stops(_workspace(tmp_path, stops=rows))
     assert [s["reason"] for s in stops] == ["goal_parse"]
+
+
+def test_the_picker_sees_what_is_on_disk(tmp_path) -> None:
+    """Суточный прогон 2026-09-19: цель выбиралась без единого инструмента, по
+    тексту, где книг, лаборатории и веба не было, — и выбор ходил по кругу
+    собственных детекторов. Перед выбором папка перечисляется с диска: только
+    факты (папки, число и типы файлов) и открытые инструменты."""
+    ws = _workspace(tmp_path)
+    books = ws / "knowledge_library" / "physics"
+    books.mkdir(parents=True)
+    for i in range(3):
+        (books / f"book{i}.txt").write_text("text", encoding="utf-8")
+    (ws / "logs").mkdir()
+    (ws / "logs" / "trace_x.jsonl").write_text("{}", encoding="utf-8")
+    seen: list[str] = []
+
+    class _Capture(_LLM):
+        def complete(self, *, system: str, user: str, **kw) -> str:
+            seen.append(user)
+            return super().complete(system=system, user=user, **kw)
+
+    propose_charter_goal(_Capture(_reply()), ws)
+    prompt = next(u for u in seen if "Numbered anchors" in u)
+    assert "WHAT IS IN YOUR WORKSPACE RIGHT NOW" in prompt
+    assert "knowledge_library/physics/ — 3 files (3 .txt)" in prompt
+    assert "logs/" not in prompt.split("WHAT IS IN YOUR WORKSPACE RIGHT NOW", 1)[1].split("Recent campaign goals")[0]
