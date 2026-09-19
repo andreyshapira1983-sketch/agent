@@ -179,3 +179,23 @@ def test_per_cycle_heartbeat_failure_never_kills_the_run(workspace: Path):
         build_agent_fn=lambda ws: SimpleNamespace(log=None),
     )
     assert rc == 0  # survived all 3 failing per-cycle writes
+
+
+def test_live_campaign_applies_authorised_proposals_after_every_cycle(workspace: Path):
+    """24h run 2026-09-19: the agent proposed a code split on cycle 4, but the
+    drain ran only after `run_campaign` returned — a day later. Live: once per
+    cycle plus the final pass; dry run: never before the end."""
+    drains: list[bool] = []
+    run_paced_campaign(
+        workspace, dry_run=False, max_cycles=3, heartbeat_fn=_HBRecorder(),
+        run_campaign_fn=_make_run_campaign(3), build_agent_fn=lambda ws: SimpleNamespace(log=None),
+        drain_fn=lambda ws, **kw: drains.append(kw["dry_run"]),
+    )
+    assert drains == [False] * 4, drains
+    dry: list[bool] = []
+    run_paced_campaign(
+        workspace, dry_run=True, max_cycles=3, heartbeat_fn=_HBRecorder(),
+        run_campaign_fn=_make_run_campaign(3), build_agent_fn=lambda ws: SimpleNamespace(log=None),
+        drain_fn=lambda ws, **kw: dry.append(kw["dry_run"]),
+    )
+    assert dry == [True], "a dry run drains once at the end, where the drain itself refuses"

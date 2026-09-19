@@ -1779,6 +1779,7 @@ def run_paced_campaign(
     charter_goals: bool = False,
     run_campaign_fn: Callable[..., Any] | None = None,
     build_agent_fn: Callable[[Path], Any] | None = None,
+    drain_fn: Callable[..., Any] | None = None,
 ) -> int:
     """Run ONE long, PACED autonomous campaign as a single daemon process.
 
@@ -1804,6 +1805,7 @@ def run_paced_campaign(
 
     write_heartbeat = heartbeat_fn or _write_heartbeat
     run_campaign = run_campaign_fn or _real_run_campaign
+    drain = drain_fn or drain_and_log
 
     def _on_cycle(snapshot: dict) -> None:
         # Liveness during a long paced run. A heartbeat-write failure (e.g. a
@@ -1821,6 +1823,14 @@ def run_paced_campaign(
             write_heartbeat(workspace, payload)
         except (OSError, TypeError, ValueError):
             pass
+        # Заявки — после КАЖДОГО цикла, не раз в конце (суточный прогон
+        # 2026-09-19: правка агента ждала бы сутки). Ошибки не выпускает.
+        if not dry_run:
+            drain(
+                workspace, dry_run=dry_run,
+                log_tick=lambda p: _log_tick(workspace, p),
+                durable_writes=unattended_memory_profile(workspace)["durable_writes"],
+            )
 
     try:
         config = CampaignConfig(
@@ -1937,7 +1947,7 @@ def run_paced_campaign(
         "cycles_run": result.cycles_run,
         "totals": result.totals,
     })
-    drain_and_log(
+    drain(
         workspace, dry_run=dry_run,
         log_tick=lambda p: _log_tick(workspace, p),
         durable_writes=unattended_memory_profile(workspace)["durable_writes"],
