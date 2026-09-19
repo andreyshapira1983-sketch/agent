@@ -564,3 +564,19 @@ def test_a_shared_registry_does_not_make_two_changes_the_same(workspace: Path) -
     assert blocking_lesson(workspace, ["core/anatomy_groups.py"]) is not None, (
         "a rolled-back edit OF the registry still blocks repeating it"
     )
+
+
+def test_a_timed_out_battery_is_not_a_failed_change() -> None:
+    """Суточный прогон 2026-09-19: полная батарея (~10 000 тестов) упёрлась в
+    лимит 900 с; отчёт сказал «full pytest failed», урок запретил повтор
+    правки core/step_sanitizer.py навсегда. Не успевшая проверка — не провал."""
+    from core.self_apply_lane import _failure_detail
+    from core.self_build_rules import lesson_from_apply_result
+
+    detail = _failure_detail({"timed_out": True, "failed_tests": [], "stdout_tail": "", "stderr_tail": ""})
+    assert "timed out" in detail
+    timed_out = {"status": "rolled_back", "reason": f"full pytest failed: {detail}",
+                 "files_changed": ["core/step_sanitizer.py"], "tests_run": ["targeted", "full"]}
+    assert lesson_from_apply_result(timed_out, origin="burn_in_sandbox") is None
+    red = dict(timed_out, reason="full pytest failed: tests=tests/test_x.py::test_y")
+    assert lesson_from_apply_result(red, origin="burn_in_sandbox") is not None, "a real red still teaches"

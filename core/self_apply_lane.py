@@ -363,6 +363,11 @@ def _failure_detail(result: Any) -> str:
     if not isinstance(result, dict):
         return ""
     parts: list[str] = []
+    if result.get("timed_out"):
+        # Суточный прогон 2026-09-19: батарея из ~10 000 тестов упёрлась в
+        # лимит 900 с, а урок записал «full pytest failed» — будто правка
+        # что-то сломала. Не успевшая проверка — не проваленная.
+        parts.append("timed out — no verdict")
     failed_tests = result.get("failed_tests") or []
     if isinstance(failed_tests, (list, tuple)) and failed_tests:
         shown = [str(t) for t in list(failed_tests)[:3]]

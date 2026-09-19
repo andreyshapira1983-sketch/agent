@@ -5868,3 +5868,15 @@ later split (step_sanitizer, smart_memory, operator_intent_patterns) was
 refused «prior rollback lesson». `blocking_lesson` now ignores
 `SHARED_BOOKKEEPING` files when both sides have their own targets. Witness:
 `test_a_shared_registry_does_not_make_two_changes_the_same`.
+
+**Addendum: a battery that ran out of time is not a failed change.** Second
+hour of the 24h run: the agent's split of `core/step_sanitizer.py` passed its
+targeted tests and was rolled back «full pytest failed». The battery (~10 000
+tests, 11 min idle, up to 22 min under the campaign's own load) hit
+`run_tests`' 900 s default — set when the suite had 7 262 tests — and
+`_failure_detail` never read `timed_out`, so the lesson recorded a failure and
+forbade the retry forever. The detail now says «timed out — no verdict», and
+`lesson_from_apply_result` records no lesson from a timed-out rollback (like a
+gate refusal, it says nothing about the change). The campaign runs with
+`AGENT_TEST_TIMEOUT_SECONDS=3600`. The earlier step_sanitizer lesson stays in
+the journal as written. Witness: `test_a_timed_out_battery_is_not_a_failed_change`.

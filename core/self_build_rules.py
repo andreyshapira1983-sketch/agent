@@ -203,6 +203,11 @@ def lesson_from_apply_result(
     outcome = _TERMINAL_OUTCOMES.get(status)
     if outcome is None:
         return None
+    if outcome == "rolled_back" and "timed out" in str(result.get("reason") or ""):
+        # Не успевшая проверка ничего не говорит об изменении — как и отказ
+        # ворот выше. Урок из неё навсегда запрещал бы повторить, возможно,
+        # верную правку (суточный прогон 2026-09-19, core/step_sanitizer.py).
+        return None
     files = tuple(
         str(p).replace("\\", "/") for p in (result.get("files_changed") or []) if p
     )
