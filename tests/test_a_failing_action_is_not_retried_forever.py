@@ -49,4 +49,21 @@ def test_three_failures_then_the_action_is_skipped(tmp_path: Path) -> None:
         f"the failing action ran {execute.calls} times — the 25-in-12-minutes loop"
     )
     repeats = [r for r in result.records if r.result == "repeat"]
-    assert repeats and "failed 3 times in a row" in repeats[0].reason
+    assert repeats and "empty 3 times in a row" in repeats[0].reason
+
+
+class _AlwaysWaiting:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, *, agent, workspace, action, config, approval_inbox=None):
+        self.calls += 1
+        return CampaignActionOutcome(result="approval_wait")
+
+
+def test_any_empty_outcome_counts_not_only_failed(tmp_path: Path) -> None:
+    """Вечер 2026-09-19: 12 циклов подряд `approval_wait` по одной цели —
+    исход без работы и без трат, но не `failed`, и страж его не видел."""
+    execute = _AlwaysWaiting()
+    _run(tmp_path, execute)
+    assert execute.calls == _MAX_FAILED_REPEATS, execute.calls

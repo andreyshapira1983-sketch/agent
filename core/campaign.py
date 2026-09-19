@@ -66,7 +66,10 @@ _SUBJECT_AWARE_ACTIONS = frozenset({
     "birth_experiment_specs",
 })
 _MAX_STEPS_PER_ACTION = 10
-#: Провалов одного действия подряд без работы, после которых оно пропускается.
+#: Пустых исходов одного действия подряд (ни работы, ни трат — `failed`,
+#: `approval_wait` и любой другой), после которых оно пропускается. Вечер
+#: суточного прогона: 12 циклов подряд `propose_engineering_task` →
+#: `approval_wait` («на файл уже есть заявка») — страж ловил только `failed`.
 #: Суточный прогон 2026-09-19: `run_claim_experiment` 25 раз за 12 минут дал
 #: «следствие не воспроизвелось» — ноль вызовов модели, `ran` ложно, и ни
 #: банк подписей, ни потолок шагов его не видели: оба считают только
@@ -177,7 +180,7 @@ def _pursue_goal_action(idle: BestNextAction) -> BestNextAction:
 def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
     """Return the reason a repeated action is being skipped, based on whether it hit the per-campaign step ceiling."""
     if failed_in_a_row:
-        return (f"'{action_name}' failed {failed_in_a_row} times in a row without doing work; "
+        return (f"'{action_name}' came back empty {failed_in_a_row} times in a row (no work, no spend); "
                 "repeating it cannot change the result — skipping")
     if hit_ceiling:
         return f"потолок шагов действия за кампанию: {_MAX_STEPS_PER_ACTION} — одно действие не монополизирует прогон"
@@ -742,7 +745,7 @@ def run_campaign(
                 useful_cycles += 1
             failed_in_a_row[signature] = (
                 failed_in_a_row.get(signature, 0) + 1
-                if outcome.result == "failed" and not outcome.did_work else 0
+                if not outcome.did_work and not outcome.ran else 0
             )
             # MIR-149: межзапусковая память цены пополняется и внутри запуска.
             signature_spend[signature] = spent_before + max(0, outcome.cost_units_spent)

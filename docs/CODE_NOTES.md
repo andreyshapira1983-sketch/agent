@@ -5961,3 +5961,9 @@ what exists». Before each choice the workspace is now listed from disk
 skipped) and the tools open to an unattended run are computed
 (`_unattended_tools`: registered minus blocked). Facts only — no word about
 what to do with them. Witness: `test_the_picker_sees_what_is_on_disk`.
+Evening, 19:08–19:14: twelve cycles in a row `propose_engineering_task` →
+`approval_wait` («the target already has a pending item; the lane applies it,
+not you») — every 30 s, no work, no spend. The failed-action guard counted only
+`result == "failed"`. It now counts any outcome with no work and no spend
+(`not did_work and not ran`), whatever its name. Witness:
+`test_any_empty_outcome_counts_not_only_failed`.
