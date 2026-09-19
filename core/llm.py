@@ -155,6 +155,19 @@ def _reasoning_effort_kwargs() -> dict[str, str]:
     return {"reasoning_effort": level} if level in _REASONING_EFFORT_LEVELS else {}
 
 
+def _deepseek_thinking_kwargs() -> dict[str, Any]:
+    """Режим размышления DeepSeek из AGENT_DEEPSEEK_THINKING (enabled/disabled).
+
+    С 2026-09 у DeepSeek две модели (deepseek-flash, deepseek-v4-pro), и обе по
+    умолчанию думают; старые имена deepseek-chat/-reasoner — псевдонимы Flash
+    без/с размышлением (живой запрос 2026-09-19). Размышление тратит тот же
+    max_tokens, что и ответ. Не задано или мусор → {} (умолчание поставщика);
+    читается на каждый вызов, как AGENT_OPENAI_REASONING_EFFORT.
+    """
+    mode = (os.getenv("AGENT_DEEPSEEK_THINKING", "") or "").strip().lower()
+    return {"extra_body": {"thinking": {"type": mode}}} if mode in {"enabled", "disabled"} else {}
+
+
 # How far a continuation round may escalate the per-leg budget when the
 # previous leg came back empty. Bounded so a model that never answers cannot
 # drive unbounded spend; `AGENT_MAX_CONTINUATIONS` is the other backstop.
@@ -708,6 +721,7 @@ class LLM:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=messages,
+                **(_deepseek_thinking_kwargs() if self.provider == "deepseek" else {}),
             )
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0
