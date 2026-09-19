@@ -217,6 +217,23 @@ _MAX_GOAL_SWITCHES = 12
 #: (agent_tick._GOAL_PICK_ATTEMPTS): одна попытка убивала прогон на любом
 #: молчании модели (L6, аудит 2026-09-03).
 _GOAL_SWITCH_ATTEMPTS = 3
+
+
+def goal_pick_attempts() -> int:
+    """Попыток выбрать цель — на старте и при смене; `AGENT_GOAL_PICK_ATTEMPTS`.
+
+    Суточный прогон 2026-09-19: при перезапуске все три попытки отверг страж
+    новизны («goal repeats a recent campaign goal»), и прогон честно
+    остановился. Больше попыток — больше шансов, что агент САМ найдёт новую
+    тему (отклонённые варианты он видит); по умолчанию прежние 3, потолок 20.
+    """
+    import os
+
+    try:
+        n = int(os.environ.get("AGENT_GOAL_PICK_ATTEMPTS") or _GOAL_SWITCH_ATTEMPTS)
+    except ValueError:
+        n = _GOAL_SWITCH_ATTEMPTS
+    return max(1, min(20, n))
 #: Ожидание внутри смены (блок 8, слово оператора 2026-09-03): исход
 #: отдельной работы — не конец смены. Когда три попытки сменить цель
 #: отвергнуты, процесс не умирает, а ждёт ограниченно: основное условие
@@ -246,7 +263,7 @@ def _ask_for_a_goal(
     """
     before_calls, before_cost = _cost_totals(agent)
     candidate = check = ""
-    for _attempt in range(_GOAL_SWITCH_ATTEMPTS):
+    for _attempt in range(goal_pick_attempts()):
         try:
             proposed = next_goal()
         except Exception as exc:  # noqa: BLE001 — смена цели не имеет права

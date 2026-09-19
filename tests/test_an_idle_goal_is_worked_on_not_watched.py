@@ -69,3 +69,29 @@ def test_the_pass_is_told_to_do_the_work_not_advise_a_human() -> None:
     prompt = _action_focused_goal(GOAL, action)
     assert GOAL in prompt and "Do the work yourself" in prompt
     assert "a human should take" not in prompt and "do not perform any effects" not in prompt
+
+
+def test_goal_pick_attempts_are_a_setting(tmp_path: Path, monkeypatch) -> None:
+    """Перезапуск 2026-09-19 18:36: три попытки выбрать цель отверг страж
+    новизны, прогон остановился. Число попыток — `AGENT_GOAL_PICK_ATTEMPTS`
+    (умолчание 3, потолок 20), одно на старт и на смену цели."""
+    from core.campaign import goal_pick_attempts
+
+    monkeypatch.delenv("AGENT_GOAL_PICK_ATTEMPTS", raising=False)
+    assert goal_pick_attempts() == 3
+    monkeypatch.setenv("AGENT_GOAL_PICK_ATTEMPTS", "99")
+    assert goal_pick_attempts() == 20
+    monkeypatch.setenv("AGENT_GOAL_PICK_ATTEMPTS", "7")
+    asked: list[int] = []
+
+    def refuse() -> str:  # always proposes the goal it already has — never accepted
+        asked.append(1)
+        return GOAL
+
+    run_campaign(
+        CampaignConfig(goal=GOAL, max_cycles=4, max_idle_streak=3, dry_run=False, max_unproductive_streak=0),
+        agent=SimpleNamespace(log=None), workspace=str(tmp_path),
+        gather_signals=_NothingAdmissible(), execute_action=_Record(), next_goal=refuse,
+        now_fn=lambda: datetime(2026, 9, 19, 15, 36, tzinfo=timezone.utc), sleep_fn=lambda _s: None,
+    )
+    assert len(asked) >= 7 and len(asked) % 7 == 0, len(asked)

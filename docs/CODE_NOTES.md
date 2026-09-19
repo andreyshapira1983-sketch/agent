@@ -5933,3 +5933,8 @@ once per goal, banked like any action), prompted to do the work and produce the
 result its own success check names. The goal and its check remain the agent's.
 `failed_in_a_row` is now cleared with the goal as well. Witness:
 `test_an_idle_goal_is_worked_on_not_watched`.
+The relaunch at 18:36 stopped at once: all three goal picks were refused by the
+novelty guard («goal repeats a recent campaign goal») — the agent keeps coming
+back to the same two topics. The number of attempts, at the start and at a
+switch, is now `AGENT_GOAL_PICK_ATTEMPTS` (default 3, ceiling 20; the run uses
+10). The guard is unchanged: more attempts, same bar.

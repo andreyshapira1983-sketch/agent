@@ -2094,12 +2094,14 @@ if __name__ == "__main__":
         # причинной лестницы. Тишины здесь быть не должно — иначе выбор снова
         # станет невидимым для него самого.
         pick = None
-        for _attempt in range(_GOAL_PICK_ATTEMPTS):
+        from core.campaign import goal_pick_attempts
+        attempts = goal_pick_attempts()
+        for _attempt in range(attempts):
             pick = propose_charter_goal(_charter_router.for_role("planner"), ws)
             if pick.status == "proposed":
                 break
             print(f"[CHARTER] no goal (attempt {_attempt + 1}"
-                  f"/{_GOAL_PICK_ATTEMPTS}): {pick.reason}")
+                  f"/{attempts}): {pick.reason}")
             from core.self_stop_record import (
                 reason_kind,
                 record_self_stop,
@@ -2123,7 +2125,7 @@ if __name__ == "__main__":
             )
         if pick is None or pick.status != "proposed":
             print("[CHARTER] no goal after "
-                  f"{_GOAL_PICK_ATTEMPTS} attempts; stopping honestly")
+                  f"{attempts} attempts; stopping honestly")
             sys.exit(3)
         print(f"[CHARTER] goal: {pick.goal}")
         print(f"[CHARTER] anchored to: {pick.charter_quote!r}")
