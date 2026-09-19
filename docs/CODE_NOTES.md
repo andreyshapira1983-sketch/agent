@@ -5938,3 +5938,14 @@ novelty guard («goal repeats a recent campaign goal») — the agent keeps comi
 back to the same two topics. The number of attempts, at the start and at a
 switch, is now `AGENT_GOAL_PICK_ATTEMPTS` (default 3, ceiling 20; the run uses
 10). The guard is unchanged: more attempts, same bar.
+Then, 18:42–18:43, the run slept again: ten picks in a row declined as repeats,
+seven of them «read the goal_repeat wall's code and the goal_selection_failure
+log». Every refused pick records a `goal_selection_failure / goal_repeat` stop,
+and the picker's prompt shows stops as «check this wall» — the output of a
+refusal became the input of the next one (named already in
+test_one_wall_must_not_evict_the_others.py, where collapsing repeats into a
+count softened but did not break it). The `goal_repeat` wall is no longer shown
+to the picker, neither as a stop nor as an unexplained observation: what it
+says is already in the DECLINED block. Other picker walls (`goal_parse`) are
+shown as before; the collapsing tests now use `goal_budget` as their frequent
+wall. Witness: `test_the_repeat_wall_is_not_fed_back_to_the_picker`.

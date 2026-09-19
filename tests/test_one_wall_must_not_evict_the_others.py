@@ -48,6 +48,12 @@ goal_selection_failure at wall 'goal_repeat'». Эта цель повторяе
 произвести не может; второй берёт журнал, где последний удар стены лежит ЗА
 хвостом, и заодно проверяет, что удары вне хвоста не выпали из счёта. Против
 старого читателя красных свидетелей стало восемь из двенадцати вместо шести.
+
+ДОПОЛНЕНИЕ 2026-09-19 (суточный прогон). Самоусиление, описанное выше,
+сворачивание не остановило: десять попыток подряд, семь — про стену
+`goal_repeat`. Эта стена больше не показывается выбирателю вовсе (её
+содержание он видит в DECLINED), поэтому пример «частой стены» здесь —
+`goal_budget`: проверяется счёт стен, а не имя.
 """
 from __future__ import annotations
 
@@ -116,7 +122,7 @@ def _live_shaped_journal() -> list[dict]:
         rows.append(_stop("goal_parse", _SIG_PARSE,
                           f"2026-09-17T21:33:{20 + i:02d}+00:00"))
     for i in range(20):
-        rows.append(_stop("goal_repeat", _SIG_REPEAT,
+        rows.append(_stop("goal_budget", _SIG_REPEAT,
                           f"2026-09-18T11:24:{20 + i:02d}+00:00"))
     for i in range(12):
         rows.append(_stop("other", _SIG_OTHER,
@@ -131,9 +137,9 @@ def _straddling_journal() -> list[dict]:
     удар частой стены попадал в хвост, и «показан последний удар» выполнялось
     само собой, без всякого сворачивания.
     """
-    rows = [_stop("goal_repeat", _SIG_REPEAT, f"2026-09-18T11:20:0{i}+00:00")
+    rows = [_stop("goal_budget", _SIG_REPEAT, f"2026-09-18T11:20:0{i}+00:00")
             for i in range(3)]
-    rows.append(_stop("goal_repeat", _SIG_REPEAT, "2026-09-18T11:24:39+00:00"))
+    rows.append(_stop("goal_budget", _SIG_REPEAT, "2026-09-18T11:24:39+00:00"))
     rows += [_stop("other", _SIG_OTHER, f"2026-09-18T11:26:{i:02d}+00:00")
              for i in range(20)]
     return rows
@@ -170,7 +176,7 @@ def test_a_wall_hit_often_does_not_evict_the_walls_hit_rarely(tmp_path) -> None:
     stops = _recent_stops(ws)
     walls = {st["reason"] for st in stops}
 
-    assert walls == {"goal_parse", "goal_repeat", "other"}, (
+    assert walls == {"goal_parse", "goal_budget", "other"}, (
         f"журнал знает три стены, до выбора дошли {sorted(walls)}: "
         "частая стена вытеснила редкую"
     )
@@ -217,7 +223,7 @@ def test_the_repetition_survives_as_a_number(tmp_path) -> None:
     stops = _recent_stops(ws)
     by_wall = {st["reason"]: st for st in stops}
 
-    assert by_wall["goal_repeat"]["hits"] == 20
+    assert by_wall["goal_budget"]["hits"] == 20
     assert by_wall["other"]["hits"] == 12
     assert by_wall["goal_parse"]["hits"] == 3
 
@@ -237,7 +243,7 @@ def test_the_prompt_says_out_loud_how_often_the_wall_was_hit(tmp_path) -> None:
 
     line = next(
         (ln for ln in llm.user.splitlines()
-         if "goal_repeat" in ln and ln.lstrip().startswith("-")),
+         if "goal_budget" in ln and ln.lstrip().startswith("-")),
         "",
     )
     assert "hit 20x" in line, (
@@ -275,11 +281,11 @@ def test_the_newest_hit_is_the_one_shown(tmp_path) -> None:
     stops = _recent_stops(ws)
     by_wall = {st["reason"]: st for st in stops}
 
-    assert "goal_repeat" in by_wall, (
+    assert "goal_budget" in by_wall, (
         "стена, чей последний удар лежит за хвостом, пропала целиком"
     )
-    assert by_wall["goal_repeat"]["ts"] == "2026-09-18T11:24:39+00:00"
-    assert by_wall["goal_repeat"]["hits"] == 4, (
+    assert by_wall["goal_budget"]["ts"] == "2026-09-18T11:24:39+00:00"
+    assert by_wall["goal_budget"]["hits"] == 4, (
         "удары за пределами хвоста выпали из счёта"
     )
 
@@ -289,7 +295,7 @@ def test_the_walls_are_ordered_by_their_latest_hit(tmp_path) -> None:
     ws = _workspace(tmp_path, stops=_live_shaped_journal())
 
     assert [st["reason"] for st in _recent_stops(ws)] == [
-        "goal_parse", "goal_repeat", "other",
+        "goal_parse", "goal_budget", "other",
     ]
 
 
@@ -365,3 +371,14 @@ def test_an_unreadable_journal_still_does_not_block_the_choice(tmp_path) -> None
 
     assert report.status == "proposed"
     assert report.stop_considered is False
+
+
+def test_the_repeat_wall_is_not_fed_back_to_the_picker(tmp_path) -> None:
+    """Суточный прогон 2026-09-19, 18:42–18:43: стена `goal_repeat` звала
+    выбиратель «разобраться со стеной повтора», это отклонялось как повтор и
+    оставляло новую такую же стену — петля. Она не показывается; прочие стены
+    выбора (`goal_parse`) показываются как прежде."""
+    rows = [_stop("goal_repeat", _SIG_REPEAT, "2026-09-19T15:43:00+00:00"),
+            _stop("goal_parse", _SIG_PARSE, "2026-09-19T15:43:05+00:00")]
+    stops = _recent_stops(_workspace(tmp_path, stops=rows))
+    assert [s["reason"] for s in stops] == ["goal_parse"]

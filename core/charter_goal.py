@@ -121,6 +121,18 @@ def _decline(reason: str) -> CharterGoalReport:
 _RECENT_STOPS = 20
 
 
+#: Остановка ВЫБОРА цели о стену повтора. Выбирателю она не показывается ни как
+#: «остановка», ни как «необъяснённое наблюдение»: её содержание — отклонённый
+#: вариант с причиной — он и так видит в блоке DECLINED. Суточный прогон
+#: 2026-09-19, 18:42–18:43: десять попыток подряд, семь — «прочитай код стены
+#: goal_repeat и лог goal_selection_failure»; все отклонены как повтор, каждая
+#: оставила новую такую же остановку, и подсказка снова звала разобраться с
+#: ней. Петля кормила сама себя, и прогон уснул.
+_PICKER_OWN_STOP = "goal_selection_failure"
+#: Только эта стена дублирует DECLINED; `goal_parse` и прочие — другая новость.
+_REPEAT_WALL = "goal_repeat"
+
+
 def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
     """Последние собственные остановки — НИЗКОДОВЕРЕННАЯ подсказка.
 
@@ -158,6 +170,9 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
     collapsed: dict[str, dict[str, str]] = {}
     for index, row in enumerate(rows):
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
+        if (str(payload.get("kind") or "") == _PICKER_OWN_STOP
+                and str(payload.get("reason") or "") == _REPEAT_WALL):
+            continue
         stop = {
             "kind": str(payload.get("kind") or ""),
             "reason": str(payload.get("reason") or ""),
@@ -457,7 +472,11 @@ def _unexplained_lines(root: Path) -> tuple[str, ...]:
         return tuple(
             f"[unexplained] {str(observation.observed_mismatch)[:120]} "
             f"(seen {observation.occurrences}x)"
-            for observation in unexplained_observations(root)[:5]
+            for observation in [
+                o for o in unexplained_observations(root)
+                if not (_PICKER_OWN_STOP in str(getattr(o, "observed_mismatch", ""))
+                        and _REPEAT_WALL in str(getattr(o, "observed_mismatch", "")))
+            ][:5]
         )
     except Exception:  # noqa: BLE001 — то же правило: подсказка необязательна.
         return ()
