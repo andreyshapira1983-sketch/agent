@@ -309,7 +309,8 @@ def run_campaign(
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
         nonlocal current_success_check, llm_calls_used, cost_units_used
-        if next_goal is None or goal_switches >= _MAX_GOAL_SWITCHES:
+        limit = config.max_goal_switches
+        if next_goal is None or (limit and goal_switches >= limit):
             return False
         switched, switched_check, spent_calls, spent_cost = _ask_for_a_goal(
             agent, next_goal, current_goal, cycle)
@@ -328,7 +329,7 @@ def run_campaign(
         streak_repeats = False
         _log(agent, "campaign_goal_switched", {
             "cycle": cycle, "from": previous_goal[:200], "to": current_goal[:200],
-            "switches_used": goal_switches, "limit": _MAX_GOAL_SWITCHES, "reason": why,
+            "switches_used": goal_switches, "limit": config.max_goal_switches or "none", "reason": why,
         })
         return True
 

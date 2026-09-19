@@ -1774,6 +1774,7 @@ def run_paced_campaign(
     max_llm_calls: int = 100,
     max_cost_units: int = 0,
     max_unproductive_streak: int = 3,
+    max_goal_switches: int = 12,
     opening_spend: tuple[int, int] = (0, 0),
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     charter_goals: bool = False,
@@ -1843,6 +1844,7 @@ def run_paced_campaign(
             cycle_pause_seconds=cycle_pause_seconds,
             max_wall_clock_seconds=max_wall_clock_seconds,
             max_unproductive_streak=max_unproductive_streak,
+            max_goal_switches=max_goal_switches,
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
@@ -2031,6 +2033,13 @@ def _parse_args() -> argparse.Namespace:
              "with no useful state change (loop_suspected); 0 = off "
              "(only used with --campaign).",
     )
+    parser.add_argument(
+        "--max-goal-switches",
+        type=int,
+        default=12,
+        help="How many times the campaign may replace an exhausted goal with a "
+             "new self-chosen one; 0 = unlimited (only used with --campaign).",
+    )
     return parser.parse_args()
 
 
@@ -2127,6 +2136,7 @@ if __name__ == "__main__":
             max_llm_calls=args.max_llm_calls,
             max_cost_units=args.max_cost_units,
             max_unproductive_streak=args.max_unproductive_streak,
+            max_goal_switches=args.max_goal_switches,
             opening_spend=opening_spend,
             charter_goals=bool(args.charter),
         ))

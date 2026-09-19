@@ -133,3 +133,22 @@ def test_a_real_world_change_may_open_a_new_era(tmp_path: Path) -> None:
         "перемена мира обязана открывать новую эру выбора, иначе агент заперт "
         "вердиктами, вынесенными в другом мире"
     )
+
+
+def test_an_unlimited_switch_budget_keeps_choosing_instead_of_sleeping(tmp_path: Path) -> None:
+    """Суточный прогон 2026-09-19: двенадцать смен кончились за час с
+    небольшим, дальше кампания спала до «перемены мира». Оператор: «мне не
+    надо, чтобы он спал». `max_goal_switches=0` — потолка нет: исчерпав цель,
+    агент выбирает следующую сам. По умолчанию потолок прежний (тест выше)."""
+    assert CampaignConfig().max_goal_switches == _MAX_GOAL_SWITCHES
+    result = run_campaign(
+        CampaignConfig(goal="цель №0", max_cycles=120, max_idle_streak=3, dry_run=False,
+                       max_goal_switches=0),
+        agent=SimpleNamespace(log=None), workspace=str(tmp_path),
+        gather_signals=_OneActionGather(), execute_action=_WorksOnce(), ledger=CampaignLedger(),
+        next_goal=_endless_goals(),
+        now_fn=lambda: datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc), sleep_fn=lambda _s: None,
+    )
+    goals = {r.goal for r in result.records}
+    assert len(goals) > _MAX_GOAL_SWITCHES + 1, "the unlimited budget still stopped at the default ceiling"
+    assert not any(r.result == "waiting" for r in result.records), "it slept although it could choose"

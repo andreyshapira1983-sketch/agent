@@ -5908,3 +5908,13 @@ of the per-run unblock mechanism) stay closed;
 and the step ceiling count only an action that RAN, and an inconclusive
 experiment spends nothing. Three failures in a row without work now skip the
 action as a repeat. Witness: `test_a_failing_action_is_not_retried_forever`.
+
+**Addendum: the campaign fell asleep after twelve goals.** `_MAX_GOAL_SWITCHES
+= 12` per process: after that, an exhausted goal leads to `_wait_for_change`
+(backoff up to 15 min, waiting for a capability event or a new approval). In
+the 24h run the twelve switches were used in about an hour, so most of the day
+would have been sleep; the operator: «мне не надо, чтобы он спал». The ceiling
+is now `CampaignConfig.max_goal_switches` (default 12, unchanged; 0 = none) and
+`agent_tick.py --max-goal-switches`; the run uses 0. The agent still chooses
+every new goal itself through the same charter gate. Witness:
+`test_an_unlimited_switch_budget_keeps_choosing_instead_of_sleeping`.
