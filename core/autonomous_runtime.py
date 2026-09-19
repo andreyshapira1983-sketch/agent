@@ -606,7 +606,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 approvals=self.approval_inbox.snapshot(),
                 stop_reason=f"approval required: {item.id}",
             )
-            self._log("autonomous_runtime_stop", report.to_dict())
+            self._log("autonomous_runtime_stop", report.for_log())
             return report
 
         with receipt_context(
@@ -656,7 +656,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         if status == "stopped":
             self._record_incident(stop_reason, tasks)
 
-        self._log("autonomous_runtime_stop", report.to_dict())
+        self._log("autonomous_runtime_stop", report.for_log())
         return report
 
     def _record_incident(

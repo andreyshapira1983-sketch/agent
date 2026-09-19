@@ -125,6 +125,23 @@ class AutonomousRunReport:
             "reflection": self.reflection,
         }
 
+    def for_log(self) -> dict:
+        """`to_dict` для журнала: ящик одобрений — описью, без тел заявок.
+
+        Прогон «цель первой» 2026-09-19: каждый заход на цель писал в трассу
+        весь ящик вместе с содержимым файлов заявок (текст и base64) — ~2 МБ
+        на событие, 8,4 из 9,5 МБ трассы за шесть минут; панель эфира,
+        читающая хвост трассы, ослепла. Сам отчёт не меняется.
+        """
+        out = self.to_dict()
+        approvals = dict(out.get("approvals") or {})
+        approvals["items"] = [
+            {k: item.get(k) for k in ("id", "operation", "status", "summary", "risk", "created_at")}
+            for item in approvals.get("items") or [] if isinstance(item, dict)
+        ]
+        out["approvals"] = approvals
+        return out
+
     def attempted(self) -> bool:
         """Была ли ПОПЫТКА: что-то началось или что-то потрачено.
 
