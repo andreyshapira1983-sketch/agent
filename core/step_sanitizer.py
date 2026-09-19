@@ -320,6 +320,13 @@ def _sanitize_find_in_files(args: dict[str, Any], idx: int, warnings: list[str])
     }
 
 
+
+def _web_fetch_find(args: dict[str, Any]) -> dict[str, str]:
+    """`find` для web_fetch (поиск по странице, 2026-09-20): строка до 200 знаков или ничего."""
+    find = args.get("find")
+    return {"find": find.strip()[:200]} if isinstance(find, str) and find.strip() else {}
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -608,7 +615,7 @@ def sanitize_step(
             return None
         return {
             "tool": "web_fetch",
-            "arguments": {"url": url},
+            "arguments": {"url": url, **_web_fetch_find(args)},
             "label": f"web_fetch:{url[:60]}",
             "expected_outcome": (
                 "Fetched page with content_hash + fetched_at; serves as "

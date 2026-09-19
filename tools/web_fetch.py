@@ -89,6 +89,37 @@ _SPACE_ONLY_LINES_RE = re.compile(r"\n[ \t]+(?=\n)")
 # Tool
 # ---------------------------------------------------------------------------
 
+
+#: Сколько текста вокруг совпадения и сколько совпадений показывать.
+FIND_RADIUS = 600
+FIND_MAX_WINDOWS = 6
+
+
+def find_windows(text: str, find: str) -> str:
+    """Куски страницы вокруг совпадений `find` (термины через |), с шапкой.
+
+    Цепочка веб-знания, 2026-09-20: страница RFC 9114 скачана целиком
+    (146 111 символов), а модели дошли ~1,8 тыс. — отбор абзацев по словам
+    РУССКОГО вопроса к английской странице не нашёл ничего и отдал шапку и
+    список версий. У книги есть find_in_files, у страницы не было ничего.
+    Нет совпадений — честная пометка и прежний текст страницы.
+    """
+    terms = [t.strip() for t in (find or "").split("|") if t.strip()][:5]
+    hits = sorted({m.start() for t in terms for m in re.finditer(re.escape(t), text, re.IGNORECASE)})
+    if not hits:
+        return f"[find {find!r}: no match in {len(text)} chars; page head follows]\n" + text
+    spans: list[list[int]] = []
+    for pos in hits:
+        lo, hi = max(0, pos - FIND_RADIUS), min(len(text), pos + FIND_RADIUS)
+        if spans and lo <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], hi)
+        else:
+            spans.append([lo, hi])
+    shown = spans[:FIND_MAX_WINDOWS]
+    head = (f"[find {find!r}: {len(hits)} match(es) in {len(text)} chars; "
+            f"{len(shown)} window(s) shown, at chars {', '.join(str(lo) for lo, _ in shown)}]")
+    return head + "\n" + "\n…\n".join(text[lo:hi] for lo, hi in shown)
+
 class WebFetchTool(Tool):
     """Fetch a single web page and return its plain-text content."""
 
@@ -100,6 +131,8 @@ class WebFetchTool(Tool):
         "verifiable source the Verifier can cite. Plain HTTP requires an "
         "explicit host allowlist. Refuses local network targets, blocked "
         "egress hosts, non-text content types, and any URL > 2048 chars. "
+        "Optional `find` (terms in the PAGE's language, separated by |) returns "
+        "the text around each match instead of the page head. "
         "Risk: read_only."
     )
     risk: Risk = "read_only"
@@ -159,7 +192,7 @@ class WebFetchTool(Tool):
     # run
     # ------------------------------------------------------------------
 
-    def run(self, url: str) -> dict[str, Any]:
+    def run(self, url: str, find: str = "") -> dict[str, Any]:
         self._network_policy.validate_url(url, role="web_fetch url")
         reserve_egress(self.budget_ledger, tool_name="web_fetch", target=url)
 
@@ -223,6 +256,10 @@ class WebFetchTool(Tool):
         from core.redaction import redact_text
 
         text_safe, _ = redact_text(text_clean)
+        full_length = len(text_safe)
+        found = find_windows(text_safe, find) if (find or "").strip() else None
+        if found is not None:
+            text_safe = found
 
         # Hash the FULL content we read (post-decompression, pre-strip
         # but post-decode) — gives a stable "same page" handle even
@@ -240,6 +277,8 @@ class WebFetchTool(Tool):
             "content_hash": content_hash,
             "text": text_safe,
             "text_truncated": truncated,
+            "full_length": full_length,
+            **({"find": find} if (find or "").strip() else {}),
             "bytes": len(raw),
             "elapsed_ms": elapsed_ms,
             "compensation_plan": {

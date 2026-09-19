@@ -202,7 +202,7 @@ Available tools:
     content. Use this BEFORE calling file_write to show the user what
     would change. `path` ASCII-only, inside workspace.
 
-- web_fetch(url: str)
+- web_fetch(url: str, find: str = "")
     -> {url, status_code, content_type, fetched_at, content_hash, text, ...}
     [read_only — no approval needed]
     Fetch ONE web page (http/https only) and return its plain-text
@@ -213,6 +213,10 @@ Available tools:
     needs an external fact, plan `[web_search, web_fetch <best_url>]`
     instead of `[web_search]` alone. URL must be ASCII, max 2048 chars,
     NOT pointed at localhost / private IPs / metadata endpoints.
+    Long pages reach you as a short excerpt (often only the page head).
+    To read the part you need, pass `find` — key terms IN THE PAGE'S
+    LANGUAGE, separated by | (e.g. find="stream multiplexing|multiplex"):
+    the text around each match comes back instead of the head.
 
 - find_in_files(query: str = "", path: str = ".", name: str = "*",
                 regex: bool = False, max_results: int = 50) -> str  [read_only]
