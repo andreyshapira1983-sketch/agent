@@ -123,9 +123,16 @@ class AgentLoopMemoryRead:
                 },
             )
             return ""
-        selection = self.retrieval_policy.select_with_report(use_report.allowed, question)
+        from core.learned_conclusion import is_self_knowledge, self_knowledge_off_topic
+
+        allowed = list(use_report.allowed)
+        if self_knowledge_off_topic(question):  # предметной задаче — предмет, не разборы себя
+            allowed = [r for r in allowed if not is_self_knowledge(getattr(r, "content", ""))]
+        selection = self.retrieval_policy.select_with_report(allowed, question)
         selected = selection.selected
         rejected_by = _merge_rejection_reasons(use_report.rejected_by, selection.rejected_by)
+        if len(allowed) < len(use_report.allowed):
+            rejected_by["self_knowledge_off_topic"] = len(use_report.allowed) - len(allowed)
         if not selected:
             self.log.log(
                 "persistent_memory_inject",
