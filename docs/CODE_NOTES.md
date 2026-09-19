@@ -5918,3 +5918,18 @@ is now `CampaignConfig.max_goal_switches` (default 12, unchanged; 0 = none) and
 `agent_tick.py --max-goal-switches`; the run uses 0. The agent still chooses
 every new goal itself through the same charter gate. Witness:
 `test_an_unlimited_switch_budget_keeps_choosing_instead_of_sleeping`.
+
+**Addendum: a goal that only filters a menu leaves the agent watching.** 18:05–
+18:32 of the 24h run: 27 cycles, 3 with a product, 9 «nothing admissible»,
+11 skipped repeats — while every goal was concrete and self-chosen («read
+core/best_next_action.py and record which lines implement goal-repeat»). The
+campaign does not execute a goal: it picks an action from a menu of signals and
+idles when none names the goal's subject. And every agent pass it does run is
+told «decide the ONE step a human should take … do not perform any effects»,
+which is why its conclusions read «next step for the human: approve …».
+`CampaignConfig.pursue_goal_when_idle` (off by default; `--pursue-goal-when-idle`)
+turns such an idle cycle into one agent pass on the goal itself (`pursue_goal`,
+once per goal, banked like any action), prompted to do the work and produce the
+result its own success check names. The goal and its check remain the agent's.
+`failed_in_a_row` is now cleared with the goal as well. Witness:
+`test_an_idle_goal_is_worked_on_not_watched`.

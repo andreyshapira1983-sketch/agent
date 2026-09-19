@@ -153,6 +153,27 @@ def _approved_ids(approval_inbox) -> frozenset[str]:
         return frozenset()
 
 
+#: Действие «сама цель»: один заход агента на выбранную им цель, когда меню не
+#: дало ей ничего допустимого (CampaignConfig.pursue_goal_when_idle).
+PURSUE_GOAL = "pursue_goal"
+
+
+def _pursue_goal_action(idle: BestNextAction) -> BestNextAction:
+    """Простой по цели превращается в работу над целью."""
+    return BestNextAction(
+        action=PURSUE_GOAL,
+        title="Work on the chosen goal directly",
+        severity="medium",
+        priority=1,
+        reason=("no menu action binds the goal (" + str(idle.reason or "")[:200]
+                + "); the goal itself is the work"),
+        evidence=tuple(idle.evidence[:3]),
+        risk="reversible",
+        grounds="operator_goal",
+        decided_by="no_candidate",
+    )
+
+
 def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
     """Return the reason a repeated action is being skipped, based on whether it hit the per-campaign step ceiling."""
     if failed_in_a_row:
@@ -325,6 +346,7 @@ def run_campaign(
         # объявлять повтором первый же шаг по новой.
         attempted_signatures.clear()
         action_steps.clear()
+        failed_in_a_row.clear()
         idle_streak = 0
         streak_repeats = False
         _log(agent, "campaign_goal_switched", {
@@ -510,6 +532,9 @@ def run_campaign(
                 except TypeError:
                     signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
+            if (action.priority <= 0 and config.pursue_goal_when_idle and not config.dry_run
+                    and current_goal and PURSUE_GOAL not in attempted_signatures):
+                action = _pursue_goal_action(action)
             goal_drove_cycles += int(action.grounds == "operator_goal")  # MIR-163
             now = now_fn()
 

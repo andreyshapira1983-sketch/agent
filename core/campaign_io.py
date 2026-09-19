@@ -55,6 +55,13 @@ def spend_since(router: Any, before: tuple[int, int]) -> tuple[int, int]:
 
 
 def _action_focused_goal(goal: str, action: BestNextAction) -> str:
+    if action.action == "pursue_goal":
+        # Цель выбрана агентом и она сама — задание: делать, а не советовать
+        # человеку. Прежняя формула («the ONE step a human should take … do not
+        # perform any effects») превращала каждый заход в записку оператору.
+        return (f"{goal.strip()}\n\nThis is your own chosen goal. Do the work yourself now with "
+                "your tools and produce the checkable result it names; if something is missing, "
+                "say exactly what, instead of handing the step to a human.")
     reason = (action.reason or "").strip()
     evidence = "; ".join(e for e in action.evidence[:3] if e)
     parts = [

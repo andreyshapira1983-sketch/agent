@@ -1775,6 +1775,7 @@ def run_paced_campaign(
     max_cost_units: int = 0,
     max_unproductive_streak: int = 3,
     max_goal_switches: int = 12,
+    pursue_goal_when_idle: bool = False,
     opening_spend: tuple[int, int] = (0, 0),
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     charter_goals: bool = False,
@@ -1845,6 +1846,7 @@ def run_paced_campaign(
             max_wall_clock_seconds=max_wall_clock_seconds,
             max_unproductive_streak=max_unproductive_streak,
             max_goal_switches=max_goal_switches,
+            pursue_goal_when_idle=pursue_goal_when_idle,
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
@@ -2034,6 +2036,12 @@ def _parse_args() -> argparse.Namespace:
              "(only used with --campaign).",
     )
     parser.add_argument(
+        "--pursue-goal-when-idle",
+        action="store_true",
+        help="When no menu action binds the chosen goal, work on the goal itself "
+             "(one agent pass per goal) instead of idling (only used with --campaign).",
+    )
+    parser.add_argument(
         "--max-goal-switches",
         type=int,
         default=12,
@@ -2137,6 +2145,7 @@ if __name__ == "__main__":
             max_cost_units=args.max_cost_units,
             max_unproductive_streak=args.max_unproductive_streak,
             max_goal_switches=args.max_goal_switches,
+            pursue_goal_when_idle=args.pursue_goal_when_idle,
             opening_spend=opening_spend,
             charter_goals=bool(args.charter),
         ))
