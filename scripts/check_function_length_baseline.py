@@ -119,7 +119,7 @@ WATCH: dict[str, int] = {
     #: применял ничего, потому что `_pending_excluding` считает остальные
     #: ожидающие заявки, а их составляет сам слив. Обе вставки — решение и
     #: его причина; выносить их в helper значило бы спрятать причину.
-    "core/rule_approved_apply.py:drain_rule_approved_proposals": 190,  # +1: sandbox-authorised repairs no longer wait for unrelated approvals; production keeps the queue gate.
+    "core/rule_approved_apply.py:drain_rule_approved_proposals": 199,  # +9 (2026-09-20, живой слив): устаревшая заявка отказывается ДО расхода полномочия — стена полосы стоила единицы гранта, три цикла сожгли его до нуля без единого теста; правило вынесено в stale_proposal_files, здесь только ворота и событие.  # +1: sandbox-authorised repairs no longer wait for unrelated approvals; production keeps the queue gate.
 }
 
 

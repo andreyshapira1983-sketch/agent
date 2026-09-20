@@ -106,6 +106,20 @@ def _authorised_candidates(inbox: Any, authority: _Authority) -> list[Any]:
     return candidates
 
 
+def stale_proposal_files(workspace, proposal) -> list[str]:
+    """Пути заявки, чей файл на диске уже новее её, — ДО расхода полномочия.
+
+    Живой слив 2026-09-20: правка оператора в core/step_sanitizer.py сделала
+    вчерашнее предложение устаревшим; полоса честно отказала у своих базовых
+    ворот, но единица гранта уже была списана — три цикла подряд сожгли грант
+    до нуля, не сделав ничего и не запустив ни одного теста. Правило то же
+    самое, что у полосы (`core.self_apply_lane._stale_changes`).
+    """
+    from core.self_apply_lane import _stale_changes
+
+    return _stale_changes(Path(workspace), getattr(proposal, "files", ()))
+
+
 def drain_rule_approved_proposals(
     workspace: Path,
     *,
@@ -214,6 +228,15 @@ def drain_rule_approved_proposals(
                 "scope": list(lesson.scope),
                 "failure": lesson.failure[:200],
                 "learned_at": lesson.created_at,
+            })
+            continue
+        stale = stale_proposal_files(workspace, proposal)
+        if stale:
+            out["refused"] += 1
+            out["blocked"] = out["blocked"] or "stale proposal"
+            _say("rule_approval_refused_stale", {
+                "approval_id": item.id, "stale_files": stale,
+                "next_human_action": "rebuild the proposal against the current file",
             })
             continue
         # Расход занимается ДО применения и НЕРАЗДЕЛИМО с проверкой остатка:
