@@ -436,7 +436,9 @@ class AgentLoopMemoryWrite:
 
         content, tags = conclusion_memory(episode), list(TAGS)
         if content is None:
-            content, tags = web_knowledge_memory(episode), list(WEB_TAGS)
+            content = web_knowledge_memory(
+                episode, getattr(self, "last_verification", None), getattr(self, "last_provenance", None))
+            tags = list(WEB_TAGS)
         if content is None or self._durable_learning_suppressed("knowledge"):
             return
         try:

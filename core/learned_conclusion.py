@@ -107,44 +107,45 @@ def superseded_by(new_content: str, records: list[Any]) -> tuple[list[Any], bool
 #: Звенья 3–4 цепочки «нашёл в сети → проверил → решил сохранить → записал с
 #: родословной» (оператор, 2026-09-19). Правило «сеть в память не пишется»
 #: стояло, пока квалификации не было: за сутки 7 задач с интернетом, 0 записей.
-#: Квалификация — не домен и не вкус модели, а проверка ЭТОГО хода: хотя бы
-#: один факт ответа с дословной цитатой подтверждён проверяющим по открытой
-#: странице (`[verified:web:…]`). Поисковая выдача без открытой страницы не
-#: квалифицирует ничего.
+#: Квалификация — не домен и не вкус модели, а проверка ЭТОГО хода: у одного
+#: утверждения с дословной цитатой вердикт проверяющего «verified», и улика
+#: этого утверждения — ОТКРЫТАЯ страница (`web_page:<url>`). Берётся из отчёта
+#: проверки, а не из текста ответа: метка `[verified:…]` из ответа человеку
+#: намеренно снимается (`core/answer_format._strip_verification_markers`), и
+#: первая версия этого правила искала то, чего в тексте не бывает — 146
+#: эпизодов, 0 записей (замер 2026-09-20). Поисковая выдача без открытой
+#: страницы не квалифицирует ничего.
 WEB_TAGS = ["fact", "conclusion", "web-knowledge"]
-_VERIFIED_WEB = re.compile(r"\[verified:web:([^\]\s]+)[^\]]*\]")
 _QUOTE = re.compile(r"«([^«»\n]{12,400})»|“([^“”\n]{12,400})”|\"([^\"\n]{12,400})\"")
-_SOURCE_URL = re.compile(r"\bweb:(https?://\S+)")
 _OWN_WRAPPER = "\n\nThis is your own chosen goal."
 
 
-def _facts_of(answer: str) -> list[str]:
-    m = re.search(r"Facts:\s*(.*?)(?:\n\s*(?:Sources|Confidence|Unverified|Safety)\s*:|$)",
-                  answer or "", re.DOTALL | re.IGNORECASE)
-    return [ln.strip() for ln in (m.group(1) if m else "").splitlines() if ln.strip()]
+def _verified_web_quote(verification: Any, chain: Any) -> tuple[str, str]:
+    """(цитата, адрес) из подтверждённого утверждения о веб-странице, или («», «»)."""
+    pages = {ev.id: ev.source_id[len("web_page:"):]
+             for ev in (getattr(chain, "evidences", None) or [])
+             if str(getattr(ev, "source_id", "")).startswith("web_page:")}
+    for chunk in (getattr(verification, "chunks", None) or []):
+        if chunk.verdict != "verified":
+            continue
+        url = next((pages[i] for i in chunk.matched_evidence_ids if i in pages), "")
+        quote = _QUOTE.search(chunk.text or "")
+        if url and quote:
+            return next(g for g in quote.groups() if g), url
+    return "", ""
 
 
-def web_knowledge_memory(episode: Any) -> str | None:
+def web_knowledge_memory(episode: Any, verification: Any = None, chain: Any = None) -> str | None:
     """Запись «вопрос → вывод → цитата → адрес и дата», или None, если сеть не квалифицирована."""
     if not getattr(episode, "usage_eligible", False):
         return None
     labels = [str(s) for s in (getattr(episode, "source_labels", None) or [])]
     if not any(s.startswith("web_fetch:http") for s in labels):
         return None  # страницу не открывали — пересказ выдачи, а не источник
-    answer = getattr(episode, "full_answer", "") or ""
-    quote, url = "", ""
-    for fact in _facts_of(answer):
-        tag = _VERIFIED_WEB.search(fact)
-        q = _QUOTE.search(fact)
-        if tag and q:
-            quote = next(g for g in q.groups() if g)
-            url = tag.group(1) if tag.group(1).startswith("http") else ""
-            break
+    quote, url = _verified_web_quote(verification, chain)
     if not quote:
         return None  # ни одна цитата не подтверждена по странице — сохранять нечего
-    if not url:
-        found = _SOURCE_URL.search(answer)
-        url = found.group(1).rstrip(".,;)") if found else ""
+    answer = getattr(episode, "full_answer", "") or ""
     conclusion = conclusion_of(answer)
     question = " ".join(str(getattr(episode, "question", "") or "").split(_OWN_WRAPPER)[0].split())
     if not url or not conclusion or not question or _NOT_FOUND.search(conclusion):
