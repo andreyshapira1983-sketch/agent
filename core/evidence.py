@@ -97,9 +97,14 @@ QUESTION_CODE_MARKER = "[QUESTION-CODE: the experiment's own code, not evidence 
 #: «the sum is 9, not 400». Девять — это `exit_code: 0` плюс `duration_ms: 9`:
 #: разбор пар «ключ: число» шёл по всей выдержке и складывал конверт. Список
 #: живёт здесь, рядом со строками, которые эти имена и печатают.
+#: Замер того же дня, вторая улика: «Sal(7.1) = 1 + 1/2 + … ≈ 2.592857» было
+#: опровергнуто как `sum_mismatch` «ждали 13099» — это `bytes=13060` плюс
+#: `lines=39` из конверта прочитанного файла. Конверт у каждого сборщика свой,
+#: и все его имена собраны здесь.
 ENVELOPE_KEYS: frozenset[str] = frozenset({
     "exit_code", "timed_out", "duration_ms", "stdout_truncated",
     "inputs", "missing_inputs", "stdout", "stderr", "returncode",
+    "bytes", "lines", "latency_ms", "cost", "status",
 })
 
 
