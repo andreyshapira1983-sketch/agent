@@ -206,6 +206,30 @@ def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
     return f"already attempted '{action_name}' this campaign; the earlier pass did not clear the signal — skipping re-execution"
 
 
+def _refusal_reason(action_name: str) -> str:
+    """Слова для отказа НА ВОРОТАХ — не те же, что для повтора попытки."""
+    return (f"'{action_name}': ворота отказали до старта, и разрешение с тех пор "
+            "не появилось — повторное предложение ничего не изменит")
+
+
+def _refused_again(signature: str, refused: set[str], *, ran: bool, result: str) -> bool:
+    """True, если это действие уже отказывали на воротах в этой серии циклов.
+
+    Замер 2026-09-19: 170 циклов подряд с `blocked` на одном действии, ноль
+    вызовов модели. Подпись не банилась, потому что отказ до старта попыткой
+    не считается (см. CampaignActionOutcome.ran) — и это верно. Но из «нельзя
+    назвать это попыткой» следовало «не помнить вовсе», а отказ на воротах —
+    самостоятельный факт: путь сейчас закрыт. Память о нём отдельная, чтобы
+    не врать про несуществовавший проход.
+    """
+    if ran or result != "blocked":
+        return False
+    if signature in refused:
+        return True
+    refused.add(signature)
+    return False
+
+
 def _bank_signature(agent, signature, outcome, subject_aware, attempted, action_steps):
     """Return True if the action is stalled (subject already banked), else False, banking the appropriate composite or bare signature."""
     if not subject_aware:
@@ -336,6 +360,7 @@ def run_campaign(
 
     records: list[CampaignCycleRecord] = []
     attempted_signatures: set[str] = set()
+    refused_signatures: set[str] = set()
     action_steps: dict[str, int] = {}  # WEAVE ред.2 §1: шаги по имени действия
     failed_in_a_row: dict[str, int] = {}  # провалы подряд без работы (_MAX_FAILED_REPEATS)
     # MIR-149: единственная память, переживающая запуски, — леджер; страж
@@ -387,6 +412,7 @@ def run_campaign(
         # Новая цель — новая тема: память о повторах прежней темы не должна
         # объявлять повтором первый же шаг по новой.
         attempted_signatures.clear()
+        refused_signatures.clear()
         action_steps.clear()
         failed_in_a_row.clear()
         idle_streak = 0
@@ -484,6 +510,7 @@ def run_campaign(
             idle_streak = 0
             streak_repeats = False
             attempted_signatures.clear()
+            refused_signatures.clear()
             action_steps.clear()
             goal_switches = 0
         return True
@@ -650,7 +677,8 @@ def run_campaign(
                 and action_steps.get(signature, 0) >= _MAX_STEPS_PER_ACTION
             )
             hit_failures = failed_in_a_row.get(signature, 0) >= _MAX_FAILED_REPEATS
-            if hit_ceiling or hit_failures or (not subject_aware and signature in attempted_signatures):
+            hit_refusal = signature in refused_signatures
+            if hit_ceiling or hit_failures or (not subject_aware and signature in attempted_signatures) or hit_refusal:
                 if not subject_aware:
                     action_steps[signature] = action_steps.get(signature, 0) + 1  # L2
                 idle_streak += 1
@@ -672,8 +700,12 @@ def run_campaign(
                     llm_calls_spent=0,
                     cost_units_spent=0,
                     result="repeat",
-                    reason=_repeat_reason(action.action, hit_ceiling,
-                                          failed_in_a_row.get(signature, 0) if hit_failures else 0),
+                    reason=(
+                        _refusal_reason(action.action) if hit_refusal
+                        else _repeat_reason(
+                            action.action, hit_ceiling,
+                            failed_in_a_row.get(signature, 0) if hit_failures else 0)
+                    ),
                     work_done=False,
                 )
                 ledger.append(record)
@@ -765,6 +797,12 @@ def run_campaign(
                 )
                 idle_streak = (idle_streak + 1) * int(stalled)
                 streak_repeats = streak_repeats or stalled
+            # Отказ на воротах запоминается ОТДЕЛЬНО от попыток: сам он
+            # попыткой не является, но «этот путь сейчас закрыт» — факт, и
+            # без него следующий цикл предлагал то же самое (170 подряд,
+            # замер 2026-09-19).
+            _refused_again(signature, refused_signatures,
+                           ran=outcome.ran, result=str(outcome.result))
             if outcome.did_work:
                 useful_cycles += 1
             failed_in_a_row[signature] = (
