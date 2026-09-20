@@ -432,6 +432,7 @@ class AgentLoopMemoryWrite:
             conclusion_memory,
             superseded_by,
             web_knowledge_memory,
+            web_knowledge_reason,
         )
 
         content, tags = conclusion_memory(episode), list(TAGS)
@@ -439,6 +440,13 @@ class AgentLoopMemoryWrite:
             content = web_knowledge_memory(
                 episode, getattr(self, "last_verification", None), getattr(self, "last_provenance", None))
             tags = list(WEB_TAGS)
+            if content is None:
+                self.log.log("web_knowledge_skipped", {
+                    "episode_id": getattr(episode, "id", ""),
+                    "reason": web_knowledge_reason(
+                        episode, getattr(self, "last_verification", None),
+                        getattr(self, "last_provenance", None)),
+                })
         if content is None or self._durable_learning_suppressed("knowledge"):
             return
         try:

@@ -135,6 +135,26 @@ def _verified_web_quote(verification: Any, chain: Any) -> tuple[str, str]:
     return "", ""
 
 
+def web_knowledge_reason(episode: Any, verification: Any = None, chain: Any = None) -> str:
+    """Почему веб-знание НЕ записано, или пусто. Молчаливый отказ не отлаживается:
+    живой прогон 2026-09-20 — задача про CAP-теорему дошла до допуска в опыт с
+    семью подтверждёнными утверждениями, записи не появилось, и в журнале не
+    было ни строки о том, какое условие не выполнилось."""
+    if not getattr(episode, "usage_eligible", False):
+        return "episode not admitted to experience"
+    labels = [str(s) for s in (getattr(episode, "source_labels", None) or [])]
+    if not any(s.startswith("web_fetch:http") for s in labels):
+        return "no page was opened (web_fetch)"
+    if verification is None or chain is None:
+        return "no verification report at write time"
+    pages = sum(1 for ev in (getattr(chain, "evidences", None) or [])
+                if str(getattr(ev, "source_id", "")).startswith("web_page:"))
+    verified = sum(1 for c in (getattr(verification, "chunks", None) or []) if c.verdict == "verified")
+    if not _verified_web_quote(verification, chain)[0]:
+        return f"no verified claim quoting a page (pages={pages}, verified_chunks={verified})"
+    return ""
+
+
 def web_knowledge_memory(episode: Any, verification: Any = None, chain: Any = None) -> str | None:
     """Запись «вопрос → вывод → цитата → адрес и дата», или None, если сеть не квалифицирована."""
     if not getattr(episode, "usage_eligible", False):
