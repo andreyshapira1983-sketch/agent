@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from core.redaction import redact_dlp_text
 from core.topic_tokens import topic_tokens
@@ -144,3 +144,15 @@ def _episode_tags(
     if any(label.startswith("file") for label in labels):
         tags.append("file")
     return tuple(dict.fromkeys(tags))
+
+
+def episode_tools(planned_sources: Iterable[dict[str, Any]], executed: Iterable[str]) -> list[str]:
+    """Инструменты хода для эпизода: план последнего круга плюс исполненное раньше.
+
+    С кругом наблюдения (`core/observation_round.py`) последний план часто пуст —
+    «всё сделано», — и эпизод записывал пустой список за ход, который читал и
+    писал (замер 2026-09-19). Без кругов всё исполненное входит в последний план,
+    и список остаётся прежним.
+    """
+    planned = [s["tool"] for s in planned_sources]
+    return planned + [t for t in dict.fromkeys(executed) if t not in planned]

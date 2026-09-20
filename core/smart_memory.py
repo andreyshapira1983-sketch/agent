@@ -31,6 +31,7 @@ from core.smart_memory_helpers import (  # noqa: F401 -- re-exported
     _summarise_labels,
     _tokens,
     episode_id_for_run,
+    episode_tools,
 )
 from core.state_integrity import (
     append_state_jsonl_unlocked,
@@ -1733,15 +1734,3 @@ def family_product_warnings(
         ):
             warnings.append(cand.summary[:max_each])
     return warnings
-
-
-def episode_tools(planned_sources: Iterable[dict[str, Any]], executed: Iterable[str]) -> list[str]:
-    """Инструменты хода для эпизода: план последнего круга плюс исполненное раньше.
-
-    С кругом наблюдения (`core/observation_round.py`) последний план часто пуст —
-    «всё сделано», — и эпизод записывал пустой список за ход, который читал и
-    писал (замер 2026-09-19). Без кругов всё исполненное входит в последний план,
-    и список остаётся прежним.
-    """
-    planned = [s["tool"] for s in planned_sources]
-    return planned + [t for t in dict.fromkeys(executed) if t not in planned]
