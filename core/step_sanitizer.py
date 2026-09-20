@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+from pathlib import Path
 from typing import Any
 
 _PLACEHOLDER_HOSTS = frozenset({
@@ -327,6 +328,29 @@ def _web_fetch_find(args: dict[str, Any]) -> dict[str, str]:
     return {"find": find.strip()[:200]} if isinstance(find, str) and find.strip() else {}
 
 
+def _exists_in_workspace(workspace: str | None, path: str) -> bool:
+    """Лежит ли этот путь ФАЙЛОМ внутри рабочей папки.
+
+    Различитель выдумки: имя, сочинённое планировщиком из фразы («привет.txt»),
+    на диске отсутствует, а собственный черновик агента — лежит. Замер
+    2026-09-20: в рабочей папке 1556 файлов с не-ASCII путём (его же
+    математические черновики), и запрет на не-ASCII снимал каждое чтение по
+    ним — 20 снятых шагов за семь суток, после каждого прогон бился вслепую.
+
+    Существование вне песочницы ничего не разрешает: путь приводится к
+    канону и обязан остаться внутри папки.
+    """
+    if not workspace or not path:
+        return False
+    try:
+        root = Path(workspace).resolve()
+        target = (root / path).resolve()
+        target.relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return target.is_file()
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -335,6 +359,7 @@ def sanitize_step(
     warnings: list[str],
     *,
     self_documentation_paths: tuple[str, ...] = (),
+    workspace: str | None = None,
 ) -> dict[str, Any] | None:
     if tool_name == "file_read":
         path = args.get("path")
@@ -368,7 +393,8 @@ def sanitize_step(
         # input, so non-ASCII filenames (e.g. Russian documents) are
         # allowed after the hint-equality/remap gate above.
         is_explicit_hint_path = bool(file_hint) and path == file_hint.strip()
-        if not path.isascii() and not is_explicit_hint_path:
+        if (not path.isascii() and not is_explicit_hint_path
+                and not _exists_in_workspace(workspace, path)):
             warnings.append(
                 f"step[{idx}]: file_read path '{path}' is not ASCII; "
                 "non-ASCII planner-invented identifiers are rejected by policy, dropped"
