@@ -145,11 +145,17 @@ def parse_pairs(excerpt: str) -> dict[str, float]:
     than salvaged. A parser that guesses at half-structured text would feed
     wrong numbers into a check whose whole value is being right.
     """
+    from core.evidence import ENVELOPE_KEYS
+
     pairs: dict[str, float] = {}
     for line in (excerpt or "").splitlines():
         match = _PAIR_RE.match(line)
         if match:
-            pairs[match.group(1).lower()] = float(match.group(2))
+            key = match.group(1).lower()
+            # Конверт прогона — не его данные: см. ENVELOPE_KEYS.
+            if key in ENVELOPE_KEYS:
+                continue
+            pairs[key] = float(match.group(2))
     return pairs
 
 
