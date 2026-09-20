@@ -256,6 +256,34 @@ def _observation_goal(root: Path) -> DriveGoal | None:
     )
 
 
+def _engineering_goal(root: Path) -> DriveGoal | None:
+    """Правку своего кода предлагает штатное действие, а не проза о нём.
+
+    Замер 2026-09-19/20: после включения драйвов агент читал свой код в 133
+    задачах из 198 и не подал НИ ОДНОЙ заявки на правку. Путь к изменению кода
+    лежал в меню, а режим «цель первой» меню обходит; задачи от драйвов по
+    построению только читают. Здесь цель называет свободный модуль и своё
+    действие — `propose_engineering_task`, всё та же полоса и те же ворота.
+    """
+    from core.drives import self_improvement_targets
+
+    targets = self_improvement_targets(root)
+    if not targets:
+        return None
+    target, lines = targets[0]
+    helpers = target[:-3] + "_helpers.py"
+    return DriveGoal(
+        status="proposed",
+        goal=(f"Разбить свой модуль {target} ({lines} строк): прочитать его, выбрать связную "
+              f"группу имён и предложить их перенос в {helpers} — заявкой в ящик одобрений, "
+              "полоса самоправок и её ворота остаются прежними"),
+        success_check=(f"в data/approval_inbox.jsonl появилась новая заявка self_apply_lane.run "
+                       f"по {target}"),
+        drive="self_improvement_need",
+        action="propose_engineering_task",
+    )
+
+
 def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = None,
                        attempts: int = 3) -> DriveGoal:
     root = Path(workspace)
@@ -264,8 +292,9 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     state = _load_state(root)
     drive, state = choose_drive(drives, state, now)
     report = DriveGoal(status="declined", reason="ни один драйв не выше порога содержания")
-    if drive == "uncertainty":
-        report = _observation_goal(root) or report
+    if drive in ("uncertainty", "self_improvement_need"):
+        made = _observation_goal(root) if drive == "uncertainty" else _engineering_goal(root)
+        report = made or report
         if report.status == "proposed":
             state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
     elif drive is not None:

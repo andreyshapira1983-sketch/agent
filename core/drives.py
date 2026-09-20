@@ -34,7 +34,7 @@ DOMAINS: dict[str, tuple[str, ...]] = {
 _WEB_TOOLS = frozenset({"web_search", "web_fetch", "rss_fetch"})
 
 #: Время (часы), за которое драйв без события поднимается до ~0.63.
-TAU_HOURS = {"idle_time": 0.5, "competence": 3.0, "world": 6.0}
+TAU_HOURS = {"idle_time": 0.5, "competence": 3.0, "world": 6.0, "self": 6.0}
 _WORK_RESULTS = frozenset({"completed"})
 #: Поломка — действие было, а результата нет. Простой («нечего делать») и пропуск
 #: повтора — не поломка: это `idle_time`, иначе один факт считался бы дважды.
@@ -129,6 +129,52 @@ def open_obligations(root: Path) -> list[dict[str, Any]]:
     return out
 
 
+#: Потребность «улучшить себя» меряется двумя вещами: сколько прошло с
+#: последней СВОЕЙ правки кода и есть ли материал — крупный собственный модуль,
+#: который сейчас никто не ждёт в ящике и по которому нет урока отката. Замер
+#: 2026-09-19/20: после включения драйвов агент читал свой код в 133 задачах из
+#: 198 и не подал ни одной заявки на правку — потребности «сделать себя лучше»
+#: в списке не было вовсе, а задачи от драйвов по построению только читают.
+_OWN_CODE_DIRS = ("core", "tools")
+_SELF_CHANGE_OPS = frozenset({"self_apply_lane.run"})
+
+
+def last_self_change(root: Path) -> datetime | None:
+    """Когда агент в последний раз ИЗМЕНИЛ свой код (исполненная заявка полосы)."""
+    stamps = [t for r in _rows(root / "data" / "approval_inbox.jsonl")
+              if r.get("operation") in _SELF_CHANGE_OPS and r.get("status") == "executed"
+              for t in [_ts(r.get("updated_at") or r.get("created_at"))] if t]
+    return max(stamps, default=None)
+
+
+def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]]:
+    """Свои модули, по которым правку можно предложить ПРЯМО СЕЙЧАС, крупные первыми.
+
+    Отсеиваются занятые: то, что уже ждёт человека в ящике, и то, что закрыто
+    уроком отката, — предлагать их значит снова упереться в approval_wait.
+    """
+    from core.self_build_rules import blocking_lesson
+
+    waiting = {str(f.get("path") or "") for r in _rows(root / "data" / "approval_inbox.jsonl")
+               if r.get("status") == "pending"
+               for f in ((r.get("payload") or {}).get("files") or []) if isinstance(f, dict)}
+    out: list[tuple[str, int]] = []
+    for folder in _OWN_CODE_DIRS:
+        for path in sorted((root / folder).glob("*.py")):
+            rel = f"{folder}/{path.name}"
+            if rel in waiting:
+                continue
+            try:
+                lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+            except OSError:
+                continue
+            if blocking_lesson(root, [rel]) is not None:
+                continue
+            out.append((rel, lines))
+    out.sort(key=lambda pair: -pair[1])
+    return out[:limit]
+
+
 def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[str, dict[str, Any]]:
     """Все драйвы: {имя: {"value": 0..1, "why": строка}}. Только чтение диска."""
     root = Path(workspace)
@@ -164,6 +210,15 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     pending = open_obligations(root)
     drives["unfinished_obligations"] = {"value": 1.0 - math.exp(-len(pending) / 5),
                                         "why": f"незавершённых дел, которые можно сдвинуть: {len(pending)}"}
+
+    targets = self_improvement_targets(root)
+    changed = last_self_change(root)
+    drives["self_improvement_need"] = {
+        "value": _growth(changed, now, TAU_HOURS["self"]) if targets else 0.0,
+        "why": (f"последняя своя правка кода: {_ago(changed, now)}; "
+                + (f"самый крупный свободный модуль: {targets[0][0]} ({targets[0][1]} строк)"
+                   if targets else "свободных модулей нет — всё занято ящиком или уроками")),
+    }
 
     tail = ledger[-20:]
     acted = [r for r in tail if r.get("result") in _BROKEN_RESULTS | _WORK_RESULTS]
