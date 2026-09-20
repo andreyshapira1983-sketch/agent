@@ -1166,15 +1166,6 @@ def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, .
     return tuple(specs)
 
 
-def _model_score(spec: ModelSpec, role_key: str) -> tuple[int, int, int, int, str]:
-    exact_role = 1 if role_key in spec.roles else 0
-    quality = _QUALITY_SCORE.get(spec.quality_tier, _QUALITY_SCORE["unknown"])
-    cost = _COST_SCORE.get(spec.cost_tier, _COST_SCORE["unknown"])
-    context = spec.context_window or 0
-    # Deterministic tie-breaker keeps repeated runs stable.
-    return (exact_role, quality, cost, context, spec.id)
-
-
 def _within_cost_limit(spec: ModelSpec, max_cost_tier: str | None) -> bool:
     if max_cost_tier is None:
         return True

@@ -139,9 +139,13 @@ def _sanitize_python_probe(
     # умолчанию из собственного договора и выбрасывало вместе с ним весь
     # замер. Жалоба теперь называет пришедшее: прежняя не сохраняла его, и
     # по журналу форму аргумента установить было нельзя.
-    if isinstance(inputs, str):
-        inputs = [inputs.strip()] if inputs.strip() else None
-    elif isinstance(inputs, list) and not inputs:
+    # Голая строка НЕ достраивается до списка одного. Замер 2026-09-20 дал
+    # 15 снятых шагов на этом ключе, но какой формы был аргумент — журнал не
+    # сохранял, и достройка строки была догадкой. Договор «список» держат два
+    # слоя сразу (здесь и tools/python_probe.py, где не-список поднимает
+    # ValueError), и расходиться им нельзя: строка — тоже последовательность,
+    # и принятая молча она разошлась бы посимвольно.
+    if isinstance(inputs, (list, str)) and not inputs:
         inputs = None
     if inputs is not None:
         if not (isinstance(inputs, list)

@@ -120,18 +120,3 @@ def describe_code_state(root: Path | str) -> dict[str, Any]:
 
     state["files_newer_than_index"] = _files_newer_than_index(path, git_dir / "index")
     return state
-
-
-def state_summary(state: dict[str, Any]) -> str:
-    """Одна строка для человека и для текста улики."""
-    if not state.get("commit"):
-        return f"код: {state.get('reason') or 'состояние неизвестно'}"
-    parts = [f"коммит {str(state['commit'])[:7]}"]
-    if state.get("branch"):
-        parts.append(f"ветка {state['branch']}")
-    if state.get("matches_shared") is False:
-        parts.append("НЕ совпадает с общей веткой")
-    newer = state.get("files_newer_than_index")
-    if newer:
-        parts.append(f"файлов изменено после индексации: {newer}")
-    return "код: " + ", ".join(parts)

@@ -299,13 +299,6 @@ def sandbox_applies_today(workspace: Any, authority: SandboxAuthority) -> int:
     return standing_runs_today(workspace, authority.id)
 
 
-def record_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> None:
-    """Записать расход ДО применения — общим журналом, не своим."""
-    from core.autonomous_runtime import record_standing_grant_use
-
-    record_standing_grant_use(workspace, authority.id)
-
-
 def reserve_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> bool:
     """Занять одну единицу дневного потолка песочницы, или отказать.
 

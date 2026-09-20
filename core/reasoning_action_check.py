@@ -201,11 +201,6 @@ def _reasoning_mentions(reasoning: str, tool: str) -> bool:
     return any(_keyword_in_text(text, kw) for kw in _TOOL_KEYWORDS.get(tool, ()))
 
 
-def _tool_alias_in_text(text: str, tool: str) -> bool:
-    """Same as ``_reasoning_mentions`` but external-callable for symmetry."""
-    return _reasoning_mentions(text, tool)
-
-
 #: Довод короче этого — не довод, а отписка («needed», «нужно»).
 _MIN_RATIONALE_WORDS = 3
 

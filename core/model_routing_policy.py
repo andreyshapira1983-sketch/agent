@@ -154,11 +154,6 @@ class RoutingPolicyStore:
             set_by=str(latest.get("set_by") or "agent"), ts=str(latest.get("ts") or ""),
         )
 
-    def active_routes(self) -> dict[str, RoutingChoice]:
-        return {
-            role: choice for role in sorted(_KNOWN_ROLES)
-            if (choice := self.resolve(role)) is not None
-        }
 
     def history(self, role: str | None = None, *, limit: int = 20) -> list[dict[str, Any]]:
         rows = [r for r in self._rows() if role is None or r.get("role") == role]

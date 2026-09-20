@@ -175,13 +175,6 @@ def redact_payload(obj: Any) -> Any:
     return obj
 
 
-def collect_findings(text: str) -> list[SecretFinding]:
-    """Convenience for callers that need the findings without rewriting text."""
-    if not isinstance(text, str):
-        return []
-    return scan(text)
-
-
 def collect_pii_findings(text: str) -> list[DlpFinding]:
     """Convenience for callers that need PII findings without rewriting text."""
     if not isinstance(text, str):
