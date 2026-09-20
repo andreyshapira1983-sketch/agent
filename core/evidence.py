@@ -217,6 +217,34 @@ def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+#: Честный отчёт поиска о НЕНАЙДЕННОМ (`tools/find_in_files.py:128`):
+#: «no matches for 'имя' in 3305 text files under .» — он обязан назвать
+#: искомое, иначе это не отчёт.
+_NO_MATCHES_RE = re.compile(r"^no matches for .+? in (?P<tail>\d+ text files.*)$",
+                            re.IGNORECASE | re.DOTALL)
+
+
+def _search_excerpt(output: str) -> str:
+    """Исход поиска отдельно от его запроса.
+
+    Живой разговор 2026-09-20: агент честно написал «поиск
+    `smart_memory_helpers2` по 3305 файлам не дал совпадений» — и получил
+    `absence_refuted_by_evidence` трижды. Улика, конечно, содержала искомое
+    имя: пустой результат поиска повторяет запрос ПО ПОСТРОЕНИЮ. Гейт видел
+    имя и заключал, что отсутствие опровергнуто собственным доказательством.
+
+    То же различение, что у кода пробы: имена — из вопроса, истина — из
+    исхода. Отзвук запроса уезжает за маркер; гейты истины его отрезают
+    (`core.verifier_utils.truth_excerpt`), гейт литералов по-прежнему видит,
+    что имя не выдумано. Находку не трогаем: там улика — сами строки.
+    """
+    match = _NO_MATCHES_RE.match(output.strip())
+    if not match:
+        return output
+    return (f"no matches in {match.group('tail')}\n"
+            f"{QUESTION_CODE_MARKER}\n{output.strip()}")
+
+
 def _truncate(text: str, limit: int = MAX_EXCERPT_CHARS) -> str:
     if not isinstance(text, str):
         text = str(text)
@@ -683,7 +711,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             source_id="tool_output:find_in_files",
             obtained_via="find_in_files",
             claim=f"Workspace search under {args.get('path', '.')}",
-            excerpt=output,
+            excerpt=_search_excerpt(output),
         )
 
     # ---- unknown tool fallback -------------------------------------------
