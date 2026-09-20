@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,15 @@ _PLACEHOLDER_HOSTS = frozenset({
 })
 
 _PLACEHOLDER_TLDS = (".example", ".invalid", ".test", ".localhost")
+
+#: Похоже на имя узла: метки через точку с буквенным окончанием (или голый
+#: `localhost`), затем необязательные порт и путь. Пробелов нет — фраза
+#: («см. раздел 4.2») узлом не притворится.
+_HOSTLIKE_RE = re.compile(
+    r"^(?:localhost|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,})"
+    r"(?::\d{1,5})?(?:[/?#]\S*)?$"
+)
 
 
 def _url_host(url_lower: str) -> str:
@@ -122,10 +132,24 @@ def _sanitize_python_probe(
             return None
         arguments["timeout_seconds"] = timeout
     inputs = args.get("inputs")  # файлы рабочей папки для счёта (2026-09-19)
+    # Пустое значение равносильно отсутствию ключа, а одна строка —
+    # однозначный список из одной строки. Замер 2026-09-20: 15 снятых шагов
+    # из 47 за четверо суток пришлись сюда, а промпт планировщика объявляет
+    # ровно `inputs: list[str] = []` — правило допуска отвергало значение по
+    # умолчанию из собственного договора и выбрасывало вместе с ним весь
+    # замер. Жалоба теперь называет пришедшее: прежняя не сохраняла его, и
+    # по журналу форму аргумента установить было нельзя.
+    if isinstance(inputs, str):
+        inputs = [inputs.strip()] if inputs.strip() else None
+    elif isinstance(inputs, list) and not inputs:
+        inputs = None
     if inputs is not None:
-        if not (isinstance(inputs, list) and inputs
+        if not (isinstance(inputs, list)
                 and all(isinstance(p, str) and p.strip() for p in inputs)):
-            warnings.append(f"step[{idx}]: python_probe inputs must be a list of paths, dropped")
+            warnings.append(
+                f"step[{idx}]: python_probe inputs must be a list of paths, "
+                f"got {type(inputs).__name__}, dropped"
+            )
             return None
         arguments["inputs"] = inputs
     first = code.strip().splitlines()[0][:50]
@@ -136,6 +160,64 @@ def _sanitize_python_probe(
         "expected_outcome": (
             "Measured behaviour of THIS runtime: exit_code/stdout/stderr of a "
             "small experiment; a failing snippet is itself the answer."
+        ),
+    }
+
+
+def _sanitize_web_fetch(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """Пропуск наружу: адрес есть, он http(s), не свой узел и не заглушка.
+
+    Вынесено из лестницы `sanitize_step` 2026-09-20. Лекарство названо в
+    храповике этой функции давно — диспетчеризация по словарю вместо ветки
+    на инструмент, — и каждая правка вместо него поднимала планку. Эта
+    ветка ушла целиком, и функция стала КОРОЧЕ прежнего предела, а не
+    длиннее.
+    """
+    url = args.get("url")
+    if not isinstance(url, str) or not url.strip():
+        warnings.append(f"step[{idx}]: web_fetch without url, dropped")
+        return None
+    if len(url) > 2048:
+        warnings.append(
+            f"step[{idx}]: web_fetch url too long ({len(url)} > 2048), dropped"
+        )
+        return None
+    if not url.isascii():
+        warnings.append(f"step[{idx}]: web_fetch url not ASCII, dropped")
+        return None
+    # Голое имя узла — адрес с умолчательной схемой: так его понимает и
+    # браузер, и человек, диктующий «rfc-editor.org». Замер 2026-09-20: 11
+    # снятых шагов из 47 за четверо суток пришлись сюда, а какое значение
+    # отвергалось — по журналу не установить, жалоба его не сохраняла.
+    # Достраивается только похожее на узел; все прежние замки (локальная
+    # сеть, узлы-заглушки) стоят ПОСЛЕ достройки.
+    if "://" not in url and _HOSTLIKE_RE.match(url.strip()):
+        url = "https://" + url.strip()
+    url_lower = url.lower()
+    if not url_lower.startswith(("http://", "https://")):
+        warnings.append(
+            f"step[{idx}]: web_fetch url must start with http:// or https://, "
+            f"got '{url[:80]}', dropped"
+        )
+        return None
+    # Block obvious SSRF shapes BEFORE the tool layer.
+    if _is_local_network_host(_url_host(url_lower)):
+        warnings.append(f"step[{idx}]: web_fetch url targets local network, dropped")
+        return None
+    if _is_placeholder_url(url_lower):
+        warnings.append(
+            f"step[{idx}]: web_fetch url is a placeholder/example host, dropped"
+        )
+        return None
+    return {
+        "tool": "web_fetch",
+        "arguments": {"url": url, **_web_fetch_find(args)},
+        "label": f"web_fetch:{url[:60]}",
+        "expected_outcome": (
+            "Fetched page with content_hash + fetched_at; serves as "
+            "a verifiable web_page evidence source for the Verifier."
         ),
     }
 
@@ -606,48 +688,7 @@ def sanitize_step(
 
     # ----- MVP-14.2 web_fetch -----
     if tool_name == "web_fetch":
-        url = args.get("url")
-        if not isinstance(url, str) or not url.strip():
-            warnings.append(
-                f"step[{idx}]: web_fetch without url, dropped"
-            )
-            return None
-        if len(url) > 2048:
-            warnings.append(
-                f"step[{idx}]: web_fetch url too long ({len(url)} > 2048), dropped"
-            )
-            return None
-        if not url.isascii():
-            warnings.append(
-                f"step[{idx}]: web_fetch url not ASCII, dropped"
-            )
-            return None
-        url_lower = url.lower()
-        if not (url_lower.startswith(("http://", "https://"))):
-            warnings.append(
-                f"step[{idx}]: web_fetch url must start with http:// or https://, dropped"
-            )
-            return None
-        # Block obvious SSRF shapes BEFORE the tool layer.
-        if _is_local_network_host(_url_host(url_lower)):
-            warnings.append(
-                f"step[{idx}]: web_fetch url targets local network, dropped"
-            )
-            return None
-        if _is_placeholder_url(url_lower):
-            warnings.append(
-                f"step[{idx}]: web_fetch url is a placeholder/example host, dropped"
-            )
-            return None
-        return {
-            "tool": "web_fetch",
-            "arguments": {"url": url, **_web_fetch_find(args)},
-            "label": f"web_fetch:{url[:60]}",
-            "expected_outcome": (
-                "Fetched page with content_hash + fetched_at; serves as "
-                "a verifiable web_page evidence source for the Verifier."
-            ),
-        }
+        return _sanitize_web_fetch(args, idx, warnings)
 
     if tool_name == "rss_fetch":
         url = args.get("url")
