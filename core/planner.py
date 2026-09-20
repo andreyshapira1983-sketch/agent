@@ -576,6 +576,7 @@ class LLMPlanner:
             spec = sanitize_step(
                 tool_name, args, file_hint, idx, warnings,
                 self_documentation_paths=self.self_documentation_paths,
+                workspace=self.workspace,
             )
             if spec is None:
                 continue
