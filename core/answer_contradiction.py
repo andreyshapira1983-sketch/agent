@@ -87,35 +87,96 @@ def _subjects(text: str) -> set[str]:
     return {m.group(0).lower() for m in _SUBJECT_RE.finditer(text)}
 
 
+#: Буквальные объекты спора: код в обратных кавычках, путь, составной
+#: идентификатор, число. По ним видно, О ЧЁМ суждение, — в отличие от русской
+#: морфологии, которую подсчётом слов не берут («выполнения» / «исполнению»).
+_OBJECT_RE = re.compile(
+    r"`[^`]+`"
+    r"|\b[\w./\\-]+\.(?:py|md|json|jsonl|txt|log|cmd|toml|yaml|yml)\b"
+    r"|\b[a-z]+_[a-z0-9_]{3,}\b"
+    r"|\b\d{2,}\b",
+    re.IGNORECASE,
+)
+
+#: Строка, которая сама отрицает, ничего не утверждает: снимать с неё нечего.
+#: В живом корпусе такие строки стояли в Facts («содержимое не было
+#: прочитано») и ловили обвинение от собственного повтора в Unverified.
+_NEGATION_RE = re.compile(
+    r"\bне\b|\bнет\b|отсутств|\bnot\b|\bno\b|missing|\bбез\s",
+    re.IGNORECASE,
+)
+
+_OBJECT_SPLIT_RE = re.compile(r"""[\s=,()"':]+""")
+
+
+def _objects(line: str) -> set[str]:
+    """Буквальные объекты строки, разобранные до отдельных имён."""
+    out: set[str] = set()
+    for m in _OBJECT_RE.finditer(line):
+        for piece in _OBJECT_SPLIT_RE.split(m.group(0).strip("`").lower()):
+            if len(piece) >= 3:
+                out.add(piece)
+    return out
+
+
 def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
-    """Предметы, утверждённые в Conclusion/Facts и снятые в Unverified."""
+    """Суждение, утверждённое в Conclusion/Facts и снятое в Unverified.
+
+    Сверяются ПАРЫ СТРОК, а не множества предметов. Замер 2026-09-20 на 420
+    живых ответах: прежняя сверка обвиняла 154 ответа (37%), и ни одно
+    обвинение при разборе не оказалось противоречием — все были формой
+    честного ответа, где Facts утверждает одно свойство предмета («каталог
+    содержит файл X»), а Unverified называет другое («содержимое X не
+    прочитано»). Раздел Unverified ПО КОНТРАКТУ перечисляет непроверенное;
+    имя, попавшее в оба раздела, само по себе ничего не снимает.
+
+    Цена ошибки измерена там же: обвинение закрывает эпизоду вход в опыт
+    (`_answer_disqualified`, core/smart_memory.py) прежде всех прочих осей —
+    за четверо суток так отсечены 29 эпизодов из 133, годных по всем трём
+    осям, то есть пятая часть всего, чему прогоны могли научить.
+
+    Три условия сверх совпадения предмета, ни одно не подбиралось порогом:
+    утверждающая строка должна утверждать, отрицающая — отрицать (именная
+    строка «Точное содержимое X» называет открытый вопрос, а не снимает
+    факт), и отрицание не вправе вводить НОВЫЙ буквальный объект: новый
+    объект значит новое суждение о том же предмете, а не снятие прежнего.
+    На том же корпусе остаётся 24 обвинения из 420, и живой случай
+    2026-08-10, ради которого детектор построен, по-прежнему ловится.
+    """
     if not answer:
         return ()
     sections = _sections(answer)
-    denied_text = sections.get("unverified", "")
-    if not denied_text.strip():
-        return ()
-    denied = _subjects(denied_text)
-    if not denied:
-        return ()
-    # Предмет ищется среди предметов строки, а не подстрокой: иначе
-    # `report.json` находился внутри `report.json.bak.…` в соседней строке.
-    denied = set().union(*(
-        _subjects(ln) for ln in denied_text.splitlines()
-        if ln.strip() and not _BOUNDARY_RE.search(ln)
-    )) & denied
-    if not denied:
+    # Строка, которая ничего не отрицает, ничего и не снимает. Большинство
+    # строк Unverified — именные: «Точное содержимое X», «Номер строки в
+    # файле». Это открытый вопрос, а не снятие факта; снятие произносится
+    # («не доказано, что…»), и именно так выглядел живой случай 2026-08-10.
+    denied_lines = [
+        ln for ln in sections.get("unverified", "").splitlines()
+        if ln.strip() and _NEGATION_RE.search(ln) and not _BOUNDARY_RE.search(ln)
+    ]
+    if not denied_lines:
         return ()
 
     found: list[Contradiction] = []
     seen: set[str] = set()
     for name in ("facts", "conclusion"):
-        asserted_text = sections.get(name, "")
-        for subject in sorted(_subjects(asserted_text) & denied):
-            if subject in seen:
+        for asserted in sections.get(name, "").splitlines():
+            if not asserted.strip() or _NEGATION_RE.search(asserted):
                 continue
-            seen.add(subject)
-            found.append(Contradiction(
-                subject=subject, asserted_in=name, denied_in="unverified"
-            ))
+            # Предмет ищется среди предметов СТРОКИ, а не подстрокой: иначе
+            # `report.json` находился внутри `report.json.bak.…` в соседней.
+            subjects = _subjects(asserted)
+            if not subjects:
+                continue
+            allowed = _objects(asserted) | subjects
+            for denial in denied_lines:
+                if _objects(denial) - allowed:
+                    continue  # отрицание о другом: оно назвало новый объект
+                for subject in sorted(subjects & _subjects(denial)):
+                    if subject in seen:
+                        continue
+                    seen.add(subject)
+                    found.append(Contradiction(
+                        subject=subject, asserted_in=name, denied_in="unverified"
+                    ))
     return tuple(found)
