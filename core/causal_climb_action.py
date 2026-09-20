@@ -477,10 +477,42 @@ def _run_reasoning_action_check(arm: str) -> str:
             f"mentioned_extra={sorted(report.mentioned_but_not_planned)!r}")
 
 
+def _run_goal_first(arm: str) -> str:
+    """Адаптер: «severity=… ;; action=… ;; goal_action=… ;; attempted=…» → выбор.
+
+    `_goal_first` чиста: строит новые объекты, ничего не читает и не пишет.
+    Взята целью 2026-09-20 по живому случаю: агент нашёл про неё все факты
+    верно и сложил вывод наизнанку — «пайплайн не срабатывает из-за раннего
+    возврата при critical/high», хотя по его же факту у пайплайна severity
+    равен medium. Направление причины лексикой не установить; оно
+    устанавливается прогоном обоих рукавов.
+    """
+    from core.best_next_action import BestNextAction
+    from core.campaign import _goal_first
+
+    fields: dict[str, str] = {}
+    for part in arm.split(";;"):
+        key, _, value = part.partition("=")
+        if key.strip():
+            fields[key.strip().lower()] = value.strip()
+    incoming = BestNextAction(
+        action=fields.get("action") or "observe",
+        title="experiment arm",
+        severity=fields.get("severity") or "medium",  # type: ignore[arg-type]
+        priority=1,
+        reason="experiment arm",
+    )
+    attempted = {t.strip() for t in (fields.get("attempted") or "").split(",") if t.strip()}
+    chosen = _goal_first(incoming, attempted, fields.get("goal_action") or "")
+    return (f"action={chosen.action} severity={chosen.severity} "
+            f"decided_by={chosen.decided_by}")
+
+
 #: Белый список целей эксперимента. Только ЧИСТЫЕ функции; расширение —
 #: новая строка здесь плюс свидетель, никогда динамический импорт по имени.
 _EXPERIMENT_TARGETS: dict[str, Any] = {
     "reasoning_action_check": _run_reasoning_action_check,
+    "goal_first": _run_goal_first,
 }
 
 #: Договор цели: что цель берёт на вход и что печатает. Без него модель
@@ -491,6 +523,12 @@ _TARGET_CONTRACTS: dict[str, str] = {
     "reasoning_action_check": (
         "вход: «<текст рассуждения> ;; <инструмент1,инструмент2>»; "
         "печатает ровно: \"unjustified=['имя',…] mentioned_extra=['имя',…]\""
+    ),
+    "goal_first": (
+        "решение режима «цель первой» по входящему действию; вход: "
+        "«severity=<none|low|medium|high|critical> ;; action=<имя> ;; "
+        "goal_action=<имя или пусто> ;; attempted=<имена через запятую>»; "
+        "печатает ровно: \"action=<имя> severity=<…> decided_by=<…>\""
     ),
 }
 
