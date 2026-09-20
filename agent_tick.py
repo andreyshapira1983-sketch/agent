@@ -1795,6 +1795,7 @@ def run_paced_campaign(
     heartbeat_fn: Callable[[Path, dict], None] | None = None,
     charter_goals: bool = False,
     drive_goals: bool = False,
+    goal_action: str = "",
     run_campaign_fn: Callable[..., Any] | None = None,
     build_agent_fn: Callable[[Path], Any] | None = None,
     drain_fn: Callable[..., Any] | None = None,
@@ -1865,7 +1866,8 @@ def run_paced_campaign(
             pursue_goal_when_idle=pursue_goal_when_idle,
             # От драйвов цель — один заход: выполненная цель сменяется сразу,
             # а не после трёх пустых циклов.
-            **({"max_idle_streak": 1, "goal_first": True} if drive_goals else {}),
+            **({"max_idle_streak": 1, "goal_first": True, "goal_action": goal_action}
+               if drive_goals else {}),
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
@@ -2160,6 +2162,7 @@ if __name__ == "__main__":
         opening_spend = spend_since(_charter_router, _spend_before)
         success_check = pick.success_check
 
+    _first_action = ""
     if args.campaign and args.drives:
         _ensure_env_loaded(ws)
         _first = None
@@ -2172,6 +2175,7 @@ if __name__ == "__main__":
             print("[DRIVES] no start goal; stopping honestly")
             sys.exit(3)
         goal, success_check = _first.goal, _first.success_check
+        _first_action = str(getattr(_first, "action", "") or "")
 
     if args.campaign:
         sys.exit(run_paced_campaign(
@@ -2190,6 +2194,7 @@ if __name__ == "__main__":
             opening_spend=opening_spend,
             charter_goals=bool(args.charter),
             drive_goals=bool(args.drives),
+            goal_action=_first_action if args.drives else "",
         ))
 
     sys.exit(run_tick(ws, dry_run=dry))

@@ -177,11 +177,17 @@ def _pursue_goal_action(idle: BestNextAction, reason: str = "") -> BestNextActio
     )
 
 
-def _goal_first(action: BestNextAction, attempted: set[str]) -> BestNextAction:
+def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = "") -> BestNextAction:
     """Режим «цель первой» (CampaignConfig.goal_first): поломка — меню, иначе цель."""
     if action.severity in ("critical", "high"):
         return action
-    if PURSUE_GOAL not in attempted:
+    if goal_action and goal_action not in attempted:
+        return BestNextAction(
+            action=goal_action, title="Work on the chosen goal by its own action",
+            severity="medium", priority=1,
+            reason=f"goal first: the goal names {goal_action!r} as the work",
+            risk="reversible", grounds="operator_goal", decided_by="goal_first")
+    if not goal_action and PURSUE_GOAL not in attempted:
         return _pursue_goal_action(action, "goal first: the goal itself is the work; the menu would "
                                            f"have taken {action.action!r} ({action.grounds})")
     return BestNextAction(
@@ -264,7 +270,7 @@ _BACKOFF_MAX_SECONDS = 900
 
 def _ask_for_a_goal(
     agent: Any, next_goal: Callable[[], Any], current_goal: str, cycle: int,
-) -> tuple[str, str, int, int]:
+) -> tuple[str, str, str, int, int]:
     """Спросить источник о новой цели и вернуть её вместе с ценой вопроса.
 
     Выбор цели — такой же платный вызов модели, как работа цикла, но он не
@@ -278,7 +284,7 @@ def _ask_for_a_goal(
     столько же, сколько согласие, а три попытки на смену умножают счёт.
     """
     before_calls, before_cost = _cost_totals(agent)
-    candidate = check = ""
+    candidate = check = act = ""
     for _attempt in range(goal_pick_attempts()):
         try:
             proposed = next_goal()
@@ -294,9 +300,10 @@ def _ask_for_a_goal(
         if asked and asked != current_goal:
             candidate = asked
             check = str(getattr(proposed, "success_check", "") or "").strip()
+            act = str(getattr(proposed, "action", "") or "").strip()
             break
     after_calls, after_cost = _cost_totals(agent)
-    return (candidate, check,
+    return (candidate, check, act,
             max(0, after_calls - before_calls), max(0, after_cost - before_cost))
 
 
@@ -342,6 +349,7 @@ def run_campaign(
     #: без смены критерия судила бы новую работу по чужой мерке — это хуже
     #: отсутствия мерки: неверная проверка выглядит как проверка.
     current_success_check = config.success_check
+    current_goal_action = config.goal_action
     goal_switches = 0
     # Does the current no-progress streak contain repeat cycles? A streak of
     # pure priority-0 observations means the world was checked and found
@@ -362,11 +370,11 @@ def run_campaign(
         попытка убивала прогон на любом молчании модели.
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
-        nonlocal current_success_check, llm_calls_used, cost_units_used
+        nonlocal current_success_check, current_goal_action, llm_calls_used, cost_units_used
         limit = config.max_goal_switches
         if next_goal is None or (limit and goal_switches >= limit):
             return False
-        switched, switched_check, spent_calls, spent_cost = _ask_for_a_goal(
+        switched, switched_check, switched_action, spent_calls, spent_cost = _ask_for_a_goal(
             agent, next_goal, current_goal, cycle)
         llm_calls_used += spent_calls
         cost_units_used += spent_cost
@@ -375,6 +383,7 @@ def run_campaign(
         goal_switches += 1
         previous_goal, current_goal = current_goal, switched
         current_success_check = switched_check
+        current_goal_action = switched_action
         # Новая цель — новая тема: память о повторах прежней темы не должна
         # объявлять повтором первый же шаг по новой.
         attempted_signatures.clear()
@@ -566,7 +575,7 @@ def run_campaign(
                     signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
             if config.goal_first and current_goal and not config.dry_run:
-                action = _goal_first(action, attempted_signatures)
+                action = _goal_first(action, attempted_signatures, current_goal_action)
             elif (action.priority <= 0 and config.pursue_goal_when_idle and not config.dry_run
                     and current_goal and PURSUE_GOAL not in attempted_signatures):
                 action = _pursue_goal_action(action)

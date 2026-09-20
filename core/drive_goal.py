@@ -52,6 +52,8 @@ class DriveGoal:
     success_check: str = ""
     drive: str = ""
     reason: str = ""
+    #: Действие, которым эта цель делается (пусто — заход агента на цель).
+    action: str = ""
 
 
 def _load_state(root: Path) -> dict[str, Any]:
@@ -227,6 +229,33 @@ def _problem(goal: str, root: Path, success_check: str = "") -> str:
     return ""
 
 
+def _observation_goal(root: Path) -> DriveGoal | None:
+    """Непонятное разбирает штатный подъём (`explain_causal_observation`), не проза.
+
+    Суточный прогон 2026-09-19/20: модель сама придумывала, где искать, лезла в
+    data/charter_decisions.jsonl (детекторов там нет) и 230 раз отвечала
+    «данных нет». Прозаический разбор не закрывает наблюдение ничем: закрывает
+    его только заявка с конкурирующими объяснениями, а её пишет это действие.
+    """
+    try:
+        from core.causal_climb_action import unexplained_observations
+
+        naked = unexplained_observations(root)
+    except Exception:  # noqa: BLE001 — без лестницы драйв просто молчит
+        return None
+    if not naked:
+        return None
+    first = naked[0]
+    return DriveGoal(
+        status="proposed",
+        goal="Объяснить наблюдение о себе: " + str(first.observed_mismatch)[:400],
+        success_check=("в data/causal_claims.jsonl появилась заявка по отпечатку "
+                       f"{first.fingerprint} с двумя конкурирующими объяснениями и предсказаниями"),
+        drive="uncertainty",
+        action="explain_causal_observation",
+    )
+
+
 def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = None,
                        attempts: int = 3) -> DriveGoal:
     root = Path(workspace)
@@ -235,7 +264,11 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     state = _load_state(root)
     drive, state = choose_drive(drives, state, now)
     report = DriveGoal(status="declined", reason="ни один драйв не выше порога содержания")
-    if drive is not None:
+    if drive == "uncertainty":
+        report = _observation_goal(root) or report
+        if report.status == "proposed":
+            state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
+    elif drive is not None:
         feedback = ""
         for _ in range(max(1, attempts)):
             try:
@@ -267,13 +300,17 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
 if __name__ == "__main__":  # pragma: no cover — ручной осмотр
     import sys
 
+    # Ядро не зависит от точки входа (INV-1): прежний осмотр импортировал
+    # `agent_tick` и ломал инвариант слоёв (внесено 2026-09-19 вместе с шагом 2,
+    # найдено полным прогоном 2026-09-20). Роутер собирается здесь же.
+    from dotenv import load_dotenv
+
+    from core.model_router import ModelRouter
+
     ws = Path(".")
     if "--dry" in sys.argv:
         d = compute_drives(ws)
         print(choose_drive(d, _load_state(ws), datetime.now(timezone.utc))[0])
     else:
-        sys.path.insert(0, str(ws.resolve()))
-        from agent_tick import _charter_goal_router, _ensure_env_loaded
-
-        _ensure_env_loaded(ws)
-        print(propose_drive_goal(_charter_goal_router(ws).for_role("planner"), ws))
+        load_dotenv(ws / ".env")
+        print(propose_drive_goal(ModelRouter.from_env().for_role("planner"), ws))

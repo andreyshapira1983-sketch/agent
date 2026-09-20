@@ -323,8 +323,15 @@ def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | No
         run_id=str(getattr(episode, "run_id", "") or ""),
         defect_signals=signals,
         evidence_refs=tuple(getattr(episode, "source_labels", None) or ()),
+        # Адрес сигналов — в самом наблюдении. Суточный прогон 2026-09-19/20:
+        # 14 наблюдений из 15 не называли файла, агент по аналогии лез в
+        # data/charter_decisions.jsonl (там четыре поля и ни одного детектора) и
+        # 230 задач подряд честно отвечал «данных нет».
         observed_mismatch=(
             f"детекторы {', '.join(signals)} при завершении {completion}; "
-            "объяснения не выдвинуты, причина не доказана"
+            "объяснения не выдвинуты, причина не доказана. Сигналы записаны в "
+            "data/episodic_memory.jsonl (payload.defect_signals) у эпизода "
+            f"{getattr(episode, 'id', '') or ''!s}; событие детектора — в "
+            f"logs/trace_{trace_id}.jsonl"
         ),
     )
