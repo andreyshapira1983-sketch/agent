@@ -459,6 +459,19 @@ _SEARCH_PLACE_RE = re.compile(
 )
 
 
+#: НАЙДЕННОЕ — не предмет отсутствия. Живой прогон 2026-09-20 (задача про
+#: RFC 9110): «упоминаний определения не найдено: поиск дал три совпадения
+#: (core/injection_guard.py, docs/CODE_NOTES.md, tests/…), но ни одно не
+#: содержит формулировки» — именами НАЙДЕННЫХ файлов утверждение и объявили
+#: ложью. Всё, что стоит после слова о находке, — перечень найденного;
+#: отсутствует то, что названо до него.
+#: Конец предложения — точка С ПРОБЕЛОМ: точка внутри `core/loader.py` обрывала
+#: вырезание на первом же имени файла (замер 2026-09-20).
+_FOUND_MATERIAL_RE = re.compile(
+    r"(?:совпадени\w*|результат\w*|matches|match|hits|найден\w*|found)\b(?:(?!\.\s)[^;\n])*",
+    re.IGNORECASE)
+
+
 def absence_subjects(claim: str) -> set[str]:
     """Явно названные предметы утверждения об отсутствии.
 
@@ -475,6 +488,7 @@ def absence_subjects(claim: str) -> set[str]:
         if _ABSENCE_ASSERTION_RE.search(_own_voice(part)) or not _PRESENCE_RE.search(part)
     ]
     text = _SEARCH_PLACE_RE.sub(" ", " , ".join(kept))
+    text = _FOUND_MATERIAL_RE.sub(" ", text)
     named ={m.group(1).lower() for m in _NAMED_SUBJECT_RE.finditer(text)}
     return named | salient_literals(text)
 

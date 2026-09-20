@@ -269,3 +269,18 @@ def test_a_question_is_not_a_proposition() -> None:
     assert _subject_value("What is a plasma") is None, "вопросительный предмет — не предмет"
     assert _subject_value("Entropy is a measure of disorder") == ("entropy", "a measure of disorder")
     assert _subject_value("Энтропия это мера беспорядка") == ("энтропия", "мера беспорядка")
+
+
+def test_what_the_search_found_is_not_what_is_missing() -> None:
+    """Живой прогон 2026-09-20 (RFC 9110): «упоминаний определения не найдено:
+    поиск дал три совпадения (core/injection_guard.py, docs/CODE_NOTES.md,
+    tests/…), но ни одно не содержит формулировки» — именами НАЙДЕННЫХ файлов
+    верное утверждение и объявили ложью, эпизод не попал в опыт."""
+    from core.verifier_absence import absence_subjects
+
+    found_list = ("В рабочей папке docs/ и knowledge/ упоминаний именно этого определения не "
+                  "найдено: поиск «RFC 9110» дал три совпадения (core/injection_guard.py, "
+                  "docs/CODE_NOTES.md, tests/test_an_email.py), но ни одно не содержит формулировки")
+    assert absence_subjects(found_list) == set()
+    assert "data_v2" in absence_subjects("Файла data_v2.csv нет в рабочей папке")
+    assert "parse_config" in absence_subjects("Функции parse_config нет в core/loader.py")
