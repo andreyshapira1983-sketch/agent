@@ -86,6 +86,29 @@ def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence |
     return None
 
 
+#: Причины, которые НЕ доказывают лжи: улика просто не подпирает утверждение.
+#:
+#: Замечание оператора 2026-09-21: «у него то восемь из двенадцати, то семь из
+#: десяти, и никогда десять из десяти — он никогда не уверен». Замер по чату
+#: того вечера: 53 ответа с хвостом проверки, ПОЛНЫХ ровно два, суммарно 377
+#: утверждений из 549. Клеймо `claim-refuted` стояло 37 раз; пять взятых
+#: наугад образцов проверены руками, и все пять оказались ИСТИННЫМИ докладами
+#: агента о собственной работе: «прогон завершился exit_code 1, passed 0,
+#: failed 2», «ворота одобрения вернули unavailable для file_write».
+#:
+#: Механизм: отличительные слова утверждения обязаны дословно встретиться в
+#: вырезке улики; агент ссылался на самое близкое, что у него было, улика по
+#: теме верная, а его точных слов в ней нет — и вердикт становился `refuted`.
+#: То есть честный доклад о своей неудаче получал клеймо лжи.
+#:
+#: Различение назвал сам агент, когда с ним об этом спорили:
+#: `absence_refuted_by_evidence` — настоящее опровержение (сказал «ничего
+#: нет», а улика показывает, что есть), и такие коды остаются ложью. А
+#: `cited_literal_absent` доказывает только одно — что слов нет в вырезке.
+#: Между «улика не содержит этих слов» и «утверждение ложно» лежит пропасть.
+_UNSUPPORTED_REASONS: frozenset[str] = frozenset({"cited_support_missing"})
+
+
 def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
@@ -330,6 +353,29 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 verdict = "topic_supported_but_claim_unverified"
                 topic_supported += 1
                 annotated = annotated.rstrip() + " [absence-unverifiable]"
+            elif chunk_reason is not None and chunk_reason.code in _UNSUPPORTED_REASONS:
+                # Та же полярность, применённая в ДРУГУЮ сторону: «в вырезке
+                # улики нет этих слов» — не разновидность доказанной лжи.
+                #
+                # И НЕ разновидность выдуманной ссылки. Первая редакция этой
+                # правки (2026-09-21, час спустя) увела такие куски в
+                # `cited_but_unmatched` — а `core/unsupported_claims.py`
+                # считает именно этот счётчик ФАБРИКАЦИЕЙ цитат, и фабрикация
+                # терминальна: ответ не отправляется вовсе. Живая цена: два
+                # ответа подряд уничтожены целиком, человек получил канцелярскую
+                # записку вместо работы, причём один раз — из-за ОДНОЙ ссылки
+                # на восемь утверждений.
+                #
+                # Разница существенная. Выдуманная ссылка НЕ РАЗРЕШАЕТСЯ НИ ВО
+                # ЧТО: источника нет. Здесь источник есть, он открыт и прочитан,
+                # в нём просто нет дословных слов утверждения. Первое — ложь о
+                # происхождении, второе — нехватка подпорки.
+                verdict = "topic_supported_but_claim_unverified"
+                topic_supported += 1
+                for raw, rewrite in topic_only_replacements:
+                    annotated = annotated.replace(raw, rewrite)
+                annotated = annotated.rstrip() + " [улика-без-этих-слов]"
+                chunk_reason = None
             elif chunk_reason is not None:
                 # Полярность: доказанная ложь — не разновидность «не подтверждено»
                 # (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).

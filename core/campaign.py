@@ -30,6 +30,7 @@ pass; tests inject deterministic fakes and assert on the real record shapes.
 """
 from __future__ import annotations
 
+import inspect
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -38,7 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from core.best_next_action import BestNextAction
+from core.best_next_action import GOAL_GROUNDS, BestNextAction
 from core.campaign_io import (
     _cost_totals,
     _default_execute_action,
@@ -177,8 +178,15 @@ def _pursue_goal_action(idle: BestNextAction, reason: str = "") -> BestNextActio
     )
 
 
-def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = "") -> BestNextAction:
-    """Режим «цель первой» (CampaignConfig.goal_first): поломка — меню, иначе цель."""
+def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = "",
+                goal_is_self: bool = False) -> BestNextAction:
+    """Режим «цель первой» (CampaignConfig.goal_first): поломка — меню, иначе цель.
+
+    `goal_is_self` только НАЗЫВАЕТ происхождение цели и ничего не решает:
+    до 2026-09-21 здесь стояло `operator_goal` у всякой цели, и сводка
+    докладывала человеку его цели там, где он не ставил ни одной.
+    """
+    grounds = "self_goal" if goal_is_self else "operator_goal"
     if action.severity in ("critical", "high"):
         return action
     if goal_action and goal_action not in attempted:
@@ -186,14 +194,35 @@ def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = 
             action=goal_action, title="Work on the chosen goal by its own action",
             severity="medium", priority=1,
             reason=f"goal first: the goal names {goal_action!r} as the work",
-            risk="reversible", grounds="operator_goal", decided_by="goal_first")
+            risk="reversible", grounds=grounds, decided_by="goal_first")
     if not goal_action and PURSUE_GOAL not in attempted:
         return _pursue_goal_action(action, "goal first: the goal itself is the work; the menu would "
                                            f"have taken {action.action!r} ({action.grounds})")
     return BestNextAction(
         action="observe", title="The goal had its pass", severity="none", priority=0,
         reason="goal first: the goal had its pass this cycle series; the next goal comes from the drives",
-        grounds="operator_goal", decided_by="goal_first")
+        grounds=grounds, decided_by="goal_first")
+
+
+def _call_gather(gather, agent, workspace, approval_inbox, **kwargs):
+    """Позвать сборщик сигналов, отдав ему ТОЛЬКО понятные ему доводы.
+
+    До 2026-09-21 здесь стояла лесенка из `try/except TypeError`: каждый новый
+    довод добавлял ступеньку, и добавление `goal_is_self` сразу это показало —
+    сборщик, не знающий нового имени, проваливался на две ступени вниз и терял
+    `exhausted_actions`, то есть исчерпанные действия переставали доезжать до
+    выбора (поймано тестами про исчерпанное действие). Подпись спрашивается
+    один раз у самого сборщика: чужой сборщик получает то, что умеет принять,
+    и ничего не теряет по дороге.
+    """
+    try:
+        params = inspect.signature(gather).parameters
+    except (TypeError, ValueError):
+        params = None
+    if params is not None and not any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        kwargs = {k: v for k, v in kwargs.items() if k in params}
+    return gather(agent, workspace, approval_inbox, **kwargs)
 
 
 def _repeat_reason(action_name, hit_ceiling, failed_in_a_row=0):
@@ -591,22 +620,22 @@ def run_campaign(
                 or (name not in _SUBJECT_AWARE_ACTIONS and steps >= 1)
             )
             try:
-                signals = gather(agent, workspace, approval_inbox,
-                                 goal=current_goal,
-                                 exhausted_actions=exhausted_actions)
+                signals = _call_gather(
+                    gather, agent, workspace, approval_inbox,
+                    goal=current_goal, goal_is_self=config.goal_is_self,
+                    exhausted_actions=exhausted_actions)
             except TypeError:
-                try:
-                    signals = gather(agent, workspace, approval_inbox,
-                                     goal=current_goal)
-                except TypeError:
-                    signals = gather(agent, workspace, approval_inbox)
+                signals = gather(agent, workspace, approval_inbox)
             action: BestNextAction = signals["action"]
             if config.goal_first and current_goal and not config.dry_run:
-                action = _goal_first(action, attempted_signatures, current_goal_action)
+                action = _goal_first(action, attempted_signatures, current_goal_action,
+                                     goal_is_self=config.goal_is_self)
             elif (action.priority <= 0 and config.pursue_goal_when_idle and not config.dry_run
                     and current_goal and PURSUE_GOAL not in attempted_signatures):
                 action = _pursue_goal_action(action)
-            goal_drove_cycles += int(action.grounds == "operator_goal")  # MIR-163
+            # Любая цель, а не только человеческая: счётчик про то, вела ли
+            # работу цель. Чья именно — сказано в основании.
+            goal_drove_cycles += int(action.grounds in GOAL_GROUNDS)  # MIR-163
             now = now_fn()
 
             if action.priority <= 0:

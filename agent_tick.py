@@ -1898,6 +1898,9 @@ def run_paced_campaign(
             pursue_goal_when_idle=pursue_goal_when_idle,
             # От драйвов цель — один заход: выполненная цель сменяется сразу,
             # а не после трёх пустых циклов.
+            # Здесь известна правда: --goal даёт цель человека, драйвы и
+            # хартия — его собственную (см. GOAL_GROUNDS).
+            goal_is_self=bool(drive_goals or charter_goals),
             **({"max_idle_streak": 1, "goal_first": True, "goal_action": goal_action}
                if drive_goals else {}),
         )

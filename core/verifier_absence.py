@@ -92,8 +92,38 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     if not absent:
         return None
     from .verifier_models import ClaimReason
+    # ПРИПИСЫВАНИЕ или НЕХВАТКА ПОДПОРКИ — разные вещи, и до 2026-09-21 они
+    # шли под одним кодом.
+    #
+    # Приписывание: утверждение называет ЧУЖОЙ файл, а ссылается на другой,
+    # где этого нет. «Producer живёт в core/self_build_memory.py
+    # [file:core/loop.py]» — источник не говорит того, что ему приписали.
+    # Это ложь о происхождении, и решение оператора держать её как
+    # опровержение остаётся в силе.
+    #
+    # Нехватка подпорки: утверждение про ТОТ САМЫЙ источник, на который
+    # ссылается, просто дословных слов в вырезке нет — улика бывает про
+    # другое место файла. Живой случай той же ночи: честные доклады агента
+    # о собственных неудачах («прогон завершился exit_code 1») клеймились
+    # ложью двадцать раз за вечер.
+    #
+    # Различитель: назван ли в пропавших литералах ПУТЬ, отличный от
+    # цитируемого источника. Назван — приписывание; не назван — нехватка.
+    cited = (ev.source_id or "").split(":", 1)[-1].replace("\\", "/").lower()
+    foreign = [
+        lit for lit in absent
+        if "/" in lit and "." in lit.rsplit("/", 1)[-1]
+        and lit.replace("\\", "/").lower() not in cited
+    ]
+    # ЧИСЛО, которого улика не печатала, — тоже ложь, а не нехватка подпорки.
+    # Прогон напечатал 1.142...e+26, а в ответе стоит 9.999...e+26: источник
+    # тот самый, путей в утверждении нет, и по одному лишь правилу про чужой
+    # файл это проскочило бы как «не подтверждено». Поймано прогоном
+    # (tests/test_two_runs_of_one_tool_are_one_source.py), а не рассуждением.
+    if not foreign:
+        foreign = [lit for lit in absent if any(ch.isdigit() for ch in lit)]
     return ClaimReason(
-        code="cited_literal_absent",
+        code="cited_literal_absent" if foreign else "cited_support_missing",
         expected=", ".join(sorted(absent)[:3]),
         actual="",
         explanation="утверждение называет то, чего нет в цитируемой улике",
