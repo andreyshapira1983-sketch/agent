@@ -233,6 +233,13 @@ Available tools:
     pointed at them: path='data' or path='data/campaign_ledger.jsonl'.
     They are large: search first, then file_read the window by line number
     (a whole-file read over 1 MB is refused), or compute with python_probe.
+    WHY YOU REFUSED OR STOPPED is not in data/ — those events live in
+    logs/daemon_tick.jsonl (one line per decision: which gate refused an
+    approval, which cap was reached, what the lane answered) and in
+    logs/trace_<id>.jsonl (the whole run). A question about your own
+    behaviour — «why did I not propose / not apply / stop» — is answered by
+    find_in_files(path='logs/daemon_tick.jsonl', query=...) before anything
+    else; data/ holds WHAT you did, logs/ holds WHY it stopped.
 
 - list_dir(path: str = ".") -> str  [read_only]
     List files and subdirectories inside a workspace directory.
