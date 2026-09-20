@@ -622,3 +622,16 @@ def test_a_genuine_audit_ask_still_routes():
     """Улов не отдан: настоящая просьба об аудите идёт куда шла."""
     intent = route_operator_intent("Проведи аудит архитектуры и покажи разрывы")
     assert intent is not None and intent.kind == "architecture_audit"
+
+
+def test_a_why_question_about_approvals_is_not_the_list_command():
+    """Живой разговор 2026-09-20: «Почему сегодня утром твои одобренные заявки
+    не применились?» ушёл в `:approval-list all`, и вместо разбора агент
+    напечатал ящик. Причинный вопрос — не просьба показать список."""
+    from core.operator_intent_patterns import _matches_approval_status
+
+    assert not _matches_approval_status(
+        "почему сегодня утром твои одобренные заявки на правку кода не применились?")
+    assert not _matches_approval_status("why did the approved proposal not apply")
+    assert _matches_approval_status("покажи заявки, ожидающие одобрения")
+    assert _matches_approval_status("какие заявки ждут одобрения?")

@@ -1118,7 +1118,19 @@ _APPROVAL_CONSENT_REQUEST = (
 )
 
 
+#: Причинный вопрос — не просьба показать список. Живой разговор 2026-09-20:
+#: «Почему сегодня утром твои одобренные заявки не применились?» ушёл в команду
+#: `:approval-list all`, и вместо разбора агент напечатал ящик. «Покажи, какие
+#: заявки ждут одобрения?» — по-прежнему команда: там спрашивают СПИСОК.
+_CAUSAL_QUESTION = (
+    "почему", "отчего", "зачем", "по какой причине", "из-за чего",
+    "why ", "why?", "what caused", "how come",
+)
+
+
 def _matches_approval_status(text: str) -> bool:
+    if _has_any_loose(text, _CAUSAL_QUESTION):
+        return False
     if _has_any_loose(text, ("без одобр", "without approval", "no approval", "без явного")):
         return False
     # A consent-request aimed at the agent ("запроси моё подтверждение") must not
