@@ -44,8 +44,12 @@ from tools.base import Tool
 from tools.file_read import _is_credential_path
 
 _INPUT_MAX_FILES = 20
-_INPUT_MAX_BYTES = 2 * 1024 * 1024
-_INPUT_MAX_TOTAL = 8 * 1024 * 1024
+#: Потолок одного входа. 2 МБ не хватало на собственные журналы агента:
+#: живой разговор 2026-09-20 — `data/approval_inbox.jsonl` (2 435 380 байт)
+#: не принят как вход, и на вопрос «почему ты не правил свой код» агент
+#: ответил догадками, не сумев посчитать по ящику заявок.
+_INPUT_MAX_BYTES = 16 * 1024 * 1024
+_INPUT_MAX_TOTAL = 32 * 1024 * 1024
 
 #: Модули, чей импорт превращает замер в действие. Корни, не подстроки.
 _FORBIDDEN_MODULES = frozenset({
@@ -135,7 +139,12 @@ class PythonProbeTool(Tool):
             size = src.stat().st_size
             total += size
             if size > _INPUT_MAX_BYTES or total > _INPUT_MAX_TOTAL:
-                raise ValueError(f"inputs: {rel!r} exceeds the size limit for an experiment")
+                raise ValueError(
+                    f"inputs: {rel!r} is {size} bytes; the limit is "
+                    f"{_INPUT_MAX_BYTES} per file and {_INPUT_MAX_TOTAL} in total — "
+                    "narrow it first (find_in_files for the lines, file_read with "
+                    "start_line/end_line for a window) and compute over that"
+                )
             dest = Path(cwd) / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dest)

@@ -44,7 +44,9 @@ class FindInFilesTool(Tool):
         "Without `query`: the files whose NAME matches `name` (a glob such as "
         "'*Lebl*' or '*.txt'). Recursive under `path`; case-insensitive; "
         "`regex=true` treats query as a regular expression. A negative answer "
-        "states how many files were searched."
+        "states how many files were searched. YOUR OWN journals and memory "
+        "(logs/, data/) are skipped by a workspace-wide search — to search them "
+        "point `path` at them, e.g. path='data' or path='data/approval_inbox.jsonl'."
     )
     risk = "read_only"
 

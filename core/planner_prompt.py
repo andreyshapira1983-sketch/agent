@@ -227,6 +227,12 @@ Available tools:
     Case-insensitive. Use it BEFORE concluding that a file or a phrase is
     absent: its negative answer says how many files were searched, while
     an empty findstr output may just be a syntax error.
+    YOUR OWN journals and memory (logs/, data/) are skipped by a
+    workspace-wide search, so a question ABOUT YOURSELF — what you did,
+    which cycles ran, what waits in the approval inbox — needs `path`
+    pointed at them: path='data' or path='data/campaign_ledger.jsonl'.
+    They are large: search first, then file_read the window by line number
+    (a whole-file read over 1 MB is refused), or compute with python_probe.
 
 - list_dir(path: str = ".") -> str  [read_only]
     List files and subdirectories inside a workspace directory.
