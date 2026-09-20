@@ -311,6 +311,19 @@ def runtime_evidence_pool() -> list[Evidence]:
     ]
 
 
+def truth_excerpt(text: str) -> str:
+    """Выдержка БЕЗ вопроса опыта: всё после маркера — код, который ход написал сам.
+
+    Разделение внесено 2026-09-20: без кода гейт литералов считал имена
+    собственных переменных выдуманными, а с кодом внутри общей выдержки
+    вопрос опыта снова подтверждал бы его ответ (docs/CODE_NOTES.md, «The
+    experiment's question refuted its answer»).
+    """
+    from core.evidence import QUESTION_CODE_MARKER
+
+    return str(text or "").split(QUESTION_CODE_MARKER, 1)[0]
+
+
 def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | None:
     candidates = chain.by_kind(citation.expected_kind)  # type: ignore[arg-type]
     if citation.prefix == "runtime":

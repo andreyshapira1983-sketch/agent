@@ -49,10 +49,21 @@ def _probe_evidence():
 def test_the_excerpt_is_the_outcome_not_the_question():
     ev = _probe_evidence()
 
-    assert "has batched: False" in (ev.excerpt or "")
-    assert "itertools.batched" not in (ev.excerpt or ""), (
-        "код эксперимента — вопрос; в выдержке улики ему не место"
+    from core.evidence import QUESTION_CODE_MARKER
+    from core.verifier_utils import truth_excerpt
+
+    # 2026-09-20: договор уточнён, а не отменён. Код по-прежнему не улика
+    # ИСТИНЫ — гейты судят только часть до маркера. Но имя, которое ход сам
+    # написал (`f_gw`, `k_bt`), перестало быть «выдумкой»: за маркером его
+    # видит гейт литералов. Живой повод: три подряд content_refuted на
+    # собственных переменных расчёта.
+    outcome = truth_excerpt(ev.excerpt or "")
+    assert "has batched: False" in outcome
+    assert "itertools.batched" not in outcome, (
+        "код эксперимента — вопрос; истину по нему не судят"
     )
+    assert QUESTION_CODE_MARKER in (ev.excerpt or "")
+    assert "itertools.batched" in (ev.excerpt or "").split(QUESTION_CODE_MARKER, 1)[1]
 
 
 def test_the_measured_absence_is_not_refuted_by_its_own_question():

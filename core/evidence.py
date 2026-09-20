@@ -84,6 +84,10 @@ DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
 # log entries bounded even when a tool returns megabytes of text.
 MAX_EXCERPT_CHARS = 800
 
+#: Граница между исходом опыта и его ВОПРОСОМ (кодом). Всё после маркера —
+#: не улика истины: там живут имена, которые ход сам и написал.
+QUESTION_CODE_MARKER = "[QUESTION-CODE: the experiment's own code, not evidence of its answer]"
+
 
 # ---------------------------------------------------------------------------
 # Core dataclasses
@@ -254,7 +258,8 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     """
     if not isinstance(output, dict):
         return None
-    head = str(args.get("code") or output.get("code") or "").strip().splitlines()
+    code = str(args.get("code") or output.get("code") or "").strip()
+    head = code.splitlines()
     outcome = (
         f"exit_code: {output.get('exit_code')}\n"
         f"timed_out: {output.get('timed_out', False)}\n"
@@ -265,12 +270,21 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
         f"stdout:\n{output.get('stdout') or ''}\n"
         f"stderr:\n{output.get('stderr') or ''}"
     )
+    # Имена — из вопроса, истина — из исхода. Живой прогон 2026-09-20: имена
+    # собственных переменных расчёта (`f_gw`, `k_bt`) объявлялись выдуманными,
+    # потому что в выдержке был только вывод. Код приложен ОТДЕЛЬНОЙ частью за
+    # маркером: гейт литералов видит, что имя существует, а гейты истины эту
+    # часть отрезают (`core.verifier_utils.truth_excerpt`) — иначе вопрос снова
+    # начал бы подтверждать собственный ответ.
+    excerpt = _truncate(outcome, 520)
+    if code:
+        excerpt += f"\n{QUESTION_CODE_MARKER}\n" + _truncate(code, 240)
     return make_evidence(
         kind="tool_output",
         source_id="tool_output:python_probe",
         obtained_via="python_probe",
         claim=f"Measured outcome of a live experiment: {head[0][:80] if head else '?'}",
-        excerpt=outcome,
+        excerpt=excerpt,
     )
 
 

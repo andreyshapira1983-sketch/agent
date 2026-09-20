@@ -87,8 +87,16 @@ def test_a_task_file_named_but_not_given_is_copied_by_itself(tmp_path: Path):
     assert out["auto_inputs"] == ["data/numbers.txt"] and out["missing_inputs"] == []
 
 
-def test_a_file_over_the_limit_is_still_named_as_missing(tmp_path: Path):
-    """Пределы те же: что не влезло — названо, как раньше, и результатом не считается."""
+def test_a_file_over_the_limit_is_still_named_as_missing(tmp_path: Path, monkeypatch):
+    """Что не влезло — названо, и результатом не считается.
+
+    Проверяется ПРАВИЛО, а не число: 2026-09-20 потолок входа поднят с 2 МБ до
+    16 МБ, чтобы агент мог считать по собственным журналам, и прежние 3 МБ
+    перестали быть «слишком большими».
+    """
+    import tools.python_probe as probe_mod
+
+    monkeypatch.setattr(probe_mod, "_INPUT_MAX_BYTES", 1024 * 1024)
     ws = _workspace(tmp_path)
     (ws / "big.txt").write_bytes(b"x" * (3 * 1024 * 1024))
     out = PythonProbeTool(workspace_root=ws).run(code="print(len(open('big.txt').read()))")
@@ -138,10 +146,20 @@ def test_true_facts_of_a_run_are_not_refuted() -> None:
 
 
 def test_the_experiment_code_still_stays_out_of_the_evidence() -> None:
-    """Прежний договор цел: код — вопрос, а не ответ мира."""
+    """Прежний договор цел: код — вопрос, а не ответ мира.
+
+    2026-09-20 договор уточнён: код лежит за маркером `QUESTION-CODE` и не
+    участвует в суждении об истине (`truth_excerpt`), зато имена, которые ход
+    сам написал, перестали считаться выдуманными.
+    """
+    from core.evidence import QUESTION_CODE_MARKER
+    from core.verifier_utils import truth_excerpt
+
     excerpt = _probe_chain().evidences[0].excerpt
-    assert "import csv" not in excerpt
-    assert "inputs: [\"data.csv\"]" in excerpt
+    outcome = truth_excerpt(excerpt)
+    assert "import csv" not in outcome
+    assert "inputs: [\"data.csv\"]" in outcome
+    assert "import csv" in excerpt.split(QUESTION_CODE_MARKER, 1)[1]
 
 
 @pytest.mark.parametrize("claim", [

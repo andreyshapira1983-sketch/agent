@@ -527,10 +527,13 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     """Причина демоции, если улика содержит то, чего утверждение не нашло."""
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
-    if not absence_refuted_by_excerpt(chunk_text, ev.excerpt or ""):
+    from .verifier_utils import truth_excerpt
+
+    outcome = truth_excerpt(ev.excerpt or "")
+    if not absence_refuted_by_excerpt(chunk_text, outcome):
         return None
     present = sorted(
-        s for s in absence_subjects(chunk_text) if s in (ev.excerpt or "").lower()
+        s for s in absence_subjects(chunk_text) if s in outcome.lower()
     )
     from .verifier_models import ClaimReason
     return ClaimReason(

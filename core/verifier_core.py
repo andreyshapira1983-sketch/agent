@@ -46,6 +46,7 @@ from .verifier_utils import (
     match_citation,
     parse_citations,
     split_into_chunks,
+    truth_excerpt,
 )
 
 # Memory records whose provenance makes a citation to them independent
@@ -238,7 +239,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 # Silent by construction on every shape it does not recognise,
                 # so it can only ever remove a false `verified`, never create
                 # one.
-                arith = evaluate_claim_arithmetic(chunk_text, ev.excerpt or "")
+                arith = evaluate_claim_arithmetic(chunk_text, truth_excerpt(ev.excerpt or ""))
                 if arith.refutes:
                     strict_ok = False
                     chunk_reason = chunk_reason or ClaimReason(
@@ -279,7 +280,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                     strict_ok = False
                     chunk_reason = chunk_reason or _restated
                 if stat_claim and c.prefix not in {"user", "memory", "general-knowledge"}:
-                    excerpt = ev.excerpt or ""
+                    excerpt = truth_excerpt(ev.excerpt or "")
                     if stat_figures:
                         from .verifier_absence import _APPROXIMATION_RE
                         from .verifier_utils import _excerpt_supports_figures
