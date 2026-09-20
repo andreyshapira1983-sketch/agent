@@ -380,6 +380,30 @@ def _candidate_goal_names_missing(
     )
 
 
+#: Основания, означающие «это пришло от ЦЕЛИ». Их два, потому что цель
+#: бывает двух происхождений, и путать их — врать в отчёте.
+#:
+#: До 2026-09-21 различия не было: `grounds` у всякой цели равнялось
+#: `operator_goal`, кто бы её ни выбрал. Живой замер того вечера: оператор не
+#: ставил ни одной цели, а в сводке значилось «117 решений из 117 по
+#: операторской цели». Купился не только он — купился и читатель журналов,
+#: который эту сводку ему пересказал.
+#:
+#: Метка не косметическая, и её двух читателей нашёл сам агент, задав
+#: единственный за вечер вопрос: «а читается ли поле обратно?».
+#: `_partition_by_subject` освобождает по ней кандидата от сужения по
+#: предмету — то есть собственная цель агента получала защиту,
+#: предназначенную слову человека. `core/campaign.py` считает по ней, сколько
+#: циклов вела цель, — то есть сводка приписывала человеку то, чего он не
+#: ставил.
+#:
+#: Освобождение от сужения по предмету оставлено ОБОИМ видам нарочно:
+#: отнимать ли его у самовыбранной цели — отдельное решение, и протащить
+#: его молча внутри переименования значило бы спрятать от оператора ровно
+#: то, что он просил показать.
+GOAL_GROUNDS: frozenset[str] = frozenset({"operator_goal", "self_goal"})
+
+
 def _partition_by_subject(
     active: list[BestNextAction], goal_subject: str,
 ) -> tuple[list[BestNextAction], list[BestNextAction], list[BestNextAction]]:
@@ -397,7 +421,7 @@ def _partition_by_subject(
         if (
             candidate.severity in ("critical", "high")
             or candidate.target_path == goal_subject
-            or candidate.grounds == "operator_goal"
+            or candidate.grounds in GOAL_GROUNDS  # оба вида цели; см. GOAL_GROUNDS
         ):
             on.append(candidate)
         elif candidate.target_path is None:
@@ -409,6 +433,8 @@ def _partition_by_subject(
 
 def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
+    #: Цель выбрал САМ агент, а не назвал человек; см. `GOAL_GROUNDS`.
+    goal_is_self: bool = False,
     goal: str = "",
     #: Артефакт, О КОТОРОМ цель, — разрешает ВЫЗЫВАЮЩИЙ (`resolve_goal_subject`),
     #: потому что разрешение требует файловой системы, а таблица решений чистая.
@@ -470,10 +496,11 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
         if candidate is not None:
             candidates.append(replace(candidate, grounds=grounds))
 
-    admit(_candidate_engineering_task(goal), "operator_goal")
-    admit(_candidate_charter_document(goal), "operator_goal")
-    admit(_candidate_external_study(goal), "operator_goal")
-    admit(_candidate_own_issue_named_by_goal(goal, open_self_improvement_issues), "operator_goal")
+    goal_grounds = "self_goal" if goal_is_self else "operator_goal"
+    admit(_candidate_engineering_task(goal), goal_grounds)
+    admit(_candidate_charter_document(goal), goal_grounds)
+    admit(_candidate_external_study(goal), goal_grounds)
+    admit(_candidate_own_issue_named_by_goal(goal, open_self_improvement_issues), goal_grounds)
 
     admit(
         _candidate_daemon(heartbeat_missing, heartbeat_stale,
@@ -565,7 +592,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             fallback,
             decided_by="no_candidate",
             candidates_considered=0,
-            grounds="operator_goal" if emptied_by_goal else "observed_state",
+            grounds=goal_grounds if emptied_by_goal else "observed_state",
         )
 
     # Deterministic: highest priority wins; ties keep first-appended (which is

@@ -324,18 +324,70 @@ def truth_excerpt(text: str) -> str:
     return str(text or "").split(QUESTION_CODE_MARKER, 1)[0]
 
 
-def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | None:
-    candidates = chain.by_kind(citation.expected_kind)  # type: ignore[arg-type]
+def _search_output_evidence(chain: ProvenanceChain) -> list:
+    """Выдача `find_in_files` — тоже улика о названных в ней файлах.
+
+    Образец взят у соседа: в `match_citation` для ссылки `web` к кандидатам
+    так же добавляются попадания `web_search_hit`.
+
+    Живой случай 2026-09-21: агента попросили найти свои поломки. Он нашёл,
+    сослался как положено — `[file:core/x.py:871]`, — и ОДИННАДЦАТЬ из
+    двадцати двух утверждений вырезали как выдуманные цитаты. Причина: он
+    ИСКАЛ по файлам, а не открывал их, а поиск кладёт всю выдачу в одну
+    улику `tool_output:find_in_files`, которая для ссылки вида `file:` даже
+    не попадала в кандидаты. Мы требуем ссылок с файлом и строкой — и
+    наказывали за них, если строку нашли поиском. Поиск он звал 3099 раз
+    против 3508 чтений: половина работы была нецитируемой по построению.
+    """
+    return [ev for ev in chain.by_kind("tool_output")  # type: ignore[arg-type]
+            if getattr(ev, "obtained_via", "") == "find_in_files"]
+
+
+def _search_names_file(evidences: list, cited_body: str):
+    """Улика поиска, в чьей выдаче назван ЭТОТ файл, или None.
+
+    Выдача поиска перечисляет попадания как «путь:строка: текст», значит
+    путь, встретившийся в ней, — свидетельство об этом файле. Сверяется сам
+    путь, а не подстрока: иначе ссылка на `core/x.py` цеплялась бы за
+    упоминание `core/xyz.py`.
+    """
+    cited = str(cited_body).split(":", 1)[0].strip().replace("\\", "/").lower()
+    if not cited:
+        return None
+    for ev in evidences:
+        haystack = str(getattr(ev, "excerpt", "") or "").replace("\\", "/").lower()
+        if cited in haystack:
+            return ev
+    return None
+
+
+def _candidates_for(citation: Citation, chain: ProvenanceChain) -> list:
+    """Улики, среди которых ищется эта ссылка.
+
+    `runtime` — measured, not gathered: the process reading its own
+    interpreter, version, pid and cwd. Its own execution is the proof, and
+    until 2026-08-14 there was no channel through which it could be offered.
+
+    `web` добирает попадания поиска в интернете, `file` — выдачу поиска по
+    файлам: и то и другое свидетельства о предмете ссылки, добытые иначе,
+    чем прямым открытием.
+    """
+    candidates = list(chain.by_kind(citation.expected_kind))  # type: ignore[arg-type]
+    extra: list = []
     if citation.prefix == "runtime":
-        # Measured, not gathered: the process reading its own interpreter,
-        # version, pid and cwd. Its own execution is the proof, and until
-        # 2026-08-14 there was no channel through which it could be offered.
-        candidates = list(candidates) + runtime_evidence_pool()
-    if citation.prefix == "web":
-        search_hits = chain.by_kind("web_search_hit")  # type: ignore[arg-type]
-        if search_hits:
-            seen: set[str] = {ev.id for ev in candidates}
-            candidates = list(candidates) + [ev for ev in search_hits if ev.id not in seen]
+        extra = runtime_evidence_pool()
+    elif citation.prefix == "web":
+        extra = list(chain.by_kind("web_search_hit"))  # type: ignore[arg-type]
+    elif citation.prefix == "file":
+        extra = _search_output_evidence(chain)
+    if not extra:
+        return candidates
+    seen = {ev.id for ev in candidates}
+    return candidates + [ev for ev in extra if ev.id not in seen]
+
+
+def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | None:
+    candidates = _candidates_for(citation, chain)
     if not candidates:
         return None
     if not citation.body:
@@ -353,6 +405,9 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
         for ev in candidates:
             if same_file(citation.body, ev.source_id):
                 return ev
+        hit = _search_names_file(_search_output_evidence(chain), citation.body)
+        if hit is not None:
+            return hit
     for ev in candidates:
         # Every other prefix keeps the substring rule — a web query or a
         # memory id is a string, not a path.

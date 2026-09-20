@@ -84,7 +84,7 @@ def _action_focused_goal(goal: str, action: BestNextAction) -> str:
 
 def _default_gather_signals(
     agent: Any, workspace: Any, approval_inbox: Any, goal: str = "",
-    exhausted_actions: Any = None,
+    exhausted_actions: Any = None, goal_is_self: bool = False,
 ) -> dict[str, Any]:
     from core.alert_ack import AlertAckStore
     from core.approval_inbox import ApprovalInbox
@@ -128,6 +128,7 @@ def _default_gather_signals(
 
     action = select_best_next_action(
         goal=goal,
+        goal_is_self=goal_is_self,
         goal_subject=resolve_goal_subject(
             goal, exists=_here, command_module=command_module
         ),

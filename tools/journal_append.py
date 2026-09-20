@@ -3,13 +3,113 @@ from pathlib import Path
 from core.state_integrity import append_state_jsonl_unlocked, state_file_lock
 from tools.base import Tool
 
+#: Журналы, у которых ЕСТЬ читатель, и что этот читатель требует от записи.
+#:
+#: Живой вечер 2026-09-20/21, четыре случая подряд одной формы. Агент писал
+#: верное содержание в склад, которого никто не открывает: сначала в
+#: `source_registry.jsonl` («там же про источники»), потом в им же созданный
+#: `defect_registry.jsonl`, потом в им же созданный `judgements.jsonl`, потом
+#: снова в `defect_registry.jsonl` — и каждый раз инструмент отвечал
+#: `appended: True`. Запись была, работы не было.
+#:
+#: Правило он знал и сам его повторял вслух: склад определяется ЧИТАТЕЛЕМ, а
+#: не названием. Но знание жило в разговоре, а рука писала по названию.
+#: Поэтому знание переехало сюда, к самой руке.
+_KNOWN_JOURNALS: dict[str, dict] = {
+    "data/self_improvement_issues.jsonl": {
+        "reader": "core/campaign_io.py:114 — сборка контекста КАЖДОГО цикла",
+        "required": ("fingerprint", "title"),
+        "lists": ("evidence", "related_files"),
+    },
+    "data/episodic_memory.jsonl": {
+        "reader": "core/loop_memory_read.py — опыт подаётся в каждый ответ",
+        "required": ("goal", "question", "summary"),
+        "lists": ("tags", "tools_used"),
+    },
+    "data/persistent_memory.jsonl": {
+        "reader": "core/loop_memory_read.py — постоянная память",
+        "required": ("text",),
+        "lists": (),
+    },
+    "data/assumptions.jsonl": {
+        "reader": "core/assumption_registry.py",
+        "required": ("text",),
+        "lists": (),
+    },
+    "data/causal_claims.jsonl": {
+        "reader": "core/causal_store.py",
+        "required": ("claim",),
+        "lists": (),
+    },
+    "data/chat_outbox.jsonl": {
+        "reader": "панель оператора (live_view) — разговор втроём",
+        "required": ("author", "text"),
+        "lists": (),
+    },
+}
+
+#: Слова-заглушки. Поле с таким значением — это дырка, а не запись.
+#:
+#: Тот же вечер: решение о собственном весе было записано с полем
+#: `decision: PENDING — filled from the measured file contents in this turn`.
+#: Запись завели затем, чтобы прибор перестал врать молча, — и она молчала
+#: о самом решении.
+_PLACEHOLDERS: frozenset[str] = frozenset({
+    "pending", "todo", "tbd", "fixme", "xxx", "n/a", "na", "none", "-", "—",
+    "заполнить", "уточнить", "позже",
+})
+
+
+def _refuse_placeholders(record: dict) -> None:
+    """Поле-заглушка — дырка, а не запись, и писать её значит терять работу."""
+    for key, value in record.items():
+        if isinstance(value, str) and value.strip().casefold().rstrip(".!") in _PLACEHOLDERS:
+            raise ValueError(
+                f"поле {key!r} осталось заглушкой ({value.strip()!r}): "
+                "запись без него ничего не говорит читателю"
+            )
+        if isinstance(value, str) and value.strip().casefold().startswith(
+                tuple(w + " " for w in _PLACEHOLDERS)):
+            raise ValueError(
+                f"поле {key!r} начинается заглушкой ({value.strip()[:40]!r}): "
+                "допиши настоящее значение"
+            )
+
+
+def _refuse_broken_shape(path: str, record: dict, contract: dict) -> None:
+    """Запись, которую читатель молча отбросит, лучше не писать вовсе.
+
+    Читатель `self_improvement_issues.jsonl` отбрасывает запись без непустого
+    `fingerprint` и раскладывает строку в поле-списке ПОСИМВОЛЬНО: улика из
+    105 знаков стала 105 элементами, первый — буква `d` (замер 2026-09-20).
+    Оба отказа были молчаливыми, и оба стоили целого вечера.
+    """
+    missing = [f for f in contract["required"]
+               if not str(record.get(f) or "").strip()]
+    if missing:
+        raise ValueError(
+            f"{path}: читатель ({contract['reader']}) отбросит эту запись — "
+            f"не заполнено обязательное: {', '.join(missing)}"
+        )
+    flattened = [f for f in contract["lists"] if isinstance(record.get(f), str)]
+    if flattened:
+        raise ValueError(
+            f"{path}: поля {', '.join(flattened)} читаются как СПИСОК строк, "
+            "а переданы строкой — читатель разложит её посимвольно"
+        )
+
 
 class JournalAppendTool(Tool):
     name = "journal_append"
     description = (
         "Append a single JSON record to a data/*.jsonl journal file through the "
         "state-file lock. The path must live under data/ and end in .jsonl; the "
-        "record must be a dict. Boundary violations raise ValueError WITHOUT writing."
+        "record must be a dict. Boundary violations raise ValueError WITHOUT writing. "
+        "The result names the READER of that journal; a journal nobody reads "
+        "comes back with a warning, because a record no one opens is not work. "
+        "For a known journal the record is checked against what its reader "
+        "requires (missing required field, or a string where a list is read), "
+        "and a field left as a placeholder (PENDING, TODO) is refused."
     )
     # Append-only store; reversibility is guaranteed by the append-only journal semantics (no delete exists)
     risk = "reversible"
@@ -49,9 +149,27 @@ class JournalAppendTool(Tool):
         if not isinstance(record, dict):
             raise ValueError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
+        contract = _KNOWN_JOURNALS.get(str(path))
+        _refuse_placeholders(record)
+        if contract:
+            _refuse_broken_shape(str(path), record, contract)
         with state_file_lock(target):
             append_state_jsonl_unlocked(target, [record])
-        return {"path": path, "appended": True}
+        result = {"path": path, "appended": True}
+        # Кто это прочтёт — часть ответа, а не украшение. Раньше инструмент
+        # отвечал `appended: True` и на запись в файл, которого не открывает
+        # никто, и отличить сделанную работу от потраченной было нельзя.
+        if contract:
+            result["reader"] = contract["reader"]
+        else:
+            result["reader"] = None
+            result["warning"] = (
+                f"никто не читает {path}: этот журнал не связан ни с одним "
+                f"читателем в коде. Склад определяется читателем, а не "
+                f"названием. Журналы с читателем: "
+                + ", ".join(sorted(_KNOWN_JOURNALS))
+            )
+        return result
 
     def validate_output(self, output):
         reasons = []
