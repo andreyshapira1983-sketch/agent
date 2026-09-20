@@ -21,6 +21,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -93,6 +94,30 @@ def _episode_wall(p: dict) -> str:
     return "не допущен по иной причине"
 
 
+def _nerve_map_verdict() -> list[str]:
+    """Согласна ли карта нервной системы с телом — именами, а не счётом.
+
+    Почему это здесь, а не только в общем прогоне тестов. Перепись
+    `knowledge/maps/cns_census.json` покраснела 2026-09-20 в 12:36, когда в
+    синтез вшили узел `_rewrite_if_off_topic` и не внесли его в карту. Сигнал
+    пришёл немедленно и правильный. Его не услышали: полный прогон дал семь
+    падений, шесть из них нашлись и на старом коммите, и вывод был сделан по
+    СЧЁТУ — «шесть там, шесть здесь, значит не моё». Одно из шести было моим.
+
+    Счёт падений скрывает подмену состава. Поэтому здесь печатаются имена.
+    """
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly",
+             "-k", "cns", "--no-header", "-rf"],
+            capture_output=True, text=True, timeout=300, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        return [f"проверить не удалось: {type(err).__name__}"]
+    return [ln.split("::", 1)[-1].split(" ")[0]
+            for ln in done.stdout.splitlines() if ln.startswith("FAILED")]
+
+
 def main(days: float) -> None:
     steps, episodes, goals, refutations = _rows(days)
     print(f"=== за последние {days:g} сут ===\n")
@@ -115,6 +140,12 @@ def main(days: float) -> None:
     print(f"\nЦЕЛИ, проверенные по следу в мире: {sum(goals.values())}")
     for verdict, n in goals.most_common():
         print(f"  {n:4d}  {verdict}")
+
+    broken = _nerve_map_verdict()
+    print("\nКАРТА НЕРВНОЙ СИСТЕМЫ:",
+          "согласна с телом" if not broken else "РАСХОДИТСЯ С ТЕЛОМ")
+    for name in broken:
+        print(f"  ✗ {name}")
 
 
 if __name__ == "__main__":
