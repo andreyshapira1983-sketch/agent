@@ -381,6 +381,40 @@ def _deferred_choices(demanding: str) -> list[str]:
     return out
 
 
+#: Закавыченный кусок просьбы вместе с глаголом письма перед ним. Внутри
+#: кавычек бывает и предмет работы («создай файл «report.md»»), и просто речь
+#: («так и напиши «данных нет»»). Глагол забирается вместе с фразой: вырезать
+#: один предмет мало — «напиши» без предмета всё равно читается как «создай».
+_QUOTED_SPAN_RE = re.compile(
+    r"(?:\b(?:напиш|напис|скаж|ответ|отвеч|укаж|пиши|write|say|reply|answer|"
+    r"state|print)\w*\s+(?:что\s+|это\s+)?)?"
+    r"(«[^»\n]*»|\"[^\"\n]*\"|“[^”\n]*”)",
+    re.IGNORECASE,
+)
+
+
+def _without_quoted_prose(text: str) -> str:
+    """Просьба без закавыченных ФРАЗ; закавыченные имена файлов остаются.
+
+    Живой разговор 2026-09-20, 19:31: агент не ответил на читательский вопрос,
+    а потребовал уточнения — «the request mixes reading and changing over
+    several paths». Виновато оказалось правило доказательства, которое мостик
+    приклеивает к каждому вопросу: «Если данных нет — так и напиши «данных
+    нет»». Стебель «напиш» стоит в `_CREATE_STEMS`, действие стало `create`,
+    путей в вопросе было три — и просьба объявилась неоднозначной. Замерено:
+    тот же вопрос без правила уточнения не требует.
+
+    Различитель — предмет глагола. «Напиши «данных нет»» — предмет фраза, это
+    речь. «Создай файл «report.md»» — предмет имя файла, это работа. Потому
+    закавыченное вырезается только тогда, когда пути внутри нет.
+    """
+    def keep(match: re.Match[str]) -> str:
+        quoted = match.group(1)
+        return match.group(0) if paths_mentioned(quoted[1:-1]) else " "
+
+    return _QUOTED_SPAN_RE.sub(keep, text or "")
+
+
 def derive_completion_contract(
     question: str,
     *,
@@ -400,7 +434,7 @@ def derive_completion_contract(
     # фразы «…merely to make the test pass», стоявшей внутри запрета. Запрет при
     # этом никуда не девается — он остаётся в `unsupported_deliverables`, и
     # читается по ПОЛНОМУ тексту, а не по этому усечению.
-    demanding = demanding_text(text)
+    demanding = _without_quoted_prose(demanding_text(text))
     tokens = tuple(normalize_text(demanding).split())
     action = _action_for(tokens)
 
