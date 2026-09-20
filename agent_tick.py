@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import time
 import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -1762,6 +1763,37 @@ def _pick_next_charter_goal(workspace: Path) -> Any:
     return pick
 
 
+#: Сколько ждать, пока потребность дорастёт до порога. Драйв — величина
+#: времени: «сейчас ничего не нужно» не равно «делать больше нечего».
+#: Живой прогон 2026-09-20 13:29: все наблюдения закрыты, все области только
+#: что пройдены, заявка ждёт человека — выбор цели вернул пусто, и прогон вышел
+#: с кодом 3 через секунду после старта. Предметным драйвам (tau 3 ч) нужно
+#: около десяти минут, чтобы снова перевесить порог.
+_NEED_WAIT_SECONDS = 20 * 60
+
+
+def _wait_for_a_need(workspace: Path, *, pause_seconds: float,
+                     budget_seconds: float = _NEED_WAIT_SECONDS,
+                     sleep_fn: Any = time.sleep, now_fn: Any = time.monotonic) -> Any:
+    """Первая цель от драйвов; пустой выбор — не конец прогона, а ожидание."""
+    from core.campaign import goal_pick_attempts
+
+    deadline = now_fn() + max(0.0, budget_seconds)
+    waited = False
+    while True:
+        for _attempt in range(goal_pick_attempts()):
+            pick = _pick_next_drive_goal(workspace)
+            if pick:
+                return pick
+        if now_fn() >= deadline:
+            return None
+        if not waited:
+            print(f"[DRIVES] all needs below threshold; waiting up to {int(budget_seconds)}s "
+                  "for one to grow")
+            waited = True
+        sleep_fn(max(1.0, float(pause_seconds)))
+
+
 def _pick_next_drive_goal(workspace: Path) -> Any:
     """Следующая цель — от самого сильного драйва (core/drive_goal.py, шаг 3)."""
     try:
@@ -2165,14 +2197,9 @@ if __name__ == "__main__":
     _first_action = ""
     if args.campaign and args.drives:
         _ensure_env_loaded(ws)
-        _first = None
-        from core.campaign import goal_pick_attempts
-        for _attempt in range(goal_pick_attempts()):
-            _first = _pick_next_drive_goal(ws)
-            if _first:
-                break
+        _first = _wait_for_a_need(ws, pause_seconds=args.cycle_pause_seconds or 30)
         if not _first:
-            print("[DRIVES] no start goal; stopping honestly")
+            print("[DRIVES] no need grew within the waiting window; stopping honestly")
             sys.exit(3)
         goal, success_check = _first.goal, _first.success_check
         _first_action = str(getattr(_first, "action", "") or "")

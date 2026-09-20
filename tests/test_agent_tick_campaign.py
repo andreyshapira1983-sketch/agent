@@ -220,3 +220,38 @@ def test_drive_goals_feed_the_campaign(workspace: Path, monkeypatch):
                        drain_fn=lambda ws, **kw: None, drive_goals=True)
     assert seen["idle"] == 1 and seen["goal_first"] is True
     assert seen["next"] is not None and seen["next"]() == "from-drives"
+
+
+def test_an_empty_pick_waits_for_a_need_instead_of_stopping(monkeypatch):
+    """Живой прогон 2026-09-20 13:29: все наблюдения закрыты, все области только
+    что пройдены, заявка ждёт человека — выбор вернул пусто, и прогон вышел с
+    кодом 3 через секунду после старта. Драйв — величина времени: «сейчас
+    ничего не нужно» не равно «делать больше нечего»."""
+    import agent_tick
+
+    picks = iter(["", "", "", "", "", "", "цель от драйва"])
+    monkeypatch.setattr(agent_tick, "_pick_next_drive_goal", lambda _ws: next(picks, ""))
+    clock, slept = {"v": 0.0}, []
+
+    def _sleep(seconds):
+        slept.append(seconds)
+        clock["v"] += seconds
+
+    got = agent_tick._wait_for_a_need(Path("."), pause_seconds=30, budget_seconds=600,
+                                      sleep_fn=_sleep, now_fn=lambda: clock["v"])
+    assert got == "цель от драйва" and slept, "ждал, пока потребность дорастёт"
+
+
+def test_the_waiting_window_is_bounded(monkeypatch):
+    import agent_tick
+
+    monkeypatch.setattr(agent_tick, "_pick_next_drive_goal", lambda _ws: "")
+    clock, slept = {"v": 0.0}, []
+
+    def _sleep(seconds):
+        slept.append(seconds)
+        clock["v"] += seconds
+
+    got = agent_tick._wait_for_a_need(Path("."), pause_seconds=30, budget_seconds=90,
+                                      sleep_fn=_sleep, now_fn=lambda: clock["v"])
+    assert got is None and sum(slept) <= 120, "ожидание ограничено окном"
