@@ -97,7 +97,7 @@ WATCH: dict[str, int] = {
     "core/ingestion.py:ingest_web_topic": 155,
     "core/loop_verification.py:AgentLoopVerification._verify_draft": 165,
     "core/loop_run_tail.py:AgentLoopRunTail._finalize_run_tail": 203,
-    "core/loop_attempt.py:AgentLoopAttempt._run_attempt_loop": 434,  # +1 (2026-09-20): датчик согласованности судит по доводу ШАГА, когда план его несёт; словарь по прозе остался запасным путём.
+    "core/loop_attempt.py:AgentLoopAttempt._run_attempt_loop": 437,  # +3 (2026-09-20): журнал называет, чем судили согласованность (довод шага или запасной словарь) и сколько шагов пришли с доводом — иначе два способа неотличимы в записях.  # +1 (2026-09-20): датчик согласованности судит по доводу ШАГА, когда план его несёт; словарь по прозе остался запасным путём.
     "core/loop_verify_replan.py:AgentLoopVerifyReplan._verify_and_settle_answer": 385,  # +27 (2026-08-29, авторство агента): крючок настойчивости — helper исполнения шагов, одноразовый fallback иной формы и settled-выход; правило mem_8b36eb3c, ставшее механизмом
     #: 162 (2026-09-18, ревизия PR #333): расход стоячего гранта переведён на
     #: атомарную резервацию. Рост — не новая ветка, а объяснение при ней:

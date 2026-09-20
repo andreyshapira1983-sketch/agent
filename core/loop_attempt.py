@@ -330,9 +330,11 @@ class AgentLoopAttempt:
                 # форме своей таблицы; планировщик пишет `rationale` к каждому
                 # шагу, и с 2026-09-20 он доезжает сюда (core/planner.py).
                 _sources = list(st.planner_out.sources)
+                _with_rationale = sum(1 for s in _sources if s.get("rationale"))
+                _ra_mode = "rationale" if _with_rationale else "keywords"
                 _ra_report = (
                     check_by_rationale(_sources)
-                    if any(s.get("rationale") for s in _sources)
+                    if _with_rationale
                     else check_reasoning_actions(
                         st.planner_out.reasoning, [s["tool"] for s in _sources])
                 )
@@ -341,6 +343,12 @@ class AgentLoopAttempt:
                         "reasoning_action_mismatch",
                         {
                             **_ra_report.to_log_payload(),
+                            # Чем судили и сколько шагов пришли со своим
+                            # доводом: без этого поля нельзя отличить
+                            # структурную проверку от запасной словарной.
+                            "mode": _ra_mode,
+                            "steps_with_rationale": _with_rationale,
+                            "steps_total": len(_sources),
                             "attempt": st.attempt,
                         },
                     )
