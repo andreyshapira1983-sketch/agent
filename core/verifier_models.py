@@ -107,4 +107,32 @@ class VerificationReport:
             "malformed_output": self.malformed_output,
             "disclaimer_set": self.disclaimer is not None,
             "verdicts": [c.verdict for c in self.chunks],
+            # ПОЧЕМУ опровергнуто, а не только сколько. Замер 2026-09-20:
+            # `content_refuted` закрывает эпизоду вход в опыт раньше всех
+            # прочих осей и несли его 105 из 142 недопущенных эпизодов — а
+            # код причины в журнал не попадал вовсе. Установить его удалось
+            # только реконструкцией: цепочки улик собирались заново из трасс
+            # и пересуживались верификатором. Так нашлись `sum_mismatch`,
+            # сложивший `exit_code` с `duration_ms`, и
+            # `absence_refuted_by_evidence`, взявший предметом отсутствия
+            # перечисленное наличное. Мера, которая не записывает
+            # отвергнутое, не даёт себя перемерить.
+            "refutations": self._refutation_records(),
         }
+
+    #: Сколько опровержений попадает в запись. Причины повторяются, а журнал
+    #: читают целиком: пять разных кодов видно, тысяча одинаковых — шум.
+    _REFUTATIONS_LOGGED = 5
+
+    def _refutation_records(self) -> list[dict[str, str]]:
+        """Причина каждого опровержения: код, работа и само утверждение."""
+        out: list[dict[str, str]] = []
+        for chunk in self.chunks:
+            if chunk.verdict != "refuted" or chunk.reason is None:
+                continue
+            record = chunk.reason.to_log_payload()
+            record["claim"] = " ".join((chunk.text or "").split())[:160]
+            out.append(record)
+            if len(out) >= self._REFUTATIONS_LOGGED:
+                break
+        return out
