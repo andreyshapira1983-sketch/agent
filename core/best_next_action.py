@@ -828,10 +828,26 @@ def _candidate_open_self_improvement_issue(
         files = [str(item) for item in issue.get("related_files") or () if str(item)]
         if files:
             evidence.append("related files: " + ", ".join(files))
+        # Тяжесть берётся У ЗАПИСИ, а не прибивается здесь. Слово оператора
+        # 2026-09-20: «почини фильтр, пусть его собственные дефекты проходят».
+        # Замер: 117 решений из 117 по операторской цели, ноль по этому
+        # реестру, — потому что `_partition_by_subject` ниже оставляет в гонке
+        # только критическое, высокое, совпавшее с предметом цели или
+        # пришедшее из цели, а здесь стояла константа `medium`. Дверь для
+        # объективной помехи была, и её заварили одной строкой.
+        #
+        # Словарь записи закрыт на `high` (`IssueSeverity`), и `critical`
+        # сюда не приходит: авария — то, что видно снаружи, а не то, что
+        # запись сама о себе думает. Незнакомое слово читается как `medium`,
+        # то есть как прежнее поведение, поэтому старые записи не меняют
+        # своего веса ни на грамм.
+        severity = str(issue.get("severity") or "medium")
+        if severity not in {"low", "medium", "high"}:
+            severity = "medium"
         return BestNextAction(
             action=str(issue.get("action") or "improve_failure_to_idea_pipeline"),
             title=str(issue.get("title") or "Resolve the open self-improvement issue"),
-            severity="medium",
+            severity=severity,  # type: ignore[arg-type]
             priority=_P_SELF_IMPROVEMENT_FAILURE,
             reason=(
                 "A durable self-improvement issue remains unresolved; unrelated "
