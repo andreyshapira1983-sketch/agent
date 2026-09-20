@@ -99,9 +99,12 @@ def test_the_planner_keeps_the_rationale_it_was_asked_for() -> None:
     """Корень 2026-09-20: планировщик пишет довод к каждому шагу, а конвейер
     его выбрасывал — санитайзер пересобирает шаг из инструмента и аргументов.
     Датчик после этого угадывал довод по общей прозе."""
-    from pathlib import Path
+    import inspect
 
-    planner = (Path(__file__).resolve().parents[1] / "core" / "planner.py").read_text(encoding="utf-8")
+    from core import planner as planner_mod
+    from core import planner_prompt as prompt_mod
+
+    planner = inspect.getsource(planner_mod)
     assert 'step.get("rationale")' in planner, "довод шага снова теряется в конвейере"
-    prompt = (Path(__file__).resolve().parents[1] / "core" / "planner_prompt.py").read_text(encoding="utf-8")
-    assert '"rationale"' in prompt, "у планировщика перестали просить довод"
+    assert '"rationale"' in inspect.getsource(prompt_mod), \
+        "у планировщика перестали просить довод"
