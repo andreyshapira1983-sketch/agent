@@ -88,6 +88,24 @@ ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
 #: то, что будет отброшено.
 PDF_MAX_PAGES = 40
 
+#: Сколько байт разрешено скачать, когда сервер отдал PDF.
+#:
+#: Живой замер 2026-09-20, 21:5x, после того как оператор сказал «опять PDF
+#: не работают». Статья «Attention Is All You Need» на arXiv весит 2 215 244
+#: байта при общем потолке чтения в 1 МиБ. Обрезанный PDF не читается ВООБЩЕ:
+#: таблица перекрёстных ссылок лежит в КОНЦЕ файла, и вместе с хвостом
+#: срезается оглавление всего документа. pypdf падает с `PdfStreamError`, а
+#: до того печатает «EOF marker not found».
+#:
+#: То есть разрешение читать PDF, поставленное часом раньше, работало только
+#: на документах меньше мегабайта — а первоисточники столько не весят. Для
+#: HTML обрезка безобидна (начало текста остаётся), для PDF она фатальна, и
+#: одним потолком эти два случая мерить нельзя.
+#:
+#: Восемь мебибайт покрывают статью с рисунками; текста из них всё равно
+#: берётся не больше `PDF_MAX_PAGES` страниц, так что цена — только трафик.
+PDF_MAX_BYTES = 8 * 1024 * 1024
+
 # Tag tags we strip when there's no embedded text we want to keep.
 _SCRIPT_STYLE_RE = re.compile(
     r"<(script|style|noscript|template|svg)\b[^>]*>.*?</\1\s*>",
@@ -230,6 +248,12 @@ class WebFetchTool(Tool):
     # run
     # ------------------------------------------------------------------
 
+    def _read_limit_for(self, content_type: str) -> int:
+        """Потолок чтения для этого ответа: у PDF он свой, см. `PDF_MAX_BYTES`."""
+        if "application/pdf" in (content_type or "").lower():
+            return max(self.max_bytes, PDF_MAX_BYTES)
+        return self.max_bytes
+
     def run(self, url: str, find: str = "") -> dict[str, Any]:
         self._network_policy.validate_url(url, role="web_fetch url")
         reserve_egress(self.budget_ledger, tool_name="web_fetch", target=url)
@@ -254,8 +278,9 @@ class WebFetchTool(Tool):
                 status_code = int(getattr(resp, "status", 200))
                 content_type = resp.headers.get("Content-Type", "")
                 content_encoding = (resp.headers.get("Content-Encoding") or "").lower()
-                # Read at most max_bytes + 1 to detect truncation.
-                raw = resp.read(self.max_bytes + 1)
+                # Read at most limit + 1 to detect truncation.
+                limit = self._read_limit_for(content_type)
+                raw = resp.read(limit + 1)
         except urllib.error.HTTPError as e:
             raise ValueError(
                 f"HTTP {e.code} fetching {url!r}: {e.reason}"
@@ -266,14 +291,14 @@ class WebFetchTool(Tool):
             raise ValueError(f"timeout fetching {url!r}") from None
 
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        truncated = len(raw) > self.max_bytes
+        truncated = len(raw) > limit
         if truncated:
-            raw = raw[: self.max_bytes]
+            raw = raw[:limit]
 
         # Decompress gzip if needed.
         if content_encoding == "gzip":
             try:
-                raw, decompressed_truncated = decompress_gzip_limited(raw, self.max_bytes)
+                raw, decompressed_truncated = decompress_gzip_limited(raw, limit)
                 truncated = truncated or decompressed_truncated
             except OSError:
                 # Truncated gzip; fall back to raw bytes — the strip
@@ -283,6 +308,12 @@ class WebFetchTool(Tool):
         self._check_content_type(content_type)
 
         if "application/pdf" in (content_type or "").lower():
+            if truncated:
+                raise ValueError(
+                    f"PDF is larger than the {limit} byte read cap and a "
+                    f"truncated PDF cannot be opened at all: its table of "
+                    f"contents lives at the END of the file"
+                )
             text_raw = text_clean = _pdf_text(raw)
         else:
             charset = self._extract_charset(content_type) or "utf-8"
