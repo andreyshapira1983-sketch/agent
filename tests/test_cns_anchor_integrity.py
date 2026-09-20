@@ -189,9 +189,17 @@ def test_the_writer_set_names_every_site_that_mutates_the_carrier(carrier: str) 
 
 
 def test_the_derivation_can_actually_find_something() -> None:
-    """A census that finds nothing would pass every completeness check above."""
+    """A census that finds nothing would pass every completeness check above.
+
+    Счёт держится порогом, а не равенством. Равенство здесь ловило не то,
+    что этот тест охраняет: 2026-09-20 появился пятый писатель
+    (`core/loop_synthesis.py:596`), и красным стала канарейка «правило вообще
+    что-то находит» — хотя неполноту записи уже ловит правило 2 выше, и
+    ловило. Один дефект, два красных теста, и второй говорит не о нём.
+    Порог растёт вместе с кодом: писателей 5, и меньше уже не будет молча.
+    """
     assert len(_writes_to_thread_local_slot("_step_trigger_tls")) >= 11
-    assert len(_mutations_of_list_field("failure_history")) == 4
+    assert len(_mutations_of_list_field("failure_history")) >= 5
     assert _writes_to_thread_local_slot("_last_step_failure") == set()
 
 

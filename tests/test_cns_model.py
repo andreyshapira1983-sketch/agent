@@ -131,11 +131,17 @@ def test_the_acceptance_case_is_described_whole() -> None:
                 "readers", "lifetime", "owner", "properties", "semantic_defects")
     missing = [f for f in required if f not in fh]
     assert not missing, f"the acceptance case lost fields: {missing}"
-    assert len(fh["writers"]) == 4, (
-        "four write sites were found by reading the code (loop_attempt:472, "
-        "verify_replan:149, :228, :379); a different number means the line "
-        "moved or a writer appeared — walk it, do not adjust the number"
+    assert len(fh["writers"]) == 5, (
+        "five write sites were found by reading the code (loop_attempt:481, "
+        "loop_synthesis:596, verify_replan:149, :255, :406); a different "
+        "number means the line moved or a writer appeared — walk it, do not "
+        "adjust the number"
     )
+    # Пройдено ногами 2026-09-20, а не подогнано. Пятый писатель —
+    # `loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic`: нерв
+    # вшит коммитом c0eaf7b в тот же день и в карту тогда не внесён. Сайты
+    # прочих четырёх тоже уехали (:472→:481, :228→:255, :379→:406) — здесь
+    # они названы заново, чтобы сообщение об ошибке не врало следующему.
     assert fh["owner"] == "UNPROVEN", (
         "ownership was never proven; an assignment site is not an owner"
     )
