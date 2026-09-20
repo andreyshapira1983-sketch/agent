@@ -52,3 +52,16 @@ def test_english_past_is_narration_too() -> None:
         "You created core/foo.py and added a counter. Read core/loop.py and "
         "tools/web_fetch.py and tell me what blocked you.")
     assert not contract.needs_clarification, list(contract.ambiguities)
+
+def test_the_future_tense_is_not_an_order_either() -> None:
+    """Третий случай того же рода, 2026-09-20 вечером.
+
+    «Что туда напишешь, то оператор и я увидим в чате» — будущее время,
+    второе лицо, придаточное. Глагол стоит в УСЛОВИИ, а не в поручении, но
+    стебель «напиш» читался как приказ создать файл, и агент вместо работы
+    снова потребовал уточнения.
+    """
+    contract = derive_completion_contract(
+        "Файл data/chat_outbox.jsonl — твой почтовый ящик. Что туда напишешь, "
+        "то оператор и я увидим. Читай tools/python_probe.py и tests/t.py.")
+    assert not contract.needs_clarification, list(contract.ambiguities)
