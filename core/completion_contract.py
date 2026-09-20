@@ -325,10 +325,30 @@ def _mentions_read(tokens: tuple[str, ...]) -> bool:
     return any(tok.startswith(stem) for tok in tokens for stem in _READ_STEMS)
 
 
+#: Прошедшее время: «добавил», «написала», «создали», «added». Глагол в нём
+#: рассказывает о сделанном и поручения не несёт.
+#:
+#: Живой разговор 2026-09-20, 19:36: читательский вопрос агенту кончился
+#: встречным уточнением из-за ОДНОГО слова в пересказе его же поступка —
+#: «назвал её в ответе и ДОБАВИЛ, что…». Стебель «добав» стоит в
+#: `_CREATE_STEMS`, и прошедшее время его не смущало. Это повторялось бы
+#: ровно настолько, насколько с агентом разговаривают: всякий разбор его
+#: поступков состоит из «ты написал», «ты создал», «ты добавил».
+#:
+#: Повелительное («добавь») и инфинитив («нужно добавить») не тронуты: по-русски
+#: ни одно из них на -л не кончается, а инфинитив кончается на -ть.
+#: Хвостовая пунктуация отсекается перед проверкой: токены приходят как
+#: «добавил,» — на этом первая редакция и не сработала (проверено прогоном).
+_PAST_TENSE_RE = re.compile(r"(?:л|ла|ло|ли|ed)[^\w]*$")
+
+
 def _action_for(tokens: tuple[str, ...]) -> str:
     """`create` / `modify` / `read` / `unknown` for one request's tokens."""
     def _hit(stems: tuple[str, ...]) -> bool:
-        return any(tok.startswith(stem) for tok in tokens for stem in stems)
+        return any(
+            tok.startswith(stem) and not _PAST_TENSE_RE.search(tok)
+            for tok in tokens for stem in stems
+        )
 
     if _hit(_MODIFY_STEMS):
         return "modify"
