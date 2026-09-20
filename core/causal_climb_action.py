@@ -261,7 +261,7 @@ def _birth_experiment_spec(agent, claim):
             return None
 
         h1, h2 = alive[0], alive[1]
-        targets = ", ".join(_EXPERIMENT_TARGETS.keys())
+        targets = target_contracts()
         system = (
             "Ты разводишь ДВЕ конкурирующие гипотезы одним песочным экспериментом. "
             "Верни РОВНО ОДНУ строку в формате [exp: цель | A=рукав для гипотезы 1 | B=рукав для гипотезы 2 | след=наблюдаемое различие]. "
@@ -278,7 +278,12 @@ def _birth_experiment_spec(agent, claim):
         spec_text = response
         if "НЕВЫРАЗИМО" in spec_text:
             return None
-        if parse_experiment(spec_text) is None:
+        born = parse_experiment(spec_text)
+        if born is None:
+            return None
+        why = spec_is_executable(born)
+        if why:
+            _log(agent, "causal_spec_rejected", {"why": why, "kind": "discriminate"})
             return None
     except Exception:  # noqa: BLE001 — рождение не роняет суд
         return None
@@ -298,7 +303,7 @@ def _birth_intervention_spec(agent, claim):
         target = chosen_explanation(claim)
         if target is None:
             return None
-        targets = ", ".join(_EXPERIMENT_TARGETS.keys())
+        targets = target_contracts()
         system = (
             "Ты доказываешь ОДНУ уже выбранную причину её УСТРАНЕНИЕМ. Верни РОВНО ДВЕ строки:\n"
             "[exp: цель | A=вход, где причина присутствует | B=тот же вход без причины | след=наблюдаемое следствие]\n"
@@ -313,7 +318,14 @@ def _birth_intervention_spec(agent, claim):
         response = str(agent.llm.complete(
             system=system, user=user, max_tokens=300, temperature=0.2,
         ) or "")
-        if "НЕВЫРАЗИМО" in response or parse_experiment(response) is None:
+        if "НЕВЫРАЗИМО" in response:
+            return None
+        born = parse_experiment(response)
+        if born is None:
+            return None
+        why = spec_is_executable(born)
+        if why:
+            _log(agent, "causal_spec_rejected", {"why": why, "kind": "intervene"})
             return None
         found = _INVARIANT_RE.search(response)
         invariant = found.group("text").strip() if found else ""
@@ -471,6 +483,25 @@ _EXPERIMENT_TARGETS: dict[str, Any] = {
     "reasoning_action_check": _run_reasoning_action_check,
 }
 
+#: Договор цели: что цель берёт на вход и что печатает. Без него модель
+#: писала рукава прозой («трейс с partially_achieved»), цель принимала её
+#: молча и оба рукава давали один и тот же пустой отчёт — 46 прогонов
+#: «неопределённо» на одной заявке (замер 2026-09-20).
+_TARGET_CONTRACTS: dict[str, str] = {
+    "reasoning_action_check": (
+        "вход: «<текст рассуждения> ;; <инструмент1,инструмент2>»; "
+        "печатает ровно: \"unjustified=['имя',…] mentioned_extra=['имя',…]\""
+    ),
+}
+
+
+def target_contracts() -> str:
+    """Список целей С ИХ ДОГОВОРАМИ: рукав — вход цели, след — подстрока вывода."""
+    return "; ".join(
+        f"{name} ({_TARGET_CONTRACTS.get(name, 'договор не описан')})"
+        for name in _EXPERIMENT_TARGETS
+    )
+
 
 @dataclass(frozen=True)
 class Experiment:
@@ -498,6 +529,36 @@ def parse_experiment(predicts: str) -> Experiment | None:
     return Experiment(target=target, arm_a=arm_a, arm_b=arm_b, effect=effect)
 
 
+def spec_is_executable(spec: Experiment) -> str:
+    """Пустая строка — спека исполнима; иначе причина, по которой она не опыт.
+
+    Замер 2026-09-20: 46 исходов подряд «следствие не воспроизвелось ни в
+    одном рукаве» на ОДНОЙ заявке. Разбор формы её пропускал — рукава были
+    прозой («трейс с partially_achieved»), которую цель на вход не берёт, а
+    `след=` было рассуждением, которого в выводе цели не бывает. Форма — не
+    исполнимость; исполнимость проверяется исполнением.
+    """
+    runner = _EXPERIMENT_TARGETS.get(spec.target)
+    if runner is None:
+        return f"цели {spec.target!r} нет в белом списке"
+    try:
+        out_a = str(runner(spec.arm_a))
+        out_b = str(runner(spec.arm_b))
+    except Exception as err:  # noqa: BLE001 — сломанный рукав — не вердикт
+        return f"рукав не исполняется: {type(err).__name__}"
+    if spec.effect not in out_a and spec.effect not in out_b:
+        return ("следствие не встречается ни в одном рукаве: "
+                f"след={spec.effect[:60]!r} не подстрока вывода цели")
+    if out_a == out_b:
+        return "рукава дают один и тот же вывод — различать нечего"
+    return ""
+
+
+def retire_spec(predicts: str) -> str:
+    """Предсказание без спецификации: мёртвая спека снимается, гипотеза живёт."""
+    return _EXP_RE.sub("", predicts or "").strip()
+
+
 def experimentable_claims(workspace: str | Path):
     """Открытые заявки, где живая гипотеза несёт спецификацию.
 
@@ -520,6 +581,26 @@ def experimentable_claims(workspace: str | Path):
     return tuple(out)
 
 
+def _retire_dead_specs(claim, extra, explanations, workspace, agent, retired):
+    """Снять неисполнимые спеки и вернуть заявку под новое рождение.
+
+    Неопределённый исход — не вердикт о гипотезе, а приговор СПЕКЕ: она не
+    воспроизвела явление ни в одном рукаве. До 2026-09-20 он не стоил ей
+    ничего, и следующий цикл брал ту же спеку первой — 46 прогонов подряд.
+    """
+    import dataclasses
+
+    new_claim = dataclasses.replace(
+        claim, explanations=tuple(explanations),
+        notes=tuple(dict.fromkeys((*claim.notes, AWAITING_EXPERIMENT_MARK))),
+    )
+    key = save_claim(new_claim, workspace=workspace,
+                     directive=extra.get("directive", ""),
+                     machine_action="retire_dead_spec")
+    _log(agent, "causal_spec_retired", {"claim_key": key, "retired": retired})
+    return key
+
+
 def run_claim_experiment(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:
@@ -535,6 +616,7 @@ def run_claim_experiment(
     claim, extra = pending[0]
 
     verdicts = 0
+    retired: list[str] = []
     chosen = claim.chosen
     intervention = claim.intervention
     new_explanations = []
@@ -552,7 +634,9 @@ def run_claim_experiment(
                 "claim_key": extra["key"], "target": spec.target,
                 "reason": f"рукав упал: {type(err).__name__}",
             })
-            new_explanations.append(exp)
+            new_explanations.append(dataclasses.replace(
+                exp, predicts=retire_spec(exp.predicts)))
+            retired.append(f"рукав упал: {type(err).__name__}")
             continue
         in_a = spec.effect in out_a
         in_b = spec.effect in out_b
@@ -587,9 +671,16 @@ def run_claim_experiment(
                 "claim_key": extra["key"], "target": spec.target,
                 "reason": "следствие не воспроизвелось ни в одном рукаве",
             })
-            new_explanations.append(exp)
+            new_explanations.append(dataclasses.replace(
+                exp, predicts=retire_spec(exp.predicts)))
+            retired.append("следствие не воспроизвелось ни в одном рукаве")
 
     if verdicts == 0:
+        if retired:
+            key = _retire_dead_specs(claim, extra, new_explanations,
+                                     ws, agent, tuple(retired))
+            return _decline(agent, "спецификация ничего не воспроизвела — снята, "
+                            "заявка ждёт новой", claim_key=key, result="idle")
         return _decline(agent, "эксперименты не дали ни одного вердикта",
                         claim_key=extra["key"])
 
