@@ -951,11 +951,22 @@ def _is_truncated_text(text: str) -> bool:
     return "[truncated]" in tail or tail.endswith(("...", "…"))
 
 
+#: Вопрос — не утверждение. Живой реестр 2026-09-20: оглавления двух книг,
+#: «1.1 What is a compiler?» и «1.1 What is a plasma?», разобрались как
+#: «предмет `11 what` = компилятор / плазма» и объявились противоречием, а
+#: конфликт сажает на карантин запись памяти, из которой он вырос (MIR-047).
+#: Ни «X is Y» из вопроса, ни вопросительное слово в предмете утверждением о
+#: мире не являются.
+_INTERROGATIVE_SUBJECT_RE = re.compile(
+    r"(?:^|\s)(?:what|who|which|where|when|why|how|что|кто|какой|какая|какие|где|когда|почему|как)$",
+    re.IGNORECASE)
+
+
 def _subject_value(text: str) -> tuple[str, str] | None:
     if _is_truncated_text(text):
         return None
     compact = " ".join((text or "").strip().rstrip(".").split())
-    if len(compact) < 8:
+    if len(compact) < 8 or compact.endswith("?"):
         return None
     patterns = (
         r"^(.{3,80}?)\s+(?:is|are|=|:)\s+(.{1,120})$",
@@ -972,7 +983,7 @@ def _subject_value(text: str) -> tuple[str, str] | None:
         # self-descriptions. The bare-pronoun deny-list below cannot catch
         # the phrase form, and the old subject normaliser even STRIPPED
         # «этот», collapsing Russian deixis into a groupable common noun.
-        if _DEICTIC_SUBJECT_RE.match(raw_subject):
+        if _DEICTIC_SUBJECT_RE.match(raw_subject) or _INTERROGATIVE_SUBJECT_RE.search(raw_subject):
             continue
         subject = _normalise_subject(raw_subject)
         value = _normalise_value(match.group(2))

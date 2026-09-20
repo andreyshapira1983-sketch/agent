@@ -255,3 +255,17 @@ def test_the_extractor_does_not_mint_claims_from_truncated_fragments() -> None:
 
     texts = " ".join(c.text for c in registry.claims)
     assert "[truncated]" not in texts
+
+
+def test_a_question_is_not_a_proposition() -> None:
+    """Live registry 2026-09-20: two tables of contents, «1.1 What is a compiler?»
+    (Mogensen) and «1.1 What is a plasma?» (Hutchinson), parsed as subject
+    «11 what» with values «a compiler?» / «a plasma?» and were reported as a
+    contradiction — and a conflict quarantines the memory record it came from."""
+    from core.knowledge_pipeline import _subject_value
+
+    assert _subject_value("1.1 What is a compiler?") is None
+    assert _subject_value("1.1 What is a plasma?") is None
+    assert _subject_value("What is a plasma") is None, "вопросительный предмет — не предмет"
+    assert _subject_value("Entropy is a measure of disorder") == ("entropy", "a measure of disorder")
+    assert _subject_value("Энтропия это мера беспорядка") == ("энтропия", "мера беспорядка")
