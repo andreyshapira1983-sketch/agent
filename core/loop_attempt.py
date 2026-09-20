@@ -37,7 +37,7 @@ from core.model_usage import ModelBudgetExceeded
 from core.models import ErrorObject, Goal, Plan, PlanStep
 from core.observation_round import continue_after_observation
 from core.planner import PlannerOutput
-from core.reasoning_action_check import check_reasoning_actions
+from core.reasoning_action_check import check_by_rationale, check_reasoning_actions
 from core.replan import (
     ReplanTrigger,
     count_failures,
@@ -325,9 +325,16 @@ class AgentLoopAttempt:
 
             # MAST FM-2.6 — reasoning ↔ action consistency check.
             try:
-                _ra_report = check_reasoning_actions(
-                    st.planner_out.reasoning,
-                    [s["tool"] for s in st.planner_out.sources],
+                # Довод шага — у шага. Словарная проверка по общей прозе
+                # срабатывала на 54% ходов (замер 2026-09-20) и обвиняла по
+                # форме своей таблицы; планировщик пишет `rationale` к каждому
+                # шагу, и с 2026-09-20 он доезжает сюда (core/planner.py).
+                _sources = list(st.planner_out.sources)
+                _ra_report = (
+                    check_by_rationale(_sources)
+                    if any(s.get("rationale") for s in _sources)
+                    else check_reasoning_actions(
+                        st.planner_out.reasoning, [s["tool"] for s in _sources])
                 )
                 if _ra_report.has_mismatch:
                     self.log.log(

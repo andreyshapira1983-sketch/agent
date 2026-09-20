@@ -13,6 +13,19 @@ against the chosen ``steps``. Two failure shapes are surfaced:
 This is observational only: it produces a report; it does not block the
 plan. Down the line a stricter mode could replan or demote confidence.
 
+STRUCTURAL REPLACEMENT, 2026-09-20. The branch this note ends with proposed
+reading the per-step ``rationale`` instead of guessing from the free text —
+and the planner has been asked for that field all along
+(``core/planner_prompt.py``). The pipeline DROPPED it: the sanitiser rebuilds
+each step as tool + arguments + expected_outcome. Re-measured over the 1208
+planner turns of that day's run: the keyword check fires on 654 of them (54%),
+with 208 accusations against ``list_dir``, 187 against ``python_probe`` — a
+tool the table did not contain at all — and 155 against ``find_in_files``.
+Filling the table changed the rate by nothing (54% before, 54% after): the
+accusations simply moved into the reverse direction. So the word table is kept
+only as the fallback for plans that carry no rationale, and ``check_by_rationale``
+judges what can be judged: a step either states why it is there or it does not.
+
 MEASURED, and the number is the reason it must stay observational
 (2026-08-19, over every ``planner`` event in ``logs/`` — 268 real turns
 carrying both a reasoning text and a plan): **the detector fires on 190 of
@@ -65,7 +78,7 @@ separate operator decision (MIR-015).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 # Tool → recognisable keywords (English + Russian) that count as a
@@ -103,10 +116,25 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
                                 "paper", "publication"),
     "rss_fetch": ("rss", "feed", "лента"),
     "spawn_subagent": ("subagent", "субагент", "delegate", "делегир"),
-    "self_repair": ("self_repair", "repair", "почини", "исправ"),
     "current_time": ("current_time", "current time", "today's date",
                      "current date", "now()", "сегодн", "текущая дат",
                      "текущее врем", "число", "дату"),
+    # 2026-09-20: пять инструментов таблица не знала вовсе, и планирование
+    # каждого объявлялось «действием без довода» ПО ПОСТРОЕНИЮ. За сутки это
+    # дало 187 обвинений одному `python_probe`. Запись `self_repair` убрана:
+    # такого инструмента в реестре нет, и обратное направление обвиняло
+    # планировщика в пропуске шага, который он не может сделать.
+    "python_probe": ("python_probe", "probe", "посчита", "подсчита", "расч",
+                     "вычисл", "compute", "calculate", "numeric", "скрипт",
+                     "эксперимент", "python", "проверю"),
+    "file_write": ("file_write", "запиш", "запис", "сохран", "write the file",
+                   "write to", "создам файл", "save"),
+    "lesson_provenance": ("lesson_provenance", "урок", "lesson", "происхожден"),
+    "journal_append": ("journal_append", "в журнал", "journal", "заметк"),
+    "memory_recall": ("memory_recall", "вспомн", "из памяти", "recall"),
+    "memory_bank": ("memory_bank", "запомн", "remember", "в память"),
+    "model_roster": ("model_roster", "roster", "реестр моделей", "какие модели"),
+    "model_route": ("model_route", "маршрут", "routing", "какая модель"),
 }
 
 
@@ -176,6 +204,38 @@ def _reasoning_mentions(reasoning: str, tool: str) -> bool:
 def _tool_alias_in_text(text: str, tool: str) -> bool:
     """Same as ``_reasoning_mentions`` but external-callable for symmetry."""
     return _reasoning_mentions(text, tool)
+
+
+#: Довод короче этого — не довод, а отписка («needed», «нужно»).
+_MIN_RATIONALE_WORDS = 3
+
+
+def check_by_rationale(steps: Sequence[dict]) -> MismatchReport:
+    """Структурная проверка: у шага есть СВОЙ довод или его нет.
+
+    Замер 2026-09-20 (1208 ходов суток): словарная проверка срабатывала на
+    54%, и обвинения объяснялись формой таблицы, а не планом — 187 из них
+    достались `python_probe`, которого в таблице не было вовсе. Дополнение
+    таблицы ничего не изменило (54% до и после): обвинения просто переехали
+    в обратное направление. Угадывать довод по прозе незачем — планировщик
+    пишет его к каждому шагу, конвейер его терял (core/planner.py).
+    """
+    unjustified: list[str] = []
+    matched: list[str] = []
+    for step in steps or ():
+        tool = str((step or {}).get("tool") or "")
+        if not tool:
+            continue
+        rationale = str((step or {}).get("rationale") or "").strip()
+        if len(rationale.split()) >= _MIN_RATIONALE_WORDS:
+            matched.append(tool)
+        else:
+            unjustified.append(tool)
+    return MismatchReport(
+        unjustified_actions=tuple(dict.fromkeys(unjustified)),
+        mentioned_but_not_planned=(),
+        matched_tools=tuple(dict.fromkeys(matched)),
+    )
 
 
 def check_reasoning_actions(

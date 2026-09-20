@@ -46,26 +46,34 @@ def _registered_tools() -> set[str]:
     return names
 
 
-def test_the_table_does_not_cover_the_registry() -> None:
-    """Tools the agent can plan but the sensor cannot recognise: planning one
-    is flagged 'unjustified' by construction, not by any real defect."""
+def test_the_table_covers_every_tool_that_can_be_planned() -> None:
+    """2026-09-20: пять инструментов таблица не знала, и планирование каждого
+    объявлялось «действием без довода» ПО ПОСТРОЕНИЮ — 187 обвинений одному
+    `python_probe` за сутки. Слепое пятно закрыто; таблица осталась запасным
+    путём для планов без доводов."""
     blind = _registered_tools() - set(_TOOL_KEYWORDS)
-    assert blind, (
-        "the keyword table now covers every registered tool — the measured "
-        "blind spot is gone; re-measure and update the module docstring"
-    )
-    assert {"file_write", "python_probe", "lesson_provenance"} <= blind, (
-        f"the measured blind tools changed; now blind: {sorted(blind)}"
-    )
+    assert not blind, f"таблица снова не знает инструментов: {sorted(blind)}"
 
 
-def test_the_table_names_tools_that_do_not_exist() -> None:
-    """The reverse direction accuses the planner of omitting a step it cannot
-    produce: this entry matches no registered tool."""
+def test_the_table_names_no_tool_that_does_not_exist() -> None:
+    """Обратное направление обвиняло в пропуске шага, которого не бывает:
+    запись `self_repair` не соответствовала ни одному инструменту реестра."""
     phantom = set(_TOOL_KEYWORDS) - _registered_tools()
-    assert phantom == {"self_repair"}, (
-        f"the measured phantom entry changed; now phantom: {sorted(phantom)}"
-    )
+    assert not phantom, f"таблица называет несуществующее: {sorted(phantom)}"
+
+
+def test_the_step_justifies_itself_or_it_does_not() -> None:
+    """Структурная замена: довод шага — у шага, а не в общей прозе."""
+    from core.reasoning_action_check import check_by_rationale
+
+    report = check_by_rationale([
+        {"tool": "file_read", "rationale": "нужно прочитать раздел про рекурсию"},
+        {"tool": "python_probe", "rationale": "проверю"},
+        {"tool": "list_dir"},
+    ])
+    assert report.matched_tools == ("file_read",)
+    assert set(report.unjustified_actions) == {"python_probe", "list_dir"}
+    assert report.mentioned_but_not_planned == (), "сравнивать с прозой больше нечего"
 
 
 def test_the_file_read_keyword_still_carries_its_trailing_space() -> None:
@@ -81,4 +89,19 @@ def test_the_measurement_is_recorded_where_the_code_lives() -> None:
     assert "268" in head and "190" in head, (
         "the module docstring lost its measurement — restore it or re-measure"
     )
+    assert "1208" in head and "54%" in head, (
+        "повторный замер 2026-09-20 потерян — его и заменяет структурная проверка"
+    )
     assert "observational" in head
+
+
+def test_the_planner_keeps_the_rationale_it_was_asked_for() -> None:
+    """Корень 2026-09-20: планировщик пишет довод к каждому шагу, а конвейер
+    его выбрасывал — санитайзер пересобирает шаг из инструмента и аргументов.
+    Датчик после этого угадывал довод по общей прозе."""
+    from pathlib import Path
+
+    planner = (Path(__file__).resolve().parents[1] / "core" / "planner.py").read_text(encoding="utf-8")
+    assert 'step.get("rationale")' in planner, "довод шага снова теряется в конвейере"
+    prompt = (Path(__file__).resolve().parents[1] / "core" / "planner_prompt.py").read_text(encoding="utf-8")
+    assert '"rationale"' in prompt, "у планировщика перестали просить довод"

@@ -579,6 +579,14 @@ class LLMPlanner:
             )
             if spec is None:
                 continue
+            # Планировщик обязан писать «rationale» к КАЖДОМУ шагу (см.
+            # core/planner_prompt.py), и до 2026-09-20 конвейер это поле
+            # выбрасывал: санитайзер пересобирает шаг из инструмента и
+            # аргументов. Дальше датчик согласованности пытался угадать довод
+            # по общей прозе и срабатывал на 54% ходов. Довод шага — у шага.
+            rationale = step.get("rationale") if isinstance(step, dict) else None
+            if isinstance(rationale, str) and rationale.strip():
+                spec["rationale"] = rationale.strip()[:300]
             sources.append(spec)
 
         return sources, warnings, dropped_tools
