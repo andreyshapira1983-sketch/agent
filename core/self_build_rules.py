@@ -351,10 +351,6 @@ class LessonStore:
         else:
             return True
 
-    def lessons_for(self, target: str) -> list[Lesson]:
-        norm = str(target).replace("\\", "/").strip()
-        return [lesson for lesson in self.load() if norm in lesson.scope]
-
 
 #: Служебные файлы, которые обновляет ЛЮБОЕ разбиение модуля: карта анатомии,
 #: её генерат, карты census и потолки. Суточный прогон 2026-09-19: откат

@@ -1270,19 +1270,6 @@ def publish_incremental_split_step(
     return item, evidence
 
 
-_SPLIT_TARGET_PREFIX = "split:"
-
-
-def _concrete_split_target(raw: str) -> str | None:
-    """Concrete ``core/x.py`` path behind a ``split:core/x.py`` backlog target,
-    or ``None`` when ``raw`` is not a split target."""
-    s = str(raw or "").replace("\\", "/").strip()
-    if s.startswith(_SPLIT_TARGET_PREFIX):
-        rest = s[len(_SPLIT_TARGET_PREFIX):].strip()
-        return rest or None
-    return None
-
-
 def _deterministic_split_report(
     *,
     workspace: str | Path,

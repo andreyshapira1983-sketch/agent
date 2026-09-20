@@ -41,11 +41,19 @@ def test_an_empty_string_means_the_same() -> None:
     assert spec is not None and "inputs" not in spec["arguments"]
 
 
-def test_one_path_is_a_list_of_one() -> None:
-    spec, _warnings = _probe("math_study/library/txt/Clark_HonorsCalculus.txt")
-    assert spec is not None
-    assert spec["arguments"]["inputs"] == [
-        "math_study/library/txt/Clark_HonorsCalculus.txt"]
+def test_a_bare_path_is_still_refused() -> None:
+    """Границу правки я сначала провёл не там, и полный прогон это поймал.
+
+    Первая редакция достраивала строку до списка одного: «намерение
+    однозначно». Но `tests/test_the_lab_computes_over_task_files.py` держит
+    обратное СОЗНАТЕЛЬНО, и tools/python_probe.py поднимает ValueError на
+    не-список. Строка — тоже последовательность: принятая молча, она
+    разошлась бы посимвольно. Договор держат два слоя, и расходиться им
+    нельзя. Пустое значение — другое дело: его объявляет сам промпт.
+    """
+    spec, warnings = _probe("math_study/library/txt/Clark_HonorsCalculus.txt")
+    assert spec is None
+    assert warnings and "str" in warnings[0]
 
 
 def test_a_shape_nobody_can_read_is_still_dropped() -> None:
