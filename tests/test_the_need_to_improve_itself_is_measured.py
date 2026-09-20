@@ -1,13 +1,15 @@
 """The agent has a need to improve its OWN code, and it is measured.
 
 Day run 2026-09-19/20, after drives were switched on: the agent read its own
-code in 133 of 198 tasks and filed NOT ONE proposal to change it. Three causes,
-all in the code: the route to a change lived in the action menu and `goal_first`
-bypasses the menu; there was no drive for «make myself better» at all; and a
-drive task is read-only by construction. This drive is measured like the
-others — time since its own last applied change — and it only counts when there
-is material: a module of its own that no inbox item is waiting on and no
-rollback lesson forbids.
+code in 133 of 198 tasks and filed NOT ONE proposal to change it — the route to
+a change lived in the action menu, `goal_first` bypasses the menu, there was no
+drive for «make myself better», and drive tasks are read-only by construction.
+
+First live run of the drive, the same morning, refused twice and both refusals
+are pinned here: the biggest module was `core/self_build_producer.py`, which the
+producer denies as a critical organ, and the producer stays silent entirely
+while an undecided lane proposal waits for a human. Material the machine will
+not take is not material.
 """
 from __future__ import annotations
 
@@ -21,13 +23,19 @@ from core.drives import compute_drives, last_self_change, self_improvement_targe
 from core.self_build_rules import Lesson, LessonStore, default_lessons_path
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=timezone.utc)
+_APPLIED = {"id": "b", "status": "executed", "operation": "self_apply_lane.run",
+            "created_at": "2026-09-20T00:00:00+00:00", "updated_at": "2026-09-20T00:00:00+00:00",
+            "payload": {"files": [{"path": "core/old.py"}]}}
+_PENDING = {"id": "a", "status": "pending", "operation": "self_apply_lane.run",
+            "payload": {"files": [{"path": "core/waiting.py"}]}}
 
 
 def _workspace(tmp_path: Path, inbox_rows: list[dict]) -> Path:
     (tmp_path / "core").mkdir()
     (tmp_path / "core" / "big.py").write_text("x = 1\n" * 900, encoding="utf-8")
-    (tmp_path / "core" / "waiting.py").write_text("y = 2\n" * 800, encoding="utf-8")
-    (tmp_path / "core" / "punished.py").write_text("z = 3\n" * 700, encoding="utf-8")
+    (tmp_path / "core" / "punished.py").write_text("z = 3\n" * 1500, encoding="utf-8")
+    # В списке критических органов производителя заявок — его полоса не берёт.
+    (tmp_path / "core" / "self_apply_lane.py").write_text("c = 4\n" * 2000, encoding="utf-8")
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "approval_inbox.jsonl").write_text(
         "\n".join(json.dumps({"payload": r}) for r in inbox_rows), encoding="utf-8")
@@ -38,36 +46,33 @@ def _workspace(tmp_path: Path, inbox_rows: list[dict]) -> Path:
     return tmp_path
 
 
-_WAITING = {"id": "a", "status": "pending", "operation": "self_apply_lane.run",
-            "payload": {"files": [{"path": "core/waiting.py"}]}}
-_APPLIED = {"id": "b", "status": "executed", "operation": "self_apply_lane.run",
-            "created_at": "2026-09-20T00:00:00+00:00", "updated_at": "2026-09-20T00:00:00+00:00",
-            "payload": {"files": [{"path": "core/old.py"}]}}
-
-
-def test_material_is_only_what_it_can_act_on_now(tmp_path: Path) -> None:
-    ws = _workspace(tmp_path, [_WAITING, _APPLIED])
+def test_material_is_only_what_the_lane_would_take(tmp_path: Path) -> None:
+    ws = _workspace(tmp_path, [_APPLIED])
     names = [rel for rel, _lines in self_improvement_targets(ws)]
-    assert names == ["core/big.py"], names
+    assert names == ["core/big.py"], names  # критический и наказанный уроком — не материал
     assert last_self_change(ws) == datetime(2026, 9, 20, 0, 0, tzinfo=timezone.utc)
 
 
-def test_the_need_grows_with_time_and_dies_without_material(tmp_path: Path) -> None:
-    ws = _workspace(tmp_path, [_WAITING, _APPLIED])
+def test_an_undecided_proposal_means_no_material_at_all(tmp_path: Path) -> None:
+    """Производитель заявок молчит, пока человек не решил предыдущую."""
+    ws = _workspace(tmp_path, [_APPLIED, _PENDING])
+    assert self_improvement_targets(ws) == []
+    drive = compute_drives(ws, NOW + timedelta(hours=6))["self_improvement_need"]
+    assert drive["value"] == 0.0 and "занято ящиком" in drive["why"]
+    assert _engineering_goal(ws) is None, "нет материала — нет цели"
+
+
+def test_the_need_grows_with_time_when_there_is_material(tmp_path: Path) -> None:
+    ws = _workspace(tmp_path, [_APPLIED])
     value = compute_drives(ws, NOW + timedelta(hours=6))["self_improvement_need"]["value"]
     assert 0.5 < value < 0.999, value
-    (ws / "core" / "big.py").unlink()
-    blocked = compute_drives(ws, NOW + timedelta(hours=6))["self_improvement_need"]
-    assert blocked["value"] == 0.0 and "свободных модулей нет" in blocked["why"]
 
 
 def test_the_goal_names_the_module_and_its_own_action(tmp_path: Path) -> None:
-    ws = _workspace(tmp_path, [_WAITING, _APPLIED])
+    ws = _workspace(tmp_path, [_APPLIED])
     pick = _engineering_goal(ws)
     assert pick is not None
     assert pick.action == "propose_engineering_task", "прозой свой код не чинится"
     assert _is_engineering_goal(pick.goal), "машина должна признать цель инженерной"
     assert resolve_goal_subject(pick.goal, exists=lambda rel: (ws / rel).is_file()) == "core/big.py"
     assert "approval_inbox.jsonl" in pick.success_check
-    (ws / "core" / "big.py").unlink()
-    assert _engineering_goal(ws) is None, "нет материала — нет цели"

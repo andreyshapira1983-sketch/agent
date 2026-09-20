@@ -152,23 +152,30 @@ def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]
 
     Отсеиваются занятые: то, что уже ждёт человека в ящике, и то, что закрыто
     уроком отката, — предлагать их значит снова упереться в approval_wait.
+    Критический орган (CRITICAL_DENY) отсеивается по правилу САМОГО
+    производителя заявок: живой запуск 2026-09-20 выбрал крупнейший модуль
+    core/self_build_producer.py и получил «grounded target is critical» —
+    материал драйва обязан совпадать с тем, что полоса вообще берёт.
     """
+    from core.self_build_producer import _is_critical
     from core.self_build_rules import blocking_lesson
 
-    waiting = {str(f.get("path") or "") for r in _rows(root / "data" / "approval_inbox.jsonl")
-               if r.get("status") == "pending"
-               for f in ((r.get("payload") or {}).get("files") or []) if isinstance(f, dict)}
+    # Производитель заявок молчит, пока в ящике есть НЕРЕШЁННАЯ заявка полосы —
+    # одна за раз, и решает её человек (`_has_pending_self_build_proposal`).
+    # Пока так, материала нет ни по одному модулю: иначе драйв зовёт в запертую
+    # дверь и цикл кончается пустым исходом (живой запуск 2026-09-20).
+    if any(r.get("operation") in _SELF_CHANGE_OPS and r.get("status") == "pending"
+           for r in _rows(root / "data" / "approval_inbox.jsonl")):
+        return []
     out: list[tuple[str, int]] = []
     for folder in _OWN_CODE_DIRS:
         for path in sorted((root / folder).glob("*.py")):
             rel = f"{folder}/{path.name}"
-            if rel in waiting:
-                continue
             try:
                 lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
             except OSError:
                 continue
-            if blocking_lesson(root, [rel]) is not None:
+            if _is_critical(rel) or blocking_lesson(root, [rel]) is not None:
                 continue
             out.append((rel, lines))
     out.sort(key=lambda pair: -pair[1])
