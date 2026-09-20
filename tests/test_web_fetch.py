@@ -297,7 +297,14 @@ class TestContentTypePolicy:
 
     @pytest.mark.parametrize("ct", list(ALLOWED_CONTENT_TYPES))
     def test_allowed_types_pass(self, ct: str):
-        opener = _opener_with(b"<p>ok</p>", content_type=ct)
+        # Тело обязано соответствовать типу: с 2026-09-20 в списке есть
+        # application/pdf, и для него «<p>ok</p>» — не документ, а мусор.
+        # Разбор PDF отказывает названной причиной, и это правильно; проверять
+        # ворота типа подложным телом значило бы проверять не ворота.
+        from tests.test_a_primary_source_in_pdf_is_readable import _pdf_bytes
+
+        body = _pdf_bytes(["ok"]) if ct == "application/pdf" else b"<p>ok</p>"
+        opener = _opener_with(body, content_type=ct)
         out = WebFetchTool(opener=opener).run(url="https://example.com/")
         assert out["content_type"] == ct
 

@@ -72,7 +72,21 @@ ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
     "application/json",
     "application/xml",
     "application/xhtml+xml",
+    # Первоисточник лежит в PDF. Замер 2026-09-20 по двум суткам трасс:
+    # web_search отработал 67 раз из 67, web_fetch — 79 успехов и 28 ошибок,
+    # и 15 из 28 были одной причиной — «application/pdf not in allow-list».
+    # Адреса говорят сами за себя: Тьюринг 1936, Нётер, Шеннон 1948, ACM.
+    # Поиск находил первоисточники, читалка их не открывала — вот чем «поиск
+    # и чтение не соединены». Список держит двоичный мусор снаружи и держит
+    # его дальше: PDF — документ, и берётся из него только ТЕКСТ, чистым
+    # питоном, без запуска чего бы то ни было.
+    "application/pdf",
 )
+
+#: Сколько страниц PDF читается. Первоисточник бывает на сотни страниц, а
+#: улике всё равно достаётся вырезка: читать всё значит платить временем за
+#: то, что будет отброшено.
+PDF_MAX_PAGES = 40
 
 # Tag tags we strip when there's no embedded text we want to keep.
 _SCRIPT_STYLE_RE = re.compile(
@@ -119,6 +133,30 @@ def find_windows(text: str, find: str) -> str:
     head = (f"[find {find!r}: {len(hits)} match(es) in {len(text)} chars; "
             f"{len(shown)} window(s) shown, at chars {', '.join(str(lo) for lo, _ in shown)}]")
     return head + "\n" + "\n…\n".join(text[lo:hi] for lo, hi in shown)
+
+def _pdf_text(raw: bytes) -> str:
+    """Текст PDF — и ничего, кроме текста.
+
+    Разбор чистым питоном (pypdf): ни внешних программ, ни исполнения. Битый
+    или зашифрованный файл — это отказ с названной причиной, а не пустая
+    строка: молчаливая пустота выглядела бы как «страница без содержания».
+    """
+    import io as _io
+
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:  # pragma: no cover — зависимость есть в окружении
+        raise ValueError("PDF reading requires pypdf") from exc
+    try:
+        reader = PdfReader(_io.BytesIO(raw))
+        pages = [page.extract_text() or "" for page in reader.pages[:PDF_MAX_PAGES]]
+    except Exception as exc:  # noqa: BLE001 — чужой файл не роняет прогон
+        raise ValueError(f"PDF could not be read: {type(exc).__name__}") from None
+    text = chr(10).join(pages).strip()
+    if not text:
+        raise ValueError("PDF carries no extractable text (scanned images?)")
+    return text
+
 
 class WebFetchTool(Tool):
     """Fetch a single web page and return its plain-text content."""
@@ -244,9 +282,12 @@ class WebFetchTool(Tool):
 
         self._check_content_type(content_type)
 
-        charset = self._extract_charset(content_type) or "utf-8"
-        text_raw = raw.decode(charset, errors="replace")
-        text_clean = self._strip_html(text_raw)
+        if "application/pdf" in (content_type or "").lower():
+            text_raw = text_clean = _pdf_text(raw)
+        else:
+            charset = self._extract_charset(content_type) or "utf-8"
+            text_raw = raw.decode(charset, errors="replace")
+            text_clean = self._strip_html(text_raw)
         if "json" in content_type.lower():
             # Факты API не тонут в README: tools/json_view.py.
             from tools.json_view import compact_json_view
