@@ -24,10 +24,16 @@ _OBSERVATIONS_RELPATH = Path("data") / "causal_observations.jsonl"
 #: Пары «ОБЪЯСНЕНИЕ N / ПРЕДСКАЗАНИЕ N» из ответа модели. Разбор построчный
 #: и терпимый к хвостам: незнакомые строки игнорируются, пустые поля убивают
 #: пару на воротах качества, не в разборе.
+#: Живой прогон 2026-09-20: подъём отказал шесть раз подряд — «нужны
+#: конкурирующие фальсифицируемые объяснения: выжило 0». Модель писала пары,
+#: но перенос строки внутри объяснения (или пустая строка перед
+#: предсказанием) ломал разбор, требовавший ДВУХ соседних строк. Номер тоже
+#: стал необязательным: пара опознаётся по словам, а не по нумерации.
 _PAIR_RE = re.compile(
-    r"ОБЪЯСНЕНИЕ\s*\d+\s*:\s*(?P<statement>[^\n]*)\n"
-    r"\s*ПРЕДСКАЗАНИЕ\s*\d+\s*:\s*(?P<predicts>[^\n]*)",
-    re.IGNORECASE,
+    r"ОБЪЯСНЕНИЕ\s*\d*\s*:\s*(?P<statement>.+?)\s*\n\s*"
+    r"ПРЕДСКАЗАНИЕ\s*\d*\s*:\s*(?P<predicts>.+?)"
+    r"(?=\n\s*ОБЪЯСНЕНИЕ\s*\d*\s*:|\Z)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 _SYSTEM_PROMPT = (
@@ -82,12 +88,17 @@ def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
 
 
 def _decline(agent: Any, reason: str, *, llm_calls_spent: int = 0,
-             **payload: Any) -> CampaignActionOutcome:
+             result: str = "failed", **payload: Any) -> CampaignActionOutcome:
     """Отказ не носит продукта: artifact = работа (MIR-117), а причина —
     в журнале `causal_climb_declined`, молчаливых отказов нет. Потраченные
-    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3)."""
+    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3).
+
+    `result` разделяет два разных отказа. «Не смог» — это `failed`. «Нечего
+    делать» — это `idle`: живой прогон 2026-09-20, все наблюдения оказались
+    закрыты, и шесть циклов подряд записали провал там, где была выполненная
+    работа; драйв поломок считал их сломанными действиями."""
     _log(agent, "causal_climb_declined", {"reason": reason, **payload})
-    return CampaignActionOutcome(result="failed", llm_calls_spent=llm_calls_spent)
+    return CampaignActionOutcome(result=result, llm_calls_spent=llm_calls_spent)
 
 
 def _log(agent: Any, event: str, payload: dict) -> None:
@@ -105,7 +116,8 @@ def explain_causal_observation(
     """Одно наблюдение → заявка с ≥2 фальсифицируемыми объяснениями."""
     naked = unexplained_observations(workspace)
     if not naked:
-        return _decline(agent, "нет непокрытых наблюдений — подъёму нечего объяснять")
+        return _decline(agent, "нет непокрытых наблюдений — подъёму нечего объяснять",
+                        result="idle")
     record = naked[0]
     if dry_run:
         return _decline(

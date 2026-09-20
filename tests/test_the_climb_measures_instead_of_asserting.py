@@ -171,3 +171,40 @@ def test_scope_is_the_last_step_and_it_is_the_operator_s():
     )
     assert state_of(climbed) == "GENERALIZED"
     assert state_of(name_scope(climbed, "citation-resolving verdicts")) == "LESSON"
+
+
+def test_a_wrapped_pair_is_still_a_pair() -> None:
+    """Живой прогон 2026-09-20: подъём отказал шесть раз подряд — «выжило 0».
+    Модель писала пары, но перенос строки внутри объяснения (и пустая строка
+    перед предсказанием) ломали разбор, требовавший двух СОСЕДНИХ строк."""
+    from core.causal_climb_action import _parse_hypotheses
+
+    wrapped = ("ОБЪЯСНЕНИЕ 1: В ходе чтения книги модель сформировала вывод,\n"
+               "который не попал в план шага\n\n"
+               "ПРЕДСКАЗАНИЕ 1: в logs/daemon_tick.jsonl будет событие без шага\n\n"
+               "ОБЪЯСНЕНИЕ 2: детектор сработал на пересказе цитаты\n"
+               "ПРЕДСКАЗАНИЕ 2: в data/episodic_memory.jsonl tools_used пуст")
+    pairs = _parse_hypotheses(wrapped)
+    assert len(pairs) == 2, pairs
+    assert pairs[0][0].startswith("В ходе чтения книги")
+    assert "daemon_tick.jsonl" in pairs[0][1]
+    assert pairs[1][0].startswith("детектор сработал")
+
+    plain = ("ОБЪЯСНЕНИЕ: причина А\nПРЕДСКАЗАНИЕ: в журнале есть X\n"
+             "ОБЪЯСНЕНИЕ: причина Б\nПРЕДСКАЗАНИЕ: в журнале нет X")
+    assert len(_parse_hypotheses(plain)) == 2, "номер пары необязателен"
+    assert _parse_hypotheses("никаких пар тут нет") == []
+
+
+def test_nothing_left_to_explain_is_not_a_failure(tmp_path) -> None:
+    """Живой прогон 2026-09-20: все наблюдения закрылись, и шесть циклов подряд
+    записали «failed» там, где работа была сделана — драйв поломок считал их
+    сломанными действиями."""
+    from types import SimpleNamespace
+
+    from core.causal_climb_action import explain_causal_observation
+
+    (tmp_path / "data").mkdir()
+    out = explain_causal_observation(agent=SimpleNamespace(log=None), workspace=tmp_path)
+    assert out.result == "idle", out
+    assert not out.work_done
