@@ -12,6 +12,10 @@ from typing import Literal
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
 IssueStatus = Literal["open", "verified", "resolved"]
+#: Тяжесть, которую запись вправе объявить о себе. `critical` сюда НЕ входит
+#: намеренно: он принадлежит объективной неживости, которую видно снаружи.
+IssueSeverity = Literal["low", "medium", "high"]
+_ISSUE_SEVERITIES: frozenset[str] = frozenset({"low", "medium", "high"})
 DEFAULT_ISSUE_PATH = Path("data") / "self_improvement_issues.jsonl"
 _DUPLICATE_MIXIN_KEY = "incremental_splitter:duplicate_mixin_base_class"
 _GENERIC_ACTION = "improve_failure_to_idea_pipeline"
@@ -88,6 +92,27 @@ class SelfImprovementIssue:
     #: с того момента, как поле появилось (2026-08-22), поэтому у записей
     #: старше этой даты он занижен. Потребитель обязан показывать `>=`.
     occurrences: int = 1
+    #: Насколько дефект мешает РАБОТЕ, по суждению того, кто его завёл.
+    #:
+    #: Слово оператора 2026-09-20: «почини фильтр, пусть его собственные
+    #: дефекты проходят». Замер того вечера: 117 решений из 117 приняты по
+    #: операторской цели, НИ ОДНОГО по собственному реестру. Причина —
+    #: `_partition_by_subject` в `core/best_next_action.py`: кандидат остаётся
+    #: в гонке, только если у него критическая или высокая тяжесть, либо его
+    #: предмет совпадает с предметом цели, либо он пришёл из цели. А кандидату
+    #: из этого реестра тяжесть была ПРИБИТА как `medium`, поэтому всё, что
+    #: агент узнаёт о себе, выметалось любой целью, называющей другой файл.
+    #:
+    #: Дверь «объективная поломка не выметается» существовала и работала — её
+    #: заварили изнутри одной константой. Это поле её отпирает: запись сама
+    #: говорит, мешает она работе или только досаждает.
+    #:
+    #: Потолок `high` намеренный. `critical` остаётся за объективной
+    #: неживостью (демон упал, тик сломан) — тем, что видно снаружи и не
+    #: зависит от самооценки. Иначе самооценка стала бы способом всегда
+    #: объявлять себя главным делом, а цель потеряла бы то влияние, ради
+    #: которого фильтр и написан (MIR-162).
+    severity: IssueSeverity = "medium"
 
     def to_dict(self) -> dict:
         data = dict(self.__dict__)
@@ -100,6 +125,12 @@ class SelfImprovementIssue:
         status = str(data.get("status") or "open")
         if status not in {"open", "verified", "resolved"}:
             status = "open"
+        # Незнакомое слово — не повод поверить записи на слово: неизвестная
+        # тяжесть читается как `medium`, то есть как прежнее поведение. Так же
+        # читается и `critical`: объявить себя аварией эта запись не вправе.
+        severity = str(data.get("severity") or "medium").strip().casefold()
+        if severity not in _ISSUE_SEVERITIES:
+            severity = "medium"
         return cls(
             fingerprint=str(data.get("fingerprint") or ""),
             title=str(data.get("title") or "Unresolved self-improvement failure"),
@@ -112,6 +143,7 @@ class SelfImprovementIssue:
             related_error_text=str(data.get("related_error_text") or ""),
             suggested_next_action=str(data.get("suggested_next_action") or ""),
             occurrences=max(1, int(data.get("occurrences") or 1)),
+            severity=severity,  # type: ignore[arg-type]
         )
 
 
