@@ -78,10 +78,36 @@ def run_one_shot(
     # data/persistent_memory.jsonl — main.py's module docstring promises
     # "no memory, fresh session", so persistent memory must be excluded
     # too, not just working (session) memory.
+    #
+    # with_experience=True, and it is a DIFFERENT axis — слово оператора
+    # 2026-09-20. Опыт (эпизоды и процедуры) отключался здесь не по решению,
+    # а по умолчанию `with_experience = with_memory` в bootstrap. Тот же самый
+    # изъян уже чинили однажды для безлюдного пути — комментарий рядом с
+    # `if with_experience:` говорит, что связка «оставляла агента неспособным
+    # записывать и вспоминать опыт вообще», — и канал разговора тогда забыли.
+    #
+    # Цена измерена в живом разговоре 2026-09-20: за вечер через `--ask`
+    # прошло около двадцати пяти обменов, в которых агент установил, что `-I`
+    # отбрасывает PYTHONPATH, что его собственная заявка предлагает нерабочее
+    # лекарство, что он объясняет стену вместо проверки. В эпизодической
+    # памяти после этого — НОЛЬ записей об этом разговоре (замер: из 200
+    # эпизодов ни один не несёт вопроса оператора). Складывать было некуда:
+    # `episodic_store` равен None, и каждая запись падала в пустоту.
+    #
+    # Обещание «no memory, fresh session» этим не нарушено: оно про сессию и
+    # про `data/persistent_memory.jsonl`, и обе оси остаются выключенными.
+    # Замороженный контракт (`tests/characterization/test_cli_one_shot_policy.py`)
+    # проверяет ровно эти две и об опыте не говорит ничего.
+    #
+    # episodic_replay=False нарочно: память должна ПОДСКАЗЫВАТЬ, а не
+    # подменять работу готовым ответом из прошлого. Разговор ведут ради
+    # нового измерения, а не ради пересказа старого.
     agent = build_agent(
         workspace,
         with_memory=False,
         with_persistent=False,
+        with_experience=True,
+        episodic_replay=False,
         approval_provider=approval_provider,
     )
     # Explicit ':' meta-commands take precedence over fuzzy intent routing,
