@@ -75,6 +75,12 @@ from core.synth_resilience import (
 from core.user_profile import profile_to_prompt_block
 
 
+#: Ниже этого совпадения с вопросом черновик считается «не про то». Живые
+#: разговоры 2026-09-20: 0.20 и 0.22 у двух ответов, каждый из которых отвечал
+#: на свой вопрос, а не на заданный.
+_OFF_TOPIC_RELEVANCE = 0.35
+
+
 class AgentLoopSynthesis:
     """Фаза «Ответ»: сборка промпта синтезатора и вызов модели.
 
@@ -555,6 +561,68 @@ class AgentLoopSynthesis:
             system=system_prompt, user=safe_user_prompt, temperature=0.5
         )
 
+    def _rewrite_if_off_topic(self, st: SynthesisState, do_synthesize: Any) -> None:
+        """Один переписанный черновик, когда ответ не про заданный вопрос.
+
+        Соответствие вопросу СЧИТАЛОСЬ (`core/confidence_vector.relevance_score`),
+        печаталось человеку и клалось в эпизод — и ничем не распоряжалось.
+        Живой разговор 2026-09-20: на вопрос «какое условие не выполнялось»
+        агент перечислил четыре условия, нашёл ответ среди СВОИХ ЖЕ фактов
+        («цель драйва идёт действием propose_engineering_task, а не
+        improve_failure_to_idea_pipeline»), в выводе написал «данных нет», а
+        собственная проверка отметила 0.22. Мерить и не различать — то же
+        самое, что не мерить. Вторая сборка идёт по ТЕМ ЖЕ уликам, без новых
+        шагов и без сети: меняется только требование отвечать на вопрос.
+        Лучший из двух черновиков по тому же измерению и остаётся.
+        """
+        import os
+
+        from core.confidence_vector import relevance_applicable, relevance_score
+        from core.replan import ReplanTrigger
+        from core.synth_resilience import SynthAttempt
+
+        # Переключатель, по умолчанию выключённый — как `AGENT_OBSERVE_BEFORE_ANSWER`
+        # у наблюдения перед ответом. Мера соответствия груба (совпадение слов), а
+        # цена срабатывания — лишний вызов модели: включать это всем и всегда
+        # означало бы менять поведение каждого хода ради части случаев.
+        if (os.getenv("AGENT_REWRITE_OFF_TOPIC", "") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
+        draft = st.draft_answer or ""
+        question = st.user_question or ""
+        if self._last_synth_degraded or not relevance_applicable(question, draft):
+            return
+        before = relevance_score(question, draft)
+        if before >= _OFF_TOPIC_RELEVANCE:
+            return
+        st.failure_history.append(ReplanTrigger(
+            code="answer_off_topic",
+            step_id="synthesis-relevance",
+            tool_name=None,
+            arguments={"relevance": round(before, 3)},
+            reason=(
+                f"the draft answered something else: its overlap with the question is "
+                f"{before:.2f}. The question was: {question.strip()[:300]}. Answer THAT "
+                "question with the facts already gathered this turn — and if they do not "
+                "settle it, say which fact is missing and where it would be."
+            ),
+            attempt=0,
+        ))
+        try:
+            second = do_synthesize(SynthAttempt(index=1, adapt_context=False, is_final=True))
+        except Exception as exc:  # noqa: BLE001 — переписывание не вправе ронять ответ
+            self._sensor_failed("off_topic_rewrite", exc)
+            return
+        after = relevance_score(question, second or "")
+        self.log.log("answer_off_topic", {
+            "relevance_before": round(before, 3),
+            "relevance_after": round(after, 3),
+            "threshold": _OFF_TOPIC_RELEVANCE,
+            "rewritten": bool(second) and after > before,
+            "question_head": question.strip()[:120],
+        })
+        if second and after > before:
+            st.draft_answer = second
+
     def _run_synthesizer_ladder(self, st: SynthesisState) -> None:
         """Довести черновик ответа, переживая сбои синтезатора.
 
@@ -683,6 +751,7 @@ class AgentLoopSynthesis:
                 fatal_types=(ModelBudgetExceeded,),
             )
             st.draft_answer = _ladder.answer
+            self._rewrite_if_off_topic(st, _do_synthesize)
             self._last_synth_degraded = _ladder.degraded
             if _ladder.degraded:
                 # The answer the user gets was assembled by the fallback, not
