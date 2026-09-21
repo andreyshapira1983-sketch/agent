@@ -180,7 +180,8 @@
   "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt": [],
   "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified": [],
   "loop_synthesis.py::_safety_notes_block": [],
-  "loop_synthesis.py::_failure_context_block": []
+  "loop_synthesis.py::_failure_context_block": [],
+  "loop_gates.py::_names_its_material": []
  },
  "edges": [
   [
