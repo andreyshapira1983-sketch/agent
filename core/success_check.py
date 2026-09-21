@@ -56,6 +56,43 @@ _KV_JSON = re.compile(
 #: небольшом следе; читать гигабайт ради слова — способ уронить тик.
 _CONTENT_READ_LIMIT = 256 * 1024
 
+#: Третья наблюдаемая форма, для правки КОДА: `undefined:имя@путь.py` — «в
+#: этом модуле больше нет определения верхнего уровня с таким именем».
+#: Читается по AST, без модели. Зачем: до 2026-09-21 цель самоправки
+#: проверялась критерием «в data/approval_inbox.jsonl появилась новая заявка
+#: self_apply_lane.run». Он мерил бумажку, а не правку, и наблюдатель не мог
+#: проверить даже её: `self_apply_lane.run` читался как имя файла, файла нет —
+#: вердикт «missing» при любом исходе. Критерий не отличал сделанное от
+#: несделанного. След правки кода должен меняться только тогда, когда правка
+#: сделана.
+_UNDEFINED = re.compile(r"\bundefined:([A-Za-z_][A-Za-z0-9_]{0,99})@([A-Za-z0-9_./\\-]+\.py)\b")
+
+
+def undefined_claims(success_check: str) -> tuple[tuple[str, str], ...]:
+    """Пары (имя, путь) из форм `undefined:имя@путь.py`, по порядку, без повторов."""
+    out: list[tuple[str, str]] = []
+    for match in _UNDEFINED.finditer(str(success_check or "")):
+        pair = (match.group(1), match.group(2).replace("\\", "/"))
+        if pair not in out:
+            out.append(pair)
+    return tuple(out)
+
+
+def _top_level_names(target: Path) -> set[str] | None:
+    import ast
+
+    try:
+        tree = ast.parse(target.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
 
 def content_claims(success_check: str) -> tuple[tuple[str, str], ...]:
     """Пары «ключ, значение», названные критерием, без повторов."""
@@ -234,6 +271,13 @@ def observe_success_check(success_check: str, workspace: Any) -> dict:
         if not met:
             missing.append(relpath)
             reasons.append(f"{relpath}: {why}")
+    for name, relpath in undefined_claims(success_check):
+        names = _top_level_names(root / relpath) if relpath not in missing else None
+        if names is None or name in names:
+            if relpath not in missing:
+                missing.append(relpath)
+            reasons.append(f"{relpath}: определение {name} всё ещё на месте"
+                           if names is not None else f"{relpath}: не читается как модуль")
     return {
         "verdict": "missing" if missing else "verified",
         "artifacts": list(artifacts),

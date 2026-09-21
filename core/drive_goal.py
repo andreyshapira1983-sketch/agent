@@ -265,22 +265,31 @@ def _engineering_goal(root: Path) -> DriveGoal | None:
     построению только читают. Здесь цель называет свободный модуль и своё
     действие — `propose_engineering_task`, всё та же полоса и те же ворота.
     """
-    from core.drives import self_improvement_targets
+    from core.drives import self_improvement_proofs
 
-    targets = self_improvement_targets(root)
+    targets = self_improvement_proofs(root)
     if not targets:
         return None
-    target, lines = targets[0]
-    helpers = target[:-3] + "_helpers.py"
+    target, _lines, proof = targets[0]
+    # Цель называет ДОКАЗАТЕЛЬСТВО и действие, которое из него следует, а не
+    # толщину файла; успех — след правки в коде, а не появление бумажки.
+    # До 2026-09-21: «Разбить свой модуль X (N строк)… в X_helpers.py» и
+    # «в data/approval_inbox.jsonl появилась новая заявка» — критерий мерил
+    # бумажку и не отличал сделанное от несделанного (core/success_check.py).
+    gone = " ".join(f"undefined:{name}@{target}" for name in proof.names[:3])
+    if proof.kind == "dup":
+        goal = (f"Свести повтор в модуле {target}: {proof.describe(target)}. Оставить одну "
+                f"копию в {proof.other}, в {target} взять её импортом — заявкой в ящик "
+                "одобрений; полоса самоправок и её ворота остаются прежними")
+        check = f"{gone} — копия в {target} убрана, остаётся в {proof.other}"
+    else:
+        goal = (f"Раскол модуля {target} по доказательству — {proof.describe(target)}. "
+                "Вынести эту группу в модуль с именем по её смыслу (не _helpers) — заявкой "
+                "в ящик одобрений; полоса самоправок и её ворота остаются прежними")
+        check = f"{gone} — группа вынесена из {target}"
     return DriveGoal(
-        status="proposed",
-        goal=(f"Разбить свой модуль {target} ({lines} строк): прочитать его, выбрать связную "
-              f"группу имён и предложить их перенос в {helpers} — заявкой в ящик одобрений, "
-              "полоса самоправок и её ворота остаются прежними"),
-        success_check=(f"в data/approval_inbox.jsonl появилась новая заявка self_apply_lane.run "
-                       f"по {target}"),
-        drive="self_improvement_need",
-        action="propose_engineering_task",
+        status="proposed", goal=goal, success_check=check,
+        drive="self_improvement_need", action="propose_engineering_task",
     )
 
 
