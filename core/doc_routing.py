@@ -6,6 +6,24 @@ from typing import Any
 from core.lang_match import any_term_matches, normalize_text, tokenize
 from core.workspace_reference import names_workspace_path
 
+
+def _keeps_step_references(fn: Any) -> Any:
+    """Перестановка шагов плана переносит и номера в ссылках {{step:N.output}}.
+
+    2026-09-21: вставленное в начало чтение доктрины сдвинуло шаги, ссылка
+    записи осталась прежней, и в предложение агента записалась доктрина.
+    """
+    import functools
+
+    from core.step_references import renumber_step_references
+
+    @functools.wraps(fn)
+    def wrapper(sources: list[dict[str, Any]], *args: Any, **kwargs: Any) -> Any:
+        before = list(sources)
+        return renumber_step_references(before, fn(sources, *args, **kwargs))
+
+    return wrapper
+
 BROAD_PROJECT_CONTEXT_TERMS = (
     "your project",
     "this project",
@@ -633,6 +651,12 @@ def _is_self_repair_doctrine_question(question: str) -> bool:
     lowered = (question or "").casefold()
     if any(term in lowered for term in _SELF_REPAIR_DOC_STRONG_TERMS):
         return True
+    # Задача над названными файлами — не вопрос о протоколе починки. 2026-09-21:
+    # «исправь proposals/…final.md на месте … резервная копия» совпало по
+    # «исправ» + «резервн», и в план правки текста вставилось чтение доктрины.
+    from core.file_request_intent import extract_path_mentions
+    if extract_path_mentions(question or ""):
+        return False
     has_context = any(term in lowered for term in _SELF_REPAIR_DOC_CONTEXT_TERMS)
     has_action = any(term in lowered for term in _SELF_REPAIR_DOC_ACTION_TERMS)
     return has_context and has_action
@@ -715,6 +739,7 @@ def _is_low_signal_confidence_source(src: dict[str, Any]) -> bool:
     return False
 
 
+@_keeps_step_references
 def _ensure_confidence_evidence_sources_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
@@ -764,6 +789,7 @@ def _ensure_confidence_evidence_sources_first(
     return ordered + remainder
 
 
+@_keeps_step_references
 def _ensure_doctrine_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
@@ -818,6 +844,7 @@ def _ensure_doctrine_docs_first(
     return ordered_docs + remainder
 
 
+@_keeps_step_references
 def _ensure_thematic_docs_first(
     sources: list[dict[str, Any]],
     warnings: list[str],
@@ -924,6 +951,7 @@ def _ensure_self_repair_doctrine_docs_first(
     )
 
 
+@_keeps_step_references
 def _drop_readme_status_sources(
     sources: list[dict[str, Any]],
     warnings: list[str],
@@ -953,6 +981,7 @@ def _drop_readme_status_sources(
 _WEB_EGRESS_TOOLS = frozenset({"web_search", "web_fetch", "rss_fetch"})
 
 
+@_keeps_step_references
 def _drop_web_lookup_for_introspection(
     sources: list[dict[str, Any]],
     warnings: list[str],

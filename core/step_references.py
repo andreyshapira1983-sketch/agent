@@ -239,3 +239,44 @@ def resolve_step_references(
             resolve_step_references(v, outputs, plan_steps=plan_steps) for v in value
         )
     return value
+
+
+def renumber_step_references(
+    before: list[dict[str, Any]], after: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Переписать `{{step:N.output}}` под новый порядок шагов.
+
+    2026-09-21, живой разговор: агент спланировал «прочитать final (1),
+    прочитать дополнение (2), записать final = {{step:1.output}} …». Маршрутизатор
+    документов (`core/doc_routing._ensure_*_docs_first`) после планировщика
+    ВСТАВИЛ в начало чтение доктрины самопочинки — шаги сдвинулись, ссылка
+    осталась, и в предложение агента записалась доктрина. Номер ссылки — это
+    место шага в плане ПЛАНИРОВЩИКА; при перестановке он обязан ехать за шагом.
+
+    Шаги сопоставляются по тождеству объекта. Ссылка на шаг, которого больше
+    нет, не трогается — разрешение ссылки откажет вслух.
+    """
+    old_to_new: dict[str, str] = {}
+    positions = {id(src): i for i, src in enumerate(after, start=1)}
+    for old, src in enumerate(before, start=1):
+        new = positions.get(id(src))
+        if new is not None and new != old:
+            old_to_new[str(old)] = str(new)
+    if not old_to_new:
+        return after
+
+    def fix(value: Any) -> Any:
+        if isinstance(value, str):
+            return _REFERENCE_RE.sub(
+                lambda m: m.group(0).replace(m.group("ref"), old_to_new[m.group("ref")], 1)
+                if m.group("ref") in old_to_new else m.group(0), value)
+        if isinstance(value, dict):
+            return {k: fix(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [fix(v) for v in value]
+        return value
+
+    for src in after:
+        if isinstance(src.get("arguments"), dict):
+            src["arguments"] = fix(src["arguments"])
+    return after
