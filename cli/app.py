@@ -28,7 +28,7 @@ from app.task_scheduler_cli import _schedule_disable_message
 from cli.args import build_parser
 from cli.commands_self_build import _handle_self_build_propose
 from cli.help import render_startup_commands
-from cli.one_shot import run_one_shot
+from cli.one_shot import read_history, run_one_shot
 from cli.repl import _stdin_is_interactive, _StdinLineReader, run_repl
 from cli.resume import resolve_resume
 from core.approval import ApprovalProvider, AutoApprover, CLIApprovalProvider
@@ -173,6 +173,7 @@ def run_cli() -> int:
             expect=args.expect,
             resumed_from=resumed_from,
             build_agent=build_agent,
+            history=read_history(args.history),
         )
 
     # ── Paste-safe interactive input ─────────────────────────────────────────

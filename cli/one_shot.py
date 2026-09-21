@@ -61,6 +61,8 @@ def run_one_shot(
     # Wiring seam: cli/app.py passes its own binding, so a patch there is
     # observed here too. Default keeps this function runnable on its own.
     build_agent: Callable[..., object] = _build_agent,
+    # Прошлые реплики разговора (вопрос, ответ) — см. `--history`.
+    history: list[tuple[str, str]] | None = None,
 ) -> int:
     """Run a single question end-to-end and return the process exit code."""
     # Approval provider selection. One-shot can't realistically prompt a
@@ -102,14 +104,22 @@ def run_one_shot(
     # episodic_replay=False нарочно: память должна ПОДСКАЗЫВАТЬ, а не
     # подменять работу готовым ответом из прошлого. Разговор ведут ради
     # нового измерения, а не ради пересказа старого.
+    # Разговор, а не поток команд (оператор, 2026-09-20 и снова 2026-09-21).
+    # Мостик зовёт `--ask` новым процессом на каждую реплику, и агент видел
+    # каждое сообщение с чистого листа: не помнил, что сам нашёл час назад
+    # (строка 186 — нашёл, а свой испорченный этим же файл не связал), не
+    # слышал поправок, «предыдущего шага» у него не было никогда. С `--history`
+    # память СЕССИИ заполняется прошлыми репликами; долговременная память
+    # (`with_persistent`) по-прежнему выключена. Без ключа — как было.
     agent = build_agent(
         workspace,
-        with_memory=False,
+        with_memory=bool(history),
         with_persistent=False,
         with_experience=True,
         episodic_replay=False,
         approval_provider=approval_provider,
     )
+    _load_history(agent, history)
     # Explicit ':' meta-commands take precedence over fuzzy intent routing,
     # mirroring the interactive REPL — otherwise e.g. ':campaign-start
     # --max-cost-units 0' is misread as a budget query by the classifier.
@@ -148,3 +158,44 @@ def run_one_shot(
     )
     print("\n" + format_human_response(answer) + "\n")
     return 0
+
+
+#: Сколько прошлых реплик разговора поднимать в память сессии. Память сама
+#: режет контекст по своему бюджету (WorkingMemory.max_context_chars), так
+#: что это верхняя граница, а не обещание, что все войдут в подсказку.
+HISTORY_TURNS = 8
+
+
+def read_history(path: str | None) -> list[tuple[str, str]]:
+    """Пары (вопрос, ответ) из файла `--history`: JSONL {"question","answer"}.
+
+    Нечитаемая строка пропускается, отсутствующий файл — пустая история:
+    разговор без прошлого хуже разговора с прошлым, но не повод упасть.
+    """
+    import json
+    from pathlib import Path
+
+    if not path:
+        return []
+    pairs: list[tuple[str, str]] = []
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        question, answer = str(row.get("question") or ""), str(row.get("answer") or "")
+        if question.strip() and answer.strip():
+            pairs.append((question, answer))
+    return pairs[-HISTORY_TURNS:]
+
+
+def _load_history(agent: object, history: list[tuple[str, str]] | None) -> None:
+    memory = getattr(agent, "memory", None)
+    if not history or memory is None:
+        return
+    for question, answer in history:
+        memory.record_turn(question, "", [], [], answer)
