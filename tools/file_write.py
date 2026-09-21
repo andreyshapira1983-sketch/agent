@@ -120,8 +120,18 @@ class FileWriteTool(Tool):
             # in depth.
             return "irreversible"
         if target.exists():
+            # Свои предложения агент правит сам — решение оператора
+            # 2026-09-21: перезапись требовала одобрения, правки шли новыми
+            # файлами, и proposals/ выросла до 17 версий одного документа.
+            # Откат есть всегда: перед записью делается резервная копия.
+            if self._is_own_proposal(target):
+                return "reversible"
             return "irreversible"
         return "reversible"
+
+    def _is_own_proposal(self, target: Path) -> bool:
+        proposals = (self.workspace_root / "proposals").resolve()
+        return proposals in target.resolve().parents
 
     # ------------------------------------------------------------------
     # execution
@@ -196,7 +206,11 @@ class FileWriteTool(Tool):
             target.parent.mkdir(parents=True, exist_ok=True)
             mode = "create"
 
-        target.write_text(content, encoding="utf-8")
+        # newline="": текст пишется как есть. Без этого на Windows каждый \n
+        # становился \r\n, и доклад «17713 байт» расходился с 18105 на диске
+        # (2026-09-21). Размер — измеренный на диске, а не посчитанный.
+        target.write_text(content, encoding="utf-8", newline="")
+        size = target.stat().st_size
 
         target_rel = str(target.relative_to(self.workspace_root))
         # MVP-11 Compensation: tool ships an undo plan in its output.
