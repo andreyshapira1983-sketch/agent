@@ -52,6 +52,7 @@ from core.referent_resolver import (
     is_show_only_directive,
     referent_resolver_mode,
 )
+from core.self_defect_reminder import format_open_self_defects, open_self_defects
 from core.spend_report import load_spend_rows, spend_mirror_block
 
 
@@ -171,8 +172,24 @@ class AgentLoopContext:
         # получил», данные, не указание; пустые журналы не занимают подсказку.
         # На витке локальной критики подавляется вместе с остальной памятью.
         spend_block = "" if local_critique_active else self._spend_mirror()
+        # Свои открытые записи о промахах (2026-09-21) — в тот же пятый
+        # элемент «о себе», не в блок опыта; синтез берёт их с цикла.
+        self._self_defects_block = "" if local_critique_active else self._self_defects()
+        spend_block = "\n\n".join(p for p in (spend_block, self._self_defects_block) if p)
 
         return history, local_critique_active, persistent_block, experience_block, spend_block
+
+    def _self_defects(self) -> str:
+        """Открытые записи реестра о собственных промахах — блоком для хода."""
+        try:
+            rows = open_self_defects(self._file_read_workspace_root())
+        except Exception as exc:  # noqa: BLE001 — напоминание не вправе ронять ход
+            self.log.log("self_defects_unavailable", {"error": repr(exc)[:200]})
+            return ""
+        self.log.log("self_defects_inject", {
+            "count": len(rows), "titles": [str(r.get("title") or r.get("issue"))[:80] for r in rows],
+        })
+        return format_open_self_defects(rows)
 
     def _spend_mirror(self) -> str:
         """Блок зеркала из живых журналов; без рабочей папки — пустота."""

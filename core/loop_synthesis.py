@@ -111,6 +111,9 @@ class AgentLoopSynthesis:
         _save_budget_pause_checkpoint: Any
         last_referent_decision: Any
         model_router: Any
+        # Свои открытые записи о промахах: заводит чтение контекста хода
+        # (`core/loop_context.py`), синтез ставит их рядом с <failure_context>.
+        _self_defects_block: Any
 
     def _resolve_synthesis_contract(self) -> str:
         """The active output contract, and a fallback that admits itself.
@@ -160,6 +163,16 @@ class AgentLoopSynthesis:
             # агент не смог назвать собственный состав.
             self._sensor_failed("runtime_self", exc)
             return ""
+        return f"{block}\n\n" if block else ""
+
+    def _self_defects_prompt(self) -> str:
+        """Свои открытые записи о промахах — у того, кто пишет «не могу».
+
+        2026-09-21: агент записал «объяснил стену вместо проверки» и повторил
+        это через десять часов. Блок заводит чтение контекста хода; синтез
+        зовут и мимо него, поэтому пустота — законный ответ.
+        """
+        block = getattr(self, "_self_defects_block", "") or ""
         return f"{block}\n\n" if block else ""
 
     def _synthesize(  # noqa: PLR0913, PLR0917 — the roster rides beside the memory block (exam 2026-09-04)
@@ -313,7 +326,7 @@ class AgentLoopSynthesis:
             )
             user_prompt = (
                 f"{safety_block}"
-                f"{failure_block}"
+                f"{self._self_defects_prompt()}{failure_block}"
                 f"{profile_block}"
                 f"<directive>\n{safe_directive}\n</directive>\n\n"
                 f'<analysis_target untrusted="true">\n'
@@ -439,7 +452,7 @@ class AgentLoopSynthesis:
             )
             user_prompt = (
                 f"{safety_block}"
-                f"{failure_block}"
+                f"{self._self_defects_prompt()}{failure_block}"
                 f"{role_block}"
                 f"{profile_block}"
                 f"{assumptions_block}"
@@ -490,7 +503,7 @@ class AgentLoopSynthesis:
             sensor_citations_block = format_allowed_citations_block(self.last_provenance)
             user_prompt = (
                 f"{safety_block}"
-                f"{failure_block}"
+                f"{self._self_defects_prompt()}{failure_block}"
                 f"{role_block}"
                 f"{profile_block}"
                 f"{assumptions_block}"
