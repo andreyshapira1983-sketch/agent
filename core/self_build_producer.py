@@ -1431,7 +1431,140 @@ def _denied_self_apply_targets(inbox: Any) -> frozenset[str]:
         return frozenset()
 
 
-def produce_self_apply_proposal(
+def _precheck_gates(
+    *, inbox: Any, vcs: Any, budget_snapshot: Any, kill_switch: Any,
+    explicit: tuple[str, ...],
+) -> tuple[ProducerReport | None, list[str], Any, Any]:
+    """Gates 1–4 before any LLM work: (stop report or None, gates passed,
+    files waiting on approval, files on denial cooldown). Moved verbatim out of
+    `produce_self_apply_proposal` 2026-09-21 (over the linter's statement and
+    branch limits).
+    """
+    gates: list[str] = []
+
+    # ── gate 1: budget kill-switch (before ANY LLM-heavy work) ──────────────
+    if kill_switch is not None and getattr(kill_switch, "active", False):
+        return ProducerReport(
+            status="budget_kill_switch",
+            reason=str(getattr(kill_switch, "reason", "") or "kill-switch active"),
+            checked_gates=["kill_switch"],
+            next_human_action="Resolve budget kill-switch before self-build.",
+        ), gates, None, frozenset()
+    gates.append("kill_switch")
+
+    # ── gate 2: hour budget near-exhaustion ─────────────────────────────────
+    if budget_snapshot is not None:
+        headroom = hour_budget_headroom(budget_snapshot)
+        near, reasons = is_budget_near_exhaustion(headroom)
+        if near:
+            return ProducerReport(
+                status="budget_wait",
+                reason="; ".join(reasons) or "budget near exhaustion",
+                checked_gates=[*gates, "budget"],
+                next_human_action="Wait for the budget window to refill.",
+            ), gates, None, frozenset()
+    gates.append("budget")
+
+    # ── gate 3: a self_apply approval on the SAME file is still waiting ─────
+    # Block 3 (L9, 2026-09-03): waiting on one file is not exhaustion of the
+    # hand. Only a candidate a waiting item already touches waits; a file a
+    # human denied recently is on cooldown; when the producer chooses, both
+    # sets are excluded so it advances to the next grounded candidate.
+    waiting = _waiting_self_apply_targets(inbox)
+    denied_cooldown = _denied_self_apply_targets(inbox)
+    if waiting is None or (explicit and set(explicit) & waiting):
+        held = sorted(set(explicit) & waiting) if waiting is not None else []
+        return ProducerReport(
+            status="approval_wait",
+            reason=(
+                f"a pending self_apply_lane.run approval already touches "
+                f"{', '.join(held)}" if held else
+                "a pending self_apply_lane.run approval item names no files"
+            ),
+            checked_gates=[*gates, "approval"],
+            next_human_action="Resolve the existing self-apply approval first.",
+        ), gates, waiting, denied_cooldown
+    if explicit and set(explicit) <= denied_cooldown:
+        return ProducerReport(
+            status="denied_cooldown",
+            reason=f"a human denied a proposal for {', '.join(explicit)} recently",
+            checked_gates=[*gates, "approval"],
+            next_human_action="Revise against the denial reason or pick another file.",
+        ), gates, waiting, denied_cooldown
+    gates.append("approval")
+
+    # ── gate 4: dirty working tree ──────────────────────────────────────────
+    if vcs is not None and not vcs.is_clean():
+        return ProducerReport(
+            status="dirty_tree_wait",
+            reason="git working tree is not clean",
+            checked_gates=[*gates, "dirty_tree"],
+            next_human_action="Commit or stash local changes, then retry.",
+        ), gates, waiting, denied_cooldown
+    gates.append("dirty_tree")
+    return None, gates, waiting, denied_cooldown
+
+
+def _dependency_context(
+    workspace: str | Path, target: str, evidence: list[str],
+) -> tuple[Any, str | None]:
+    """Dependency map. Before the Builder touches a Python module, measure its
+    real consumers: which project files import it, which symbols they take, and
+    which test files exercise it. The Builder gets this as an explicit contract,
+    the Critic cross-checks dropped names against REAL imports, and the importer
+    tests are appended to the targeted-test list. Best-effort: a scan failure
+    must never break the producer. Appends to ``evidence`` in place.
+    """
+    if not target.lower().endswith(".py"):
+        return None, None
+    try:
+        from core.dependency_map import build_dependency_map
+
+        dep_map = build_dependency_map(workspace, target)
+        dep_context = dep_map.builder_context()
+        evidence.extend(dep_map.summary_lines())
+    except Exception:  # noqa: BLE001 — dep scan must never break the producer
+        return None, None
+    return dep_map, dep_context
+
+
+def _hard_rules(
+    workspace: str | Path, target: str, evidence: list[str], dep_context: str | None,
+) -> tuple[dict[str, str], str | None]:
+    """Hard rules from past rollbacks. Machine-extracted lessons (e.g.
+    "ImportError: cannot import name 'X'") persisted by the apply command. The
+    Builder sees them as non-negotiable constraints and the Critic enforces them
+    deterministically. Returns (required symbols, Builder context with the rules
+    block prepended). Appends to ``evidence`` in place.
+    """
+    required_symbols: dict[str, str] = {}
+    if not target.lower().endswith(".py"):
+        return required_symbols, dep_context
+    try:
+        from core.self_build_rules import RuleStore, default_rules_path
+
+        for rule in RuleStore(default_rules_path(workspace)).rules_for(target):
+            if rule.kind == "keep_importable":
+                required_symbols[rule.symbol] = rule.source
+        if required_symbols:
+            evidence.append(
+                "hard_rules=" + ", ".join(sorted(required_symbols))
+            )
+            rules_block = (
+                "HARD RULES (learned from rolled-back applies; violating "
+                "any of these guarantees a veto): the following symbols "
+                "MUST remain importable from the target file: "
+                + ", ".join(sorted(required_symbols))
+            )
+            dep_context = (
+                f"{rules_block}\n\n{dep_context}" if dep_context else rules_block
+            )
+    except Exception:  # noqa: BLE001 — rules must never break the producer
+        return {}, dep_context
+    return required_symbols, dep_context
+
+
+def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 call sites (3 callers + tests); an options object would rewrite all of them for no change in behaviour
     *,
     workspace: str | Path,
     inbox: Any,
@@ -1466,69 +1599,12 @@ def produce_self_apply_proposal(
         return report
 
     targets = tuple(candidate_targets) if candidate_targets else DEFAULT_CANDIDATE_TARGETS
-    gates: list[str] = []
-
-    # ── gate 1: budget kill-switch (before ANY LLM-heavy work) ──────────────
-    if kill_switch is not None and getattr(kill_switch, "active", False):
-        return _record(ProducerReport(
-            status="budget_kill_switch",
-            reason=str(getattr(kill_switch, "reason", "") or "kill-switch active"),
-            checked_gates=["kill_switch"],
-            next_human_action="Resolve budget kill-switch before self-build.",
-        ))
-    gates.append("kill_switch")
-
-    # ── gate 2: hour budget near-exhaustion ─────────────────────────────────
-    if budget_snapshot is not None:
-        headroom = hour_budget_headroom(budget_snapshot)
-        near, reasons = is_budget_near_exhaustion(headroom)
-        if near:
-            return _record(ProducerReport(
-                status="budget_wait",
-                reason="; ".join(reasons) or "budget near exhaustion",
-                checked_gates=[*gates, "budget"],
-                next_human_action="Wait for the budget window to refill.",
-            ))
-    gates.append("budget")
-
-    # ── gate 3: a self_apply approval on the SAME file is still waiting ─────
-    # Block 3 (L9, 2026-09-03): waiting on one file is not exhaustion of the
-    # hand. Only a candidate a waiting item already touches waits; a file a
-    # human denied recently is on cooldown; when the producer chooses, both
-    # sets are excluded so it advances to the next grounded candidate.
-    waiting = _waiting_self_apply_targets(inbox)
-    denied_cooldown = _denied_self_apply_targets(inbox)
     explicit = tuple(candidate_targets or ())
-    if waiting is None or (explicit and set(explicit) & waiting):
-        held = sorted(set(explicit) & waiting) if waiting is not None else []
-        return _record(ProducerReport(
-            status="approval_wait",
-            reason=(
-                f"a pending self_apply_lane.run approval already touches "
-                f"{', '.join(held)}" if held else
-                "a pending self_apply_lane.run approval item names no files"
-            ),
-            checked_gates=[*gates, "approval"],
-            next_human_action="Resolve the existing self-apply approval first.",
-        ))
-    if explicit and set(explicit) <= denied_cooldown:
-        return _record(ProducerReport(
-            status="denied_cooldown",
-            reason=f"a human denied a proposal for {', '.join(explicit)} recently",
-            checked_gates=[*gates, "approval"],
-            next_human_action="Revise against the denial reason or pick another file.",
-        ))
-    gates.append("approval")
-
-    # ── gate 4: dirty working tree ──────────────────────────────────────────
-    if vcs is not None and not vcs.is_clean():
-        return _record(ProducerReport(
-            status="dirty_tree_wait",
-            reason="git working tree is not clean",
-            checked_gates=[*gates, "dirty_tree"],
-            next_human_action="Commit or stash local changes, then retry.",
-        ))
-    gates.append("dirty_tree")
+    stopped, gates, waiting, denied_cooldown = _precheck_gates(
+        inbox=inbox, vcs=vcs, budget_snapshot=budget_snapshot,
+        kill_switch=kill_switch, explicit=explicit)
+    if stopped is not None:
+        return _record(stopped)
 
     reader = file_reader or _default_file_reader(workspace)
     roles: list[RoleOutput] = []
@@ -1630,53 +1706,8 @@ def produce_self_apply_proposal(
                 ),
             ))
 
-    # ── Dependency map ───────────────────────────────────────────────────────
-    # Before the Builder touches a Python module, measure its real consumers:
-    # which project files import it, which symbols they take, and which test
-    # files exercise it. The Builder gets this as an explicit contract, the
-    # Critic cross-checks dropped names against REAL imports, and the importer
-    # tests are appended to the targeted-test list. Best-effort: a scan failure
-    # must never break the producer.
-    dep_map = None
-    dep_context: str | None = None
-    if target.lower().endswith(".py"):
-        try:
-            from core.dependency_map import build_dependency_map
-
-            dep_map = build_dependency_map(workspace, target)
-            dep_context = dep_map.builder_context()
-            evidence.extend(dep_map.summary_lines())
-        except Exception:  # noqa: BLE001 — dep scan must never break the producer
-            dep_map = None
-            dep_context = None
-
-    # ── Hard rules from past rollbacks ──────────────────────────────────────
-    # Machine-extracted lessons (e.g. "ImportError: cannot import name 'X'")
-    # persisted by the apply command. The Builder sees them as non-negotiable
-    # constraints and the Critic enforces them deterministically.
-    required_symbols: dict[str, str] = {}
-    if target.lower().endswith(".py"):
-        try:
-            from core.self_build_rules import RuleStore, default_rules_path
-
-            for rule in RuleStore(default_rules_path(workspace)).rules_for(target):
-                if rule.kind == "keep_importable":
-                    required_symbols[rule.symbol] = rule.source
-            if required_symbols:
-                evidence.append(
-                    "hard_rules=" + ", ".join(sorted(required_symbols))
-                )
-                rules_block = (
-                    "HARD RULES (learned from rolled-back applies; violating "
-                    "any of these guarantees a veto): the following symbols "
-                    "MUST remain importable from the target file: "
-                    + ", ".join(sorted(required_symbols))
-                )
-                dep_context = (
-                    f"{rules_block}\n\n{dep_context}" if dep_context else rules_block
-                )
-        except Exception:  # noqa: BLE001 — rules must never break the producer
-            required_symbols = {}
+    dep_map, dep_context = _dependency_context(workspace, target, evidence)
+    required_symbols, dep_context = _hard_rules(workspace, target, evidence, dep_context)
 
     # ── Builder → Critic (with optional single retry on veto, B) ────────────
     # When ``max_builder_attempts > 1`` a Critic veto is retried ONCE with the
