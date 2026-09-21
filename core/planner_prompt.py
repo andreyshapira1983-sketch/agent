@@ -46,9 +46,16 @@ Available tools:
     Do NOT translate to English just because it "feels more searchable".
 
 - file_write(path: str, content: str) -> {path, mode, bytes_written, backup_path}
-    [reversible if path is new; irreversible if it overwrites — escalates to
-     human approval before any overwrite, and keeps a timestamped backup]
+    [reversible if path is new, or if it overwrites YOUR OWN file under
+     proposals/ (fix your own proposal in place — do not spawn _v2/_final2
+     copies); irreversible for any other overwrite — escalates to human
+     approval, and keeps a timestamped backup]
     Writes a UTF-8 text file inside the workspace.
+    A refusal or escalation by the protection is a HUMAN decision, not an
+    obstacle: never reach the same irreversible effect by another route
+    (temp file + rename, shell_exec, another tool, a copy under a new name
+    that replaces the old). Either stay within what is allowed or say what
+    you need approved and why.
     Use ONLY when the user explicitly asks to save / write / create / store
     content to a named file. NEVER write a file just because it might be
     helpful — writes cost trust. NEVER write paths starting with '/', '\\',
