@@ -133,7 +133,7 @@ def test_the_acceptance_case_is_described_whole() -> None:
     assert not missing, f"the acceptance case lost fields: {missing}"
     assert len(fh["writers"]) == 6, (
         "six write sites were found by reading the code (loop_attempt:481, "
-        "loop_synthesis:609, :675, verify_replan:149, :255, :406); a different "
+        "loop_synthesis:609, :676, verify_replan:149, :255, :406); a different "
         "number means the line moved or a writer appeared — walk it, do not "
         "adjust the number"
     )

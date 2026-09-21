@@ -651,6 +651,7 @@ class AgentLoopSynthesis:
         try:
             tool = self.registry.get("file_read")
         except KeyError:
+            self.log.log("unverified_own_files_skipped", {"reason": "no file_read tool"})
             return
         paths = unverified_own_paths(
             st.draft_answer or "", root=getattr(tool, "workspace_root", None),

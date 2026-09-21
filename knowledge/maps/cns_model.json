@@ -81,7 +81,7 @@
      "_anchor_correction": "сдвинулось 2026-09-21 на +13: в core/loop_synthesis.py выше вставлен _self_defects_prompt (свои записи о промахах перед синтезатором); поймано tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:675",
+     "site": "core/loop_synthesis.py:676",
      "node": "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified",
      "puts": "unverified_own_file — черновик вынес в «Не подтверждено» файлы своей папки; они дочитаны, повод собрать ответ заново один раз",
      "call": "append",
