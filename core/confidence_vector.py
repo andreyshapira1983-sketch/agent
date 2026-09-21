@@ -314,11 +314,18 @@ def compute_vector(
     disagreements: Sequence[dict] | None,
     question: str | None,
     answer: str | None,
+    judged_relevance: float | None = None,
 ) -> ConfidenceVector:
+    """``judged_relevance`` — оценка судьи (`core/relevance_judge.py`); когда
+    она есть, заменяет счёт слов: судья читает смысл, и алфавит ему не помеха.
+    """
     e = evidence_score(report)
     c = coherence_score(disagreements)
-    applicable = relevance_applicable(question, answer)
-    r = relevance_score(question, answer) if applicable else None
+    if judged_relevance is not None:
+        applicable, r = True, max(0.0, min(1.0, float(judged_relevance)))
+    else:
+        applicable = relevance_applicable(question, answer)
+        r = relevance_score(question, answer) if applicable else None
     if applicable:
         overall = _weighted_geometric_mean(
             [e, c, r or 0.0],

@@ -174,10 +174,9 @@ class AgentLoopVerification:
             self.last_confidence_vector = None  # never a previous run's axes
             from core.confidence_vector import compute_vector
             _cv = compute_vector(
-                report=report,
-                disagreements=_disagreements,
-                question=user_question,
-                answer=draft_answer,
+                report=report, disagreements=_disagreements,
+                question=user_question, answer=draft_answer,
+                judged_relevance=self._judged_relevance(user_question, draft_answer),
             )
             # Kept on the loop, not only logged: the summary reports the
             # relevance axis. Reset per run in `loop.py` so a previous run's
@@ -233,6 +232,31 @@ class AgentLoopVerification:
             self._sensor_failed("evidence_support", exc)
 
         return report, verifier_failure
+
+    def _judged_relevance(self, question: str | None, answer: str | None) -> float | None:
+        """Оценка судьи относимости, если он включён; иначе None — счёт слов.
+
+        Судья идёт ролью `verifier` через маршрутизатор: его вызов попадает в
+        общий учёт расходов. Рядом в журнал — прежняя мера, чтобы расхождение
+        было видно на живых ходах (признак рецидива и цена — там же).
+        """
+        from core.relevance_judge import judge_enabled, judge_relevance
+
+        router = getattr(self, "model_router", None)
+        if router is None or not judge_enabled():
+            return None
+        try:
+            from core.confidence_vector import relevance_score
+            from core.model_router import ModelRole
+
+            verdict = judge_relevance(router.for_role(ModelRole.VERIFIER), question, answer)
+            payload = verdict.to_log_payload() if verdict else {"score": None}
+            self.log.log("relevance_judge", {
+                **payload, "lexical": round(relevance_score(question, answer), 3)})
+        except Exception as exc:  # noqa: BLE001 — судья не вправе ронять ход
+            self._sensor_failed("relevance_judge", exc)
+            return None
+        return verdict.score if verdict else None
 
     def _verification_receipt_kwargs(self) -> dict[str, Any]:
         from core.tool_receipts import ToolReceiptLedger, default_receipts_path

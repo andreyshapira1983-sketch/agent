@@ -181,9 +181,18 @@
   "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified": [],
   "loop_synthesis.py::_safety_notes_block": [],
   "loop_synthesis.py::_failure_context_block": [],
-  "loop_gates.py::_names_its_material": []
+  "loop_gates.py::_names_its_material": [],
+  "loop_verification.py::AgentLoopVerification._judged_relevance": []
  },
  "edges": [
+  [
+   "loop_verification.py::AgentLoopVerification._judged_relevance",
+   "loop_sensor.py::AgentLoopSensor._sensor_failed"
+  ],
+  [
+   "loop_verification.py::AgentLoopVerification._verify_draft",
+   "loop_verification.py::AgentLoopVerification._judged_relevance"
+  ],
   [
    "loop.py::AgentLoop._run_inner",
    "loop.py::AgentLoop._file_read_workspace_root"

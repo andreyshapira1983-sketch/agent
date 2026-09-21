@@ -52,7 +52,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "clarification_policy", "pending_clarification", "answer_contradiction",
         "instruction_conflict_gate", "directive_extractor",
         "assumption_registry", "referent_resolver",
-        "evidence_support", "confidence_vector",
+        "evidence_support", "confidence_vector", "relevance_judge",
         "reasoning_action_check", "best_next_action",
         "best_next_action_helpers", "task_complexity", "low_evidence_policy",
         "unsupported_claims", "subsystem_disagreement", "completion_marker",
