@@ -43,6 +43,15 @@ def test_an_admitted_gap_enters_the_denominator() -> None:
     assert "уверенность: высокая" not in tail
 
 
+def test_an_unverified_section_saying_nothing_counts_nothing() -> None:
+    """2026-09-21, «пересчитай функции»: «Ничего — подтверждено AST» считалось
+    непроверенным пунктом, и уверенность занижалась при пустом разделе."""
+    report = verify(answer=_answer(
+        "Ничего — количество и имена функций подтверждены прямым измерением AST."),
+        chain=_chain())
+    assert report.admitted_unverified_chunks == 0
+
+
 def test_nothing_admitted_changes_nothing() -> None:
     chain = _chain()
     report = verify(answer=_answer("- (нет)").replace("Unverified:\n- (нет)\n", ""),
