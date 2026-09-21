@@ -148,7 +148,21 @@ def last_self_change(root: Path) -> datetime | None:
 
 
 def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]]:
-    """Свои модули, по которым правку можно предложить ПРЯМО СЕЙЧАС, крупные первыми.
+    """Свои модули, по которым правку можно предложить ПРЯМО СЕЙЧАС — только с
+    доказательством, сильные первыми (подробности: `self_improvement_proofs`)."""
+    return [(rel, lines) for rel, lines, _proof in self_improvement_proofs(root, limit)]
+
+
+def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, Any]]:
+    """Свои модули с ДОКАЗАТЕЛЬСТВОМ, что их надо переделать, и само доказательство.
+
+    До 2026-09-21 цель выбиралась по числу строк — самый толстый файл первым.
+    Шесть файлов в пределах 180 строк друг от друга: разрежешь первый, корона
+    переедет на второй, финиша нет по построению; 139 из 141 самостоятельных
+    целей были «прочитать себя» или «разбить себя». Требование оператора:
+    прежде чем резать — доказать; размер доказательством не является.
+    Доказательства — `core/split_proof.py`; без него модуль не цель, даже самый
+    большой. Порядок: вид доказательства, его вес, размер — последним.
 
     Отсеиваются занятые: то, что уже ждёт человека в ящике, и то, что закрыто
     уроком отката, — предлагать их значит снова упереться в approval_wait.
@@ -159,6 +173,7 @@ def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]
     """
     from core.self_build_producer import _is_critical
     from core.self_build_rules import blocking_lesson
+    from core.split_proof import index_workspace, proof_for, rank_key
 
     # Производитель заявок молчит, пока в ящике есть НЕРЕШЁННАЯ заявка полосы —
     # одна за раз, и решает её человек (`_has_pending_self_build_proposal`).
@@ -167,18 +182,17 @@ def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]
     if any(r.get("operation") in _SELF_CHANGE_OPS and r.get("status") == "pending"
            for r in _rows(root / "data" / "approval_inbox.jsonl")):
         return []
-    out: list[tuple[str, int]] = []
-    for folder in _OWN_CODE_DIRS:
-        for path in sorted((root / folder).glob("*.py")):
-            rel = f"{folder}/{path.name}"
-            try:
-                lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
-            except OSError:
-                continue
-            if _is_critical(rel) or blocking_lesson(root, [rel]) is not None:
-                continue
-            out.append((rel, lines))
-    out.sort(key=lambda pair: -pair[1])
+    index = index_workspace(root)
+    out: list[tuple[str, int, Any]] = []
+    for rel, mod in index.items():
+        if not rel.startswith(tuple(f"{d}/" for d in _OWN_CODE_DIRS)):
+            continue
+        if _is_critical(rel) or blocking_lesson(root, [rel]) is not None:
+            continue
+        proof = proof_for(rel, index)
+        if proof is not None:
+            out.append((rel, mod.lines, proof))
+    out.sort(key=lambda item: rank_key(item[2], item[1]))
     return out[:limit]
 
 
@@ -218,13 +232,14 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     drives["unfinished_obligations"] = {"value": 1.0 - math.exp(-len(pending) / 5),
                                         "why": f"незавершённых дел, которые можно сдвинуть: {len(pending)}"}
 
-    targets = self_improvement_targets(root)
+    targets = self_improvement_proofs(root)
     changed = last_self_change(root)
     drives["self_improvement_need"] = {
         "value": _growth(changed, now, TAU_HOURS["self"]) if targets else 0.0,
         "why": (f"последняя своя правка кода: {_ago(changed, now)}; "
-                + (f"самый крупный свободный модуль: {targets[0][0]} ({targets[0][1]} строк)"
-                   if targets else "свободных модулей нет — всё занято ящиком или уроками")),
+                + (f"доказано: {targets[0][2].describe(targets[0][0])}" if targets
+                   else "модуля с доказательством правки нет (толщина доказательством "
+                        "не является) — или всё занято ящиком или уроками")),
     }
 
     tail = ledger[-20:]

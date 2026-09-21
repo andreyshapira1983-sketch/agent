@@ -30,12 +30,33 @@ _PENDING = {"id": "a", "status": "pending", "operation": "self_apply_lane.run",
             "payload": {"files": [{"path": "core/waiting.py"}]}}
 
 
+#: Материал — модуль с ДОКАЗАТЕЛЬСТВОМ правки (core/split_proof.py), а не
+#: толстый. До 2026-09-21 здесь стояло «x = 1» девятьсот раз, и тест требовал
+#: считать это материалом: толщина была целью. Слово оператора того дня:
+#: «надо доказать, что так надо сделать»; размер — только повод посмотреть.
+#: Доказательство в фикстуре — дубль: одна и та же пара функций в нескольких
+#: модулях. Исключения (критический орган, урок отката) проверяются на
+#: модулях, у которых доказательство ЕСТЬ, иначе они проверяли бы пустоту.
+_DUPLICATED = (
+    "def _norm(text):\n    text = text.strip()\n    text = text.lower()\n"
+    "    text = text.replace('ё', 'е')\n    parts = text.split()\n"
+    "    return ' '.join(parts)\n\n\n"
+    "def _clip(value, low, high):\n    if value < low:\n        return low\n"
+    "    if value > high:\n        return high\n    return value\n\n\n"
+)
+
+
 def _workspace(tmp_path: Path, inbox_rows: list[dict]) -> Path:
     (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "big.py").write_text("x = 1\n" * 900, encoding="utf-8")
-    (tmp_path / "core" / "punished.py").write_text("z = 3\n" * 1500, encoding="utf-8")
+    (tmp_path / "core" / "big.py").write_text(_DUPLICATED + "x = 1\n" * 900, encoding="utf-8")
+    (tmp_path / "core" / "twin.py").write_text(_DUPLICATED, encoding="utf-8")
+    (tmp_path / "core" / "punished.py").write_text(_DUPLICATED + "z = 3\n" * 1500,
+                                                   encoding="utf-8")
     # В списке критических органов производителя заявок — его полоса не берёт.
-    (tmp_path / "core" / "self_apply_lane.py").write_text("c = 4\n" * 2000, encoding="utf-8")
+    (tmp_path / "core" / "self_apply_lane.py").write_text(_DUPLICATED + "c = 4\n" * 2000,
+                                                          encoding="utf-8")
+    # Самый толстый файл дерева без единого доказательства.
+    (tmp_path / "core" / "fat.py").write_text("f = 5\n" * 5000, encoding="utf-8")
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "approval_inbox.jsonl").write_text(
         "\n".join(json.dumps({"payload": r}) for r in inbox_rows), encoding="utf-8")
@@ -49,8 +70,16 @@ def _workspace(tmp_path: Path, inbox_rows: list[dict]) -> Path:
 def test_material_is_only_what_the_lane_would_take(tmp_path: Path) -> None:
     ws = _workspace(tmp_path, [_APPLIED])
     names = [rel for rel, _lines in self_improvement_targets(ws)]
-    assert names == ["core/big.py"], names  # критический и наказанный уроком — не материал
+    assert names[0] == "core/big.py", names
+    # критический и наказанный уроком — не материал, хотя доказательство у них есть
+    assert "core/self_apply_lane.py" not in names and "core/punished.py" not in names, names
     assert last_self_change(ws) == datetime(2026, 9, 20, 0, 0, tzinfo=timezone.utc)
+
+
+def test_thickness_alone_is_not_material(tmp_path: Path) -> None:
+    """Самый толстый файл без доказательства — не цель (2026-09-21)."""
+    ws = _workspace(tmp_path, [_APPLIED])
+    assert "core/fat.py" not in [rel for rel, _lines in self_improvement_targets(ws)]
 
 
 def test_an_undecided_proposal_means_no_material_at_all(tmp_path: Path) -> None:
@@ -75,4 +104,7 @@ def test_the_goal_names_the_module_and_its_own_action(tmp_path: Path) -> None:
     assert pick.action == "propose_engineering_task", "прозой свой код не чинится"
     assert _is_engineering_goal(pick.goal), "машина должна признать цель инженерной"
     assert resolve_goal_subject(pick.goal, exists=lambda rel: (ws / rel).is_file()) == "core/big.py"
-    assert "approval_inbox.jsonl" in pick.success_check
+    # Успех — след правки в коде, а не появление заявки в ящике: тот критерий
+    # мерил бумажку и не отличал сделанное от несделанного (2026-09-21).
+    assert "undefined:" in pick.success_check and "core/big.py" in pick.success_check
+    assert "approval_inbox" not in pick.success_check
