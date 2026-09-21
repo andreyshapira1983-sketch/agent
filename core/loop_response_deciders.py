@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from core.answer_contradiction import headline_contradicts_facts
 from core.answer_format import file_scope_notice
 from core.degraded_route import substituted_routes, substitution_notice
 from core.low_evidence_policy import is_evidence_expected
@@ -260,6 +261,28 @@ class AgentLoopResponseDeciders:
                 except Exception:  # noqa: BLE001, S110 — reason stated above
                     pass
 
+    def _headline_check(self, draft: ResponseDraft) -> None:
+        """Заголовок против фактов того же ответа — видно, но не карантин.
+
+        2026-09-21, 05:52: «признак присутствует в обоих файлах» в выводе и
+        «в коде инструмента имя в явном виде отсутствует» в фактах. Сигнал
+        наблюдающий (нет в DISQUALIFYING_DEFECT_SIGNALS): на 111 живых ответах
+        он сработал один раз — ровно на этом. Разбор:
+        tests/test_the_headline_is_held_to_its_own_facts.py
+        """
+        found = headline_contradicts_facts(draft.body)
+        if not found:
+            return
+        self._defect_signals.append("headline_contradicts_facts")
+        self.log.log("headline_contradicts_facts",
+                     {"contradictions": [c.to_log_payload() for c in found]})
+        names = ", ".join(f"`{c.subject}`" for c in found[:3])
+        draft.add_notice(
+            author="headline_check", channel="append",
+            text=(f"⚠️ Вывод ответа противоречит его же фактам: {names} — в выводе "
+                  "заявлено наличие, в фактах названо отсутствие. Верить стоит фактам."),
+        )
+
     def _enforce_answer_safety(
         self,
         draft: ResponseDraft,
@@ -363,6 +386,8 @@ class AgentLoopResponseDeciders:
             _stage = "set_body"
             if _enf.applied:
                 draft.set_body(_enf.answer, by="answer_enforcement")
+            _stage = "headline_check"
+            self._headline_check(draft)
         except Exception as _enf_exc:  # noqa: BLE001 — отчёт в помощнике ниже
             # Reported, not swallowed: `_safe_answer_after_enforcement_failure`
             # writes `answer_enforcement_failed` and banks the defect signal
