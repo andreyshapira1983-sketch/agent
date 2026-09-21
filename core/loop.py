@@ -90,7 +90,8 @@ from core.replan import DEFAULT_MAX_REPLAN_ATTEMPTS  # noqa: F401 -- re-exported
 # использование — сохраняем шов явным ре-экспортом.
 from core.replan import FailureType as ReplanCode  # noqa: F401 — шов импорта
 from core.smart_memory import (
-    effective_completion, episode_tools,
+    effective_completion,
+    episode_tools,
 )
 from core.source_registry import SourceRegistry
 from core.step_repetition import StepRepetitionTracker
