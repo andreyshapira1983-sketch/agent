@@ -178,7 +178,9 @@
   "loop_context.py::AgentLoopContext._self_defects": [],
   "loop_response_deciders.py::AgentLoopResponseDeciders._headline_check": [],
   "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt": [],
-  "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified": []
+  "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified": [],
+  "loop_synthesis.py::_safety_notes_block": [],
+  "loop_synthesis.py::_failure_context_block": []
  },
  "edges": [
   [

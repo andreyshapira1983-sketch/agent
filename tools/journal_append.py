@@ -213,7 +213,7 @@ class JournalAppendTool(Tool):
         path = kwargs["path"]
         record = kwargs["record"]
         if not isinstance(record, dict):
-            raise ValueError(f"record must be a dict, got {type(record).__name__}")
+            raise TypeError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
         _refuse_owned_state(str(path))
         contract = _KNOWN_JOURNALS.get(str(path))

@@ -74,6 +74,54 @@ from core.synth_resilience import (
 )
 from core.user_profile import profile_to_prompt_block
 
+
+def _safety_notes_block(cycle_findings: list[dict[str, Any]] | None) -> str:
+    """Kernel-built safety notes — the LLM is told to surface these in the
+    user-facing answer. The notes describe what was redacted (the kernel did
+    it), not what the LLM did.
+    """
+    if not cycle_findings:
+        return ""
+    lines = ["<safety_notes>"]
+    lines.extend(
+        f"- label={f['label']} kinds={f['kinds']} "
+        f"count={f['count']} (kernel-redacted)"
+        for f in cycle_findings
+    )
+    lines.append("</safety_notes>")
+    return "\n".join(lines) + "\n\n"
+
+
+def _failure_context_block(failure_history: list[ReplanTrigger] | None) -> str:
+    """Failure context (MVP-8): the cumulative trigger list, so the synthesizer
+    can write an honest Conclusion («I tried X, Y, Z; here is why none worked»)
+    instead of an empty/fake answer.
+
+    No claim about replan exhaustion: since 2026-08-14 this block also carries
+    the failures of an attempt that SUCCEEDED on another step, where nothing was
+    exhausted. Each entry states its own `attempt=N`, which is the fact.
+    Вынесено из `_synthesize` 2026-09-21 дословно — метод был сверх предела
+    операторов линтера (105 > 100).
+    """
+    if not failure_history:
+        return ""
+    lines = [
+        "<failure_context>",
+        (
+            "Steps that failed this turn. This is a FACT about the turn: "
+            "say what did not work and why. It is context, NOT evidence — "
+            "do not cite it as a source."
+        ),
+    ]
+    lines.extend(
+        f"- attempt={trig.attempt} code={trig.code} "
+        f"tool={trig.tool_name or '(none)'}: {trig.reason}"
+        for trig in failure_history
+    )
+    lines.append("</failure_context>")
+    return "\n".join(lines) + "\n\n"
+
+
 #: Ниже этого совпадения с вопросом черновик считается «не про то». Живые
 #: разговоры 2026-09-20: 0.20 и 0.22 у двух ответов, каждый из которых отвечал
 #: на свой вопрос, а не на заданный.
@@ -243,44 +291,8 @@ class AgentLoopSynthesis:
                 else ""
             )
 
-        # Kernel-built safety notes — the LLM is told to surface these in
-        # the user-facing answer. The notes describe what was redacted
-        # (the kernel did it), not what the LLM did.
-        safety_block = ""
-        if cycle_findings:
-            lines = ["<safety_notes>"]
-            lines.extend(
-                f"- label={f['label']} kinds={f['kinds']} "
-                f"count={f['count']} (kernel-redacted)"
-                for f in cycle_findings
-            )
-            lines.append("</safety_notes>")
-            safety_block = "\n".join(lines) + "\n\n"
-
-        # Failure context (MVP-8). Only injected when re-planning was
-        # exhausted; carries the cumulative trigger list so the
-        # synthesizer can write an honest Conclusion ("I tried X, Y, Z;
-        # here is why none worked") instead of an empty/fake answer.
-        failure_block = ""
-        if failure_history:
-            lines = ["<failure_context>"]
-            # No claim about replan exhaustion: since 2026-08-14 this block also
-            # carries the failures of an attempt that SUCCEEDED on another step,
-            # where nothing was exhausted. Each entry states its own `attempt=N`,
-            # which is the fact; the old sentence asserted a status the list no
-            # longer implies.
-            lines.append(
-                "Steps that failed this turn. This is a FACT about the turn: "
-                "say what did not work and why. It is context, NOT evidence — "
-                "do not cite it as a source."
-            )
-            for trig in failure_history:
-                lines.append(
-                    f"- attempt={trig.attempt} code={trig.code} "
-                    f"tool={trig.tool_name or '(none)'}: {trig.reason}"
-                )
-            lines.append("</failure_context>")
-            failure_block = "\n".join(lines) + "\n\n"
+        safety_block = _safety_notes_block(cycle_findings)
+        failure_block = _failure_context_block(failure_history)
 
         # The question travels into the LLM prompt; redact any credential
         # or sensitive PII the user pasted in.
