@@ -165,9 +165,14 @@ _AMBIGUOUS_REALTIME_TERMS = frozenset({
     "currently",
     "latest",
     "now",
+    "today",
     "сейчас",
     "текущ",
     "последн",
+    # «сегодня» стояло рядом с «биткоин» и «погода» (2026-09-21): вопрос
+    # оператора «что ты успел сделать сегодня» получал потолок уверенности
+    # `low` и штамп про live-источник. Это слово о времени, а не о рынке.
+    "сегодня",
 })
 
 # Strong markers that a question is about the local repository / codebase, not
@@ -191,8 +196,21 @@ _REPO_LOCAL_MARKERS = (
 )
 
 
+#: Вопрос о СОБСТВЕННОЙ работе агента так же местен, как вопрос о
+#: репозитории: ответ лежит в его журналах, а не в живом мире. Человек,
+#: спрашивающий «что ты сделал сегодня», слова «репозиторий» не говорит
+#: (замер 2026-09-21). Гасятся этим только двусмысленные слова времени;
+#: «биткоин», «курс», «цена», «погода» остаются свежими при любом «ты».
+_SELF_ACTIVITY_RE = re.compile(
+    r"(?<![а-яё])(?:ты|тебя|тебе|тобой|тво[йяеёию]|твоих|твоего|твоей|твоим|твоими)(?![а-яё])"
+    r"|\b(?:did|have|were) you\b|\byou (?:did|have|made|changed|wrote|worked)\b"
+    r"|\byour own\b|\byourself\b"
+)
+
+
 def _is_repo_local(lowered: str) -> bool:
-    return any(marker in lowered for marker in _REPO_LOCAL_MARKERS)
+    return (any(marker in lowered for marker in _REPO_LOCAL_MARKERS)
+            or _SELF_ACTIVITY_RE.search(lowered) is not None)
 
 
 @dataclass(frozen=True)
