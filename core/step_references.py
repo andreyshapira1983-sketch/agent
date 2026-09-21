@@ -158,8 +158,28 @@ def _delivered(ref: str, output: Any) -> Any:
     return output.get("stdout")
 
 
+#: Аргументы, где вклеенный внутрь вывод становится адресом. След
+#: trace_965c1af5… (ночь 20→21.09): в `math_study/library/txt/{{step:3.output}}`
+#: подставился весь вывод шага — кусок чужого файла, десяток имён через перевод
+#: строки — и file_read искал такой «файл». Адрес — одно имя.
+_ADDRESS_KEYS = frozenset({"path", "url"})
+
+
+def _one_line(ref: str, value: Any) -> str:
+    text = value.strip() if isinstance(value, str) else None
+    if text is None or "\n" in text or "\r" in text:
+        kind = "multi-line" if text is not None else type(value).__name__
+        raise UnresolvedStepReference(
+            f"step reference {{{{step:{ref}.output}}}} is pasted inside an address "
+            f"(path/url), but its result is {kind}; an address takes one name — "
+            f"pick the name first, then reference that step"
+        )
+    return text
+
+
 def _resolve_string(
     text: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
+    address: bool = False,
 ) -> Any:
     _reject_field_path(text)
     match = _REFERENCE_RE.fullmatch(text.strip())
@@ -183,7 +203,8 @@ def _resolve_string(
                 f"step reference {{{{step:{ref}.output}}}} has no result: "
                 f"known steps are {sorted(outputs)}"
             )
-        return str(_delivered(ref, outputs[ref]))
+        value = _delivered(ref, outputs[ref])
+        return _one_line(ref, value) if address else str(value)
 
     return _REFERENCE_RE.sub(_substitute, text)
 
@@ -206,7 +227,9 @@ def resolve_step_references(
         return _resolve_string(value, outputs, plan_steps)
     if isinstance(value, dict):
         return {
-            k: resolve_step_references(v, outputs, plan_steps=plan_steps)
+            k: (_resolve_string(v, outputs, plan_steps, address=True)
+                if k in _ADDRESS_KEYS and isinstance(v, str)
+                else resolve_step_references(v, outputs, plan_steps=plan_steps))
             for k, v in value.items()
         }
     if isinstance(value, list):
