@@ -22,6 +22,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="One-shot question (no memory). Omit to enter the interactive REPL.",
     )
     parser.add_argument(
+        "--history",
+        default=None,
+        help=(
+            "JSONL of the conversation so far ({\"question\", \"answer\"} per line) "
+            "loaded into the session memory before a one-shot --ask, so a bridge "
+            "that starts a new process per message still holds a dialogue."
+        ),
+    )
+    parser.add_argument(
         "--file",
         help=(
             "Optional file hint. The planner MAY call file_read with it. "
