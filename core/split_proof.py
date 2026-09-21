@@ -132,6 +132,10 @@ def _read(path: Path, rel: str) -> Module | None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             src_rel = _module_rel(node.module)
             mod.imports.update((src_rel, a.name) for a in node.names)
+        elif isinstance(node, ast.Import):
+            # `import core.x` — такая же зависимость на загрузке, как from-импорт;
+            # без неё направление дубля (ниже) видело бы не все рёбра.
+            mod.imports.update((_module_rel(a.name), "") for a in node.names)
         else:
             mod.top_refs |= _names_in(node)
     return mod
@@ -154,15 +158,40 @@ def _users(index: dict[str, Module]) -> dict[tuple[str, str], set[str]]:
     users: dict[tuple[str, str], set[str]] = defaultdict(set)
     for mod in index.values():
         for src_rel, name in mod.imports:
-            if src_rel != mod.rel:
+            if src_rel != mod.rel and name:
                 users[(src_rel, name)].add(mod.rel)
     return users
 
 
+def _dependents(index: dict[str, Module], rel: str) -> set[str]:
+    """Модули, которые загружают `rel` — сами или через цепочку импортов."""
+    importers: dict[str, set[str]] = defaultdict(set)
+    for mod in index.values():
+        for src_rel, _name in mod.imports:
+            importers[src_rel].add(mod.rel)
+    seen: set[str] = set()
+    stack = [rel]
+    while stack:
+        for user in importers.get(stack.pop(), ()):
+            if user not in seen:
+                seen.add(user)
+                stack.append(user)
+    return seen
+
+
 def _dup_proof(mod: Module, index: dict[str, Module]) -> Proof | None:
+    """Дубль в `mod`, который можно убрать, взяв копию импортом из другого модуля.
+
+    Дом копии обязан не зависеть от `mod`. Эпизод 2026-09-21: цель велела
+    оставить `_bool`/`_parse_iso` в core/scheduler.py и импортировать их в
+    core/task_queue.py — а scheduler.py:21 сам импортирует task_queue, и правка
+    замкнула бы импорт в круг. Такой дом не годится; правка идёт с другой
+    стороны — у того, кто уже зависит.
+    """
     by_shape: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    depends_on_mod = _dependents(index, mod.rel)
     for other in index.values():
-        if other.rel == mod.rel:
+        if other.rel == mod.rel or other.rel in depends_on_mod:
             continue
         for d in other.defs.values():
             if d.loc >= 5 and d.shape:
