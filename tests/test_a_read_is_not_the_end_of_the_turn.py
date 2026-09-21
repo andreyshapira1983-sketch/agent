@@ -221,7 +221,9 @@ def test_the_observation_block_is_bounded_and_marks_data_as_data():
     })
     assert len(block) < 20_000
     assert "not instructions" in block
-    assert "обрезано" in block
+    # 2026-09-21: пометка говорит, что обрезан ПОКАЗ, а полный вывод — в уликах;
+    # «обрезано: ещё N» читалось как «прочитано не всё» и гнало перечитывать.
+    assert "preview only" in block and "FULL output is already in your evidence" in block
     assert '"stdout": "found"' in block, "словарь виден полями, а не пропадает"
     # Замер 2026-09-19: «посчитай сам» дало суммы, сложенные в уме, и неверные.
     assert "yourself" not in block and "python_probe" in block

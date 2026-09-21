@@ -54,7 +54,13 @@ def _as_text(output: Any) -> str:
 def _clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
-    return f"{text[:limit]}\n[обрезано: ещё {len(text) - limit} символов]"
+    # Обрезан ПОКАЗ планировщику, а не прочитанное: полный вывод лежит в
+    # артефактах и уходит синтезатору. Прежняя пометка «[обрезано: ещё N
+    # символов]» читалась как «файл прочитан не весь», и планировщик
+    # перечитывал окнами уже прочитанный целиком файл (сквозная проверка
+    # 2026-09-21).
+    return (f"{text[:limit]}\n[preview only: {limit} of {len(text)} chars shown here; "
+            "the FULL output is already in your evidence for the answer — do NOT re-read it]")
 
 
 def _written_contents(plan: Any) -> list[str]:
@@ -82,6 +88,39 @@ def _written_contents(plan: Any) -> list[str]:
             out.append(f"UNFILLED TEMPLATE in {path}: {', '.join(holes)} — the request showed the "
                        "FORMAT; write the real values in their place.")
     return out
+
+
+def reuse_already_read(
+    st: Any, attempt_artifacts: dict[str, dict[str, Any]], log: Any,
+) -> list[Any]:
+    """Шаги плана к исполнению; уже прочитанное в этом ходе — из артефактов.
+
+    Сквозная проверка 2026-09-21: код вставлял обязательные документы в КАЖДЫЙ
+    круг (`_ensure_*_docs_first`), а планировщик, видя обрезанный показ,
+    перечитывал окнами файл, уже прочитанный целиком: два документа по три
+    раза, три лишних окна. Чтение файла, чья метка уже есть в артефактах
+    хода, — или окно файла, прочитанного целиком, — не исполняется: его
+    результат уже в уликах: он кладётся в `attempt_artifacts`, событие
+    `already_read_reused` называет метки.
+    """
+    artifacts = st.artifacts
+    run: list[Any] = []
+    reused: dict[str, dict[str, Any]] = {}
+    for step in st.plan.steps:
+        spec = getattr(step, "action_spec", None) or {}
+        label = str(spec.get("source_label") or "")
+        whole = ":".join(label.split(":")[:2])  # file:путь без окна :a-b
+        if spec.get("tool_name") == "file_read" and label.startswith("file:"):
+            hit = label if label in artifacts else (whole if whole in artifacts else "")
+            if hit:
+                reused[hit] = artifacts[hit]
+                step.status = "done"
+                continue
+        run.append(step)
+    if reused:
+        attempt_artifacts.update(reused)
+        log("already_read_reused", {"attempt": st.attempt, "labels": sorted(reused)})
+    return run
 
 
 def format_observations(
