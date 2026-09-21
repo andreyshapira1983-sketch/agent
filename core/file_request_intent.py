@@ -538,6 +538,15 @@ def prepare_multi_file_review(
         details = "; ".join(
             f"{item['path']}: {item['reason']}" for item in rejected
         ) or "no valid files were mentioned"
+        # Угаданный режим не вправе отказать во всём вопросе: ни одного из
+        # названных файлов нет — это довод против догадки. 2026-09-21: спор о
+        # мере с именами ещё не созданных файлов и словом «сравни» умер за три
+        # секунды. Отказ остаётся за режимом, НАЗВАННЫМ словами.
+        if not explicit_mode:
+            log("multi_file_review_guess_dropped", {
+                "requested_paths": requested_paths, "rejected": rejected,
+            })
+            return {"kind": "none"}
         return {
             "kind": "refusal",
             "message": (
