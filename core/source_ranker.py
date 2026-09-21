@@ -290,8 +290,11 @@ def is_realtime_question(question: str) -> bool:
         if not _ignored(term)
     ):
         return True
+    # Фрагмент — НАЧАЛО слова, а не любая его середина: 2026-09-21 «с тем же
+    # сценарием» содержало «цена» (с-ЦЕНА-рием), и вопрос о своём коде получил
+    # приписку «источники недостаточны для realtime-значения без live-источника».
     if any(
-        term in lowered
+        re.search(rf"(?<![а-яёa-z0-9_]){re.escape(term)}", lowered)
         for term in _REALTIME_FRAGMENT_TERMS
         if not _ignored(term)
     ):
