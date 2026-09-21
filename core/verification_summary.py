@@ -30,6 +30,7 @@ FIVE_POINT_MARKERS: tuple[str, str, str, str, str] = (
 _VERDICT_RU: dict[str, str] = {
     "verified": "подтверждено сверкой цитаты с сохранённым выводом инструмента",
     "unverified": "без какого-либо подтверждения",
+    "admitted_unverified": "ответ сам назвал непроверенным (раздел «Не подтверждено»)",
     "cited_but_unmatched": "цитата указана, но с источником не совпала",
     "self_declared": "только заявление самого агента, без внешнего источника",
     "structural": "служебная строка ответа, не утверждение",
@@ -123,6 +124,21 @@ def _gap_counts(report: VerificationReport) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
+def _gaps_with_admitted(
+    report: VerificationReport, examined: int,
+) -> tuple[list[tuple[str, int]], int]:
+    """Пробелы вместе с тем, что ответ сам вынес в «Не подтверждено».
+
+    Названное непроверенным — тоже непроверенное, и счёт обязан его видеть
+    (2026-09-21: «я не проверял X» над «9 из 9, уверенность высокая»).
+    """
+    gaps = _gap_counts(report)
+    admitted = getattr(report, "admitted_unverified_chunks", 0) if examined else 0
+    if admitted:
+        gaps = [*gaps, ("admitted_unverified", admitted)]
+    return gaps, admitted
+
+
 #: Below this, the tail says the answer may not be addressing the question.
 #: NOT an operator-set number. Chosen from measurement: two production runs on
 #: 2026-08-09 answered a question that had not been asked and scored 0.051 and
@@ -212,7 +228,7 @@ def build_verification_summary(
         evidence = "совпадений утверждений с источниками цепочки нет"
 
     # (4) Что осталось непроверенным.
-    gaps = _gap_counts(report)
+    gaps, admitted = _gaps_with_admitted(report, examined)
     if examined == 0:
         unverified = "весь ответ — он не проверялся"
     elif not gaps:
@@ -224,7 +240,7 @@ def build_verification_summary(
         )
 
     # (5) Насколько уверен.
-    word, confidence = _confidence_wording(verified, examined)
+    word, confidence = _confidence_wording(verified, examined + admitted)
     if no_evidence_owed and examined > 0:
         # «Нулевая уверенность» — приговор для хода, который был должен улики
         # и не принёс. Ход, который улик не был должен, приговора не заслужил.
@@ -244,8 +260,10 @@ def build_verification_summary(
     else:
         gap_total = sum(count for _v, count in gaps)
         subject = "отклонённый черновик — " if rejected_draft else ""
+        named = f" ({admitted} — ответ сам назвал непроверенными)" if admitted else ""
         tail = (
-            f"{TAIL_PREFIX} {subject}подтверждено {verified} из {examined} утверждений; "
+            f"{TAIL_PREFIX} {subject}подтверждено {verified} из "
+            f"{examined + admitted} утверждений{named}; "
             f"без внешнего подтверждения: {gap_total}; уверенность: {word}."
         )
 

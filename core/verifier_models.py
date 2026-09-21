@@ -87,6 +87,12 @@ class VerificationReport:
     #: known lie all the way into `usage_eligible=True` (live turn 3,
     #: trace_d322a875).
     refuted_chunks: int = 0
+    #: Строки, которые ответ САМ вынес в раздел «Unverified» («Не
+    #: подтверждено»). Утверждениями они не являются и в `chunks` не входят
+    #: (раздел — не-утвердительный), но это непроверенное, названное вслух.
+    #: 2026-09-21: без этого счётчика ответ нёс «я не проверял X» и внизу
+    #: «подтверждено 9 из 9; уверенность: высокая» — считалось лёгкое.
+    admitted_unverified_chunks: int = 0
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -102,6 +108,7 @@ class VerificationReport:
             "dialogue_supported_chunks": self.dialogue_supported_chunks,
             "user_asserted_chunks": self.user_asserted_chunks,
             "refuted_chunks": self.refuted_chunks,
+            "admitted_unverified_chunks": self.admitted_unverified_chunks,
             "fully_unverified": self.fully_unverified,
             "chain_was_empty": self.chain_was_empty,
             "malformed_output": self.malformed_output,
