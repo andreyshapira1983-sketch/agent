@@ -59,6 +59,52 @@ _PLACEHOLDERS: frozenset[str] = frozenset({
     "заполнить", "уточнить", "позже",
 })
 
+#: Файлы состояния, у которых есть ХОЗЯИН в коде: класс, который их пишет,
+#: знает схему и отвечает за смысл строки. Сырая строка в таком файле — не
+#: запись, а подделка состояния.
+#:
+#: Найдено 2026-09-21. Агент подал заявку на патч этим инструментом прямо в
+#: ящик одобрений: строка без id и срока стала вечной висящей заявкой. Проверка
+#: того же вечера — тем же вызовом в ящик ложится ОДОБРЕННАЯ заявка на
+#: самоправку, подписанная «andre (operator)», и ApprovalInbox принимает её
+#: как решение человека. Ворота «проверь, потом разреши» обходились одной
+#: строкой.
+#:
+#: Список полный: `tests/test_an_agent_cannot_sign_its_own_approval.py`
+#: сканирует код и падает, если файл, который называет код, не записан ни
+#: сюда, ни в `_KNOWN_JOURNALS`.
+_OWNED_STATE: dict[str, str] = {
+    "data/approval_inbox.jsonl": (
+        "это ящик одобрений, его хозяин ApprovalInbox. Решение в нём — "
+        "полномочие человека, и сырая строка здесь подделывает его. Заявку "
+        "подаёт полоса самоправки или человек. Если тебе нужно подать заявку, "
+        "а инструмента для этого нет, — так и скажи человеку"
+    ),
+    **{f"data/{name}.jsonl": "его пишет код системы через свой класс"
+       for name in (
+           "alert_acknowledgements", "approval_outcomes", "budget_ledger",
+           "burn_in_adoptions", "burn_in_offers", "campaign_ledger",
+           "campaign_verdicts", "capability_events", "causal_observations",
+           "charter_decisions", "conflict_episodes", "daemon_tick",
+           "drive_decisions", "lesson_injections", "lesson_measurements",
+           "memory_consolidation", "memory_writes", "mentor_questions",
+           "model_routing_policy", "model_usage", "procedural_memory",
+           "reasoning_roster", "runtime_schedules", "runtime_tasks",
+           "self_build_lessons", "self_build_rules", "self_stops",
+           "source_registry", "standing_grant_usage", "subagent_quarantine",
+           "tool_receipts", "user_profile", "value_reviews",
+       )},
+}
+
+
+def _refuse_owned_state(path: str) -> None:
+    owner = _OWNED_STATE.get(path)
+    if owner is not None:
+        raise PermissionError(
+            f"{path}: {owner}. Сюда journal_append не пишет. Журналы, в "
+            f"которые писать можно: " + ", ".join(sorted(_KNOWN_JOURNALS))
+        )
+
 
 def _refuse_placeholders(record: dict) -> None:
     """Поле-заглушка — дырка, а не запись, и писать её значит терять работу."""
@@ -149,6 +195,7 @@ class JournalAppendTool(Tool):
         if not isinstance(record, dict):
             raise ValueError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
+        _refuse_owned_state(str(path))
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
         if contract:
