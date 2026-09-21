@@ -66,6 +66,35 @@ _FORBIDDEN_OS_CALLS = frozenset({
 
 _OUTPUT_CAP = 16 * 1024  # 16 KiB на поток: эксперимент — не дамп
 
+#: Выключатель импорта модулей рабочей папки. Ставит ОПЕРАТОР в окружении
+#: процесса агента; сам опыт его не видит (окружение ребёнка чистое, `-I`).
+#: По умолчанию выключен.
+#:
+#: Зачем: открытая запись агента probe-cwd-isolation-2026-09-20 и её
+#: severity=high соседка — «на этом измерительном приборе стоят все прочие
+#: решения». Лаборатория не могла импортировать ни одного модуля агента, и
+#: 2026-09-21 он не смог исполнить ни строки собственного кода, чтобы
+#: проверить свои же утверждения о нём: числа выводились из чтения формулы.
+#:
+#: Цена: с выключателем опыт может вызвать ЛЮБОЙ модуль агента, в том числе
+#: пишущий в data/, — АСТ-гейт выше судит только текст опыта. Поэтому это
+#: решение оператора, а не агента; на безнадзорном пути инструмент закрыт.
+WORKSPACE_IMPORT_ENV = "PYTHON_PROBE_WORKSPACE_IMPORT"
+_WORKSPACE_PACKAGES = ("core", "tools", "app", "cli")
+
+
+def _with_workspace_on_path(code: str, root: Path) -> str:
+    """Опыт, которому виден корень рабочей папки.
+
+    Путь вставляется в сам код, а не в PYTHONPATH: `-I` игнорирует окружение.
+    Опыт исполняется через compile под именем `<string>`, поэтому номера
+    строк в его ошибке — строки самого опыта, без сдвига на вставку.
+    """
+    return (
+        f"import sys\nsys.path.insert(0, {str(root)!r})\n"
+        f"exec(compile({code!r}, '<string>', 'exec'))\n"
+    )
+
 
 def _forbidden_reason(code: str) -> str | None:
     """Одна названная причина отказа или None. Судит структуру, не строки."""
@@ -110,7 +139,11 @@ class PythonProbeTool(Tool):
         "timeout and an output cap. A failing snippet is a valid measurement "
         "(the ImportError IS the data). Process/network/write operations are "
         "refused. Args: code (str), timeout_seconds (int, default 10), "
-        "inputs (list of workspace-relative paths, optional)."
+        "inputs (list of workspace-relative paths, optional). "
+        "The agent's own modules (core, tools, app, cli) are importable only "
+        "when the operator set PYTHON_PROBE_WORKSPACE_IMPORT=1; the result's "
+        "`workspace_import` says which, so a ModuleNotFoundError for them is "
+        "the switch being off, not a fact about the code."
     )
     risk = "read_only"
 
@@ -213,6 +246,8 @@ class PythonProbeTool(Tool):
         if reason:
             raise ValueError(f"refused before execution: {reason}")
 
+        workspace_import = (os.environ.get(WORKSPACE_IMPORT_ENV) == "1"
+                            and self.workspace_root is not None)
         env = {"PATH": os.environ.get("PATH", "")}
         if sys.platform == "win32":
             for key in ("SystemRoot", "PATHEXT", "SYSTEMDRIVE"):
@@ -238,7 +273,9 @@ class PythonProbeTool(Tool):
                     # и кириллица приходила «���»; агент «восстановил» названия
                     # товаров выдумкой. PYTHONIOENCODING не годится: `-I` его
                     # игнорирует.
-                    [sys.executable, "-I", "-X", "utf8", "-c", code],
+                    [sys.executable, "-I", "-X", "utf8", "-c",
+                     _with_workspace_on_path(code, self.workspace_root)
+                     if workspace_import else code],
                     cwd=cwd, env=env, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=max(1, int(timeout_seconds)), check=False,
@@ -262,15 +299,25 @@ class PythonProbeTool(Tool):
         stdout, stdout_truncated = _cap(stdout)
         stderr, stderr_truncated = _cap(stderr)
         missing = [p for p in self._missing_inputs(code, inputs) if p not in auto]
+        notes = []
+        if missing:
+            notes.append(f"workspace files named in the code but not passed in "
+                         f"inputs: {missing}; the lab cannot see them — add them to inputs")
+        if not workspace_import and any(
+                f"No module named '{pkg}" in stderr for pkg in _WORKSPACE_PACKAGES):
+            notes.append(f"the agent's own modules are not importable here because "
+                         f"{WORKSPACE_IMPORT_ENV} is off — this ModuleNotFoundError "
+                         f"measures the switch, not the code; say so, do not call it a wall")
         return {
             "code": code,
             "inputs": copied + auto,
             **({"auto_inputs": auto} if auto else {}),
             # Не пусто — вывод не результат: код называл файлы, которых не видел.
             "missing_inputs": missing,
-            **({"note": f"workspace files named in the code but not passed in inputs: "
-                        f"{missing}; the lab cannot see them — add them to inputs"}
-               if missing else {}),
+            # Видел ли опыт модули агента. Без этого отказ импорта выглядел
+            # как факт о коде (открытая запись агента severity=high).
+            "workspace_import": workspace_import,
+            **({"note": " | ".join(notes)} if notes else {}),
             "exit_code": exit_code,
             "stdout": stdout,
             "stderr": stderr,
