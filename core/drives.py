@@ -159,17 +159,20 @@ def _paused_targets(root: Path) -> frozenset[str]:
     выбирала core/scheduler.py, а руки его не брали (target_denied_recently),
     и цикл уходил в простой — голова не видела паузы рук.
     """
-    from core.approval_inbox import ApprovalInbox
+    # Ящик читается сырыми строками (`_rows`), а не объектом ApprovalInbox: тот
+    # при открытии «чинит» строки без обёртки целостности, а читатель цели
+    # ничего переписывать не вправе (полный прогон 2026-09-21 поймал это на
+    # соседнем замере last_self_change).
+    from core.approval_inbox import _DENIAL_MEMORY_HOURS, _payload_targets, _within_hours
     from core.self_apply_bridge import SELF_APPLY_OPERATION
     from core.splitter_refusals import refused_unchanged
 
-    denied: frozenset[str] = frozenset()
-    try:
-        inbox = ApprovalInbox(path=root / "data" / "approval_inbox.jsonl")
-        denied = frozenset(inbox.recently_denied_targets(operation=SELF_APPLY_OPERATION))
-    except Exception:  # noqa: BLE001 — нет ящика — нет и отказов человека
-        denied = frozenset()
-    return denied | refused_unchanged(root)
+    denied: set[str] = set()
+    for row in _rows(root / "data" / "approval_inbox.jsonl"):
+        if (row.get("status") == "denied" and row.get("operation") == SELF_APPLY_OPERATION
+                and _within_hours(row.get("updated_at"), _DENIAL_MEMORY_HOURS)):
+            denied.update(_payload_targets(row.get("payload") or {}))
+    return frozenset(denied) | refused_unchanged(root)
 
 
 def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, Any]]:

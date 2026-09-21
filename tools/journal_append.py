@@ -92,7 +92,7 @@ _OWNED_STATE: dict[str, str] = {
            "model_routing_policy", "model_usage", "procedural_memory",
            "reasoning_roster", "runtime_schedules", "runtime_tasks",
            "self_build_lessons", "self_build_rules", "self_stops",
-           "source_registry", "standing_grant_usage", "subagent_quarantine",
+           "source_registry", "splitter_refusals", "standing_grant_usage", "subagent_quarantine",
            "tool_receipts", "user_profile", "value_reviews",
        )},
 }
