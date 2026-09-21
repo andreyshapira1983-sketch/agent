@@ -264,8 +264,9 @@ class AgentLoop(
         # run's own faults never reached the episode and the same mistake could
         # be repeated indefinitely without a trace. Reset per cycle for the same
         # reason `_executed_tools` is: instance state outlives a run, and an
-        # inherited fault would be banked against the wrong episode.
+        # inherited fault would be banked against the wrong episode (as would _self_defects_block).
         self._defect_signals = []
+        self._self_defects_block = ""
         # Per-cycle, or a turn whose synthesis broke early inherits the
         # previous turn's contract verdict — wrong both ways (census A6, see
         # `tests/test_cross_mixin_fields_are_guaranteed.py`).
