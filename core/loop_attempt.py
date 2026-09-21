@@ -35,7 +35,7 @@ from core.evidence import ProvenanceChain, evidence_from_tool_result
 from core.file_request_intent import force_file_hint_read_when_explicit
 from core.model_usage import ModelBudgetExceeded
 from core.models import ErrorObject, Goal, Plan, PlanStep
-from core.observation_round import continue_after_observation
+from core.observation_round import continue_after_observation, reuse_already_read
 from core.planner import PlannerOutput
 from core.reasoning_action_check import check_by_rationale, check_reasoning_actions
 from core.replan import (
@@ -433,7 +433,7 @@ class AgentLoopAttempt:
             # `planner` event). Declared in test_loop_attempt_split.py.
             attempt_failures.extend(dropped_step_triggers(st.planner_out.warnings, attempt=st.attempt))
 
-            for step, outcome, trigger in self._execute_steps_parallel(st.plan.steps):
+            for step, outcome, trigger in self._execute_steps_parallel(reuse_already_read(st, attempt_artifacts, self.log.log)):
                 if outcome is None:
                     step.status = "failed"
                     if trigger is not None:
