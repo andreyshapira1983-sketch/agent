@@ -541,14 +541,6 @@ _COUNT_WORDS: dict[str, int] = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 
-#: Число (цифрой или ИМЕННО числительным — свободная словесная ветка ловила
-#: любое слово, и нулевой матч съедал скобки) + существительное + перечисление
-#: в скобках того же предложения; точка в зазоре запрещена.
-_ENUM_COUNT_RE = re.compile(
-    r"(?:\b(\d{1,2})\b|\b(" + "|".join(_COUNT_WORDS) + r")\b)\s+[\wЀ-ӿ-]+"
-    r"[^().\n]{0,60}\(([^()]{2,200})\)",
-    re.IGNORECASE,
-)
 
 #: Пункт, который предложение само же отвергло, — не перечислен, а исключён.
 _ENUM_EXCLUDED_RE = re.compile(
@@ -591,20 +583,81 @@ _ITEM_CARRIES_A_COUNT_RE = re.compile(
     r"(?i)^(?:по\s+данным|согласно|всего|итого|according|in\s+total)|\bиз\s+них\b|\bof\s+which\b")
 
 
+#: Скобка относится к БЛИЖАЙШЕМУ числу перед ней. Замер 2026-09-22 по всем
+#: ответам мостика: 4 срабатывания, все 4 ложные — «4 константы, 2
+#: dataclass-модели (SplitStep, SplitPlan)» сверялось с «4»; «строка 58
+#: определяет … (…)» приняло номер строки за счёт; «шесть записей, из них три
+#: … (одна medium, две без значения)» — разбивку по количествам за перечень;
+#: «три случая (вставка `Edit[i, j−1]+1`, …)» резало пункты по запятым ВНУТРИ
+#: кода и насчитало шесть.
+_PAREN_RE = re.compile(r"\(([^()]{2,200})\)")
+_COUNT_TOKEN_RE = re.compile(
+    r"\b(\d{1,2})\b|\b(" + "|".join(_COUNT_WORDS) + r")\b", re.IGNORECASE)
+_NOUN_THEN_GAP_RE = re.compile(r"\s+[\wЀ-ӿ-]+[^().\n]{0,60}$")
+#: Число-адрес (строка, пункт, шаг, глава), а не количество.
+_ADDRESS_BEFORE_RE = re.compile(
+    r"(?i)(?:строк\w*|line|lines|стр\.|пункт\w*|№|#|§|глав\w*|раздел\w*|"
+    r"chapter|section|step|шаг\w*)\s*$")
+#: Пункт, который начинается с количества, — разбивка, а не предмет перечня.
+_ITEM_STARTS_WITH_A_COUNT_RE = re.compile(
+    r"(?i)^(?:\d+|" + "|".join(_COUNT_WORDS) + r")\b")
+_OPENERS, _CLOSERS = "([{«", ")]}»"
+
+
+def _top_level_items(inner: str) -> list[str]:
+    """Пункты скобки: деление по `,`/`;` только вне кода, скобок и кавычек."""
+    items, buf, depth, in_code = [], [], 0, False
+    for ch in inner:
+        if ch == "`":
+            in_code = not in_code
+        elif not in_code and ch in _OPENERS:
+            depth += 1
+        elif not in_code and ch in _CLOSERS and depth:
+            depth -= 1
+        elif ch in ",;" and not in_code and depth == 0:
+            items.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(ch)
+    items.append("".join(buf).strip())
+    return [item for item in items if item]
+
+
+def _claimed_count_before(text: str, paren_start: int) -> int:
+    """Счёт, к которому относится скобка: ближайшее число перед ней, за
+    которым идёт существительное; 0 — такого нет (дата, адрес, не счёт)."""
+    lead_from = max(0, paren_start - 120)
+    lead = re.split(r"[.\n()]", text[lead_from:paren_start])[-1]
+    offset = paren_start - len(lead)
+    # Ближайшее число, за которым идёт существительное: в «три позиции с qty
+    # меньше 6 (…)» шестёрка — порог сравнения, счёт — «три».
+    token = next((t for t in reversed(list(_COUNT_TOKEN_RE.finditer(lead)))
+                  if _NOUN_THEN_GAP_RE.match(lead[t.end():])), None)
+    if token is None:
+        return 0
+    at = _COUNT_TOKEN_RE.match(text, offset + token.start())
+    if at is None or (at.group(1) and _number_is_a_date(text, at)):
+        return 0
+    if _ADDRESS_BEFORE_RE.search(text[:offset + token.start()]):
+        return 0
+    return int(token.group(1)) if token.group(1) else _COUNT_WORDS.get(token.group(2).lower(), 0)
+
+
 def enumeration_count_reason(text: str) -> Any:
     """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же
     предложения.
     """
     from .verifier_models import ClaimReason
 
-    for m in _ENUM_COUNT_RE.finditer(text or ""):
-        if m.group(1) and _number_is_a_date(text or "", m):
-            continue
-        claimed = int(m.group(1)) if m.group(1) else _COUNT_WORDS.get((m.group(2) or "").lower(), 0)
+    text = text or ""
+    for paren in _PAREN_RE.finditer(text):
+        claimed = _claimed_count_before(text, paren.start())
         if claimed < 2:
             continue
-        items = [p.strip() for p in re.split(r"[;,]", m.group(3)) if p.strip()]
-        if len(items) < 2 or any(_ITEM_CARRIES_A_COUNT_RE.search(item) for item in items):
+        items = _top_level_items(paren.group(1))
+        if len(items) < 2 or any(
+                _ITEM_CARRIES_A_COUNT_RE.search(item) or _ITEM_STARTS_WITH_A_COUNT_RE.search(item)
+                for item in items):
             continue
         counted = sum(1 for item in items if not _ENUM_EXCLUDED_RE.search(item))
         if counted != claimed:
