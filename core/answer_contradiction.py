@@ -250,13 +250,44 @@ _DENIES_WRITE_RE = re.compile(
     r"did\s+not\s+write|no\s+files?\s+(?:were\s+)?written)\b")
 
 
+#: Доклад о любом действии — чтении, замере, пробе, счёте, запуске. Тот же ход
+#: 2026-09-21 ~17:10 кроме «записано» сказал «по измерению file_read в нём
+#: 9412 байт» — при нуле выполненных инструментов. Замер по 126 ответам
+#: мостика: заявление о действии в ходе без единого инструмента — только этот.
+_CLAIMS_ACTION_RE = re.compile(
+    r"(?i)(?:\b(?:прочита(?:л[аи]?|н[оаы]?)|открыл[аи]?|измерил[аи]?|посчитал[аи]?|"
+    r"пересчитал[аи]?|запустил[аи]?|выполнил[аи]?|проверил[аи]?)\b|"
+    r"\bI\s+(?:read|measured|counted|ran|executed)\b|"
+    r"\bпо\s+(?:измерени|замер|подсчёт|выдач)\w*|"
+    r"\b(?:проб[аы]|probe|замер)\w*\s+(?:показал|напечатал|вернул|дал|showed|printed|returned)\w*)")
+_DENIES_ACTION_RE = re.compile(
+    r"(?i)\b(?:не\s+(?:прочита|открыва|открыл|измеря|измерил|посчита|запуска|запустил|выполня|выполнил|"
+    r"вызывал|провер)\w*|ни\s+одно(?:го|й)\s+(?:инструмент|проб|шаг|файл)\w*|"
+    r"did\s+not\s+(?:read|run|measure)|no\s+tools?\s+(?:were\s+)?(?:run|executed))")
+
+
+def _report_head(answer: str) -> str:
+    """Вывод ответа: раздел Conclusion, иначе первый абзац.
+
+    Абзацы делятся и по `\\r\\n\\r\\n`: ответы мостика приходят с ними, и деление
+    по `\\n\\n` отдавало ВЕСЬ ответ — «не выполнил» из дальнего абзаца гасило
+    поправку к выводу (ответ 2026-09-21 14:09:47).
+    """
+    return (_sections(answer).get("conclusion")
+            or re.split(r"\r?\n[ \t]*\r?\n", answer, maxsplit=1)[0])
+
+
 def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str | None:
-    """Строка-поправка, когда ответ о записи расходится с тем, что выполнено.
+    """Строка-поправка, когда доклад о действиях расходится с тем, что выполнено.
 
     Сверяется только ВЫВОД (первый абзац / Conclusion): там доклад, который
     читают. Возвращает None, если расхождения нет.
     """
-    head = (_sections(answer or "").get("conclusion") or (answer or "").split("\n\n", 1)[0])
+    head = _report_head(answer or "")
+    if (not executed_tools and (_CLAIMS_ACTION_RE.search(head) or _CLAIMS_WRITE_RE.search(head))
+            and not (_DENIES_ACTION_RE.search(head) or _DENIES_WRITE_RE.search(head))):
+        return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одного инструмента "
+                "(инструментов: 0, file_write: 0) — утверждения о прочитанном, измеренном или записанном в выводе не подтверждены.")
     writes = sum(1 for tool in executed_tools if tool == "file_write")
     if writes == 0 and _CLAIMS_WRITE_RE.search(head) and not _DENIES_WRITE_RE.search(head):
         return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одной записи файла "
