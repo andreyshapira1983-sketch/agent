@@ -406,13 +406,19 @@ class AgentLoopResponseDeciders:
 
         return draft
 
-    def _add_verification_summary(self, draft: ResponseDraft) -> None:
+    def _add_verification_summary(self, draft: ResponseDraft, user_question: str = "") -> None:
         """Name the verified text after enforcement has decided what survived."""
         # MIR-069 (phase 1): the five-point verification explanation — what was
         # checked, how, on what evidence, what remains unverified, how
         # confident. Full text goes to the journal; the compact tail rides the
         # notice ledger so a later body rewrite cannot delete it. Nothing
         # examined → no tail (the disclaimers already speak for that case).
+        # Светская реплика хвоста не несёт: 2026-09-21 «Привет, как дела?» →
+        # «подтверждено 2 из 5, уверенность: низкая» — отчёт о надёжности беседы.
+        from core.conversation_contract import classify_register
+        if user_question and classify_register(user_question) == "small_talk":
+            self.log.log("verification_tail_skipped", {"reason": "small_talk"})
+            return
         if self.last_verification is not None:
             try:
                 _vsummary = build_verification_summary(
@@ -566,7 +572,7 @@ class AgentLoopResponseDeciders:
             local_critique_active=local_critique_active,
             verifier_failure=verifier_failure,
         )
-        self._add_verification_summary(draft)
+        self._add_verification_summary(draft, user_question)
         self._disclose_substituted_model(draft)
 
         scope_notice = file_scope_notice(user_question, artifacts)
