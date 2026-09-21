@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from core.state_integrity import append_state_jsonl_unlocked, state_file_lock
@@ -122,6 +123,25 @@ def _refuse_placeholders(record: dict) -> None:
             )
 
 
+#: Поля времени, которые читатели разбирают как момент. `tests/
+#: test_a_naive_timestamp_is_read_as_utc.py` меряет тот же список в живом
+#: состоянии; 2026-09-20 сюда пришло `"ts": "2026-09-20"` — дата без часа и
+#: зоны, и замер покраснел. Запись без зоны — другой момент для каждого читателя.
+_STAMP_KEYS = ("created_at", "updated_at", "completed_at", "started_at",
+               "heartbeat_at", "run_after", "first_seen", "last_seen", "ts")
+_ZONE_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
+
+
+def _refuse_naive_stamps(record: dict) -> None:
+    for key in _STAMP_KEYS:
+        value = record.get(key)
+        if isinstance(value, str) and len(value) >= 10 and not _ZONE_RE.search(value):
+            raise ValueError(
+                f"поле {key!r} = {value!r}: время без часового пояса. Пиши "
+                "полный момент в UTC, например 2026-09-20T17:17:00+00:00"
+            )
+
+
 def _refuse_broken_shape(path: str, record: dict, contract: dict) -> None:
     """Запись, которую читатель молча отбросит, лучше не писать вовсе.
 
@@ -198,6 +218,7 @@ class JournalAppendTool(Tool):
         _refuse_owned_state(str(path))
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
+        _refuse_naive_stamps(record)
         if contract:
             _refuse_broken_shape(str(path), record, contract)
         with state_file_lock(target):
