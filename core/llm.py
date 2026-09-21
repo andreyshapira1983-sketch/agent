@@ -1,6 +1,7 @@
 """Thin LLM client wrapper."""
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any
 
@@ -153,6 +154,33 @@ def _reasoning_effort_kwargs() -> dict[str, str]:
     read per call so an exam session can flip it without a process restart."""
     level = (os.getenv("AGENT_OPENAI_REASONING_EFFORT", "") or "").strip().lower()
     return {"reasoning_effort": level} if level in _REASONING_EFFORT_LEVELS else {}
+
+
+def accepted_flags(fn: Any, flags: dict[str, bool]) -> dict[str, bool]:
+    """The subset of *flags* that *fn* can take as keywords.
+
+    Asked of the signature, not of a failed call: retrying on TypeError would
+    re-send a paid request whenever the provider itself raised TypeError.
+    """
+    if not flags:
+        return flags
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return {}
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return flags
+    return {name: value for name, value in flags.items() if name in params}
+
+
+# Providers whose chat API has `response_format={"type": "json_object"}`.
+# DeepSeek: api-docs.deepseek.com/guides/json_mode — valid JSON when the prompt
+# says "json" and shows the shape; may occasionally return EMPTY content
+# (parse_json names that `empty_model_output`, not a decode error).
+# Measured 2026-09-19..21: 9 of 2176 planner replies did not parse — unescaped
+# quotes in quoted code, raw newlines inside strings, a bad `\` escape, text
+# after the object — and each one left the turn with no tools at all.
+_JSON_MODE_PROVIDERS = frozenset({"deepseek", "openai"})
 
 
 def _deepseek_thinking_kwargs() -> dict[str, Any]:
@@ -339,10 +367,17 @@ class LLM:
         temperature: float = 0.7,
         *,
         allow_continuation: bool = True,
+        json_object: bool = False,
     ) -> str:
-        """Send a single-turn prompt and return the text response."""
+        """Send a single-turn prompt and return the text response.
+
+        ``json_object=True`` asks a provider that has a JSON mode to return a
+        syntactically valid JSON object (see `_JSON_MODE_PROVIDERS`); elsewhere
+        the flag changes nothing and the caller still parses what it gets.
+        """
         text, stop_reason = self._complete_once(
-            system, user, max_tokens, temperature, prior=None
+            system, user, max_tokens, temperature, prior=None,
+            json_object=json_object,
         )
         self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
         # Truncated with nothing to show: the whole budget went to internal
@@ -435,6 +470,7 @@ class LLM:
         temperature: float,
         *,
         prior: str | None,
+        json_object: bool = False,
     ) -> tuple[str, str]:
         """One provider call. Returns ``(text, stop_reason)``.
 
@@ -445,7 +481,8 @@ class LLM:
             return self._complete_anthropic(system, user, max_tokens, temperature, prior)
         if self.provider in {"openai", "deepseek", "huggingface", "local"}:
             return self._complete_openai_compatible(
-                system, user, max_tokens, temperature, self.model, prior
+                system, user, max_tokens, temperature, self.model, prior,
+                json_object=json_object,
             )
         return self._complete_mock(system, user, max_tokens), "stop"
 
@@ -697,7 +734,16 @@ class LLM:
         temperature: float,
         model: str,
         prior: str | None = None,
+        *,
+        json_object: bool = False,
     ) -> tuple[str, str]:
+        # JSON mode on the first leg only: a continuation leg resumes the text
+        # of an unfinished object, which is not a JSON object on its own.
+        format_kwargs = (
+            {"response_format": {"type": "json_object"}}
+            if json_object and prior is None and self.provider in _JSON_MODE_PROVIDERS
+            else {}
+        )
         messages: list[dict] = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -714,6 +760,7 @@ class LLM:
                 max_completion_tokens=self._reasoning_budget(max_tokens),
                 messages=messages,
                 **_reasoning_effort_kwargs(),
+                **format_kwargs,
             )
         else:
             response = self._client.chat.completions.create(
@@ -722,6 +769,7 @@ class LLM:
                 temperature=temperature,
                 messages=messages,
                 **(_deepseek_thinking_kwargs() if self.provider == "deepseek" else {}),
+                **format_kwargs,
             )
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0

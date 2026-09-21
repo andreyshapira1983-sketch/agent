@@ -7,11 +7,11 @@ import os
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from core.llm import LLM
+from core.llm import LLM, accepted_flags
 from core.model_routing_policy import agent_policy_route, drop_clients_if_policy_moved
 from core.model_usage import (
     _KEY_CLASS_TEXT_MARKERS,
@@ -21,7 +21,7 @@ from core.model_usage import (
 )
 
 
-class ModelRole(str, Enum):
+class ModelRole(StrEnum):
     """Stable model roles used by the runtime."""
 
     PLANNER = "planner"
@@ -526,30 +526,27 @@ class UsageTrackedLLM:
         max_tokens: int,
         temperature: float,
         allow_continuation: bool,
+        json_object: bool = False,
     ) -> str:
-        """Call the wrapped provider, tolerating one that predates the flag.
+        """Call the wrapped provider, tolerating one that predates the flags.
 
         Test doubles and older wrappers accept only the four original
         arguments. Continuation is ON in those, which is the historical
         behaviour — the caller's request for a whole answer simply cannot be
-        honoured there, and pretending otherwise would hide it.
+        honoured there, and pretending otherwise would hide it. JSON mode is
+        likewise dropped for a wrapper whose signature does not name it.
         """
-        if allow_continuation:
-            return self._llm.complete(
-                system=system, user=user,
-                max_tokens=max_tokens, temperature=temperature,
-            )
-        try:
-            return self._llm.complete(
-                system=system, user=user,
-                max_tokens=max_tokens, temperature=temperature,
-                allow_continuation=False,
-            )
-        except TypeError:
-            return self._llm.complete(
-                system=system, user=user,
-                max_tokens=max_tokens, temperature=temperature,
-            )
+        flags: dict[str, bool] = {}
+        if not allow_continuation:
+            flags["allow_continuation"] = False
+        if json_object:
+            flags["json_object"] = True
+        flags = accepted_flags(self._llm.complete, flags)
+        return self._llm.complete(
+            system=system, user=user,
+            max_tokens=max_tokens, temperature=temperature,
+            **flags,
+        )
 
     def stream_complete(
         self,
@@ -665,6 +662,7 @@ class UsageTrackedLLM:
         temperature: float = 0.7,
         *,
         allow_continuation: bool = True,
+        json_object: bool = False,
     ) -> str:
         """Route one completion. See :meth:`core.llm.LLM.complete`.
 
@@ -723,6 +721,7 @@ class UsageTrackedLLM:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     allow_continuation=allow_continuation,
+                    json_object=json_object,
                 )
             except Exception as exc:
                 completed_at = utc_now_iso()
@@ -1114,14 +1113,20 @@ def _custom_model_specs_from_path() -> tuple[ModelSpec, ...]:
     )
 
 
+class ModelRegistryShapeError(TypeError, ValueError):
+    """A registry entry of the wrong type. Also a ValueError: the loader
+    catches ValueError and falls back to the defaults, and a bad file must
+    keep doing that rather than take the process down."""
+
+
 def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, ...]:
     items = data.get("models", []) if isinstance(data, dict) else data
     if not isinstance(items, list):
-        raise ValueError("model registry must be a list or {'models': [...]}")
+        raise ModelRegistryShapeError("model registry must be a list or {'models': [...]}")
     specs: list[ModelSpec] = []
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
-            raise ValueError(f"model registry item {idx} must be an object")
+            raise ModelRegistryShapeError(f"model registry item {idx} must be an object")
         provider = _normalise_provider(str(item.get("provider", "") or ""))
         model = str(item.get("model", "") or "").strip()
         if not provider or not model:
@@ -1132,7 +1137,7 @@ def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, .
         elif isinstance(raw_roles, list):
             roles = tuple(str(r).strip() for r in raw_roles if str(r).strip())
         else:
-            raise ValueError(f"model registry item {idx} roles must be string or list")
+            raise ModelRegistryShapeError(f"model registry item {idx} roles must be string or list")
         raw_requires = item.get("requires_env")
         if raw_requires is None:
             requires_env = _DEFAULT_PROVIDER_ENV.get(provider, ())

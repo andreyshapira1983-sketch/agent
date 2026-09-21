@@ -41,7 +41,7 @@ from core.doc_routing import (
     is_doctrine_corporate_question,
 )
 from core.host_tools_context import _build_host_tools_block
-from core.llm import LLM
+from core.llm import LLM, accepted_flags
 from core.plan_parsing import parse_json
 from core.planner_prompt import PLANNER_SYSTEM
 from core.step_sanitizer import sanitize_step
@@ -232,8 +232,8 @@ class LLMPlanner:
         raw = _active_llm.complete(
             system=effective_system,
             user=safe_prompt,
-            max_tokens=_plan_max_tokens(),
-            temperature=0.0,
+            max_tokens=_plan_max_tokens(), temperature=0.0,
+            **accepted_flags(_active_llm.complete, {"json_object": True}),
         )
         parsed, parse_warnings, parse_diag = parse_json(raw)
         if parsed is None:
