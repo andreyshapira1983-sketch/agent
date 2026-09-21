@@ -180,3 +180,57 @@ def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
                         subject=subject, asserted_in=name, denied_in="unverified"
                     ))
     return tuple(found)
+
+
+#: Заголовок утверждает НАЛИЧИЕ предмета…
+_PRESENCE_CLAIM_RE = re.compile(
+    r"присутству|\bесть\b|содерж|реализован|определ[её]н|добавлен|"
+    r"\bpresent\b|\bexists?\b|\bcontains?\b|\bimplemented\b|\bdefined\b|\badded\b",
+    re.IGNORECASE,
+)
+#: …а факт того же ответа — его ОТСУТСТВИЕ.
+_ABSENCE_CLAIM_RE = re.compile(
+    r"отсутству|\bнет\b|не\s+(?:реализован|определ|найден|существу|содерж|добавлен)|"
+    r"\babsent\b|\bmissing\b|\bnot\s+(?:present|implemented|defined|found|added)\b|"
+    r"\bdoes\s+not\s+(?:exist|contain)\b",
+    re.IGNORECASE,
+)
+#: Предмет спора: код в апострофах, составной идентификатор, путь.
+_IDENT_RE = re.compile(
+    r"`([^`\n]{3,})`|\b([A-Za-z]\w*_\w+)\b|\b([\w./\\-]+\.(?:py|md|json|jsonl|txt))\b")
+
+
+def _identifiers(line: str) -> set[str]:
+    return {next(g for g in m.groups() if g).strip().lower()
+            for m in _IDENT_RE.finditer(line)}
+
+
+def headline_contradicts_facts(answer: str | None) -> tuple[Contradiction, ...]:
+    """Заголовок утверждает наличие того, чьё отсутствие называют факты ответа.
+
+    2026-09-21, 05:52: Conclusion — «признак `PYTHON_PROBE_WORKSPACE_IMPORT`
+    присутствует в обоих файлах», Facts того же ответа — «в коде инструмента
+    имя `PYTHON_PROBE_WORKSPACE_IMPORT` в явном виде отсутствует». Правда
+    стояла в фактах, ложь — в заголовке, и `contradicted_claims` этого не
+    видел: он сверяет утверждения только с разделом Unverified.
+
+    Сигнал НАБЛЮДАЮЩИЙ: в `DISQUALIFYING_DEFECT_SIGNALS` его нет. Обвинение в
+    противоречии закрывает эпизоду вход в опыт, прежний детектор настраивали
+    на 420 живых ответах, чтобы не резать честные, — новый путь сначала
+    должен набрать свой замер, а до тех пор только показывает.
+    """
+    if not answer:
+        return ()
+    sections = _sections(answer)
+    headlines = [ln for ln in sections.get("conclusion", "").splitlines()
+                 if _PRESENCE_CLAIM_RE.search(ln) and not _ABSENCE_CLAIM_RE.search(ln)]
+    denials = [ln for ln in sections.get("facts", "").splitlines()
+               if _ABSENCE_CLAIM_RE.search(ln) and not _BOUNDARY_RE.search(ln)]
+    found: dict[str, Contradiction] = {}
+    for head in headlines:
+        claimed = _identifiers(head)
+        for fact in denials:
+            for subject in sorted(claimed & _identifiers(fact)):
+                found.setdefault(subject, Contradiction(
+                    subject=subject, asserted_in="conclusion", denied_in="facts"))
+    return tuple(found.values())

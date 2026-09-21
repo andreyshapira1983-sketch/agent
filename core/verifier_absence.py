@@ -602,6 +602,13 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     outcome = truth_excerpt(ev.excerpt or "")
     if not absence_refuted_by_excerpt(chunk_text, outcome):
         return None
+    # МЕСТО отсутствия. «В tools/python_probe.py имени X нет» со ссылкой на
+    # ТЕСТ, где X, конечно, есть, — не опровержение: источник не то место, о
+    # котором сказано «там нет» (2026-09-21, правдивый факт получил
+    # claim-refuted). Опровергнуть отсутствие может только названное место.
+    places = _denied_places(chunk_text)
+    if places and _cited_path(ev.source_id or "") not in places:
+        return None
     present = sorted(
         s for s in absence_subjects(chunk_text) if s in outcome.lower()
     )
@@ -613,6 +620,38 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
         explanation="утверждение об отсутствии опровергнуто собственной уликой",
         computed_from=ev.source_id or "",
     )
+
+_PLACE_PATH_RE = re.compile(
+    r"[\w./\\-]+\.(?:py|md|json|jsonl|txt|yaml|yml|cmd|toml|csv|log)\b", re.IGNORECASE)
+#: МЕСТО — путь после «в/во/in», не дальше трёх слов и не после «про/о/about»:
+#: «в коде инструмента tools/python_probe.py» — место; «в журнале нет события
+#: error про `core/diagnostics.py`» — место журнал, а файл — ПРЕДМЕТ события
+#: (tests/test_a_quotation_is_not_an_absence_claim.py поймал это на первой
+#: редакции, где местом считался любой путь).
+_PLACE_RE = re.compile(
+    r"\b(?:в|во|in|inside|within)\s+"
+    r"(?:(?!(?:про|о|об|about|for)\b)[^\s,;:`'\"«]+\s+){0,3}"
+    r"[`'\"«]?([\w./\\-]+\.(?:py|md|json|jsonl|txt|yaml|yml|cmd|toml|csv|log))\b",
+    re.IGNORECASE)
+
+
+def _denied_places(claim: str) -> set[str]:
+    """Файлы, названные МЕСТОМ в той части утверждения, где стоит отрицание."""
+    body = _CITATION_TOKEN_RE.sub(" ", claim or "")
+    return {
+        m.group(1).replace("\\", "/").lower()
+        for part in _CLAUSE_SPLIT_RE.split(body)
+        if _ABSENCE_ASSERTION_RE.search(_own_voice(part))
+        for m in _PLACE_RE.finditer(part)
+    }
+
+
+def _cited_path(source_id: str) -> str:
+    """Путь цитируемого источника без префикса вида и без диапазона строк."""
+    rest = source_id.split(":", 1)[-1] if ":" in source_id else source_id
+    found = _PLACE_PATH_RE.search(rest)
+    return found.group(0).replace("\\", "/").lower() if found else ""
+
 
 def absence_certifiable(claim: str, excerpt: str) -> bool:
     """Можно ли вообще СЕРТИФИЦИРОВАТЬ утверждение об отсутствии выдержкой."""
