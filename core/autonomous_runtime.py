@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.actuation_gateway import GatewayPath, gateway_path_from_receipt
-from core.approval_inbox import ApprovalInbox
+from core.approval_inbox import ApprovalInbox, close_answered_effects_requests
 from core.autonomous_runtime_proposals import AutonomousRuntimeProposals
 from core.budget_governor import BudgetCounter, BudgetGovernor, BudgetLimits
 from core.budget_kill_switch import BudgetKillSwitch, default_path
@@ -547,7 +547,12 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                     self.workspace, standing.id, max_per_day=cap
                 ):
                     config = replace(config, effects_approved=True)
-                    self._standing_grant_used(standing)
+                    self._log("autonomous_effects_standing", {
+                        "approval_id": standing.id,
+                        "runs_today": standing_runs_today(self.workspace, standing.id),
+                        "requests_answered": close_answered_effects_requests(
+                            self.approval_inbox, standing.id),
+                    })
                 else:
                     self._log("standing_grant_exhausted", {
                         "approval_id": standing.id, "cap": cap,
@@ -1323,37 +1328,6 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         log = getattr(self.agent, "log", None)
         if log is not None:
             log.log(event, payload)
-
-    def _standing_grant_used(self, standing: Any) -> None:
-        """Прогон пошёл по стоячему гранту: записать это и закрыть просьбы,
-        на которые грант — ответ.
-
-        2026-09-20/21: грант продлили в 19:14, а шесть просьб
-        `allow_effects`, поданных в 19:00–19:10 именно из-за его истечения,
-        висели сутки. Полоса самоправки стоит при любой висящей заявке (это
-        правило закреплено тестом и не меняется), и давно отвеченные просьбы
-        держали её закрытой: 169 циклов, ноль работы.
-
-        Статус `aborted`, не `approved`: одобренную просьбу следующий прогон
-        с той же целью подобрал бы как одноразовое разрешение.
-        """
-        closed = []
-        for item in self.approval_inbox.pending():
-            if item.operation != "autonomous_runtime.allow_effects":
-                continue
-            self.approval_inbox.set_status(
-                item.id, "aborted", decided_by=f"standing_grant:{standing.id}",
-                decision_reason=(
-                    f"отвечено действующим стоячим грантом {standing.id}: "
-                    "разрешение на эффекты есть, просьба о нём больше не нужна"
-                ),
-            )
-            closed.append(item.id)
-        self._log("autonomous_effects_standing", {
-            "approval_id": standing.id,
-            "runs_today": standing_runs_today(self.workspace, standing.id),
-            "requests_answered": closed,
-        })
 
 
 #: Queue kinds the runtime can execute. `resume_checkpoint` is here because the
