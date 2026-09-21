@@ -234,7 +234,7 @@ class _NoHome(Exception):
 
 
 def _name_of(node: ast.stmt) -> str:
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return node.name
     target = node.targets[0] if isinstance(node, ast.Assign) else None
     return target.id if isinstance(target, ast.Name) else ""
@@ -449,7 +449,8 @@ def _last_import_end(tree: ast.Module) -> int:
 
 
 def _movable_function_group(
-    tree: ast.Module, dominant_class: ast.ClassDef | None
+    tree: ast.Module, dominant_class: ast.ClassDef | None,
+    classes: frozenset[str] = frozenset(),
 ) -> list[ast.stmt]:
     """Maximal set of top-level defs movable without referencing left-behind names.
 
@@ -469,7 +470,11 @@ def _movable_function_group(
     for node in tree.body:
         if node is dominant_class:
             continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or (
+                # Класс едет, только если его назвало доказательство: 21.09 в
+                # core/knowledge_pipeline.py доказанный предмет «ClaimExtractor
+                # и 13 функций» разрезан — функции уехали, класс остался дома.
+                isinstance(node, ast.ClassDef) and node.name in classes):
             if not _uses_forbidden_scope(node):
                 candidates[node.name] = node
         elif isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -510,13 +515,7 @@ def _trim_to_budget(
             (n.end_lineno or n.lineno) - n.lineno + 1 for n in nodes
         )
 
-    def name_of(node: ast.stmt) -> str:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return node.name
-        assert isinstance(node, ast.Assign)  # noqa: S101 — type narrowing, guarded above
-        tgt = node.targets[0]
-        assert isinstance(tgt, ast.Name)  # noqa: S101 — type narrowing, guarded above
-        return tgt.id
+    name_of = _name_of
 
     kept = list(group)
     while kept and total(kept) > max_lines:
@@ -545,7 +544,8 @@ def _plan_function_split(
     names: set[str] | None = None,
 ) -> SplitStep | None:
     lines = src.split("\n")
-    group = _cohesive_group(_movable_function_group(tree, dominant_class), names, max_lines)
+    group = _cohesive_group(
+        _movable_function_group(tree, dominant_class, frozenset(names or ())), names, max_lines)
     group = [
         n
         for n in group
@@ -553,19 +553,19 @@ def _plan_function_split(
     ]  # never move a lone constant; pointless churn
     group = _trim_to_budget(group, lines, max_lines)
     funcs = [
-        n for n in group if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        n for n in group
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     ]
     if not funcs:
         return None
 
-    moved_names: list[str] = []
-    for node in group:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            moved_names.append(node.name)
-        elif isinstance(node, ast.Assign):
-            tgt = node.targets[0]
-            assert isinstance(tgt, ast.Name)  # noqa: S101 — type narrowing, guarded above
-            moved_names.append(tgt.id)
+    moved_names = [_name_of(node) for node in group]
+    # Доказанный предмет едет ЦЕЛИКОМ или никак: половина предмета в новом
+    # файле и половина дома — не раскол по смыслу, а разрез (21.09,
+    # core/knowledge_pipeline.py: ClaimExtractor остался, его функции уехали).
+    if names and not set(names) <= set(moved_names):
+        missing = ", ".join(sorted(set(names) - set(moved_names))[:6])
+        raise _NoHome(f"the proven group does not move whole: {missing} would stay behind")
 
     refs: set[str] = set()
     for node in group:
@@ -573,7 +573,13 @@ def _plan_function_split(
     refs -= set(moved_names)
     import_stmts = _needed_import_stmts(tree, lines, refs)
 
-    suffix = _meaningful_suffix(moved_names)
+    # Имя — по доказанному предмету, а не по тому, что прицепилось к нему
+    # (константы-зависимости): 21.09 «claim» по группе, «helpers» по перенесённому.
+    suffix = _meaningful_suffix(sorted(names) if names else moved_names)
+    if names and suffix == "helpers":
+        raise _NoHome(
+            f"the proven group ({', '.join(sorted(names)[:6])}) has no common word to be "
+            "named by; «helpers» is not a subject — name it by meaning")
     new_rel = _pick_new_module_path(workspace, target, suffix, numbered=False)
     if new_rel is None:
         raise _NoHome(
@@ -582,7 +588,7 @@ def _plan_function_split(
             "copy of the name is not a home"
         )
     header = [
-        f'"""Helpers extracted verbatim from ``{target}`` by the incremental',
+        f'"""Extracted verbatim from ``{target}`` by the incremental',
         "splitter. The original module re-exports every name below, so all",
         'existing import paths keep working."""',
     ]
