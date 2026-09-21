@@ -217,6 +217,46 @@ LOCAL CRITIQUE MODE (overrides the no-evidence general-knowledge rule above):
 # table-only diagnostic contract) omits these.
 _GENERIC_CONTRACT_MARKERS = ("Conclusion:", "Facts:")
 
+_UNVERIFIED_SECTION_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?\**Unverified\**\s*:?\**\s*$(?P<body>.*?)"
+    r"(?=^\s*(?:#{1,6}\s*)?\**(?:Conclusion|Facts|Sources|Confidence|Safety)\**\s*:|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+
+
+def unverified_own_paths(
+    draft: str, *, root: Any, already_read: Any = (), limit: int = 3,
+) -> list[str]:
+    """Файлы своей папки, которые черновик вынес в «Unverified», не открыв их.
+
+    Замер 2026-09-21: 44 из 74 блоков «Не подтверждено» в чате были о его же
+    файлах, журналах и инструментах — «не проверял, требует ли file_write
+    подтверждения», когда `tools/file_write.py` лежит рядом. Стены нет: это
+    дверь, в которую он не зашёл. Возвращает существующие пути внутри `root`,
+    которых нет среди прочитанного в этом ходе (метки `file:<путь>[:a-b]`).
+    """
+    from pathlib import Path
+
+    match = _UNVERIFIED_SECTION_RE.search(draft or "")
+    if match is None or root is None:
+        return []
+    base = Path(root).resolve()
+    # Прочитанным считается файл целиком (`file:<путь>`); окно `file:<путь>:a-b`
+    # — нет: «не открывал полный текст» ровно про такой случай.
+    read = {str(label)[5:].replace("\\", "/") for label in already_read
+            if str(label).startswith("file:") and str(label).count(":") == 1}
+    out: list[str] = []
+    for mention in extract_path_mentions(match.group("body")):
+        rel = mention.replace("\\", "/").lstrip("./")
+        target = (base / rel).resolve()
+        if rel in read or rel in out or not target.is_file() or base not in target.parents:
+            continue
+        out.append(rel)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def output_contract_requires_headers(system_prompt: str | None) -> bool:
     """Whether *system_prompt* enforces the generic Conclusion/Facts contract.
 

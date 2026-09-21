@@ -177,7 +177,8 @@
   "loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic": [],
   "loop_context.py::AgentLoopContext._self_defects": [],
   "loop_response_deciders.py::AgentLoopResponseDeciders._headline_check": [],
-  "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt": []
+  "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt": [],
+  "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified": []
  },
  "edges": [
   [
@@ -573,12 +574,20 @@
    "loop_sensor.py::AgentLoopSensor._sensor_failed"
   ],
   [
+   "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified",
+   "loop_sensor.py::AgentLoopSensor._sensor_failed"
+  ],
+  [
    "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
    "loop_attempt.py::AgentLoopAttempt._save_budget_pause_checkpoint"
   ],
   [
    "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
    "loop_sensor.py::AgentLoopSensor._sensor_failed"
+  ],
+  [
+   "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
+   "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified"
   ],
   [
    "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
