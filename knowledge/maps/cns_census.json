@@ -174,7 +174,10 @@
   "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims": [],
   "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source": [],
   "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
-  "loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic": []
+  "loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic": [],
+  "loop_context.py::AgentLoopContext._self_defects": [],
+  "loop_response_deciders.py::AgentLoopResponseDeciders._headline_check": [],
+  "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt": []
  },
  "edges": [
   [
@@ -648,6 +651,22 @@
   [
    "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
    "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source"
+  ],
+  [
+   "loop_context.py::AgentLoopContext._retrieve_turn_context",
+   "loop_context.py::AgentLoopContext._self_defects"
+  ],
+  [
+   "loop_context.py::AgentLoopContext._self_defects",
+   "loop.py::AgentLoop._file_read_workspace_root"
+  ],
+  [
+   "loop_response_deciders.py::AgentLoopResponseDeciders._enforce_answer_safety",
+   "loop_response_deciders.py::AgentLoopResponseDeciders._headline_check"
+  ],
+  [
+   "loop_synthesis.py::AgentLoopSynthesis._synthesize",
+   "loop_synthesis.py::AgentLoopSynthesis._self_defects_prompt"
   ]
  ]
 }

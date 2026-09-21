@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 231 modules across 12 groups._
+_Total: 233 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -279,7 +279,9 @@ _Reflection-driven repair, self-build, value gating._
 | `core/self_task_builder` | Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a HUMAN-APPROVED, FROZEN acceptance test pass. |
 | `core/writer_completion` | The completion verdict a mechanical writer settles from its own outcome. |
 | `core/self_improvement_issues` | Durable lifecycle registry for self-improvement failures. |
+| `core/self_defect_reminder` | Свои открытые записи о промахах — перед глазами в момент действия. |
 | `core/incremental_splitter` | Incremental splitter for oversized Python modules (junior-plan item #5). |
+| `core/split_proof` | Доказательство того, что модуль надо переделать, — а не его толщина. |
 | `core/dependency_map` | Project import/dependency map for self-build changes. |
 | `core/causal_lesson` | От замеченного отклонения до усвоенного правила — состояниями, не подписями. |
 | `core/learning_planner` | Learning planner. |

@@ -73,11 +73,12 @@
      "call": "append"
     },
     {
-     "site": "core/loop_synthesis.py:596",
+     "site": "core/loop_synthesis.py:609",
      "node": "loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic",
      "puts": "answer_off_topic — черновик отвечает не на тот вопрос; повод переписать один раз",
      "call": "append",
-     "_added": "2026-09-20: нерв был вшит коммитом c0eaf7b и в карту не записан; перепись поймала это в тот же день, а прочитали её только вечером."
+     "_added": "2026-09-20: нерв был вшит коммитом c0eaf7b и в карту не записан; перепись поймала это в тот же день, а прочитали её только вечером.",
+     "_anchor_correction": "сдвинулось 2026-09-21 на +13: в core/loop_synthesis.py выше вставлен _self_defects_prompt (свои записи о промахах перед синтезатором); поймано tests/test_cns_anchor_integrity.py."
     }
    ],
    "readers": [
@@ -94,11 +95,11 @@
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:252",
+     "site": "core/loop_synthesis.py:265",
      "role": "control",
      "uses": "<failure_context> block in the synthesis prompt",
-     "gated_by": "core/loop_synthesis.py:630 — receives the world-facing subset unless st.replan_exhausted",
-     "_anchor_correction": "shifted 2026-09-19 (+6: the runtime_self block lists the registered tools minus the blocked ones; +22 below the gate). shifted 2026-09-05 (+6: spend_block on _synthesize and the sensor citations offered on the no-tool branch, exam of 2026-09-04). shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель."
+     "gated_by": "core/loop_synthesis.py:710 — receives the world-facing subset unless st.replan_exhausted",
+     "_anchor_correction": "shifted 2026-09-19 (+6: the runtime_self block lists the registered tools minus the blocked ones; +22 below the gate). shifted 2026-09-05 (+6: spend_block on _synthesize and the sensor citations offered on the no-tool branch, exam of 2026-09-04). shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель. | сдвинулось 2026-09-21 на +13 (вставлен _self_defects_prompt); gated_by исправлен с :630 (строка документации, устарел ещё до этой правки) на :710 — место, где отбирается подмножество для мира."
     },
     {
      "site": "core/loop_run_tail.py:306",
