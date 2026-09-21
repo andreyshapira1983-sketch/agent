@@ -68,3 +68,21 @@ def test_a_skeleton_with_to_be_filled_keeps_the_round() -> None:
     assert unfilled_placeholders("# Приложение A\n\n(заполняется после чтения core/approval_inbox.py)")
     assert unfilled_placeholders("(to be filled after the probe)")
     assert not unfilled_placeholders("Функция (строка 12) возвращает список (см. выше).")
+
+
+def test_a_read_another_step_references_is_run_again() -> None:
+    """2026-09-21 ~18:22: второй круг пропустил оба чтения как «уже прочитанные»,
+    и запись final.md = {{step:1.output}}… упала с «known steps are []»."""
+    artifacts = {"file:proposals/final.md": {"tool": "file_read", "output": "old"}}
+    steps = [
+        SimpleNamespace(order=1, id="s1", status="pending",
+                        action_spec={"tool_name": "file_read", "source_label": "file:proposals/final.md"}),
+        SimpleNamespace(order=2, id="s2", status="pending",
+                        action_spec={"tool_name": "file_write", "source_label": "file_write:proposals/final.md",
+                                     "arguments": {"path": "proposals/final.md",
+                                                   "content": "{{step:1.output}} + fix"}}),
+    ]
+    run = reuse_already_read(
+        SimpleNamespace(artifacts=artifacts, plan=SimpleNamespace(steps=steps), attempt=2),
+        {}, lambda e, p: None)
+    assert [s.order for s in run] == [1, 2], "чтение, нужное ссылке, не пропускается"

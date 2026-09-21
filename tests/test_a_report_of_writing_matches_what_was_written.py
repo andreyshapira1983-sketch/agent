@@ -23,11 +23,21 @@ def test_a_denied_write_after_real_writes_is_flagged() -> None:
     assert note and "записей файлов: 2" in note
 
 
-def test_an_honest_report_passes() -> None:
-    assert action_report_mismatch("Conclusion: Записал proposals/x.md.", ["file_write"]) is None
+def test_an_honest_report_gets_only_the_plain_fact() -> None:
+    note = action_report_mismatch("Conclusion: Записал proposals/x.md.", ["file_write"])
+    assert note and note.startswith("ℹ️") and "1" in note
     assert action_report_mismatch("Conclusion: Ничего не записано: запись заблокирована.", []) is None
     assert action_report_mismatch("Conclusion: Прочитал core/a.py, строка 12.", ["file_read"]) is None
 
 
 def test_a_denial_is_caught_in_any_form() -> None:
-    assert action_report_mismatch("Conclusion: Файл не записан.", ["file_write"]) is not None
+    assert action_report_mismatch("Conclusion: Файл не записан.", ["file_write"]).startswith("⚠️")
+
+
+def test_a_denial_in_words_nobody_listed_still_meets_the_fact() -> None:
+    """2026-09-21 ~18:22: «запись в файл не состоялась» после успешной перезаписи
+    в первом круге — ловля отрицаний не знала слова «не состоялась»."""
+    note = action_report_mismatch(
+        "Задача не выполнена: запись в файл не состоялась — final.md остался прежним.",
+        ["file_read", "file_write", "find_in_files"])
+    assert note and "записей файлов в этом ходе: 1" in note
