@@ -280,7 +280,7 @@ def _load_split_proofs(root: Path) -> tuple[list[SignalRecord], str]:
         ranked = sorted((item for item in found if item[1] is not None),
                         key=lambda item: (rank_key(item[1], item[2]), item[0]))
         return split_proof_candidates((rel, proof) for rel, proof, _lines in ranked)
-    except Exception:  # noqa: BLE001 — a broken detector must never break the backlog
+    except Exception:  # a broken detector must never break the backlog
         logger.debug("split proofs unavailable", exc_info=True)
         return [], ""
 
