@@ -2,11 +2,11 @@
 
 Two complementary limits keep the synthesizer prompt lean:
 
-  1. Per-artifact budget (env AGENT_EVIDENCE_FILE_CHARS, default 12 000 chars ≈ 3 k tokens)
+  1. Per-artifact budget (env AGENT_EVIDENCE_FILE_CHARS, default 96 000 chars ≈ 28 k tokens)
      A single large file (README, source module) is intelligently trimmed rather than
      fed whole into the expensive model.
 
-  2. Total evidence budget (env AGENT_EVIDENCE_TOTAL_CHARS, default 32 000 chars ≈ 8 k tokens)
+  2. Total evidence budget (env AGENT_EVIDENCE_TOTAL_CHARS, default 100 000 chars ≈ 30 k tokens)
      Many medium-sized artifacts cannot collectively overwhelm the context window.
      The LARGEST artifact is trimmed first, preserving smaller ones intact —
      except for blocks the caller demotes via ``trim_first_labels``, which are
@@ -30,8 +30,8 @@ Realtime Intent extraction:
 
 Constants
 ---------
-EVIDENCE_FILE_CHARS   = 12_000   override via AGENT_EVIDENCE_FILE_CHARS
-EVIDENCE_TOTAL_CHARS  = 32_000   override via AGENT_EVIDENCE_TOTAL_CHARS
+EVIDENCE_FILE_CHARS   = 96_000   override via AGENT_EVIDENCE_FILE_CHARS
+EVIDENCE_TOTAL_CHARS  = 100_000  override via AGENT_EVIDENCE_TOTAL_CHARS
 """
 from __future__ import annotations
 
@@ -42,8 +42,18 @@ from collections.abc import Set as AbstractSet
 
 # ── configurable limits ────────────────────────────────────────────────────────
 
-EVIDENCE_FILE_CHARS:  int = 12_000   # per-artifact ceiling
-EVIDENCE_TOTAL_CHARS: int = 32_000   # total ceiling across all artifacts
+# Подняты 2026-09-21 с 12 000 / 32 000. Эпизод: вопрос «открой
+# core/smart_memory.py целиком» — агент прочитал все 1756 строк (≈83 КБ), а
+# синтезатору дошло 32 000 знаков: 26 из 36 блоков урезаны до 444 знаков, и
+# ответ честно писал «строки 111–323… не были показаны». Руки прочитали, рот
+# не видел — половина «не подтверждено» про собственный код была этой стеной.
+# Прежние числа ставились под окна в 8–32 k токенов; синтезатор сейчас
+# deepseek-v4-pro с окном 1 048 576. 100 000 знаков ≈ 30 k токенов: самый
+# большой модуль агента (1865 строк, ≈90 КБ) доходит целиком. Цена — до
+# ≈$0.03 за ответ по пиковому тарифу, и только там, где прочитано больше
+# прежнего потолка.
+EVIDENCE_FILE_CHARS:  int = 96_000   # per-artifact ceiling
+EVIDENCE_TOTAL_CHARS: int = 100_000  # total ceiling across all artifacts
 
 # Ceiling for the agent's OWN self-documentation (the planner's hint-free
 # allowlist). Higher than the ordinary per-file limit, and the reason is
@@ -55,7 +65,8 @@ EVIDENCE_TOTAL_CHARS: int = 32_000   # total ceiling across all artifacts
 # agent then described its architecture with the memory layer missing.
 # The total budget below still governs; this only stops a SECOND gate from
 # mutilating the one file the agent is told to read to know itself.
-EVIDENCE_SELF_DOC_CHARS: int = 32_000
+# 2026-09-21: не ниже обычного потолка файла (иначе «повышенный» стал бы ниже).
+EVIDENCE_SELF_DOC_CHARS: int = 96_000
 
 # Label under which the `<long_term_memory>` block enters the total budget.
 # Defined here, next to the budget it competes in, so the loop and the tests

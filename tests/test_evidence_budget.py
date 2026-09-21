@@ -679,7 +679,7 @@ def test_total_trims_reports_every_cut_block(monkeypatch):
 
 # ── the agent's own self-description must survive whole ──────────────────────
 
-def test_the_anatomy_map_is_not_mutilated_when_the_operator_asks_in_russian():
+def test_the_anatomy_map_is_not_mutilated_when_the_operator_asks_in_russian(monkeypatch):
     """Measured 2026-08-14 on the live agent, asked «Опиши свою архитектуру».
 
     The map is 19 163 chars against a 12 000 per-file ceiling. The question is
@@ -708,12 +708,19 @@ def test_the_anatomy_map_is_not_mutilated_when_the_operator_asks_in_russian():
     marker = "## Memory & Knowledge Governance"
     assert marker in text, "the generated map no longer has this section"
 
+    # 2026-09-21 the ordinary per-file ceiling rose to 96 000 and no longer
+    # cuts the map at all — that is the point of the raise. The pole that keeps
+    # the flag honest is now measured at the OLD ceiling, pinned by env.
+    monkeypatch.delenv("AGENT_EVIDENCE_SELF_DOC_CHARS", raising=False)
+    monkeypatch.delenv("AGENT_EVIDENCE_FILE_CHARS", raising=False)
+    assert budget_file_content(text, question=question) == text
+    monkeypatch.setenv("AGENT_EVIDENCE_FILE_CHARS", "12000")
     trimmed = budget_file_content(text, question=question)
     whole = budget_file_content(text, question=question, self_documentation=True)
 
     assert marker not in trimmed, (
-        "the ordinary per-file ceiling no longer cuts this section — if the map "
-        "shrank below the limit the measurement is stale, re-take it"
+        "the old 12 000 ceiling no longer cuts this section — if the map "
+        "shrank below it the measurement is stale, re-take it"
     )
     assert whole == text, (
         "the agent's own anatomy must reach the synthesiser whole; it lost "
