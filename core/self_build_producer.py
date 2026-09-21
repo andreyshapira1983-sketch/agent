@@ -1218,7 +1218,9 @@ def publish_incremental_split_step(
     build: dict[str, Any] = {
         "files": [
             {"path": step.target, "content": step.target_content},
-            {"path": step.new_module, "content": step.new_content},
+            # У сведения дубля второй модуль не меняется: его не публикуют.
+            *([{"path": step.new_module, "content": step.new_content}]
+              if step.new_content else []),
         ],
     }
     # Keep knowledge/generated/AGENT_ANATOMY.md in sync (its drift check would fail otherwise).
@@ -1259,6 +1261,9 @@ def publish_incremental_split_step(
     item = inbox.add(
         operation=SELF_APPLY_OPERATION,
         summary=_split_note + (
+            f"dedup step for {step.target}: remove {len(step.moved_names)} "
+            f"duplicate(s), take them from {step.new_module}"
+            if step.mode == "dedup" else
             f"incremental split step for {step.target}: move "
             f"{len(step.moved_names)} name(s) into {step.new_module}"
         ),
@@ -1298,7 +1303,13 @@ def _deterministic_split_report(
     except Exception:  # noqa: BLE001 — splitter unavailable → keep prior behaviour
         return None
     try:
-        plan = plan_incremental_split(workspace, concrete_target)
+        # Доказательство правки ведёт раскольщик: дубль сводится, доказанная
+        # группа выносится (core/split_proof.py, 2026-09-21).
+        from core.split_proof import index_workspace, proof_for
+
+        plan = plan_incremental_split(
+            workspace, concrete_target,
+            proof=proof_for(concrete_target, index_workspace(workspace)))
     except Exception as exc:  # noqa: BLE001 — a crashing planner must be surfaced, not disguised
         # The splitter IS present but threw on this input — that is a splitter
         # bug, NOT a genuine "no safe step" outcome. Returning None here would let

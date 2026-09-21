@@ -100,8 +100,16 @@ def test_function_split_moves_closed_group(workspace: Path):
     step = plan.step
     assert step.mode == "functions"
     assert step.new_module == "core/funcs_helpers.py"
-    # the dependency-closed group includes LIMIT because uses_limit needs it
-    assert set(step.moved_names) == {"LIMIT", "helper_a", "helper_b", "uses_limit"}
+    # ONE connected group moves, closed over its dependencies: LIMIT travels
+    # exactly when uses_limit does. Until 2026-09-21 this pinned all four names
+    # at once — the union of two unrelated groups (helper_a/helper_b and
+    # LIMIT/uses_limit). That union is how the live plan for
+    # core/step_sanitizer.py carried URL checks, int coercion, a line window,
+    # a shell label and four tool sanitizers into one file: they were connected
+    # only through `sanitize_step`, which stayed behind.
+    moved = set(step.moved_names)
+    assert moved in ({"helper_a", "helper_b"}, {"LIMIT", "uses_limit"}), moved
+    assert ("LIMIT" in moved) == ("uses_limit" in moved)
 
 
 def test_function_split_target_reexports_everything(workspace: Path):
