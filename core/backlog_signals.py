@@ -428,6 +428,42 @@ def oversized_module_candidates(
     return records, "\n".join(quotes)
 
 
+
+SPLIT_PROOF_SOURCE = "split_proof"
+
+
+def split_proof_candidates(
+    proofs: Iterable[tuple[str, Any]],
+) -> tuple[list[SignalRecord], str]:
+    """Модули с ДОКАЗАТЕЛЬСТВОМ из core/split_proof.py — работа для рук.
+
+    Эпизод 2026-09-21: драйв нашёл настоящий дубль в core/task_queue.py и
+    поставил цель, а руки (`_default_grounded_selector`) ответили «no grounded
+    backlog candidate»: весь бэклог был семью записями «файл большой», и ни
+    одной доказанной. Доказательство доходило до головы и не доходило до рук.
+
+    ``proofs`` — пары ``(rel, proof)`` уже в порядке силы; без IO. Цель —
+    тот же абстрактный ``split:<rel>``, что у размера: отображение в файл и
+    решение, КАК править (свести дубль или вынести предмет), остаются за
+    картографом и производителем.
+    """
+    items = [(str(rel).replace("\\", "/").strip(), proof) for rel, proof in proofs]
+    items = [(rel, proof) for rel, proof in items if rel and proof is not None]
+    records: list[SignalRecord] = []
+    quotes: list[str] = []
+    for index, (rel, proof) in enumerate(items):
+        quote = proof.describe(rel)
+        quotes.append(quote)
+        records.append(SignalRecord(
+            signal_source=SPLIT_PROOF_SOURCE,
+            target_path=f"{_OVERSIZED_TARGET_PREFIX}{rel}",
+            evidence_ref=f"{rel}:1",
+            problem_quote=quote,
+            rank_hint=(len(items) - index) * 0.001,
+        ))
+    return records, "\n".join(quotes)
+
+
 def value_review_penalties(
     reviews: Iterable,
     item_target_map: Mapping[str, str] | None = None,

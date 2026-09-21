@@ -22,6 +22,7 @@ from typing import Any
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,
     OVERSIZED_MODULE_SOURCE,
+    SPLIT_PROOF_SOURCE,
     SignalRecord,
     ValuePenalties,
     anatomy_candidates,
@@ -29,6 +30,7 @@ from core.backlog_signals import (
     open_tech_debt,
     oversized_module_candidates,
     self_build_docs_candidate,
+    split_proof_candidates,
     value_review_penalties,
 )
 
@@ -48,6 +50,9 @@ _SOURCE_BASE_SCORE = {
     # Oversized-module advisories sit at the very bottom: they are report-only
     # (abstract ``split:`` target, no mapper) and never displace actionable work.
     OVERSIZED_MODULE_SOURCE: 0.9,
+    # Доказанная переделка (дубль, два предмета) стоит над голым размером:
+    # размер — повод посмотреть, доказательство — работа (оператор, 2026-09-21).
+    SPLIT_PROOF_SOURCE: 0.95,
 }
 _SOURCE_CONFIDENCE = {
     "tech_debt": 0.7,
@@ -55,6 +60,7 @@ _SOURCE_CONFIDENCE = {
     ARCHITECTURE_AUDIT_SOURCE: 0.55,
     "anatomy": 0.5,
     OVERSIZED_MODULE_SOURCE: 0.4,
+    SPLIT_PROOF_SOURCE: 0.6,
 }
 _PENALTY_SCORE = 1.0
 
@@ -151,6 +157,8 @@ def build_backlog(
     architecture_audit_text: str = "",
     oversized_records: list[SignalRecord] | None = None,
     oversized_text: str = "",
+    split_proof_records: list[SignalRecord] | None = None,
+    split_proof_text: str = "",
     include_self_build_docs: bool = True,
     penalties: ValuePenalties | None = None,
 ) -> list[BacklogCandidate]:
@@ -165,6 +173,7 @@ def build_backlog(
         + anatomy_candidates(anatomy_text)
         + list(architecture_audit_records or [])
         + list(oversized_records or [])
+        + list(split_proof_records or [])
     )
     sources = {
         "tech_debt": tech_debt_text,
@@ -172,6 +181,7 @@ def build_backlog(
         "anatomy": anatomy_text,
         ARCHITECTURE_AUDIT_SOURCE: architecture_audit_text,
         OVERSIZED_MODULE_SOURCE: oversized_text,
+        SPLIT_PROOF_SOURCE: split_proof_text,
     }
     return _finalize(records, sources, penalties)
 
@@ -254,6 +264,27 @@ def _scan_oversized_modules(root: Path) -> tuple[list[SignalRecord], str]:
     return oversized_module_candidates(files)
 
 
+def _load_split_proofs(root: Path) -> tuple[list[SignalRecord], str]:
+    """Доказательства переделки по собственному коду, сильнейшие первыми.
+
+    Только для настоящей копии агента (как аудит архитектуры): во временной
+    папке без core/split_proof.py — пусто. Любой сбой — пусто, не исключение.
+    """
+    if not _path_exists(root / "core" / "split_proof.py"):
+        return [], ""
+    try:
+        from core.split_proof import index_workspace, proof_for, rank_key
+
+        index = index_workspace(root)
+        found = [(rel, proof_for(rel, index), mod.lines) for rel, mod in index.items()]
+        ranked = sorted((item for item in found if item[1] is not None),
+                        key=lambda item: (rank_key(item[1], item[2]), item[0]))
+        return split_proof_candidates((rel, proof) for rel, proof, _lines in ranked)
+    except Exception:  # noqa: BLE001 — a broken detector must never break the backlog
+        logger.debug("split proofs unavailable", exc_info=True)
+        return [], ""
+
+
 def load_backlog(
     workspace: str | Path,
     *,
@@ -272,6 +303,7 @@ def load_backlog(
     include_self_build_docs = not _path_exists(root / "docs" / "self_build.md")
     audit_records, audit_text = _load_architecture_audit(root)
     oversized_records, oversized_text = _scan_oversized_modules(root)
+    proof_records, proof_text = _load_split_proofs(root)
     penalties = None
     if value_reviews is not None:
         penalties = value_review_penalties(value_reviews, item_target_map)
@@ -283,6 +315,8 @@ def load_backlog(
         architecture_audit_text=audit_text,
         oversized_records=oversized_records,
         oversized_text=oversized_text,
+        split_proof_records=proof_records,
+        split_proof_text=proof_text,
         include_self_build_docs=include_self_build_docs,
         penalties=penalties,
     )
