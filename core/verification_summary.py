@@ -124,6 +124,19 @@ def _gap_counts(report: VerificationReport) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
+def _tail_notes(report: VerificationReport, admitted: int) -> tuple[str, str]:
+    """Приписки хвоста: названное непроверенным и опора на запись разговора.
+
+    Опора на реплики разговора — не внешнее подтверждение (MIR-028), но и не
+    пустота: 2026-09-21 на «помнишь разговор?» хвост «0 из 11, нулевая» читался
+    как ответ без опоры, хотя стоял на записи беседы.
+    """
+    named = f" ({admitted} — ответ сам назвал непроверенными)" if admitted else ""
+    dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
+    heard = f"; из них {dialogue} — по записи этого разговора" if dialogue else ""
+    return named, heard
+
+
 def _gaps_with_admitted(
     report: VerificationReport, examined: int,
 ) -> tuple[list[tuple[str, int]], int]:
@@ -260,11 +273,11 @@ def build_verification_summary(
     else:
         gap_total = sum(count for _v, count in gaps)
         subject = "отклонённый черновик — " if rejected_draft else ""
-        named = f" ({admitted} — ответ сам назвал непроверенными)" if admitted else ""
+        named, heard = _tail_notes(report, admitted)
         tail = (
             f"{TAIL_PREFIX} {subject}подтверждено {verified} из "
             f"{examined + admitted} утверждений{named}; "
-            f"без внешнего подтверждения: {gap_total}; уверенность: {word}."
+            f"без внешнего подтверждения: {gap_total}{heard}; уверенность: {word}."
         )
 
     if tail:
