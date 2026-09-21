@@ -1347,6 +1347,9 @@ def _deterministic_split_report(
             ),
         )
     if plan.status != "planned" or plan.step is None:
+        # Отказ раскольщика ставит паузу до изменения файла (core/splitter_refusals.py).
+        from core.splitter_refusals import record_refusal
+        record_refusal(workspace, concrete_target, str(plan.reason))
         return ProducerReport(
             status="no_patch",
             reason=(
@@ -1425,6 +1428,13 @@ def _waiting_self_apply_targets(inbox: Any) -> frozenset[str] | None:
         return reader(operation=SELF_APPLY_OPERATION)
     except Exception:  # noqa: BLE001 — an unreadable inbox keeps the old wait
         return None
+
+
+def _splitter_refused(workspace: str | Path) -> frozenset[str]:
+    """Файлы, которые раскольщик отказался резать и которые не менялись с тех пор."""
+    from core.splitter_refusals import refused_unchanged
+
+    return refused_unchanged(workspace)
 
 
 def _denied_self_apply_targets(inbox: Any) -> frozenset[str]:
@@ -1630,8 +1640,8 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
         manager = _manager_select(llm, targets)
     else:
         named = frozenset(explicit)
-        excluded = (frozenset(recently_vetoed_targets or ())
-                    | (waiting or frozenset()) | denied_cooldown)
+        excluded = (frozenset(recently_vetoed_targets or ()) | (waiting or frozenset())
+                    | denied_cooldown | _splitter_refused(workspace))
         selector = grounded_selector or _default_grounded_selector(
             workspace, exclude_targets=excluded, only_targets=named)
         manager = _manager_from_grounded(

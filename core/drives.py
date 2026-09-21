@@ -153,6 +153,25 @@ def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]
     return [(rel, lines) for rel, lines, _proof in self_improvement_proofs(root, limit)]
 
 
+def _paused_targets(root: Path) -> frozenset[str]:
+    """Файлы на паузе у рук: недавно отклонённые человеком и отказанные
+    раскольщиком без изменений. 2026-09-21: цель кампании трижды подряд
+    выбирала core/scheduler.py, а руки его не брали (target_denied_recently),
+    и цикл уходил в простой — голова не видела паузы рук.
+    """
+    from core.approval_inbox import ApprovalInbox
+    from core.self_apply_bridge import SELF_APPLY_OPERATION
+    from core.splitter_refusals import refused_unchanged
+
+    denied: frozenset[str] = frozenset()
+    try:
+        inbox = ApprovalInbox(path=root / "data" / "approval_inbox.jsonl")
+        denied = frozenset(inbox.recently_denied_targets(operation=SELF_APPLY_OPERATION))
+    except Exception:  # noqa: BLE001 — нет ящика — нет и отказов человека
+        denied = frozenset()
+    return denied | refused_unchanged(root)
+
+
 def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, Any]]:
     """Свои модули с ДОКАЗАТЕЛЬСТВОМ, что их надо переделать, и само доказательство.
 
@@ -183,11 +202,12 @@ def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, 
            for r in _rows(root / "data" / "approval_inbox.jsonl")):
         return []
     index = index_workspace(root)
+    paused = _paused_targets(root)
     out: list[tuple[str, int, Any]] = []
     for rel, mod in index.items():
         if not rel.startswith(tuple(f"{d}/" for d in _OWN_CODE_DIRS)):
             continue
-        if _is_critical(rel) or blocking_lesson(root, [rel]) is not None:
+        if _is_critical(rel) or rel in paused or blocking_lesson(root, [rel]) is not None:
             continue
         proof = proof_for(rel, index)
         if proof is not None:
