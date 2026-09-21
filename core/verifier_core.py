@@ -109,6 +109,24 @@ def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence |
 _UNSUPPORTED_REASONS: frozenset[str] = frozenset({"cited_support_missing"})
 
 
+def _admitted_unverified(chunks: list[str]) -> int:
+    """Сколько строк ответ сам вынес в раздел «Unverified» («Не подтверждено»).
+
+    Раздел не-утвердительный, и в счёт утверждений он не идёт — но это
+    непроверенное, названное вслух, и уверенность обязана его видеть
+    (2026-09-21: «я не проверял X» и ниже «9 из 9, уверенность высокая»).
+    """
+    section: str | None = None
+    count = 0
+    for text in chunks:
+        header = _output_contract_header_name(text)
+        if header is not None:
+            section = header
+        elif section == "unverified" and not is_structural_chunk(text):
+            count += 1
+    return count
+
+
 def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
@@ -505,4 +523,4 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
     if disclaimer is not None:
         annotated_answer = annotated_answer.rstrip() + "\n\n" + disclaimer
-    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted, refuted_chunks=refuted)
+    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted, refuted_chunks=refuted, admitted_unverified_chunks=_admitted_unverified(all_chunks_text))
