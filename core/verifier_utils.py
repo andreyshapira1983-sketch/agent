@@ -582,6 +582,15 @@ def _number_is_a_date(text: str, m: Any) -> bool:
     return bool(re.search(r"[–—-]\s*$", before))
 
 
+#: Скобка-пояснение («по данным поиска — …», «из них …», «всего …») — не
+#: перечень предметов. 2026-09-21: «встречается 5 раз … (по данным поиска — 10
+#: совпадений, из них 5 строк с X и 5 с Y)» — скобка прочитана как перечень из
+#: двух, и ВЕРНОЕ «5 и 5» получило клеймо лжи. Перечень с количествами
+#: («rotor-33: 5 шт., gasket-9: 0 шт.») остаётся перечнем.
+_ITEM_CARRIES_A_COUNT_RE = re.compile(
+    r"(?i)^(?:по\s+данным|согласно|всего|итого|according|in\s+total)|\bиз\s+них\b|\bof\s+which\b")
+
+
 def enumeration_count_reason(text: str) -> Any:
     """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же
     предложения.
@@ -595,7 +604,7 @@ def enumeration_count_reason(text: str) -> Any:
         if claimed < 2:
             continue
         items = [p.strip() for p in re.split(r"[;,]", m.group(3)) if p.strip()]
-        if len(items) < 2:
+        if len(items) < 2 or any(_ITEM_CARRIES_A_COUNT_RE.search(item) for item in items):
             continue
         counted = sum(1 for item in items if not _ENUM_EXCLUDED_RE.search(item))
         if counted != claimed:

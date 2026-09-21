@@ -59,3 +59,14 @@ def test_nothing_admitted_changes_nothing() -> None:
     assert report.admitted_unverified_chunks == 0
     tail = build_verification_summary(report, chain=chain).tail
     assert "назвал непроверенными" not in tail
+
+
+def test_a_parenthesis_with_its_own_counts_is_not_an_enumeration() -> None:
+    """2026-09-21, «испорченный файл»: верное «5 и 5» с пояснением в скобках
+    получило [claim-refuted] — скобка прочитана как перечень из двух."""
+    from core.verifier_utils import enumeration_count_reason
+
+    claim = ("Маркер A встречается в файле 5 раз, маркер B — 5 раз (по данным поиска — "
+             "10 совпадений, из них 5 строк с A и 5 с B).")
+    assert enumeration_count_reason(claim) is None
+    assert enumeration_count_reason("Нашёл 3 файла (a.py, b.py).") is not None
