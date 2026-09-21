@@ -117,6 +117,13 @@ _DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 # burning a doomed generation; it needs a human-scoped incremental split.
 _MAX_SPLIT_TARGET_LINES = 900
 
+#: Диагноз из core/split_proof.py (Proof.describe). Доказанная правка идёт
+#: детерминированным раскольщиком при ЛЮБОМ размере файла. 2026-09-21:
+#: доказанный дубль в core/scheduler.py (541 строка < 900) ушёл к модели-
+#: Строителю одним выстрелом, тот выбросил _FALSE_VALUES, _TRUE_VALUES,
+#: _VALID_STATUSES, и критик верно отказал — правка не получалась никогда.
+_PROVEN_DIAGNOSES = ("дубль:", "два предмета:")
+
 # Default number of Builder attempts per run. ``1`` preserves the historical
 # single-shot behaviour (and every existing producer test). The real
 # ``:self-build-produce`` command opts into ``2`` so ONE Critic veto is retried
@@ -1679,7 +1686,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     # the LLM Builder path unchanged.
     if split_mode:
         too_large, line_count = _split_target_too_large(current_content)
-        if too_large:
+        if too_large or str(diagnosis).startswith(_PROVEN_DIAGNOSES):
             det = _deterministic_split_report(
                 workspace=workspace,
                 concrete_target=target,
