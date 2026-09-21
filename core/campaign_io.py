@@ -456,6 +456,10 @@ def _engineering_preflight(
         command_module=command_module,
     )
     waiting = _engineering_target_waits(inbox, target)
+    if not waiting and target:
+        from core.splitter_refusals import refused_unchanged
+        if str(target).replace("\\", "/") in refused_unchanged(ws):
+            waiting = "target_refused_by_splitter:until_the_file_changes"
     if not waiting:
         return None
     _log(agent, "campaign_engineering_waiting", {
