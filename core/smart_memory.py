@@ -91,6 +91,19 @@ def _smoothed_confidence(success_count: int, failure_count: int) -> float:
 #: двух десятков мест этого файла.
 
 
+def _stored_relevance(raw: Any) -> float | None:
+    """Соответствие, прочитанное с диска: число в [0, 1] или «не мерили».
+
+    Нечисло и число вне отрезка — не мерили, а не ноль: ноль это приговор,
+    и выдумывать его за испорченную строку нельзя.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if 0.0 <= value <= 1.0 else None
+
+
 @dataclass(frozen=True)
 class EpisodeRecord:
     """A compact memory of one completed agent cycle or operator task."""
@@ -223,6 +236,12 @@ class EpisodeRecord:
                else {"defect_signals": list(self.defect_signals)}),
             **({} if self.completion_override is None
                else {"completion_override": self.completion_override}),
+            # Основание третьей оси допуска. Не выводится из счётчиков, в
+            # отличие от answer_quality_score, — поэтому хранится. Без него
+            # приговор usage_eligible=False нельзя было проверить по журналу
+            # (замер 2026-09-21: 200 приговоров, 0 оснований).
+            **({} if self.relevance_score is None
+               else {"relevance_score": self.relevance_score}),
         }
 
     @classmethod
@@ -297,6 +316,7 @@ class EpisodeRecord:
             tags=tuple(str(x) for x in data.get("tags") or ()),
             full_answer=str(data.get("full_answer") or ""),
             created_at=str(data.get("created_at") or _now_iso()),
+            relevance_score=_stored_relevance(data.get("relevance_score")),
         )
 
 
