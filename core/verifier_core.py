@@ -2,6 +2,7 @@
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any
 
@@ -123,9 +124,17 @@ def _admitted_unverified(chunks: list[str]) -> int:
         header = _output_contract_header_name(text)
         if header is not None:
             section = header
-        elif section == "unverified" and not is_structural_chunk(text):
+        elif (section == "unverified" and not is_structural_chunk(text)
+              and not _NOTHING_UNVERIFIED_RE.match(text)):
             count += 1
     return count
+
+
+#: «Не подтверждено: Ничего — всё измерено…» — это не непроверенный пункт.
+#: 2026-09-21, ответ «пересчитай функции»: такая строка засчитывалась, и хвост
+#: говорил «(1 — ответ сам назвал непроверенными)» при пустом разделе.
+_NOTHING_UNVERIFIED_RE = re.compile(
+    r"^[\s\-•*]*(?:ничего|нет|none|nothing|n/a)\b", re.IGNORECASE)
 
 
 def _judge_uncited(chunk_text: str, chain: ProvenanceChain, chain_empty: bool,
