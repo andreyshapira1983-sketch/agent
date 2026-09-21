@@ -58,3 +58,13 @@ def test_the_preview_says_the_whole_output_is_in_evidence() -> None:
     assert "preview only" in block
     assert "FULL output is already in your evidence" in block
     assert "обрезано: ещё" not in block
+
+
+def test_a_skeleton_with_to_be_filled_keeps_the_round() -> None:
+    """2026-09-21: приложения записаны заглушками «(заполняется после чтения…)»,
+    ход закончился как «чистая запись», и заполнить их было некогда."""
+    from core.observation_round import unfilled_placeholders
+
+    assert unfilled_placeholders("# Приложение A\n\n(заполняется после чтения core/approval_inbox.py)")
+    assert unfilled_placeholders("(to be filled after the probe)")
+    assert not unfilled_placeholders("Функция (строка 12) возвращает список (см. выше).")
