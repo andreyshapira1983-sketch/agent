@@ -18,6 +18,17 @@ _PRIOR_STEP_RE = re.compile(
 )
 
 
+def _names_its_material(question: str) -> bool:
+    """Вопрос сам называет файлы — значит, «предыдущий шаг» в нём описание, а
+    не висящая ссылка. 2026-09-21: Claude описал дефект словами «вывод
+    предыдущего шага» в вопросе с путями и следом, и ворота вернули
+    «уточните, какой результат использовать» — модель вопрос не увидела.
+    """
+    from core.file_request_intent import extract_path_mentions
+
+    return bool(extract_path_mentions(question or ""))
+
+
 class AgentLoopGates:
     """Ранние выходы: ход решён до планирования — или не решён."""
 
@@ -148,7 +159,7 @@ class AgentLoopGates:
             return None
         if referent_resolver_mode() == "off":
             return None
-        if not _PRIOR_STEP_RE.search(user_question or ""):
+        if not _PRIOR_STEP_RE.search(user_question or "") or _names_its_material(user_question):
             return None
         memory = getattr(self, "memory", None)
         if memory is not None and getattr(memory, "turns", None):
