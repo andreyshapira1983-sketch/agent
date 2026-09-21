@@ -6,6 +6,8 @@ review later, while the unattended run stays stopped or dry-run only.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +16,21 @@ from typing import Literal
 from core.ids import new_id
 from core.redaction import redact_payload
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
+
+
+def _content_id(data: dict) -> str:
+    """Постоянное имя строки, у которой своего нет.
+
+    2026-09-21: строке без `id` выдавался `new_id` — новый случайный при
+    каждом чтении. `set_status` перечитывает файл и получал уже другое имя:
+    «approval not found». Строка висела заявкой, и снять её штатно было
+    нельзя. Одна и та же строка — одно и то же имя.
+    """
+    digest = hashlib.sha256(
+        json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()
+    return f"ain_{digest[:32]}"
+
 
 ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
 ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external"]
@@ -169,7 +186,7 @@ class ApprovalInboxItem:
             reasons = (str(reasons),)
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
         return cls(
-            id=str(data.get("id") or new_id("ain")),
+            id=str(data.get("id") or _content_id(data)),
             operation=str(data.get("operation") or ""),
             summary=str(data.get("summary") or ""),
             risk=risk,  # type: ignore[arg-type]
