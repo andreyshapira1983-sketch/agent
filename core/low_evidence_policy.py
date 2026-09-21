@@ -184,7 +184,15 @@ def _reports_a_result(text: str) -> bool:
     lowered = text.lower()
     if any(marker in lowered for marker in _REPORT_VERB_MARKERS):
         return True
-    return _KEY_VALUE_RE.search(text) is not None
+    return _KEY_VALUE_RE.search(text) is not None or _CODE_LINE_RE.search(text) is not None
+
+
+#: Ссылка на строку кода — отчёт о прочитанном. Сквозная проверка 2026-09-21:
+#: ответ «`apply_episode_feedback` … на строке 801 … `risk_for()` (строки
+#: 111–120)» на два нумерованных вопроса освобождён от улик как «план» — сработали
+#: нумерация, «затем» и «оценк»(у риска), — и хвост сказал «внешнее
+#: подтверждение не требовалось», хотя ответ целиком стоял на прочитанных файлах.
+_CODE_LINE_RE = re.compile(r"(?i)\bстрок[аеиу]?\s+\d+|\bline\s+\d+|\.py:\d+")
 
 
 def _carries_plan_proposal(answer: str, question: str = "") -> bool:
