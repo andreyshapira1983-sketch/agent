@@ -635,6 +635,63 @@ class AgentLoopSynthesis:
         if second and after > before:
             st.draft_answer = second
 
+    def _read_what_it_left_unverified(self, st: SynthesisState, do_synthesize: Any) -> None:
+        """Файл своей папки, вынесенный в «Не подтверждено», — прочитать и ответить.
+
+        Замер 2026-09-21: 44 из 74 блоков «Не подтверждено» были о его же
+        файлах («не проверял, требует ли file_write подтверждения», когда
+        tools/file_write.py рядом), а просьба «открой и проверь» в самом
+        вопросе не помогла. Это дверь, не стена: файлы читаются тем же
+        инструментом (только чтение, не больше трёх), ложатся в улики, и
+        черновик собирается один раз заново с требованием решить эти пункты.
+        """
+        from core.answer_format import unverified_own_paths
+        from core.evidence import evidence_from_tool_result
+
+        try:
+            tool = self.registry.get("file_read")
+        except KeyError:
+            return
+        paths = unverified_own_paths(
+            st.draft_answer or "", root=getattr(tool, "workspace_root", None),
+            already_read=st.artifacts)
+        if not paths or self._last_synth_degraded:
+            return
+        read: list[str] = []
+        for rel in paths:
+            try:
+                output = tool.run(path=rel)
+            except Exception as exc:  # noqa: BLE001 — непрочитанный файл остаётся непроверенным
+                self._sensor_failed("unverified_self_read", exc)
+                continue
+            st.artifacts[f"file:{rel}"] = {"tool": "file_read", "output": output, "issues": []}
+            ev = evidence_from_tool_result(tool_name="file_read", arguments={"path": rel},
+                                           output=output)
+            if ev is not None and getattr(self, "last_provenance", None) is not None:
+                self.last_provenance.add(ev)
+            read.append(rel)
+        if not read:
+            return
+        st.failure_history.append(ReplanTrigger(
+            code="unverified_own_file", step_id="synthesis-unverified", tool_name="file_read",
+            arguments={"paths": read},
+            reason=(
+                "Your draft put under Unverified what lives in your OWN workspace: "
+                + ", ".join(read) + ". Those files have now been read in full and are in "
+                "your evidence. Settle those points from them and cite them; keep under "
+                "Unverified only what the files really do not settle."
+            ),
+            attempt=0,
+        ))
+        try:
+            second = do_synthesize(SynthAttempt(index=1, adapt_context=False, is_final=True))
+        except Exception as exc:  # noqa: BLE001 — дочитывание не вправе ронять ответ
+            self._sensor_failed("unverified_self_read", exc)
+            return
+        self.log.log("unverified_own_files_read", {"paths": read, "rewritten": bool(second)})
+        if second:
+            st.draft_answer = second
+
     def _run_synthesizer_ladder(self, st: SynthesisState) -> None:
         """Довести черновик ответа, переживая сбои синтезатора.
 
@@ -765,6 +822,7 @@ class AgentLoopSynthesis:
             st.draft_answer = _ladder.answer
             self._rewrite_if_off_topic(st, _do_synthesize)
             self._last_synth_degraded = _ladder.degraded
+            self._read_what_it_left_unverified(st, _do_synthesize)
             if _ladder.degraded:
                 # The answer the user gets was assembled by the fallback, not
                 # by the attempt that declared. Keeping that declaration would
