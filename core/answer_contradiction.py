@@ -234,3 +234,34 @@ def headline_contradicts_facts(answer: str | None) -> tuple[Contradiction, ...]:
                 found.setdefault(subject, Contradiction(
                     subject=subject, asserted_in="conclusion", denied_in="facts"))
     return tuple(found.values())
+
+
+#: Доклад о записи и его отрицание. 2026-09-21, разговор через мостик: ход, в
+#: котором не выполнилось НИ ОДНОГО инструмента (план дважды не собрался),
+#: ответил «записано …_v3.md, по измерению 9412 байт»; следующий ход, в котором
+#: ЧЕТЫРЕ file_write прошли, ответил «не записал ни одного файла». Проверка
+#: видела пустоту («0 из 9»), а ответ уходил. Сверка идёт не по уликам ответа, а
+#: по списку того, что цикл действительно выполнил.
+_CLAIMS_WRITE_RE = re.compile(
+    r"(?i)\b(?:записа(?:л|н[оаы]?|ла)|переписа(?:л|н[оаы]?)|сохран(?:ил|ён|ено)|"
+    r"создал\w*\s+файл|wrote|written|saved)\b")
+_DENIES_WRITE_RE = re.compile(
+    r"(?i)\b(?:не\s+(?:записа|переписа|сохран)\w*|не\s+вызывал\w*\s+file_write|ни\s+одного\s+файла|"
+    r"did\s+not\s+write|no\s+files?\s+(?:were\s+)?written)\b")
+
+
+def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str | None:
+    """Строка-поправка, когда ответ о записи расходится с тем, что выполнено.
+
+    Сверяется только ВЫВОД (первый абзац / Conclusion): там доклад, который
+    читают. Возвращает None, если расхождения нет.
+    """
+    head = (_sections(answer or "").get("conclusion") or (answer or "").split("\n\n", 1)[0])
+    writes = sum(1 for tool in executed_tools if tool == "file_write")
+    if writes == 0 and _CLAIMS_WRITE_RE.search(head) and not _DENIES_WRITE_RE.search(head):
+        return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одной записи файла "
+                "(file_write: 0) — утверждение о записи в выводе не подтверждено.")
+    if writes > 0 and _DENIES_WRITE_RE.search(head):
+        return (f"⚠️ По журналу хода: в этом ходе выполнено записей файлов: {writes} "
+                "(file_write) — утверждение «не записал» в выводе неверно.")
+    return None

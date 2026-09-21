@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from core.answer_contradiction import headline_contradicts_facts
+from core.answer_contradiction import action_report_mismatch, headline_contradicts_facts
 from core.answer_format import file_scope_notice
 from core.degraded_route import substituted_routes, substitution_notice
 from core.low_evidence_policy import is_evidence_expected
@@ -270,6 +270,13 @@ class AgentLoopResponseDeciders:
         он сработал один раз — ровно на этом. Разбор:
         tests/test_the_headline_is_held_to_its_own_facts.py
         """
+        # Доклад о записи сверяется с тем, что цикл выполнил (2026-09-21:
+        # «записано, 9412 байт» при нуле действий и «не записал» при четырёх).
+        ledger = action_report_mismatch(draft.body, list(getattr(self, "_executed_tools", []) or []))
+        if ledger:
+            self._defect_signals.append("action_report_mismatch")
+            self.log.log("action_report_mismatch", {"notice": ledger})
+            draft.add_notice(author="action_ledger", channel="append", text=ledger)
         found = headline_contradicts_facts(draft.body)
         if not found:
             return
