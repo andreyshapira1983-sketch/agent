@@ -264,4 +264,9 @@ def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str
     if writes > 0 and _DENIES_WRITE_RE.search(head):
         return (f"⚠️ По журналу хода: в этом ходе выполнено записей файлов: {writes} "
                 "(file_write) — утверждение «не записал» в выводе неверно.")
+    if writes > 0:
+        # Факт записи — всегда, без разбора слов: 2026-09-21 «запись не
+        # состоялась» при успешной перезаписи в первом круге прошло мимо
+        # ловли отрицаний. Переформулировок бесконечно, журнал — один.
+        return f"ℹ️ По журналу хода: записей файлов в этом ходе: {writes} (file_write)."
     return None

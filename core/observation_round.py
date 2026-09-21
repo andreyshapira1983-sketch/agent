@@ -90,6 +90,16 @@ def _written_contents(plan: Any) -> list[str]:
     return out
 
 
+def _referenced_steps(steps: list[Any]) -> set[str]:
+    """Номера и id шагов, на вывод которых ссылаются аргументы других шагов."""
+    found: set[str] = set()
+    for step in steps:
+        args = json.dumps((getattr(step, "action_spec", None) or {}).get("arguments") or {},
+                          ensure_ascii=False, default=str)
+        found.update(re.findall(r"\{\{\s*step:([A-Za-z0-9_\-]+)\.output", args))
+    return found
+
+
 def reuse_already_read(
     st: Any, attempt_artifacts: dict[str, dict[str, Any]], log: Any,
 ) -> list[Any]:
@@ -106,10 +116,18 @@ def reuse_already_read(
     artifacts = st.artifacts
     run: list[Any] = []
     reused: dict[str, dict[str, Any]] = {}
+    # Чтение, на которое ссылается другой шаг ({{step:N.output}}), исполняется:
+    # его вывод нужен ссылке. 2026-09-21: второй круг пропустил оба чтения как
+    # «уже прочитанные», и запись final.md = {{step:1.output}}… упала с «known
+    # steps are []».
+    wanted = _referenced_steps(st.plan.steps)
     for step in st.plan.steps:
         spec = getattr(step, "action_spec", None) or {}
         label = str(spec.get("source_label") or "")
         whole = ":".join(label.split(":")[:2])  # file:путь без окна :a-b
+        if {str(getattr(step, "order", "")), str(getattr(step, "id", ""))} & wanted:
+            run.append(step)
+            continue
         if spec.get("tool_name") == "file_read" and label.startswith("file:"):
             hit = label if label in artifacts else (whole if whole in artifacts else "")
             if hit:
