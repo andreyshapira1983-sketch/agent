@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from core.replan import VERBATIM_ADVICE_TAG
@@ -83,7 +84,9 @@ def _written_contents(plan: Any) -> list[str]:
     return out
 
 
-def format_observations(plan: Any, artifacts: dict[str, dict[str, Any]]) -> str:
+def format_observations(
+    plan: Any, artifacts: dict[str, dict[str, Any]], earlier: Sequence[str] = (),
+) -> str:
     """Блок для планировщика: какие шаги уже выполнены и что они вернули.
 
     Замер 2026-09-19: прежний текст велел «посчитай значения из выводов сам» —
@@ -101,6 +104,11 @@ def format_observations(plan: Any, artifacts: dict[str, dict[str, Any]]) -> str:
         spec = step.action_spec or {}
         args = json.dumps(spec.get("arguments") or {}, ensure_ascii=False, default=str)
         lines.append(f"  {step.order}. {spec.get('tool_name')} {args[:300]}")
+    if earlier:
+        # 2026-09-21: круг видел только последний пакет и перечитывал прежнее —
+        # один документ трижды за ход. Прочитанное раньше уже в уликах.
+        lines.append("Already read in EARLIER rounds — in your evidence, do NOT read again: "
+                     + ", ".join(earlier))
     lines += _written_contents(plan)
     lines.append("Outputs:")
     budget = _TOTAL_CHARS
@@ -218,7 +226,9 @@ def continue_after_observation(
             "attempt": st.attempt, "max_total": limit, "reason": "attempt budget spent",
         })
         return False
-    block = format_observations(st.plan, attempt_artifacts)
+    block = format_observations(
+        st.plan, attempt_artifacts,
+        earlier=sorted(set(st.artifacts) - set(attempt_artifacts)))
     st.advice_for_planner = block
     loop.log.log("observation_round", {
         "attempt": st.attempt,
