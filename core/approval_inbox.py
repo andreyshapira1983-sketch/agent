@@ -622,3 +622,32 @@ class ApprovalInbox:
             return
         path = Path(self.path)
         rewrite_state_jsonl(path, [item.to_dict() for item in self.items])
+
+
+def close_answered_effects_requests(inbox: ApprovalInbox, grant_id: str) -> list[str]:
+    """Закрыть просьбы о разрешении на эффекты, на которые действующий
+    стоячий грант уже ответил. Возвращает их идентификаторы.
+
+    2026-09-20/21: грант продлили в 19:14, а шесть просьб `allow_effects`,
+    поданных в 19:00–19:10 именно из-за его истечения, висели сутки. Полоса
+    самоправки стоит при любой висящей заявке (правило закреплено тестом и не
+    меняется), и давно отвеченные просьбы держали её закрытой: 169 циклов,
+    ноль работы. Разбор: tests/test_a_grant_answers_the_requests_it_answers.py.
+
+    Статус `aborted`, не `approved`: одобренную просьбу следующий прогон с той
+    же целью подобрал бы как одноразовое разрешение. Заявки на правку кода не
+    трогаются — их решает человек.
+    """
+    closed: list[str] = []
+    for item in inbox.pending():
+        if item.operation != "autonomous_runtime.allow_effects":
+            continue
+        inbox.set_status(
+            item.id, "aborted", decided_by=f"standing_grant:{grant_id}",
+            decision_reason=(
+                f"отвечено действующим стоячим грантом {grant_id}: разрешение "
+                "на эффекты есть, просьба о нём больше не нужна"
+            ),
+        )
+        closed.append(item.id)
+    return closed
