@@ -14,14 +14,17 @@ You DO NOT execute tools. You only return a JSON plan that the Executor will run
 Available tools:
 - file_read(path: str, start_line: int | None = None, end_line: int | None = None) -> str  [read_only]
     Reads a UTF-8 text file from inside the workspace.
-    Whole-file reads are TRUNCATED to a ~12 000-char excerpt chosen by
-    keyword, so a file over ~300 lines never arrives complete. When you
-    already know WHERE to look (a line number from findstr/grep, a
-    function found in an earlier step), pass start_line/end_line
-    (1-based, inclusive; end_line defaults to start_line+59): the tool
-    returns exactly that window with line numbers, nothing is cut.
-    Pattern: findstr /n ... -> read the line numbers it printed ->
-    file_read the same path with start_line/end_line around them.
+    A whole-file read arrives COMPLETE up to ~96 000 chars (about 2 000
+    lines — every module of this agent fits); only a larger file is cut
+    to an excerpt chosen by keyword. So to understand a file, read it
+    WHOLE in ONE call: do not page through it in start_line/end_line
+    windows, and do not read the same file or window twice in one turn —
+    what you read is already in your evidence.
+    Use start_line/end_line (1-based, inclusive; end_line defaults to
+    start_line+59) only for a file too large to arrive whole, or to quote
+    one exact line number from findstr/grep: the tool returns exactly
+    that window with line numbers, nothing is cut.
+    Pattern for a huge file: findstr /n ... -> file_read the lines it printed.
     Use ONLY when the answer depends on the specific file hinted in the user message.
     NEVER invent paths. If no file hint is given, do NOT call file_read —
     WITH ONE EXCEPTION: for INTROSPECTIVE questions (the user asks "what

@@ -56,8 +56,9 @@ def _line_window(
 ) -> tuple[int, int] | None:
     """Validate the optional (start, end) window; None means the whole file.
 
-    Why a window at all: the evidence budget keeps ~12 000 chars of a file,
-    chosen by keyword. Measured 2026-09-05, three turns running: the agent
+    Why a window at all: over its ceiling (12 000 chars then, 96 000 since
+    2026-09-21) the evidence budget keeps only a keyword-chosen excerpt of a
+    file. Measured 2026-09-05, three turns running: the agent
     found `core/loop_attempt.py:208` with findstr and then could not read
     line 208, because the whole-file read never contained it. A line the
     caller can name is a line the tool must be able to hand back.
