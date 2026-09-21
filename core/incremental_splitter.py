@@ -29,6 +29,7 @@ import builtins as _builtins_mod
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 _BUILTIN_NAMES = frozenset(dir(_builtins_mod)) | {"__file__", "__name__", "__doc__"}
 
@@ -179,14 +180,119 @@ def _module_name(rel: str) -> str:
     return rel.replace("\\", "/").removesuffix(".py").replace("/", ".")
 
 
-def _pick_new_module_path(workspace: Path, target: str, suffix: str) -> str:
+def _pick_new_module_path(
+    workspace: Path, target: str, suffix: str, *, numbered: bool = True,
+) -> str | None:
+    """Имя нового модуля. Без нумерации — None, если такое имя уже занято.
+
+    Нумерация (`_methods2`) остаётся за режимом примесей: там номер идёт вместе
+    с уникальным именем базового класса, и порядок наслоения закреплён тестом.
+    В режиме функций счётчик называл модуль вместо смысла: 20.09 `episode_tools`
+    ушла в НОВЫЙ `core/smart_memory_helpers2.py`, когда `smart_memory_helpers.py`
+    уже держал её прямую родню. Отменено коммитом 24fb2d4.
+    """
     base = target.replace("\\", "/").removesuffix(".py")
     candidate = f"{base}_{suffix}.py"
+    if not numbered:
+        return None if (workspace / candidate).exists() else candidate
     n = 2
     while (workspace / candidate).exists():
         candidate = f"{base}_{suffix}{n}.py"
         n += 1
     return candidate
+
+
+#: Слова имён, которые не говорят о предмете группы; по ним модуль не назвать.
+_GENERIC_NAME_TOKENS = frozenset({
+    "helper", "helpers", "util", "utils", "impl", "internal", "private",
+    "value", "values", "text", "name", "names", "data", "item", "items",
+    "result", "reason", "block", "check", "make", "build", "from", "with",
+})
+
+
+def _meaningful_suffix(names: list[str]) -> str:
+    """Имя группы по её предмету: самое частое содержательное слово имён.
+
+    Слово должно встретиться хотя бы дважды и хотя бы в пятой части имён
+    (замер 2026-09-21 на доказанных группах живого кода: «claim» — 3 имени из
+    14 в core/knowledge_pipeline.py). Нет такого слова — «helpers», как было;
+    но нумерации в режиме функций больше нет (см. _pick_new_module_path).
+    """
+    counts: dict[str, int] = {}
+    for name in names:
+        words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).strip("_").lower().split("_")
+        for tok in {w for w in words if len(w) >= 3 and w not in _GENERIC_NAME_TOKENS}:
+            counts[tok] = counts.get(tok, 0) + 1
+    if not counts:
+        return "helpers"
+    token, hits = max(sorted(counts.items()), key=lambda kv: kv[1])
+    return token if hits >= 2 and hits * 5 >= len(names) else "helpers"
+
+
+class _NoHome(Exception):
+    """План раскола есть, а честного имени для нового модуля нет."""
+
+
+def _name_of(node: ast.stmt) -> str:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return node.name
+    target = node.targets[0] if isinstance(node, ast.Assign) else None
+    return target.id if isinstance(target, ast.Name) else ""
+
+
+def _cohesive_group(
+    group: list[ast.stmt], names: set[str] | None, max_lines: int,
+) -> list[ast.stmt]:
+    """ОДНА связная группа из переносимого, а не всё переносимое сразу.
+
+    `_movable_function_group` возвращает МАКСИМАЛЬНЫЙ набор всего, что можно
+    унести, не задев оставшееся, — объединение независимых мелочей. 21.09 план
+    для core/step_sanitizer.py вёз в один файл подставные URL, приведение int,
+    окно строк, метку shell и четыре санитайзера разных инструментов: общего у
+    них было только то, что они влезли в 338 строк. Здесь выбирается одна
+    компонента связности (по взаимным ссылкам); с доказательством — та, что
+    содержит доказанные имена, с замыканием по ссылкам, иначе — самая крупная.
+    """
+    by_name = {_name_of(n): n for n in group}
+    adjacent: dict[str, set[str]] = {k: set() for k in by_name}
+    for name, node in by_name.items():
+        for ref in _free_refs(node) & by_name.keys():
+            adjacent[name].add(ref)
+            adjacent[ref].add(name)
+
+    def component(seed: set[str], *, follow_users: bool) -> set[str]:
+        seen, stack = set(), list(seed)
+        while stack:
+            cur = stack.pop()
+            if cur in seen or cur not in by_name:
+                continue
+            seen.add(cur)
+            nxt = adjacent.get(cur, set()) if follow_users else _free_refs(by_name[cur]) & by_name.keys()
+            stack.extend(nxt - seen)
+        return seen
+
+    if names:
+        chosen = component(set(names) & by_name.keys(), follow_users=False)
+    else:
+        # Член больше бюджета одного шага сам не переедет — и не должен
+        # связывать группы. 21.09 в step_sanitizer всё склеивал `sanitize_step`
+        # (752 строки при бюджете 400): бюджет его отрезал, и уезжали несвязанные
+        # кучки, которые держались вместе только через того, кто остаётся дома.
+        hubs = {n for n, node in by_name.items()
+                if (node.end_lineno or node.lineno) - node.lineno + 1 > max_lines}
+        for hub in hubs:
+            for peer in adjacent.pop(hub, set()):
+                adjacent.get(peer, set()).discard(hub)
+        comps, left = [], set(by_name) - hubs
+        while left:
+            comp = component({min(left)}, follow_users=True) - hubs
+            comps.append(comp or {min(left)})
+            left -= comps[-1]
+        best = max(comps, key=lambda c: (sum(
+            (by_name[n].end_lineno or by_name[n].lineno) - by_name[n].lineno + 1
+            for n in c), sorted(c))) if comps else set()
+        chosen = component(best, follow_users=False) if best else set()
+    return [n for n in group if _name_of(n) in chosen]
 
 
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -436,9 +542,10 @@ def _plan_function_split(
     tree: ast.Module,
     dominant_class: ast.ClassDef | None,
     max_lines: int,
+    names: set[str] | None = None,
 ) -> SplitStep | None:
     lines = src.split("\n")
-    group = _movable_function_group(tree, dominant_class)
+    group = _cohesive_group(_movable_function_group(tree, dominant_class), names, max_lines)
     group = [
         n
         for n in group
@@ -466,7 +573,14 @@ def _plan_function_split(
     refs -= set(moved_names)
     import_stmts = _needed_import_stmts(tree, lines, refs)
 
-    new_rel = _pick_new_module_path(workspace, target, "helpers")
+    suffix = _meaningful_suffix(moved_names)
+    new_rel = _pick_new_module_path(workspace, target, suffix, numbered=False)
+    if new_rel is None:
+        raise _NoHome(
+            f"{target.removesuffix('.py')}_{suffix}.py already exists: decide whether "
+            f"{', '.join(sorted(moved_names)[:6])} belong there or elsewhere — a numbered "
+            "copy of the name is not a home"
+        )
     header = [
         f'"""Helpers extracted verbatim from ``{target}`` by the incremental',
         "splitter. The original module re-exports every name below, so all",
@@ -682,6 +796,64 @@ def _collapse_blank_runs(text: str) -> str:
     return "\n".join(out)
 
 
+# ── dedup mode ───────────────────────────────────────────────────────────────
+
+
+def _dedup_step(
+    workspace: Path, target: str, src: str, tree: ast.Module, proof: Any,
+) -> SplitStep:
+    """Свести дубль: убрать копию из `target`, взять её импортом у `proof.other`.
+
+    Правка, которую следует из доказательства «дубль», — не раскол: второй
+    модуль уже держит то же тело, рождать третий файл незачем. Копия
+    выбрасывается, только если тело в `other` по-прежнему то же (по AST, как
+    его сравнил core/split_proof.py); имя другое — берётся с псевдонимом.
+    """
+    from core.split_proof import _shape
+
+    other = str(getattr(proof, "other", "") or "")
+    try:
+        other_tree = ast.parse((workspace / other).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise _NoHome(f"dedup: the kept copy {other!r} is unreadable: {exc}") from exc
+    kept = {_shape(n): n.name for n in other_tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    wanted = set(getattr(proof, "names", ()) or ())
+    drops = [n for n in tree.body
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+             and n.name in wanted and _shape(n) in kept]
+    if not drops:
+        raise _NoHome(f"dedup: no copy in {target} still matches {other}")
+    aliases = sorted(
+        kept[_shape(n)] if kept[_shape(n)] == n.name else f"{kept[_shape(n)]} as {n.name}"
+        for n in drops)
+    lines = src.split("\n")
+    drop: set[int] = set()
+    for node in drops:
+        start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+        drop.update(range(start, (node.end_lineno or node.lineno) + 1))
+    module = _module_name(other)
+    line = (f"from {module} import (  # noqa: F401 -- deduplicated, the kept copy\n    "
+            + ",\n    ".join(aliases) + ",\n)")
+    slot = _sorted_import_slot(tree, module)
+    out = [line] if slot == 0 else []
+    for i, text in enumerate(lines, start=1):
+        if i in drop:
+            continue
+        out.append(text)
+        if i == slot:
+            out.append(line)
+    content = _collapse_blank_runs(prune_orphaned_imports("\n".join(out)))
+    return SplitStep(
+        mode="dedup", target=target, new_module=other,
+        moved_names=sorted(n.name for n in drops),
+        lines_moved=sum((n.end_lineno or n.lineno) - n.lineno + 1 for n in drops),
+        target_content=content if content.endswith("\n") else content + "\n",
+        new_content="",
+        notes=[f"dropped {len(drops)} duplicate(s); the kept copy lives in {other}"],
+    )
+
+
 # ── public API ───────────────────────────────────────────────────────────────
 
 
@@ -690,6 +862,7 @@ def plan_incremental_split(
     target: str,
     *,
     max_move_lines: int = DEFAULT_MAX_MOVE_LINES,
+    proof: Any | None = None,
 ) -> SplitPlan:
     """Plan ONE deterministic extraction step for an oversized module.
 
@@ -714,7 +887,16 @@ def plan_incremental_split(
     total_lines = src.count("\n") + 1
     dominant = _dominant_class(tree, total_lines)
 
-    step = _plan_function_split(ws, rel, src, tree, dominant, max_move_lines)
+    # Доказательство правки (core/split_proof.py) решает, ЧТО делать: дубль
+    # сводится импортом, два предмета — выносится доказанная группа.
+    try:
+        if getattr(proof, "kind", None) == "dup":
+            step = _dedup_step(ws, rel, src, tree, proof)
+        else:
+            names = set(getattr(proof, "names", ()) or ()) or None
+            step = _plan_function_split(ws, rel, src, tree, dominant, max_move_lines, names)
+    except _NoHome as exc:
+        return SplitPlan("no_split", str(exc))
     if step is None and dominant is not None:
         step = _plan_mixin_split(ws, rel, src, tree, dominant, max_move_lines)
     if step is None:
@@ -729,9 +911,10 @@ def plan_incremental_split(
     # module carried whole import statements verbatim — six unused names —
     # and both import blocks were un-sorted; the repo-wide lint-debt count
     # rolled the apply back). Import-only rules; ruff absent = text unchanged.
-    step.new_content = _lint_fix_imports(
-        prune_orphaned_imports(step.new_content), step.new_module, ws,
-    )
+    if step.new_content:  # у сведения дубля второй модуль не меняется
+        step.new_content = _lint_fix_imports(
+            prune_orphaned_imports(step.new_content), step.new_module, ws,
+        )
     step.target_content = _lint_fix_imports(step.target_content, step.target, ws)
 
     # Deterministic self-checks; refuse rather than propose a broken step.
@@ -743,7 +926,7 @@ def plan_incremental_split(
     new_total = step.target_content.count("\n") + 1
     if new_total >= total_lines:
         return SplitPlan("no_split", "planned step does not shrink the target")
-    if step.mode == "functions":
+    if step.mode in {"functions", "dedup"}:
         kept = _bound_names(new_tree)
         missing = [n for n in step.moved_names if n not in kept]
         if missing:
@@ -754,6 +937,13 @@ def plan_incremental_split(
             )
 
     step.notes.append(f"target shrinks {total_lines} -> {new_total} lines")
+    if step.mode == "dedup":
+        return SplitPlan(
+            "planned",
+            f"dedup of {len(step.moved_names)} name(s) ({step.lines_moved} lines): "
+            f"copies removed from {rel}, taken from {step.new_module}",
+            step,
+        )
     return SplitPlan(
         "planned",
         f"{step.mode} extraction of {len(step.moved_names)} name(s) "

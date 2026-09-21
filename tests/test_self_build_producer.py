@@ -1367,8 +1367,12 @@ def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
     (workspace / "core").mkdir(parents=True, exist_ok=True)
     target_rel = "core/mini.py"
     (workspace / target_rel).write_text(
+        # One CONNECTED group (beta -> gamma -> alpha). Until 2026-09-21 the
+        # three functions were unrelated and moved together anyway — the union
+        # of unrelated pieces is the dump the splitter no longer makes; this
+        # test checks the plumbing, not a right to move the unrelated.
         "import os\n\n\ndef alpha():\n    return os.getpid()\n\n\n"
-        "def beta():\n    return 2\n\n\ndef gamma():\n    return 3\n",
+        "def beta():\n    return gamma()\n\n\ndef gamma():\n    return alpha()\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)  # force the oversized path
