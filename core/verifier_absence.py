@@ -509,6 +509,12 @@ _FOUND_MATERIAL_RE = re.compile(
 #: закреплено tests/test_absence_claims_are_refuted_by_their_own_evidence.py).
 _ENUMERATED_SPAN_RE = re.compile(r"\([^()\n]*\)|«[^»\n]*»")
 
+#: Хвост сообщения исключения — от имени класса до конца предложения. В части
+#: без отрицания это цитата прибора, а не предмет: «…и core FAIL
+#: ModuleNotFoundError No module named 'core'» (2026-09-21).
+_ERROR_TAIL_RE = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Warning)\b[^.;\n]*")
+
 
 def absence_subjects(claim: str) -> set[str]:
     """Явно названные предметы утверждения об отсутствии.
@@ -535,14 +541,26 @@ def absence_subjects(claim: str) -> set[str]:
     # предмет утверждение называет своим голосом. Обратные апострофы НЕ
     # трогаются: ими агент называет именно предмет (`itertools.batched`).
     body = _ENUMERATED_SPAN_RE.sub(" ", _CITATION_TOKEN_RE.sub(" ", claim or ""))
+    # СОСЕД — не предмет. 2026-09-21: «python_probe запускается во временном
+    # каталоге…, поэтому sys.path не содержит каталога с пакетом core» —
+    # подлежащее первой части стало предметом отрицания, вывод самого
+    # python_probe его содержал, правду объявили ложью. Шесть заплат выше
+    # исключали соседей по одному сорту; это правило закрывает класс. Голые
+    # литералы — только из части с самим отрицанием; из соседних — лишь
+    # названное явно («`foo` — нет такой функции»), и без хвоста сообщения об
+    # ошибке: он чужой голос. Разбор: tests/test_the_subject_of_a_denial_is_what_is_denied.py
+    parts = _CLAUSE_SPLIT_RE.split(body)
+    denying = [bool(_ABSENCE_ASSERTION_RE.search(_own_voice(p))) for p in parts]
     kept = [
-        part for part in _CLAUSE_SPLIT_RE.split(body)
-        if _ABSENCE_ASSERTION_RE.search(_own_voice(part)) or not _PRESENCE_RE.search(part)
+        part if deny else _ERROR_TAIL_RE.sub(" ", part)
+        for part, deny in zip(parts, denying, strict=True)
+        if deny or not _PRESENCE_RE.search(part)
     ]
-    text = _SEARCH_PLACE_RE.sub(" ", " , ".join(kept))
-    text = _FOUND_MATERIAL_RE.sub(" ", text)
-    named ={m.group(1).lower() for m in _NAMED_SUBJECT_RE.finditer(text)}
-    return named | salient_literals(text)
+    text = _FOUND_MATERIAL_RE.sub(" ", _SEARCH_PLACE_RE.sub(" ", " , ".join(kept)))
+    denied = _FOUND_MATERIAL_RE.sub(" ", _SEARCH_PLACE_RE.sub(
+        " ", " , ".join(p for p, deny in zip(parts, denying, strict=True) if deny)))
+    named = {m.group(1).lower() for m in _NAMED_SUBJECT_RE.finditer(text)}
+    return named | salient_literals(denied)
 
 
 #: Материал, произнесённый ЧУЖИМ голосом внутри утверждения: спаны в обратных
