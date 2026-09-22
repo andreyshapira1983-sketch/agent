@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 240 modules across 12 groups._
+_Total: 241 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -121,6 +121,7 @@ _Planning, verification, clarification, control loop._
 | `core/note_contract` | Договор конспекта: что обязано быть в следе учебной задачи, решает код. |
 | `core/defect_intake` | Свой сбой становится дефектом реестра, а не только наблюдением. |
 | `core/stuck_route` | Уткнулся — спроси: сначала интернет, потом партнёра. |
+| `core/write_at_execution` | Текст записи собирается в момент исполнения, а не при планировании. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/best_next_action_helpers` | Helpers extracted verbatim from ``core/best_next_action.py`` by the incremental splitter. |

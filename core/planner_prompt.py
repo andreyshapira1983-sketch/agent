@@ -45,7 +45,12 @@ Available tools:
     If the user asks in English → write the query in English.
     Do NOT translate to English just because it "feels more searchable".
 
-- file_write(path: str, content: str) -> {path, mode, bytes_written, backup_path}
+- file_write(path: str, content: str | write_instruction: str) -> {path, mode, bytes_written, backup_path}
+    ВАЖНО: если текст файла зависит от того, что вернут ЧТЕНИЯ этого же плана,
+    НЕ сочиняй content заранее — передай write_instruction: задание словами
+    («выпиши определение из прочитанного с номерами строк», «перепиши строки
+    284-292 с новым параметром»). Текст соберётся ПЕРЕД записью, уже по выводам
+    исполненных шагов, и шаг не придётся откладывать на следующий круг.
     [reversible if path is new, or if it overwrites YOUR OWN file under
      proposals/ (fix your own proposal in place — do not spawn _v2/_final2
      copies); irreversible for any other overwrite — escalates to human

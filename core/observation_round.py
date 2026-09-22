@@ -169,9 +169,12 @@ def defer_blind_writes(loop: Any, steps: list[Any], log: Any) -> list[Any]:
     first_read = min((s.order for s in steps if only_reads(s)), default=None)
     if first_read is None:
         return steps
+    # Запись с заданием (write_instruction) собирает текст при исполнении —
+    # откладывать её незачем (core/write_at_execution.py).
     blind = [s for s in steps
              if s.order > first_read
              and (s.action_spec or {}).get("tool_name") == "file_write"
+             and not ((s.action_spec or {}).get("arguments") or {}).get("write_instruction")
              and not has_step_reference(((s.action_spec or {}).get("arguments") or {}).get("content"))]
     if not blind:
         return steps
