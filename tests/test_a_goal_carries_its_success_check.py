@@ -596,3 +596,22 @@ def test_a_book_that_was_there_before_the_goal_is_not_its_result(tmp_path: Path)
 
     assert report.status == "inconclusive", "существование входной книги засчитано как работа"
     assert report.details["success_check_verdict"] == "preexisting"
+
+
+def test_a_note_that_is_an_unfilled_template_is_not_the_result(tmp_path: Path) -> None:
+    """2026-09-22 17:02: конспект data/notes/… был болванкой «(заполняется по
+    прочитанному разделу)», и цель засчитана по факту файла."""
+    import time
+
+    from core.campaign_verdict import against_start
+
+    since = time.time() - 5
+    note = tmp_path / "data" / "notes" / "n.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("## Формулировка\n\n(заполняется по прочитанному разделу книги)\n", encoding="utf-8")
+    verdict = against_start({"verdict": "verified", "artifacts": ["data/notes/n.md"]}, tmp_path, since)
+    assert verdict["verdict"] == "missing" and "шаблон" in verdict["reason"]
+
+    note.write_text("## Формулировка\n\nТокен — последовательность символов с общим смыслом, стр. 12.\n",
+                    encoding="utf-8")
+    assert against_start({"verdict": "verified", "artifacts": ["data/notes/n.md"]}, tmp_path, since)["verdict"] == "verified"

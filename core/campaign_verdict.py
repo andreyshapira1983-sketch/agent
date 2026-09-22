@@ -73,6 +73,20 @@ def _fresh_traces(
     return fresh
 
 
+def _unfilled(paths: list[str], workspace: Any) -> list[str]:
+    """Незаполненные места шаблона в свежих следах (core.observation_round)."""
+    from core.observation_round import unfilled_placeholders
+
+    holes: list[str] = []
+    for rel in paths:
+        try:
+            text = (Path(workspace or ".") / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        holes += [f"{rel}: {h[:80]}" for h in unfilled_placeholders(text)]
+    return holes
+
+
 def against_start(observation: dict[str, Any], workspace: Any, since: float | None) -> dict[str, Any]:
     """Вердикт цели с учётом начала: все следы старше начала — «preexisting».
 
@@ -83,7 +97,14 @@ def against_start(observation: dict[str, Any], workspace: Any, since: float | No
     """
     if observation.get("verdict") != "verified" or since is None:
         return observation
-    if _fresh_traces([str(a) for a in observation.get("artifacts") or ()], workspace, since):
+    fresh = _fresh_traces([str(a) for a in observation.get("artifacts") or ()], workspace, since)
+    holes = _unfilled(fresh, workspace)
+    if holes:
+        # 2026-09-22 17:02: конспект data/notes/… был болванкой — «(заполняется по
+        # прочитанному разделу)», «(правило из книги)» — и засчитан по факту файла.
+        return {**observation, "verdict": "missing",
+                "reason": "след — незаполненный шаблон: " + "; ".join(holes[:3])}
+    if fresh:
         return observation
     named = ", ".join(str(a) for a in observation.get("artifacts") or ())
     return {**observation, "verdict": "preexisting",
