@@ -204,6 +204,22 @@ def _verdict(result: dict[str, Any]) -> dict[str, str]:
     return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
 
 
+#: Порядок полей ответа: сначала то, что решает, — вердикт и вывод тестов,
+#: diff последним. 2026-09-22 16:15: показ ответа агенту режется на 6000 знаков,
+#: длинный diff стоял раньше вывода тестов — агент пять кругов не видел новой
+#: ошибки и чинил уже исправленную.
+_ORDER = ("verdict", "why", "applied", "errors", "tests_exit_code", "tests_output",
+          "full_exit_code", "full_output", "ruff", "files", "diff")
+
+
+def _ordered(result: dict[str, Any]) -> dict[str, Any]:
+    out = {k: result[k] for k in _ORDER if k in result}
+    out.update({k: v for k, v in result.items() if k not in out})
+    if isinstance(out.get("diff"), str) and len(out["diff"]) > 3000:
+        out["diff"] = out["diff"][:3000] + "\n… (diff truncated; the verdict and test output above decide)"
+    return out
+
+
 class PatchCheckTool(Tool):
     name = "patch_check"
     description = (
@@ -294,4 +310,4 @@ class PatchCheckTool(Tool):
                 code, out = self._run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], copy)
                 result.update(full_exit_code=code, full_output=_tail(out, 25))
             result.update(_verdict(result))
-            return result
+            return _ordered(result)
