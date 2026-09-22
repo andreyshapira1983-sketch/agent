@@ -195,9 +195,16 @@ def steps_to_run(loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]
     """
     steps = reuse_already_read(st, attempt_artifacts, loop.log.log)
     policy = getattr(loop, "replan_policy", None)
-    if policy is not None and st.attempt >= policy.max_total_replans:
+    # Один раз за ход: 2026-09-22 14:31 планировщик на каждом круге добавлял
+    # ещё одно чтение, запись откладывалась дважды и легла лишь на последнем
+    # круге — на исправление по выводу patch_check кругов не осталось.
+    if getattr(st, "writes_deferred_once", False) or (
+            policy is not None and st.attempt >= policy.max_total_replans):
         return steps
-    return defer_blind_writes(loop, steps, loop.log.log)
+    kept = defer_blind_writes(loop, steps, loop.log.log)
+    if len(kept) < len(steps):
+        st.writes_deferred_once = True
+    return kept
 
 
 def format_observations(
@@ -294,11 +301,22 @@ def _written_placeholders(plan: Any) -> bool:
 
 
 def _red_tests(attempt_artifacts: dict[str, dict[str, Any]]) -> bool:
-    """В пакете есть прогон тестов, который не зелёный: упавший тест — не упавший шаг."""
+    """В пакете есть прогон тестов, который не зелёный: упавший тест — не упавший шаг.
+
+    Красная проверка своей правки (`patch_check`: не легла, тесты или полный
+    набор не зелёные) — то же самое: 2026-09-22 14:31 ход кончился на ней
+    словами «действие выполнено, ничего не упало».
+    """
     for meta in attempt_artifacts.values():
         out = (meta or {}).get("output")
-        if (meta or {}).get("tool") == "run_tests" and isinstance(out, dict) and (
+        tool = (meta or {}).get("tool")
+        if tool == "run_tests" and isinstance(out, dict) and (
             out.get("failed") or out.get("errors") or out.get("exit_code") not in (0, None)
+        ):
+            return True
+        if tool == "patch_check" and isinstance(out, dict) and (
+            not out.get("applied") or out.get("tests_exit_code") not in (0, None)
+            or out.get("full_exit_code") not in (0, None)
         ):
             return True
     return False
