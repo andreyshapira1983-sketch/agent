@@ -64,3 +64,35 @@ def test_the_same_observation_is_not_filed_twice(tmp_path: Path) -> None:
     assert intake_observations(tmp_path) == [], "то же наблюдение принято во второй раз"
     again = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
     assert [i.last_seen for i in again] == [i.last_seen for i in first]
+
+
+def test_a_class_is_one_signal_not_a_combination(tmp_path: Path) -> None:
+    """Один сигнал — один класс; наблюдение с тремя есть улика для трёх.
+
+    Замер 2026-09-23: в реестре 15 открытых записей при восьми различных
+    сигналах — `reasoning_action_mismatch` жил сразу в восьми из них, потому
+    что класс считался по СОЧЕТАНИЮ. Это тот же промах, против которого
+    механизм и делался (MIR-035, 13 копий одного класса), на шаг выше.
+    """
+    path = tmp_path / "data" / "causal_observations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = datetime(2026, 9, 23, 12, tzinfo=timezone.utc).isoformat()
+    rows = [
+        {"fingerprint": "obs-pair", "observed_mismatch": "отчёт разошёлся с действием",
+         "defect_signals": ["action_report_mismatch", "reasoning_action_mismatch"],
+         "evidence_refs": [], "occurrences": 4, "last_seen": seen, "first_seen": seen},
+        {"fingerprint": "obs-single", "observed_mismatch": "рассуждение разошлось с действием",
+         "defect_signals": ["reasoning_action_mismatch"],
+         "evidence_refs": [], "occurrences": 3, "last_seen": seen, "first_seen": seen},
+    ]
+    path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+                    encoding="utf-8")
+
+    from core.defect_intake import intake_observations
+
+    intake_observations(tmp_path)
+
+    filed = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
+    titles = [str(i.title or "") for i in filed]
+    assert len(filed) == 2, f"классов должно быть два (по сигналам), а не {titles}"
+    assert not any("," in t for t in titles), f"класс собран из сочетания: {titles}"

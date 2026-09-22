@@ -39,14 +39,22 @@ def intake_observations(workspace: Path | str, registry: Any = None) -> list[str
     for record in sorted(records, key=lambda r: (-r.occurrences, r.last_seen))[:40]:
         if record.occurrences < MIN_OCCURRENCES or record.fingerprint in known:
             continue
-        signals = ", ".join(record.defect_signals) or "detector"
-        # Текст начинается со слова «detectors» — по нему реестр сам считает
-        # отпечаток класса и заголовок (core/self_improvement_issues.py).
-        text = (f"detectors {signals}: {record.observed_mismatch[:300]} "
-                f"(повторений: {record.occurrences}; улики: {', '.join(record.evidence_refs[:3])})")
-        issue = registry.upsert_failure(text, record.last_seen)
-        registry.transition(status=issue.status, observed_at=record.last_seen,
-                            fingerprint=issue.fingerprint, evidence=record.fingerprint)
+        # ОДИН дефект на КАЖДЫЙ сигнал, а не один на их сочетание. Реестр
+        # считает класс по строке сигналов (`failure_fingerprint`), поэтому
+        # сочетание заводило свой класс: замер 2026-09-23 — 15 открытых
+        # записей при восьми различных сигналах, и `reasoning_action_mismatch`
+        # жил сразу в восьми из них. Тот же промах, против которого механизм и
+        # делался (MIR-035: 13 копий одного класса), только на шаг выше: класс
+        # — это сигнал, а наблюдение с тремя сигналами есть улика для трёх.
+        for signal in (record.defect_signals or ("detector",)):
+            # Текст начинается со слова «detectors» — по нему реестр сам считает
+            # отпечаток класса и заголовок (core/self_improvement_issues.py).
+            text = (f"detectors {signal}: {record.observed_mismatch[:300]} "
+                    f"(повторений: {record.occurrences}; улики: "
+                    f"{', '.join(record.evidence_refs[:3])})")
+            issue = registry.upsert_failure(text, record.last_seen)
+            registry.transition(status=issue.status, observed_at=record.last_seen,
+                                fingerprint=issue.fingerprint, evidence=record.fingerprint)
         filed.append(record.fingerprint)
         if len(filed) >= MAX_PER_SWEEP:
             break
