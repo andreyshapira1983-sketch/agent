@@ -43,6 +43,15 @@ _GATE_WAIT_STATUSES: frozenset[str] = frozenset({
     "budget_kill_switch", "budget_wait", "approval_wait", "dirty_tree_wait",
 })
 
+#: Пустой ход производителя: цели не нашлось, править нечего. Замер
+#: 2026-09-22: 275 таких записей из 300 в опыте — они вытеснили ВСЮ настоящую
+#: работу (сегодня ноль эпизодов с книгами и ноль успехов), и драйвы
+#: компетентности вечно показывали «успешной задачи ни разу».
+_NO_WORK_STATUSES: frozenset[str] = frozenset({
+    "no_grounded_target", "no_patch", "skipped", "no_llm", "idle", "none",
+})
+_DEDUP_STATUSES: frozenset[str] = _GATE_WAIT_STATUSES | _NO_WORK_STATUSES
+
 # Map each command status to a coarse episodic outcome the agent already
 # understands (success / partial / failed).
 _OUTCOME_BY_STATUS: dict[str, str] = {
@@ -206,7 +215,7 @@ def record_self_build_episode(
         # docs/audit/archive/MEMORY_CONSOLIDATION_MEASUREMENT.md). Gate waits only —
         # an identical genuine veto tomorrow may mean "still failing", and
         # judging that is the hygiene collapser's job, not the writer's.
-        if str(result.get("status") or "") in _GATE_WAIT_STATUSES:
+        if str(result.get("status") or "") in _DEDUP_STATUSES:
             key = (episode.goal, episode.question, episode.summary, episode.outcome)
             for old in store.load():
                 if (old.goal, old.question, old.summary, old.outcome) == key:
