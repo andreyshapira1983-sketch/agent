@@ -312,6 +312,8 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     # включённый в .env сервера, он ронял 18 тестов в пути самоприменения,
     # и каждая правка агента откатывалась, какой бы верной ни была.
     monkeypatch.delenv("AGENT_RELEVANCE_JUDGE", raising=False)
+    # Число кругов (2026-09-22) ставится разговору и кампании; наборы считают круги.
+    monkeypatch.delenv("AGENT_MAX_REPLANS", raising=False)
 
 
 # Deliberately not a key shape any provider would accept: it must satisfy a
