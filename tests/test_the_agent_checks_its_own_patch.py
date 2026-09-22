@@ -100,3 +100,20 @@ def test_only_a_change_with_a_passing_test_is_green(tmp_path: Path) -> None:
         "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
         "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
     assert PatchCheckTool(workspace_root=root).run(path=rel)["verdict"] == "green"
+
+
+def test_text_outside_the_blocks_is_named_not_dropped(tmp_path: Path) -> None:
+    """2026-09-22 14:54: новый код стоял ПОСЛЕ закрывающей метки блока LINES —
+    четыре круга подряд он пропадал молча, и ошибка не менялась."""
+    root = _repo(tmp_path)
+    rel = _patch(root, "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x\n>>>>>>> REPLACE\n    return x + 1\n")
+    result = PatchCheckTool(workspace_root=root).run(path=rel)
+    assert result["verdict"] == "red" and "return x + 1" in result["errors"][0]
+
+
+def test_a_lines_block_may_carry_old_text_before_the_separator(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    blocks = parse_blocks("FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n")
+    assert blocks[0]["new"] == "    return x + 1\n"
+    assert apply_blocks(root, blocks) == []
+    assert "return x + 1" in (root / "pkg" / "mod.py").read_text(encoding="utf-8")

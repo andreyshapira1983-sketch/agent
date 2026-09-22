@@ -62,13 +62,41 @@ _CONTEXT_LINES = 12
 _TIMEOUT_SECONDS = 900
 
 
+def _lines_new(body: str) -> str:
+    """Тело блока LINES: новый текст, либо «старый ======= новый» — старое для сверки.
+
+    2026-09-22 14:54: агент четыре круга подряд клал в LINES старый текст, а
+    новый — после закрывающей метки; блок менял строки на те же, новое
+    пропадало молча. Модель тянется к форме SEARCH — она теперь принята.
+    """
+    parts = re.split(r"^=======\n", body, maxsplit=1, flags=re.MULTILINE)
+    return parts[1] if len(parts) == 2 else body
+
+
+def _matches(text: str) -> list[tuple[int, int, dict[str, Any]]]:
+    found = [(m.start(), m.end(), {"path": m["path"], "old": m["old"], "new": m["new"]})
+             for m in _BLOCK_RE.finditer(text or "")]
+    found += [(m.start(), m.end(), {"path": m["path"], "lines": (int(m["a"]), int(m["b"])),
+                                    "new": _lines_new(m["new"])})
+              for m in _LINES_RE.finditer(text or "")]
+    return sorted(found, key=lambda x: x[0])
+
+
 def parse_blocks(text: str) -> list[dict[str, Any]]:
     """Блоки правки в порядке текста: ПОИСК/ЗАМЕНА и замена по номерам строк."""
-    found = [(m.start(), {"path": m["path"], "old": m["old"], "new": m["new"]})
-             for m in _BLOCK_RE.finditer(text or "")]
-    found += [(m.start(), {"path": m["path"], "lines": (int(m["a"]), int(m["b"])), "new": m["new"]})
-              for m in _LINES_RE.finditer(text or "")]
-    return [b for _, b in sorted(found, key=lambda x: x[0])]
+    return [b for _, _, b in _matches(text)]
+
+
+def stray_text(text: str) -> list[str]:
+    """Текст вне блоков — он не ляжет никуда; молча выбрасывать его нельзя."""
+    out, pos = [], 0
+    for start, end, _ in _matches(text):
+        if (text[pos:start]).strip():
+            out.append(text[pos:start].strip()[:300])
+        pos = end
+    if (text or "")[pos:].strip():
+        out.append(text[pos:].strip()[:300])
+    return out
 
 
 def _apply_line_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
@@ -181,6 +209,7 @@ class PatchCheckTool(Tool):
         "blocks: FILE: path / <<<<<<< SEARCH / exact old text / ======= / new text / "
         ">>>>>>> REPLACE (empty SEARCH = new file), OR - easier, no copying of old text - "
         "FILE: path / <<<<<<< LINES 284-292 / new text for those lines / >>>>>>> REPLACE "
+        "(or LINES a-b / old text / ======= / new text / >>>>>>> REPLACE) "
         "(line numbers exactly as file_read shows them, before the change). It applies it to a clean copy "
         "of the repository OUTSIDE the workspace, runs ruff and pytest there and returns "
         "the output and the resulting diff. The workspace is never changed. If a SEARCH block is not found the "
@@ -217,7 +246,13 @@ class PatchCheckTool(Tool):
         patch = (self.workspace_root / path).resolve()
         if self.workspace_root not in patch.parents or not patch.is_file():
             raise FileNotFoundError(f"patch file not found inside the workspace: {path}")
-        blocks = parse_blocks(patch.read_text(encoding="utf-8"))
+        raw = patch.read_text(encoding="utf-8")
+        blocks = parse_blocks(raw)
+        stray = stray_text(raw)
+        if stray:
+            return {"applied": False, "verdict": "red", "why": "text outside blocks",
+                    "errors": [f"text outside any block is ignored — put it inside a block: {t!r}"
+                               for t in stray]}
         if not blocks:
             return {"applied": False, "verdict": "red", "why": "no blocks",
                     "errors": ["в файле нет блоков FILE:/<<<<<<< SEARCH/=======/>>>>>>> REPLACE или <<<<<<< LINES a-b"]}
