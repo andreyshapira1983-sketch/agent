@@ -31,6 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--with-persistent",
+        action="store_true",
+        help=(
+            "Let a one-shot --ask read and write data/persistent_memory.jsonl. The "
+            "conversation bridge sets it (operator, 2026-09-22): without it lessons "
+            "recorded in long-term memory never reach the chat."
+        ),
+    )
+    parser.add_argument(
         "--file",
         help=(
             "Optional file hint. The planner MAY call file_read with it. "

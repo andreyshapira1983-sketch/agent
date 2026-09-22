@@ -174,6 +174,7 @@ def run_cli() -> int:
             resumed_from=resumed_from,
             build_agent=build_agent,
             history=read_history(args.history),
+            with_persistent=bool(getattr(args, "with_persistent", False)),
         )
 
     # ── Paste-safe interactive input ─────────────────────────────────────────
