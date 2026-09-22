@@ -256,7 +256,11 @@ def test_an_unfilled_template_is_not_finished_work():
     — агент переписал образец формата вместо номеров страниц."""
     from types import SimpleNamespace
 
-    from core.observation_round import _effect_completed_cleanly, format_observations, unfilled_placeholders
+    from core.observation_round import (
+        _effect_completed_cleanly,
+        format_observations,
+        unfilled_placeholders,
+    )
 
     assert unfilled_placeholders("Экранирование (стр. N). Длина (стр. 12).") == ["стр. N"]
     assert unfilled_placeholders("Страница 327; выручка 2026-04; ПРОГНОЗ 1: да, шагов: 3") == []
@@ -278,3 +282,20 @@ def test_the_agent_sees_its_own_tools():
     block = runtime_self_block(trace_id="t", run_id="r", session_id=None, stores={},
                                durable_writes=(), tools=["file_read", "file_write"])
     assert "tools: file_read, file_write" in block
+
+
+def test_identical_rounds_are_named_and_then_stopped(workspace: Path):
+    """2026-09-22 15:00: шесть кругов подряд — те же чтения с тем же ответом,
+    бюджет сгорел, файл так и не переписан. Второй одинаковый круг получает
+    прямое «ты повторяешь одно и то же», третий заканчивает ход."""
+    (workspace / "a.txt").write_text("alpha", encoding="utf-8")
+    planner = _ScriptedPlanner([[_src("file_read", {"path": "a.txt", "start_line": 1, "end_line": 1})]] * 10)
+    loop = _loop(workspace, planner, observe=True)
+    loop.replan_policy.max_total_replans = 6
+
+    loop.run("Что написано в a.txt?")
+
+    assert len(planner.contexts) == 3, "третий одинаковый круг — конец хода, не шестой"
+    assert "REPEAT: the last 2 rounds" in planner.contexts[2]
+    skipped = _events(loop, "observation_round_skipped")
+    assert skipped and "stuck" in skipped[-1]["reason"]
