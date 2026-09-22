@@ -139,3 +139,16 @@ def test_the_full_suite_waits_for_the_own_test_to_be_green(tmp_path: Path) -> No
     result = PatchCheckTool(workspace_root=root).run(path=rel, full=True)
     assert result["tests_exit_code"] == 1 and "full_exit_code" not in result
     assert "make them green first" in result["full_output"]
+
+
+def test_the_verdict_and_test_output_come_before_the_diff(tmp_path: Path) -> None:
+    """2026-09-22 16:15: показ ответа агенту режется на 6000 знаков; длинный diff
+    стоял раньше вывода тестов, и агент пять кругов не видел новой ошибки."""
+    root = _repo(tmp_path)
+    rel = _patch(root, (
+        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
+        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
+        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
+    keys = list(PatchCheckTool(workspace_root=root).run(path=rel))
+    assert keys[:2] == ["verdict", "why"]
+    assert keys.index("tests_output") < keys.index("diff")
