@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 235 modules across 12 groups._
+_Total: 236 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -116,6 +116,7 @@ _Planning, verification, clarification, control loop._
 | `core/evidence_support` | Evidence support — how well the gathered sources back THIS answer; telemetry, not a gate. |
 | `core/confidence_vector` | Decompose answer confidence into a three-axis vector. |
 | `core/relevance_judge` | Судья относимости: отвечает ли ответ на заданный вопрос — по утверждениям. |
+| `core/draft_refutation` | Черновик, который противоречит своим же уликам, переписывается один раз. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
 | `core/best_next_action_helpers` | Helpers extracted verbatim from ``core/best_next_action.py`` by the incremental splitter. |

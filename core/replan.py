@@ -121,6 +121,25 @@ def world_facing_failures(triggers: list[ReplanTrigger] | None) -> list[ReplanTr
     return [t for t in (triggers or []) if t.code in WORLD_FACING_FAILURE_TYPES]
 
 
+#: Требования ко второй сборке черновика. 2026-09-22: переписывание «не про
+#: вопрос» и дочитывание своих файлов клали требование в историю провалов, а
+#: синтезатору шли только WORLD_FACING — требование до модели не доходило, и
+#: вторая сборка писалась вслепую, тем же запросом.
+SYNTHESIS_DEMAND_TYPES: frozenset[str] = frozenset({
+    "answer_off_topic", "unverified_own_file", "draft_contradicts_evidence",
+})
+
+
+def failures_for_synthesis(
+    triggers: list[ReplanTrigger] | None, *, exhausted: bool,
+) -> list[ReplanTrigger]:
+    """Что видит синтезатор: всё при исчерпании, иначе мир и требования."""
+    if exhausted:
+        return list(triggers or [])
+    return [t for t in (triggers or [])
+            if t.code in WORLD_FACING_FAILURE_TYPES or t.code in SYNTHESIS_DEMAND_TYPES]
+
+
 #: `step[<n>]: <tool> … dropped` — the shape every sanitiser/validator warning
 #: takes when it removes a step (core/step_sanitizer.py, core/planner.py).
 _DROPPED_STEP_RE = re.compile(
