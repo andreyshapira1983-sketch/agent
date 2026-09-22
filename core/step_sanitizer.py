@@ -548,13 +548,16 @@ def sanitize_step(
     if tool_name == "file_write":
         path = args.get("path")
         content = args.get("content")
+        # Задание вместо текста: текст соберётся ПЕРЕД вызовом инструмента, по
+        # выводам шагов этого же пакета (core/write_at_execution.py). Корень
+        # «сочиняет запись до чтения» лечится здесь, а не откладыванием круга.
+        instruction = args.get("write_instruction")
         if not isinstance(path, str) or not path.strip():
             warnings.append(f"step[{idx}]: file_write without path, dropped")
             return None
-        if not isinstance(content, str):
-            warnings.append(
-                f"step[{idx}]: file_write content must be a string, dropped"
-            )
+        if not isinstance(content, str) and not (isinstance(instruction, str) and instruction.strip()):
+            warnings.append(f"step[{idx}]: file_write content must be a string "
+                            "(or give write_instruction), dropped")
             return None
         path = path.strip()
         # ASCII-only identifier policy. Catches the LLM trying to
@@ -583,7 +586,8 @@ def sanitize_step(
             return None
         return {
             "tool": "file_write",
-            "arguments": {"path": path, "content": content},
+            "arguments": ({"path": path, "content": content} if isinstance(content, str)
+                          else {"path": path, "write_instruction": str(instruction).strip()[:2000]}),
             # Label uses the path only — content can be huge and is also
             # the thing most likely to carry sensitive data.
             "label": f"file_write:{path}",

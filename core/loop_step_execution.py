@@ -354,7 +354,37 @@ class AgentLoopStepExecution:
         trigger = self._resolve_references_in(step, done, plan_steps)
         if trigger is not None:
             return step, None, trigger
+        trigger = self._compose_write_content(step, done)
+        if trigger is not None:
+            return step, None, trigger
         return self._run_step_parallel(step)
+
+    def _compose_write_content(self, step: PlanStep, done: list[Any]) -> ReplanTrigger | None:
+        """Собрать текст записи по заданию шага — уже по выводам этого пакета."""
+        arguments = (step.action_spec or {}).get("arguments") or {}
+        if "content" in arguments or not arguments.get("write_instruction"):
+            return None
+        from core.write_at_execution import compose_content
+
+        try:
+            arguments["content"] = compose_content(self, step, done)
+        except Exception as exc:  # noqa: BLE001 — не собралось: шаг не исполняется
+            step.status = "failed"
+            self.log.log("write_compose_failed", {
+                "step": getattr(step, "order", None), "path": arguments.get("path"),
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            return ReplanTrigger(
+                code="tool_error", step_id=step.id, tool_name="file_write",
+                arguments={"path": arguments.get("path")},
+                reason=f"текст записи не собрался: {type(exc).__name__}: {exc}",
+                attempt=0)
+        arguments.pop("write_instruction", None)
+        self.log.log("write_composed_at_execution", {
+            "step": getattr(step, "order", None), "path": arguments.get("path"),
+            "chars": len(arguments["content"]),
+        })
+        return None
 
     def _resolve_references_in(
         self,
