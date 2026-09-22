@@ -99,3 +99,32 @@ def test_on_the_last_round_the_write_is_not_deferred_into_nothing(workspace: Pat
     loop.run("Посчитай сумму чисел в numbers.txt и запиши её в sum.txt")
 
     assert (workspace / "sum.txt").read_text(encoding="utf-8") == "6"
+
+
+def test_a_write_waits_one_round_not_every_round(workspace: Path):
+    """2026-09-22 14:31: планировщик на каждом круге добавлял ещё одно чтение,
+    запись откладывалась дважды и легла лишь на последнем круге — на исправление
+    по выводу проверки кругов не осталось. Ждёт один круг, не каждый."""
+    (workspace / "a.txt").write_text("1\n", encoding="utf-8")
+    (workspace / "b.txt").write_text("2\n", encoding="utf-8")
+    planner = _ScriptedPlanner([
+        [_src("file_read", {"path": "a.txt"}), _src("file_write", {"path": "out.txt", "content": "first"})],
+        [_src("file_read", {"path": "b.txt"}), _src("file_write", {"path": "out.txt", "content": "second"})],
+        [],
+    ])
+    loop = _loop(workspace, planner, observe=True)
+
+    loop.run("Прочитай a.txt и b.txt и запиши итог в out.txt")
+
+    assert (workspace / "out.txt").read_text(encoding="utf-8") == "second"
+    assert len(_events(loop, "writes_deferred")) == 1
+
+
+def test_a_red_patch_check_keeps_the_round() -> None:
+    from core.observation_round import _red_tests
+
+    assert _red_tests({"patch_check:x": {"tool": "patch_check", "output": {"applied": False, "errors": ["x"]}}})
+    assert _red_tests({"patch_check:x": {"tool": "patch_check",
+                                         "output": {"applied": True, "tests_exit_code": 1}}})
+    assert not _red_tests({"patch_check:x": {"tool": "patch_check",
+                                             "output": {"applied": True, "tests_exit_code": 0}}})
