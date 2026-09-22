@@ -158,6 +158,22 @@ def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
+def _verdict(result: dict[str, Any]) -> dict[str, str]:
+    """Зелёное — только правка, которая что-то меняет, несёт тест, и тест проходит.
+
+    2026-09-22 14:43: агент заменил строки 284–292 теми же строками, без теста;
+    проверка ответила applied=True, и ход закрылся как сделанный. Правка без
+    изменения и без теста не доказывает ничего — это не зелёное.
+    """
+    if not result.get("diff"):
+        return {"verdict": "red", "why": "the patch changes nothing (empty diff)"}
+    if result.get("tests_exit_code") is None:
+        return {"verdict": "red", "why": "no test in the patch — a change without a test proves nothing"}
+    if result.get("tests_exit_code") != 0 or result.get("full_exit_code") not in (0, None):
+        return {"verdict": "red", "why": "tests are not green"}
+    return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
+
+
 class PatchCheckTool(Tool):
     name = "patch_check"
     description = (
@@ -203,7 +219,8 @@ class PatchCheckTool(Tool):
             raise FileNotFoundError(f"patch file not found inside the workspace: {path}")
         blocks = parse_blocks(patch.read_text(encoding="utf-8"))
         if not blocks:
-            return {"applied": False, "errors": ["в файле нет блоков FILE:/<<<<<<< SEARCH/=======/>>>>>>> REPLACE"]}
+            return {"applied": False, "verdict": "red", "why": "no blocks",
+                    "errors": ["в файле нет блоков FILE:/<<<<<<< SEARCH/=======/>>>>>>> REPLACE или <<<<<<< LINES a-b"]}
         with tempfile.TemporaryDirectory(prefix="patch_check_") as tmp:
             copy = Path(tmp) / "repo"
             self._clone(copy)
@@ -212,7 +229,7 @@ class PatchCheckTool(Tool):
             errors = apply_blocks(copy, blocks)
             result: dict[str, Any] = {"applied": not errors, "errors": errors, "files": files}
             if errors:
-                return result
+                return {**result, "verdict": "red", "why": "the patch did not apply"}
             result["diff"] = _diff(copy, originals)
             py = [b["path"] for b in blocks if b["path"].endswith(".py")]
             code, out = self._run([sys.executable, "-m", "ruff", "check", *py], copy)
@@ -230,4 +247,5 @@ class PatchCheckTool(Tool):
             if full:
                 code, out = self._run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], copy)
                 result.update(full_exit_code=code, full_output=_tail(out, 25))
+            result.update(_verdict(result))
             return result
