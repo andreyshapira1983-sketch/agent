@@ -57,3 +57,26 @@ def test_a_patch_without_a_test_is_told_so(tmp_path: Path) -> None:
     rel = _patch(root, "FILE: pkg/mod.py\n<<<<<<< SEARCH\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n")
     result = PatchCheckTool(workspace_root=root).run(path=rel)
     assert result["tests_exit_code"] is None and "proves nothing" in result["tests_output"]
+
+
+def test_lines_are_replaced_by_number_without_copying_old_text(tmp_path: Path) -> None:
+    """2026-09-22 14:37: модель трижды не смогла переписать сигнатуру символ в
+    символ, хотя видела её; номера строк из file_read она видит без ошибок."""
+    root = _repo(tmp_path)
+    rel = _patch(root, (
+        "FILE: pkg/mod.py\n<<<<<<< LINES 1-4\ndef f(*, x: int = 1, y: int = 0) -> int:\n>>>>>>> REPLACE\n"
+        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + y\n>>>>>>> REPLACE\n"
+        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
+        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1, y=2) == 3\n>>>>>>> REPLACE\n"))
+
+    result = PatchCheckTool(workspace_root=root).run(path=rel)
+
+    assert result["applied"] is True, result["errors"]
+    assert result["tests_exit_code"] == 0, result["tests_output"]
+    assert "+def f(*, x: int = 1, y: int = 0) -> int:" in result["diff"]
+
+
+def test_a_line_range_outside_the_file_is_refused(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    errors = apply_blocks(root, parse_blocks("FILE: pkg/mod.py\n<<<<<<< LINES 4-99\nx\n>>>>>>> REPLACE\n"))
+    assert errors and "4-99" in errors[0]

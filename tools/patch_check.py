@@ -19,7 +19,18 @@ SEARCH/REPLACE в Aider). Здесь то же, но без записи в жи
     новый текст
     >>>>>>> REPLACE
 
-Пустой SEARCH — новый файл. Риск — `reversible`, как у `run_tests`: код
+Пустой SEARCH — новый файл. Второй вид блока — по номерам строк, которые
+показывает file_read (копировать старый текст не нужно; так же устроены
+`insert`/`view` у редактора Anthropic и OpenHands):
+
+    FILE: core/x.py
+    <<<<<<< LINES 284-292
+    новый текст на место строк 284–292
+    >>>>>>> REPLACE
+
+2026-09-22 14:37: модель трижды не смогла переписать сигнатуру символ в
+символ, хотя видела её, — номера строк она видит без ошибок. Номера — по
+файлу ДО правки. В ответе — итоговая разница, чтобы увидеть, что легло. Риск — `reversible`, как у `run_tests`: код
 тестов исполняется, но рабочая папка не меняется.
 """
 from __future__ import annotations
@@ -40,14 +51,61 @@ _BLOCK_RE = re.compile(
     r"(?P<new>.*?)^>>>>>>> REPLACE[ \t]*$",
     re.MULTILINE | re.DOTALL,
 )
+_LINES_RE = re.compile(
+    r"^FILE:[ \t]*(?P<path>\S+)[ \t]*\n<<<<<<< LINES[ \t]+(?P<a>\d+)-(?P<b>\d+)[ \t]*\n"
+    r"(?P<new>.*?)^>>>>>>> REPLACE[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
 _TAIL_LINES = 40
+_DIFF_LINES = 150
 _CONTEXT_LINES = 12
 _TIMEOUT_SECONDS = 900
 
 
-def parse_blocks(text: str) -> list[dict[str, str]]:
-    """Блоки ПОИСК/ЗАМЕНА из текста правки."""
-    return [{"path": m["path"], "old": m["old"], "new": m["new"]} for m in _BLOCK_RE.finditer(text or "")]
+def parse_blocks(text: str) -> list[dict[str, Any]]:
+    """Блоки правки в порядке текста: ПОИСК/ЗАМЕНА и замена по номерам строк."""
+    found = [(m.start(), {"path": m["path"], "old": m["old"], "new": m["new"]})
+             for m in _BLOCK_RE.finditer(text or "")]
+    found += [(m.start(), {"path": m["path"], "lines": (int(m["a"]), int(m["b"])), "new": m["new"]})
+              for m in _LINES_RE.finditer(text or "")]
+    return [b for _, b in sorted(found, key=lambda x: x[0])]
+
+
+def _apply_line_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
+    """Замены по номерам строк — по файлу ДО правки, снизу вверх."""
+    errors: list[str] = []
+    by_file: dict[str, list[dict[str, Any]]] = {}
+    for b in blocks:
+        by_file.setdefault(b["path"], []).append(b)
+    for rel, items in by_file.items():
+        target = (root / rel).resolve()
+        if root.resolve() not in target.parents or not target.is_file():
+            errors.append(f"LINES {rel}: файла нет в копии")
+            continue
+        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        spans = sorted((b["lines"] for b in items), reverse=True)
+        bad = [f"{a}-{z}" for a, z in spans if not 1 <= a <= z <= len(lines)]
+        overlap = any(spans[i][0] <= spans[i + 1][1] for i in range(len(spans) - 1))
+        if bad or overlap:
+            errors.append(f"LINES {rel}: диапазоны {bad or 'пересекаются'} вне 1-{len(lines)} или пересекаются")
+            continue
+        for b in sorted(items, key=lambda b: b["lines"][0], reverse=True):
+            a, z = b["lines"]
+            new = b["new"] if not b["new"] or b["new"].endswith("\n") else b["new"] + "\n"
+            lines[a - 1:z] = new.splitlines(keepends=True)
+        target.write_text("".join(lines), encoding="utf-8")
+    return errors
+
+
+def _diff(root: Path, originals: dict[str, str]) -> str:
+    import difflib
+
+    out: list[str] = []
+    for rel, before in originals.items():
+        target = root / rel
+        after = target.read_text(encoding="utf-8") if target.is_file() else ""
+        out += difflib.unified_diff(before.splitlines(), after.splitlines(), f"a/{rel}", f"b/{rel}", lineterm="", n=2)
+    return "\n".join(out[:_DIFF_LINES]) + ("\n… (diff truncated)" if len(out) > _DIFF_LINES else "")
 
 
 def _nearest(text: str, old: str) -> str:
@@ -67,10 +125,15 @@ def _tail(text: str, n: int = _TAIL_LINES) -> str:
     return redact_text("\n".join((text or "").strip().splitlines()[-n:]))[0]
 
 
-def apply_blocks(root: Path, blocks: list[dict[str, str]]) -> list[str]:
-    """Положить блоки в копию; вернуть ошибки (пусто — всё легло)."""
-    errors = []
+def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
+    """Положить блоки в копию; вернуть ошибки (пусто — всё легло).
+
+    Сначала замены по номерам строк (номера — по файлу до правки), затем ПОИСК/ЗАМЕНА.
+    """
+    errors = _apply_line_blocks(root, [b for b in blocks if "lines" in b])
     for n, b in enumerate(blocks, 1):
+        if "lines" in b:
+            continue
         target = (root / b["path"]).resolve()
         if root.resolve() not in target.parents:
             errors.append(f"блок {n}: путь {b['path']} выходит за копию")
@@ -99,10 +162,12 @@ class PatchCheckTool(Tool):
     name = "patch_check"
     description = (
         "Check YOUR OWN code change before anyone applies it: reads a patch file of "
-        "SEARCH/REPLACE blocks (FILE: path / <<<<<<< SEARCH / exact old text / ======= / "
-        "new text / >>>>>>> REPLACE; empty SEARCH = new file), applies it to a clean copy "
+        "blocks: FILE: path / <<<<<<< SEARCH / exact old text / ======= / new text / "
+        ">>>>>>> REPLACE (empty SEARCH = new file), OR - easier, no copying of old text - "
+        "FILE: path / <<<<<<< LINES 284-292 / new text for those lines / >>>>>>> REPLACE "
+        "(line numbers exactly as file_read shows them, before the change). It applies it to a clean copy "
         "of the repository OUTSIDE the workspace, runs ruff and pytest there and returns "
-        "the output. The workspace is never changed. If a SEARCH block is not found the "
+        "the output and the resulting diff. The workspace is never changed. If a SEARCH block is not found the "
         "result shows the real file lines to copy from. Arguments: path (the patch file, "
         "e.g. proposals/selffix/<name>/edits.txt), tests (optional list of test files), "
         "full (true = also run the whole suite)."
@@ -142,11 +207,13 @@ class PatchCheckTool(Tool):
         with tempfile.TemporaryDirectory(prefix="patch_check_") as tmp:
             copy = Path(tmp) / "repo"
             self._clone(copy)
+            files = list(dict.fromkeys(b["path"] for b in blocks))
+            originals = {f: (copy / f).read_text(encoding="utf-8") if (copy / f).is_file() else "" for f in files}
             errors = apply_blocks(copy, blocks)
-            result: dict[str, Any] = {"applied": not errors, "errors": errors,
-                                      "files": [b["path"] for b in blocks]}
+            result: dict[str, Any] = {"applied": not errors, "errors": errors, "files": files}
             if errors:
                 return result
+            result["diff"] = _diff(copy, originals)
             py = [b["path"] for b in blocks if b["path"].endswith(".py")]
             code, out = self._run([sys.executable, "-m", "ruff", "check", *py], copy)
             result["ruff"] = "not installed" if "No module named ruff" in out else (
