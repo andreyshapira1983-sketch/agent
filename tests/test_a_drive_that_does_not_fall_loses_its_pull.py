@@ -86,3 +86,22 @@ def test_a_stale_need_does_not_outrank_a_growing_subject() -> None:
     state = {"weights": {"uncertainty": 0.1}, "updated": NOW.isoformat()}
     drive, _ = choose_drive(drives, state, NOW)
     assert drive == "competence_math"
+
+
+def test_a_subject_task_ends_in_a_note_that_the_check_looks_at(tmp_path) -> None:
+    """2026-09-22: критерий называл входную книгу (она обязана быть на диске), а
+    судья не засчитывает след старше начала цели — «прочитай раздел» не
+    засчитывалась никогда. Теперь задача кончается конспектом в data/notes/."""
+    from datetime import datetime, timezone
+
+    from core.drive_goal import _with_notes
+    from core.success_check import observe_success_check
+
+    goal, check = _with_notes("Прочитай раздел.", "В книге найдена теорема.", "competence_math",
+                              datetime(2026, 9, 22, 17, 0, tzinfo=timezone.utc))
+    assert "data/notes/20260922T170000_competence_math.md" in goal
+    assert observe_success_check(check, tmp_path)["verdict"] == "missing"
+    note = tmp_path / "data" / "notes" / "20260922T170000_competence_math.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("итог", encoding="utf-8")
+    assert observe_success_check(check, tmp_path)["verdict"] == "verified"

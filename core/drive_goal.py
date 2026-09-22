@@ -200,6 +200,25 @@ def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str =
     return data if isinstance(data, dict) and str(data.get("goal") or "").strip() else None
 
 
+#: Конспекты предметных задач (data/ исключена из git — дерево не пачкается).
+NOTES_DIR = "data/notes"
+
+
+def _with_notes(goal: str, check: str, drive: str, now: datetime) -> tuple[str, str]:
+    """Предметная задача заканчивается конспектом, и проверка смотрит на него.
+
+    Кампания 2026-09-22: _problem требует, чтобы файлы критерия уже были на
+    диске, — значит, критерий называл входную книгу; судья цели (0630e28)
+    честно не засчитывает след старше начала цели. Вместе: «прочитай раздел
+    книги» не засчитывалась НИКОГДА, даже выполненная, а прочитанное
+    пропадало в журнале. Конспект — новый след работы и накопленное знание.
+    """
+    note = f"{NOTES_DIR}/{now.strftime('%Y%m%dT%H%M%S')}_{drive}.md"
+    goal = (f"{goal} Итог — формулировку, ключевой шаг и результат проверки с источником — "
+            f"запиши файлом {note}.")
+    return goal, f"{check} Файл {note} создан и содержит итог задачи.".strip()
+
+
 def _problem(goal: str, root: Path, success_check: str = "") -> str:
     """Почему задачу нельзя выдать, или пусто.
 
@@ -322,6 +341,7 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
             check = str(data.get("success_check") or "").strip()
             feedback = _problem(goal, root, check)
             if not feedback:
+                goal, check = _with_notes(goal, check, drive, now)
                 report = DriveGoal("proposed", goal, check, drive)
                 state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
                 break
