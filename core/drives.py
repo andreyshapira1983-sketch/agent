@@ -297,6 +297,17 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     drives["uncertainty"] = {"value": 1.0 - math.exp(-unexplained / 5),
                              "why": f"необъяснённых наблюдений: {unexplained}"}
 
+    # Уткнулся — спроси: интернет и партнёр (слово оператора 2026-09-22:
+    # «он забывает, что у него есть интернет и партнёр»). Совет в подсказке
+    # механизмом не был: сам он заговорил первым 3 раза за всё время.
+    from core.stuck_route import stuck_evidence
+
+    stuck = len(stuck_evidence(root))
+    drives["stuck_need"] = {
+        "value": 1.0 - math.exp(-stuck / 2) if stuck else 0.0,
+        "why": (f"признаков застревания: {stuck}" if stuck else "застревания не видно"),
+    }
+
     drives["economic_opportunity"] = {"value": 0.0,
                                       "why": "источник оплачиваемой работы не подключён — честный ноль"}
     return drives

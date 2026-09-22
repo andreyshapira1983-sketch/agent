@@ -326,7 +326,14 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     state = _load_state(root)
     drive, state = choose_drive(drives, state, now)
     report = DriveGoal(status="declined", reason="ни один драйв не выше порога содержания")
-    if drive in ("uncertainty", "self_improvement_need"):
+    if drive == "stuck_need":
+        # Уткнулся — спроси: интернет, потом партнёр (core/stuck_route.py).
+        from core.stuck_route import stuck_goal
+
+        report = stuck_goal(root) or report
+        if report.status == "proposed":
+            state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
+    elif drive in ("uncertainty", "self_improvement_need"):
         # Самоулучшение — сначала открытый дефект реестра правкой (core/patch_route.py).
         from core.patch_route import defect_goal
 
