@@ -319,6 +319,10 @@ _ANSWER_CITATION_RE = re.compile(
 
 _EMPTY_QUOTE_LINE_RE = re.compile(r"^>+\s*$")
 
+#: Начало строки-показания журнала хода (core/answer_contradiction.py).
+_LEDGER_NOTICE_PREFIX = "⚠️ По журналу хода:"
+
+
 def format_human_response(answer: str) -> str:
     """Convert the internal Output Contract format to clean human-readable
     text.
@@ -332,6 +336,7 @@ def format_human_response(answer: str) -> str:
     facts_lines: list[str] = []
     unverified_lines: list[str] = []
     verification_tail_lines: list[str] = []
+    ledger_lines: list[str] = []
 
     _SKIP_PREFIXES = ("sources:", "confidence:", "safety:", "[note]")
 
@@ -386,6 +391,15 @@ def format_human_response(answer: str) -> str:
              _SUBSTITUTED_MODEL_PREFIX, *_EXCISION_PREFIXES)
         ):
             verification_tail_lines.append(stripped)
+            continue
+
+        # Показание журнала хода («⚠️ По журналу хода: …») — не проза ответа, а
+        # то, ЧТО БЫЛО СДЕЛАНО на самом деле. 2026-09-22 14:10: детектор
+        # расхождения сработал, строка легла в собранный ответ (2518 знаков), а
+        # человеку ушло 1521 — пересборка по разделам её выбрасывала, и доклад
+        # «правка записана» шёл без поправки «file_write: 0».
+        if stripped.startswith(_LEDGER_NOTICE_PREFIX):
+            ledger_lines.append(stripped)
             continue
 
         # ── content collection ────────────────────────────────────────────
@@ -446,6 +460,8 @@ def format_human_response(answer: str) -> str:
     if unverified_lines:
         note = " ".join(unverified_lines)
         parts.append(f"⚠️ Не подтверждено: {note}")
+    if parts and ledger_lines:
+        parts.extend(ledger_lines)
     if parts and verification_tail_lines:
         parts.extend(verification_tail_lines)
 
