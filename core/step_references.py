@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
+from pathlib import Path
 from typing import Any
 
 #: {{step:<ref>.output}} — единственная разрешённая форма.
@@ -126,6 +127,77 @@ def _reject_field_path(text: str) -> None:
         f"a path into the output ({path!r}) cannot be resolved; the only "
         f"allowed form is {{{{step:{ref}.output}}}} (the whole output)"
     )
+
+
+#: Вывод этих инструментов никогда не бывает содержимым файла: поиск, список,
+#: веб-страница. Подставить его в content записи — записать чужое вместо своего.
+_NEVER_FILE_CONTENT = frozenset({
+    "list_dir", "find_in_files", "web_fetch", "web_search",
+    "semantic_scholar_search", "rss_fetch", "read_logs",
+})
+#: Окно file_read со start_line/end_line — вид для глаз с номерами строк
+#: («[x.py lines 340-430 of 1122]\n340: …»), а не содержимое файла.
+_NUMBERED_WINDOW_RE = re.compile(r"\[[^\]\n]+ lines \d+-\d+ of \d+\]\n")
+#: Код другого вида — не копия: модуль .py, прочитанный в patch.md (22.09
+#: 09:48). Текст и данные между собой копируются законно: «скопируй src.txt в
+#: report.json» — просьба человека (tests/test_a_read_is_not_the_end_of_the_turn.py).
+_CODE_SUFFIXES = frozenset({
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".sh", ".ps1", ".bat", ".cmd",
+    ".c", ".h", ".cpp", ".rs", ".go", ".java", ".rb", ".php", ".sql",
+})
+
+
+def _code_kind_changes(source_suffix: str, target_suffix: str) -> bool:
+    """Код переезжает в файл другого вида (или в код — не код): это не копия."""
+    return source_suffix != target_suffix and (
+        source_suffix in _CODE_SUFFIXES or target_suffix in _CODE_SUFFIXES)
+
+
+def reject_content_reference(
+    tool: str | None,
+    arguments: dict[str, Any],
+    sources: dict[str, tuple[str, str]],
+    outputs: dict[str, Any],
+) -> None:
+    """Прочитанное вместо собственного текста в content записи — ошибка.
+
+    Замысел и имя — агента (разговор 2026-09-22): за день пять его записей
+    легли не его текстом, а выводом чтения в том же плане — skill.py получил
+    окно книги с номерами строк, patch.md дважды получил текст модуля, и одну
+    попытку описать правку съела сама поломка. Подсказка планировщику учила
+    ровно этому (пример «file_read → file_write content={{step:1.output}}»).
+
+    Законное остаётся: вывод команды (python_probe, shell_exec) в файл и
+    копия ЦЕЛОГО файла в файл того же вида — ради этого ссылки и делались
+    (замер 2026-08-31, перенос черновика). Отвергается прочитанное, которое
+    содержимым файла не является: вывод поиска, списка, веб-страницы; окно
+    строк с номерами; целый файл другого вида (.py → .md — не копия).
+    `sources` — ссылка шага → (инструмент, путь), `outputs` — его вывод.
+    """
+    if tool != "file_write":
+        return
+    content = arguments.get("content")
+    if not isinstance(content, str):
+        return
+    target_suffix = Path(str(arguments.get("path") or "")).suffix.lower()
+    for ref in referenced_steps(content):
+        source_tool, source_path = sources.get(ref, ("", ""))
+        if source_tool in _NEVER_FILE_CONTENT:
+            why = f"the output of {source_tool} is never a file's content"
+        elif source_tool != "file_read":
+            continue
+        elif _NUMBERED_WINDOW_RE.match(str(outputs.get(ref) or "")):
+            why = "a file_read line window is numbered lines for reading, not the file"
+        elif _code_kind_changes(Path(source_path).suffix.lower(), target_suffix):
+            why = (f"{source_path} copied into a {target_suffix or 'suffix-less'} file "
+                   "is not a copy")
+        else:
+            continue
+        raise UnresolvedStepReference(
+            f"file_write content takes step {ref}'s output ({source_tool} {source_path}): "
+            f"{why}. Write your own text into content; a reference carries only a "
+            f"command's output or a whole-file copy"
+        )
 
 
 def _delivered(ref: str, output: Any) -> Any:

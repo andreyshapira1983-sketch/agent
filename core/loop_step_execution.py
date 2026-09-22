@@ -42,6 +42,7 @@ from core.repo_provenance import block_may_be_annotated
 from core.step_references import (
     UnresolvedStepReference,
     has_step_reference,
+    reject_content_reference,
     resolve_step_references,
 )
 from core.step_sanitizer import fit_resolved_arguments
@@ -376,7 +377,11 @@ class AgentLoopStepExecution:
         if not has_step_reference(arguments):
             return None
         outputs: dict[str, Any] = {}
+        sources: dict[str, tuple[str, str]] = {}
         for done_step, artifact, _trigger in done:
+            spec = done_step.action_spec
+            sources[done_step.id] = sources[str(done_step.order)] = (
+                str(spec.get("tool_name") or ""), str(spec.get("arguments", {}).get("path") or ""))
             if artifact is None:
                 continue
             output = artifact.get("output")
@@ -384,6 +389,7 @@ class AgentLoopStepExecution:
             outputs[str(done_step.order)] = output
         tool_name = step.action_spec.get("tool_name")
         try:
+            reject_content_reference(tool_name, arguments, sources, outputs)
             resolved = resolve_step_references(
                 arguments, outputs, plan_steps=plan_steps,
             )

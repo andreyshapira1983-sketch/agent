@@ -647,9 +647,16 @@ Carrying a measured value into a later step
   To use what an earlier step actually produced, reference it instead of
   guessing it:
 
-      {"tool": "file_read",  "arguments": {"path": "core/loop.py"}},
-      {"tool": "file_write", "arguments": {"path": "copy.py",
-                                           "content": "{{step:1.output}}"}}
+      {"tool": "python_probe", "arguments": {"code": "print(sum(range(10)))"}},
+      {"tool": "file_write",   "arguments": {"path": "sum.txt",
+                                             "content": "{{step:1.output}}"}}
+
+  A reference CARRIES a value; it never WRITES your text. A patch, a note, a
+  README or code you compose goes into content as your own full text. What a
+  read returned is not your text: file_write rejects content taken from a
+  search, a listing, a web page, a numbered line window of file_read, or code
+  read into a file of another kind (.py read, .md written). Legal: a command's
+  output, or a whole-file copy (src.txt read, report.json written).
 
   Steps are numbered from 1 in plan order: the first step is step 1.
   {{step:<order or step id>.output}} is replaced with that step's real output
