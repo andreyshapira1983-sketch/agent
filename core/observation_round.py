@@ -187,8 +187,17 @@ def defer_blind_writes(loop: Any, steps: list[Any], log: Any) -> list[Any]:
 
 
 def steps_to_run(loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> list[Any]:
-    """Шаги пакета к исполнению: без уже прочитанного и без слепых записей."""
-    return defer_blind_writes(loop, reuse_already_read(st, attempt_artifacts, loop.log.log), loop.log.log)
+    """Шаги пакета к исполнению: без уже прочитанного и без слепых записей.
+
+    На последнем круге запись не откладывается: следующего круга нет, и
+    отложенное пропало бы. 2026-09-22 14:09: запись edits.json откладывалась
+    дважды, круги кончились, файла нет — а ответ сказал «записана».
+    """
+    steps = reuse_already_read(st, attempt_artifacts, loop.log.log)
+    policy = getattr(loop, "replan_policy", None)
+    if policy is not None and st.attempt >= policy.max_total_replans:
+        return steps
+    return defer_blind_writes(loop, steps, loop.log.log)
 
 
 def format_observations(

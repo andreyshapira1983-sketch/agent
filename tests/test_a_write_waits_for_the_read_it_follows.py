@@ -85,3 +85,17 @@ def test_a_reference_written_as_prose_does_not_buy_a_round(workspace: Path):
 
     assert len(planner.contexts) == 1, "проза о ссылках — не ссылка на шаг плана"
     assert (workspace / "README.md").read_text(encoding="utf-8").count("{{step:N.output}}") == 1
+
+
+def test_on_the_last_round_the_write_is_not_deferred_into_nothing(workspace: Path):
+    """2026-09-22 14:09: запись откладывалась на каждом круге, круги кончились —
+    файла нет, а ответ сказал «записана». На последнем круге следующего нет."""
+    (workspace / "numbers.txt").write_text("1\n2\n3\n", encoding="utf-8")
+    plan = [_src("file_read", {"path": "numbers.txt"}),
+            _src("file_write", {"path": "sum.txt", "content": "6"})]
+    planner = _ScriptedPlanner([plan] * 10)
+    loop = _loop(workspace, planner, observe=True)
+
+    loop.run("Посчитай сумму чисел в numbers.txt и запиши её в sum.txt")
+
+    assert (workspace / "sum.txt").read_text(encoding="utf-8") == "6"
