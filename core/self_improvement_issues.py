@@ -131,6 +131,11 @@ class SelfImprovementIssue:
         severity = str(data.get("severity") or "medium").strip().casefold()
         if severity not in _ISSUE_SEVERITIES:
             severity = "medium"
+        raw_evidence = data.get("evidence")
+        if isinstance(raw_evidence, str):
+            evidence = (raw_evidence,)
+        else:
+            evidence = tuple(str(x) for x in raw_evidence or ())
         return cls(
             fingerprint=str(data.get("fingerprint") or ""),
             title=str(data.get("title") or "Unresolved self-improvement failure"),
@@ -138,7 +143,7 @@ class SelfImprovementIssue:
             status=status,  # type: ignore[arg-type]
             first_seen=str(data.get("first_seen") or _now()),
             last_seen=str(data.get("last_seen") or _now()),
-            evidence=tuple(str(x) for x in data.get("evidence") or ()),
+            evidence=evidence,
             related_files=tuple(str(x) for x in data.get("related_files") or ()),
             related_error_text=str(data.get("related_error_text") or ""),
             suggested_next_action=str(data.get("suggested_next_action") or ""),
