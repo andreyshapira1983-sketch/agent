@@ -21,6 +21,7 @@ verified», а все три его пробы упали с TypeError (exit_cod
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 _MAX_LISTED = 5
@@ -28,6 +29,33 @@ _MAX_LISTED = 5
 
 def _refuted(report: Any) -> list[Any]:
     return [c for c in getattr(report, "chunks", ()) or () if getattr(c, "reason", None)]
+
+
+_GREEN_CLAIM = re.compile(r"(verdict|вердикт)[^\n]{0,25}(green|зелён)|доведен\w*\s+до\s+зел[её]н",
+                          re.IGNORECASE)
+
+
+def _outcome_contradictions(st: Any, answer: str) -> list[Any]:
+    """Заявленный зелёный вердикт при красном последнем patch_check.
+
+    2026-09-22 16:03: агент написал «verdict: green, full_exit_code: 0», а
+    единственный patch_check хода был red; проверяющий засчитал «green», потому
+    что в выводе стояло «tests are not green» — совпадение слова, не смысла.
+    """
+    from types import SimpleNamespace
+
+    checks = [a for a in (getattr(st, "artifacts", None) or {}).values()
+              if (a or {}).get("tool") == "patch_check" and isinstance((a or {}).get("output"), dict)]
+    if not checks:
+        return []
+    last = checks[-1]["output"]
+    if last.get("verdict") == "green" or not _GREEN_CLAIM.search(answer or ""):
+        return []
+    reason = SimpleNamespace(code="outcome_contradicts_tool", explanation="the last patch_check is NOT green",
+                             computed_from="tool_output:patch_check",
+                             actual=f"verdict={last.get('verdict')}, why={last.get('why')}, "
+                                    f"tests_exit_code={last.get('tests_exit_code')}")
+    return [SimpleNamespace(text=_GREEN_CLAIM.search(answer).group(0), reason=reason)]
 
 
 def _check(loop: Any, st: Any, answer: str) -> Any:
@@ -48,7 +76,7 @@ def revise_refuted_draft(loop: Any, st: Any, do_synthesize: Any) -> None:
             or getattr(loop, "_last_synth_degraded", False) or not (st.draft_answer or "").strip()):
         return
     try:
-        refuted = _refuted(_check(loop, st, st.draft_answer))
+        refuted = _outcome_contradictions(st, st.draft_answer) + _refuted(_check(loop, st, st.draft_answer))
     except Exception as exc:  # noqa: BLE001 — сверка не вправе ронять ответ
         loop._sensor_failed("draft_refutation", exc)
         return
@@ -72,7 +100,8 @@ def revise_refuted_draft(loop: Any, st: Any, do_synthesize: Any) -> None:
     ))
     try:
         second = do_synthesize(SynthAttempt(index=1, adapt_context=False, is_final=True))
-        after = len(_refuted(_check(loop, st, second))) if second else len(refuted)
+        after = (len(_outcome_contradictions(st, second)) + len(_refuted(_check(loop, st, second)))
+                 if second else len(refuted))
     except Exception as exc:  # noqa: BLE001 — переписывание не вправе ронять ответ
         loop._sensor_failed("draft_refutation", exc)
         return

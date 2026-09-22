@@ -91,3 +91,30 @@ def test_a_clean_draft_costs_nothing(monkeypatch) -> None:
     revise_refuted_draft(loop, st, synthesize)
 
     assert st.draft_answer == "правда" and not st.failure_history
+
+
+def test_a_green_claim_over_a_red_patch_check_is_rewritten(monkeypatch) -> None:
+    """2026-09-22 16:03: «verdict: green, full_exit_code: 0» при единственном
+    patch_check хода с verdict=red; проверяющий засчитал «green», потому что в
+    выводе стояло «tests are not green»."""
+    monkeypatch.setattr(verifier_mod, "verify", _fake_verify({}))
+    loop, st = _Loop(), _state("Правка доведена до зелёного: verdict: green, tests_exit_code: 0")
+    st.artifacts = {"patch_check:x": {"tool": "patch_check", "output": {
+        "verdict": "red", "why": "tests are not green", "tests_exit_code": 1}}}
+
+    revise_refuted_draft(loop, st, lambda attempt: "patch_check красный: verdict red, tests_exit_code 1")
+
+    assert "verdict red" in st.draft_answer
+    assert "the last patch_check is NOT green" in st.failure_history[-1].reason
+
+
+def test_a_true_green_claim_is_left_alone(monkeypatch) -> None:
+    monkeypatch.setattr(verifier_mod, "verify", _fake_verify({}))
+    loop, st = _Loop(), _state("verdict: green")
+    st.artifacts = {"patch_check:x": {"tool": "patch_check", "output": {"verdict": "green"}}}
+
+    def synthesize(attempt):
+        raise AssertionError("правдивый зелёный не переписывается")
+
+    revise_refuted_draft(loop, st, synthesize)
+    assert st.draft_answer == "verdict: green"
