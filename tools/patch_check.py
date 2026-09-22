@@ -108,7 +108,9 @@ def _apply_line_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
     for rel, items in by_file.items():
         target = (root / rel).resolve()
         if root.resolve() not in target.parents or not target.is_file():
-            errors.append(f"LINES {rel}: файла нет в копии")
+            errors.append(f"LINES {rel}: файла нет в копии — LINES правит только существующий файл; "
+                          "новый файл создаётся блоком с ПУСТЫМ SEARCH: <<<<<<< SEARCH / ======= / "
+                          "весь текст файла / >>>>>>> REPLACE")
             continue
         lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
         spans = sorted((b["lines"] for b in items), reverse=True)
