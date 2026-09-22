@@ -118,6 +118,46 @@ def defect_goal(root: Path) -> Any:
     return None
 
 
+def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] | None:
+    """Вердикт цели самопочинки: правка настоящая или файл ради файла.
+
+    Замер 2026-09-23, первая же живая цель после разблокировки: агент создал
+    `proposals/selffix/sii_5dab4ac83cc87892/edits.txt` с пустым каркасом
+    блоков — ни одной строки замены. Файловый судья сказал «verified», потому
+    что критерий требовал ровно «файл создан», а patch_check в ту же минуту
+    сказал «red: text outside blocks». Два прибора о той же работе, и наружу
+    шёл тот, который меряет не то.
+
+    Здесь вердикт ставит сам patch_check — без полного набора, без применения:
+    пустышка и неприменимая правка не проходят, а настоящая ещё встретит
+    полный набор в `settle_patch`. `None` — цель не про правку, судит обычный.
+    """
+    match = _PATCH_RE.search(success_check or "")
+    if not match:
+        return None
+    from tools.patch_check import PatchCheckTool
+
+    rel, root = match.group(0), Path(root)
+    if not (root / rel).is_file():
+        return {"verdict": "missing", "reason": f"файла правки {rel} нет",
+                "artifacts_named": [rel], "artifacts_observed": []}
+    try:
+        check = PatchCheckTool(workspace_root=root).run(path=rel, full=False)
+    except Exception as exc:  # noqa: BLE001 — сломанный инструмент не судит
+        return {"verdict": "unverifiable", "reason": f"patch_check не отработал: {exc}"[:200],
+                "artifacts_named": [rel], "artifacts_observed": [rel]}
+    green = check.get("verdict") == "green"
+    why = str(check.get("why") or "")
+    errors = "; ".join(str(e) for e in (check.get("errors") or ()))[:200]
+    return {
+        "verdict": "verified" if green else "missing",
+        "reason": (f"patch_check: {check.get('verdict')}"
+                   + (f" — {why} {errors}".rstrip() if not green else "")),
+        "artifacts_named": [rel],
+        "artifacts_observed": [rel] if green else [],
+    }
+
+
 def _forbidden(paths: list[str]) -> list[str]:
     return [p for p in paths if p.startswith(_FORBIDDEN)]
 

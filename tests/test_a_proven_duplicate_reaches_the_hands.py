@@ -48,11 +48,16 @@ def test_the_backlog_carries_the_proof(tmp_path) -> None:
 
 def test_a_proof_outranks_a_bare_size(tmp_path) -> None:
     ws = _workspace(tmp_path)
+    # Нечитаемая функция, а не 700 коротких: с 2026-09-23 поводом посмотреть
+    # служит функция, которую нельзя прочесть целиком, — сама длина файла
+    # больше ничего не значит (tests/test_backlog_oversized_module.py).
     (ws / "core" / "huge.py").write_text(
-        "\n".join(f"def f{i}():\n    return {i}\n" for i in range(700)), encoding="utf-8")
+        "def one_long_function():\n"
+        + "\n".join(f"    x{i} = {i}" for i in range(300)),
+        encoding="utf-8")
     backlog = load_backlog(ws)
     sources = [c.signal_source for c in backlog]
-    assert "oversized_module" in sources, "размер остаётся поводом посмотреть"
+    assert "oversized_module" in sources, "нечитаемая функция остаётся поводом посмотреть"
     assert sources.index("split_proof") < sources.index("oversized_module")
 
 
