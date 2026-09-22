@@ -80,3 +80,20 @@ def test_a_green_patch_lands_in_the_main_branch_and_closes_the_defect(tmp_path: 
     assert "return 2" in (root / "core" / "mod.py").read_text(encoding="utf-8")
     assert "self-apply" in _git(root, "log", "-1", "--format=%s").lower() or _git(root, "log", "--oneline").count("\n") >= 2
     assert all(i.status == "resolved" for i in registry.list())
+
+
+def test_an_environment_defect_is_left_to_the_operator(tmp_path: Path) -> None:
+    """2026-09-22 18:40: цикл самопочинки ушёл на «в пробе нет numpy» — это
+    решение о среде, кодом не закрывается."""
+    from core.patch_route import OPERATOR_DECISION
+    from core.self_improvement_issues import SelfImprovementIssue
+
+    root = _repo(tmp_path)
+    registry = SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH)
+    registry._save([SelfImprovementIssue(
+        fingerprint="no-numpy", title="в пробе нет numpy", action=OPERATOR_DECISION, status="open",
+        first_seen="2026-09-22T00:00:00+00:00", last_seen="2026-09-22T00:00:00+00:00",
+        evidence=("ModuleNotFoundError",), related_files=(), related_error_text="",
+        suggested_next_action="решает оператор")])
+
+    assert defect_goal(root) is None
