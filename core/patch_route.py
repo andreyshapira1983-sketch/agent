@@ -75,11 +75,22 @@ def _slug(fingerprint: str) -> str:
 
 def defect_goal(root: Path) -> Any:
     """Цель: починить один открытый дефект реестра правкой с зелёным patch_check."""
+    from core.defect_intake import intake_observations
     from core.drive_goal import DriveGoal
     from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
 
     state, now = _state(root), _now()
-    for issue in SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved():
+
+    registry = SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH)
+    # Приём своих сигналов живёт здесь, а не в команде одобрения: проверка
+    # 2026-09-22 перед прогоном показала, что `sync_self_improvement_issue_registry`
+    # зовёт только cli/commands_approval.py, а в автомате кампании этот путь не
+    # проходит ни разу — починенный накануне корень был там мёртв.
+    try:
+        intake_observations(root, registry)
+    except Exception as exc:  # noqa: BLE001 — приём не должен рушить выбор цели
+        _log(root, {"event": "defect_intake_failed", "error": f"{type(exc).__name__}: {exc}"})
+    for issue in registry.unresolved():
         # Дефект среды (поставить пакет, дать доступ) правкой кода не
         # закрывается: 2026-09-22 18:40 цикл ушёл на «в пробе нет numpy».
         if issue.action == OPERATOR_DECISION:
