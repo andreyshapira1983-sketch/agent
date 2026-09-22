@@ -50,3 +50,17 @@ def test_a_broken_observation_store_does_not_break_goal_choice(tmp_path: Path) -
     path.write_text("{не json\n", encoding="utf-8")
 
     assert defect_goal(tmp_path) is None
+
+
+def test_the_same_observation_is_not_filed_twice(tmp_path: Path) -> None:
+    """Приём узнаёт принятое наблюдение по своей улике, а не по тексту дефекта."""
+    _observation(tmp_path)
+    defect_goal(tmp_path)
+    first = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
+    assert len(first) == 1
+
+    from core.defect_intake import intake_observations
+
+    assert intake_observations(tmp_path) == [], "то же наблюдение принято во второй раз"
+    again = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
+    assert [i.last_seen for i in again] == [i.last_seen for i in first]

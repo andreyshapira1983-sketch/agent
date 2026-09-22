@@ -27,7 +27,13 @@ def intake_observations(workspace: Path | str, registry: Any = None) -> list[str
 
     root = Path(workspace)
     registry = registry or SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH)
-    known = {issue.related_error_text for issue in registry.list()}
+    # Уже принятое наблюдение узнаётся по СВОЕЙ улике (cobs_…), которую приём
+    # кладёт в дефект. Сверять его отпечаток с `related_error_text` — сверять
+    # разные вещи: та строка начинается со слова «detectors» и никогда не равна
+    # отпечатку, поэтому за каждый проход заново переписывались одни и те же
+    # пять классов и их «последний раз виден» обновлялся без причины
+    # (замечено живой проверкой на сервере 2026-09-22, 39 наблюдений).
+    known = {str(ref) for issue in registry.list() for ref in (issue.evidence or ())}
     filed: list[str] = []
     records = CausalObservationStore(root / "data" / "causal_observations.jsonl").load()
     for record in sorted(records, key=lambda r: (-r.occurrences, r.last_seen))[:40]:
