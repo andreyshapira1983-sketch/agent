@@ -88,7 +88,7 @@
      "_added": "2026-09-21: 44 из 74 блоков «Не подтверждено» были о его же файлах; дверь, а не стена."
     },
     {
-     "site": "core/draft_refutation.py:62",
+     "site": "core/draft_refutation.py:90",
      "node": "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
      "puts": "draft_contradicts_evidence — черновик противоречит своим уликам; синтезатор переписывает его один раз до ответа (2026-09-22); пишет модульная функция core/draft_refutation.revise_refuted_draft, которую зовёт лестница синтеза — перепись узлов считает только методы цикла",
      "call": "append"
