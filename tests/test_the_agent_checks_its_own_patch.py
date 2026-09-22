@@ -117,3 +117,16 @@ def test_a_lines_block_may_carry_old_text_before_the_separator(tmp_path: Path) -
     assert blocks[0]["new"] == "    return x + 1\n"
     assert apply_blocks(root, blocks) == []
     assert "return x + 1" in (root / "pkg" / "mod.py").read_text(encoding="utf-8")
+
+
+def test_the_copy_runs_without_the_agents_keys(tmp_path: Path, monkeypatch) -> None:
+    """2026-09-22 15:07: полный набор внутри patch_check шёл с настоящим ключом
+    DeepSeek в окружении и не уложился в 900 с; ключ тестам не нужен вовсе."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-should-not-travel")
+    root = _repo(tmp_path)
+    rel = _patch(root, (
+        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
+        "FILE: tests/test_env.py\n<<<<<<< SEARCH\n=======\n"
+        "import os\n\n\ndef test_no_key():\n    assert 'DEEPSEEK_API_KEY' not in os.environ\n>>>>>>> REPLACE\n"))
+    result = PatchCheckTool(workspace_root=root).run(path=rel)
+    assert result["tests_exit_code"] == 0, result["tests_output"]

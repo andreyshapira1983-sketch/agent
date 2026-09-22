@@ -235,8 +235,13 @@ class PatchCheckTool(Tool):
     def _run(self, cmd: list[str], cwd: Path) -> tuple[int, str]:
         try:
             # argv из своих частей, пути проверены require_ascii_identifier.
+            # Окружение — как у run_tests, без ключей: 2026-09-22 15:07 полный
+            # набор с настоящим ключом DeepSeek в окружении не уложился в 900 с.
+            from tools.run_tests import RunTestsTool
+
             p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",  # noqa: S603
-                               errors="replace", timeout=_TIMEOUT_SECONDS, check=False)
+                               errors="replace", timeout=_TIMEOUT_SECONDS, check=False,
+                               env=RunTestsTool._build_env())
             return p.returncode, (p.stdout or "") + (p.stderr or "")
         except subprocess.TimeoutExpired:
             return -1, f"timeout {_TIMEOUT_SECONDS}s"
