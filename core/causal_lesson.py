@@ -307,6 +307,18 @@ def observation_from_self_stop(
     )
 
 
+def trace_log_path(trace_id: str) -> str:
+    """Журнал трассы по её номеру. Номер уже начинается с «trace_».
+
+    Кампания 2026-09-22: адрес склеивался как logs/trace_{trace_id}.jsonl и
+    выходил «logs/trace_trace_…» — такого файла нет. 38 наблюдений из 47
+    называли его, модель писала пробу по этому адресу, ворота рождения
+    убивали пару, и подъём падал «выжило 1» десятки циклов подряд.
+    """
+    name = trace_id if trace_id.startswith("trace_") else f"trace_{trace_id}"
+    return f"logs/{name}.jsonl"
+
+
 def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | None:
     """Отклонение из эпизода: три выводимые вещи и ни одной невыводимой.
 
@@ -332,6 +344,6 @@ def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | No
             "объяснения не выдвинуты, причина не доказана. Сигналы записаны в "
             "data/episodic_memory.jsonl (payload.defect_signals) у эпизода "
             f"{getattr(episode, 'id', '') or ''!s}; событие детектора — в "
-            f"logs/trace_{trace_id}.jsonl"
+            f"{trace_log_path(trace_id)}"
         ),
     )

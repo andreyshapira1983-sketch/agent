@@ -129,12 +129,13 @@ def explain_causal_observation(
     try:
         # Кормление реальностью (проект агента): без списка модель выдумывала
         # имена журналов, и суд давился неведением — замер 2/2 кампаний.
-        inventory = _live_inventory_block(workspace)
+        mismatch = _repaired_address(record.observed_mismatch)
+        inventory = _live_inventory_block(workspace, named=_named_files(mismatch, workspace))
         raw = str(agent.llm.complete(
             system=_SYSTEM_PROMPT,
             user=(
                 f"Сигналы дефекта: {', '.join(record.defect_signals)}\n"
-                f"Наблюдение: {record.observed_mismatch[:1200]}\n"
+                f"Наблюдение: {mismatch[:1200]}\n"
                 f"Улики: {', '.join(record.evidence_refs[:6])}\n"
                 f"Повторений: {record.occurrences}"
                 + (f"\n{inventory}" if inventory else "")
@@ -143,6 +144,7 @@ def explain_causal_observation(
         ) or "")
     except Exception as exc:  # noqa: BLE001 — провод не роняет кампанию
         return _decline(agent, f"model_error:{type(exc).__name__}",
+                        llm_calls_spent=max(0, _llm_calls(agent) - spent_before),
                         fingerprint=record.fingerprint)
 
     pairs = _parse_hypotheses(raw)
@@ -155,6 +157,8 @@ def explain_causal_observation(
         return _decline(
             agent,
             f"нужны конкурирующие фальсифицируемые объяснения: выжило {len(pairs)}",
+            # Вызов модели уже оплачен: 2026-09-22 отказ писал 0, и бюджет врал.
+            llm_calls_spent=max(0, _llm_calls(agent) - spent_before),
             fingerprint=record.fingerprint,
             answer_head=" ".join((raw or "").split())[:200],
         )
@@ -856,9 +860,29 @@ def _pairs_with_real_targets(pairs, workspace):
     return survivors
 
 
-def _live_inventory_block(workspace):
-    """Модель пишет пробы по списку настоящих файлов, а не по памяти."""
-    lines = []
+_TRACE_ADDRESS_RE = re.compile(r"logs/(?:trace_)+(?=trace_)")
+_NAMED_FILE_RE = re.compile(r"\b(?:logs|data)/[\w.\-]+\.jsonl?\b")
+
+
+def _repaired_address(text: str) -> str:
+    """Старые наблюдения (до 2026-09-22) называли «logs/trace_trace_…» —
+    файла нет (`core.causal_lesson.trace_log_path`); адрес чинится при чтении."""
+    return _TRACE_ADDRESS_RE.sub("logs/", text or "")
+
+
+def _named_files(text: str, workspace) -> list[str]:
+    """Файлы, которые называет само наблюдение и которые есть на диске."""
+    found = dict.fromkeys(_NAMED_FILE_RE.findall(text or ""))
+    return [rel for rel in found if (Path(workspace) / rel).is_file()]
+
+
+def _live_inventory_block(workspace, named=()):
+    """Модель пишет пробы по списку настоящих файлов, а не по памяти.
+
+    Файлы, названные наблюдением, идут первыми: список каталога режется на
+    сорока именах, а в logs/ их сотни — нужный журнал в него не попадал.
+    """
+    lines = [f"названы наблюдением: {', '.join(named)}"] if named else []
     for dirname in _PROBE_DIRS:
         d = Path(workspace) / dirname
         if not d.is_dir():
