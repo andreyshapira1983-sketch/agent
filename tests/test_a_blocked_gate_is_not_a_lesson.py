@@ -28,6 +28,12 @@ episode."* The collapser cannot reach these rows (protected, and it only runs
 from a typed command — MIR-131), so the writer must not mint the duplicate in
 the first place.
 
+SECOND MEASUREMENT (2026-09-23). The same shape, one status further out: the
+producer's empty runs (`no_grounded_target` and kin) were minting the tag too,
+287 of the store's 300 rows, every one protected. The tag is earned by work
+done; the absence of work does not earn it. The list of tagless statuses is now
+`_DEDUP_STATUSES` — the pre-flight gates plus the empty runs.
+
 WHAT THIS DOES NOT CLAIM. Not that gate waits vanish from memory — the FIRST
 wait is banked, searchable under its status tag, and simply ages out like any
 ordinary episode. Not that genuine attempts lose anything: a veto or a proposal
@@ -89,11 +95,28 @@ def test_every_preflight_gate_is_covered() -> None:
         assert "lesson" not in ep.tags, f"{status} is tagged lesson"
 
 
+def test_an_empty_run_is_not_a_lesson_either() -> None:
+    """Граница сдвинута 2026-09-23 по замеру, а не по вкусу.
+
+    Ход, которому не нашлось цели, — такая же статусная строка, как «одобрение
+    ждёт»: работы не было, учиться не на чем. Замер: 287 записей опыта из 300
+    были именно такими, все с меткой `lesson`, то есть под защитой от
+    вытеснения; штатная чистка дублей брала из них 0. Опыт показывал «успешной
+    задачи ни разу», и драйв компетентности вечно перебивал самопочинку.
+    Слово оператора в тот день: «надо почистить всё враньё».
+    """
+    for status in ("no_grounded_target", "no_patch", "skipped", "no_llm",
+                   "idle", "none"):
+        ep = build_self_build_episode("self-build-produce",
+                                      {"status": status, "reason": "x"})
+        assert "lesson" not in ep.tags, f"пустой ход «{status}» помечен уроком"
+
+
 def test_a_genuine_attempt_keeps_its_lesson_tag() -> None:
     """The boundary that must not move. Learning from real attempts — vetoes
     included — is correct and must stay; MIR-096 measured how few channels a
     lesson has, and this repair may not close another one."""
-    for status in ("proposed", "critic_veto", "no_grounded_target",
+    for status in ("proposed", "critic_veto",
                    "committed_local", "rolled_back"):
         ep = build_self_build_episode("self-build-produce",
                                       {"status": status, "reason": "x"})
