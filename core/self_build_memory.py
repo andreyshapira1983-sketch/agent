@@ -471,6 +471,11 @@ def sync_self_improvement_issue_registry(
 ) -> SelfImprovementIssueRegistry:
     """Persist recent failures and apply only explicitly matching transitions."""
     registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
+    # Свой сбой становится дефектом, а не только наблюдением (2026-09-22:
+    # за день ни одной записи от агента при десятках срабатываний детекторов).
+    from core.defect_intake import intake_observations
+
+    intake_observations(workspace, registry)
     for record in _recent_self_improvement_events(
         agent, workspace, max_age_days=max_age_days
     ):
