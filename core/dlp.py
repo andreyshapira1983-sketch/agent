@@ -7,6 +7,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DlpFinding:
+    """A single regex hit inside a piece of text (secrets and personal data).
+
+    `matched` holds the raw bytes that triggered the match. Callers MUST
+    NOT log it — the raw value stays inside the kernel. The kernel passes
+    findings to the redactor, which replaces the span with a
+    `[REDACTED:<kind>]` token. `core.secret_scanner.SecretFinding` is this
+    same class under its old name.
+    """
+
     kind: str
     start: int
     end: int

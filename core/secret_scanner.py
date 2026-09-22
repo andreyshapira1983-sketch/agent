@@ -30,8 +30,13 @@ Adding a new pattern? Do it here, once. Every consumer picks it up for free.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Final
+
+# Одна копия структуры находки — в core/dlp.py (заявка агента
+# proposals/2026-09-21_dedupe_secretfinding_into_dlp.md; кампания 2026-09-22
+# шесть раз подряд брала эту цель, а живой код менять не может). Имя
+# SecretFinding остаётся импортируемым отсюда: его берёт core/redaction.py.
+from core.dlp import DlpFinding as SecretFinding
 
 # The set of KEY NAMES that make a value a credential. Single source of truth:
 # it feeds both the flat-text rule (`credential-assignment`, below) and the
@@ -163,22 +168,6 @@ KEYWORD_RULES: Final[tuple[str, ...]] = (
     "secret_key", "private_key",
     "authorization:", "auth_token",
 )
-
-
-@dataclass(frozen=True)
-class SecretFinding:
-    """A single regex hit inside a piece of text.
-
-    `matched` holds the raw bytes that triggered the match. Callers MUST
-    NOT log it — the whole point of this module is that the raw value
-    stays inside the kernel. The kernel passes findings to the redactor,
-    which replaces the span with a `[REDACTED:<kind>]` token.
-    """
-
-    kind: str
-    start: int
-    end: int
-    matched: str
 
 
 def looks_like_secret_body(value: str) -> bool:
