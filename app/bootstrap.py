@@ -1,6 +1,7 @@
 """Agent construction: tool registry, policy, memory stores, model router."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from cli.parsers import _env_bool
@@ -354,4 +355,5 @@ def build_agent(
         # Прочитанное — не конец хода (core/observation_round.py). Выключено по
         # умолчанию до замера: включается AGENT_OBSERVE_BEFORE_ANSWER=1.
         observe_before_answer=_env_bool("AGENT_OBSERVE_BEFORE_ANSWER", False),
+        max_replan_attempts=max(1, int(os.getenv("AGENT_MAX_REPLANS", "3") or 3)),
     )
