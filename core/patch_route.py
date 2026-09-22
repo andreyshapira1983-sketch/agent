@@ -85,10 +85,15 @@ def defect_goal(root: Path) -> Any:
         state.setdefault("patch_to_defect", {})[patch] = issue.fingerprint
         _save_state(root, state)
         evidence = "; ".join(issue.evidence[:3])[:900]
+        # «Меняется ровно 1 файл» — иначе ворота уточнения (core/loop_gates.py)
+        # отвечают вопросом вместо работы, а в автомате на вопрос никто не
+        # ответит: 2026-09-22 18:21 три цикла подряд ушли в clarify.
         goal = (f"Почини свой дефект «{issue.title}» ({issue.fingerprint}). Улики: {evidence}. "
-                f"Что сделать: {issue.suggested_next_action[:400]}. Напиши правку файлом {patch} — блоки "
-                "FILE:/<<<<<<< LINES a-b (номера строк из file_read) или SEARCH/=======/>>>>>>> REPLACE, "
-                "и новый тест в tests/ пустым SEARCH; вызывай patch_check, пока verdict не станет green. "
+                f"Что сделать: {issue.suggested_next_action[:400]}. "
+                f"Меняется ровно 1 файл: {patch}. Все остальные файлы только читаются. "
+                f"В {patch} напиши блоки FILE:/<<<<<<< LINES a-b (номера строк из file_read) или "
+                "SEARCH/=======/>>>>>>> REPLACE, и новый тест в tests/ блоком с пустым SEARCH; "
+                f"затем вызывай patch_check с путём {patch}, пока verdict не станет green. "
                 "Не трогай деньги, ключи, политику, одобрения и сеть — такие правки не лягут.")
         return DriveGoal(status="proposed", goal=goal, success_check=f"Файл {patch} создан",
                          drive="self_improvement_need", action="pursue_goal")
