@@ -523,7 +523,7 @@ class AgentLoop(
             cheap_path_active=cheap_path_active,
             local_critique_active=local_critique_active,
             _task_synth_llm=_task_synth_llm,
-            _cp=_cp,
+            _cp=_cp, chain=chain,
         )
         self._run_synthesizer_ladder(_synth_state)
         draft_answer = _synth_state.draft_answer

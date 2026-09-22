@@ -55,6 +55,7 @@ from core.answer_format import (
 from core.completion_marker import marker_instruction as completion_marker_instruction
 from core.completion_marker import new_nonce as new_completion_nonce
 from core.completion_marker import parse_completion_marker
+from core.draft_refutation import revise_refuted_draft
 from core.model_router import ModelRole
 from core.model_usage import ModelBudgetExceeded
 from core.models import Goal
@@ -64,7 +65,7 @@ from core.referent_resolver import (
     citation_token_for_referent,
     is_show_only_directive,
 )
-from core.replan import ReplanTrigger, world_facing_failures
+from core.replan import ReplanTrigger, failures_for_synthesis
 from core.runtime_self import runtime_self_block
 from core.smart_memory import _COMPLETION_DECLARATIONS
 from core.synth_resilience import (
@@ -777,10 +778,8 @@ class AgentLoopSynthesis:
                 # had told it. Nothing carried the answer to synthesis.
                 # `<failure_context>` is not an `<evidence>` block, so this
                 # gives the failure a voice without giving it citation power.
-                failure_history=(
-                    st.failure_history if st.replan_exhausted
-                    else world_facing_failures(st.failure_history)
-                ),
+                failure_history=failures_for_synthesis(
+                    st.failure_history, exhausted=st.replan_exhausted),
                 llm=_synth_llm,
                 # Shrink the prompt/output on the adapted attempt — this is the
                 # recovery for a request the model "could not finish".
@@ -836,6 +835,7 @@ class AgentLoopSynthesis:
             self._rewrite_if_off_topic(st, _do_synthesize)
             self._last_synth_degraded = _ladder.degraded
             self._read_what_it_left_unverified(st, _do_synthesize)
+            revise_refuted_draft(self, st, _do_synthesize)
             if _ladder.degraded:
                 # The answer the user gets was assembled by the fallback, not
                 # by the attempt that declared. Keeping that declaration would

@@ -131,9 +131,12 @@ def test_the_acceptance_case_is_described_whole() -> None:
                 "readers", "lifetime", "owner", "properties", "semantic_defects")
     missing = [f for f in required if f not in fh]
     assert not missing, f"the acceptance case lost fields: {missing}"
-    assert len(fh["writers"]) == 6, (
-        "six write sites were found by reading the code (loop_attempt:481, "
-        "loop_synthesis:621, :688, verify_replan:149, :255, :406); a different "
+    # Седьмой — `revise_refuted_draft` (2026-09-22): черновик, противоречащий
+    # своим уликам, переписывается до ответа (core/draft_refutation.py).
+    assert len(fh["writers"]) == 7, (
+        "seven write sites were found by reading the code (loop_attempt:481, "
+        "loop_synthesis:622, :689, verify_replan:149, :255, :406, "
+        "draft_refutation:62); a different "
         "number means the line moved or a writer appeared — walk it, do not "
         "adjust the number"
     )
