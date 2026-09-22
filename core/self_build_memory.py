@@ -143,8 +143,13 @@ def build_self_build_episode(
 
     # `lesson` is what confers eligibility, eviction protection and retrieval
     # priority (MIR-115) — a pre-flight refusal earns none of that.
+    # Пустой ход — тоже не урок: 2026-09-23 замер показал 287 таких записей из
+    # 300, и все с меткой «урок», то есть под защитой от вытеснения. Штатная
+    # чистка дублей их не трогала (0 из 287), опыт врал «успехов ни разу», а
+    # драйв компетентности вечно перебивал самопочинку. Метка урока — за
+    # сделанную работу; за её отсутствие она не выдаётся.
     tags = (["self-build", kind, status, outcome]
-            if status in _GATE_WAIT_STATUSES
+            if status in _DEDUP_STATUSES
             else ["self-build", "lesson", kind, status, outcome])
     if status == "critic_veto":
         # Which kind of veto this was decides whether the target goes on the
