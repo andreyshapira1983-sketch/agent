@@ -110,6 +110,7 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
                    "команд", "выполн", "запуст"),
     "run_tests": ("run_tests", "pytest", "test suite", "run the test",
                   "run tests", "тест", "прогон"),
+    "patch_check": ("patch_check", "patch", "правк", "проверю правку", "edits.txt"),
     "diff_file": ("diff_file", "diff", "разниц", "сравн"),
     "read_logs": ("read_logs", "лог", "logs", "журнал"),
     "semantic_scholar_search": ("semantic_scholar", "scholar", "статьи",

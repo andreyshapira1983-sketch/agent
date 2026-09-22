@@ -306,6 +306,31 @@ def _line_range_arguments(
     return {"start_line": start, "end_line": end}, warnings
 
 
+def _sanitize_patch_check(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """patch_check admission: relative ASCII paths, at most 16 tests, full is a bool."""
+    def _rel(p: Any) -> bool:
+        return (isinstance(p, str) and bool(p.strip()) and p.isascii()
+                and not p.startswith(("/", "\\")) and ":" not in p and ".." not in p)
+
+    path, tests = args.get("path"), args.get("tests") or []
+    if not _rel(path):
+        warnings.append(f"step[{idx}]: patch_check path must be a relative ASCII path, dropped")
+        return None
+    if not isinstance(tests, list) or len(tests) > 16 or not all(_rel(t) for t in tests):
+        warnings.append(f"step[{idx}]: patch_check tests must be <=16 relative ASCII paths, dropped")
+        return None
+    cleaned: dict[str, Any] = {"path": path.strip(), "full": bool(args.get("full", False))}
+    if tests:
+        cleaned["tests"] = [t.strip() for t in tests]
+    return {
+        "tool": "patch_check", "arguments": cleaned, "label": f"patch_check:{path.strip()[:60]}",
+        "expected_outcome": "The patch is applied to a clean copy outside the workspace; "
+                            "SEARCH mismatches show real file lines; ruff and pytest output returned.",
+    }
+
+
 def _sanitize_read_logs(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
@@ -808,6 +833,9 @@ def sanitize_step(
                 "summary (passed/failed counts + failed test names)."
             ),
         }
+
+    if tool_name == "patch_check":
+        return _sanitize_patch_check(args, idx, warnings)
 
     if tool_name == "read_logs":
         return _sanitize_read_logs(args, idx, warnings)
