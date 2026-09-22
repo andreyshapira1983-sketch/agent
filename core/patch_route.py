@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any
 
 DAILY_CAP = 5
+#: Пометка дефекта, который правкой кода не закрывается (среда, доступ, деньги):
+#: его решает человек, и путь самопочинки такие пропускает.
+OPERATOR_DECISION = "operator_decision"
 RETRY_AFTER = timedelta(hours=6)
 STATE_RELPATH = "data/patch_route_state.json"
 LOG_RELPATH = "data/self_repair_log.jsonl"
@@ -77,6 +80,10 @@ def defect_goal(root: Path) -> Any:
 
     state, now = _state(root), _now()
     for issue in SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved():
+        # Дефект среды (поставить пакет, дать доступ) правкой кода не
+        # закрывается: 2026-09-22 18:40 цикл ушёл на «в пробе нет numpy».
+        if issue.action == OPERATOR_DECISION:
+            continue
         tried = state["attempted"].get(issue.fingerprint)
         if tried and now - datetime.fromisoformat(tried) < RETRY_AFTER:
             continue
