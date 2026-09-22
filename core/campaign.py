@@ -146,6 +146,39 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
     )
 
 
+def judge_closing_goal(agent: Any, *, workspace: Any, goal: str, success_check: str,
+                       cycle: int, why: str, started_at: Any, ts: Any,
+                       proposals: int = 0, artifacts: int = 0) -> dict[str, Any] | None:
+    """Осудить закрывающуюся цель её же критерием и записать показание.
+
+    Судья стоял ТОЛЬКО на выходе из прогона, поэтому за 2685 циклов вердиктов
+    записано три, а 754 цикла «сделано» не проверил никто: «сделано» держалось
+    на слове исполнителя (замер 2026-09-23, слово оператора «почистить всё
+    враньё»). Цель закрывается в момент смены — здесь её критерий ещё в руках,
+    и здесь же известно, когда она началась, чтобы чужой след ей не зачёлся.
+
+    Цель без критерия не судится: «критерий не назван» — честное состояние, и
+    выдумывать мерку задним числом хуже, чем её не иметь.
+    """
+    if not str(success_check or "").strip():
+        return None
+    try:
+        verdict, error = judge_and_record(
+            goal=goal, success_check=success_check, workspace=workspace,
+            started_at=started_at, ts=ts, stop_reason=why, cycles_run=cycle,
+            proposals=proposals, artifacts=artifacts,
+        )
+    except Exception as exc:  # noqa: BLE001 — показание не валит прогон
+        _log(agent, "campaign_goal_verdict_failed",
+             {"cycle": cycle, "error": repr(exc)[:200]})
+        return None
+    _log(agent, "campaign_goal_verdict", {
+        "cycle": cycle, "goal": str(goal)[:200], "verdict": verdict.get("verdict"),
+        "reason": str(verdict.get("reason") or "")[:200], "unrecorded": error,
+    })
+    return verdict
+
+
 def _approved_ids(approval_inbox) -> frozenset[str]:
     """Approved item ids, or empty when the inbox is absent or unreadable —
     a new approval during a backoff is a wake condition (block 8)."""
@@ -412,7 +445,6 @@ def run_campaign(
     # dry-run reported «idle_stall», which reads as a failure).
     streak_repeats = False
     previous_goal = ""
-
     def _switch_goal(cycle: int, why: str) -> bool:
         """Право сменить цель ВНУТРИ прогона (слово оператора 2026-09-01).
 
@@ -425,6 +457,7 @@ def run_campaign(
         """
         nonlocal current_goal, previous_goal, goal_switches, idle_streak, streak_repeats
         nonlocal current_success_check, current_goal_action, llm_calls_used, cost_units_used
+        nonlocal goal_started_at
         limit = config.max_goal_switches
         if next_goal is None or (limit and goal_switches >= limit):
             return False
@@ -435,8 +468,18 @@ def run_campaign(
         if not switched:
             return False
         goal_switches += 1
+        # Уходящая цель судится СВОИМ критерием здесь, а не в конце прогона:
+        # судья стоял только на выходе, поэтому за 2685 циклов вердиктов
+        # записано три, а 754 цикла «сделано» не проверил никто — «сделано»
+        # держалось на слове исполнителя (замер 2026-09-23). Цель закрывается
+        # ровно в этой точке, и здесь её критерий ещё в руках.
+        judge_closing_goal(agent, workspace=workspace, goal=current_goal,
+                           success_check=current_success_check, cycle=cycle, why=why,
+                           started_at=goal_started_at, ts=now_fn(),
+                           proposals=proposals, artifacts=artifacts)
         previous_goal, current_goal = current_goal, switched
         current_success_check = switched_check
+        goal_started_at = now_fn()
         current_goal_action = switched_action
         # Новая цель — новая тема: память о повторах прежней темы не должна
         # объявлять повтором первый же шаг по новой.
@@ -475,6 +518,10 @@ def run_campaign(
     stop_reason = ""
     status: CampaignStatus = "completed"
     started_at = now_fn()
+    #: Когда началась ТЕКУЩАЯ цель: судья отделяет след, сделанный по ней, от
+    #: следа, лежавшего здесь раньше, и без этой отметки чужая работа зачлась
+    #: бы новой цели (core/campaign_verdict.against_start).
+    goal_started_at = started_at
 
     def _wait_for_change(cycle: int, stall: str) -> bool:
         """Блок 8: ограниченное ожидание ВНУТРИ процесса вместо смерти.
