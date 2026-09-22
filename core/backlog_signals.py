@@ -302,6 +302,21 @@ OVERSIZED_MODULE_SOURCE = "oversized_module"
 _OVERSIZED_MODULE_MIN_LINES = 800
 _MAX_OVERSIZED_RECORDS = 25
 
+#: Функция длиннее этого — та, которую НЕЛЬЗЯ прочесть и найти в ней проблему.
+#: Слово оператора 2026-09-23, договор о дроблении: «файл делится, когда в нём
+#: лишние функции, которые к нему не относятся, либо когда он так велик, что
+#: его не прочесть и не увидеть, где беда; маленький файл легче наблюдать».
+#:
+#: Замер, которым договор проверен. Механизм предложил разделить
+#: core/loop_step_execution.py (1158 строк) — вынести восемь методов по 25-32
+#: строки. Все двенадцать методов файла относятся к исполнению шага, чужого
+#: в нём нет; линейка файлов его не сторожит (потолок 2000). А `_execute_step`
+#: на 566 строк — ровно то, что прочесть нельзя, — оставался нетронутым.
+#: Правило мерило файл, а не содержимое: двадцать файлов core/ длиннее 800
+#: строк стали кандидатами разом, и агент дробил бы их по очереди, вынося
+#: отовсюду мелочь. Мерить надо то, из-за чего дробят.
+_UNREADABLE_FUNCTION_LINES = 200
+
 
 def _code_line_count(content: str) -> tuple[int, bool]:
     """Lines that carry code, and whether the module parsed.
@@ -366,6 +381,38 @@ def _code_line_count(content: str) -> tuple[int, bool]:
 _OVERSIZED_TARGET_PREFIX = "split:"
 
 
+def _longest_function(content: str) -> tuple[str, int, int]:
+    """Самая длинная функция модуля: имя, число строк и где она начинается.
+
+    Метод класса называется вместе с классом (`Класс.метод`), иначе читающий
+    не найдёт `_execute_step` среди одноимённых. Немой разбор — не повод
+    объявить файл здоровым и не повод его дробить: нечитаемый для машины
+    модуль возвращает пустое имя и ноль строк, и сигнала не будет.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(content or "")
+    except (SyntaxError, ValueError):
+        return "", 0, 0
+    best_name, best_size, best_at = "", 0, 0
+    owner: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owner[id(child)] = node.name
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        size = (node.end_lineno or node.lineno) - node.lineno + 1
+        if size > best_size:
+            prefix = owner.get(id(node))
+            best_name = f"{prefix}.{node.name}" if prefix else node.name
+            best_size, best_at = size, node.lineno
+    return best_name, best_size, best_at
+
+
 def oversized_module_candidates(
     files: Iterable[tuple[str, str]],
 ) -> tuple[list[SignalRecord], str]:
@@ -381,7 +428,7 @@ def oversized_module_candidates(
     :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``,
     and ``problem_quote`` states the concrete line count.
     """
-    measured: list[tuple[int, int, bool, str]] = []
+    measured: list[tuple[int, int, str, str]] = []
     seen: set[str] = set()
     for rel_path, content in files:
         rel = str(rel_path or "").replace("\\", "/").strip()
@@ -389,36 +436,35 @@ def oversized_module_candidates(
             continue
         seen.add(rel)
         total = content.count("\n") + 1 if content else 0
-        code, parsed = _code_line_count(content)
-        decisive = code if parsed else total
-        if decisive >= _OVERSIZED_MODULE_MIN_LINES:
-            measured.append((decisive, total, parsed, rel))
+        # Повод дробить — не длина файла, а функция, которую нельзя прочесть.
+        # Файл без такой функции читается, и беду в нём видно: дробить его
+        # значит двигать мелочь и множить файлы без смысловой границы.
+        name, size, at = _longest_function(content)
+        if size >= _UNREADABLE_FUNCTION_LINES:
+            measured.append((size, total, rel, name, at))
 
-    measured.sort(key=lambda item: (-item[0], item[3]))
+    measured.sort(key=lambda item: (-item[0], item[2]))
 
     records: list[SignalRecord] = []
     quotes: list[str] = []
     kept = measured[:_MAX_OVERSIZED_RECORDS]
     count = len(kept)
-    for index, (decisive, total, parsed, rel) in enumerate(kept):
-        if parsed:
-            quote = (
-                f"{rel} has {decisive} code lines of {total} total "
-                f"(soft limit {_OVERSIZED_MODULE_MIN_LINES} code lines; "
-                "docstrings and comments excluded); split into focused modules"
-            )
-        else:
-            quote = (
-                f"{rel} has {total} lines (unparseable, counted as total; "
-                f"soft limit {_OVERSIZED_MODULE_MIN_LINES}); "
-                "split into focused modules"
-            )
+    for index, (decisive, total, rel, name, at) in enumerate(kept):
+        quote = (
+            f"{rel}: функция {name} занимает {decisive} строк при пороге "
+            f"читаемости {_UNREADABLE_FUNCTION_LINES} — её нельзя прочесть "
+            f"целиком и увидеть, где беда (весь файл {total} строк). Разделить "
+            "надо её: вынести смысловые части тела в отдельные функции или "
+            "модуль. Переносить мелких соседей незачем — они и так читаются."
+        )
         quotes.append(quote)
         records.append(
             SignalRecord(
                 signal_source=OVERSIZED_MODULE_SOURCE,
                 target_path=f"{_OVERSIZED_TARGET_PREFIX}{rel}",
-                evidence_ref=f"{rel}:1",
+                # Улика ведёт к САМОЙ функции, а не к первой строке файла:
+                # читающий должен открыть то, из-за чего дробят.
+                evidence_ref=f"{rel}:{at}",
                 problem_quote=quote,
                 # Worst-first: the biggest module gets the largest bump so it
                 # ranks ahead of its peers while staying below the next tier.

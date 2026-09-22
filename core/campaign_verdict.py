@@ -116,6 +116,25 @@ def judge_campaign(
 ) -> dict[str, Any]:
     """Сказать, сошёлся ли критерий кампании, и чем это наблюдается."""
     check = str(success_check or "").strip()
+    # Цель самопочинки судит сам patch_check, а не наличие файла: 2026-09-23
+    # первая живая правка была пустым каркасом блоков — файловый судья сказал
+    # «verified», patch_check в ту же минуту сказал «red». Прибор, меряющий
+    # не то, наружу не идёт (core/patch_route.patch_goal_verdict).
+    from core.patch_route import patch_goal_verdict
+
+    special = patch_goal_verdict(workspace, check)
+    if special is not None:
+        observed = list(special.get("artifacts_observed") or ())
+        named_patch = list(special.get("artifacts_named") or ())
+        return {
+            "goal": str(goal or ""),
+            "success_check": check,
+            "verdict": str(special.get("verdict") or "unverifiable"),
+            "reason": str(special.get("reason") or ""),
+            "named_traces": named_patch,
+            "missing_traces": [a for a in named_patch if a not in observed],
+            "fresh_traces": observed,
+        }
     observation = observe_success_check(check, workspace)
     named = [str(a) for a in observation.get("artifacts") or ()]
     missing = [str(m) for m in observation.get("missing") or ()]
