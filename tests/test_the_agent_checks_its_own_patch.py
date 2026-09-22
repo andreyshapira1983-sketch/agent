@@ -130,3 +130,12 @@ def test_the_copy_runs_without_the_agents_keys(tmp_path: Path, monkeypatch) -> N
         "import os\n\n\ndef test_no_key():\n    assert 'DEEPSEEK_API_KEY' not in os.environ\n>>>>>>> REPLACE\n"))
     result = PatchCheckTool(workspace_root=root).run(path=rel)
     assert result["tests_exit_code"] == 0, result["tests_output"]
+
+
+def test_the_full_suite_waits_for_the_own_test_to_be_green(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    rel = _patch(root, (
+        "FILE: tests/test_red.py\n<<<<<<< SEARCH\n=======\ndef test_red():\n    assert False\n>>>>>>> REPLACE\n"))
+    result = PatchCheckTool(workspace_root=root).run(path=rel, full=True)
+    assert result["tests_exit_code"] == 1 and "full_exit_code" not in result
+    assert "make them green first" in result["full_output"]
