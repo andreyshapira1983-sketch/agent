@@ -63,6 +63,10 @@ def run_one_shot(
     build_agent: Callable[..., object] = _build_agent,
     # Прошлые реплики разговора (вопрос, ответ) — см. `--history`.
     history: list[tuple[str, str]] | None = None,
+    # Долгая память в разговоре — только по ключу (оператор 2026-09-22): уроки
+    # поломок пишутся в data/persistent_memory.jsonl, а без ключа чат их не
+    # видел — 223 «persistent store not configured» за день. Без ключа — как было.
+    with_persistent: bool = False,
 ) -> int:
     """Run a single question end-to-end and return the process exit code."""
     # Approval provider selection. One-shot can't realistically prompt a
@@ -114,7 +118,7 @@ def run_one_shot(
     agent = build_agent(
         workspace,
         with_memory=bool(history),
-        with_persistent=False,
+        with_persistent=with_persistent,
         with_experience=True,
         episodic_replay=False,
         approval_provider=approval_provider,
