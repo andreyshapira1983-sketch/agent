@@ -350,6 +350,42 @@ def _effect_completed_cleanly(loop: Any, st: Any, attempt_artifacts: dict | None
     return all(s.status == "done" for s in steps) and bool(effects) and not unseen and not red
 
 
+#: Сколько одинаковых кругов подряд — петля, а не работа.
+_STUCK_ROUNDS = 3
+
+
+def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> str:
+    """Что круг сделал и что получил — чтобы узнать повтор один в один."""
+    import hashlib
+
+    steps = [json.dumps({"tool": (s.action_spec or {}).get("tool_name"),
+                         "args": (s.action_spec or {}).get("arguments")},
+                        ensure_ascii=False, sort_keys=True, default=str)
+             for s in getattr(st.plan, "steps", None) or [] if getattr(s, "status", "") != "deferred"]
+    outs = [f"{k}={_as_text((v or {}).get('output'))[:4000]}" for k, v in sorted(attempt_artifacts.items())]
+    return hashlib.sha256("\n".join(steps + outs).encode("utf-8", "replace")).hexdigest()
+
+
+def _repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> int:
+    """Сколько последних кругов подряд совпадают с этим (1 — повтора нет).
+
+    2026-09-22 15:00: шесть кругов подряд — те же чтения и тот же patch_check с
+    тем же ответом, файл правки ни разу не переписан; бюджет сгорел. Так же
+    устроен StuckDetector в OpenHands: повтор пар «действие → наблюдение».
+    """
+    history = getattr(st, "round_signatures", None)
+    if history is None:
+        history = []
+        st.round_signatures = history
+    history.append(_round_signature(st, attempt_artifacts))
+    count = 1
+    for sig in reversed(history[:-1]):
+        if sig != history[-1]:
+            break
+        count += 1
+    return count
+
+
 def continue_after_observation(
     loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]]
 ) -> bool:
@@ -377,9 +413,21 @@ def continue_after_observation(
             "attempt": st.attempt, "max_total": limit, "reason": "attempt budget spent",
         })
         return False
+    repeats = _repeats(st, attempt_artifacts)
+    if repeats >= _STUCK_ROUNDS:
+        loop.log.log("observation_round_skipped", {
+            "attempt": st.attempt, "reason": f"stuck: {repeats} identical rounds",
+        })
+        return False
     block = format_observations(
         st.plan, attempt_artifacts,
         earlier=sorted(set(st.artifacts) - set(attempt_artifacts)))
+    if repeats > 1:
+        loop.log.log("observation_round_repeated", {"attempt": st.attempt, "repeats": repeats})
+        block = (f"REPEAT: the last {repeats} rounds ran the SAME steps and got the SAME outputs. "
+                 "Running them again will change nothing. Do the step that changes the outcome "
+                 "(for example, rewrite the file the check complained about), or return an empty "
+                 "plan and say what blocks you.\n\n" + block)
     st.advice_for_planner = block
     loop.log.log("observation_round", {
         "attempt": st.attempt,
