@@ -308,6 +308,10 @@ def _neutralize_operator_model_env(monkeypatch, tmp_path_factory):
     # Круг наблюдения меняет число вызовов планировщика; наборы, расписывающие
     # вызовы модели по порядку, не должны зависеть от .env оператора.
     monkeypatch.delenv("AGENT_OBSERVE_BEFORE_ANSWER", raising=False)
+    # Судья относимости (2026-09-22) — лишний вызов модели после черновика;
+    # включённый в .env сервера, он ронял 18 тестов в пути самоприменения,
+    # и каждая правка агента откатывалась, какой бы верной ни была.
+    monkeypatch.delenv("AGENT_RELEVANCE_JUDGE", raising=False)
 
 
 # Deliberately not a key shape any provider would accept: it must satisfy a
