@@ -204,6 +204,18 @@ def _verdict(result: dict[str, Any]) -> dict[str, str]:
     return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
 
 
+def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
+    """Полное содержимое файлов после правки — для штатного пути применения."""
+    blocks = parse_blocks((Path(workspace) / patch_rel).read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix="patch_apply_") as tmp:
+        copy = Path(tmp) / "repo"
+        PatchCheckTool(workspace_root=Path(workspace))._clone(copy)
+        errors = apply_blocks(copy, blocks)
+        if errors:
+            raise ValueError("; ".join(errors))
+        return {p: (copy / p).read_text(encoding="utf-8") for p in dict.fromkeys(b["path"] for b in blocks)}
+
+
 #: Порядок полей ответа: сначала то, что решает, — вердикт и вывод тестов,
 #: diff последним. 2026-09-22 16:15: показ ответа агенту режется на 6000 знаков,
 #: длинный diff стоял раньше вывода тестов — агент пять кругов не видел новой
