@@ -322,7 +322,11 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     drive, state = choose_drive(drives, state, now)
     report = DriveGoal(status="declined", reason="ни один драйв не выше порога содержания")
     if drive in ("uncertainty", "self_improvement_need"):
-        made = _observation_goal(root) if drive == "uncertainty" else _engineering_goal(root)
+        # Самоулучшение — сначала открытый дефект реестра правкой (core/patch_route.py).
+        from core.patch_route import defect_goal
+
+        made = (_observation_goal(root) if drive == "uncertainty"
+                else defect_goal(root) or _engineering_goal(root))
         report = made or report
         if report.status == "proposed":
             state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
