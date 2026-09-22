@@ -228,7 +228,18 @@ class PythonProbeTool(Tool):
             if rel.is_absolute() or ".." in rel.parts or rel.as_posix() in given:
                 continue
             try:
-                if (self.workspace_root / rel).is_file():
+                target = self.workspace_root / rel
+                # КАТАЛОГ считается наравне с файлом. Замер 2026-09-23: агент
+                # мерил свой код пробой `Path("core").glob("*.py")` и получил
+                # «py_files 0»; каталога в лаборатории нет, но проверка смотрела
+                # только `is_file()` и промолчала, так что ноль ушёл в ответ как
+                # факт о коде. Невидимый отказ, выглядящий как настоящий ноль, —
+                # его собственная открытая запись в реестре дефектов.
+                covered = any(g == rel.as_posix() or g.startswith(rel.as_posix() + "/")
+                              for g in given)
+                if covered:
+                    continue
+                if target.is_file() or (target.is_dir() and any(target.iterdir())):
                     missing.append(rel.as_posix())
             except (OSError, ValueError):
                 continue
@@ -301,8 +312,18 @@ class PythonProbeTool(Tool):
         missing = [p for p in self._missing_inputs(code, inputs) if p not in auto]
         notes = []
         if missing:
-            notes.append(f"workspace files named in the code but not passed in "
+            dirs = [p for p in missing
+                    if self.workspace_root is not None and (self.workspace_root / p).is_dir()]
+            notes.append(f"workspace paths named in the code but not passed in "
                          f"inputs: {missing}; the lab cannot see them — add them to inputs")
+            if dirs:
+                # Каталог через inputs не передашь — только перечислением файлов.
+                # Без этой строки совет «add them to inputs» невыполним, а счёт
+                # по пустому каталогу читается как измеренный ноль.
+                notes.append(f"{dirs} are DIRECTORIES: the lab starts in an empty "
+                             "temp folder, so a count over them is not a measurement "
+                             "of the code — pass the individual files in inputs, or "
+                             "read the directory with file_read/find_in_files instead")
         if not workspace_import and any(
                 f"No module named '{pkg}" in stderr for pkg in _WORKSPACE_PACKAGES):
             notes.append(f"the agent's own modules are not importable here because "
