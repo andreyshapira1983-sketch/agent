@@ -219,6 +219,16 @@ def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, 
     return out[:limit]
 
 
+def _open_defect_count(root: Path) -> int:
+    """Сколько дефектов реестра ждут починки (0 — реестра нет или он пуст)."""
+    try:
+        from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
+
+        return len(SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved())
+    except Exception:  # noqa: BLE001 — нечитаемый реестр = ноль поводов, остальное считается
+        return 0
+
+
 def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[str, dict[str, Any]]:
     """Все драйвы: {имя: {"value": 0..1, "why": строка}}. Только чтение диска."""
     root = Path(workspace)
@@ -257,12 +267,19 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
 
     targets = self_improvement_proofs(root)
     changed = last_self_change(root)
+    # Открытые дефекты реестра — такой же повод чинить себя, как дубль или
+    # раскол: 2026-09-22 вес был ноль при семи открытых дефектах, потому что
+    # считались только структурные доказательства, и путь самопочинки
+    # (core/patch_route.py) не запускался ни разу.
+    open_defects = _open_defect_count(root)
     drives["self_improvement_need"] = {
-        "value": _growth(changed, now, TAU_HOURS["self"]) if targets else 0.0,
+        "value": (_growth(changed, now, TAU_HOURS["self"]) if targets
+                  else 1.0 - math.exp(-open_defects / 3) if open_defects else 0.0),
         "why": (f"последняя своя правка кода: {_ago(changed, now)}; "
                 + (f"доказано: {targets[0][2].describe(targets[0][0])}" if targets
-                   else "модуля с доказательством правки нет (толщина доказательством "
-                        "не является) — или всё занято ящиком или уроками")),
+                   else f"открытых дефектов в реестре: {open_defects}" if open_defects
+                   else "ни доказательства правки, ни открытых дефектов — "
+                        "или всё занято ящиком или уроками")),
     }
 
     tail = ledger[-20:]

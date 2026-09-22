@@ -105,3 +105,22 @@ def test_a_subject_task_ends_in_a_note_that_the_check_looks_at(tmp_path) -> None
     note.parent.mkdir(parents=True)
     note.write_text("итог", encoding="utf-8")
     assert observe_success_check(check, tmp_path)["verdict"] == "verified"
+
+
+def test_open_defects_raise_the_need_to_repair_itself(tmp_path) -> None:
+    """2026-09-22 18:07: вес самопочинки был 0.0 при семи открытых дефектах —
+    считались только структурные доказательства (дубль, раскол), и путь
+    самопочинки не запускался ни разу."""
+    from datetime import datetime, timezone
+
+    from core.drives import compute_drives
+    from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
+
+    now = datetime(2026, 9, 22, 18, tzinfo=timezone.utc)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    assert compute_drives(tmp_path, now)["self_improvement_need"]["value"] == 0.0
+
+    registry = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH)
+    registry.upsert_failure("FileNotFoundError: нет файла core/x.py", "2026-09-22T00:00:00+00:00")
+    drive = compute_drives(tmp_path, now)["self_improvement_need"]
+    assert drive["value"] > 0.2 and "открытых дефектов в реестре: 1" in drive["why"]
