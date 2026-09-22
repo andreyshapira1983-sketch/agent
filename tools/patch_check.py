@@ -284,7 +284,11 @@ class PatchCheckTool(Tool):
             else:
                 result["tests_exit_code"] = None
                 result["tests_output"] = "no test file in the patch and none named — a change without a test proves nothing"
-            if full:
+            if full and result.get("tests_exit_code") not in (0, None):
+                # 2026-09-22 15:33–15:40: свой тест красный, а полный набор (3 мин)
+                # гонялся каждый круг — три круга из шести ушли на ожидание.
+                result["full_output"] = "skipped: your own tests are red — make them green first"
+            elif full:
                 code, out = self._run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], copy)
                 result.update(full_exit_code=code, full_output=_tail(out, 25))
             result.update(_verdict(result))

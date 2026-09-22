@@ -362,7 +362,11 @@ def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> s
                          "args": (s.action_spec or {}).get("arguments")},
                         ensure_ascii=False, sort_keys=True, default=str)
              for s in getattr(st.plan, "steps", None) or [] if getattr(s, "status", "") != "deferred"]
-    outs = [f"{k}={_as_text((v or {}).get('output'))[:4000]}" for k, v in sorted(attempt_artifacts.items())]
+    # Время прогона и имена временных папок меняются от круга к кругу, смысл —
+    # нет (15:33–15:40: «in 0.16s» против «in 0.17s» прятал повтор).
+    noise = re.compile(r"\d+(?:\.\d+)?s\b|\(\d+:\d\d:\d\d\)|patch_check_\w+|latency_ms\W+\d+")
+    outs = [f"{k}={noise.sub('', _as_text((v or {}).get('output'))[:4000])}"
+            for k, v in sorted(attempt_artifacts.items())]
     return hashlib.sha256("\n".join(steps + outs).encode("utf-8", "replace")).hexdigest()
 
 
