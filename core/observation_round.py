@@ -314,10 +314,7 @@ def _red_tests(attempt_artifacts: dict[str, dict[str, Any]]) -> bool:
             out.get("failed") or out.get("errors") or out.get("exit_code") not in (0, None)
         ):
             return True
-        if tool == "patch_check" and isinstance(out, dict) and (
-            not out.get("applied") or out.get("tests_exit_code") not in (0, None)
-            or out.get("full_exit_code") not in (0, None)
-        ):
+        if tool == "patch_check" and isinstance(out, dict) and out.get("verdict") != "green":
             return True
     return False
 

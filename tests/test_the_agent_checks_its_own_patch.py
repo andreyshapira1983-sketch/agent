@@ -80,3 +80,23 @@ def test_a_line_range_outside_the_file_is_refused(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     errors = apply_blocks(root, parse_blocks("FILE: pkg/mod.py\n<<<<<<< LINES 4-99\nx\n>>>>>>> REPLACE\n"))
     assert errors and "4-99" in errors[0]
+
+
+def test_a_patch_that_changes_nothing_is_not_green(tmp_path: Path) -> None:
+    """2026-09-22 14:43: строки 284–292 заменены теми же строками, без теста, —
+    applied=True, и ход закрылся как сделанный. Ничего не изменить — не зелёное."""
+    root = _repo(tmp_path)
+    same = (root / "pkg" / "mod.py").read_text(encoding="utf-8").splitlines()[0]
+    rel = _patch(root, f"FILE: pkg/mod.py\n<<<<<<< LINES 1-1\n{same}\n>>>>>>> REPLACE\n")
+    result = PatchCheckTool(workspace_root=root).run(path=rel)
+    assert result["applied"] is True
+    assert result["verdict"] == "red" and "changes nothing" in result["why"]
+
+
+def test_only_a_change_with_a_passing_test_is_green(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    rel = _patch(root, (
+        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
+        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
+        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
+    assert PatchCheckTool(workspace_root=root).run(path=rel)["verdict"] == "green"

@@ -123,8 +123,9 @@ def test_a_write_waits_one_round_not_every_round(workspace: Path):
 def test_a_red_patch_check_keeps_the_round() -> None:
     from core.observation_round import _red_tests
 
-    assert _red_tests({"patch_check:x": {"tool": "patch_check", "output": {"applied": False, "errors": ["x"]}}})
+    assert _red_tests({"patch_check:x": {"tool": "patch_check", "output": {"applied": False, "verdict": "red"}}})
+    # 14:43: правка без изменения и без теста — applied=True, но не зелёная.
     assert _red_tests({"patch_check:x": {"tool": "patch_check",
-                                         "output": {"applied": True, "tests_exit_code": 1}}})
+                                         "output": {"applied": True, "tests_exit_code": None, "verdict": "red"}}})
     assert not _red_tests({"patch_check:x": {"tool": "patch_check",
-                                             "output": {"applied": True, "tests_exit_code": 0}}})
+                                             "output": {"applied": True, "tests_exit_code": 0, "verdict": "green"}}})
