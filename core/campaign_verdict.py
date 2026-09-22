@@ -73,6 +73,23 @@ def _fresh_traces(
     return fresh
 
 
+def against_start(observation: dict[str, Any], workspace: Any, since: float | None) -> dict[str, Any]:
+    """Вердикт цели с учётом начала: все следы старше начала — «preexisting».
+
+    Кампания 2026-09-22, цикл 1: критерий «в книге Тонга найдено уравнение»
+    называл ВХОДНУЮ книгу (лежит с 15.09), и её существование засчиталось как
+    выполненная цель — ответ был о другом, уравнения в нём нет. Судья кампании
+    этот закон уже держал (`judge_campaign`), судья отдельной цели — нет.
+    """
+    if observation.get("verdict") != "verified" or since is None:
+        return observation
+    if _fresh_traces([str(a) for a in observation.get("artifacts") or ()], workspace, since):
+        return observation
+    named = ", ".join(str(a) for a in observation.get("artifacts") or ())
+    return {**observation, "verdict": "preexisting",
+            "reason": "следы найдены, но все старше начала цели: " + named}
+
+
 def judge_campaign(
     *, goal: str, success_check: str, workspace: Any, since: float | None = None,
 ) -> dict[str, Any]:

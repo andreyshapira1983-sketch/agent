@@ -151,7 +151,7 @@ def test_goal_contract_reaches_execution(tmp_path: Path, monkeypatch: Any) -> No
     `AutonomousRuntimeConfig`. Прежде на последнем участке `success_check`
     не существовало как поля вовсе.
     """
-    import core.campaign_io as campaign_io
+    from core import campaign_io
 
     seen: dict[str, Any] = {}
 
@@ -163,7 +163,7 @@ def test_goal_contract_reaches_execution(tmp_path: Path, monkeypatch: Any) -> No
             seen["config"] = config
             return SimpleNamespace(
                 tasks=[], status="completed", stop_reason="",
-                to_dict=lambda: {}, semantic_result=lambda: ("empty", False),
+                to_dict=dict, semantic_result=lambda: ("empty", False),
             )
 
     monkeypatch.setattr(
@@ -572,3 +572,27 @@ def test_the_artifact_that_owns_the_claim_still_has_to_meet_it(tmp_path):
     assert seen["verdict"] == "missing"
     assert "result.json" in seen["missing"]
     assert "log.txt" not in seen["missing"]
+
+
+def test_a_book_that_was_there_before_the_goal_is_not_its_result(tmp_path: Path) -> None:
+    """Кампания 2026-09-22, цикл 1: критерий «в книге Тонга найдено уравнение»
+    называл ВХОДНУЮ книгу; она лежала с 15.09, и её существование засчиталось
+    как работа, хотя ответ был о другом. След старше начала цели — не работа."""
+    import os
+
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    book = tmp_path / "library" / "book.txt"
+    book.parent.mkdir(parents=True)
+    book.write_text("Navier-Stokes ...", encoding="utf-8")
+    os.utime(book, (1_700_000_000, 1_700_000_000))
+    agent = _TalkativeAgent(tmp_path)
+    runtime = AutonomousRuntime(agent, workspace=tmp_path)
+    task = AutonomousTask(kind="goal", description="прочитай книгу")
+
+    report = runtime._task_goal(task, AutonomousRuntimeConfig(
+        goal="прочитать", goal_success_check="В library/book.txt найдено уравнение",
+        dry_run=True, include_tests=False,
+    ))
+
+    assert report.status == "inconclusive", "существование входной книги засчитано как работа"
+    assert report.details["success_check_verdict"] == "preexisting"
