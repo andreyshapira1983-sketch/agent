@@ -170,7 +170,9 @@ def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
             continue
         if not b["old"]:
             if target.exists():
-                errors.append(f"блок {n}: SEARCH пуст (новый файл), но {b['path']} уже есть")
+                errors.append(f"блок {n}: SEARCH пуст (новый файл), но {b['path']} уже есть — "
+                              "существующий файл правят блоком LINES a-b или SEARCH с его куском; "
+                              "пустой SEARCH только для файла, которого ещё нет")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(b["new"], encoding="utf-8")
