@@ -29,7 +29,9 @@ def test_the_observation_names_the_journal_where_the_signals_live() -> None:
     assert obs is not None
     text = obs.observed_mismatch
     assert "data/episodic_memory.jsonl" in text and "defect_signals" in text
-    assert "ep-7" in text and "logs/trace_trace_abc.jsonl" in text
+    # 2026-09-22: здесь было закреплено «logs/trace_trace_abc.jsonl» — адрес
+    # несуществующего файла; номер трассы уже начинается с «trace_».
+    assert "ep-7" in text and "logs/trace_abc.jsonl" in text and "trace_trace_" not in text
     assert "charter_decisions" not in text
 
 
