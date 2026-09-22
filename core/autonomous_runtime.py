@@ -14,6 +14,7 @@ from core.approval_inbox import ApprovalInbox, close_answered_effects_requests
 from core.autonomous_runtime_proposals import AutonomousRuntimeProposals
 from core.budget_governor import BudgetCounter, BudgetGovernor, BudgetLimits
 from core.budget_kill_switch import BudgetKillSwitch, default_path
+from core.campaign_verdict import against_start
 from core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from core.clarification_gate import clarification_for_replan_exhausted
 from core.doc_routing import (
@@ -1002,6 +1003,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
         Gateway and policy blocks are run-scoped and always restored, even on error.
         """
+        self._goal_started_at = time.time() - 2.0  # mtime в Linux грубее time.time()
         policy = getattr(self.agent, "policy", None)
         has_block_support = policy is not None and hasattr(policy, "blocked_tools")
         to_block = _goal_block_set(
@@ -1147,7 +1149,9 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         Исход «unverifiable» сохраняет прежнее поведение и НАЗЫВАЕТ его:
         «не проверяли» — не «сошлось».
         """
-        observation = observe_success_check(config.goal_success_check, self.workspace)
+        # След старше начала цели работой не был (`core/campaign_verdict.py`).
+        observation = against_start(observe_success_check(config.goal_success_check, self.workspace),
+                                    self.workspace, getattr(self, "_goal_started_at", None))
         details = {
             "answer": answer,
             "success_check": config.goal_success_check,
@@ -1161,8 +1165,8 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             "verdict": observation["verdict"],
             "reason": observation["reason"],
         })
-        if observation["verdict"] == "missing":
-            missing = ", ".join(observation["missing"])
+        if observation["verdict"] in ("missing", "preexisting"):
+            missing = ", ".join(observation["missing"] or observation["artifacts"])
             return AutonomousTaskReport(
                 task,
                 "inconclusive",
