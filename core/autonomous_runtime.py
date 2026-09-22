@@ -26,6 +26,7 @@ from core.incident import IncidentLog
 from core.ingestion import ingest_files
 from core.learning_planner import LearningPlanner
 from core.models import ToolCall
+from core.note_contract import settle_note
 from core.patch_route import settle_patch
 from core.reflection import ReflectionConfig, ReflectionEngine
 from core.run_context import run_restrictions
@@ -1153,7 +1154,8 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         # След старше начала цели работой не был (`core/campaign_verdict.py`).
         observation = against_start(observe_success_check(config.goal_success_check, self.workspace),
                                     self.workspace, getattr(self, "_goal_started_at", None))
-        observation.update(settle_patch(self.agent, self.workspace, config.goal_success_check) or {})
+        observation.update(settle_patch(self.agent, self.workspace, config.goal_success_check)
+                           or settle_note(self.workspace, config.goal_success_check) or {})
         details = {
             "answer": answer,
             "success_check": config.goal_success_check,
