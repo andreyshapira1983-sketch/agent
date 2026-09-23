@@ -293,6 +293,67 @@ def make_evidence(
 # Factory: (tool_name, output) -> Evidence
 # ---------------------------------------------------------------------------
 
+#: Потолок выдержки исхода опыта. Замер 2026-09-23 на 478 разборах
+#: `python_probe` из 120 свежих следов: при 520 знаках целиком помещались 77%
+#: исходов, при 2000 — 97%, а дальше каждый лишний процент стоил втрое
+#: дороже. Цена подъёма: +118 знаков на улику в среднем (медиана исхода 316,
+#: то есть обычный опыт не подорожал вовсе).
+_PROBE_OUTCOME_CHARS = 2000
+
+#: Сколько знаков исхода отдать под сам вывод, оставив место заголовку.
+_PROBE_STDOUT_BUDGET = 1500
+
+
+def _condense_probe_stdout(stdout: str, budget: int = _PROBE_STDOUT_BUDGET) -> str:
+    """Вывод опыта в пределах `budget`, СОХРАНЯЯ строки с числами.
+
+    Проверка утверждения требует, чтобы каждое названное число стояло в
+    выдержке улики дословно (`core.verifier_utils._excerpt_supports_figures`);
+    одно отсутствующее число делает непроверенным всё утверждение, а ворота
+    улик затем стирают ответ целиком.
+
+    Обрезка по голове теряла именно числа. Замер 2026-09-23 (478 разборов из
+    120 свежих следов): у 83 разборов (17%) выдержка теряла хотя бы одно
+    число, а когда теряла — теряла 16,4 числа из 28,4, то есть 58%. Худший
+    случай: 273 числа из 295. Расчёт печатает числа по всему выводу, а голова
+    занята подготовительными строками.
+
+    Поэтому строки с цифрами отбираются первыми, в исходном порядке, и только
+    остаток места отдаётся строкам без цифр. Выдержка становится СТРОЖЕ, а не
+    мягче: чисел для сверки в ней больше, чем было.
+
+    Опущенное называется вслух. Молчаливая обрезка — тот же дефект, что панель,
+    резавшая сообщения оператора на 4000 знаках: отсутствие числа в выдержке
+    становилось неотличимо от «числа не было никогда».
+    """
+    text = stdout or ""
+    if len(text) <= budget:
+        return text
+    lines = text.split("\n")
+    with_digits = [i for i, ln in enumerate(lines) if any(c.isdigit() for c in ln)]
+    keep: set[int] = set()
+    used = 0
+    for i in with_digits:
+        cost = len(lines[i]) + 1
+        if used + cost > budget:
+            break
+        keep.add(i)
+        used += cost
+    for i, ln in enumerate(lines):
+        if i in keep:
+            continue
+        cost = len(ln) + 1
+        if used + cost > budget:
+            continue
+        keep.add(i)
+        used += cost
+    dropped_numeric = sum(1 for i in with_digits if i not in keep)
+    dropped_plain = len(lines) - len(keep) - dropped_numeric
+    kept = "\n".join(lines[i] for i in sorted(keep))
+    note = "...[опущено строк: %d с числами, %d без]" % (dropped_numeric, dropped_plain)
+    return kept + "\n" + note
+
+
 def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     """Улика эксперимента — его ИСХОД; код — вопрос, и в выдержку не входит.
     См. docs/CODE_NOTES.md, «The experiment's question refuted its answer».
@@ -314,7 +375,7 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
         f"missing_inputs: {json.dumps(output.get('missing_inputs') or [], ensure_ascii=False)}\n"
         f"stdout_truncated: {output.get('stdout_truncated', False)}\n"
         f"duration_ms: {output.get('duration_ms')}\n"
-        f"stdout:\n{output.get('stdout') or ''}\n"
+        f"stdout:\n{_condense_probe_stdout(str(output.get('stdout') or ''))}\n"
         f"stderr:\n{output.get('stderr') or ''}"
     )
     # Имена — из вопроса, истина — из исхода. Живой прогон 2026-09-20: имена
@@ -323,7 +384,7 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     # маркером: гейт литералов видит, что имя существует, а гейты истины эту
     # часть отрезают (`core.verifier_utils.truth_excerpt`) — иначе вопрос снова
     # начал бы подтверждать собственный ответ.
-    excerpt = _truncate(outcome, 520)
+    excerpt = _truncate(outcome, _PROBE_OUTCOME_CHARS)
     if code:
         excerpt += f"\n{QUESTION_CODE_MARKER}\n" + _truncate(code, 240)
     return make_evidence(
