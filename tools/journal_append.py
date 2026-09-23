@@ -195,6 +195,32 @@ VOICE_PATH = "data/chat_outbox.jsonl"
 VOICE_CALLS_PER_DAY = 5
 
 
+
+def _stamp_voice_record(path: str, record: dict) -> dict:
+    """Запись голоса получает время, если его не поставил вызывающий.
+
+    Замер 2026-09-23 (через час после того, как потолок голоса был введён):
+    потолок НЕ РАБОТАЛ. В живых записях ящика лежат только `author` и `text`
+    — времени нет, — а счётчик отбирал записи по дате и потому видел ноль
+    обращений за сутки при одиннадцати записях в файле и двух сделанных за
+    этот же день. Мои тесты прошли, потому что в тестовых записях время было:
+    третий случай за день, когда зелёные тесты не увидели живой поломки.
+
+    Чинится У ИСТОКА, а не в счётчике. Считать записи без времени
+    «сегодняшними» значило бы мгновенно съесть весь запас старыми записями и
+    заткнуть агента; считать их «не сегодняшними» — то, что и происходило.
+    Обращение к человеку обязано знать, когда оно сделано: без этого нельзя
+    ни отмерить суточный запас, ни прочитать переписку по порядку.
+
+    Поле не перезаписывается: время, названное вызывающим, остаётся его.
+    """
+    if path != VOICE_PATH or "ts" in record:
+        return record
+    stamped = dict(record)
+    stamped["ts"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    return stamped
+
+
 def _voice_calls_today(target: Path) -> int:
     """Сколько раз агент уже заговорил первым за нынешние сутки UTC."""
     if not target.exists():
@@ -288,6 +314,7 @@ class JournalAppendTool(Tool):
             raise TypeError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
         _refuse_owned_state(str(path))
+        record = _stamp_voice_record(str(path), record)
         _refuse_over_voice_budget(str(path), target)
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
