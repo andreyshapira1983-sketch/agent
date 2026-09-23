@@ -32,6 +32,11 @@ SourceType = Literal[
     "forum",
     "memory",
     "user",
+    # Дословная реплика ЭТОГО разговора. Своего типа не имела и проваливалась
+    # в "unknown" — отсюда 27 ложных конфликтов по предмету "user asked claude"
+    # (MIR-054, дообнаружено 2026-09-23): «user asked: X» читалось как
+    # утверждение «user asked ЕСТЬ X».
+    "dialogue",
     "tool_output",
     "unknown",
 ]
@@ -63,6 +68,9 @@ DEFAULT_SOURCE_TRUST: dict[SourceType, float] = {
     "video": 0.60,
     "podcast": 0.55,
     "memory": 0.55,
+    # 0.60 — как у kind="session_dialogue" в core/evidence.py: одно число на
+    # обе стороны, иначе доверие расходится в двух местах.
+    "dialogue": 0.60,
     "forum": 0.45,
     "tool_output": 0.45,
     "unknown": 0.10,
@@ -409,6 +417,11 @@ def source_type_from_evidence(evidence: Evidence) -> SourceType:
         return "log"
     if kind in {"shell_output", "tool_output", "diff_preview"}:
         return "tool_output"
+    if kind == "session_dialogue":
+        # Реплика разговора — не источник знания о мире. Тот же довод, что у
+        # list_dir выше: наблюдение одного мгновения не утверждает ничего
+        # стоящего. Две реплики об одном — это разговор, а не противоречие.
+        return "dialogue"
     if kind == "memory":
         return "memory"
     if kind == "user_explicit":

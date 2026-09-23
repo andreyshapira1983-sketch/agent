@@ -78,6 +78,61 @@ def test_the_live_registry_reports_no_conflicts() -> None:
 # ==========================================================================
 # Why each class was false.
 # ==========================================================================
+def test_two_dialogue_turns_do_not_conflict() -> None:
+    """Реплики разговора — не спорящие источники.
+
+    Замерено на живом реестре 2026-09-23: 27 ложных конфликтов по предмету
+    `user asked claude`, значения ('claude', 'снова claude'). Все утверждения
+    приходили из ходов беседы с адресом `session_dialogue:turn_N:…`, а
+    «user asked: X» читалось как утверждение «user asked ЕСТЬ X». Повтор
+    вопроса — это ход беседы, а не второй источник, спорящий с первым.
+    """
+    reg = _registry([
+        ("session_dialogue:turn_6:abc", "dialogue", "d1", "user asked: [Claude] Это Claude."),
+        ("session_dialogue:turn_7:def", "dialogue", "d2", "user asked: [Claude] Это снова Claude."),
+    ])
+
+    assert _conflicts(reg) == []
+
+
+def test_a_dialogue_turn_written_before_the_type_existed_still_does_not_conflict() -> None:
+    """Старая строка с типом `unknown` тоже не должна спорить.
+
+    Тип `dialogue` появился 2026-09-23, а строки на диске записаны раньше — с
+    `unknown`. Починка у истока их не перепишет, поэтому природу источника
+    приходится узнавать по адресу. Тот же приём, что для файлов кода.
+    """
+    reg = _registry([
+        ("session_dialogue:turn_6:abc", "unknown", "d1", "user asked: [Claude] Это Claude."),
+        ("session_dialogue:turn_7:def", "unknown", "d2", "user asked: [Claude] Это снова Claude."),
+    ])
+
+    assert _conflicts(reg) == []
+
+
+def test_a_dialogue_turn_gets_its_own_source_type_at_the_root() -> None:
+    """Улика из реплики разговора типизируется `dialogue`, а не `unknown`.
+
+    Это и есть корень: пока тип проваливался в `unknown`, реплики попадали в
+    разрешитель конфликтов как полноценные источники о мире.
+    """
+    from core.evidence import evidence_from_prior_turn
+    from core.source_registry import source_type_from_evidence
+
+    # Через настоящую фабрику, а не через самодельный двойник: 2026-09-23 я уже
+    # обжёгся тем, что тест проверял мою подделку и пропустил живую ошибку.
+    ev = evidence_from_prior_turn(
+        question="[Claude] Это Claude.",
+        answer="Да.",
+        turn_index=6,
+        turn_id="abc",
+    )
+
+    assert ev.kind == "session_dialogue"
+    assert ev.source_id.startswith("session_dialogue:")
+    assert source_type_from_evidence(ev) == "dialogue"
+
+
 def test_two_files_assigning_one_variable_do_not_conflict() -> None:
     reg = _registry([
         ("core/checkpoint.py", "file", "c1", "path = self._path_for(trace_id)"),

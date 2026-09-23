@@ -304,7 +304,21 @@ def quarantine_conflicted_records(
 # disagreement instead of resolving it.
 _NON_ASSERTING_SOURCE_TYPES = frozenset({
     "memory", "log", "tool_output", "test_result", "code_repository",
+    # dialogue — дословная реплика разговора. Две реплики об одном предмете
+    # это ход беседы, а не спор двух источников о мире.
+    "dialogue",
 })
+
+# Схема адреса, под которой лежат реплики разговора. Проверяется ОТДЕЛЬНО от
+# типа, потому что строки, записанные до появления типа "dialogue"
+# (2026-09-23), уже лежат на диске с типом "unknown", и починка у истока их не
+# перепишет. Тот же приём, что `_is_code_locator` ниже: адрес говорит о природе
+# источника даже когда тип потерян.
+_DIALOGUE_LOCATOR_PREFIX = "session_dialogue:"
+
+
+def _is_dialogue_locator(locator: str) -> bool:
+    return (locator or "").strip().casefold().startswith(_DIALOGUE_LOCATOR_PREFIX)
 
 # Extensions whose contents are programs, not assertions. `x = y` there is an
 # assignment, and every module docstring opens "This module is ...". A prose
@@ -336,6 +350,8 @@ class ConflictResolver:
             if source is None or source.type in _NON_ASSERTING_SOURCE_TYPES:
                 continue
             if _is_code_locator(source.locator):
+                continue
+            if _is_dialogue_locator(source.locator):
                 continue
             parsed = _subject_value(claim.text)
             if parsed is None:
