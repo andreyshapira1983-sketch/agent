@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
 from pathlib import Path
 
@@ -152,3 +153,85 @@ def test_journal_append_is_no_longer_blocked_on_the_autonomous_path() -> None:
     from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
     assert "journal_append" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+# --------------------------------------------------------------------------
+# Потолок на ЖИВОЙ форме записи
+# --------------------------------------------------------------------------
+def test_the_ceiling_holds_on_the_shape_the_agent_actually_writes(tmp_path: Path) -> None:
+    """Запись приходит БЕЗ времени — и потолок обязан работать всё равно.
+
+    Замер 2026-09-23, через час после введения потолка: он НЕ РАБОТАЛ. Живые
+    записи в data/chat_outbox.jsonl несут только `author` и `text`; из 12
+    записей поле `ts` было у одной — самой первой, писанной руками мимо
+    инструмента. Счётчик отбирал записи по дате и потому видел ноль обращений
+    за сутки при двух сделанных за этот же день.
+
+    А тесты выше были ЗЕЛЁНЫЕ, потому что ставили `ts` в записи сами. Это
+    третий случай за один день, когда зелёный прогон не увидел живой поломки
+    (первый — учёт кэша, второй — шапка планировщика). Поэтому здесь запись
+    берётся в той форме, в какой она приходит В ЖИЗНИ, и ни одно поле не
+    добавляется.
+    """
+    tool = _voice(tmp_path)
+    fired_at = None
+    for i in range(1, VOICE_CALLS_PER_DAY + 3):
+        try:
+            tool.run(path=VOICE_PATH, record={"author": "agent", "text": f"зов {i}"})
+        except PermissionError:
+            fired_at = fired_at or i
+    assert fired_at == VOICE_CALLS_PER_DAY + 1, (
+        f"потолок сработал на обращении {fired_at}, а должен на "
+        f"{VOICE_CALLS_PER_DAY + 1}: запись без поля `ts` не считалась за сутки"
+    )
+
+
+def test_a_voice_record_is_stamped_at_birth(tmp_path: Path) -> None:
+    """Обращение к человеку обязано знать, когда оно сделано.
+
+    Чинится у ИСТОКА, а не в счётчике: считать записи без времени
+    «сегодняшними» значило бы мгновенно съесть весь запас старыми записями и
+    заткнуть агента, а считать «не сегодняшними» — это и была поломка.
+    Без времени нельзя ни отмерить суточный запас, ни прочитать переписку по
+    порядку.
+    """
+    tool = _voice(tmp_path)
+    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "без времени"})
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "data" / "chat_outbox.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+    payload = rows[-1].get("payload", rows[-1])
+    assert "ts" in payload, "время не проставлено при рождении записи"
+    stamp = dt.datetime.fromisoformat(payload["ts"])
+    assert stamp.tzinfo is not None, "время без часового пояса — наивная метка"
+
+
+def test_a_stamp_the_caller_named_is_not_overwritten(tmp_path: Path) -> None:
+    """Время, названное вызывающим, остаётся его."""
+    tool = _voice(tmp_path)
+    mine = "2026-01-02T03:04:05+00:00"
+    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "своё время", "ts": mine})
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "data" / "chat_outbox.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+    assert rows[-1].get("payload", rows[-1])["ts"] == mine
+
+
+def test_an_ordinary_journal_is_not_stamped(tmp_path: Path) -> None:
+    """Время проставляется только ГОЛОСУ, а не любому журналу.
+
+    Иначе запрет стал бы шире своего основания: у прочих журналов свои
+    договоры формы, и дописывать им поля — не дело этой двери.
+    """
+    from tools.journal_append import _stamp_voice_record
+
+    record = {"author": "agent", "text": "заметка"}
+    assert _stamp_voice_record("data/self_improvement_issues.jsonl", record) == record
+    assert "ts" not in record
