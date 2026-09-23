@@ -714,12 +714,23 @@ def _norm_source_path(path: str) -> str:
 
 
 
-def _file_read_source_spec(path: str) -> dict[str, Any]:
+def _file_read_source_spec(path: str, why: str) -> dict[str, Any]:
+    """Шаг чтения, который дописывает ПРАВИЛО маршрутизации, а не модель.
+
+    Довод обязателен и называет правило. Замер 2026-09-23 по 898 срабатываниям
+    датчика «шаг без довода» (core/reasoning_action_check.check_by_rationale):
+    в 799 обвинён только file_read, в 515 планах без довода ровно 4 шага — это
+    чтения доктрины, дописанные сюда (5 документов, один модель обычно называет
+    сама). У шагов модели довод был, у дописанных кодом — нет, и датчик неделями
+    обвинял агента в действиях, которых он не выбирал. Шаг, поставленный
+    правилом, обоснован этим правилом; сказать это — правда, а не смягчение.
+    """
     return {
         "tool": "file_read",
         "arguments": {"path": path},
         "label": f"file:{path}",
         "expected_outcome": "Non-empty UTF-8 text from the requested local source.",
+        "rationale": f"routing rule: {why}",
     }
 
 
@@ -773,7 +784,8 @@ def _ensure_confidence_evidence_sources_first(
         if existing is not None:
             ordered.append(existing)
         else:
-            ordered.append(_file_read_source_spec(path))
+            ordered.append(_file_read_source_spec(
+                path, "confidence/evidence question, the verifier's own sources are read first"))
             injected.append(path)
 
     if injected:
@@ -828,7 +840,8 @@ def _ensure_doctrine_docs_first(
         if existing is not None:
             ordered_docs.append(existing)
         else:
-            ordered_docs.append(_file_read_source_spec(path))
+            ordered_docs.append(_file_read_source_spec(
+                path, "question about the agent itself, its doctrine documents are read first"))
             injected.append(path)
 
     if injected:
@@ -895,7 +908,7 @@ def _ensure_thematic_docs_first(
         if existing is not None:
             ordered_target.append(existing)
         else:
-            ordered_target.append(_file_read_source_spec(path))
+            ordered_target.append(_file_read_source_spec(path, warning_prefix.strip().rstrip(":")))
             injected.append(path)
 
     if injected:
