@@ -251,7 +251,7 @@ def _one_line(ref: str, value: Any) -> str:
 
 def _resolve_string(
     text: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
-    address: bool = False,
+    address: bool = False, whole_is_one_name: bool = False,
 ) -> Any:
     _reject_field_path(text)
     match = _REFERENCE_RE.fullmatch(text.strip())
@@ -264,7 +264,12 @@ def _resolve_string(
                 f"step reference {{{{step:{ref}.output}}}} has no result: "
                 f"known steps are {sorted(outputs)}"
             )
-        return _delivered(ref, outputs[ref])
+        value = _delivered(ref, outputs[ref])
+        # Ссылка целиком сохраняет тип значения — его судит инструмент. Кроме
+        # url: там список выдачи поиска — не адрес (замер 2026-09-23, «нашёл ->
+        # открыл»), и отказ обязан назвать, что сделать сначала. Правило не
+        # шире основания: для path поведение прежнее.
+        return _one_line(ref, value) if whole_is_one_name else value
 
     def _substitute(m: re.Match[str]) -> str:
         ref = m.group("ref")
@@ -299,7 +304,7 @@ def resolve_step_references(
         return _resolve_string(value, outputs, plan_steps)
     if isinstance(value, dict):
         return {
-            k: (_resolve_string(v, outputs, plan_steps, address=True)
+            k: (_resolve_string(v, outputs, plan_steps, address=True, whole_is_one_name=(k == "url"))
                 if k in _ADDRESS_KEYS and isinstance(v, str)
                 else resolve_step_references(v, outputs, plan_steps=plan_steps))
             for k, v in value.items()

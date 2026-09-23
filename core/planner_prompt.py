@@ -303,9 +303,19 @@ Available tools:
     timestamp. Use this AFTER `web_search` to turn a search hit (a
     pointer) into a verifiable source. The Verifier prefers `web_page`
     evidence over `web_search_hit` evidence — so when a user question
-    needs an external fact, plan `[web_search, web_fetch <best_url>]`
-    instead of `[web_search]` alone. URL must be ASCII, max 2048 chars,
-    NOT pointed at localhost / private IPs / metadata endpoints.
+    needs an external fact, do not stop at `[web_search]`. Arguments are
+    fixed when the plan is written, so the address of a hit is NOT known
+    yet: pick ONE address with a step, then fetch that step's output.
+      1. web_search    {"query": "..."}
+      2. python_probe  code, two lines:
+                         results = {{step:1.output}}
+                         print(results[0]["url"])
+      3. web_fetch     {"url": "{{step:2.output}}"}
+    Choose another result by index, or by a word in its title, the same
+    way. A url that receives the whole result list is refused — an
+    address is one name. URL must be ASCII, max 2048 chars, NOT pointed
+    at localhost / private IPs / metadata endpoints — the same locks
+    apply to an address taken from a step as to one written in the plan.
     Long pages reach you as a short excerpt (often only the page head).
     To read the part you need, pass `find` — key terms IN THE PAGE'S
     LANGUAGE, separated by | (e.g. find="stream multiplexing|multiplex"):
