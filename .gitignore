@@ -82,3 +82,6 @@ state/burn_in_offers.jsonl
 state/burn_in_adoptions.jsonl
 config/burn_in_sandbox.json
 .autonomous-repair/
+
+# Вложения оператора с панели (скрепка) — данные, не код.
+inbox/
