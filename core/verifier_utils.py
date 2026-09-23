@@ -35,6 +35,41 @@ def _normalise_figure(fig: str) -> str:
     return s.replace("\u2013", "-").replace("\u2014", "-")
 
 
+#: Знаки валюты, приклеенные к числу. Замер 2026-09-23: число утверждения
+#: извлекается вместе с ними («$0,171»), а инструменты печатают сумму словом
+#: («usd 0.171»), поэтому дословного совпадения не бывает НИКОГДА — и каждое
+#: денежное утверждение получало `[claim-figure-unverified]`.
+_CURRENCY_GLUE = "$€£₽¥"
+
+
+def _figure_variants(fig: str) -> set[str]:
+    """Написания ОДНОГО И ТОГО ЖЕ числа, которые сверка обязана принять.
+
+    Разбирается ровно две беды, обе замеренные 2026-09-23 на шести стёртых
+    ответах (пять из шести — экономическая работа):
+
+    1. **Знак валюты приклеен.** «$0,171» против «usd 0.171» в выводе опыта.
+    2. **Десятичная запятая.** Агент отвечает по-русски и пишет «0,171»,
+       а инструменты печатают в C-локали «0.171».
+
+    Запятая может быть и разделителем тысяч («1,500» по-английски — это 1500),
+    и решать, что именно она значит, здесь НЕ нужно: принимаются оба чтения,
+    и с точкой и без разделителя. Сверка от этого не слабеет — она принимает
+    больше НАПИСАНИЙ того же числа, но ни одного ДРУГОГО числа.
+    """
+    base = _normalise_figure(fig)
+    if not base:
+        return set()
+    out = {base, base.lstrip(_CURRENCY_GLUE)}
+    for value in list(out):
+        if "," in value:
+            out.add(value.replace(",", "."))
+            out.add(value.replace(",", ""))
+        elif "." in value:
+            out.add(value.replace(".", ","))
+    return {value for value in out if value}
+
+
 def extract_statistical_figures(text: str) -> list[str]:
     """Числа, которые УТВЕРЖДАЕТ кусок. Адрес цитаты сюда не входит.
 
@@ -115,7 +150,7 @@ def _excerpt_supports_figures(
         return False
     excerpt_norm = _normalise_figure(excerpt)
     for figure in figures:
-        if _normalise_figure(figure) in excerpt_norm:
+        if any(v in excerpt_norm for v in _figure_variants(figure)):
             continue
         if approximate and _approximately_supported(excerpt, figure):
             continue
