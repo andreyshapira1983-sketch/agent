@@ -364,6 +364,42 @@ def _is_code_locator(locator: str) -> bool:
     return any(_bare_locator(locator).endswith(suffix) for suffix in _CODE_SUFFIXES)
 
 
+#: Места, где лежит то, что агент написал САМ: черновики правок, журналы и
+#: состояние, следы, документы, собранные скриптом из кода.
+_OWN_ARTIFACT_PREFIXES = ("proposals/", "data/", "logs/", "knowledge/generated/")
+#: Журнальные форматы — запись одного момента, не утверждение о мире.
+_OWN_ARTIFACT_SUFFIXES = (".jsonl", ".log")
+
+
+def _is_own_artifact(locator: str) -> bool:
+    """Адрес указывает на файл, который агент написал сам.
+
+    Замер 2026-09-23 на живой памяти: фактами «о мире» с уверенностью 0.85
+    ложились его же черновики правок (`proposals/selffix/…/edits.txt` —
+    вместе с маркером `<<<<<<< LINES`), его же ящик голоса
+    (`data/chat_outbox.jsonl` — прямо со скобками JSON) и строки таблицы
+    `knowledge/generated/AGENT_ANATOMY.md`, собранного скриптом из кода. При
+    чистке памяти убрано 44 таких обрывка; пробой на нынешнем коде показал,
+    что все три входа открыты.
+
+    Это класс OWASP ASI06 «отравление памяти» в его тихой форме: своё же,
+    пересказанное своими словами, выглядит как независимое знание, и проверка
+    по содержанию его не отличает — отличает только происхождение. Отсюда
+    правило по адресу, а не по словам. Правило то же, что MIR-054 для
+    журналов и собственной памяти: запись одного момента не утверждает фактов.
+
+    Документы, написанные людьми (`knowledge/doctrine/`, `docs/`), и книги
+    (`knowledge_library/`, `math_study/`) остаются в силе.
+    """
+    bare = _bare_locator(locator).replace("\\", "/")
+    marker = "/agent-main/"
+    if marker in bare:
+        bare = bare.split(marker, 1)[1]
+    while bare.startswith("./"):
+        bare = bare[2:]
+    return bare.startswith(_OWN_ARTIFACT_PREFIXES) or bare.endswith(_OWN_ARTIFACT_SUFFIXES)
+
+
 class ConflictResolver:
     """Detect obvious contradictory claims over the same subject."""
 
@@ -478,7 +514,7 @@ class KnowledgeWritePolicy:
         self.min_source_trust = min_source_trust
         self.max_chars = max_chars
 
-    def decide(  # noqa: PLR0911 — flat: depth 1, all 14 returns are guard clauses
+    def decide(  # noqa: PLR0911 — flat: depth 1, all 15 returns are guard clauses
         self,
         claim: ClaimRecord,
         *,
@@ -583,6 +619,13 @@ class KnowledgeWritePolicy:
                 "reject",
                 ((f"source is a code file ({source.locator}): programs do not "
                  f"assert facts"),),
+            )
+        if source.type == "file" and _is_own_artifact(source.locator):
+            return KnowledgeWriteDecision(
+                "reject",
+                ((f"source is the agent's own artifact ({source.locator}): its "
+                  f"drafts, logs and generated files are not evidence about the "
+                  f"world"),),
             )
         reasons.append(f"claim confidence={claim.confidence:.2f}")
         reasons.append(f"source trust={source.trust_level:.2f}")
