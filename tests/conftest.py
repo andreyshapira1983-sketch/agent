@@ -475,3 +475,14 @@ def write_legacy_episode(path: Path, episode) -> None:
         rewrite_state_jsonl_unlocked(path, rows)
     else:
         append_state_jsonl_unlocked(path, [row])
+
+
+@pytest.fixture(autouse=True)
+def _no_embedding_model(monkeypatch):
+    """Поиск по смыслу в тестах выключен.
+
+    Живая модель (core/memory_embeddings) сделала бы порядок отбора памяти
+    зависимым от её весов, а тесты проверяют проводку; её тесты подменяют
+    кодировщик сами. Переменную может подхватить загрузка настоящего .env.
+    """
+    monkeypatch.delenv("AGENT_EMBED_MODEL", raising=False)
