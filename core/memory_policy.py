@@ -15,15 +15,17 @@ Two gates around the persistent store:
 
   MemoryRetrievalPolicy
     Decides which persistent records get injected into the prompts of
-    the current cycle. Keyword overlap scoring, recency tiebreaker,
-    capped count + capped per-record length.
+    the current cycle. BM25 ranking over a keyword-overlap floor, recency
+    tiebreaker, capped count + capped per-record length.
 
 Both policies are pure functions over MemoryRecords + question text and are
 fully testable on their own.
 """
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -413,6 +415,87 @@ def _broad_project_score_adjustment(record: MemoryRecord, base_score: int) -> in
     return score
 
 
+#: BM25 — стандарт лексического поиска (Robertson & Zaragoza, «The Probabilistic
+#: Relevance Framework: BM25 and Beyond»). Параметры — умолчания из той же
+#: литературы: k1 в [1.2, 2.0], b = 0.75; IDF в форме Lucene, всегда > 0.
+#:
+#: Зачем, замерено 2026-09-23: балл был ЧИСЛОМ ОБЩИХ СЛОВ, без поправки на
+#: длину записи и на редкость слова. Длинная запись с большим словарём
+#: выигрывала любой вопрос: нужный урок всплывал 5 раз из 9 на памяти до
+#: 14:30 и 0 из 9 к вечеру, когда в хранилище легли разборы по 2400 знаков
+#: против обычных 770. BM25 делит частоту слова на длину записи относительно
+#: средней (b) и взвешивает слово его редкостью в хранилище (IDF).
+_BM25_K1 = 1.2
+_BM25_B = 0.75
+_PREFIX_LEN = 4
+
+
+def _term_counts(text: str, tags: Iterable[str]) -> Counter[str]:
+    counts = Counter(
+        t for t in (w.lower() for w in _TOKEN_RE.findall(text or ""))
+        if t not in _STOPWORDS and len(t) > 1
+    )
+    counts.update(_tag_tokens(tags or ()))
+    return counts
+
+
+def _term_frequency(term: str, counts: Counter[str], prefixes: Counter[str]) -> int:
+    """Сколько раз слово вопроса встречается в записи.
+
+    Точное совпадение — как раньше. Если точного нет, засчитывается ОДНО
+    совпадение по первым четырём буквам (русские окончания: «уроки» и «урок»)
+    — то же правило, что было, только теперь по каждому слову, а не на всю
+    запись разом.
+    """
+    exact = counts.get(term, 0)
+    if exact or len(term) < _PREFIX_LEN:
+        return exact
+    return 1 if prefixes.get(term[:_PREFIX_LEN]) else 0
+
+
+def _bm25_scores(q_tokens: set[str], docs: list[Counter[str]]) -> list[float]:
+    """BM25 каждой записи против вопроса; IDF считается по этому же хранилищу."""
+    n_docs = len(docs)
+    if not n_docs or not q_tokens:
+        return [0.0] * n_docs
+    prefixes = [Counter(t[:_PREFIX_LEN] for t in d if len(t) >= _PREFIX_LEN) for d in docs]
+    lengths = [sum(d.values()) for d in docs]
+    avgdl = (sum(lengths) / n_docs) or 1.0
+    scores = [0.0] * n_docs
+    for q in q_tokens:
+        row = [_term_frequency(q, d, pre) for d, pre in zip(docs, prefixes)]
+        df = sum(1 for f in row if f)
+        if not df:
+            continue
+        idf = math.log((n_docs - df + 0.5) / (df + 0.5) + 1.0)
+        for i, f in enumerate(row):
+            if f:
+                norm = 1.0 - _BM25_B + _BM25_B * lengths[i] / avgdl
+                scores[i] += idf * f * (_BM25_K1 + 1.0) / (f + _BM25_K1 * norm)
+    return scores
+
+
+#: Свежесть по Generative Agents (Park et al. 2023, arXiv 2304.03442):
+#: экспоненциальное затухание 0.995 за час.
+_RECENCY_DECAY_PER_HOUR = 0.995
+
+
+def _recency(record: MemoryRecord, now: datetime) -> float:
+    created_at = record.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    hours = max(0.0, (now - created_at).total_seconds() / 3600.0)
+    return _RECENCY_DECAY_PER_HOUR ** hours
+
+
+def _min_max(values: list[float]) -> list[float]:
+    """Нормировка в [0, 1], как у Generative Agents; все равны — все нули."""
+    lo, hi = min(values), max(values)
+    if hi <= lo:
+        return [0.0] * len(values)
+    return [(v - lo) / (hi - lo) for v in values]
+
+
 def _record_prompt_note(record: MemoryRecord) -> str:
     if not _is_readme_record(record):
         return ""
@@ -576,12 +659,19 @@ class MemoryRetrievalPolicy:
         selected: list[MemoryRecord],
         records: list[MemoryRecord],
         q_kinds: frozenset[str],
+        relevance: list[float] | None = None,
     ) -> list[MemoryRecord]:
-        """Дописывает к отобранному свежие уроки того же рода работы.
+        """Дописывает к отобранному уроки того же рода работы.
 
-        Берутся САМЫЕ СВЕЖИЕ: урок тем вернее описывает нынешний код, чем
-        позже он записан, а устаревший урок бьёт по трудным задачам сильнее,
-        чем помогает (замерено: минус 26%).
+        Порядок — как у Generative Agents (Park et al. 2023): релевантность
+        вопросу плюс свежесть, обе нормированы в [0, 1], веса равны. Свежесть
+        держится потому, что урок тем вернее описывает нынешний код, чем позже
+        он записан, а устаревший урок бьёт по трудным задачам сильнее, чем
+        помогает (замерено: минус 26%). Но ОДНА свежесть — не отбор: 2026-09-23
+        канал отдавал оба места последним записанным разборам, какими бы ни
+        был вопрос, и нужный урок не всплывал ни разу из девяти. Важность в
+        сумму не входит: поле importance у нас не измеряется. Без релевантности
+        (`relevance is None`) остаётся прежний порядок — самые свежие.
 
         Слепки обменов («Вопрос: … Вывод: …») сюда не попадают: род работы
         отвечает на «как это делается», а слепок — на «что однажды спросили».
@@ -591,14 +681,26 @@ class MemoryRetrievalPolicy:
         if not q_kinds or self.lessons_by_kind <= 0:
             return selected
         already = {id(r) for r in selected}
-        candidates = [
-            r for r in records
+        pool = [
+            (i, r) for i, r in enumerate(records)
             if id(r) not in already
             and not _is_transcript(r.content if isinstance(r.content, str) else str(r.content))
             and (q_kinds & work_kinds(r.content if isinstance(r.content, str) else str(r.content)))
         ]
-        candidates.sort(key=lambda r: r.created_at, reverse=True)
-        return selected + candidates[: self.lessons_by_kind]
+        if not pool:
+            return selected
+        now = datetime.now(timezone.utc)
+        fresh = _min_max([_recency(r, now) for _i, r in pool])
+        rel = _min_max([relevance[i] for i, _r in pool]) if relevance else [0.0] * len(pool)
+        order = sorted(
+            range(len(pool)),
+            # Ничья решается релевантностью: при двух кандидатах нормировка
+            # даёт одному 1+0, другому 0+1, и дата отдала бы место свежему,
+            # но не относящемуся к делу — ровно измеренный сбой.
+            key=lambda k: (rel[k] + fresh[k], rel[k], pool[k][1].created_at),
+            reverse=True,
+        )
+        return selected + [pool[k][1] for k in order[: self.lessons_by_kind]]
 
     def select_with_report(
         self,
@@ -617,10 +719,18 @@ class MemoryRetrievalPolicy:
             )
 
         below_threshold = 0
-        scored: list[tuple[int, MemoryRecord]] = []
+        scored: list[tuple[float, MemoryRecord]] = []
         # РОД РАБОТЫ вопроса — считается один раз, не на каждую запись.
         q_kinds = work_kinds(question)
-        for r in records:
+        # Порог допуска остался прежним (число общих слов >= min_score):
+        # кто проходил, тот проходит. BM25 решает только ПОРЯДОК. Ветка
+        # «широкий вопрос о проекте» сохраняет свою настроенную прибавку.
+        broad = is_broad_project_self_knowledge_question(question)
+        relevance = _bm25_scores(q_tokens, [
+            _term_counts(r.content if isinstance(r.content, str) else str(r.content), r.tags or [])
+            for r in records
+        ])
+        for r, bm25 in zip(records, relevance):
             text = r.content if isinstance(r.content, str) else str(r.content)
             r_tokens = _tokens(text)
             score = len(q_tokens & r_tokens)
@@ -637,17 +747,17 @@ class MemoryRetrievalPolicy:
                             if len(rt) >= 4 and (rt.startswith(q[:4]) or q.startswith(rt[:4])):
                                 score += 1
                                 break
-            if is_broad_project_self_knowledge_question(question):
+            if broad:
                 score += _broad_project_score_adjustment(r, score)
             if score >= self.min_score:
-                scored.append((score, r))
+                scored.append((score if broad else bm25, r))
             else:
                 below_threshold += 1
 
         # Higher score first, then newer first.
         scored.sort(key=lambda pair: (pair[0], pair[1].created_at), reverse=True)
         selected = [r for _score, r in scored[: self.max_records]]
-        selected = self._add_lessons_by_work_kind(selected, records, q_kinds)
+        selected = self._add_lessons_by_work_kind(selected, records, q_kinds, relevance)
 
         # A cap is not a relevance judgment: these records DID clear the
         # floor and were cut by max_records. Reported separately because the
