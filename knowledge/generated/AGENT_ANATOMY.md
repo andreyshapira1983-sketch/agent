@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 241 modules across 12 groups._
+_Total: 242 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -174,6 +174,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/source_registry_store` | Persistent store for SourceRegistry. |
 | `core/source_library` | Curated online source library for controlled web learning. |
 | `core/source_ranker` | MVP-14.3 — Source Ranker / Evidence Trust Layer. |
+| `core/read_sources_registry` | Прочитанное в работе становится источником, а не только конспектом. |
 | `core/source_connectors` | Source Connector Registry. |
 
 ## Tools, Actions & Execution (§5)

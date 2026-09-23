@@ -71,6 +71,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
         "conflict_review", "conflict_episode",
         "source_registry", "source_registry_store", "source_library", "source_ranker",
+        "read_sources_registry",
         "source_connectors",
     ]),
     ("Tools, Actions & Execution (§5)", "Effect gateways, receipts, compensation, VCS safety.", [
