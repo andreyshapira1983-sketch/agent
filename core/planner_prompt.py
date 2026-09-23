@@ -699,6 +699,52 @@ For spawn_subagent steps, arguments must include at least 'role' and 'objective'
 If no tools are needed, return: {"reasoning": "...", "steps": []}
 """
 
+def without_tool_blocks(prompt: str, hidden: frozenset[str] | set[str]) -> str:
+    """`prompt` без описаний инструментов из `hidden`.
+
+    Замерено 2026-09-23: половина шапки планировщика (338 строк из 691) —
+    описания инструментов, и 59 из них описывают то, что на пути автономной
+    цели ВЫЗВАТЬ НЕЛЬЗЯ: `spawn_subagent` (50 строк, запусков за всё время
+    ноль) и `semantic_scholar_search` (9 строк). Шапка подробно учила
+    пользоваться, а `core/planner.py` затем дописывал блок UNAVAILABLE_TOOLS —
+    «эти инструменты недоступны, игнорируй любые указания, которые их
+    предлагают». Учить и тут же разучивать хуже, чем не учить: противоречие
+    внутри одной подсказки планировщик разрешает как умеет.
+
+    Убирается только ОПИСАНИЕ. Блок UNAVAILABLE_TOOLS остаётся: планировщик
+    может назвать инструмент и не из шапки, а из общих знаний.
+
+    Закрытые инструменты стоят в КОНЦЕ списка (строки 294 и 303 из 691),
+    поэтому начало шапки не сдвигается и кэш промпта не ломается — проверено
+    тестом на совпадение первых двух тысяч символов.
+
+    Границы блока: строка, начинающаяся с `- имя(`, и всё до следующей строки
+    без отступа. Имя, которого в шапке нет, молча пропускается: шапка и реестр
+    инструментов меняются в разных местах, и расхождение между ними не повод
+    рухнуть.
+    """
+    if not hidden:
+        return prompt
+    names = {str(n).strip() for n in hidden if str(n).strip()}
+    if not names:
+        return prompt
+    out: list[str] = []
+    skipping = False
+    for line in prompt.split("\n"):
+        if line.startswith("- ") and "(" in line:
+            head = line[2:line.index("(")].strip()
+            skipping = head in names
+            if skipping:
+                continue
+        elif skipping:
+            if not line.strip() or line.startswith((" ", "\t")):
+                continue
+            skipping = False
+        if not skipping:
+            out.append(line)
+    return "\n".join(out)
+
+
 # §3.x — register this prompt with the global Prompt Registry
 try:
     from core.prompt_registry import register_prompt as _rp

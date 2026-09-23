@@ -43,7 +43,7 @@ from core.doc_routing import (
 from core.host_tools_context import _build_host_tools_block
 from core.llm import LLM, accepted_flags
 from core.plan_parsing import parse_json
-from core.planner_prompt import PLANNER_SYSTEM
+from core.planner_prompt import PLANNER_SYSTEM, without_tool_blocks
 from core.step_sanitizer import sanitize_step
 from tools.base import ToolRegistry
 
@@ -225,7 +225,11 @@ class LLMPlanner:
         # Inject dynamic host-tools block so the planner knows what is
         # actually installed on this machine (from .env BLENDER_PATH etc.)
         host_block = _build_host_tools_block()
-        effective_system = PLANNER_SYSTEM + host_block if host_block else PLANNER_SYSTEM
+        # Скрытые на этом пути инструменты не описываем — см. without_tool_blocks.
+        base_system = without_tool_blocks(
+            PLANNER_SYSTEM, getattr(self, "hidden_tools", frozenset()) or frozenset(),
+        )
+        effective_system = base_system + host_block if host_block else base_system
         effective_system += self.lesson_block_for_prompt(  # живой путь уроков
             question, file_hint,
         )
