@@ -126,8 +126,8 @@ def test_a_failed_judge_is_not_an_accusation(tmp_path, monkeypatch) -> None:
 
 
 def test_switched_off_costs_no_model_calls(tmp_path, monkeypatch) -> None:
-    """Выключено — ни одного лишнего вызова, ход как прежде."""
-    monkeypatch.delenv(ENV, raising=False)
+    """Аварийный выключатель =0 — ни одного лишнего вызова, ход как прежде."""
+    monkeypatch.setenv(ENV, "0")
     llm = _Llm(["NO", "NO", "NO"], _ANSWER)
     agent, events = _run(tmp_path, llm)
     assert not {"request_checklist", "checklist_verdict"} & set(_names(events))
@@ -218,3 +218,12 @@ def test_a_minor_no_is_not_asked_twice() -> None:
     llm = _Llm(["NO"], "")
     check_answer(llm, _REQUEST, Checklist(items=(ChecklistItem("Мелочь?", 10),), reason="t"), "ответ")
     assert sum(c["system"] == JUDGE_SYSTEM for c in llm.calls) == 1
+
+
+def test_it_is_on_by_default(monkeypatch) -> None:
+    """Решение оператора 24.09: починка работает сразу, переменная только выключает."""
+    from core.request_checklist import enabled
+    monkeypatch.delenv(ENV, raising=False)
+    assert enabled()
+    monkeypatch.setenv(ENV, "0")
+    assert not enabled()

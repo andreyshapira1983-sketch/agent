@@ -490,6 +490,6 @@ def _no_embedding_model(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_request_checklist(monkeypatch):
-    """Чек-лист поручения в тестах выключен: два лишних вызова модели съели бы
+    """Чек-лист поручения в тестах выключен (в работе включён по умолчанию): два лишних вызова модели съели бы
     заготовленные ответы FakeLLM в сотнях тестов. Его тесты включают сами."""
-    monkeypatch.delenv("AGENT_REQUEST_CHECKLIST", raising=False)
+    monkeypatch.setenv("AGENT_REQUEST_CHECKLIST", "0")
