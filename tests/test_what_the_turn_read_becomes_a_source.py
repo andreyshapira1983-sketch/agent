@@ -18,15 +18,24 @@ from typing import Any
 from core.read_sources_registry import register_read_sources
 
 
-class _Evidence:
-    def __init__(self, kind: str, locator: str, title: str = "", content_hash: str = "") -> None:
-        self.kind, self.locator, self.title = kind, locator, title
-        self.content_hash, self.fetched_at = content_hash, "2026-09-23T04:00:00+00:00"
+# НАСТОЯЩИЕ Evidence и ProvenanceChain, а не двойники. 23.09 эти тесты были
+# зелёными на выдуманном поле `locator`, которого у улики нет (там `source_id`),
+# и три часа подтверждали мою ошибку вместо жизни. Двойник проверяет того, кто
+# его написал; настоящий объект проверяет код.
+from core.evidence import Evidence, ProvenanceChain
 
 
-class _Chain:
-    def __init__(self, evidences: list[_Evidence]) -> None:
-        self.evidences = evidences
+def _Evidence(kind: str, locator: str, title: str = "", content_hash: str = "") -> Evidence:
+    del title
+    return Evidence(id="ev_" + str(abs(hash(locator)))[:8], kind=kind,
+                    source_id=locator, obtained_via="test",
+                    content_hash=content_hash or "h" * 8,
+                    fetched_at="2026-09-23T04:00:00+00:00", confidence=0.7,
+                    claim="", excerpt="")
+
+
+def _Chain(evidences: list[Evidence]) -> ProvenanceChain:
+    return ProvenanceChain(evidences=list(evidences))
 
 
 class _Store:
@@ -62,7 +71,7 @@ def test_a_fetched_page_becomes_a_source() -> None:
     agent = _Agent(_Store())
     chain = _Chain([
         _Evidence("web_page", "https://www.unicode.org/reports/tr15/", "UAX #15", "abc123"),
-        _Evidence("file", "knowledge_library/physics/txt/Tong_ClassicalDynamics.txt"),
+        _Evidence("web_page", "https://peps.python.org/pep-0008/", "PEP 8"),
     ])
 
     named = register_read_sources(agent, chain)
@@ -81,7 +90,20 @@ def test_a_tool_output_is_not_a_source() -> None:
     ])
 
     assert register_read_sources(agent, chain) == 0
-    assert agent.log.events == []
+    # Тишины здесь БОЛЬШЕ НЕТ. Улики в ходе были, а к записи не подошла ни
+    # одна — журнал обязан это сказать: три часа 23.09 тихий ноль выдавал
+    # себя за «нечего записывать», пока я не полез в живой след.
+    events = dict(agent.log.events)
+    assert "read_sources_none_matched" in events, agent.log.events
+    assert events["read_sources_none_matched"]["evidences_seen"] == 3
+    assert "tool_output" in events["read_sources_none_matched"]["kinds"]
+
+
+def test_a_workspace_file_is_left_to_the_ordinary_ingest() -> None:
+    """Файлы рабочей папки пишет штатный приём — дублировать его незачем."""
+    agent = _Agent(_Store())
+
+    assert register_read_sources(agent, _Chain([_Evidence("file", "core/loop.py")])) == 0
 
 
 def test_the_same_page_read_twice_is_named_once() -> None:
