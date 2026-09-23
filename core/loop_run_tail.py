@@ -328,6 +328,18 @@ class AgentLoopRunTail:
             # something a later reader has to reconstruct.
             _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
             self.log.log("completion_obligation", _payload)
+            # Прочитанное этим ходом становится ИСТОЧНИКОМ, а не только
+            # конспектом. Замер 2026-09-23: за ночь прочитаны десятки
+            # первоисточников, а в реестре источников не прибавилось ни одной
+            # записи — весь слой приёма знания висел на командах cli/, и
+            # работающий агент не мог пополнить своё знание ничем.
+            try:
+                from core.read_sources_registry import register_read_sources
+
+                register_read_sources(self, chain)
+            except Exception as exc:  # noqa: BLE001 — знание не валит ход
+                self.log.log("read_sources_unregistered",
+                             {"error": f"{type(exc).__name__}: {exc}"[:200]})
             # Recorded here, enforced at banking — not mid-run. This signal IS
             # authoritative: `assemble_completion_verdict` lowers a claim of
             # `achieved` to `partially_achieved` when it is present, which also
