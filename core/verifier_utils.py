@@ -582,6 +582,28 @@ _ENUM_EXCLUDED_RE = re.compile(
     r"не\s+подход|не\s+подошл|не\s+входит|исключ|not\s+match|excluded",
     re.IGNORECASE,
 )
+#: Пункт, который целиком — слово-связка, а не член перечисления: «(например,
+#: яблоко, груша)» перечисляет два плода, а не три. Замер 2026-09-23: в живом
+#: ответе «(например, планировщик говорит…, а верификатор…)» связка ушла в счёт.
+_DISCOURSE_ONLY_RE = re.compile(
+    r"^(?:например|в\s+частности|то\s+есть|скажем|в\s+том\s+числе|а\s+именно|"
+    r"e\.g\.?|i\.e\.?|for\s+example|for\s+instance|namely)$",
+    re.IGNORECASE,
+)
+#: Группа цифр внутри дроби: «0.6», «0,6», «1.5». Десятичное число — один
+#: токен (так режут числа токенизаторы, начиная с Penn Treebank); его дробная
+#: часть счётом не бывает.
+#: Перечень, который сам объявил себя неполным: «(Tong, Carroll, Preskill и
+#: др.)» не может опровергнуть «41 файл». Замер 2026-09-24 по 441 живому
+#: ответу: клеймо claim-refuted стояло на «лежит 41 текстовый файл с лекциями
+#: (Tong, Carroll, Srednicki, Preskill и др.)» — верном утверждении.
+_PARTIAL_LIST_RE = re.compile(
+    r"(?:\bи\s+(?:др|пр)\.?|\bи\s+т\.?\s*(?:д|п)\.?|\bи\s+так\s+далее|\bи\s+прочие|"
+    r"\betc\.?|\band\s+so\s+on|\band\s+others|…|\.\.\.)\s*$",
+    re.IGNORECASE,
+)
+_DECIMAL_PART_BEFORE_RE = re.compile(r"\d[.,]$")
+_DECIMAL_PART_AFTER_RE = re.compile(r"^[.,]\d")
 
 
 #: Число, за которым идёт месяц или год, или перед которым стоит тире
@@ -658,16 +680,29 @@ def _top_level_items(inner: str) -> list[str]:
     return [item for item in items if item]
 
 
+def _is_decimal_part(text: str, token: re.Match[str]) -> bool:
+    """Группа цифр — часть десятичного числа («0.6», «0,6»), а не счёт."""
+    if not token.group(1):
+        return False
+    return bool(_DECIMAL_PART_BEFORE_RE.search(text[:token.start()])
+                or _DECIMAL_PART_AFTER_RE.match(text[token.end():]))
+
+
 def _claimed_count_before(text: str, paren_start: int) -> int:
     """Счёт, к которому относится скобка: ближайшее число перед ней, за
     которым идёт существительное; 0 — такого нет (дата, адрес, не счёт)."""
     lead_from = max(0, paren_start - 120)
-    lead = re.split(r"[.\n()]", text[lead_from:paren_start])[-1]
+    # Точка режет предложение, но не дробь: замер 2026-09-23 — в «падает на
+    # 0.6 за каждое противоречие (…)» точка разрезала 0.6, и шестёрка стала
+    # «обещанными шестью пунктами»; ИСТИННОЕ утверждение ушло человеку с
+    # клеймом claim-refuted.
+    lead = re.split(r"(?<!\d)\.|\.(?!\d)|[\n()]", text[lead_from:paren_start])[-1]
     offset = paren_start - len(lead)
     # Ближайшее число, за которым идёт существительное: в «три позиции с qty
     # меньше 6 (…)» шестёрка — порог сравнения, счёт — «три».
     token = next((t for t in reversed(list(_COUNT_TOKEN_RE.finditer(lead)))
-                  if _NOUN_THEN_GAP_RE.match(lead[t.end():])), None)
+                  if _NOUN_THEN_GAP_RE.match(lead[t.end():])
+                  and not _is_decimal_part(lead, t)), None)
     if token is None:
         return 0
     at = _COUNT_TOKEN_RE.match(text, offset + token.start())
@@ -689,12 +724,16 @@ def enumeration_count_reason(text: str) -> Any:
         claimed = _claimed_count_before(text, paren.start())
         if claimed < 2:
             continue
+        if _PARTIAL_LIST_RE.search(paren.group(1).strip()):
+            continue
         items = _top_level_items(paren.group(1))
         if len(items) < 2 or any(
                 _ITEM_CARRIES_A_COUNT_RE.search(item) or _ITEM_STARTS_WITH_A_COUNT_RE.search(item)
                 for item in items):
             continue
-        counted = sum(1 for item in items if not _ENUM_EXCLUDED_RE.search(item))
+        counted = sum(1 for item in items
+                      if not _ENUM_EXCLUDED_RE.search(item)
+                      and not _DISCOURSE_ONLY_RE.match(item.strip(" \t,;:—-")))
         if counted != claimed:
             return ClaimReason(
                 code="count_mismatch",
