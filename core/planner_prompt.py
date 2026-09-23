@@ -7,6 +7,8 @@ the only code here is the Prompt Registry registration that travels with it.
 """
 from __future__ import annotations
 
+import re
+
 PLANNER_SYSTEM = """You are the planner of an autonomous agent. PLANNER_MODE.
 
 You DO NOT execute tools. You only return a JSON plan that the Executor will run.
@@ -694,10 +696,7 @@ Output format - return ONLY a JSON object, no markdown fences, no preface:
   "reasoning": "<1-2 sentences: which rule applies and why>",
   "steps": [
     {
-      "tool": "file_read" | "list_dir" | "web_search" | "web_fetch" |
-              "semantic_scholar_search" | "rss_fetch" |
-              "file_write" | "shell_exec" | "run_tests" |
-              "read_logs" | "diff_file" | "spawn_subagent",
+      "tool": <<TOOL_NAMES>>,
       "arguments": { ... },
       "rationale": "<one sentence explaining WHY this step is needed>"
     }
@@ -755,6 +754,18 @@ For spawn_subagent steps, arguments must include at least 'role' and 'objective'
 
 If no tools are needed, return: {"reasoning": "...", "steps": []}
 """
+
+#: Перечень «tool» в формате вывода строится из описаний «- имя(» этой же
+#: шапки, в их порядке. Замер 2026-09-23: перечень был набран руками вторым
+#: списком и разошёлся с описаниями на пять имён — patch_check, journal_append,
+#: python_probe, find_in_files, lesson_provenance были описаны, но в перечне
+#: допустимых значений их не было: ровно то, чем агент чинит себя, зовёт
+#: человека, меряет, ищет и учится. Один источник правды — описания; порядок
+#: постоянный, поэтому шапка от запуска к запуску одна и кэш промпта цел.
+_DESCRIBED_TOOLS = tuple(dict.fromkeys(re.findall(r"^- ([a-z_]+)\(", PLANNER_SYSTEM, re.MULTILINE)))
+PLANNER_SYSTEM = PLANNER_SYSTEM.replace(
+    "<<TOOL_NAMES>>", " | ".join(f'"{name}"' for name in _DESCRIBED_TOOLS))
+
 
 def without_tool_blocks(prompt: str, hidden: frozenset[str] | set[str]) -> str:
     """`prompt` без описаний инструментов из `hidden`.

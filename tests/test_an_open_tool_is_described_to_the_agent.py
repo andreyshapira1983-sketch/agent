@@ -173,3 +173,24 @@ def test_the_prompt_does_not_forbid_what_the_code_allows() -> None:
         "не сказано, что в окружении нет pip: иначе агент возьмёт системный "
         "pip3 и получит «установлено» на пакет, которого не увидит"
     )
+
+
+def test_the_plan_format_lists_exactly_the_described_tools() -> None:
+    """Перечень «tool» в формате вывода = описанные инструменты, не больше и не меньше.
+
+    Замер 2026-09-23: перечень, набранный руками, разошёлся с описаниями на
+    пять имён — patch_check, journal_append, python_probe, find_in_files,
+    lesson_provenance. Это ровно то, чем агент чинит себя, зовёт человека,
+    меряет, ищет и учится; перечень говорил ему, что таких значений нет.
+    """
+    import re
+
+    described = set(re.findall(r"^- ([a-z_]+)\(", PLANNER_SYSTEM, re.MULTILINE))
+    i = PLANNER_SYSTEM.find('"tool": ')
+    assert i >= 0, "в шапке нет формата вывода"
+    line = PLANNER_SYSTEM[i:PLANNER_SYSTEM.find("\n", i)]
+    listed = set(re.findall(r'"([a-z_]+)"', line)) - {"tool"}
+    assert described == listed, (
+        f"описаны, но нет в перечне: {sorted(described - listed)}; "
+        f"в перечне, но не описаны: {sorted(listed - described)}"
+    )
