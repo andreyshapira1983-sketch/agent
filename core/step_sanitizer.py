@@ -3,6 +3,8 @@ with.
 """
 from __future__ import annotations
 
+from core.step_references import has_step_reference
+
 import hashlib
 import ipaddress
 import re
@@ -168,6 +170,46 @@ def _sanitize_python_probe(
     }
 
 
+def _url_refusal(url: str) -> tuple[str | None, str]:
+    """Почему адрес web_fetch недопустим (или None) и адрес после достройки.
+
+    Одни правила на двух рубежах: при планировании для адреса-литерала и после
+    подстановки для адреса из вывода прошлого шага.
+    """
+    if len(url) > 2048:
+        return f"too long ({len(url)} > 2048)", url
+    if not url.isascii():
+        return "not ASCII", url
+    # Голое имя узла — адрес с умолчательной схемой: так его понимает и
+    # браузер, и человек, диктующий «rfc-editor.org». Замер 2026-09-20: 11
+    # снятых шагов из 47 за четверо суток пришлись сюда, а какое значение
+    # отвергалось — по журналу не установить, жалоба его не сохраняла.
+    # Достраивается только похожее на узел; все прежние замки (локальная
+    # сеть, узлы-заглушки) стоят ПОСЛЕ достройки.
+    if "://" not in url and _HOSTLIKE_RE.match(url.strip()):
+        url = "https://" + url.strip()
+    url_lower = url.lower()
+    if not url_lower.startswith(("http://", "https://")):
+        return f"must start with http:// or https://, got '{url[:80]}'", url
+    # Block obvious SSRF shapes BEFORE the tool layer.
+    if _is_local_network_host(_url_host(url_lower)):
+        return "targets local network", url
+    if _is_placeholder_url(url_lower):
+        return "is a placeholder/example host", url
+    return None, url
+
+
+def resolved_url_refusal(tool_name: str | None, arguments: dict[str, Any]) -> str | None:
+    """Проверка адреса ПОСЛЕ подстановки ссылки: причина отказа или None."""
+    if tool_name != "web_fetch":
+        return None
+    url = arguments.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return f"web_fetch url resolved to {type(url).__name__}, not an address"
+    reason, _url = _url_refusal(url.strip())
+    return f"web_fetch url {reason}" if reason else None
+
+
 def _sanitize_web_fetch(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
@@ -183,38 +225,17 @@ def _sanitize_web_fetch(
     if not isinstance(url, str) or not url.strip():
         warnings.append(f"step[{idx}]: web_fetch without url, dropped")
         return None
-    if len(url) > 2048:
-        warnings.append(
-            f"step[{idx}]: web_fetch url too long ({len(url)} > 2048), dropped"
-        )
-        return None
-    if not url.isascii():
-        warnings.append(f"step[{idx}]: web_fetch url not ASCII, dropped")
-        return None
-    # Голое имя узла — адрес с умолчательной схемой: так его понимает и
-    # браузер, и человек, диктующий «rfc-editor.org». Замер 2026-09-20: 11
-    # снятых шагов из 47 за четверо суток пришлись сюда, а какое значение
-    # отвергалось — по журналу не установить, жалоба его не сохраняла.
-    # Достраивается только похожее на узел; все прежние замки (локальная
-    # сеть, узлы-заглушки) стоят ПОСЛЕ достройки.
-    if "://" not in url and _HOSTLIKE_RE.match(url.strip()):
-        url = "https://" + url.strip()
-    url_lower = url.lower()
-    if not url_lower.startswith(("http://", "https://")):
-        warnings.append(
-            f"step[{idx}]: web_fetch url must start with http:// or https://, "
-            f"got '{url[:80]}', dropped"
-        )
-        return None
-    # Block obvious SSRF shapes BEFORE the tool layer.
-    if _is_local_network_host(_url_host(url_lower)):
-        warnings.append(f"step[{idx}]: web_fetch url targets local network, dropped")
-        return None
-    if _is_placeholder_url(url_lower):
-        warnings.append(
-            f"step[{idx}]: web_fetch url is a placeholder/example host, dropped"
-        )
-        return None
+    # Ссылка на вывод прошлого шага — шаблон, а не адрес: проверять его здесь
+    # значит проверять имя переменной. Замер 2026-09-23 (экзамен): шаг
+    # «открыть найденное поиском» с url={{step:1.output}} снимался ДО запуска
+    # («must start with http:// or https://»), и связка «нашёл -> открыл» была
+    # невозможна в принципе. Проверка переносится на момент после подстановки
+    # (`resolved_url_refusal`) и там делает всё то же — с теми же замками.
+    if not has_step_reference(url):
+        reason, url = _url_refusal(url)
+        if reason:
+            warnings.append(f"step[{idx}]: web_fetch url {reason}, dropped")
+            return None
     return {
         "tool": "web_fetch",
         "arguments": {"url": url, **_web_fetch_find(args)},

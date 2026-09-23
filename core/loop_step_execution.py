@@ -45,7 +45,7 @@ from core.step_references import (
     reject_content_reference,
     resolve_step_references,
 )
-from core.step_sanitizer import fit_resolved_arguments
+from core.step_sanitizer import fit_resolved_arguments, resolved_url_refusal
 
 # Thread-local storage for per-step replan triggers.
 # _execute_step writes here instead of self._last_step_failure so that
@@ -423,6 +423,11 @@ class AgentLoopStepExecution:
             resolved = resolve_step_references(
                 arguments, outputs, plan_steps=plan_steps,
             )
+            refusal = resolved_url_refusal(tool_name, resolved)
+            if refusal:
+                raise UnresolvedStepReference(
+                    f"after substitution the {refusal}; the same locks apply to an "
+                    f"address taken from a step as to one written in the plan")
         except UnresolvedStepReference as exc:
             self.log.log("step_reference_unresolved", {
                 "step_id": step.id,
