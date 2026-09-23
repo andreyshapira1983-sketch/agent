@@ -316,8 +316,58 @@ class TestUsageTracking:
         assert s["output_tokens"] == 0
         assert s["total_tokens"] == 0
         assert llm.last_usage == {
-            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            # None, а не 0: после сброса замера кэша НЕТ, и это не то же
+            # самое, что «замерили и попало ноль».
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
+
+    def test_cache_numbers_from_the_provider_reach_last_usage(self):
+        """Поставщик сообщил про кэш — числа должны дойти до журнала.
+
+        Замерено 2026-09-23: 84% входа планировщика — неизменная шапка, и
+        DeepSeek берёт за неё в 30 раз меньше. Пока эти поля не читались,
+        расход выглядел втрое больше настоящего. Прибор, который не видит
+        разницы между попаданием и промахом, показывает слово, а не мир.
+        """
+        llm = LLM(provider="mock")
+        llm._record_usage(10_000, 500, cache_hit=9_800, cache_miss=200)
+        assert llm.last_usage["cache_hit_tokens"] == 9_800
+        assert llm.last_usage["cache_miss_tokens"] == 200
+        # И обратно: молчание поставщика — это НЕ ноль.
+        llm._record_usage(10_000, 500)
+        assert llm.last_usage["cache_hit_tokens"] is None
+        assert llm.last_usage["cache_miss_tokens"] is None
+        # Мусор вместо числа тоже не должен превращаться в ноль или падать.
+        llm._record_usage(1, 1, cache_hit="сколько-то", cache_miss=-5)
+        assert llm.last_usage["cache_hit_tokens"] is None
+        assert llm.last_usage["cache_miss_tokens"] == 0
+
+    def test_continuation_chain_keeps_the_cache_numbers(self):
+        """Цепочка продолжений складывает кэш, а не теряет его.
+
+        Так и случилось 2026-09-23: первая правка читала числа у поставщика,
+        все тесты были зелёные, а живой вызов отдавал None — потому что
+        сборщик продолжений пересоздавал last_usage из одних токенов.
+        Тест держит именно тот стык.
+        """
+        llm = LLM(provider="mock")
+        # Два отрезка сообщили числа — должны сложиться.
+        hit, miss = LLM._agg_cache(None, None, {
+            "cache_hit_tokens": 9_000, "cache_miss_tokens": 300})
+        hit, miss = LLM._agg_cache(hit, miss, {
+            "cache_hit_tokens": 9_000, "cache_miss_tokens": 120})
+        assert (hit, miss) == (18_000, 420)
+        # Молчащий отрезок не обнуляет накопленное.
+        hit, miss = LLM._agg_cache(hit, miss, {
+            "cache_hit_tokens": None, "cache_miss_tokens": None})
+        assert (hit, miss) == (18_000, 420)
+        # Цепочка, где НИКТО не сообщил, остаётся «не измерено», а не нулём.
+        assert LLM._agg_cache(None, None, {}) == (None, None)
+        # И last_usage после сборки несёт оба поля.
+        llm._record_usage(1, 1)
+        assert "cache_hit_tokens" in llm.last_usage
+        assert "cache_miss_tokens" in llm.last_usage
 
     def test_record_usage_tolerates_bad_inputs(self):
         """Usage tracking must NEVER crash a real API call."""
@@ -550,7 +600,8 @@ class TestAnthropicCallPath:
         assert out == "hello from claude"
         assert llm.call_count == 1
         assert llm.last_usage == {
-            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18
+            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     def test_complete_drops_temperature_for_gen4_model(self):
@@ -573,7 +624,9 @@ class TestAnthropicCallPath:
         assert out == "hello"
         assert seen == ["he", "llo"]
         assert llm.last_usage == {
-            "input_tokens": 12, "output_tokens": 8, "total_tokens": 20
+            "input_tokens": 12, "output_tokens": 8, "total_tokens": 20,
+            # Поставщик не сообщил про кэш — значит НЕ ИЗМЕРЕНО, не ноль.
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     def test_stream_on_token_error_is_swallowed(self):
@@ -654,7 +707,8 @@ class TestOpenAICallPath:
         out = llm.complete(system="s", user="u", temperature=0.5)
         assert out == "hello from gpt"
         assert llm.last_usage == {
-            "input_tokens": 9, "output_tokens": 4, "total_tokens": 13
+            "input_tokens": 9, "output_tokens": 4, "total_tokens": 13,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
         # Non-o-series model uses max_tokens + temperature.
         assert "max_tokens" in llm._client.last_kwargs
@@ -677,7 +731,8 @@ class TestOpenAICallPath:
         assert out == "hello"
         assert seen == ["he", "llo"]
         assert llm.last_usage == {
-            "input_tokens": 5, "output_tokens": 3, "total_tokens": 8
+            "input_tokens": 5, "output_tokens": 3, "total_tokens": 8,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     def test_stream_o_series_branch_sets_max_completion_tokens(self):
@@ -833,7 +888,8 @@ class TestLargeOutputContinuation:
         assert second[-1]["content"] == "AAAA"
         # usage is summed across both legs
         assert llm.last_usage == {
-            "input_tokens": 13, "output_tokens": 9, "total_tokens": 22
+            "input_tokens": 13, "output_tokens": 9, "total_tokens": 22,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     def test_anthropic_no_continuation_on_natural_stop(self):
@@ -919,7 +975,8 @@ class TestLargeOutputContinuation:
         assert msgs[-2]["content"] == "AAAA"
         assert msgs[-1]["role"] == "user"
         assert llm.last_usage == {
-            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18
+            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     # --- caps / disable ---------------------------------------------------
