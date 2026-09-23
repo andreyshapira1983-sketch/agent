@@ -94,7 +94,11 @@ class FindInFilesTool(Tool):
         elif root.is_dir():
             files = self._files(root, name)
         else:
-            raise FileNotFoundError(f"Not found: {path}")
+            from tools.base import truncated_name_hint
+            raise FileNotFoundError(
+                f"Not found: {path}"
+                + truncated_name_hint(self.workspace_root, root)
+            )
         limit = max(1, min(int(max_results or DEFAULT_RESULTS), MAX_RESULTS))
         where = f"under {path or '.'} (name={name or '*'})"
         if not query:

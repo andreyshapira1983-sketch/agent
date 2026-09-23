@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tools.base import Tool
+from tools.base import Tool, truncated_name_hint
 
 MAX_BYTES = 1_000_000  # 1 MB cap on a WHOLE-file read
 _WINDOW_MAX_BYTES = 50_000_000  # a start_line/end_line window of a larger file
@@ -212,7 +212,12 @@ class FileReadTool(Tool):
 
         if not target.exists():
             raise FileNotFoundError(
-                f"File not found: {target}{self._nearest_dir_hint(target)}"
+                f"File not found: {target}"
+                # Подсказка про урезанное имя ОТВЕЧАЕТ на вопрос целиком;
+                # список папки после неё — стена текста без пользы (в logs/
+                # лежит 370 следов). Список остаётся, когда продолжения нет.
+                + (truncated_name_hint(self.workspace_root, target)
+                   or self._nearest_dir_hint(target))
             )
         if not target.is_file():
             raise IsADirectoryError(f"Not a file: {target}")
