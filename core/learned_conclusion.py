@@ -85,6 +85,65 @@ def _conclusion_line(content: str) -> str:
     return ""
 
 
+#: Названная сущность вопроса: термин в скобках, в кавычках или в «ёлочках».
+#: Именно её агент кладёт рядом с русской формулировкой, и она не меняется при
+#: переформулировке: «раздел О лексическом анализе (lexer/tokenizer)» и
+#: «раздел ПРО лексический анализ (lexer/tokenizer)» — один и тот же предмет.
+_NAMED_RELATION_RE = re.compile(
+    r"\(([a-zA-Z][a-zA-Z /_-]{2,40})\)"
+    r"|'([^']{3,60})'"
+    r"|«([^»]{3,60})»"
+)
+_SOURCE_PATH_RE = re.compile(r"[\w./-]+\.(?:txt|md|py|jsonl|json|csv|pdf)")
+
+
+def question_key(question: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Ключ вопроса (предмет, отношение), или None — ключа нет.
+
+    Замер 2026-09-23 на 217 живых записях: замена устаревшего вывода не
+    срабатывала НИ РАЗУ. Сравнение шло по строке вопроса дословно, а текст
+    цели пишет модель и формулирует заново каждый цикл: вопросы об одном
+    расходились с 82-го знака. В памяти осели 6 записей об одном разделе одной
+    книги, 4 об одном сообщении об ошибке, 3 об одном разборе случая.
+
+    Ключ СТРУКТУРНЫЙ, а не по похожести, и это не вкус: измерено, что
+    противоречие в среднем ПОХОЖЕЕ на исходник, чем настоящий пересказ того
+    же самого (подмена значения — меньшая правка, чем переформулировка), и
+    распределения перекрываются так, что предельная точность при любом пороге
+    сходства равна 0.67 (arXiv 2606.26511, Temporal Validity in Retrieval
+    Memory). Порог настраивать нечего: он негоден по природе. Моя первая
+    редакция была именно порогом по пересечению слов, и собственная проверка
+    её отвергла — она склеила «лексический анализ» и «синтаксический разбор» в
+    одной книге, то есть затёрла бы верный вывод чужим.
+
+    НЕТ названного отношения — НЕТ ключа, и запись не трогается. Иначе ключ
+    вырождается в один путь и склеивает любые два вопроса об одном файле:
+    проверено на `data/charter_decisions.jsonl`, где так слились разбор случая
+    и выписка записей. Цена ошибки несимметрична: недосклеить — оставить
+    лишнюю запись, пересклеить — стереть верное знание.
+
+    Замер на живой памяти: 5 групп, 12 записей заменяются, 90 записей без
+    отношения остаются как были; все пять групп прочитаны глазами, ложных
+    склеек нет.
+    """
+    low = (question or "").lower()
+    rel = tuple(sorted({
+        (a or b or c).strip()
+        for a, b, c in _NAMED_RELATION_RE.findall(low)
+        if (a or b or c).strip()
+    }))
+    if not rel:
+        return None
+    paths = tuple(sorted(set(_SOURCE_PATH_RE.findall(low))))
+    return paths, rel
+
+
+def same_question(a: str, b: str) -> bool:
+    """Один и тот же предмет и отношение — структурно, без мер сходства."""
+    ka = question_key(a)
+    return ka is not None and ka == question_key(b)
+
+
 def superseded_by(new_content: str, records: list[Any]) -> tuple[list[Any], bool]:
     """Прежние выводы по ТОМУ ЖЕ вопросу и признак «этот вывод уже есть».
 
@@ -98,7 +157,7 @@ def superseded_by(new_content: str, records: list[Any]) -> tuple[list[Any], bool
     fresh = _conclusion_line(new_content)
     same = [r for r in records
             if "conclusion" in (getattr(r, "tags", None) or [])
-            and question and _question_of(getattr(r, "content", "")) == question]
+            and question and same_question(_question_of(getattr(r, "content", "")), question)]
     if any(_conclusion_line(r.content) == fresh for r in same):
         return [], True
     return same, False
