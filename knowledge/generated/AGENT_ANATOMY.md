@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 244 modules across 12 groups._
+_Total: 245 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -132,6 +132,7 @@ _Planning, verification, clarification, control loop._
 | `core/completion_marker` | An attempt-bound channel for the synthesizer's completion declaration. |
 | `core/completion_obligation` | Did this cycle incur an obligation to observe or act, and leave it unmet? |
 | `core/completion_contract` | What must EXIST or have CHANGED when this request is done (MIR-067). |
+| `core/request_checklist` | Чек-лист поручения: требования человека как вопросы «да/нет». |
 | `core/success_check` | Критерий успеха: та его часть, которую можно наблюдать без модели. |
 | `core/response_draft` | The answer under construction — an object the deciders contribute to. |
 | `core/synth_resilience` | Synthesizer resilience ladder. |

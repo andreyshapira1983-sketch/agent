@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.completion_obligation import evaluate_completion_obligations
 from core.redaction import redact_dlp_text
+from core.request_checklist import judge_contract_checklist
 
 
 class AgentLoopRunTail:
@@ -360,5 +361,9 @@ class AgentLoopRunTail:
             # задания — то самое дробление, которое оператор видел глазами.
             if _obl.unaddressed_units:
                 self._defect_signals.append("named_units_unaddressed")
+            # Чек-лист поручения (TICK/RLCF): важный пункт, отвеченный «нет»,
+            # понижает «выполнено» — та же односторонняя власть, что у соседей.
+            if judge_contract_checklist(self, user_question, answer, completion_contract):
+                self._defect_signals.append("checklist_unmet")
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("completion_obligation", exc)

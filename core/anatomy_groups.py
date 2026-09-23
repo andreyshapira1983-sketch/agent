@@ -56,7 +56,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "reasoning_action_check", "best_next_action",
         "best_next_action_helpers", "task_complexity", "low_evidence_policy",
         "unsupported_claims", "subsystem_disagreement", "completion_marker",
-        "completion_obligation", "completion_contract", "success_check",
+        "completion_obligation", "completion_contract", "request_checklist", "success_check",
         "response_draft", "synth_resilience",
         "strategy_router", "role_router", "prompt_registry", "runtime_self",
         "compactor",
