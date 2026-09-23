@@ -35,6 +35,7 @@ trail is uniform.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -135,6 +136,77 @@ def classify_shell_result(
     return "failure", "not_applicable"
 
 
+#: Установка пакетов себе. Открыто словом оператора 2026-09-23.
+#:
+#: Почему `uv`, а не `pip`: в окружении агента pip НЕТ вовсе — оно создано
+#: uv, и в `.venv/bin` лежат только python и uvicorn. Системный `pip` ставит
+#: в ДРУГОЙ интерпретатор: замер 2026-09-23 — `pdfplumber` есть в окружении
+#: агента и отсутствует в системном. Открыть `pip` значило бы дать агенту
+#: ставить пакеты, которых он потом не увидит: тихая ловушка того самого
+#: класса, который мы весь день и чиним.
+_FAMILY_UV = frozenset({"uv"})
+
+#: Подкоманды `uv pip`, которые ничего не меняют.
+_UV_PIP_READ = frozenset({"list", "show", "freeze", "tree"})
+#: Подкоманда, которая ставит. Обратима: поставленный пакет снимается.
+_UV_PIP_WRITE = frozenset({"install"})
+
+#: Имя пакета и ничего больше: «pkg», «pkg==1.2.3».
+#: Дополнения в квадратных скобках («httpx[http2]») отвергаются РАНЬШЕ —
+#: общим запретом на метасимволы оболочки в argv. Здесь они описаны в
+#: выражении, но недостижимы; переписывать общий запрет ради них не стоит:
+#: пакет ставится и без дополнений.
+#: Флаги запрещены ЦЕЛИКОМ, и это одно правило закрывает сразу всё опасное:
+#: `--index-url` и `--find-links` (пакет с чужого сервера), `--upgrade`
+#: (сломать закреплённое окружение, на котором агент сам и работает),
+#: `--target` (положить мимо окружения). Адреса и пути тоже запрещены: ни
+#: `git+https://…`, ни `.`, ни `/path` — только имя из общего хранилища.
+_PKG_NAME_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*"          # имя
+    r"(\[[A-Za-z0-9,._-]+\])?"              # необязательные дополнения
+    r"((==|>=|<=|~=|!=|>|<)[0-9A-Za-z.*+-]+)?$"  # необязательная версия
+)
+
+
+def _validate_uv_argv(argv: list[str]) -> None:
+    """Пропускает только `uv pip install <имена>` и чтение `uv pip list/show`.
+
+    Ставить себе инструмент — сильная сторона агента, а не нарушение (слово
+    оператора 2026-09-23 о его же попытке поставить пакет: «он наоборот
+    сделал правильно, а не писал мне сообщение каждые пять минут»). Поэтому
+    установка идёт БЕЗ одобрения — но только из общего хранилища, только по
+    имени, и только в его собственное окружение.
+    """
+    if len(argv) < 3 or argv[1].strip().lower() != "pip":
+        raise PermissionError(
+            "shell_exec 'uv' allows only 'uv pip …' "
+            f"(install / {', '.join(sorted(_UV_PIP_READ))})"
+        )
+    sub = argv[2].strip().lower()
+    if sub not in (_UV_PIP_READ | _UV_PIP_WRITE):
+        raise PermissionError(
+            f"shell_exec 'uv pip {sub}' is not allowed "
+            f"(allowed: install, {', '.join(sorted(_UV_PIP_READ))})"
+        )
+    if sub not in _UV_PIP_WRITE:
+        return
+    names = [a.strip() for a in argv[3:] if a.strip()]
+    if not names:
+        raise PermissionError("shell_exec 'uv pip install' requires a package name")
+    for name in names:
+        if name.startswith("-"):
+            raise PermissionError(
+                f"shell_exec 'uv pip install' takes no flags, got '{name}': "
+                "a flag could point the install at another server, break the "
+                "pinned environment, or land outside it"
+            )
+        if not _PKG_NAME_RE.match(name):
+            raise PermissionError(
+                f"shell_exec 'uv pip install' takes a package NAME, got "
+                f"'{name}': an address, a path or a repository is not a name"
+            )
+
+
 READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "whoami",
@@ -206,7 +278,12 @@ PROTECTED_BRANCHES: frozenset[str] = frozenset({"main", "master"})
 # Both produce ONE new path and accept exactly one positional argument.
 MUTATING_COMMANDS: frozenset[str] = frozenset({"mkdir", "touch"})
 
-ALL_WHITELIST: frozenset[str] = READ_ONLY_COMMANDS | MUTATING_COMMANDS
+#: Команды, чьё действие ОБРАТИМО: поставленный пакет снимается.
+#: Ворота пропускают обратимое с записью причины, без одобрения
+#: (core/policy.py). Открыто словом оператора 2026-09-23.
+_REVERSIBLE_COMMANDS: frozenset[str] = _FAMILY_UV
+
+ALL_WHITELIST: frozenset[str] = READ_ONLY_COMMANDS | MUTATING_COMMANDS | _REVERSIBLE_COMMANDS
 
 # Characters that would let argv elements compose into a shell — even
 # though we always run with shell=False, blocking these at the input
@@ -324,6 +401,10 @@ class ShellExecTool(Tool):
             and argv[1].strip().lower() in write_subs
         ):
             return "irreversible"
+        if cmd_norm in _REVERSIBLE_COMMANDS:
+            # `uv pip list/show` ничего не меняет; `uv pip install` обратим.
+            sub = argv[2].strip().lower() if len(argv) > 2 and isinstance(argv[2], str) else ""
+            return "read_only" if sub in _UV_PIP_READ else "reversible"
         if cmd_norm in READ_ONLY_COMMANDS:
             return "read_only"
         if cmd_norm in MUTATING_COMMANDS:
@@ -367,6 +448,10 @@ class ShellExecTool(Tool):
                 f"shell_exec refuses '{argv[0]}' — not in whitelist "
                 f"{sorted(ALL_WHITELIST)}"
             )
+
+        if cmd in _REVERSIBLE_COMMANDS:
+            _validate_uv_argv(argv)
+            return cmd, list(argv)
 
         # Subcommand whitelist (e.g. git log/diff/status only).
         sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
@@ -632,6 +717,17 @@ class ShellExecTool(Tool):
 
         plan = self._build_compensation_plan(cmd, argv, target_existed_before)
 
+        if cmd in _REVERSIBLE_COMMANDS:
+            # Ставить — только В СВОЁ окружение. Интерпретатор берётся не из
+            # PATH и не из слов агента, а тот, на котором он сам работает:
+            # системный pip/uv поставил бы в ДРУГОЙ Python (замер 2026-09-23 —
+            # pdfplumber есть у агента и нет в системном), и агент получил бы
+            # «установлено» на пакет, которого не увидит. Подставляется здесь,
+            # а не просится у планировщика: путь к своему окружению не та
+            # вещь, которую стоит угадывать.
+            if len(argv) > 2 and argv[2].strip().lower() in _UV_PIP_WRITE:
+                argv = argv[:3] + ["--python", sys.executable] + argv[3:]
+            return self._run_subprocess(cmd, argv, plan)
         if cmd in READ_ONLY_COMMANDS:
             return self._run_subprocess(cmd, argv, plan)
         if cmd in MUTATING_COMMANDS:

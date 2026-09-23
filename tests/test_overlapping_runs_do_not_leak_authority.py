@@ -49,7 +49,7 @@ from tools.base import Tool
 
 #: A name from the real unattended block set (core/autonomous_runtime.py:74)
 #: that is NOT in _UNBLOCKABLE_TOOLS, so no configuration can lift it.
-_BLOCKED_EXAMPLE = "journal_append"  # rss_fetch открыт словом оператора 2026-09-19
+_BLOCKED_EXAMPLE = "spawn_subagent"  # journal_append открыт словом оператора 2026-09-23, rss_fetch — 2026-09-19
 
 
 class _StubBlockedTool(Tool):

@@ -1,7 +1,13 @@
 import re
 from pathlib import Path
 
-from core.state_integrity import append_state_jsonl_unlocked, state_file_lock
+import datetime as _dt
+
+from core.state_integrity import (
+    append_state_jsonl_unlocked,
+    read_state_jsonl_unlocked,
+    state_file_lock,
+)
 from tools.base import Tool
 
 #: Журналы, у которых ЕСТЬ читатель, и что этот читатель требует от записи.
@@ -170,6 +176,67 @@ def _refuse_broken_shape(path: str, record: dict, contract: dict) -> None:
         )
 
 
+#: Путь ГОЛОСА — единственный журнал, который человек читает как обращение к
+#: себе. Панель оператора показывает именно его.
+VOICE_PATH = "data/chat_outbox.jsonl"
+
+#: Сколько раз за сутки агент вправе заговорить ПЕРВЫМ.
+#:
+#: Открыто словом оператора 2026-09-23 вместе с потолком, а не после него.
+#: Собрано из замеров внимания (см. заметку agent-autonomy-research-2):
+#: восстановление после прерывания — около 23 минут, прерывание в пять секунд
+#: утраивает число ошибок в сложной работе, а «умное» прерывание неврологически
+#: не отличается от глупого — полезность повода не отменяет цены. Жёсткий
+#: потолок 3-5 обращений в сутки на человека; взято верхнее.
+#:
+#: Потолок ЖЁСТКИЙ, а не мягкая цель: исчерпан — обращение ждёт следующих
+#: суток. Считается по самому файлу, а не по счётчику в памяти: перезапуск
+#: процесса не обнуляет чужое внимание.
+VOICE_CALLS_PER_DAY = 5
+
+
+def _voice_calls_today(target: Path) -> int:
+    """Сколько раз агент уже заговорил первым за нынешние сутки UTC."""
+    if not target.exists():
+        return 0
+    today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+    count = 0
+    try:
+        for row in read_state_jsonl_unlocked(target):
+            payload = row.get("payload", row) if isinstance(row, dict) else {}
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("author") or "").strip().lower() != "agent":
+                continue
+            stamp = str(payload.get("ts") or payload.get("timestamp") or "")
+            if stamp[:10] == today:
+                count += 1
+    except Exception:  # noqa: BLE001 — нечитаемый журнал не запирает голос
+        return 0
+    return count
+
+
+def _refuse_over_voice_budget(path: str, target: Path) -> None:
+    """Громкий отказ, когда суточный запас обращений исчерпан.
+
+    Отказ НАЗЫВАЕТ правило: агент, который не знает причины, угадывает её —
+    и угадывает неверно (тот же довод, что у двери памяти).
+    """
+    if path != VOICE_PATH:
+        return
+    used = _voice_calls_today(target)
+    if used >= VOICE_CALLS_PER_DAY:
+        raise PermissionError(
+            f"voice budget spent: {used} of {VOICE_CALLS_PER_DAY} calls to the "
+            "human already made today (UTC). The ceiling is hard, not a target "
+            "— speaking first costs another person's attention, and the "
+            "recovery from one interruption is measured in ~23 minutes. Fold "
+            "what you wanted to say into tomorrow's first call, or write it to "
+            "data/self_improvement_issues.jsonl, which the context of EVERY "
+            "cycle reads without costing anyone attention."
+        )
+
+
 class JournalAppendTool(Tool):
     name = "journal_append"
     description = (
@@ -221,6 +288,7 @@ class JournalAppendTool(Tool):
             raise TypeError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
         _refuse_owned_state(str(path))
+        _refuse_over_voice_budget(str(path), target)
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
         _refuse_naive_stamps(record)
