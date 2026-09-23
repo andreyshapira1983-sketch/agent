@@ -83,4 +83,35 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
         raise RuntimeError("модель вернула пустой текст файла")
     if looks_like_unfilled_content(text):
         raise RuntimeError("собранный текст — незаполненный шаблон")
+    _refuse_note_without_its_contract(loop, path, text)
     return text
+
+
+def _refuse_note_without_its_contract(loop: Any, path: str, text: str) -> None:
+    """Конспект без источника, цитаты и проверки не становится файлом.
+
+    Тот же договор, что судит цель (`core.note_contract`), только спрошенный
+    ДО записи. Замер 2026-09-23: договор проверялся лишь при судействе, и
+    пустышка всё равно ложилась на диск — 40 конспектов из 127 (31%). Цикл
+    помечен `empty`, система знает, что работы не было, а файл лежит рядом с
+    настоящими.
+
+    Отказ НАЗЫВАЕТ, чего не хватает: провал без причины агент разгадывает
+    сам и разгадывает неверно. Пустая правка проваливается так же.
+    """
+    from core.note_contract import NOTES_DIR, contract_gaps
+
+    if not str(path).replace("\\", "/").startswith(NOTES_DIR + "/"):
+        return
+    root = None
+    getter = getattr(loop, "_file_read_workspace_root", None)
+    if callable(getter):
+        try:
+            root = getter()
+        except Exception:  # noqa: BLE001 — недоступный корень не запирает запись
+            root = None
+    if root is None:
+        return
+    gaps = contract_gaps(text, root)
+    if gaps:
+        raise RuntimeError("конспект не выполняет свой договор: " + "; ".join(gaps))

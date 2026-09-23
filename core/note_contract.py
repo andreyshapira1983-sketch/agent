@@ -33,18 +33,28 @@ def criterion(note_rel: str) -> str:
             "дословная цитата и проверка с числом.")
 
 
-def settle_note(workspace: Path | str, success_check: str) -> dict[str, Any] | None:
-    """Проверить конспект по договору; None — это не задача с конспектом."""
+def contract_gaps(text: str, workspace: Path | str) -> list[str]:
+    """Чего не хватает В ЭТОМ ТЕКСТЕ по договору конспекта. Пусто — договор цел.
+
+    Вынесено из `settle_note` 2026-09-23, чтобы ОДИН критерий проверялся в двух
+    местах: при судействе цели и ДО записи файла. Замер того же дня: договор
+    проверялся только при судействе, и пустышка всё равно ложилась на диск —
+    40 конспектов из 127 (31%) содержат признание, что источник не читался,
+    цитаты нет и проверка не выполнялась. Цикл при этом помечен `empty`:
+    система знала, что работы не было, а файл лежал рядом с настоящими и со
+    стороны выглядел как «смотри, я сделал».
+
+    Отдельного списка оборотов («в выводах шагов отсутствует», «дословной
+    цитаты нет») здесь НЕТ и быть не должно: список заплат закрывает по одной
+    лазейке, а исполнитель находит следующую — тот самый упрёк оператора
+    2026-09-22 «ты чинишь симптомы». Договор один и тот же: назван источник,
+    приведена дословная цитата, показана проверка с числом. Конспект, который
+    признаётся, что источника не читал, проваливает его сам — не потому что
+    он так СКАЗАЛ, а потому что цитаты и проверки в нём нет.
+    """
     from core.observation_round import unfilled_placeholders
 
-    match = _NOTE_RE.search(success_check or "")
-    if not match:
-        return None
-    root, rel = Path(workspace), match.group(0)
-    path = root / rel
-    if not path.is_file():
-        return {"verdict": "missing", "reason": f"конспекта {rel} нет"}
-    text = path.read_text(encoding="utf-8", errors="replace")
+    root = Path(workspace)
     holes = unfilled_placeholders(text)
     named = [p for p in _WORKSPACE_PATH_RE.findall(text) if (root / p).exists()]
     missing: list[str] = []
@@ -58,6 +68,22 @@ def settle_note(workspace: Path | str, success_check: str) -> dict[str, Any] | N
         missing.append("нет дословной цитаты (строка с «>» или текст в кавычках)")
     if not (any(w in text.lower() for w in _CHECK_WORDS) and _NUMBER_RE.search(text)):
         missing.append("нет проверки с числом (расчёт, сверка, python_probe)")
+    return missing
+
+
+def settle_note(workspace: Path | str, success_check: str) -> dict[str, Any] | None:
+    """Проверить конспект по договору; None — это не задача с конспектом."""
+    from core.observation_round import unfilled_placeholders
+
+    match = _NOTE_RE.search(success_check or "")
+    if not match:
+        return None
+    root, rel = Path(workspace), match.group(0)
+    path = root / rel
+    if not path.is_file():
+        return {"verdict": "missing", "reason": f"конспекта {rel} нет"}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    missing = contract_gaps(text, root)
     if missing:
         return {"verdict": "missing", "reason": f"{rel}: " + "; ".join(missing)}
     return {"verdict": "verified", "reason": f"{rel}: источник, цитата и проверка на месте"}
