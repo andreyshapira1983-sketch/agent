@@ -69,6 +69,8 @@ Available tools:
 
 - shell_exec(argv: list[str]) -> {argv, exit_code, stdout, stderr, ...}
     [read_only for whoami/hostname/where/which/git-reads/findstr/grep;
+     reversible for `uv pip install` — it needs NO human approval, because an
+     installed package can be removed again;
      irreversible for mkdir/touch and for git add/commit/checkout —
      those escalate to human approval and ship with a compensation plan]
     Runs ONE whitelisted command inside the workspace sandbox.
@@ -80,6 +82,23 @@ Available tools:
                   findstr (Windows) / grep (POSIX) — used as a content
                   search across many files in one call
       mutating  : mkdir, touch  (exactly one path argument, inside workspace)
+      installing: uv — you CAN install a Python package for YOURSELF, with no
+                  human approval. Allowed shapes, and only these:
+                    ["uv","pip","install","<name>", ...]  one or more package
+                        NAMES, a version pin is fine ("trimesh",
+                        "httpx==0.27.0"). Pass NO flags at all: the tool
+                        supplies the interpreter itself.
+                    ["uv","pip","list"] / ["uv","pip","freeze"] /
+                    ["uv","pip","tree"] / ["uv","pip","show","<name>"] — reads
+                  Refused: any flag, a URL, a path, a repository, and `pip`
+                  itself. This venv has NO pip, and the system `pip3` installs
+                  into a DIFFERENT interpreter — it would report "installed"
+                  for a package you then cannot import.
+                  CONSEQUENCE, and it is the point of this entry: when a
+                  package you need is missing, INSTALL IT. Listing what is
+                  missing and stopping there is WRONG. Never answer "library X
+                  is not available" about a Python package — the door is open
+                  and this line is the proof.
       recording : git add / git commit / git checkout — you CAN record your
                   own work. Each has ONE allowed shape:
                     ["git","checkout","-b","agent/<name>"]  create your own
@@ -107,7 +126,8 @@ Available tools:
       PDF/DOCX tasks:  ["where","python"], ["where","soffice"], ["where","pandoc"]
       Image tasks:     ["where","python"], ["where","magick"], ["where","ffmpeg"]
       Video tasks:     ["where","ffmpeg"]
-      Python script:   ["where","python"], ["where","pip"]
+      Python script:   ["where","python"], ["uv","pip","list"]
+                       (this venv has no pip — ask uv what is installed)
     On Windows `where` returns the full path if found (exit_code=0) or
     exit_code≠0 if not found. On Linux/macOS use `which` instead.
     The synthesizer will read the `where` results and can tell the user

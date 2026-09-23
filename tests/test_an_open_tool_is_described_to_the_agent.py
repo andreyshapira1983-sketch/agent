@@ -114,3 +114,62 @@ def test_the_undocumented_list_has_no_stale_names() -> None:
     open_tools = _tools_open_on_the_unattended_path()
     stale = sorted(set(_DELIBERATELY_UNDOCUMENTED) - open_tools)
     assert not stale, f"в списке исключений имена, которых нет среди открытых: {stale}"
+
+
+def _shell_exec_block() -> str:
+    """Описание shell_exec в шапке — от его имени до следующего инструмента."""
+    i = PLANNER_SYSTEM.find("- shell_exec(")
+    assert i >= 0, "shell_exec не описан в шапке"
+    j = PLANNER_SYSTEM.find("\n- ", i + 1)
+    return PLANNER_SYSTEM[i: j if j > 0 else len(PLANNER_SYSTEM)]
+
+
+def test_every_whitelisted_command_is_named_in_the_prompt() -> None:
+    """Разрешено в коде — значит названо в шапке.
+
+    Замерено 23.09 на живом ходе: семейство `uv` добавили в ALL_WHITELIST, а
+    описание shell_exec продолжало утверждать «Whitelist (the ONLY allowed
+    argv[0] values)» без `uv`. Агент спросили про 3D-аватар — он перечислил
+    девять недостающих библиотек и не поставил НИ ОДНОЙ, потому что шапка
+    сказала ему, что нельзя. Дверь была открыта, а на карте стояла стена.
+
+    Это шире, чем `uv`: любое расхождение между белым списком и шапкой
+    отнимает у агента возможность, за которую мы уже заплатили работой.
+    """
+    import re
+
+    from tools.shell_exec import ALL_WHITELIST
+
+    block = _shell_exec_block()
+    # Целым словом, а не подстрокой: «uv» — две буквы, и внутри «uvicorn» или
+    # «trouve» подстрока нашлась бы сама собой. Такой тест не кусает, и это
+    # проверено руками на сломанной нарочно шапке.
+    missing = sorted(
+        cmd
+        for cmd in ALL_WHITELIST
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(cmd)}(?![A-Za-z0-9_])", block) is None
+    )
+    assert not missing, (
+        f"команда разрешена в ALL_WHITELIST и не названа в описании "
+        f"shell_exec: {missing}. Агент её не выберет — он читает шапку, а не "
+        f"код. Допиши её в белый список в PLANNER_SYSTEM."
+    )
+
+
+def test_the_prompt_does_not_forbid_what_the_code_allows() -> None:
+    """Установка пакета описана как действие, а не как запрет.
+
+    Недостаточно упомянуть `uv`: агент должен прочесть, что ставить себе
+    пакет — это ЕГО работа, а не повод доложить «библиотеки нет». На этом
+    промахе он и встал 23.09 в 17:57.
+    """
+    block = _shell_exec_block()
+    assert "uv pip install" in block, "в описании нет самой команды установки"
+    assert "INSTALL IT" in block, (
+        "в описании нет прямого указания ставить недостающий пакет — без него "
+        "агент снова перечислит недостающее и остановится"
+    )
+    assert "no pip" in block or "NO pip" in block, (
+        "не сказано, что в окружении нет pip: иначе агент возьмёт системный "
+        "pip3 и получит «установлено» на пакет, которого не увидит"
+    )
