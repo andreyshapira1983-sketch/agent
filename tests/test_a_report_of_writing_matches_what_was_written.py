@@ -7,6 +7,14 @@
 """
 from __future__ import annotations
 
+# Формулировки обновлены 2026-09-23: показание больше не называет `file_write`
+# единственным способом записи. Повод — живой случай: агент записал вопрос в
+# голосовой ящик через `journal_append`, запись легла, а показание ответило
+# «НЕ выполнено ни одной записи файла». Считаются все три пишущих инструмента
+# (file_write, journal_append, memory_bank); `patch_check` не считается — он
+# примеряет правку на клоне и рабочую папку не меняет.
+
+
 from core.answer_contradiction import action_report_mismatch
 
 
@@ -14,13 +22,13 @@ def test_a_claimed_write_without_any_write_is_flagged() -> None:
     answer = ("Conclusion: Исправленное предложение записано новым файлом "
               "proposals/x_v3.md, 9412 байт.\n\nFacts:\n- ...")
     note = action_report_mismatch(answer, [])
-    assert note and "file_write: 0" in note
+    assert note and "записей: 0" in note
 
 
 def test_a_denied_write_after_real_writes_is_flagged() -> None:
     answer = "В этом ходе я не записал ни одного файла и не выполнил ни одной пробы."
     note = action_report_mismatch(answer, ["list_dir", "file_write", "file_write", "file_read"])
-    assert note and "записей файлов: 2" in note
+    assert note and "записей: 2" in note
 
 
 def test_an_honest_report_gets_only_the_plain_fact() -> None:
@@ -40,4 +48,4 @@ def test_a_denial_in_words_nobody_listed_still_meets_the_fact() -> None:
     note = action_report_mismatch(
         "Задача не выполнена: запись в файл не состоялась — final.md остался прежним.",
         ["file_read", "file_write", "find_in_files"])
-    assert note and "записей файлов в этом ходе: 1" in note
+    assert note and "записей в этом ходе: 1" in note

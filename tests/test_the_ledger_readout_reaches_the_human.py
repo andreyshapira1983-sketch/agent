@@ -34,3 +34,38 @@ def test_the_notice_comes_before_the_verification_tail() -> None:
 def test_an_answer_without_a_notice_is_unchanged_in_shape() -> None:
     plain = "Conclusion:\nВсё сделано.\nFacts:\n- раз"
     assert "По журналу хода" not in format_human_response(plain)
+
+
+def test_a_journal_write_counts_as_a_write() -> None:
+    """Прибор, обвиняющий честного, хуже молчащего.
+
+    2026-09-23, 03:25. Агента спросили, молчит ли он потому, что не может, или
+    потому, что не хочет. Он проверил руками: записал вопрос в голосовой ящик
+    `data/chat_outbox.jsonl` инструментом `journal_append` — запись легла, файл
+    вырос с трёх строк до четырёх. А показание в его же ответе сказало: «НЕ
+    выполнено ни одной записи файла, утверждение о записи не подтверждено»,
+    потому что считался ровно `file_write`.
+    """
+    from core.answer_contradiction import action_report_mismatch
+
+    head = "Проверка выполнена: я записал вопрос в ящик, ворота его пропустили."
+
+    # Показание есть, но оно ПОДТВЕРЖДАЕТ запись, а не отрицает её.
+    for tool in ("journal_append", "memory_bank"):
+        note = action_report_mismatch(head, [tool])
+        assert note is not None and "не подтверждено" not in note, note
+        assert tool in note, note
+    # Ни одного инструмента — обвинение остаётся, и оно больше не называет
+    # `file_write` единственным способом записи.
+    empty = action_report_mismatch(head, []) or ""
+    assert "не подтверждены" in empty, empty
+    assert "file_write: 0" not in empty, empty
+
+
+def test_a_probe_that_changes_nothing_is_not_a_write() -> None:
+    """Обратный край: patch_check примеряет правку на клоне и не пишет."""
+    from core.answer_contradiction import action_report_mismatch
+
+    note = action_report_mismatch("Правка записана в файл.", ["patch_check"])
+
+    assert note is not None and "не подтверждено" in note

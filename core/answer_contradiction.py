@@ -249,6 +249,18 @@ _DENIES_WRITE_RE = re.compile(
     r"(?i)\b(?:не\s+(?:записа|переписа|сохран)\w*|не\s+вызывал\w*\s+file_write|ни\s+одного\s+файла|"
     r"did\s+not\s+write|no\s+files?\s+(?:were\s+)?written)\b")
 
+#: Чем агент ПИШЕТ. Не только `file_write`: 2026-09-23 в 03:25 он проверил,
+#: открыта ли дверь голосового ящика, записал туда вопрос через
+#: `journal_append` — запись легла, файл вырос, — а этот прибор ответил ему
+#: «НЕ выполнено ни одной записи файла, утверждение о записи не подтверждено».
+#: Прибор, обвиняющий честного, хуже молчащего: он учит не верить себе. Тот же
+#: класс, что и прежние поломки показаний, только с обратным знаком.
+#: `patch_check` сюда НЕ входит: он примеряет правку на клоне и рабочую папку
+#: не меняет — назвать его записью значило бы завести враньё с другого конца.
+_WRITING_TOOLS: frozenset[str] = frozenset({
+    "file_write", "journal_append", "memory_bank",
+})
+
 
 #: Доклад о любом действии — чтении, замере, пробе, счёте, запуске. Тот же ход
 #: 2026-09-21 ~17:10 кроме «записано» сказал «по измерению file_read в нём
@@ -287,17 +299,21 @@ def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str
     if (not executed_tools and (_CLAIMS_ACTION_RE.search(head) or _CLAIMS_WRITE_RE.search(head))
             and not (_DENIES_ACTION_RE.search(head) or _DENIES_WRITE_RE.search(head))):
         return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одного инструмента "
-                "(инструментов: 0, file_write: 0) — утверждения о прочитанном, измеренном или записанном в выводе не подтверждены.")
-    writes = sum(1 for tool in executed_tools if tool == "file_write")
+                "(инструментов: 0, записей: 0) — утверждения о прочитанном, измеренном "
+                "или записанном в выводе не подтверждены.")
+    writes = sum(1 for tool in executed_tools if tool in _WRITING_TOOLS)
     if writes == 0 and _CLAIMS_WRITE_RE.search(head) and not _DENIES_WRITE_RE.search(head):
-        return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одной записи файла "
-                "(file_write: 0) — утверждение о записи в выводе не подтверждено.")
+        return ("⚠️ По журналу хода: в этом ходе НЕ выполнено ни одной записи "
+                "(file_write, journal_append, memory_bank: 0) — утверждение о записи "
+                "в выводе не подтверждено.")
     if writes > 0 and _DENIES_WRITE_RE.search(head):
-        return (f"⚠️ По журналу хода: в этом ходе выполнено записей файлов: {writes} "
-                "(file_write) — утверждение «не записал» в выводе неверно.")
+        return (f"⚠️ По журналу хода: в этом ходе выполнено записей: {writes} "
+                "(file_write / journal_append / memory_bank) — утверждение «не записал» "
+                "в выводе неверно.")
     if writes > 0:
         # Факт записи — всегда, без разбора слов: 2026-09-21 «запись не
         # состоялась» при успешной перезаписи в первом круге прошло мимо
         # ловли отрицаний. Переформулировок бесконечно, журнал — один.
-        return f"ℹ️ По журналу хода: записей файлов в этом ходе: {writes} (file_write)."
+        made = ", ".join(sorted({t for t in executed_tools if t in _WRITING_TOOLS}))
+        return f"ℹ️ По журналу хода: записей в этом ходе: {writes} ({made})."
     return None

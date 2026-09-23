@@ -21,7 +21,11 @@ from core.doc_routing import (
     is_confidence_evidence_diagnostic_question,
     is_doctrine_corporate_question,
 )
-from core.gateway_consult import budget_ledger_snapshot, readiness_blockers
+from core.gateway_consult import (
+    approval_paths,
+    budget_ledger_snapshot,
+    readiness_blockers,
+)
 from core.incident import IncidentLog
 from core.ingestion import ingest_files
 from core.learning_planner import LearningPlanner
@@ -1047,6 +1051,10 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             if not config.dry_run
             else ()
         )
+        # Чего именно касаются висящие заявки. Пустое множество означает «не
+        # знаю» и оставляет запрет общим — соразмерность не должна превращаться
+        # в лазейку, когда ящик нечитаем (core/gateway_consult.approval_paths).
+        self.agent.gateway_approval_paths = approval_paths(self.approval_inbox)
         # Prune the planner-visible tool surface so the planner does not even
         # *propose* run-scoped-blocked tools on the unattended goal path. Policy
         # (below) stays as defense-in-depth if a blocked tool is attempted anyway.
