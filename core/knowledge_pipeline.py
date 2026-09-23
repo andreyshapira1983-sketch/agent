@@ -330,9 +330,38 @@ _CODE_SUFFIXES = frozenset({
 })
 
 
-def _is_code_locator(locator: str) -> bool:
+#: Украшения адреса, которые не меняют его природы: диапазон строк, номер
+#: строки, метка фрагмента. `file_read` с окном отдаёт адрес вида
+#: `core/x.py:284-292`, и проверка окончания на нём не срабатывает.
+_LOCATOR_DECORATION_RE = re.compile(r":\d+(?:-\d+)?$|#L\d+(?:-L?\d+)?$")
+
+
+def _bare_locator(locator: str) -> str:
+    """Адрес без украшений: `core/x.py:284-292` -> `core/x.py`."""
     text = (locator or "").strip().casefold()
-    return any(text.endswith(suffix) for suffix in _CODE_SUFFIXES)
+    while True:
+        stripped = _LOCATOR_DECORATION_RE.sub("", text)
+        if stripped == text:
+            return text
+        text = stripped
+
+
+def _is_code_locator(locator: str) -> bool:
+    """Адрес указывает на программу, а не на прозу.
+
+    Замер 2026-09-23: правило «программы не утверждают фактов» обходилось
+    номерами строк. `core/loop_response_deciders.py` узнавался как код,
+    а `core/loop_response_deciders.py:265-285` — нет, потому что на `.py` не
+    кончается. В памяти агента из-за этого легли 18 записей, собранных из
+    его же кода и комментариев и помеченных как факты о мире с уверенностью
+    0.85 — например обрывок «SEARCH/REPLACE в Aider).» из шапки
+    tools/patch_check.py, записанный дважды.
+
+    Тот же класс, что денежное число со знаком валюты (7c4c957) и урезанное
+    имя следа (df8c2cb): украшенная строка ломает сверку по окончанию.
+    Лечится нормализацией адреса ДО проверки, а не новым списком исключений.
+    """
+    return any(_bare_locator(locator).endswith(suffix) for suffix in _CODE_SUFFIXES)
 
 
 class ConflictResolver:
