@@ -107,6 +107,7 @@
     "loop_memory_read.py::AgentLoopMemoryRead.smart_memory_summary": [],
     "loop_memory_read.py::_family_appendix": [],
     "loop_memory_read.py::_merge_rejection_reasons": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._consolidate_conclusion": [],
     "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed": [
       "discovery",
       "callers"
@@ -473,6 +474,10 @@
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
       "loop_memory_commands.py::AgentLoopMemoryCommands.remember"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
+      "loop_memory_write.py::AgentLoopMemoryWrite._consolidate_conclusion"
     ],
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",

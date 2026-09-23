@@ -449,11 +449,32 @@ class AgentLoopMemoryWrite:
                 })
         if content is None or self._durable_learning_suppressed("knowledge"):
             return
+        consolidation = None
         try:
             existing = self.persistent_store.load() if self.persistent_store is not None else []
             old, known = superseded_by(content, existing)
             if known:
                 return  # тот же вывод по тому же вопросу уже в памяти
+            if not old:
+                # Структурный ключ ничего не решил — сверка по Mem0
+                # (`core/memory_consolidation.py`): похожие выводы отбирает BM25,
+                # решает модель. Любой сбой там — ADD, как было.
+                consolidation = self._consolidate_conclusion(content, episode, existing)
+                if consolidation.operation == "NOOP":
+                    self.log.log("conclusion_memory_write", {
+                        "episode_id": episode.id, "decision": "noop",
+                        "consolidation": consolidation.operation,
+                        "target": consolidation.target_id, "reason": consolidation.reason,
+                    })
+                    return
+                if consolidation.operation in ("UPDATE", "DELETE"):
+                    old = [r for r in existing if r.id == consolidation.target_id]
+                from core.memory_consolidation import merged_content, with_title
+                if consolidation.operation == "UPDATE" and old:
+                    # Слияние, а не замена: прежний вопрос, вывод обоих.
+                    content = merged_content(content, old[0].content, consolidation.merged or "")
+                else:
+                    content = with_title(content, consolidation.title)
             decision, record = self.remember(
                 content, tags, source="agent-auto", record_type="semantic", owner="self",
                 existing=[r for r in existing if r not in old], supersedes=bool(old),
@@ -470,7 +491,17 @@ class AgentLoopMemoryWrite:
             "record_id": record.id if record is not None else None,
             "kind": "web-knowledge" if "web-knowledge" in tags else "conclusion",
             "superseded": archived,
+            "consolidation": consolidation.operation if consolidation else "structural",
+            "consolidation_reason": consolidation.reason if consolidation else "",
         })
+
+    def _consolidate_conclusion(self, content: str, episode: Any, existing: list[Any]) -> Any:
+        """Решение Mem0 по новому выводу: ADD / UPDATE / DELETE / NOOP."""
+        from core.memory_consolidation import consolidate, similar_conclusions
+
+        question = " ".join(str(getattr(episode, "question", "") or "").split())
+        similar = similar_conclusions(content, existing)
+        return consolidate(getattr(self, "llm", None), content, question, similar)
 
     def _record_aborted_episode(self, question: str, *, reason: str) -> None:
         """Bank a `failed` episode for a run that did not complete.
