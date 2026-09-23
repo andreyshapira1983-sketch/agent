@@ -61,6 +61,40 @@ def budget_enforcement_blockers(snapshot: Mapping[str, Any] | None) -> tuple[str
     return ()
 
 
+#: Приставка причины, которую ворота снимают, когда действие не касается
+#: файлов висящей заявки. Совпадать должна ровно одна строка, поэтому она
+#: собрана в одном месте и здесь же разбирается.
+APPROVAL_BLOCKER_PREFIX = "approval item(s) pending"
+
+
+def approval_paths(inbox: Any) -> frozenset[str]:
+    """Файлы, которых касаются висящие заявки.
+
+    Слово оператора 2026-09-23: блокировка должна быть соразмерной. Замер того
+    дня: одна заявка на разделение `core/loop_step_execution.py` запрещала
+    агенту ВСЕ записи — десять циклов подряд пустые, конспект по физике в
+    `data/notes` не ложился из-за бумаги про файл в `core/`. Заявка называет
+    свои файлы сама (payload.files[].path), и дальше этих файлов её запрет не
+    простирается.
+
+    Нечитаемый ящик возвращает пустое множество: это НЕ разрешение, а
+    отсутствие сведений — вызывающий в таком случае оставляет запрет общим.
+    """
+    paths: set[str] = set()
+    try:
+        items = list(inbox.pending())
+    except Exception:  # noqa: BLE001 — неработающий ящик не ломает ворота
+        return frozenset()
+    for item in items:
+        payload = getattr(item, "payload", None) or {}
+        files = payload.get("files") if isinstance(payload, dict) else None
+        for entry in files or ():
+            path = entry.get("path") if isinstance(entry, dict) else entry
+            if isinstance(path, str) and path.strip():
+                paths.add(path.replace("\\", "/").strip())
+    return frozenset(paths)
+
+
 def readiness_blockers(
     *,
     pending_approvals: int = 0,

@@ -539,6 +539,9 @@ class AgentLoopStepExecution:
                 budget_snapshot=getattr(self, "gateway_budget_snapshot", None),
                 readiness_blockers=getattr(self, "gateway_readiness_blockers", ()),
                 check_readiness=bool(getattr(self, "gateway_check_readiness", False)),
+                # Файлы висящих заявок: запрет от заявки простирается на них и
+                # не дальше (слово оператора 2026-09-23 о соразмерности).
+                pending_approval_paths=getattr(self, "gateway_approval_paths", None),
             )
             gw = gateway.evaluate(action, registry=self.registry)
             self.log.log("gateway_decision", gw.to_log_payload())

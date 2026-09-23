@@ -462,6 +462,45 @@ def _exists_in_workspace(workspace: str | None, path: str) -> bool:
     return target.is_file()
 
 
+#: Файл правки самопочинки: его содержимое — блоки SEARCH/REPLACE, каждый из
+#: которых обязан дословно повторять кусок ЧУЖОГО файла. Такой текст нельзя
+#: знать заранее, его можно только прочитать (`core/patch_route.py`).
+_PATCH_FILE_RE = re.compile(r"^proposals/selffix/[^/]+/edits\.txt$")
+
+
+def _is_patch_file(path: str) -> bool:
+    return bool(_PATCH_FILE_RE.match(path.replace("\\", "/").strip().lstrip("./")))
+
+
+def _patch_task_from(content: str, idx: int, warnings: list[str], path: str) -> str:
+    """Готовый текст правки превратить в задание собрать её по прочитанному.
+
+    Замер 2026-09-23: все 28 записей `proposals/selffix/**/edits.txt` за прогон
+    пришли с готовым content от планировщика — и пять правок из тринадцати
+    умерли с «the patch did not apply», потому что сторона SEARCH сочинялась по
+    догадке о чужом файле. Под запись: агент написал для `tools/web_fetch.py`
+    блок с `import requests` и функцией `fetch()`, которых там нет, и файл в
+    том ходе не читал ни разу.
+
+    Планировщик дословного текста чужого файла знать не может: он его не
+    видел. Поэтому текст заменяется заданием, и блоки соберутся перед самой
+    записью — по выводам уже исполненных чтений (`core/write_at_execution.py`).
+    Нет чтений — нет текста: шаг честно провалится вместо того, чтобы положить
+    выдумку. Замысел плана не выбрасывается: он и есть содержание задания.
+    """
+    warnings.append(
+        f"step[{idx}]: file_write в {path} с готовым текстом — блоки правки "
+        "собираются по ПРОЧИТАННОМУ, а не сочиняются планом; заменено заданием")
+    return (
+        "Собери блоки правки по файлам, прочитанным в этом ходе. Сторона SEARCH "
+        "берётся ДОСЛОВНО из вывода чтения — ни одного символа от себя. Если "
+        "нужного куска в выводах шагов нет, не выдумывай его: напиши ровно "
+        "«нужные строки не прочитаны», и шаг провалится честно. Форма: "
+        "FILE:<путь>, затем <<<<<<< SEARCH / ======= / >>>>>>> REPLACE, каждая "
+        "метка на своей строке; новый файл — блок с пустым SEARCH. "
+        f"Замысел правки, как его задумал план: {content.strip()[:900]}")
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -560,6 +599,9 @@ def sanitize_step(
                             "(or give write_instruction), dropped")
             return None
         path = path.strip()
+        if isinstance(content, str) and _is_patch_file(path):
+            instruction = _patch_task_from(content, idx, warnings, path)
+            content = None
         # ASCII-only identifier policy. Catches the LLM trying to
         # honour a literal user request like «создай файл привет.txt»
         # — the planner should transliterate, but if it doesn't, we

@@ -3,10 +3,14 @@ daemon).
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from core.gateway_consult import collect_hard_stop_reasons
+from core.gateway_consult import (
+    APPROVAL_BLOCKER_PREFIX,
+    collect_hard_stop_reasons,
+)
 from core.models import Action, PolicyDecision
 from core.policy import PolicyGate
 from tools.base import ToolRegistry
@@ -79,6 +83,7 @@ class ActuationGateway:
         budget_snapshot: dict | None = None,
         readiness_blockers: tuple[str, ...] = (),
         check_readiness: bool = False,
+        pending_approval_paths: frozenset[str] | None = None,
     ):
         self.policy = policy
         self.path = path
@@ -87,14 +92,45 @@ class ActuationGateway:
         self.budget_snapshot = budget_snapshot
         self.readiness_blockers = readiness_blockers
         self.check_readiness = check_readiness
+        #: Файлы висящих заявок. `None` — сведений нет, запрет остаётся общим.
+        self.pending_approval_paths = pending_approval_paths
 
-    def _hard_stop_decision(self, tool_name: str) -> GatewayDecision | None:
+    def _touches_pending_approval(self, args: Mapping[str, Any]) -> bool:
+        """Касается ли действие файла, о котором уже лежит заявка."""
+        if not self.pending_approval_paths:
+            return True
+        named: list[str] = []
+        for key in ("path", "file_path", "target", "relpath"):
+            value = args.get(key)
+            if isinstance(value, str) and value.strip():
+                named.append(value)
+        for key in ("paths", "files", "file_paths"):
+            for value in args.get(key) or ():
+                if isinstance(value, str) and value.strip():
+                    named.append(value)
+        if not named:
+            return True  # действие без названного файла судится по-старому
+        cleaned = {p.replace("\\", "/").strip().lstrip("./") for p in named}
+        return any(p.endswith(tuple(cleaned)) or p in cleaned
+                   for p in self.pending_approval_paths)
+
+    def _hard_stop_decision(
+        self, tool_name: str, args: Mapping[str, Any] | None = None,
+    ) -> GatewayDecision | None:
         reasons = collect_hard_stop_reasons(
             kill_switch=self.kill_switch,
             budget_snapshot=self.budget_snapshot,
             blockers=self.readiness_blockers,
             check_readiness=self.check_readiness,
         )
+        # Соразмерность (слово оператора 2026-09-23): висящая заявка запрещает
+        # работу с ТЕМИ файлами, которых касается, а не со всеми сразу. Замер:
+        # одна заявка про `core/loop_step_execution.py` стоила десяти пустых
+        # циклов — конспект по физике в `data/notes` не ложился из-за неё.
+        # Остальные жёсткие причины (выключатель, бюджет) не трогаются.
+        if reasons and not self._touches_pending_approval(args or {}):
+            reasons = tuple(r for r in reasons
+                            if APPROVAL_BLOCKER_PREFIX not in r)
         if not reasons:
             return None
         return GatewayDecision(
@@ -120,7 +156,7 @@ class ActuationGateway:
                 path=self.path,
             )
 
-        blocked = self._hard_stop_decision(tool_name)
+        blocked = self._hard_stop_decision(tool_name, args)
         if blocked is not None:
             return blocked
 
