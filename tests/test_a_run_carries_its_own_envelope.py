@@ -51,7 +51,7 @@ class _Done(Exception):
 
 def _agent(workspace: Path):
     agent = _durable_agent(workspace)
-    for name in ("journal_append", "run_tests", "semantic_scholar_search"):
+    for name in ("spawn_subagent", "run_tests", "semantic_scholar_search"):
         agent.registry.register(_Stub(name))
     return agent
 
@@ -110,14 +110,14 @@ def test_a_runs_narrowing_does_not_outlive_it(workspace: Path) -> None:
     """Invariant 3, the restriction direction. What one run forbids must be
     forgotten before the next begins."""
     agent = _agent(workspace)
-    before = _verdict(agent, "journal_append")
+    before = _verdict(agent, "spawn_subagent")
     inside = _observe_during_run(
-        agent, workspace, lambda: _verdict(agent, "journal_append"),
+        agent, workspace, lambda: _verdict(agent, "spawn_subagent"),
         dry_run=True, include_tests=True)
 
     assert before != "deny"
     assert inside == "deny", "the run did not narrow anything"
-    assert _verdict(agent, "journal_append") == before, (
+    assert _verdict(agent, "spawn_subagent") == before, (
         "a run's restriction outlived the run — the next one inherits a limit "
         "nobody gave it"
     )
