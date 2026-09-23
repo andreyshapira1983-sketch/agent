@@ -47,8 +47,8 @@ TICK» на 16 живых парах чата 24.09 дал важное «нет
 повышает. Сбой модели, пустой или неразборчивый ответ — пустой чек-лист и
 никакого сигнала: отсутствие проверки не становится обвинением.
 
-Включается переменной AGENT_REQUEST_CHECKLIST=1 (в .env), как поиск по смыслу:
-два лишних вызова модели на ход — решение оператора, не умолчание.
+Включено по умолчанию (решение оператора 24.09: «включи, пусть работает»).
+AGENT_REQUEST_CHECKLIST=0 в .env — аварийный выключатель, не способ включать.
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ Answer with ONE JSON object only:
 
 
 def enabled() -> bool:
-    return os.environ.get(ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get(ENV, "").strip().lower() not in ("0", "false", "no", "off")
 
 
 @dataclass(frozen=True)
