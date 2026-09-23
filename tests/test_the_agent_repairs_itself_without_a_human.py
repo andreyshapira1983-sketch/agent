@@ -120,3 +120,39 @@ def test_the_goal_shows_the_block_form_and_forbids_an_excuse(tmp_path: Path) -> 
     assert "не кладётся" in goal.goal, "объяснение вместо правки не запрещено"
     assert "\n<<<<<<< SEARCH\n" in goal.goal, "форма блока не показана дословно"
     assert "=======" in goal.goal and ">>>>>>> REPLACE" in goal.goal
+
+
+def test_a_defect_without_a_task_is_not_given_to_the_hands(tmp_path: Path) -> None:
+    """Дефект без названной задачи правкой не закрывается — он её и не получит.
+
+    Замер ночи на 2026-09-23: из шестнадцати открытых дефектов трое были с
+    пустым `suggested_next_action`, и ровно они дали три последние красные
+    правки подряд. Цель выходила «Почини дефект X. Что делать: » — агент, не
+    зная, что менять, писал отписку, слипшиеся разделители на 305 КБ и тест
+    поверх уже существующего файла. Такому дефекту нужна сначала формулировка.
+    """
+    from core.patch_route import LOG_RELPATH, defect_goal
+    from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
+
+    from core.state_integrity import (
+        read_state_jsonl_unlocked,
+        rewrite_state_jsonl_unlocked,
+    )
+
+    registry = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH)
+    issue = registry.upsert_failure("дефект без задачи", "2026-09-23T01:00:00+00:00")
+    # Поле обнуляется прямо в хранилище: так эти три дефекта и лежат в живом
+    # реестре — их заводили руками, и задачу никто не назвал.
+    path = tmp_path / DEFAULT_ISSUE_PATH
+    rows = read_state_jsonl_unlocked(path)
+    for row in rows:
+        row["suggested_next_action"] = ""
+    rewrite_state_jsonl_unlocked(path, rows)
+    assert not (SelfImprovementIssueRegistry(path).unresolved()[0].suggested_next_action or "")
+
+    assert defect_goal(tmp_path) is None, "дефект без задачи ушёл в руки вслепую"
+
+    # Пропуск не молчит: человеку видно, какому дефекту нужна формулировка.
+    log = (tmp_path / LOG_RELPATH).read_text(encoding="utf-8")
+    assert "defect_without_a_task_skipped" in log
+    assert issue.fingerprint in log

@@ -95,6 +95,18 @@ def defect_goal(root: Path) -> Any:
         # закрывается: 2026-09-22 18:40 цикл ушёл на «в пробе нет numpy».
         if issue.action == OPERATOR_DECISION:
             continue
+        # Дефект без НАЗВАННОЙ задачи правкой не закрывается: цель выходит
+        # «Почини дефект X. Что делать: » — и агент, не зная, что менять,
+        # пишет отписку или мусор. Замер ночи на 2026-09-23: из шестнадцати
+        # открытых дефектов трое были без задачи, и ровно они дали ТРИ
+        # последние красные правки подряд («объяснил, почему не могу»,
+        # слипшиеся разделители на 305 КБ, тест поверх существующего файла).
+        # Такому дефекту сначала нужна формулировка — это работа человека
+        # или отдельного хода, а не слепая правка.
+        if not str(issue.suggested_next_action or "").strip():
+            _log(root, {"event": "defect_without_a_task_skipped",
+                        "issue": issue.fingerprint, "title": (issue.title or "")[:120]})
+            continue
         tried = state["attempted"].get(issue.fingerprint)
         if tried and now - datetime.fromisoformat(tried) < RETRY_AFTER:
             continue
