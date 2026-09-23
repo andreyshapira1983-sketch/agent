@@ -37,9 +37,14 @@ from typing import Any
 #: измерение, третье лишь указатель на страницу, которую ещё не открыли.
 #: Имена берутся из `SourceType` реестра дословно: выдуманное «web» реестр
 #: отвергает, и запись молча не состоялась бы.
+#: ТОЛЬКО веб-страница. Файлы рабочей папки уже регистрирует штатный приём
+#: (`ingest_files` — единственный вход приёма, доступный автомату), и сначала
+#: я писал их второй раз: тест test_knowledge_pipeline поймал `file:doc.txt`
+#: дважды. Дыра была не в файлах, а в вебе: за ночь агент прочитал десятки
+#: страниц, и ни одна не попала в реестр, потому что `ingest_web_topic`
+#: вызывается только из команды cli/. Чиним ровно дыру, не шире.
 _SOURCE_KINDS: dict[str, str] = {
     "web_page": "web_page",
-    "file": "file",
 }
 _MAX_PER_TURN = 12
 
@@ -58,13 +63,36 @@ def register_read_sources(agent: Any, chain: Any) -> int:
     except Exception:  # noqa: BLE001 — без реестра ход продолжается как прежде
         return 0
 
+    # Уже записанное не пишется второй раз. Сам склад дедуплицирует по id, но
+    # в одном ходе источник может прийти и обычным путём приёма, и отсюда —
+    # и тогда в реестре оказываются две строки про один файл (поймано тестом
+    # test_knowledge_pipeline 23.09: `file:doc.txt` дважды). Мы только что
+    # чистили реестры от вранья; засорять их дублями было бы тем же самым.
+    known: set[str] = set()
+    try:
+        known = {str(getattr(rec, "id", "")) for rec in store.load_sources()}
+    except Exception as exc:  # noqa: BLE001 — не прочитался склад: пишем как есть,
+        # дедуп склада всё равно отсечёт совпадения по id, а молчать нельзя.
+        log_early = getattr(agent, "log", None)
+        if log_early is not None:
+            log_early.log("read_sources_known_unread",
+                          {"error": f"{type(exc).__name__}: {exc}"[:200]})
+
     registry = SourceRegistry()
     seen: set[str] = set()
     for evidence in list(getattr(chain, "evidences", ()) or ())[:60]:
         kind = str(getattr(evidence, "kind", "") or "")
         source_type = _SOURCE_KINDS.get(kind)
-        locator = str(getattr(evidence, "locator", "") or "").strip()
+        # Поле улики называется `source_id`, а НЕ `locator`: locator — имя в
+        # реестре, куда мы пишем. 23.09 я взял имя из места назначения и
+        # приписал источнику, не посмотрев на саму улику; getattr отдавал
+        # пустую строку, каждая улика пропускалась, функция возвращала ноль —
+        # и молчала. Тесты этого не поймали, потому что проверяли двойник, где
+        # поле `locator` объявил я сам: тест подтверждал выдумку, а не жизнь.
+        locator = str(getattr(evidence, "source_id", "") or "").strip()
         if source_type is None or not locator or locator in seen:
+            continue
+        if f"{source_type}:{locator}" in known:
             continue
         seen.add(locator)
         registry.register_source(
@@ -81,9 +109,20 @@ def register_read_sources(agent: Any, chain: Any) -> int:
         )
         if len(seen) >= _MAX_PER_TURN:
             break
-    if not seen:
-        return 0
     log = getattr(agent, "log", None)
+    if not seen:
+        # Громко, а не молча. Улики в ходе были, а к записи не подошла ни одна —
+        # это либо новый вид улики, либо снова выдуманное имя поля. Тихий ноль
+        # здесь три часа выдавал себя за «нечего записывать».
+        looked = len(list(getattr(chain, "evidences", ()) or ()))
+        if looked and log is not None:
+            log.log("read_sources_none_matched", {
+                "evidences_seen": looked,
+                "kinds": sorted({str(getattr(e, "kind", "")) for e in
+                                 list(getattr(chain, "evidences", ()) or ())[:60]})[:8],
+                "expected_kinds": sorted(_SOURCE_KINDS),
+            })
+        return 0
     try:
         written = store.save_registry(registry)
     except Exception as exc:  # noqa: BLE001 — запись знания не валит ход,
