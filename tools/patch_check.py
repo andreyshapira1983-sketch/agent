@@ -87,6 +87,56 @@ def parse_blocks(text: str) -> list[dict[str, Any]]:
     return [b for _, _, b in _matches(text)]
 
 
+#: Правильные маркеры — для подсказки «вы имели в виду».
+_MARKERS = ("<<<<<<< SEARCH", "=======", ">>>>>>> REPLACE", "<<<<<<< LINES a-b")
+_OPENING = re.compile(r"^<{5,9}\s*(SEARCH|LINES)\b", re.MULTILINE)
+_CLOSING = re.compile(r"^>{5,9}\s*REPLACE\b", re.MULTILINE)
+_UNIFIED_DIFF = re.compile(r"^(?:--- |\+\+\+ |@@ -\d)", re.MULTILINE)
+_VALID_MARKER = re.compile(r"^(?:<{7} SEARCH|={7}|>{7} REPLACE|<{7} LINES \d+-\d+)$")
+
+
+def marker_hint(stray: str) -> str:
+    """Чем выброшенный текст отличается от правильного блока, или пусто.
+
+    Замер 2026-09-23 по 11 красным «text outside blocks» из
+    data/self_repair_log.jsonl: в семи сломана сама строка-маркер (SEARCH без
+    <<<<<<<, блок не закрыт >>>>>>> REPLACE, не то число знаков), в одном —
+    чужой формат unified diff, в трёх — проза. Сообщение печатало выброшенное
+    и молчало о том, что с ним не так; исправиться по нему было нельзя. Так же
+    подсказывает Python с 3.10 («Did you mean …?» для NameError): ближайшее
+    правильное имя по расстоянию редактирования. Проза подсказки не получает.
+    """
+    import difflib
+
+    lines = stray.splitlines()
+    if any(ln.lstrip().startswith("FILE:") and "<<<<" in ln for ln in lines):
+        return "строка FILE: — только путь, отдельной строкой; маркер <<<<<<< начинается со следующей строки"
+    if _UNIFIED_DIFF.search(stray):
+        return ("это формат unified diff (---/+++/@@) — patch_check его не принимает; "
+                "перепиши блоком FILE: путь / <<<<<<< LINES a-b / новый текст / >>>>>>> REPLACE")
+    # Сначала неверный маркер в строке: это причина, а «не закрыт» — следствие.
+    for line in lines:
+        bare = line.strip()
+        if not bare or len(bare) > 40 or _VALID_MARKER.match(bare):
+            continue
+        up = bare.upper()
+        if up == "SEARCH" or up.startswith("SEARCH:"):
+            return "маркер пишется целиком: '<<<<<<< SEARCH' — семь знаков '<', пробел, слово"
+        if up == "REPLACE":
+            return "маркер пишется целиком: '>>>>>>> REPLACE' — семь знаков '>', пробел, слово"
+        if up.startswith("LINES "):
+            return f"маркер пишется целиком: '<<<<<<< {bare}' — семь знаков '<', пробел, LINES a-b"
+        if re.fullmatch(r"<{7} LINES\s*", bare):
+            return "в маркере LINES нужны номера строк: '<<<<<<< LINES a-b' — по файлу ДО правки"
+        if bare[0] in "<>=":
+            close = difflib.get_close_matches(bare, _MARKERS, n=1, cutoff=0.6)
+            if close:
+                return f"вы имели в виду '{close[0]}'? (у тебя: '{bare}' — маркер ровно семь знаков)"
+    if _OPENING.search(stray) and not _CLOSING.search(stray):
+        return "блок начат, но не закрыт: последней строкой блока должно стоять '>>>>>>> REPLACE'"
+    return ""
+
+
 def stray_text(text: str) -> list[str]:
     """Текст вне блоков — он не ляжет никуда; молча выбрасывать его нельзя."""
     out, pos = [], 0
@@ -168,7 +218,10 @@ def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
         if root.resolve() not in target.parents:
             errors.append(f"блок {n}: путь {b['path']} выходит за копию")
             continue
-        if not b["old"]:
+        # Пустой — значит без единого знака, КРОМЕ пробелов и переводов строк:
+        # 2026-09-23 18:36 агент оставил между <<<<<<< SEARCH и ======= пустую
+        # строку, кусок стал '\n', нашёлся 69 раз, и новый файл не создался.
+        if not b["old"].strip():
             if target.exists():
                 errors.append(f"блок {n}: SEARCH пуст (новый файл), но {b['path']} уже есть — "
                               "существующий файл правят блоком LINES a-b или SEARCH с его куском; "
@@ -289,6 +342,7 @@ class PatchCheckTool(Tool):
         if stray:
             return {"applied": False, "verdict": "red", "why": "text outside blocks",
                     "errors": [f"text outside any block is ignored — put it inside a block: {t!r}"
+                               + (f" | подсказка: {h}" if (h := marker_hint(t)) else "")
                                for t in stray]}
         if not blocks:
             return {"applied": False, "verdict": "red", "why": "no blocks",
