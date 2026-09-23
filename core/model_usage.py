@@ -155,6 +155,12 @@ class ModelUsageRecord:
     # build and does so silently, so a required field here would erase spend
     # history rather than report a problem.
     run_id: str | None = None
+    # Кэш промпта у поставщика. None значит НЕ ИЗМЕРЕНО — так строки, писанные
+    # до 2026-09-23, честно отличаются от свежих с нулевым попаданием.
+    # Стоят последними по той же причине, что и run_id: старая строка без них
+    # должна собираться, иначе load_records() молча сотрёт историю расхода.
+    cache_hit_tokens: int | None = None
+    cache_miss_tokens: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -174,6 +180,8 @@ class ModelUsageRecord:
             "duration_ms": self.duration_ms,
             "error": self.error,
             "run_id": self.run_id,
+            "cache_hit_tokens": self.cache_hit_tokens,
+            "cache_miss_tokens": self.cache_miss_tokens,
         }
 
 
@@ -448,6 +456,8 @@ class ModelUsageLedger:
         completed_at: str,
         duration_ms: int,
         error: str | None = None,
+        cache_hit_tokens: int | None = None,
+        cache_miss_tokens: int | None = None,
     ) -> ModelUsageRecord:
         total_tokens = max(0, int(input_tokens)) + max(0, int(output_tokens))
         record = ModelUsageRecord(
@@ -467,6 +477,8 @@ class ModelUsageLedger:
             duration_ms=max(0, int(duration_ms)),
             error=error,
             run_id=self._run_id_for_record(),
+            cache_hit_tokens=cache_hit_tokens,
+            cache_miss_tokens=cache_miss_tokens,
         )
         self.records.append(record)
         if self.budget_ledger is not None:
@@ -679,6 +691,26 @@ def usage_from_llm_or_estimate(
         if input_tokens or output_tokens:
             return input_tokens, output_tokens, False
     return _estimate_tokens(system, user), _estimate_tokens(output), True
+
+
+def cache_from_llm(llm: Any) -> tuple[int | None, int | None]:
+    """Числа кэша промпта из последнего вызова, или (None, None).
+
+    Отдельно от `usage_from_llm_or_estimate`, потому что кэш НЕЛЬЗЯ оценить
+    по длине текста: оценка тут была бы выдумкой. Нет замера — нет числа.
+    """
+    last_usage = getattr(llm, "last_usage", None)
+    if not isinstance(last_usage, dict):
+        return None, None
+    def _one(key: str) -> int | None:
+        value = last_usage.get(key)
+        if value is None:
+            return None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+    return _one("cache_hit_tokens"), _one("cache_miss_tokens")
 
 
 def utc_now_iso() -> str:

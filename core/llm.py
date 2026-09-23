@@ -261,8 +261,12 @@ class LLM:
         # `last_usage` carries the most recent per-call payload so an
         # audit can attribute spend to a specific scenario without
         # diffing the counters by hand.
-        self.last_usage: dict[str, int] = {
-            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+        self.last_usage: dict[str, int | None] = {
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            # Сколько входа взято из кэша промпта у поставщика, сколько мимо.
+            # None (а не 0) значит НЕ ИЗМЕРЕНО: у нуля и у отсутствия замера
+            # разный смысл, и путать их — тот самый прибор, который врёт.
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
         #: Whether the last answer stopped on the token limit rather than
         #: finishing. A caller that declined continuation needs this to tell a
@@ -280,7 +284,8 @@ class LLM:
         self.input_tokens = 0
         self.output_tokens = 0
         self.last_usage = {
-            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
 
     def usage_summary(self) -> dict[str, Any]:
@@ -294,7 +299,44 @@ class LLM:
             "total_tokens": self.input_tokens + self.output_tokens,
         }
 
-    def _record_usage(self, in_tok: int, out_tok: int) -> None:
+    @staticmethod
+    def _opt_tokens(value: Any) -> int | None:
+        """Число токенов или None, когда поставщик его не сообщил.
+
+        None и 0 здесь РАЗНЫЕ: None — «не измерено», 0 — «измерено, в кэш
+        не попало ничего». Сплющить их в 0 значит построить прибор, который
+        показывает слово вместо мира."""
+        if value is None:
+            return None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _agg_cache(
+        hit: int | None, miss: int | None, leg: dict[str, Any]
+    ) -> tuple[int | None, int | None]:
+        """Сложить числа кэша отрезка с накопленными.
+
+        Молчащий отрезок НЕ обнуляет накопленное и не превращается в ноль:
+        None означает «не измерено», и сумма остаётся None, пока хоть один
+        отрезок не принесёт настоящее число.
+        """
+        def _add(acc: int | None, key: str) -> int | None:
+            value = LLM._opt_tokens(leg.get(key))
+            if value is None:
+                return acc
+            return value if acc is None else acc + value
+        return _add(hit, "cache_hit_tokens"), _add(miss, "cache_miss_tokens")
+
+    def _record_usage(
+        self,
+        in_tok: int,
+        out_tok: int,
+        cache_hit: Any = None,
+        cache_miss: Any = None,
+    ) -> None:
         """Internal: bump counters after a successful call. Bad inputs
         (negative or non-int) become 0 — usage tracking must NEVER
         crash a real API call."""
@@ -311,6 +353,8 @@ class LLM:
             "input_tokens": in_int,
             "output_tokens": out_int,
             "total_tokens": in_int + out_int,
+            "cache_hit_tokens": self._opt_tokens(cache_hit),
+            "cache_miss_tokens": self._opt_tokens(cache_miss),
         }
 
     def _build_client(self):
@@ -405,6 +449,11 @@ class LLM:
         combined = text
         agg_in = int(self.last_usage.get("input_tokens", 0))
         agg_out = int(self.last_usage.get("output_tokens", 0))
+        # Кэш по всей цепочке продолжений. None, пока НИ ОДИН отрезок не
+        # сообщил чисел: иначе цепочка из молчащих отрезков выглядела бы как
+        # измеренный ноль. Это ровно то место, где первая правка 2026-09-23
+        # теряла замер — тесты были зелёные, а живой вызов отдавал None.
+        agg_hit, agg_miss = self._agg_cache(None, None, self.last_usage)
         rounds = 0
         # Budget used for the NEXT leg. Reissuing an identical request after a
         # leg that was truncated *and* returned nothing is guaranteed to fail
@@ -442,6 +491,7 @@ class LLM:
             )
             agg_in += int(self.last_usage.get("input_tokens", 0))
             agg_out += int(self.last_usage.get("output_tokens", 0))
+            agg_hit, agg_miss = self._agg_cache(agg_hit, agg_miss, self.last_usage)
             last_leg_empty = not cont_text
             if cont_text:
                 combined += cont_text
@@ -456,6 +506,8 @@ class LLM:
             "input_tokens": agg_in,
             "output_tokens": agg_out,
             "total_tokens": agg_in + agg_out,
+            "cache_hit_tokens": agg_hit,
+            "cache_miss_tokens": agg_miss,
         }
         # Still truncated here means the rounds ran out, not that the model
         # finished — the caller is holding an answer that stops mid-sentence.
@@ -566,6 +618,8 @@ class LLM:
         accumulated = []
         in_tok = 0
         out_tok = 0
+        cache_hit = None
+        cache_miss = None
         for chunk in self._client.chat.completions.create(**kwargs):
             delta = chunk.choices[0].delta if chunk.choices else None
             text = getattr(delta, "content", None) or ""
@@ -580,7 +634,9 @@ class LLM:
             if chunk.usage is not None:
                 in_tok = getattr(chunk.usage, "prompt_tokens", 0)
                 out_tok = getattr(chunk.usage, "completion_tokens", 0)
-        self._record_usage(in_tok, out_tok)
+                cache_hit = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
+                cache_miss = getattr(chunk.usage, "prompt_cache_miss_tokens", None)
+        self._record_usage(in_tok, out_tok, cache_hit, cache_miss)
         return "".join(accumulated).strip()
 
     @staticmethod
@@ -774,7 +830,12 @@ class LLM:
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0
         out_tok = getattr(usage, "completion_tokens", 0) if usage is not None else 0
-        self._record_usage(in_tok, out_tok)
+        # Кэш промпта: DeepSeek (и совместимые) присылают эти поля рядом с
+        # prompt_tokens. Без них 84% входа выглядят как полная цена, и расход
+        # завышается втрое — проверено 2026-09-23.
+        cache_hit = getattr(usage, "prompt_cache_hit_tokens", None) if usage is not None else None
+        cache_miss = getattr(usage, "prompt_cache_miss_tokens", None) if usage is not None else None
+        self._record_usage(in_tok, out_tok, cache_hit, cache_miss)
         choice = response.choices[0]
         finish_reason = str(getattr(choice, "finish_reason", "") or "")
         return (choice.message.content or ""), finish_reason

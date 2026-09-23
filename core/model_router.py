@@ -16,6 +16,7 @@ from core.model_routing_policy import agent_policy_route, drop_clients_if_policy
 from core.model_usage import (
     _KEY_CLASS_TEXT_MARKERS,
     ModelUsageLedger,
+    cache_from_llm,
     usage_from_llm_or_estimate,
     utc_now_iso,
 )
@@ -638,6 +639,7 @@ class UsageTrackedLLM:
             user=user,
             output=output,
         )
+        cache_hit_tokens, cache_miss_tokens = cache_from_llm(self._llm)
         self.ledger.record(
             role=self.role,
             provider=provider,
@@ -651,6 +653,8 @@ class UsageTrackedLLM:
             started_at=started_at,
             completed_at=utc_now_iso(),
             duration_ms=int((time.perf_counter() - started) * 1000),
+            cache_hit_tokens=cache_hit_tokens,
+            cache_miss_tokens=cache_miss_tokens,
         )
         return output
 
@@ -759,6 +763,7 @@ class UsageTrackedLLM:
                 user=user,
                 output=output,
             )
+            cache_hit_tokens, cache_miss_tokens = cache_from_llm(self._llm)
             self.ledger.record(
                 role=self.role,
                 provider=provider,
@@ -772,6 +777,8 @@ class UsageTrackedLLM:
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=int((time.perf_counter() - started) * 1000),
+                cache_hit_tokens=cache_hit_tokens,
+                cache_miss_tokens=cache_miss_tokens,
             )
             return output
 
