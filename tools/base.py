@@ -49,6 +49,72 @@ def require_ascii_identifier(value: str, *, role: str) -> str:
     return value
 
 
+#: Сколько настоящих имён показать в подсказке к отсутствующему пути.
+_MAX_HINT_NAMES = 8
+
+
+def truncated_name_hint(workspace_root, target) -> str:
+    """Подсказка к отсутствующему пути: сначала ПРОДОЛЖЕНИЯ имени, потом список.
+
+    Замер 2026-09-23, живой прогон: агент искал `logs/trace_8bdd8f1f06036d05e`
+    и получил «Not found» без объяснения. Полное имя следа —
+    `trace_8bdd8f1f06036d05e7746397e8703202.jsonl`, и в журналах агента оно
+    лежит в ЧЕТЫРЁХ разных длинах: 18 упоминаний урезаны до 19 знаков, 9 — до
+    25, 191 — целиком без расширения, 1 — целиком с расширением. Урезанный
+    шестнадцатеричный хвост невозможно отличить от целого на глаз, поэтому
+    агент берёт обрывок и упирается в «файла нет».
+
+    Перечислять содержимое папки здесь мало: в `logs/` лежит 370 следов, и
+    первые восемь по алфавиту ничего не подсказывают. Решает поиск
+    ПРОДОЛЖЕНИЯ: если в папке есть ровно несколько имён, начинающихся с
+    данного, их и надо назвать — тогда отказ становится починимым в том же
+    ходе, а не потерянным шагом.
+
+    Ошибка, которая не называет причину, заставляет угадывать, и агент
+    угадывает неверно — тот же довод, что у двери памяти и у ворот улик.
+    """
+    from pathlib import Path
+
+    try:
+        root = Path(workspace_root).resolve()
+        target = Path(target)
+        parent = target.parent if target.parent != target else root
+        if not parent.is_absolute():
+            parent = root / parent
+        parent = parent.resolve()
+        parent.relative_to(root)
+    except (OSError, ValueError):
+        return ""
+    if not parent.is_dir():
+        return ""
+
+    stem = target.name
+    try:
+        names = sorted(p.name for p in parent.iterdir() if not p.name.startswith("."))
+    except OSError:
+        return ""
+    if not names:
+        return ""
+
+    if stem:
+        starts = [n for n in names if n.startswith(stem) and n != stem]
+        if starts:
+            shown = ", ".join(starts[:_MAX_HINT_NAMES])
+            more = "" if len(starts) <= _MAX_HINT_NAMES else f" (+{len(starts) - _MAX_HINT_NAMES})"
+            return (
+                f". Похоже на УРЕЗАННОЕ имя: в этой папке есть {len(starts)} "
+                f"имя(ён), начинающихся с '{stem}' — {shown}{more}. "
+                "Возьми полное имя целиком; обрывок шестнадцатеричного "
+                "хвоста от целого не отличается на вид."
+            )
+
+    # Продолжений нет — подсказки нет. Список содержимого папки здесь НЕ
+    # строится нарочно: он уже есть у `file_read._nearest_dir_hint`, и вторая
+    # его редакция другими словами — два прибора об одном, ровно тот класс,
+    # который мы весь день и разбираем. У каждого помощника одна работа.
+    return ""
+
+
 def normalize_slug(text: str) -> str:
     """Lowercase ASCII slug: non-alphanumeric runs become one hyphen."""
     import re
