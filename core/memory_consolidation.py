@@ -94,10 +94,14 @@ def similar_conclusions(content: str, records: list[Any], top_s: int = TOP_S) ->
     pool = [r for r in records if "conclusion" in (getattr(r, "tags", None) or [])]
     if not pool:
         return []
-    q = _tokens(_without_sources(content))
-    scores = _bm25_scores(q, [_term_counts(_without_sources(str(r.content)), []) for r in pool])
-    ranked = sorted(zip(scores, range(len(pool))), key=lambda p: p[0], reverse=True)
-    return [pool[i] for s, i in ranked[:top_s] if s > 0]
+    from core.memory_embeddings import fused_relevance
+
+    texts = [_without_sources(str(r.content)) for r in pool]
+    lexical = _bm25_scores(_tokens(_without_sources(content)), [_term_counts(t, []) for t in texts])
+    # Mem0 достаёт top-s похожих по векторам; без смысла — по общим словам.
+    fused, semantic = fused_relevance(_without_sources(content), texts, lexical)
+    ranked = sorted(range(len(pool)), key=lambda i: -fused[i])
+    return [pool[i] for i in ranked if semantic is not None or lexical[i] > 0][:top_s]
 
 
 def _without_sources(content: str) -> str:

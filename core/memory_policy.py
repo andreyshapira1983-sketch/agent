@@ -653,6 +653,12 @@ class MemoryRetrievalPolicy:
     #: беда «записал промах вечером, повторил наутро»: урок, который не
     #: всплывает в момент работы, работой не является.
     lessons_by_kind: int = 2
+    #: Сколько записей, ближайших по СМЫСЛУ, допускается в отбор без общих
+    #: слов с вопросом (гибридный поиск: кандидаты — объединение выдач обоих
+    #: поисков). Иначе перефразировка без единого общего слова («поставь
+    #: библиотеку» и «ставя себе пакет») не доходит даже до ранжирования.
+    #: Работает, только когда включён поиск по смыслу (core/memory_embeddings).
+    semantic_candidates: int = 3
 
     def _add_lessons_by_work_kind(
         self,
@@ -726,11 +732,16 @@ class MemoryRetrievalPolicy:
         # кто проходил, тот проходит. BM25 решает только ПОРЯДОК. Ветка
         # «широкий вопрос о проекте» сохраняет свою настроенную прибавку.
         broad = is_broad_project_self_knowledge_question(question)
+        texts = [r.content if isinstance(r.content, str) else str(r.content) for r in records]
         relevance = _bm25_scores(q_tokens, [
-            _term_counts(r.content if isinstance(r.content, str) else str(r.content), r.tags or [])
-            for r in records
+            _term_counts(t, r.tags or []) for t, r in zip(texts, records)
         ])
-        for r, bm25 in zip(records, relevance):
+        # Смысл поверх слов (core/memory_embeddings.py): выпуклая сумма
+        # нормированных баллов; выключен — остаётся один BM25.
+        from core.memory_embeddings import fused_relevance, top_by_meaning
+        relevance, semantic = fused_relevance(question, texts, relevance)
+        by_meaning = frozenset() if broad else top_by_meaning(semantic, self.semantic_candidates)
+        for i, (r, rel) in enumerate(zip(records, relevance)):
             text = r.content if isinstance(r.content, str) else str(r.content)
             r_tokens = _tokens(text)
             score = len(q_tokens & r_tokens)
@@ -749,8 +760,8 @@ class MemoryRetrievalPolicy:
                                 break
             if broad:
                 score += _broad_project_score_adjustment(r, score)
-            if score >= self.min_score:
-                scored.append((score if broad else bm25, r))
+            if score >= self.min_score or i in by_meaning:
+                scored.append((score if broad else rel, r))
             else:
                 below_threshold += 1
 
