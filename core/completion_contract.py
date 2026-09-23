@@ -298,6 +298,9 @@ class CompletionContract:
     #: Единицы, названные оператором заголовками. Отдельно от
     #: `unsupported_deliverables`: там классы, здесь предметы.
     requested_units: tuple[RequestedUnit, ...] = ()
+    #: Чек-лист поручения (core/request_checklist.py): требования человека как
+    #: вопросы «да/нет», составленные ДО работы. None — выключен или не составлен.
+    checklist: Any = None
 
     @property
     def coverage(self) -> str:

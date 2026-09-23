@@ -22,6 +22,7 @@ from core.file_request_intent import (
 )
 from core.ids import new_id
 from core.replan import ReplanTrigger
+from core.request_checklist import attach_checklist
 from core.run_context import identity_provenance, run_scope
 
 if TYPE_CHECKING:
@@ -311,8 +312,8 @@ class AgentLoop(
         # its run would judge the NEXT request by this one's criterion.
         # `tests/test_completion_marker.py` pins that invariant for the whole
         # completion family, and it caught this exact mistake in review.
-        completion_contract = derive_completion_contract(
-            user_question, file_hint=file_hint
+        completion_contract = attach_checklist(
+            self, derive_completion_contract(user_question, file_hint=file_hint), user_question
         )
         self.log.log(
             "completion_contract", completion_contract.to_log_payload()

@@ -1201,6 +1201,7 @@ def assemble_completion_verdict(
     enforcement_failed: bool = False,
     user_contract_partial: bool = False,
     citation_integrity_violation: bool = False,
+    checklist_unmet: bool = False,
 ) -> CompletionVerdict:
     """The single rule table. :func:`assemble_completion_state` delegates here.
 
@@ -1230,6 +1231,11 @@ def assemble_completion_verdict(
         return _displaced(
             "partially_achieved", declared, "user_contract_unrepresented"
         )
+    # Чек-лист поручения (core/request_checklist.py): судья ответил «нет» на
+    # важное требование человека — «не больше 8 предложений», «строка VERDICT в
+    # конце». Та же односторонняя власть: понижает, ничего не повышает.
+    if checklist_unmet and declared == "achieved":
+        return _displaced("partially_achieved", declared, "checklist_unmet")
     # Census A2: the answer-safety check raised, so the run delivered a safe
     # refusal instead of the draft it had written — work happened, the honest
     # outcome reached the user, and the process was defective.
@@ -1525,6 +1531,7 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
         ),
         enforcement_failed="answer_enforcement_failed" in (signals or ()),
         citation_integrity_violation=answer_withheld,
+        checklist_unmet="checklist_unmet" in (signals or ()),
     )
     return EpisodeRecord(
         goal=_clean_text(goal, max_chars=300),

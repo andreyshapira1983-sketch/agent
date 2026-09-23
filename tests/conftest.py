@@ -486,3 +486,10 @@ def _no_embedding_model(monkeypatch):
     кодировщик сами. Переменную может подхватить загрузка настоящего .env.
     """
     monkeypatch.delenv("AGENT_EMBED_MODEL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_request_checklist(monkeypatch):
+    """Чек-лист поручения в тестах выключен: два лишних вызова модели съели бы
+    заготовленные ответы FakeLLM в сотнях тестов. Его тесты включают сами."""
+    monkeypatch.delenv("AGENT_REQUEST_CHECKLIST", raising=False)
