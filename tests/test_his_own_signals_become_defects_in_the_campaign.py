@@ -96,3 +96,37 @@ def test_a_class_is_one_signal_not_a_combination(tmp_path: Path) -> None:
     titles = [str(i.title or "") for i in filed]
     assert len(filed) == 2, f"классов должно быть два (по сигналам), а не {titles}"
     assert not any("," in t for t in titles), f"класс собран из сочетания: {titles}"
+
+
+def test_the_trace_address_survives_truncation(tmp_path: Path) -> None:
+    """Улика, по которой нельзя открыть файл, уликой не является.
+
+    Адрес следа стоит в КОНЦЕ наблюдения, и обрезка описания по длине рубила
+    его посередине: в дефект попадало «logs/trace_8bdd8f1f06036d05e» без
+    окончания и без расширения. Замер 2026-09-23: за ночной прогон 27 ошибок
+    `file_not_found`, и самая частая — агент открывал улику собственного
+    дефекта и не находил файла.
+    """
+    trace = "logs/trace_8bdd8f1f06036d05e1234567890abcd.jsonl"
+    path = tmp_path / "data" / "causal_observations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = datetime(2026, 9, 23, 3, tzinfo=timezone.utc).isoformat()
+    path.write_text(json.dumps({
+        "fingerprint": "obs-long",
+        "observed_mismatch": (
+            "детекторы reasoning_action_mismatch при завершении blocked; объяснения не "
+            "выдвинуты, причина не доказана. " + "подробность, " * 20
+            + "Сигналы записаны в data/episodic_memory.jsonl (payload.defect_signals) "
+            f"у эпизода ep-run-run_9464519ba87bed72; событие детектора — в {trace}"),
+        "defect_signals": ["reasoning_action_mismatch"],
+        "evidence_refs": [], "occurrences": 4, "last_seen": seen, "first_seen": seen,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    from core.defect_intake import intake_observations
+
+    intake_observations(tmp_path)
+
+    filed = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
+    assert filed
+    assert trace in (filed[0].related_error_text or ""), (
+        "адрес следа не пережил обрезку — по улике нечего открыть")
