@@ -54,7 +54,21 @@ _VERDICT_RU: dict[str, str] = {
 
 #: Verdicts that stay OUT of point 4: `verified` is the confirmed bucket,
 #: `structural` lines are not claims at all.
-_NOT_A_GAP: frozenset[str] = frozenset({"verified", "structural"})
+#:
+#: `dialogue_supported` ВЫШЕЛ отсюда 2026-09-23. Общая почва (common ground),
+#: установленная в разговоре, — законная опора для дальнейшего, и система это
+#: УЖЕ признаёт в двух местах: `core.evidence_support.compute_evidence_support`
+#: держит её в числителе, и ворота обрезки тоже (issue #119). А отчёт наказывал
+#: её ДВАЖДЫ: исключал из числителя и записывал в пробелы. Замер: агент выбрал
+#: заказ верно — брать разбор PDF, не брать корректуру иврита, которую уже
+#: провалил на деле, — а внизу стояло «подтверждено 0 из 8, уверенность
+#: нулевая», потому что все опоры были из разговора.
+#:
+#: `user_asserted` остаётся пробелом по решению оператора 2026-08-03 (MIR-028):
+#: слова человека подтверждают, что было сказано, а не что это правда.
+_NOT_A_GAP: frozenset[str] = frozenset(
+    {"verified", "dialogue_supported", "structural"}
+)
 
 #: How many matched sources point 3 lists before summarising the rest.
 _MAX_NAMED_SOURCES = 5
@@ -133,7 +147,10 @@ def _tail_notes(report: VerificationReport, admitted: int) -> tuple[str, str]:
     """
     named = f" ({admitted} — ответ сам назвал непроверенными)" if admitted else ""
     dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
-    heard = f"; из них {dialogue} — по записи этого разговора" if dialogue else ""
+    heard = (
+        f"; из них {dialogue} — по записи этого разговора, "
+        "не внешним источником"
+    ) if dialogue else ""
     return named, heard
 
 
@@ -179,7 +196,10 @@ def build_verification_summary(
     destroy the very information this argument exists to carry.
     """
     examined = sum(1 for c in report.chunks if c.verdict != "structural")
-    verified = report.verified_chunks
+    # Опора на разговор — в числителе, как у ворот (основание: `_NOT_A_GAP`).
+    verified = report.verified_chunks + int(
+        getattr(report, "dialogue_supported_chunks", 0) or 0
+    )
     no_evidence_owed = bool(
         evidence_support is not None
         and not getattr(evidence_support, "applicable", True)
@@ -221,7 +241,10 @@ def build_verification_summary(
         by_id = {ev.id: ev for ev in chain.evidences}
         seen: set[str] = set()
         for chunk in report.chunks:
-            if chunk.verdict != "verified":
+            # Опора на разговор тоже НАЗЫВАЕТСЯ: до 2026-09-23 перебирались
+            # только `verified`, и ответ, стоящий на общей почве, не называл
+            # ни одного доказательства — «совпадений с источниками нет».
+            if chunk.verdict not in ("verified", "dialogue_supported"):
                 continue
             for ev_id in chunk.matched_evidence_ids:
                 ev = by_id.get(ev_id)
@@ -277,7 +300,7 @@ def build_verification_summary(
         tail = (
             f"{TAIL_PREFIX} {subject}подтверждено {verified} из "
             f"{examined + admitted} утверждений{named}; "
-            f"без внешнего подтверждения: {gap_total}{heard}; уверенность: {word}."
+            f"без подтверждения: {gap_total}{heard}; уверенность: {word}."
         )
 
     if tail:
