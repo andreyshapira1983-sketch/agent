@@ -13,11 +13,33 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 MIN_OCCURRENCES = 2
 MAX_PER_SWEEP = 5
+
+#: Путь в тексте наблюдения: адрес следа, журнала или модуля.
+_PATH_RE = re.compile(r"[\w./-]+\.(?:jsonl|json|py|md|txt|log)\b")
+
+
+def _keep_paths(text: str, limit: int) -> str:
+    """Обрезать описание, но не потерять адреса, по которым это проверяют.
+
+    Адрес следа стоит в КОНЦЕ наблюдения, и обрезка по длине рубила его
+    посередине: в дефект попадало «logs/trace_8bdd8f1f06036d05e» вместо
+    полного имени с расширением. Замер 2026-09-23: за прогон 27 ошибок
+    `file_not_found`, и самая частая — агент открывал улику собственного
+    дефекта и не находил файла. Улика, по которой нельзя проверить, уликой
+    не является.
+    """
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    head = text[:limit].rsplit(" ", 1)[0]
+    lost = [p for p in _PATH_RE.findall(text) if p not in head]
+    return head + (" (адреса: " + ", ".join(dict.fromkeys(lost)) + ")" if lost else "")
 
 
 def intake_observations(workspace: Path | str, registry: Any = None) -> list[str]:
@@ -46,10 +68,11 @@ def intake_observations(workspace: Path | str, registry: Any = None) -> list[str
         # жил сразу в восьми из них. Тот же промах, против которого механизм и
         # делался (MIR-035: 13 копий одного класса), только на шаг выше: класс
         # — это сигнал, а наблюдение с тремя сигналами есть улика для трёх.
+        body = _keep_paths(record.observed_mismatch, 300)
         for signal in (record.defect_signals or ("detector",)):
             # Текст начинается со слова «detectors» — по нему реестр сам считает
             # отпечаток класса и заголовок (core/self_improvement_issues.py).
-            text = (f"detectors {signal}: {record.observed_mismatch[:300]} "
+            text = (f"detectors {signal}: {body} "
                     f"(повторений: {record.occurrences}; улики: "
                     f"{', '.join(record.evidence_refs[:3])})")
             issue = registry.upsert_failure(text, record.last_seen)
