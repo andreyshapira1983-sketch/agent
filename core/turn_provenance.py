@@ -19,6 +19,13 @@ from pathlib import Path
 
 from core.workspace_reference import workspace_paths_named
 
+#: Где лежат ПРОДУКТЫ работы агента: выходы convert_file (tools/convert_file.py,
+#: OUTPUT_DIR) и его опыты. Код и документы, которые он читает (core/, tools/,
+#: docs/…), ход только ИСПОЛЬЗУЕТ — ночь 24→25.09: строка ложно называла
+#: «не созданными» прочитанные tools/base.py и core/model_router.py, и этот
+#: сигнал кормил его цели «объяснить наблюдение о себе».
+PRODUCT_DIRS = ("converted/", "experiments/")
+
 #: Инструменты, которыми ход что-то порождает. Ход без них только читал — там
 #: старые файлы в ответе законны («что лежит в X»).
 PRODUCING_TOOLS = frozenset({
@@ -37,6 +44,8 @@ def older_than_turn(head: str, root: Path | None, started_at: float,
         return None
     old: list[str] = []
     for rel in workspace_paths_named(head, root=root):
+        if not rel.replace("\\", "/").startswith(PRODUCT_DIRS):
+            continue
         path = root / rel
         if path.is_file() and path.stat().st_mtime < started_at:
             old.append(f"{rel} (изменён {_clock(path.stat().st_mtime)})")
