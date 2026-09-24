@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any
 
 OUTBOX_RELPATH = "data/chat_outbox.jsonl"
+#: Начало цели «спроси». Её собственный провал считается, но не цитируется:
+#: 24.09 каждый провал вкладывал её текст в следующую — «Ты застрял: цель «Ты
+#: застрял: цель «Почини…»»», а предмет уходил за обрезку в 120 символов.
+STUCK_PREFIX = "Ты застрял:"
 _UNPRODUCTIVE = frozenset({"empty", "failed", "idle", "blocked"})
 MAX_EVIDENCE = 3
 
@@ -43,12 +47,18 @@ def stuck_evidence(root: Path | str) -> list[str]:
     evidence: list[str] = []
     ledger = _rows(root / "data" / "campaign_ledger.jsonl")[-12:]
     goals: dict[str, int] = {}
+    asks_failed = 0
     for row in ledger:
         if str(row.get("result")) in _UNPRODUCTIVE:
-            goal = str(row.get("goal") or "")[:120]
-            goals[goal] = goals.get(goal, 0) + 1
+            goal = str(row.get("goal") or "")
+            if goal.startswith(STUCK_PREFIX):
+                asks_failed += 1
+                continue
+            goals[goal[:120]] = goals.get(goal[:120], 0) + 1
     evidence += [f"цель «{goal}» впустую {count} раз подряд"
                  for goal, count in goals.items() if goal and count >= 2]
+    if asks_failed >= 2:
+        evidence.append(f"цель «спроси» (интернет, потом человек) сама прошла впустую {asks_failed} раз")
     try:
         state = json.loads((root / "data" / "patch_route_state.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
