@@ -53,6 +53,25 @@ def test_weight_comes_back_with_time() -> None:
     assert abs(state["weights"]["uncertainty"] - 0.8) < 1e-9
 
 
+def test_a_plateau_does_not_starve_the_subjects() -> None:
+    """Ночь 24→25.09: все четыре предмета 0.00 («было 3 из 4, стало 3 из 4»),
+    выше — события о себе; кампания часами объясняла свои детекторы. Как у
+    Forestier/Oudeyer (JMLR 2022, 20% случайного выбора пространства целей):
+    каждый пятый выбор — предметная область, по кругу, и каждая за круг."""
+    night = {"idle_time": 0.44, "maintenance_need": 0.15, "novelty_need": 0.11,
+             "uncertainty": 0.11, "competence_math": 0.0, "competence_physics": 0.0,
+             "competence_cs": 0.0, "competence_world": 0.0, "economic_opportunity": 0.0}
+    state: dict = {"weights": {}}
+    picks = []
+    for i in range(20):
+        drives = {k: {"value": v, "why": "t"} for k, v in night.items()}
+        drive, state = choose_drive(drives, state, NOW + timedelta(minutes=i))
+        picks.append((drive, drives.get(drive, {}).get("mode")))
+    explored = [d for d, mode in picks if mode == "random"]
+    assert len(explored) == 4, picks
+    assert sorted(explored) == ["competence_cs", "competence_math", "competence_physics", "competence_world"]
+
+
 def test_the_model_sees_the_need_not_the_variable(tmp_path: Path) -> None:
     text = need_text("competence_physics", {"value": 0.42, "why": "последняя успешная задача: 97 мин назад"}, tmp_path)
     assert "физике" in text and "competence" not in text and "0.42" not in text

@@ -40,6 +40,20 @@ WAKE_THRESHOLD = 0.5
 #: выигрывать у растущего предмета 0.17.
 MIN_CONTENT = 0.05
 _NOT_CONTENT = frozenset({"idle_time", "economic_opportunity"})
+#: Доля выборов, в которых предметная область берётся случайно, а не по силе
+#: драйва. Forestier, Mollard, Oudeyer, «Intrinsically Motivated Goal Exploration
+#: Processes with Automatic Curriculum Learning» (JMLR 2022): «с вероятностью 20%
+#: берётся случайное пространство целей, с вероятностью 80% — пропорционально
+#: прогрессу». Ночь 24→25.09: без этой доли все четыре предмета стояли на 0.00
+#: («было 3 из 4, стало 3 из 4» — прогресса нет), и кампания часами объясняла
+#: наблюдения о себе. Плато на среднем успехе — не «освоено»; случайная доля
+#: возвращает туда попытки, из которых прогресс и считается.
+#: Доля та же, ритм ровный: каждый EXPLORE_EVERY-й выбор — область по кругу,
+#: дольше всех не бывавшая в таком выборе. Случайная монета у Forestier — способ
+#: получить долю; ровный ритм даёт её же, воспроизводим по журналу и не делает
+#: проверки случайными.
+EXPLORE_SHARE = 0.2
+EXPLORE_EVERY = round(1 / EXPLORE_SHARE)
 _REPEAT_SIMILARITY = 0.6
 
 
@@ -73,9 +87,18 @@ def _save_state(root: Path, state: dict[str, Any]) -> None:
 
 def choose_drive(drives: dict[str, dict[str, Any]], state: dict[str, Any],
                  now: datetime) -> tuple[str | None, dict[str, Any]]:
-    """Драйв для содержания задачи с учётом привыкания; state обновляется на месте."""
+    """Драйв для содержания задачи с учётом привыкания; state обновляется на месте.
+
+    Каждый EXPLORE_EVERY-й выбор — предметная область по кругу (у неё в drives
+    ставится mode="random"); остальные — самый сильный драйв.
+    """
     weights: dict[str, float] = state["weights"]
     last = state.get("last")
+    # Случайный выбор ничего не говорит о привыкании к области: его «не упало»
+    # не должно резать ей вес в обычном выборе.
+    if last and last.get("random"):
+        state["last"] = None
+        last = None
     if last and last.get("drive") in drives:
         dropped = float(last.get("value", 0)) - drives[last["drive"]]["value"]
         w = weights.get(last["drive"], 1.0)
@@ -88,6 +111,14 @@ def choose_drive(drives: dict[str, dict[str, Any]], state: dict[str, Any],
     for name in list(weights):
         weights[name] = min(1.0, weights[name] + 0.1 * max(0.0, hours))
     state["updated"] = now.isoformat()
+    subjects = sorted(n for n in drives if n.startswith("competence_"))
+    state["choices"] = int(state.get("choices", 0)) + 1
+    if subjects and state["choices"] % EXPLORE_EVERY == 0:
+        explored: dict[str, str] = state.setdefault("explored", {})
+        pick = min(subjects, key=lambda n: (explored.get(n, ""), n))
+        explored[pick] = now.isoformat()
+        drives[pick]["mode"] = "random"
+        return pick, state
     scored = {n: info["value"] * weights.get(n, 1.0) for n, info in drives.items() if n not in _NOT_CONTENT}
     scored = {n: v for n, v in scored.items() if v >= MIN_CONTENT}
     if not scored:
@@ -141,10 +172,16 @@ def need_text(drive: str, info: dict[str, Any], root: Path) -> str:
         if info.get("mode") == "explore":
             return (f"По {area} у тебя почти нет недавних попыток. Хочется попробовать что-то "
                     f"из своих книг по {area} и проверить это расчётом или цитатой.")
+        if info.get("mode") == "random":
+            return (f"Для разнообразия, а не по счёту — задача по {area}. Возьми из своих книг "
+                    f"по {area} то, чего ещё не было, и проверь расчётом или цитатой.")
         return (f"По {area} у тебя сейчас меняется умение ({info['why']}). Хочется учиться дальше "
                 f"там, где идёт прогресс: задача из своих книг по {area} чуть труднее недавних, "
                 "с проверкой расчётом или цитатой.")
     if drive == "competence_world":
+        if info.get("mode") == "random":
+            return ("Для разнообразия, а не по счёту — интернет. Найди в сети то, чего нет в твоих "
+                    "книгах, по первоисточнику, и проверь.")
         if info.get("mode") == "explore":
             return ("Из интернета ты почти ничего не узнавал в последнее время. Хочется найти в сети то, "
                     "чего нет в твоих книгах, по первоисточнику, и проверить.")
@@ -368,7 +405,8 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
             if not feedback:
                 goal, check = _with_notes(goal, check, drive, now)
                 report = DriveGoal("proposed", goal, check, drive)
-                state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
+                state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat(),
+                                 "random": drives[drive].get("mode") == "random"}
                 break
             report = DriveGoal("declined", goal, "", drive, feedback)
     _save_state(root, state)
@@ -376,6 +414,7 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
         fh.write(json.dumps({"ts": now.isoformat(), "status": report.status, "drive": report.drive,
                              "goal": report.goal, "success_check": report.success_check,
                              "reason": report.reason, "weights": state["weights"],
+                             "mode": drives.get(report.drive, {}).get("mode", ""),
                              "drives": {n: round(i["value"], 3) for n, i in drives.items()}},
                             ensure_ascii=False) + "\n")
     return report
