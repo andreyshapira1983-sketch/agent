@@ -102,9 +102,21 @@ PDF_MAX_PAGES = 40
 #: HTML обрезка безобидна (начало текста остаётся), для PDF она фатальна, и
 #: одним потолком эти два случая мерить нельзя.
 #:
-#: Восемь мебибайт покрывают статью с рисунками; текста из них всё равно
-#: берётся не больше `PDF_MAX_PAGES` страниц, так что цена — только трафик.
-PDF_MAX_BYTES = 8 * 1024 * 1024
+#: Восемь мебибайт покрывали статью с рисунками, но не книгу: 24.09 учебник
+#: «Algorithms» (Erickson) весит 25 055 430 байт и получил отказ по потолку.
+#: Тридцать два мебибайта берут его с запасом; текста всё равно берётся не
+#: больше `PDF_MAX_PAGES` страниц, так что цена — только трафик и память.
+PDF_MAX_BYTES = 32 * 1024 * 1024
+
+#: Сколько страниц PDF-скана распознаётся (слово оператора 24.09). Скан без
+#: текстового слоя давал отказ «scanned images?» — три таких первоисточника в
+#: следах. Распознавание — страница за страницей в песочнице convert_file, это
+#: минуты, а не секунды; десять страниц покрывают статью.
+PDF_OCR_MAX_PAGES = 10
+
+#: Исполнитель программ для распознавания; None — песочница convert_file.
+#: Подмена — только в тестах (на Windows песочницы нет).
+_ocr_runner = None
 
 # Tag tags we strip when there's no embedded text we want to keep.
 _SCRIPT_STYLE_RE = re.compile(
@@ -172,8 +184,38 @@ def _pdf_text(raw: bytes) -> str:
         raise ValueError(f"PDF could not be read: {type(exc).__name__}") from None
     text = chr(10).join(pages).strip()
     if not text:
-        raise ValueError("PDF carries no extractable text (scanned images?)")
+        return _ocr_scanned_pdf(raw)
     return text
+
+
+def _ocr_scanned_pdf(raw: bytes) -> str:
+    """Скан без текстового слоя — распознать теми же программами, что convert_file.
+
+    Чужой PDF — опасный вход: разбирать его советуют только в изоляции
+    (OCRmyPDF, «PDF security issues»). Поэтому pdftoppm и tesseract идут ТОЛЬКО
+    через песочницу convert_file — пользователь nobody, временная папка, свои
+    таймауты, — а без песочницы распознавания нет, есть отказ с причиной.
+    Рабочая папка агента не трогается: всё во временной, и она удаляется.
+    """
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    from tools.convert_file import ConvertFileTool, ConvertRefused
+
+    with _tempfile.TemporaryDirectory(prefix="web_fetch_ocr_") as root:
+        _Path(root, "scan.pdf").write_bytes(raw)
+        try:
+            out = ConvertFileTool(_Path(root), runner=_ocr_runner).run(
+                op="ocr", path="scan.pdf", max_pages=PDF_OCR_MAX_PAGES)
+        except ConvertRefused as exc:
+            raise ValueError(f"PDF carries no extractable text (scanned images?) and OCR "
+                             f"is unavailable: {exc}") from None
+    text = str(out.get("text") or "").strip()
+    if not text:
+        raise ValueError("PDF carries no extractable text (scanned images?) and OCR read "
+                         f"nothing: {out.get('error') or str(out.get('log_tail') or '')[-200:]}")
+    return (f"[распознано со скана (OCR), первые {PDF_OCR_MAX_PAGES} страниц; "
+            f"возможны ошибки распознавания]\n{text}")
 
 
 class WebFetchTool(Tool):
