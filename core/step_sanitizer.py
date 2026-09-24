@@ -522,6 +522,14 @@ def _patch_task_from(content: str, idx: int, warnings: list[str], path: str) -> 
         f"Замысел правки, как его задумал план: {content.strip()[:900]}")
 
 
+def _sanitize_convert_file(
+    args: dict[str, Any], idx: int, warnings: list[str],
+) -> dict[str, Any] | None:
+    """Программы для файлов клиента: проверки живут рядом с песочницей (tools/convert_file.py)."""
+    from tools.convert_file import sanitize_args
+    return sanitize_args(args, idx, warnings)
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -905,8 +913,7 @@ def sanitize_step(
         return _sanitize_patch_check(args, idx, warnings)
 
     if tool_name == "convert_file":
-        from tools.convert_file import sanitize_args
-        return sanitize_args(args, idx, warnings)
+        return _sanitize_convert_file(args, idx, warnings)
 
     if tool_name == "read_logs":
         return _sanitize_read_logs(args, idx, warnings)
