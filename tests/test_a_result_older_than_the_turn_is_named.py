@@ -46,5 +46,19 @@ def test_a_turn_that_only_read_may_name_old_files(tmp_path: Path) -> None:
     assert older_than_turn(HEAD, tmp_path, started, ["file_read", "list_dir"]) is None
 
 
+def test_code_the_turn_only_read_is_not_called_out(tmp_path: Path) -> None:
+    """Ночь 24→25.09: ход, писавший правку, назвал прочитанные tools/base.py и
+    core/model_router.py — и получил «НЕ создано этим ходом», а сигнал ушёл в его
+    цели «объяснить наблюдение о себе». Код, который ход читает, он использует."""
+    started = time.time()
+    for rel in ("tools/base.py", "core/model_router.py"):
+        f = tmp_path / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x", encoding="utf-8")
+        os.utime(f, (started - 3600, started - 3600))
+    head = "Risk в `tools/base.py` — Literal; complete — метод обёртки в `core/model_router.py`."
+    assert older_than_turn(head, tmp_path, started, ["file_write", "patch_check"]) is None
+
+
 def test_the_answer_path_consults_it() -> None:
     assert "older_than_turn(" in inspect.getsource(loop_response_deciders)
