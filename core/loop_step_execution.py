@@ -19,6 +19,7 @@ from contextvars import copy_context
 from typing import TYPE_CHECKING, Any, Literal
 
 from core.data_classifier import DataClass, SourceHint, classify
+from core.failure_cards import failed_output_reason
 from core.injection_guard import (
     _to_text,
     annotate_suspicious,
@@ -704,7 +705,7 @@ class AgentLoopStepExecution:
         # Tool execution
         result = self._call_tool(action)
         if result.status != "success":
-            raw_error = result.error or "tool execution failed"
+            raw_error = result.error or failed_output_reason(result.output)
             # Detect file-absence specifically: FileNotFoundError (or
             # IsADirectoryError) means the file simply does not exist on
             # disk. This is a hard stop — the planner must NOT retry the

@@ -318,6 +318,10 @@ _DECLARED_EDITS = (
         "self._execute_steps_parallel(st.plan.steps)",
         "self._execute_steps_parallel(steps_to_run(self, st, attempt_artifacts))",
     ),
+    (  # 2026-09-24: сбой шага несёт прошлый опыт по той же ошибке (core/failure_cards.py)
+        "attempt_failures.append(trigger)",
+        "attempt_failures.append(with_past_experience(self, trigger))",
+    ),
 )
 
 

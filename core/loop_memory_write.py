@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from core.failure_cards import learn_after_turn
 from core.run_context import current_run
 from core.smart_memory import (
     admit_for_storage,
@@ -216,6 +217,8 @@ class AgentLoopMemoryWrite:
         # consolidation stay off.
         may_episode = not self._durable_learning_suppressed("episode")
         may_procedure = not self._durable_learning_suppressed("procedure")
+        if may_episode:
+            learn_after_turn(self)  # карточки прошлых ошибок (core/failure_cards.py)
         if not (may_episode or may_procedure):
             self.log.log(
                 "durable_learning_writes_skipped",
