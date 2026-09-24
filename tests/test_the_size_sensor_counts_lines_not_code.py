@@ -90,7 +90,7 @@ def test_a_small_module_is_not_flagged() -> None:
     assert not _flagged_by_size("core/small.py", _module(code_lines=50, prose_lines=50))
 
 
-# ── Audit of this closure (docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md) ──────────
+# ── Audit of this closure (CLOSURE_AUDIT_2026-08-22.md in git history) ──────────
 #
 # The field's named failure for AST line counting is that it misreads real
 # Python shapes. Seven were probed — one-liner ifs, multi-line call arguments,

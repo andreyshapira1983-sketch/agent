@@ -9,7 +9,7 @@ Two lessons carved into it on 2026-09-05:
   first version ended a turn after 40 s of quiet output, the planner was
   silent for 44 s, and the stop that followed killed the process before
   synthesis — a live provenance check was lost to the harness, not to the
-  agent (docs/audit/ACTUATION_TEST_2026-09-05.md, raw timeline).
+  agent (ACTUATION_TEST_2026-09-05.md in git history, raw timeline).
 
 Protocol (paths under ``--dir``): ``q/next.txt`` = the next question;
 ``a/turn_<n>.md`` = the answer with the journals' deltas; ``q/stop`` =

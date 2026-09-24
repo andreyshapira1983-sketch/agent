@@ -116,7 +116,7 @@ def test_clean_sentences_still_extract_beside_a_marker() -> None:
 
 # ── Audit of this closure against the field's criticism ─────────────────────
 #
-# From docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md. Shape-based stripping is
+# From CLOSURE_AUDIT_2026-08-22.md in git history. Shape-based stripping is
 # criticised for eating legitimate text, and tested against real prose the
 # criticism LANDED: a bibliographic «...[1998]» and a quotation elision
 # «...[и]» were both refused. Both are now exempt — bracket content that is a

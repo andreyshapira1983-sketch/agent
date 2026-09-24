@@ -98,7 +98,7 @@ def test_corroboration_does_not_launder_a_suspect_claim() -> None:
     assert 'claim.status in {"extracted", "suspect"}' not in src
 
 
-# ── Audit of this closure (docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md) ──────────
+# ── Audit of this closure (CLOSURE_AUDIT_2026-08-22.md in git history) ──────────
 #
 # The field's named failure for scanner-driven quarantine: false positives
 # strangle legitimate sources. Measured on the LIVE registry: per sentence the

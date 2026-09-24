@@ -1,6 +1,6 @@
 """The exam driver waits for the turn's closing marker, never for silence.
 
-Measured 2026-09-05 (docs/audit/ACTUATION_TEST_2026-09-05.md, raw timeline):
+Measured 2026-09-05 (ACTUATION_TEST_2026-09-05.md in git history, raw timeline):
 the first driver ended a turn after 40 s of quiet output while the planner
 was silent for 44 s, the stop that followed sent `:quit` and terminated the
 process during the second planner call, and the one permitted live

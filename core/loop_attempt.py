@@ -590,7 +590,7 @@ class AgentLoopAttempt:
         """Write the verdict onto the in-run log objects and journal it.
 
         Called from BOTH exits. The audit of this repair
-        (`docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md`) applied the field's rule for
+        (`CLOSURE_AUDIT_2026-08-22.md in git history`) applied the field's rule for
         settle-on-exit — «a status written at one exit lies about the other
         paths» — and found one: a budget interruption re-raises past the normal
         end, leaving the objects `pending`, which in this vocabulary means

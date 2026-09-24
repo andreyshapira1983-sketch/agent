@@ -217,7 +217,7 @@ def record_self_build_episode(
         # blocked gate 32 times on 2026-08-16 and banked all 32. Keyed on
         # CONTENT, not the status label (label-keyed dedup destroys real
         # records: ten distinct answers under one question, measured in
-        # docs/audit/archive/MEMORY_CONSOLIDATION_MEASUREMENT.md). Gate waits only —
+        # MEMORY_CONSOLIDATION_MEASUREMENT.md in git history). Gate waits only —
         # an identical genuine veto tomorrow may mean "still failing", and
         # judging that is the hygiene collapser's job, not the writer's.
         if str(result.get("status") or "") in _DEDUP_STATUSES:
