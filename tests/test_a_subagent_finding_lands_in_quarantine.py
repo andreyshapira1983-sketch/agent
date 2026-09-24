@@ -54,7 +54,7 @@ def test_the_finding_is_written_down_with_its_origin(tool, tmp_path: Path) -> No
     Долговременной записи не существовало: субагент отвечал, строка уходила в
     цепочку улик родителя и исчезала вместе с прогоном.
     """
-    tool.run(role="researcher", objective="выяснить, что такое MetaGPT")
+    tool.run(role="researcher", objective="выяснить, что такое MetaGPT", why="отдельная область", expect="описание MetaGPT с источником")
 
     rows = load_quarantine(tmp_path)
     assert len(rows) == 1, "находка субагента нигде не записана"
@@ -66,7 +66,7 @@ def test_the_finding_is_written_down_with_its_origin(tool, tmp_path: Path) -> No
 
 def test_the_record_declares_that_it_may_not_influence_anything(tool, tmp_path: Path) -> None:
     """Полномочие названо явно: умолчание однажды уже раздало голос человека."""
-    tool.run(role="researcher", objective="выяснить, что такое MetaGPT")
+    tool.run(role="researcher", objective="выяснить, что такое MetaGPT", why="отдельная область", expect="описание MetaGPT с источником")
 
     assert load_quarantine(tmp_path)[0]["authority"] == QUARANTINE_AUTHORITY == "none"
 
@@ -123,3 +123,26 @@ def test_nothing_else_reads_the_quarantine(tmp_path: Path) -> None:
         "карантин читают помимо своего модуля и строки состояния: "
         + ", ".join(sorted(readers))
     )
+
+
+def test_a_subagent_needs_a_reason_and_a_prediction(tool, tmp_path: Path) -> None:
+    """Правило оператора 2026-09-25: помощника создавать можно, но письменно —
+    зачем он, а не прямой вызов, и что вернёт. Ночь 24.09: 37 помощников в трёх
+    ходах поиска вакансий дали 0–1 объявление, и ни одно «зачем» не записано."""
+    import json
+
+    from core.step_sanitizer import sanitize_step
+
+    warnings: list[str] = []
+    bare = sanitize_step("spawn_subagent", {"role": "UpworkJobScout", "objective": "find jobs"},
+                         None, 0, warnings)
+    assert bare is None and "requires 'why'" in warnings[-1]
+    with pytest.raises(ValueError, match="why"):
+        tool.run(role="researcher", objective="выяснить, что такое MetaGPT")
+
+    tool.run(role="researcher", objective="выяснить, что такое MetaGPT",
+             why="отдельная область", expect="описание MetaGPT с источником")
+    rows = [json.loads(line) for line in
+            (tmp_path / "data" / "subagent_predictions.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["expect"] == "описание MetaGPT с источником"
+    assert rows[-1]["status"] == "success"

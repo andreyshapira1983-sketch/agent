@@ -60,7 +60,7 @@ class _FakeSpawn(Tool):
 
 
 PLAN = json.dumps({"reasoning": "delegate", "steps": [
-    {"tool": "spawn_subagent", "arguments": {"role": "FlightResearcher", "objective": "check Expedia"}, "rationale": "r"}
+    {"tool": "spawn_subagent", "arguments": {"role": "FlightResearcher", "objective": "check Expedia", "why": "separate site", "expect": "what Expedia returned"}, "rationale": "r"}
 ]})
 SYNTH = (
     f"Conclusion: Expedia blocked the search with HTTP 429 Too Many Requests. [web:{PAGE_URL}]\n"
