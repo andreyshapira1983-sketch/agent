@@ -4,6 +4,8 @@ Background: docs/CODE_NOTES.md, "Which model earns the role".
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from core.model_outcomes import (
     MIN_RUNS,
     measure_model_outcomes,
@@ -131,9 +133,16 @@ def test_the_router_asks_the_measurement_before_the_tier_map():
     assert "peer_model_at_same_tier" not in source + chain
 
 
-def test_the_tier_map_still_answers_when_nothing_is_measured():
-    """Пол на месте: без замеров решение прежнее, а не отсутствующее."""
+def test_the_tier_map_still_answers_when_nothing_is_measured(monkeypatch):
+    """Пол на месте: без замеров решение прежнее, а не отсутствующее.
+
+    Каталог — образец с OpenAI: 24.09 живой каталог установки стал только
+    DeepSeek, и тест, читавший его, падал — правило от ключей не зависит."""
     from core.model_outcomes import substitute_model
+
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH",
+                       str(Path(__file__).parent / "fixtures" / "model_catalog_two_providers.json"))
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_TTL_DAYS", "100000")
 
     picked = substitute_model(
         role="роль-которой-не-было", provider="openai",
