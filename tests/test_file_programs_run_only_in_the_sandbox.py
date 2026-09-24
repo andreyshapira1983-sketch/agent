@@ -236,3 +236,16 @@ def test_a_text_result_comes_back_in_the_output(tmp_path: Path) -> None:
 
     result = ConvertFileTool(workspace_root=tmp_path, runner=fake).run(op="office", path="a.docx", to="txt")
     assert "48 750" in result["text"]
+
+
+def test_a_byte_order_mark_does_not_reach_the_text(tmp_path: Path) -> None:
+    """24.09: LibreOffice пишет txt с U+FEFF; сторож внедрений счёл его скрытым
+    текстом, и числа из Word не стали уликой."""
+    (tmp_path / "a.docx").write_bytes(b"x")
+
+    def fake(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
+        (cwd / "out" / "in.txt").write_text("﻿ИТОГО: 48 750", encoding="utf-8")
+        return 0, ""
+
+    text = ConvertFileTool(workspace_root=tmp_path, runner=fake).run(op="office", path="a.docx", to="txt")["text"]
+    assert not text.startswith("﻿") and text.startswith("ИТОГО")

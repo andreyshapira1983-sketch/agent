@@ -229,7 +229,10 @@ class ConvertFileTool(Tool):
         # урока 1: Word -> txt лёг в converted/, агент его не дочитал и
         # заявил «суммы сходятся», не видя одной из сторон сравнения.
         if outputs and (op == "ocr" or Path(outputs[0]).suffix.lstrip(".") in _TEXT_RESULTS):
-            text = (self.workspace_root / outputs[0]).read_text(encoding="utf-8", errors="replace")
+            # utf-8-sig: LibreOffice пишет txt с меткой порядка байтов U+FEFF, и
+            # сторож внедрений 24.09 счёл её скрытым текстом — вывод Word не
+            # стал уликой, ссылки ответа на его числа остались без опоры.
+            text = (self.workspace_root / outputs[0]).read_text(encoding="utf-8-sig", errors="replace")
             result["text"] = text[:_MAX_TEXT_CHARS]
             result["text_truncated"] = len(text) > _MAX_TEXT_CHARS
         if not outputs:
