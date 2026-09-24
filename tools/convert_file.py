@@ -151,6 +151,10 @@ def sandbox_available() -> str | None:
     return None
 
 
+#: Результаты, чей текст отдаётся прямо в выводе инструмента.
+_TEXT_RESULTS = frozenset({"txt", "csv", "md", "html"})
+
+
 def run_sandboxed(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
     """Запустить команду пользователем nobody в `cwd`; без оболочки и без ключей."""
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(cwd), "TMPDIR": str(cwd),
@@ -221,7 +225,10 @@ class ConvertFileTool(Tool):
             shutil.rmtree(tmp, ignore_errors=True)
         result: dict[str, Any] = {"op": op, "input": path, "exit_code": code,
                                   "outputs": outputs, "log_tail": log[-600:]}
-        if op == "ocr" and outputs:
+        # Текстовый результат — сразу в вывод, не только файлом. 24.09, приёмка
+        # урока 1: Word -> txt лёг в converted/, агент его не дочитал и
+        # заявил «суммы сходятся», не видя одной из сторон сравнения.
+        if outputs and (op == "ocr" or Path(outputs[0]).suffix.lstrip(".") in _TEXT_RESULTS):
             text = (self.workspace_root / outputs[0]).read_text(encoding="utf-8", errors="replace")
             result["text"] = text[:_MAX_TEXT_CHARS]
             result["text_truncated"] = len(text) > _MAX_TEXT_CHARS

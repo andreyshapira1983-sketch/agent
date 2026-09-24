@@ -223,3 +223,16 @@ def test_a_blend_file_is_rendered(tmp_path: Path) -> None:
                    check=True, capture_output=True, timeout=300)
     result = ConvertFileTool(workspace_root=tmp_path).run(op="render3d", path="scene.blend")
     assert result["exit_code"] == 0 and result["outputs"][0].endswith(".png"), result
+
+
+def test_a_text_result_comes_back_in_the_output(tmp_path: Path) -> None:
+    """Приёмка урока 1, 24.09: текст Word -> txt лежал только файлом, агент его не
+    дочитал и сравнил итоги, не видя одной стороны."""
+    (tmp_path / "a.docx").write_bytes(b"x")
+
+    def fake(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
+        (cwd / "out" / "in.txt").write_text("ИТОГО: 48 750 руб.", encoding="utf-8")
+        return 0, ""
+
+    result = ConvertFileTool(workspace_root=tmp_path, runner=fake).run(op="office", path="a.docx", to="txt")
+    assert "48 750" in result["text"]

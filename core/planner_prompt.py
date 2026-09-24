@@ -308,6 +308,8 @@ Available tools:
       svg        svg -> to=png|pdf (links to files and xi:include are refused)
       media      audio/video -> to=mp4|webm|mp3|wav|gif, optional max_seconds
       render3d   .blend -> png of frame 1 (scripts in the file do NOT run)
+    text: the recognised/converted text, returned for ocr and for any text result
+    (to=txt|csv|md|html) — compare numbers from `text`, not from memory.
     `path` ASCII, inside the workspace. Read or open the result from `outputs`.
 
 - web_fetch(url: str, find: str = "")
