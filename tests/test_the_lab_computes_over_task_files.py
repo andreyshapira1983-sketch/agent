@@ -164,10 +164,10 @@ def test_the_experiment_code_still_stays_out_of_the_evidence() -> None:
 
 @pytest.mark.parametrize("claim", [
     "- Скрипт завершился с кодом 0, ошибок нет, входной файл `data.csv` найден [tool:python_probe].",
-    "- Скрипт прочитал `data.csv` через `csv.DictReader`, просуммировал `amount` по `name`; "
-    "код завершился с `exit_code: 0`, ошибок в stderr нет [tool:python_probe].",
-    "- Код завершился с `exit_code: 0`, ошибок в `stderr` нет, длительность 233 мс "
-    "[tool:python_probe].",
+    ("- Скрипт прочитал `data.csv` через `csv.DictReader`, просуммировал `amount` по `name`; "
+     "код завершился с `exit_code: 0`, ошибок в stderr нет [tool:python_probe]."),
+    ("- Код завершился с `exit_code: 0`, ошибок в `stderr` нет, длительность 233 мс "
+     "[tool:python_probe]."),
 ])
 def test_no_errors_does_not_make_the_read_file_absent(claim: str) -> None:
     """Замер 2026-09-19: «ошибок нет» делало весь кусок утверждением об отсутствии,

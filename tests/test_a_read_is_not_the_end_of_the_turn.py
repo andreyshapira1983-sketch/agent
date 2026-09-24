@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 from core.approval import AutoApprover
 from core.logger import TraceLogger
@@ -213,7 +214,7 @@ def test_the_observation_block_is_bounded_and_marks_data_as_data():
             self.order, self.action_spec = 1, {"tool_name": "file_read", "arguments": {"path": "x"}}
 
     class _Plan:
-        steps = [_Step()]
+        steps: ClassVar[list] = [_Step()]
 
     block = format_observations(_Plan(), {
         "file:x": {"tool": "file_read", "output": "z" * 50_000},

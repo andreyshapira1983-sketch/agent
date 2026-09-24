@@ -463,7 +463,7 @@ def _bm25_scores(q_tokens: set[str], docs: list[Counter[str]]) -> list[float]:
     avgdl = (sum(lengths) / n_docs) or 1.0
     scores = [0.0] * n_docs
     for q in q_tokens:
-        row = [_term_frequency(q, d, pre) for d, pre in zip(docs, prefixes)]
+        row = [_term_frequency(q, d, pre) for d, pre in zip(docs, prefixes, strict=True)]
         df = sum(1 for f in row if f)
         if not df:
             continue
@@ -734,14 +734,14 @@ class MemoryRetrievalPolicy:
         broad = is_broad_project_self_knowledge_question(question)
         texts = [r.content if isinstance(r.content, str) else str(r.content) for r in records]
         relevance = _bm25_scores(q_tokens, [
-            _term_counts(t, r.tags or []) for t, r in zip(texts, records)
+            _term_counts(t, r.tags or []) for t, r in zip(texts, records, strict=True)
         ])
         # Смысл поверх слов (core/memory_embeddings.py): выпуклая сумма
         # нормированных баллов; выключен — остаётся один BM25.
         from core.memory_embeddings import fused_relevance, top_by_meaning
         relevance, semantic = fused_relevance(question, texts, relevance)
         by_meaning = frozenset() if broad else top_by_meaning(semantic, self.semantic_candidates)
-        for i, (r, rel) in enumerate(zip(records, relevance)):
+        for i, (r, rel) in enumerate(zip(records, relevance, strict=True)):
             text = r.content if isinstance(r.content, str) else str(r.content)
             r_tokens = _tokens(text)
             score = len(q_tokens & r_tokens)

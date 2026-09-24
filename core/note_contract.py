@@ -73,7 +73,6 @@ def contract_gaps(text: str, workspace: Path | str) -> list[str]:
 
 def settle_note(workspace: Path | str, success_check: str) -> dict[str, Any] | None:
     """Проверить конспект по договору; None — это не задача с конспектом."""
-    from core.observation_round import unfilled_placeholders
 
     match = _NOTE_RE.search(success_check or "")
     if not match:

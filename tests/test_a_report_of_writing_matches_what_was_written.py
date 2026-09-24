@@ -13,8 +13,6 @@ from __future__ import annotations
 # «НЕ выполнено ни одной записи файла». Считаются все три пишущих инструмента
 # (file_write, journal_append, memory_bank); `patch_check` не считается — он
 # примеряет правку на клоне и рабочую папку не меняет.
-
-
 from core.answer_contradiction import action_report_mismatch
 
 

@@ -3,13 +3,13 @@ with.
 """
 from __future__ import annotations
 
-from core.step_references import has_step_reference
-
 import hashlib
 import ipaddress
 import re
 from pathlib import Path
 from typing import Any
+
+from core.step_references import has_step_reference
 
 _PLACEHOLDER_HOSTS = frozenset({
     "example.com", "example.org", "example.net", "example.edu",

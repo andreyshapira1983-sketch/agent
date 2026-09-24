@@ -726,7 +726,7 @@ class ShellExecTool(Tool):
             # а не просится у планировщика: путь к своему окружению не та
             # вещь, которую стоит угадывать.
             if len(argv) > 2 and argv[2].strip().lower() in _UV_PIP_WRITE:
-                argv = argv[:3] + ["--python", sys.executable] + argv[3:]
+                argv = [*argv[:3], "--python", sys.executable, *argv[3:]]
             return self._run_subprocess(cmd, argv, plan)
         if cmd in READ_ONLY_COMMANDS:
             return self._run_subprocess(cmd, argv, plan)

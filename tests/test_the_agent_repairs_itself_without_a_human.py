@@ -133,7 +133,6 @@ def test_a_defect_without_a_task_is_not_given_to_the_hands(tmp_path: Path) -> No
     """
     from core.patch_route import LOG_RELPATH, defect_goal
     from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
-
     from core.state_integrity import (
         read_state_jsonl_unlocked,
         rewrite_state_jsonl_unlocked,

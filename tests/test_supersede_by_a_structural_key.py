@@ -26,6 +26,8 @@
 """
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from core.learned_conclusion import question_key, same_question, superseded_by
@@ -74,7 +76,7 @@ def test_no_relation_means_no_key() -> None:
 def test_an_identical_conclusion_is_still_refused_as_a_duplicate() -> None:
     """Прежняя защита от точного дубля не ослаблена."""
     class _R:
-        tags = ["fact", "conclusion"]
+        tags: ClassVar[list[str]] = ["fact", "conclusion"]
         content = ("Вопрос: найти раздел (lexer/tokenizer)\n"
                    "Вывод: раздел 2.1\nИсточники: file:x.txt")
     new = ("Вопрос: прочитать раздел (lexer/tokenizer)\n"
@@ -92,7 +94,7 @@ def test_a_different_conclusion_supersedes_the_old_one() -> None:
     дословно совпадало со старым.
     """
     class _R:
-        tags = ["fact", "conclusion"]
+        tags: ClassVar[list[str]] = ["fact", "conclusion"]
         content = ("Вопрос: найти раздел (lexer/tokenizer)\n"
                    "Вывод: страница 326\nИсточники: file:x.txt")
     new = ("Вопрос: прочитать раздел (lexer/tokenizer)\n"

@@ -740,8 +740,8 @@ class KnowledgePipeline:
                     "source_id": claim.source_id,
                     "knowledge_decision": {
                         "decision": "skip",
-                        "reasons": ["internet source: kept in the source registry to be qualified, "
-                                    "not promoted to durable memory by an ordinary turn"],
+                        "reasons": [("internet source: kept in the source registry to be qualified, "
+                                     "not promoted to durable memory by an ordinary turn")],
                         "policy_id": "two_worlds",
                     },
                 })

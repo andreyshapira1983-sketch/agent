@@ -35,7 +35,7 @@ def test_a_right_from_the_initial_lump_is_marked_as_such() -> None:
     """
     import subprocess
 
-    roots = subprocess.run(["git", "log", "--max-parents=0", "--format=%s"], capture_output=True,
+    roots = subprocess.run(["git", "log", "--max-parents=0", "--format=%s"], capture_output=True,  # noqa: S607
                            text=True, check=False).stdout.split("\n")
     if "Initial commit" not in (r.strip() for r in roots):
         # Замер делается на истории проекта; у локальной копии без неё

@@ -1,7 +1,6 @@
+import datetime as _dt
 import re
 from pathlib import Path
-
-import datetime as _dt
 
 from core.state_integrity import (
     append_state_jsonl_unlocked,

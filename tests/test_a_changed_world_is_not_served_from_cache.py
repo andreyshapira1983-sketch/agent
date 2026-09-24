@@ -60,5 +60,5 @@ def test_a_file_changed_between_reads_is_read_again(tmp_path: Path):
     (tmp_path / "numbers.txt").write_text("1\n2\n3000\n", encoding="utf-8")
     fresh = _read(loop, 3)
     assert "3000" in fresh["output"], "дописанные строки обязаны быть видны"
-    events = [json.loads(l)["event"] for l in Path(loop.log.path).read_text(encoding="utf-8").splitlines()]
+    events = [json.loads(line)["event"] for line in Path(loop.log.path).read_text(encoding="utf-8").splitlines()]
     assert "memory_cache_stale" in events

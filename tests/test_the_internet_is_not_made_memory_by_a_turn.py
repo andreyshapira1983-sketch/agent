@@ -65,7 +65,6 @@ def test_the_turn_is_wired_to_refuse(tmp_path) -> None:
     class _Pipeline:
         def run(self, chain, **kw):
             seen.update(kw)
-            return None
 
     host = AgentLoopEvidenceChain.__new__(AgentLoopEvidenceChain)
     host.knowledge_pipeline = _Pipeline()

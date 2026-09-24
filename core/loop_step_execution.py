@@ -428,7 +428,7 @@ class AgentLoopStepExecution:
             )
             refusal = resolved_url_refusal(tool_name, resolved)
             if refusal:
-                raise UnresolvedStepReference(
+                raise UnresolvedStepReference(  # noqa: TRY301 — тот же обработчик, что у неразрешённой ссылки
                     f"after substitution the {refusal}; the same locks apply to an "
                     f"address taken from a step as to one written in the plan")
         except UnresolvedStepReference as exc:
