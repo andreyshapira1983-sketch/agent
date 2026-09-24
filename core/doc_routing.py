@@ -253,11 +253,8 @@ _SUBAGENT_GOVERNANCE_DOC_PATHS = (
 # (MEMORY_FIX_PLAN B.3), which is failure mode OFM-015 — a record written and
 # never read changes nothing.
 #
-# Membership is deliberately small. docs/MEMORY_FIX_PLAN.md is left OUT: it is
-# partly superseded — its A3 prescription was never applied as written, so
-# injecting it would teach a rule that does not hold. (Two further exclusions
-# were listed here until 2026-08-07 and named documents that no longer exist;
-# an exclusion for a deleted file explains nothing.)
+# Membership is deliberately small: only documents whose rules hold in the
+# code today. (The superseded MEMORY_FIX_PLAN was deleted 2026-09-24.)
 _MEMORY_GOVERNANCE_DOC_PATHS = (
     # A memory-map document under the deleted `docs/audit/` tree stood first
     # here until 2026-08-07. Nothing noticed it was gone: the router injects a

@@ -1,7 +1,6 @@
 """Guard: the historical audit docs redirect status to the single registry.
 
-CORE_AUDIT, OPERATIONAL_FAILURE_MODES, MEMORY_SYSTEM_AUDIT and LIVE_PROBE_FINDINGS
-each carry their own (now historical) status ledger. To keep those stale
+MEMORY_SYSTEM_AUDIT and LIVE_PROBE_FINDINGS each carry their own (now historical) status ledger. To keep those stale
 statuses from being read as current, each must carry a **status-ledger-superseded
 banner** — a Markdown blockquote that both says it is superseded and links to the
 single status owner, docs/audit/MASTER_ISSUE_REGISTRY.md.
@@ -18,8 +17,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 HISTORICAL_AUDIT_DOCS = (
-    "docs/audit/archive/CORE_AUDIT_2026-07-18.md",
-    "docs/OPERATIONAL_FAILURE_MODES.md",
     "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "docs/LIVE_PROBE_FINDINGS.md",
 )
@@ -28,8 +25,8 @@ HISTORICAL_AUDIT_DOCS = (
 REGISTRY_NAME = "MASTER_ISSUE_REGISTRY.md"
 # Kept for the unit test below: the strictest banner form is a real relative
 # link. The per-document contract accepts the registry NAME inside the same
-# blockquote (the live banners cite it as an inline-code path, and three of the
-# four documents sit at different depths, so no single relative link fits all).
+# blockquote (the live banners cite it as an inline-code path, and the two
+# documents sit at different depths, so no single relative link fits all).
 REGISTRY_LINK = "](audit/MASTER_ISSUE_REGISTRY.md)"
 
 

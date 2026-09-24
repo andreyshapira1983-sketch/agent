@@ -47,10 +47,7 @@ DOCS = REPO / "docs"
 _HISTORICAL_ANCHOR_DOCS = {
     "LIVE_PROBE_FINDINGS.md",
     "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
-    "MEMORY_FIX_PLAN.md",
     "../knowledge/doctrine/self-audit-lessons.md",
-    "audit/archive/CORE_AUDIT_2026-07-18.md",
-    "audit/archive/daemon-progress.md",
 }
 
 #: Top-level code directories a documented path may start with.
@@ -108,7 +105,6 @@ _NONEXISTENT_MARKERS = (
 #: exemption is by directory and counted separately in the summary. Prose that
 #: NARRATES such a run lives outside these directories and is judged as prose.
 _VERBATIM_TRANSCRIPT_DIRS = {
-    "audit/exam_self_knowledge_2026-09-05/",
 }
 
 #: Files that were RENAMED, old path -> new path.
@@ -179,15 +175,12 @@ _RENAMED_PATHS: dict[str, str] = {
 #: numbers drifting, this one is about a module name that no longer exists. A
 #: document can need one and not the other.
 _HISTORICAL_RENAME_DOCS = {
-    "audit/archive/CORE_AUDIT_2026-07-18.md",
     "LIVE_PROBE_FINDINGS.md",
     # Added 2026-08-04 with the `loop_methods2` dissolution: dated audits and
     # fix plans whose job is to say what was true when they were written. The
     # old module name is the CORRECT word there — the finding was made against
     # that file, and rewriting it would falsify the record.
-    "MEMORY_FIX_PLAN.md",
     "../knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
-    "audit/archive/Технический_анализ_автономного_агента_и_функций_мозга.md",
     "../knowledge/doctrine/self-audit-lessons.md",
 }
 
