@@ -382,6 +382,12 @@ def _union_clears_literal(
     return chunk_reason
 
 
+def _absence_proven(chunk_text: str, chunk_evs: list) -> bool:
+    """Отсутствие не утверждается — или доказано полным поиском названной области
+    (исключение из стены (e): отчёт поиска — не усечённая выдержка)."""
+    return absence_certifiable(chunk_text, "") or absence_certified_by_search(chunk_text, chunk_evs)
+
+
 def _judge_cited(
     chunk_text: str, cits: list[Any], chain: ProvenanceChain, *, chain_empty: bool,
     llm: Any, chunk_reason: ClaimReason | None,
@@ -469,10 +475,7 @@ def _judge_cited(
     # MIR-060 (e): у утверждения об ОТСУТСТВИИ сертификата быть не
     # может — гейт (d) его опровергает, этот не даёт подтвердить
     # (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
-    # Отсутствие, доказанное полным поиском в названной области, — исключение
-    # из стены (e): это не усечённая выдержка (verifier_absence).
-    _abs_uncert = any_matched and not (absence_certifiable(chunk_text, "")
-                                       or absence_certified_by_search(chunk_text, chunk_evs))
+    _abs_uncert = any_matched and not _absence_proven(chunk_text, chunk_evs)
     if any_matched and not _abs_uncert and not (
         chunk_reason is not None and chunk_reason.code == "count_mismatch"
     ) and not _entailment_denied(chunk_text, chunk_evs, matched_ids, llm, stat_figures=stat_figures):
