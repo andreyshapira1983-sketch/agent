@@ -322,6 +322,11 @@ _DECLARED_EDITS = (
         "attempt_failures.append(trigger)",
         "attempt_failures.append(with_past_experience(self, trigger))",
     ),
+    (  # 2026-09-24: болтовню узнаёт и классификатор, не только словарь (core/social_turn.py)
+        "can_skip_planner(st.user_question, file_hint=st.file_hint)",
+        ("(can_skip_planner(st.user_question, file_hint=st.file_hint) or "
+         "is_social_turn(self, st.user_question, file_hint=st.file_hint))"),
+    ),
 )
 
 

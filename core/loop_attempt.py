@@ -45,6 +45,7 @@ from core.replan import (
     dropped_step_triggers,
     format_replan_context,
 )
+from core.social_turn import is_social_turn
 from core.task_complexity import can_skip_planner
 
 
@@ -234,7 +235,8 @@ class AgentLoopAttempt:
                     self.cheap_path_enabled
                     and st.attempt == 1
                     and not failure_context.strip()
-                    and can_skip_planner(st.user_question, file_hint=st.file_hint)
+                    and (can_skip_planner(st.user_question, file_hint=st.file_hint)
+                         or is_social_turn(self, st.user_question, file_hint=st.file_hint))
                 ):
                     st.planner_out = PlannerOutput(
                         reasoning=(

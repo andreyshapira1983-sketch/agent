@@ -390,6 +390,15 @@ def _is_pure_greeting(normalized: str) -> bool:
     return all(w in _GREETING_WORDS for w in words)
 
 
+def tool_signal_present(normalized: str) -> bool:
+    """В реплике (уже в нижнем регистре) есть слово-признак инструмента.
+
+    Один список на оба коротких пути: словарный (`can_skip_planner`) и
+    классификатор болтовни (`core/social_turn.py`).
+    """
+    return any(sig in normalized for sig in _TOOL_SIGNALS)
+
+
 def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
     """Return True when the planner LLM call can be safely skipped.
 
@@ -424,7 +433,7 @@ def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
     normalized = stripped.casefold()
 
     # Disqualifiers — any hint a tool may be needed forces the planner to run.
-    if any(sig in normalized for sig in _TOOL_SIGNALS):
+    if tool_signal_present(normalized):
         return False
     if needs_live_grounding(stripped):
         return False
