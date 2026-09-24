@@ -699,6 +699,11 @@ def doctrine_docs_present(root: Any) -> bool:
 
 def is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
+    # Задача над названными файлами — не вопрос о диагностике цитат и проверки
+    # (правка агента claude_0924, проверена им 23.09; влита по слову оператора 24.09).
+    from core.file_request_intent import extract_path_mentions
+    if extract_path_mentions(question or ""):
+        return False
     return any(term in lowered for term in CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS)
 
 
