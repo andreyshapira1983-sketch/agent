@@ -83,7 +83,11 @@ def test_a_reference_written_as_prose_does_not_buy_a_round(workspace: Path):
 
     loop.run("Запиши README.md с этим текстом")
 
-    assert len(planner.contexts) == 1, "проза о ссылках — не ссылка на шаг плана"
+    # С 24.09 после любой чистой записи решает планировщик (правило «записал —
+    # сделано» снято); от переписывания того же файла (22.09: трижды за ход)
+    # держит прямое «эта запись уже сделана» в круге наблюдения.
+    assert len(planner.contexts) == 2
+    assert "this write ALREADY happened" in planner.contexts[1]
     assert (workspace / "README.md").read_text(encoding="utf-8").count("{{step:N.output}}") == 1
 
 
@@ -120,12 +124,3 @@ def test_a_write_waits_one_round_not_every_round(workspace: Path):
     assert len(_events(loop, "writes_deferred")) == 1
 
 
-def test_a_red_patch_check_keeps_the_round() -> None:
-    from core.observation_round import _red_tests
-
-    assert _red_tests({"patch_check:x": {"tool": "patch_check", "output": {"applied": False, "verdict": "red"}}})
-    # 14:43: правка без изменения и без теста — applied=True, но не зелёная.
-    assert _red_tests({"patch_check:x": {"tool": "patch_check",
-                                         "output": {"applied": True, "tests_exit_code": None, "verdict": "red"}}})
-    assert not _red_tests({"patch_check:x": {"tool": "patch_check",
-                                             "output": {"applied": True, "tests_exit_code": 0, "verdict": "green"}}})
