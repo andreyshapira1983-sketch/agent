@@ -270,7 +270,11 @@ class PersistentMemoryStore:
 # Contract: memory_door_write(store, policy, text, kind, provenance) -> mem_id | None.
 # Conclusions pass, raw code / duplicates / frozen sources / unmapped kinds do not.
 
-_CODE_PUNCT_RE = re.compile(r"[:=+\[\](){}<>]|->|;\s*$")
+#: Знаки кода. Двоеточие — только без пробела после (`a:b`, `def f():`), скобка —
+#: только вплотную к имени (вызов `foo(`): 24.09 дверь отказывала короткому
+#: русскому выводу «…отдаёт две модели: deepseek-flash и deepseek-v4-pro.» —
+#: двоеточие после обобщения и скобка-пояснение — норма прозы.
+_CODE_PUNCT_RE = re.compile(r":(?!\s)|[=+\[\]{}<>]|\w\(|\)\s*:|->|;\s*$")
 _WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]{2,}")
 
 
