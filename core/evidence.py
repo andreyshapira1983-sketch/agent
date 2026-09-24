@@ -480,10 +480,12 @@ def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     """
     if not isinstance(output, dict):
         return None
-    # source_id = метка шага (tools/convert_file.sanitize_args), как у file_read и
-    # diff_file: по ней писатель ответа ставит ссылку, по ней проверка её находит.
-    # 24.09 было «file:<путь>» — все 9 ссылок приёмки урока 1 остались без улики.
-    source_id = f"convert_file:{args.get('op', '')}:{str(args.get('path', 'unknown'))[:60]}"
+    # source_id = метка шага = «file:<исходный файл>» (tools/convert_file.sanitize_args),
+    # как у file_read: писатель ответа цитирует метку, проверка находит улику по
+    # пути. Вида ссылки «convert_file» проверщик не знает (CITATION_PREFIXES):
+    # 24.09 с меткой «convert_file:…» писатель цитировал листинг папки, и верные
+    # числа из Word получили «опровергнуто».
+    source_id = f"file:{str(args.get('path', 'unknown'))[:120]}"
     text = output.get("text", "")
     if text:
         return make_evidence(kind="file", source_id=source_id, obtained_via="convert_file",

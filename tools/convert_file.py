@@ -288,5 +288,9 @@ def sanitize_args(args: dict[str, Any], idx: int, warnings: list[str]) -> dict[s
         warnings.append(f"step[{idx}]: convert_file refused: {exc}; dropped")
         return None
     return {"tool": "convert_file", "arguments": clean,
-            "label": f"convert_file:{clean['op']}:{clean['path'][:60]}",
+            # Метка = имя улики = «file:<исходный файл>», как у file_read: вида
+            # ссылки «convert_file» проверщик не знает, и 24.09 писатель ответа,
+            # не имея чем сослаться, цитировал листинг папки — верные числа
+            # из Word получили «опровергнуто».
+            "label": f"file:{clean['path'][:120]}",
             "expected_outcome": "The converted file saved under converted/ (or OCR text)."}
