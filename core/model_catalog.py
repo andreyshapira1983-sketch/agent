@@ -243,9 +243,25 @@ def _fetch_openai(api_key: str | None = None) -> list[str]:
     ]
 
 
+def _fetch_deepseek(api_key: str | None = None) -> list[str]:
+    """Модели DeepSeek: их API совместим с OpenAI (GET /models).
+
+    24.09 каталог держал только снятый список OpenAI 18.09 — DeepSeek, у
+    которого единственный ключ, в каталоге не было вовсе: опрашивать его было
+    нечем.
+    """
+    import openai  # optional dep — only needed at refresh time
+    key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
+    if not key:
+        raise ValueError("DEEPSEEK_API_KEY not set")
+    client = openai.OpenAI(api_key=key, base_url="https://api.deepseek.com")
+    return [m.id for m in client.models.list().data]
+
+
 _FETCHERS: dict[str, Any] = {
     "anthropic": _fetch_anthropic,
     "openai":    _fetch_openai,
+    "deepseek":  _fetch_deepseek,
 }
 
 
@@ -409,6 +425,8 @@ def _credentialed_providers() -> list[str]:
         out.append("anthropic")
     if os.getenv("OPENAI_API_KEY", "").strip():
         out.append("openai")
+    if os.getenv("DEEPSEEK_API_KEY", "").strip():
+        out.append("deepseek")
     return out
 
 

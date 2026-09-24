@@ -30,7 +30,7 @@ def test_the_client_builds_a_real_deepseek_backend(monkeypatch) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-not-real")
     llm = LLM(provider="deepseek")
 
-    assert llm.model == "deepseek-chat"
+    assert llm.model == "deepseek-flash"
     assert "api.deepseek.com" in str(llm._client.base_url)
 
 

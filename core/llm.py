@@ -18,7 +18,10 @@ def _default_model(provider: str) -> str:
     if override:
         return override
     if provider == "deepseek":
-        return "deepseek-chat"
+        # Официальные имена на 2026-09-24 (GET /models и страница Models &
+        # Pricing): deepseek-flash и deepseek-v4-pro. «deepseek-chat» из списка
+        # моделей исчез и живёт лишь псевдонимом Flash — его могут снять в любой день.
+        return "deepseek-flash"
     if provider == "openai":
         return "gpt-4o-mini"
     if provider == "huggingface":
