@@ -11,10 +11,11 @@ drained by one autonomous agent shares it.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,10 @@ class RunContext:
     #: active; None = no run-scoped cost bound. Consulted by the model-call
     #: pre-flight gate, so the bound acts BEFORE the next spend (MIR-116).
     cost_ceiling_units: int | None = None
+    #: Когда начался этот прогон (time.time()). По нему отличают порождённое
+    #: ходом от использованного им (W3C PROV: wasGeneratedBy / used). 0 — вне прогона.
+    #: В равенство не входит: время — не личность прогона.
+    started_at: float = field(default=0.0, compare=False)
 
 
 _RUN_CONTEXT: ContextVar[RunContext | None] = ContextVar(
@@ -110,6 +115,7 @@ def run_scope(run_id: str, task_id: str | None = None) -> Iterator[RunContext]:
         blocked_tools=outer.blocked_tools if outer else frozenset(),
         dry_run=bool(outer.dry_run) if outer else False,
         cost_ceiling_units=outer.cost_ceiling_units if outer else None,
+        started_at=time.time(),
     )
     token = _RUN_CONTEXT.set(ctx)
     try:
@@ -137,6 +143,7 @@ def run_restrictions(
         | frozenset(blocked_tools),
         dry_run=(bool(outer.dry_run) if outer else False) or bool(dry_run),
         cost_ceiling_units=outer.cost_ceiling_units if outer else None,
+        started_at=outer.started_at if outer else 0.0,
     )
     token = _RUN_CONTEXT.set(ctx)
     try:
@@ -165,6 +172,7 @@ def run_cost_envelope(*, allowed_total_units: int) -> Iterator[RunContext]:
         blocked_tools=outer.blocked_tools if outer else frozenset(),
         dry_run=bool(outer.dry_run) if outer else False,
         cost_ceiling_units=requested,
+        started_at=outer.started_at if outer else 0.0,
     )
     token = _RUN_CONTEXT.set(ctx)
     try:

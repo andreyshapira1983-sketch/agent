@@ -30,13 +30,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from core.answer_contradiction import action_report_mismatch, headline_contradicts_facts
+from core.answer_contradiction import (
+    _report_head,
+    action_report_mismatch,
+    headline_contradicts_facts,
+)
 from core.answer_format import file_scope_notice
 from core.degraded_route import substituted_routes, substitution_notice
 from core.low_evidence_policy import is_evidence_expected
 from core.output_policy import apply_ranker_output_policy
 from core.response_draft import ResponseDraft
 from core.run_context import current_run
+from core.turn_provenance import older_than_turn
 from core.unsupported_claims import apply_answer_enforcement
 from core.verification_summary import build_verification_summary
 
@@ -97,6 +102,7 @@ class AgentLoopResponseDeciders:
         # ложно помечается E1111.
         _durable_learning_suppressed: Any
         _sensor_failed: Any
+        _file_read_workspace_root: Any
 
     def _safe_answer_after_enforcement_failure(
         self, *, stage: str, exc: BaseException,
@@ -277,6 +283,16 @@ class AgentLoopResponseDeciders:
             self._defect_signals.append("action_report_mismatch")
             self.log.log("action_report_mismatch", {"notice": ledger})
             draft.add_notice(author="action_ledger", channel="append", text=ledger)
+        # Порождено ли названное в выводе этим ходом (core/turn_provenance.py).
+        run = current_run()
+        root_of = getattr(self, "_file_read_workspace_root", None)
+        stale = older_than_turn(_report_head(draft.body or ""), root_of() if callable(root_of) else None,
+                                run.started_at if run else 0.0,
+                                list(getattr(self, "_executed_tools", []) or []))
+        if stale:
+            self._defect_signals.append("result_older_than_turn")
+            self.log.log("result_older_than_turn", {"notice": stale})
+            draft.add_notice(author="action_ledger", channel="append", text=stale)
         found = headline_contradicts_facts(draft.body)
         if not found:
             return
