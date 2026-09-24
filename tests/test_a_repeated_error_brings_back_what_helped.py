@@ -82,6 +82,21 @@ def test_the_signature_is_the_error_not_its_numbers() -> None:
         "file_read|FileNotFoundError: File not found: data/x_N.md"
 
 
+def test_different_errors_do_not_share_one_coarse_card() -> None:
+    """Замер 24.09 по следам: «exit_code=N», голое «TypeError» из обрезанной
+    сводки pytest и длинная цитата сливали разные ошибки в одну карточку."""
+    a = signature("shell_exec", "tool execution failed: exit_code=2; stderr: grep: core/a.py: No such file")
+    b = signature("shell_exec", "tool execution failed: exit_code=2; stderr: findstr: cannot open x")
+    assert a != b and "grep" in a
+    told = "E   TypeError: Registry.transition() takes 1 positional argument\nFAILED tests/t.py::x - TypeError"
+    assert "transition" in signature("patch_check", told)
+    long_a = signature("patch_check", "text outside any block: 'first stray paragraph of the model output'")
+    long_b = signature("patch_check", "text outside any block: 'a completely different stray text here'")
+    assert long_a == long_b
+    assert signature("python_probe", "ModuleNotFoundError: No module named 'numpy'") != \
+        signature("python_probe", "ModuleNotFoundError: No module named 'core'")
+
+
 def test_a_failure_then_a_success_leaves_a_lesson_that_returns_with_the_error(tmp_path: Path) -> None:
     lesson = "Когда python_probe даёт «No module named 'core'» — передай файлы через inputs"
     llm = _Llm(lesson)
