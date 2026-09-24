@@ -69,6 +69,31 @@ def _log(root: Path, event: dict[str, Any]) -> None:
         fh.write(json.dumps({"ts": _now().isoformat(), **event}, ensure_ascii=False) + "\n")
 
 
+#: Через сколько неизменный пропуск дефекта записывается в сводку снова.
+SKIP_LOG_REPEAT = timedelta(hours=24)
+
+
+def _log_skip_once(root: Path, state: dict[str, Any], now: datetime, fingerprint: str, title: str) -> None:
+    """«Дефект без задачи пропущен» — один раз, а не на каждом цикле.
+
+    Сводка для человека получала ту же строку при каждом выборе цели: замер
+    24.09 — 396 из 408 строк data/self_repair_log.jsonl повторы, одна ×102.
+    Новая строка — только если пропуск новый, заголовок изменился или прошли
+    сутки (repeat_interval Alertmanager: неизменное повторять редко, изменение —
+    сразу). Сводку никто не пересчитывает, поэтому редкий повтор ничего не ломает.
+    """
+    seen = state.setdefault("skip_logged", {}).get(fingerprint) or {}
+    try:
+        fresh = now - datetime.fromisoformat(seen.get("at", "")) < SKIP_LOG_REPEAT
+    except ValueError:
+        fresh = False
+    if fresh and seen.get("title") == title:
+        return
+    _log(root, {"event": "defect_without_a_task_skipped", "issue": fingerprint, "title": title})
+    state["skip_logged"][fingerprint] = {"at": now.isoformat(), "title": title}
+    _save_state(root, state)
+
+
 def _slug(fingerprint: str) -> str:
     return re.sub(r"[^\w.\-]+", "-", fingerprint)[:60].strip("-") or "defect"
 
@@ -104,8 +129,7 @@ def defect_goal(root: Path) -> Any:
         # Такому дефекту сначала нужна формулировка — это работа человека
         # или отдельного хода, а не слепая правка.
         if not str(issue.suggested_next_action or "").strip():
-            _log(root, {"event": "defect_without_a_task_skipped",
-                        "issue": issue.fingerprint, "title": (issue.title or "")[:120]})
+            _log_skip_once(root, state, now, issue.fingerprint, (issue.title or "")[:120])
             continue
         tried = state["attempted"].get(issue.fingerprint)
         if tried and now - datetime.fromisoformat(tried) < RETRY_AFTER:
