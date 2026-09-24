@@ -19,7 +19,7 @@ from pathlib import Path
 
 from core.best_next_action_helpers import _is_engineering_goal, resolve_goal_subject
 from core.drive_goal import _engineering_goal
-from core.drives import compute_drives, last_self_change, self_improvement_targets
+from core.drives import compute_drives, self_improvement_targets
 from core.self_build_rules import Lesson, LessonStore, default_lessons_path
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=timezone.utc)
@@ -73,7 +73,6 @@ def test_material_is_only_what_the_lane_would_take(tmp_path: Path) -> None:
     assert names[0] == "core/big.py", names
     # критический и наказанный уроком — не материал, хотя доказательство у них есть
     assert "core/self_apply_lane.py" not in names and "core/punished.py" not in names, names
-    assert last_self_change(ws) == datetime(2026, 9, 20, 0, 0, tzinfo=timezone.utc)
 
 
 def test_thickness_alone_is_not_material(tmp_path: Path) -> None:
@@ -91,10 +90,13 @@ def test_an_undecided_proposal_means_no_material_at_all(tmp_path: Path) -> None:
     assert _engineering_goal(ws) is None, "нет материала — нет цели"
 
 
-def test_the_need_grows_with_time_when_there_is_material(tmp_path: Path) -> None:
+def test_the_need_does_not_grow_with_time(tmp_path: Path) -> None:
+    """24.09: повод чинить себя — доказанная правка или дефект с задачей, а не
+    время с последней правки (core/drives.py)."""
     ws = _workspace(tmp_path, [_APPLIED])
-    value = compute_drives(ws, NOW + timedelta(hours=6))["self_improvement_need"]["value"]
-    assert 0.5 < value < 0.999, value
+    soon = compute_drives(ws, NOW + timedelta(hours=6))["self_improvement_need"]["value"]
+    later = compute_drives(ws, NOW + timedelta(hours=60))["self_improvement_need"]["value"]
+    assert soon == later > 0.1, (soon, later)
 
 
 def test_the_goal_names_the_module_and_its_own_action(tmp_path: Path) -> None:
