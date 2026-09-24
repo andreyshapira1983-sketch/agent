@@ -94,6 +94,8 @@ class SpawnSubagentTool(Tool):
         context: str = "",
         allowed_tools: list[str] | None = None,
         contract_name: str | None = None,
+        why: str = "",
+        expect: str = "",
     ) -> str:
         """Execute a sub-agent and return its answer as a string.
 
@@ -111,6 +113,10 @@ class SpawnSubagentTool(Tool):
         slug of `role` if not provided.
         """
         # ── input validation ─────────────────────────────────────────
+        # Обоснование и предсказание обязательны (правило оператора 2026-09-25).
+        if not (str(why or "").strip() and str(expect or "").strip()):
+            raise ValueError("spawn_subagent: 'why' (why a sub-agent, not a direct tool call) "
+                             "and 'expect' (what it will return) are required")
         self._validate_role(role)
         self._validate_objective(objective)
         self._validate_context(context)
@@ -133,6 +139,7 @@ class SpawnSubagentTool(Tool):
         from core.subagent_quarantine import quarantine_finding
 
         quarantine_finding(self.workspace_root, result)
+        self._record_prediction(name, role, objective, why, expect, result)
 
         # The child's external evidences ride beside the text: the attempt
         # loop folds them into the parent's chain (work order 1, 2026-09-05 —
@@ -142,7 +149,29 @@ class SpawnSubagentTool(Tool):
         self.last_child_evidences = stash
         # Return evidence text — the parent loop stores this as the tool
         # output and the synthesiser cites it via [subagent:<name>].
-        return result.to_evidence_text()
+        return (result.to_evidence_text()
+                + f"\n  why (parent)   : {str(why).strip()[:400]}"
+                + f"\n  expected       : {str(expect).strip()[:400]}")
+
+    def _record_prediction(self, name: str, role: str, objective: str, why: str, expect: str,
+                           result: SubAgentRunResult) -> None:
+        """Предсказание рядом с фактом — сверяется потом, а не на слово (журнал оператора
+        «Память и под-агенты»: сильным обоснование делает проверяемое предсказание)."""
+        import json
+        from datetime import datetime, timezone
+
+        row = {"ts": datetime.now(timezone.utc).isoformat(), "name": name, "role": role,
+               "objective": objective[:400], "why": str(why)[:400], "expect": str(expect)[:400],
+               "status": getattr(result, "status", ""),
+               "external_evidence_count": getattr(result, "external_evidence_count", 0),
+               "answer_chars": len(str(getattr(result, "answer", "") or ""))}
+        try:
+            path = self.workspace_root / "data" / "subagent_predictions.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError:
+            return
 
     # ------------------------------------------------------------------
     # Validation helpers

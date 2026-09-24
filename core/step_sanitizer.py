@@ -1231,6 +1231,10 @@ def sanitize_step(
             )
             context = context[:_MAX_CONTEXT_LEN]
 
+        reason = _subagent_reason(args, idx, warnings)
+        if reason is None:
+            return None
+
         # Validate and filter allowed_tools
         cleaned_tools: list[str] | None = None
         if allowed_tools_raw is not None:
@@ -1279,6 +1283,8 @@ def sanitize_step(
             "objective": objective.strip(),
             "context": context,
             "contract_name": contract_name,
+            "why": reason[0],
+            "expect": reason[1],
         }
         if cleaned_tools is not None:
             clean_args["allowed_tools"] = cleaned_tools
@@ -1294,6 +1300,23 @@ def sanitize_step(
         }
 
     warnings.append(f"step[{idx}]: tool '{tool_name}' has no sanitiser, dropped")
+    return None
+
+
+def _subagent_reason(args: dict[str, Any], idx: int, warnings: list[str]) -> tuple[str, str] | None:
+    """Зачем помощник и что он вернёт — или None (шаг отброшен).
+
+    Правило оператора 2026-09-25: создавать помощника можно, но письменно —
+    «зачем помощник, а не прямой вызов» и проверяемое «что вернёт». Ночь 24.09:
+    37 помощников в трёх ходах поиска вакансий дали 0–1 объявление.
+    """
+    why, expect = args.get("why"), args.get("expect")
+    if isinstance(why, str) and why.strip() and isinstance(expect, str) and expect.strip():
+        return why.strip()[:400], expect.strip()[:400]
+    warnings.append(
+        f"step[{idx}]: spawn_subagent requires 'why' (why a sub-agent and not a direct "
+        "tool call) and 'expect' (what exactly it will return), dropped"
+    )
     return None
 
 

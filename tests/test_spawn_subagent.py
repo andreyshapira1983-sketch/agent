@@ -387,6 +387,7 @@ def test_planner_sanitize_spawn_valid():
         "arguments": {
             "role": "WebResearcher",
             "objective": "Find top 3 papers on multi-agent systems",
+            "why": "independent domain", "expect": "a short list with sources",
             "context": "User asked about multi-agent research",
             "allowed_tools": ["web_search", "web_fetch"],
         },
@@ -430,6 +431,7 @@ def test_planner_sanitize_spawn_empty_role_dropped():
     step = {
         "tool": "spawn_subagent",
         "arguments": {"role": "", "objective": "Do something"},
+ "why": "independent domain", "expect": "a short list with sources",
         "rationale": "x",
     }
     result = _call_sanitize(step, idx=0, warnings=warnings)
@@ -443,6 +445,7 @@ def test_planner_sanitize_spawn_unsafe_tools_filtered():
         "arguments": {
             "role": "DangerBot",
             "objective": "Do dangerous things",
+            "why": "independent domain", "expect": "a short list with sources",
             "allowed_tools": ["file_read", "shell_exec", "file_write"],
         },
         "rationale": "x",
@@ -464,6 +467,7 @@ def test_planner_sanitize_spawn_context_truncated():
         "arguments": {
             "role": "Agent",
             "objective": "Do something",
+            "why": "independent domain", "expect": "a short list with sources",
             "context": long_ctx,
         },
         "rationale": "x",

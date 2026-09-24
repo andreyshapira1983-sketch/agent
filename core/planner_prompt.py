@@ -395,7 +395,8 @@ Available tools:
     academic articles. Then follow with web_fetch on the ar5iv_url to get
     the full text. No API key needed.
 
-- spawn_subagent(role: str, objective: str, context: str = "",
+- spawn_subagent(role: str, objective: str, why: str, expect: str,
+                 context: str = "",
                  allowed_tools: list[str] | null = null,
                  contract_name: str | null = null)
     -> str  [read_only — no approval needed]
@@ -420,6 +421,19 @@ Available tools:
     contract_name : Short ASCII identifier for this sub-agent, max 40
                     characters, e.g. "AutoGenResearcher". Optional —
                     defaults to a slug of `role`.
+    why           : REQUIRED. Why a sub-agent and not a direct tool call
+                    (the operator's rule: creating one is allowed, but only
+                    with a written reason). A step without it is dropped.
+    expect        : REQUIRED. What exactly it will return — a checkable
+                    prediction ("3 papers with URLs and years"). It is
+                    logged next to what actually came back.
+
+    SCALE (Anthropic, multi-agent research system, 2025 — early versions
+    spawned 50 sub-agents for simple questions):
+    - a simple fact: NO sub-agent — call the tool directly (3-10 calls);
+    - a direct comparison: 2-4 sub-agents, one per compared item;
+    - a sub-agent that returned nothing useful is not re-spawned with the
+      same objective — change the objective or do it yourself.
 
     WHEN TO USE spawn_subagent:
     - The task has 2 or more INDEPENDENT parallel information domains.
@@ -627,11 +641,11 @@ Decision rules:
     -> [spawn_subagent(role=..., objective=..., allowed_tools=[...]), ...]
     Examples:
       "Compare AutoGen vs MetaGPT" ->
-          [spawn_subagent role=AutoGenResearcher objective="Find AutoGen's key design principles and limitations" allowed_tools=["web_search","web_fetch"],
-           spawn_subagent role=MetaGPTResearcher objective="Find MetaGPT's key design principles and limitations" allowed_tools=["web_search","web_fetch"]]
+          [spawn_subagent role=AutoGenResearcher objective="Find AutoGen's key design principles and limitations" why="independent item of a comparison" expect="3-5 principles and 2 limitations with source URLs" allowed_tools=["web_search","web_fetch"],
+           spawn_subagent role=MetaGPTResearcher objective="Find MetaGPT's key design principles and limitations" why="independent item of a comparison" expect="3-5 principles and 2 limitations with source URLs" allowed_tools=["web_search","web_fetch"]]
       "Analyze our test suite AND find recent papers on agent testing" ->
-          [spawn_subagent role=TestAnalyst objective="Run the test suite and summarise failures" allowed_tools=["run_tests","read_logs"],
-           spawn_subagent role=AcademicResearcher objective="Find 2 recent papers on LLM agent testing" allowed_tools=["semantic_scholar_search","web_fetch"]]
+          [spawn_subagent role=TestAnalyst objective="Run the test suite and summarise failures" why="independent of the paper search" expect="failing test names and one-line causes" allowed_tools=["run_tests","read_logs"],
+           spawn_subagent role=AcademicResearcher objective="Find 2 recent papers on LLM agent testing" why="independent of the test run" expect="2 papers with titles, years and URLs" allowed_tools=["semantic_scholar_search","web_fetch"]]
     NEVER use spawn_subagent for sequential tasks or simple single-domain questions.
     PREFER direct tool calls when a single domain is sufficient.
     LIMIT: at most 3 spawn_subagent steps per plan.
