@@ -73,7 +73,7 @@
      "call": "append"
     },
     {
-     "site": "core/loop_synthesis.py:622",
+     "site": "core/loop_synthesis.py:623",
      "node": "loop_synthesis.py::AgentLoopSynthesis._rewrite_if_off_topic",
      "puts": "answer_off_topic — черновик отвечает не на тот вопрос; повод переписать один раз",
      "call": "append",
@@ -81,7 +81,7 @@
      "_anchor_correction": "сдвинулось 2026-09-21 на +13: в core/loop_synthesis.py выше вставлен _self_defects_prompt (свои записи о промахах перед синтезатором); поймано tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:689",
+     "site": "core/loop_synthesis.py:690",
      "node": "loop_synthesis.py::AgentLoopSynthesis._read_what_it_left_unverified",
      "puts": "unverified_own_file — черновик вынес в «Не подтверждено» файлы своей папки; они дочитаны, повод собрать ответ заново один раз",
      "call": "append",
@@ -108,10 +108,10 @@
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/loop_synthesis.py:296",
+     "site": "core/loop_synthesis.py:297",
      "role": "control",
      "uses": "<failure_context> block in the synthesis prompt",
-     "gated_by": "core/loop_synthesis.py:781 — receives the world-facing subset unless st.replan_exhausted",
+     "gated_by": "core/loop_synthesis.py:782 — receives the world-facing subset unless st.replan_exhausted",
      "_anchor_correction": "shifted 2026-09-19 (+6: the runtime_self block lists the registered tools minus the blocked ones; +22 below the gate). shifted 2026-09-05 (+6: spend_block on _synthesize and the sensor citations offered on the no-tool branch, exam of 2026-09-04). shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель. | сдвинулось 2026-09-21 на +13 (вставлен _self_defects_prompt); gated_by исправлен с :630 (строка документации, устарел ещё до этой правки) на :710 — место, где отбирается подмножество для мира. | сдвинулось 2026-09-21 ещё раз: сборка <failure_context> и <safety_notes> вынесена из _synthesize в функции модуля (_synthesize был сверх предела операторов линтера, 105 > 100); читатель теперь — вызов _failure_context_block(failure_history) в _synthesize, писатели +12, граница :781."
     },
     {
@@ -303,7 +303,7 @@
      "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"
     },
     {
-     "site": "core/loop_synthesis.py:533",
+     "site": "core/loop_synthesis.py:534",
      "phase": "synthesis",
      "does": "same"
     },
@@ -458,7 +458,7 @@
    "carrier": "_task_planner_llm / _task_synth_llm — return values threaded through AttemptState and SynthesisState",
    "consumers": [
     "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:292)",
-    "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:589)",
+    "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:590)",
     "verify-replan planner call (core/loop_verify_replan.py:347) — bitten by M23"
    ],
    "evidence": {
@@ -1877,7 +1877,7 @@
      "external": "none"
     },
     "why_it_is_an_ordinary_path": "Four of the fourteen failure types both allow a retry (budget 2) and forbid repeating the action: approval_deny, approval_abort, policy_blocked and claim_refuted. Any single-source plan that fails with one of them produces the sequence below.",
-    "measured_sequence": "Attempt 1 plans one step; the policy gate blocks it; the trigger is policy_blocked; budget 2 means continue, and requires_different_action puts (tool, args) on the forbidden list; attempt 2's plan comes back EMPTY, filtered by that list; the loop breaks on the SUCCESS branch; replan_exhausted is never set; core/loop_synthesis.py:638 hands the synthesizer None; the answer is composed from general knowledge.",
+    "measured_sequence": "Attempt 1 plans one step; the policy gate blocks it; the trigger is policy_blocked; budget 2 means continue, and requires_different_action puts (tool, args) on the forbidden list; attempt 2's plan comes back EMPTY, filtered by that list; the loop breaks on the SUCCESS branch; replan_exhausted is never set; core/loop_synthesis.py:639 hands the synthesizer None; the answer is composed from general knowledge.",
     "the_collapse": "Compared against a control run whose planner simply chose no tools, the denied run is IDENTICAL at every consumer outside the journal: failure_context_reached_synthesis False in both, obligation_count 0 in both, answer_mentions_a_block False in both, replan_exhausted False in both. The two observation dictionaries are literally equal.",
     "why_the_arbiter_cannot_help": "core/loop_run_tail.py:301 reads policy_blocked out of failure_history into denied_tools, and failure_history IS non-empty here — the run holds the denial. But core/completion_obligation.py builds obligations from plan_steps, and the plan handed to it is the LAST attempt's, which is the empty one. The mechanism that emptied the plan is the same one that removed the obligation the denial would have marked. The run knew and had nothing to attach it to.",
     "verdict": {
@@ -1909,7 +1909,7 @@
     },
     "the_stated_contract": "The comment above the entry says blocked content must not be retried with the same tool and query, because it would just fetch the same poisoned page.",
     "what_the_measurement_showed_instead": "That half is held by a DIFFERENT mechanism. requires_different_action=True puts (tool, args) on the forbidden list, so with the budget raised to 2 the poisoned call is not repeated at all: attempt 2's plan comes back empty after the filter, and the tool is invoked once, not twice. The budget is not what prevents the repeat.",
-    "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:445 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:638 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
+    "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:445 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:639 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
     "mutation": "ONE integer, core/replan.py:396, max_occurrences 1 -> 2.",
     "observed_consequence": "FULL SUITE GREEN: 7286 passed, 1 xfail, exit 0. Nothing observed it — including the delivery test added the same day, because that test holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice in one cluster.",
     "green_mutation_diagnosis": "Not unreachable, not vacuous. PARTIALLY masked — the repetition half of the stated contract is genuinely held by requires_different_action, so the comment's stated fear does not materialise. NOT masked for the disclosure half: no other mechanism tells the answer that an injection was blocked. Classification: a real unprotected distinction, on a security-relevant constant, whose true role is disclosure rather than the retry limiting its own comment describes.",
@@ -1942,7 +1942,7 @@
      "external": "none — no network, no credentials, no model call"
     },
     "consumers_and_what_each_reads": [
-     "core/loop_synthesis.py:249 — writes `code={trig.code}` into the <failure_context> block of the synthesis prompt. LIVE MODEL consumer: delivery is mock-observable, use is not.",
+     "core/loop_synthesis.py:250 — writes `code={trig.code}` into the <failure_context> block of the synthesis prompt. LIVE MODEL consumer: delivery is mock-observable, use is not.",
      "core/replan.py:293-458 — per-type budget: every code has its own max_occurrences (1 or 2) and its own advice text, so the codes are distinguishable by construction, not by convention.",
      "core/completion_obligation.py:271-253 — failure_codes are disclosure NEEDLES, substring-matched against the composed answer; a different code changes failed_but_reported vs silently_missing only when the answer contains the literal token.",
      "core/loop_run_tail.py:301 — only the policy_blocked code is singled out, for denied_tools."

@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 248 modules across 12 groups._
+_Total: 249 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -112,6 +112,7 @@ _Planning, verification, clarification, control loop._
 | `core/answer_contradiction` | Одно утверждение, объявленное и Фактом, и Непроверенным — в одном ответе. |
 | `core/instruction_conflict_gate` | Instruction Conflict Gate — турникет между уверенным приказом и ``git add``. |
 | `core/directive_extractor` | Turn instruction *text* into ranked ``Directive`` objects. |
+| `core/root_principles` | Корневые принципы агента — выше любого одобрения (слово оператора 24.09). |
 | `core/assumption_registry` | Assumption Registry — Layer 5 (Explicit Planning Assumptions). |
 | `core/referent_resolver` | Referent resolution for local critique / show-only turns (plan critique PR1). |
 | `core/evidence_support` | Evidence support — how well the gathered sources back THIS answer; telemetry, not a gate. |

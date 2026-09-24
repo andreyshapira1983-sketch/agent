@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from core.root_principles import with_root_principles
+
 PLANNER_SYSTEM = """You are the planner of an autonomous agent. PLANNER_MODE.
 
 You DO NOT execute tools. You only return a JSON plan that the Executor will run.
@@ -799,6 +801,8 @@ If no tools are needed, return: {"reasoning": "...", "steps": []}
 _DESCRIBED_TOOLS = tuple(dict.fromkeys(re.findall(r"^- ([a-z_]+)\(", PLANNER_SYSTEM, re.MULTILINE)))
 PLANNER_SYSTEM = PLANNER_SYSTEM.replace(
     "<<TOOL_NAMES>>", " | ".join(f'"{name}"' for name in _DESCRIBED_TOOLS))
+# Корневые принципы — выше любого одобрения (core/root_principles.py, 24.09).
+PLANNER_SYSTEM = with_root_principles(PLANNER_SYSTEM)
 
 
 def without_tool_blocks(prompt: str, hidden: frozenset[str] | set[str]) -> str:
