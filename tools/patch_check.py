@@ -114,6 +114,10 @@ def marker_hint(stray: str) -> str:
     if _UNIFIED_DIFF.search(stray):
         return ("это формат unified diff (---/+++/@@) — patch_check его не принимает; "
                 "перепиши блоком FILE: путь / <<<<<<< LINES a-b / новый текст / >>>>>>> REPLACE")
+    if (_OPENING.search(stray) and _CLOSING.search(stray)
+            and not any(ln.lstrip().startswith("FILE:") for ln in lines)):
+        # 24.09: писатель положил блоки без строки FILE:, отказ молчал почему.
+        return "перед блоком нужна строка 'FILE: <путь>' — без неё блок не знает, какой файл править"
     # Сначала неверный маркер в строке: это причина, а «не закрыт» — следствие.
     for line in lines:
         bare = line.strip()
