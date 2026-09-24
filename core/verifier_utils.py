@@ -40,6 +40,7 @@ def _normalise_figure(fig: str) -> str:
 #: («usd 0.171»), поэтому дословного совпадения не бывает НИКОГДА — и каждое
 #: денежное утверждение получало `[claim-figure-unverified]`.
 _CURRENCY_GLUE = "$€£₽¥"
+_UNIT_WORD_RE = re.compile(r"(?:usd|eur|gbp|долл\w*|руб\w*|rub)\.?$")
 
 
 def _figure_variants(fig: str) -> set[str]:
@@ -61,6 +62,11 @@ def _figure_variants(fig: str) -> set[str]:
     if not base:
         return set()
     out = {base, base.lstrip(_CURRENCY_GLUE)}
+    # Единица словом («руб», «usd») — как приклеенный знак: в улике число часто
+    # без неё («Доставка 1 500»). Принимается то же число, не другое (24.09).
+    unitless = _UNIT_WORD_RE.sub("", base)
+    if unitless and unitless != base and any(ch.isdigit() for ch in unitless):
+        out.add(unitless)
     for value in list(out):
         if "," in value:
             out.add(value.replace(",", "."))
@@ -141,6 +147,17 @@ def _approximately_supported(excerpt: str, figure: str) -> bool:
     )
 
 
+def _found_whole(variant: str, excerpt_norm: str) -> bool:
+    """Число в улике целиком, а не кусок другого: «2500» не внутри «12500».
+
+    24.09: подстрока без границ принимала «2 500 руб.» по улике «12 500» (и
+    раньше — «500» внутри «1500»). Граница — не цифра вплотную слева/справа.
+    """
+    lead = r"(?<!\d)" if variant[:1].isdigit() else ""
+    tail = r"(?!\d)" if variant[-1:].isdigit() else ""
+    return re.search(lead + re.escape(variant) + tail, excerpt_norm) is not None
+
+
 def _excerpt_supports_figures(
     excerpt: str, figures: list[str], *, approximate: bool = False
 ) -> bool:
@@ -150,7 +167,7 @@ def _excerpt_supports_figures(
         return False
     excerpt_norm = _normalise_figure(excerpt)
     for figure in figures:
-        if any(v in excerpt_norm for v in _figure_variants(figure)):
+        if any(_found_whole(v, excerpt_norm) for v in _figure_variants(figure)):
             continue
         if approximate and _approximately_supported(excerpt, figure):
             continue
