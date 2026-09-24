@@ -537,6 +537,11 @@ def concealed_spans(text: str) -> list[str]:
     out: list[str] = []
     for m in _CONCEALED_RE.finditer(text or ""):
         span = m.group("html") or m.group("zw") or ""
+        # Одна U+FEFF в самом начале — метка кодировки (BOM), не содержимое
+        # (Unicode FAQ, utf_bom: «signature … of unmarked plain text files»).
+        # 24.09 её ставил LibreOffice в каждый txt, и вывод Word не становился уликой.
+        if m.start() == 0 and span == "﻿":
+            continue
         if span.strip():
             out.append(span)
     return out
