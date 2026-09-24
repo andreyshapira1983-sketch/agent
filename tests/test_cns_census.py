@@ -200,58 +200,9 @@ def test_every_listed_property_is_a_known_one() -> None:
     assert not bad, f"unknown property names: {bad}"
 
 
-def test_the_map_states_the_numbers_the_census_computes() -> None:
-    """Counts in the map are DERIVED. Kept by hand, they rot within days.
-
-    They did: `46ba5ca` gave `_execute_step` its first properties, 14 became
-    15, and five later commits touched the map without noticing. Nothing was
-    red, because every ratchet guarded the snapshot and none guarded the prose
-    about it.
-
-    The numbers stay in the map on purpose — a person reading the map needs
-    them there — so the machine is given the job of not letting them go stale.
-    """
-    census = _load()
-    text = (CORE.parent / "docs" / "PROJECT_MAP.ru.md").read_text(encoding="utf-8")
-    with_properties = sum(1 for props in census["nodes"].values() if props)
-    expected = {
-        "nodes": len(census["nodes"]),
-        "edges": len(census["edges"]),
-        "with_properties": with_properties,
-        "without": len(census["nodes"]) - with_properties,
-    }
-    # `узел` as well as `узла|узлов`: 81 takes the nominative singular in
-    # Russian, and the count crossed into that form on 2026-08-14. A ratchet
-    # that reads by shape must accept every shape the language produces, or it
-    # forces ungrammatical prose to keep itself green.
-    topology = re.search(r"находит \*\*(\d+) (?:узел|узл(?:а|ов)) и (\d+) рёбер\*\*", text)
-    status = re.search(
-        r"\*\*(\d+) узлов из (\d+)\*\* имеют хотя бы одно доказанное свойство, "
-        r"\*\*(\d+)\*\* — ни одного", text)
-    assert topology and status, (
-        "the sentences carrying the census numbers are gone from "
-        "docs/PROJECT_MAP.ru.md; this ratchet reads them by shape, so rewording "
-        "them means updating it in the same commit"
-    )
-    stated = {
-        "nodes": int(topology.group(1)),
-        "edges": int(topology.group(2)),
-        "with_properties": int(status.group(1)),
-        "without": int(status.group(3)),
-    }
-    assert int(status.group(2)) == expected["nodes"], (
-        f"the map says {status.group(1)} of {status.group(2)} nodes; the census "
-        f"holds {expected['nodes']}"
-    )
-    assert stated == expected, (
-        f"docs/PROJECT_MAP.ru.md states {stated}, the census computes "
-        f"{expected}. The census is the source; correct the prose."
-    )
-
-
 def test_the_perimeter_has_not_quietly_moved() -> None:
     mixins = {p.name for p in CORE.glob("loop_*.py")}
     assert len(mixins) == EXPECTED_MIXINS, (
         f"perimeter changed: {len(mixins)} mixin files, expected "
-        f"{EXPECTED_MIXINS}; update docs/PROJECT_MAP.ru.md in the same commit"
+        f"{EXPECTED_MIXINS}; update knowledge/maps/cns_census.json in the same commit"
     )

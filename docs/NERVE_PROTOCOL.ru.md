@@ -14,8 +14,9 @@ safety, resilience. Ниже — наш строгий приёмочный пр
 реально применяемых методов software assurance и AI TEVV, а не международный
 стандарт. Выдавать его за стандарт нельзя.
 
-Определение DONE для нервной системы (девять пунктов оператора) и счёт дуг
-живут в [PROJECT_MAP.ru.md](PROJECT_MAP.ru.md).
+Счёт узлов и дуг и вердикты по ним живут в
+[cns_census.json](../knowledge/maps/cns_census.json) и
+[cns_model.json](../knowledge/maps/cns_model.json).
 
 ## Проверка источников (2026-08-07)
 

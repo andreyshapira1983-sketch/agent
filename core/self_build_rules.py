@@ -364,7 +364,6 @@ SHARED_BOOKKEEPING = frozenset({
     "knowledge/generated/AGENT_ANATOMY.md",
     "knowledge/maps/cns_census.json",
     "knowledge/maps/cns_model.json",
-    "docs/PROJECT_MAP.ru.md",
     "scripts/check_ceo_file_baseline.py",
     "scripts/check_function_length_baseline.py",
 })

@@ -1,8 +1,7 @@
 # Code notes — what was done to these files and why
 
 > Audience: the agent. Deleting this file breaks nothing — no test and no check
-> reads it. The operator-facing index of these documents, in Russian, is
-> [OPERATOR_NOTES.ru.md](OPERATOR_NOTES.ru.md).
+> reads it.
 
 Working notes kept by the agent, for the agent. A session starts with no memory
 of the last one: everything known about a file is what is written down. This is

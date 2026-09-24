@@ -2,8 +2,7 @@
 
 Phase 1 of the documentation reconciliation added a consolidated public layer
 (license, security, contributing, changelog, operations, configuration). This
-test fails loudly if one of those files is deleted or emptied, or if the two
-consolidated docs stop being routed from docs/INDEX.md. Read-only.
+test fails loudly if one of those files is deleted or emptied. Read-only.
 """
 from __future__ import annotations
 
@@ -28,13 +27,6 @@ def test_public_docs_exist_and_are_nontrivial():
         if not path.is_file() or len(path.read_text(encoding="utf-8")) < min_len:
             missing.append(rel)
     assert not missing, f"public docs missing or too short: {missing}"
-
-
-def test_index_routes_to_new_docs():
-    index = (REPO_ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
-    assert "OPERATIONS.md" in index
-    assert "CONFIGURATION.md" in index
-
 
 
 def test_license_is_proprietary_not_osi():

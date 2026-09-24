@@ -21,9 +21,9 @@ _REPO = Path(__file__).resolve().parents[1]
 _DELETABLE_ARTIFACTS = ("Dockerfile", "compose.yaml", "docs/DOCKER.md")
 
 #: Documents that INSTRUCT a reader. The history books are excluded by role,
-#: not by convenience: CODE_NOTES.md and MISTAKE_NOTEBOOK.md exist to record
-#: why things were removed, so naming a deleted file there is their job.
-_HISTORY_BOOKS = frozenset({"CODE_NOTES.md", "MISTAKE_NOTEBOOK.md"})
+#: not by convenience: CODE_NOTES.md exists to record why things were
+#: removed, so naming a deleted file there is its job.
+_HISTORY_BOOKS = frozenset({"CODE_NOTES.md"})
 
 _DOC_FILES = tuple(
     p for p in (*_REPO.glob("docs/*.md"), _REPO / "README.md")
