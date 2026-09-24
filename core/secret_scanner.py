@@ -209,6 +209,15 @@ _REFERENCE_VALUE_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: Служебные слова Python на месте «значения»: `if not api_key: return {...}` —
+#: двоеточие закрывает условие, а не присваивает ключ. Ночь 24→25.09: сторож
+#: отказал агенту в записи инструмента, который лишь проверял, задана ли
+#: переменная окружения. Настоящий пароль словом языка не бывает.
+_CODE_KEYWORD_VALUES: Final[frozenset[str]] = frozenset({
+    "return", "raise", "pass", "continue", "break", "none", "true", "false",
+})
+
+
 def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
     """True, когда за именем доступа стоит ССЫЛКА, а не значение секрета.
 
@@ -224,6 +233,8 @@ def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
     value = raw.split("=", 1)[-1] if "=" in raw else raw.split(":", 1)[-1]
     value = value.strip().strip("\"'` \t,;")
     if not value:
+        return True
+    if value.split(None, 1)[0].lower() in _CODE_KEYWORD_VALUES:
         return True
     if looks_like_secret_body(value):
         return False
