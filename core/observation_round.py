@@ -40,6 +40,12 @@ from core.replan import VERBATIM_ADVICE_TAG
 #: получает полные артефакты.
 _PER_OUTPUT_CHARS = 6000
 _TOTAL_CHARS = 16000
+#: Результаты действий видны всегда: у них свой предел, чтения его не трогают.
+_ACTION_TOTAL_CHARS = 12000
+_ACTION_TOOLS = frozenset({
+    "patch_check", "run_tests", "python_probe", "file_write", "shell_exec",
+    "journal_append",
+})
 
 
 def _as_text(output: Any) -> str:
@@ -248,15 +254,25 @@ def format_observations(
                      + ", ".join(earlier))
     lines += _written_contents(plan)
     lines.append("Outputs:")
-    budget = _TOTAL_CHARS
-    for label, meta in artifacts.items():
-        if budget <= 0:
-            lines.append(f"[{label}] (не показан: общий предел вывода исчерпан)")
-            continue
-        text = _clip(_as_text(meta.get("output")), min(_PER_OUTPUT_CHARS, budget))
-        budget -= len(text)
-        lines.append(f"[{label}] ({meta.get('tool')})")
-        lines.append(text)
+    # Результаты ДЕЙСТВИЙ — первыми и со своим пределом; прочитанное делит
+    # прежний. Замер 2026-09-24: чтения шли первыми и съедали весь предел, и
+    # планировщик не видел вердикт patch_check (22:47), расчёт python_probe
+    # в конспекте (22:43, 22:45: «вывода пробы нет» при c/cg = 2.0 в журнале)
+    # и удачный замер «44 эпизода» (23:28) — видел строку «не показан».
+    actions = [(label, meta) for label, meta in artifacts.items()
+               if meta.get("tool") in _ACTION_TOOLS]
+    reads = [(label, meta) for label, meta in artifacts.items()
+             if meta.get("tool") not in _ACTION_TOOLS]
+    for group, total in ((actions, _ACTION_TOTAL_CHARS), (reads, _TOTAL_CHARS)):
+        budget = total
+        for label, meta in group:
+            if budget <= 0:
+                lines.append(f"[{label}] (не показан: общий предел вывода исчерпан)")
+                continue
+            text = _clip(_as_text(meta.get("output")), min(_PER_OUTPUT_CHARS, budget))
+            budget -= len(text)
+            lines.append(f"[{label}] ({meta.get('tool')})")
+            lines.append(text)
     lines += [
         "Decide what is still missing to fulfil the user's request:",
         "- if the request is already fulfilled, return an EMPTY plan (no steps);",
