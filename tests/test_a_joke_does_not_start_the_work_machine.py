@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -98,5 +97,9 @@ def test_small_talk_recognised_by_the_classifier_carries_no_report_tail() -> Non
 
 
 def test_the_loop_asks_the_classifier_at_the_cheap_path_gate() -> None:
-    src = (Path(__file__).resolve().parents[1] / "core" / "loop_attempt.py").read_text(encoding="utf-8")
+    import inspect
+
+    from core import loop_attempt
+
+    src = inspect.getsource(loop_attempt)
     assert "or is_social_turn(self, st.user_question, file_hint=st.file_hint))" in src

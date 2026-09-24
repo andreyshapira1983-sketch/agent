@@ -236,10 +236,11 @@ def test_the_operator_brake_on_auto_memory_stops_learning(tmp_path: Path) -> Non
 
 
 def test_the_loop_uses_it_where_failures_are_read() -> None:
-    root = Path(__file__).resolve().parents[1] / "core"
-    assert "attempt_failures.append(with_past_experience(self, trigger))" in \
-        (root / "loop_attempt.py").read_text(encoding="utf-8")
-    assert "notes=experience_notes(loop, attempt_artifacts)" in \
-        (root / "observation_round.py").read_text(encoding="utf-8")
-    assert "failed_output_reason(result.output)" in (root / "loop_step_execution.py").read_text(encoding="utf-8")
-    assert "learn_after_turn(self)" in (root / "loop_memory_write.py").read_text(encoding="utf-8")
+    import inspect
+
+    from core import loop_attempt, loop_memory_write, loop_step_execution, observation_round
+
+    assert "attempt_failures.append(with_past_experience(self, trigger))" in inspect.getsource(loop_attempt)
+    assert "notes=experience_notes(loop, attempt_artifacts)" in inspect.getsource(observation_round)
+    assert "failed_output_reason(result.output)" in inspect.getsource(loop_step_execution)
+    assert "learn_after_turn(self)" in inspect.getsource(loop_memory_write)
