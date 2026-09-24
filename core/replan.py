@@ -324,6 +324,13 @@ class FailureBudget:
     max_occurrences: int
     advice: str
     requires_different_action: bool = False
+    #: Считать повторы ОДНОГО действия (инструмент + аргументы), а не все
+    #: случаи типа за ход. Для исправимых ошибок: OpenHands StuckDetector
+    #: останавливает, когда одно действие даёт ту же ошибку 3 раза. Ночь
+    #: 24→25.09: ход, где пять кругов шли с продвижением, оборвали две РАЗНЫЕ
+    #: ошибки инструмента («tool_error 2/2»). Стены (одобрение, политика, нет
+    #: файла) по-прежнему считаются суммой — их не лечат другие аргументы.
+    per_action: bool = False
 
     def __post_init__(self) -> None:
         if self.max_occurrences < 1:
@@ -340,7 +347,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
     # Tool-level failures: usually fixable with different args or
     # different tool. Give it room to recover.
     "tool_error":     FailureBudget(
-        max_occurrences=2,
+        max_occurrences=3, per_action=True,
         advice=(
             "The tool raised an error. Try DIFFERENT arguments (e.g. a "
             "different path or query) OR pick a different tool. Do not "
@@ -364,7 +371,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
     "verify_failed":  FailureBudget(
-        max_occurrences=2,
+        max_occurrences=3, per_action=True,
         advice=(
             "The tool returned data but verification rejected it. Try a "
             "different tool, or different arguments that would produce "
@@ -391,7 +398,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
     "web_empty":      FailureBudget(
-        max_occurrences=2,
+        max_occurrences=3, per_action=True,
         advice=(
             "Web search returned 0 results. REFORMULATE the query: try "
             "synonyms, drop filters, use more general keywords, or "
@@ -399,7 +406,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
     ),
     "timeout":        FailureBudget(
-        max_occurrences=2,
+        max_occurrences=3, per_action=True,
         advice=(
             "The tool hit its timeout. REDUCE SCOPE: ask for less data, "
             "use a smaller query, or pick a faster tool."
@@ -654,8 +661,9 @@ class ReplanPolicy:
         #    Order is FailureType definition order so the audit log is
         #    deterministic across runs.
         for code in ALL_FAILURE_TYPES:
-            seen = counts.get(code, 0)
             budget = self.budgets[code]
+            seen = (self._worst_repeat(triggers, code) if budget.per_action
+                    else counts.get(code, 0))
             if seen >= budget.max_occurrences:
                 return ReplanDecision(
                     action="abort_no_retry",
@@ -691,6 +699,20 @@ class ReplanPolicy:
         if code in ALL_FAILURE_TYPES:
             return code  # type: ignore[return-value]
         return "unknown"
+
+    def _worst_repeat(self, triggers: list[Any], code: FailureType) -> int:
+        """Сколько раз ОДНО действие дало ошибку этого типа — худший случай."""
+        per: Counter[tuple[str, str]] = Counter()
+        for t in triggers:
+            if self._coerce_code(t) != code:
+                continue
+            try:
+                args = json.dumps(getattr(t, "arguments", None), sort_keys=True,
+                                  ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                args = repr(getattr(t, "arguments", None))
+            per[(str(getattr(t, "tool_name", "") or ""), args)] += 1
+        return max(per.values(), default=0)
 
     def _forbidden_actions(
         self, triggers: list[Any]

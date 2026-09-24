@@ -225,7 +225,8 @@ class TestAcceptanceWebEmpty:
 # ============================================================
 
 class TestAcceptanceToolErrorBounded:
-    def test_two_tool_errors_stop_with_abort_no_retry(self, workspace: Path):
+    def test_the_same_tool_error_three_times_stops_with_abort_no_retry(self, workspace: Path):
+        """Одно действие с той же ошибкой — стоп на третьем (правка 2026-09-25)."""
         def behaviour(call_n, kwargs):
             raise RuntimeError(f"tool failure #{call_n}")
 
@@ -240,15 +241,15 @@ class TestAcceptanceToolErrorBounded:
         )
         agent.run(user_question="run", file_hint=None)
 
-        # Exactly TWO tool_error triggers -> budget exhausts -> abort_no_retry.
+        # The SAME action failing three times -> budget exhausts -> abort_no_retry.
         events = _events(log_path)
         exhausted = [e for e in events if e["event"] == "replan_exhausted"]
         assert len(exhausted) == 1
         payload = exhausted[0]["payload"]
         assert payload["decision_action"] == "abort_no_retry"
-        assert payload["failure_counts"]["tool_error"] == 2
-        # The tool ran exactly 2 times (each attempt → 1 call).
-        assert flaky.calls == 2
+        assert payload["failure_counts"]["tool_error"] == 3
+        # The tool ran exactly 3 times (each attempt → 1 call).
+        assert flaky.calls == 3
 
 
 # ============================================================

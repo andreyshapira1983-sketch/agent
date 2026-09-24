@@ -324,3 +324,23 @@ def test_a_turn_over_its_dollar_budget_answers_with_what_it_has(workspace: Path,
     skipped = _events(loop, "observation_round_skipped")
     assert skipped and "dollar budget" in skipped[-1]["reason"]
     assert answer
+
+
+def test_one_action_with_the_same_result_four_times_ends_the_rounds(workspace: Path):
+    """Ночь 24→25.09: find_in_files «def complete» 7 раз за минуту с одним ответом;
+    соседние шаги в кругах были разные, датчик одинаковых кругов молчал.
+    OpenHands StuckDetector: пара «действие → наблюдение» 4 раза — стоп."""
+    (workspace / "same.txt").write_text("the same answer", encoding="utf-8")
+    for i in range(10):
+        (workspace / f"a{i}.txt").write_text(f"part {i}", encoding="utf-8")
+    rounds = [[_src("file_read", {"path": "same.txt", "start_line": 1, "end_line": 1}),
+               _src("file_read", {"path": f"a{i}.txt"})] for i in range(10)]
+    planner = _ScriptedPlanner(rounds)
+    loop = _loop(workspace, planner, observe=True)
+
+    loop.run("Найди, где определено complete.")
+
+    assert len(planner.contexts) == 4, "четвёртый одинаковый результат одного действия — конец кругов"
+    assert "REPEAT: the step" in planner.contexts[2]
+    skipped = _events(loop, "observation_round_skipped")
+    assert skipped and "one action gave the same result" in skipped[-1]["reason"]
