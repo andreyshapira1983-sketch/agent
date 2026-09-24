@@ -10,6 +10,8 @@ provider.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from core.model_catalog import classify_model
@@ -20,6 +22,17 @@ from core.model_router import (
     _is_switch_key_error,
     _next_failover_provider,
 )
+
+
+@pytest.fixture(autouse=True)
+def _a_catalog_that_knows_both_providers(monkeypatch):
+    """Каталог-образец, а не живой каталог установки: 24.09 живой стал только
+    DeepSeek (единственный ключ), и тест, читавший его, упал. Правило этого
+    теста — «уровень переносится, имя нет» — не зависит от ключей установки."""
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH",
+                       str(Path(__file__).parent / "fixtures" / "model_catalog_two_providers.json"))
+    monkeypatch.setenv("AGENT_MODEL_CATALOG_TTL_DAYS", "100000")
+    monkeypatch.setenv("AGENT_CATALOG_AUTOREFRESH", "0")
 
 _KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HF_TOKEN")
 

@@ -1,0 +1,71 @@
+{
+  "updated_at": "2026-09-18T16:40:27+00:00",
+  "providers": {
+    "openai": {
+      "models": [
+        {
+          "id": "gpt-4o",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-4o-mini",
+          "tier": "light"
+        },
+        {
+          "id": "o3",
+          "tier": "deep"
+        },
+        {
+          "id": "o4-mini",
+          "tier": "deep"
+        },
+        {
+          "id": "gpt-4.1",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-4.1-mini",
+          "tier": "light"
+        },
+        {
+          "id": "gpt-5",
+          "tier": "standard"
+        },
+        {
+          "id": "gpt-5-mini",
+          "tier": "light"
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "tier": "standard"
+        }
+      ],
+      "tier_best": {
+        "light": "gpt-5-mini",
+        "standard": "gpt-5.6-terra",
+        "deep": "o4-mini"
+      }
+    },
+    "anthropic": {
+      "models": [
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "tier": "light"
+        },
+        {
+          "id": "claude-sonnet-5",
+          "tier": "standard"
+        },
+        {
+          "id": "claude-opus-5",
+          "tier": "deep"
+        }
+      ],
+      "tier_best": {
+        "light": "claude-haiku-4-5-20251001",
+        "standard": "claude-sonnet-5",
+        "deep": "claude-opus-5"
+      }
+    }
+  }
+}
