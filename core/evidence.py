@@ -350,7 +350,7 @@ def _condense_probe_stdout(stdout: str, budget: int = _PROBE_STDOUT_BUDGET) -> s
     dropped_numeric = sum(1 for i in with_digits if i not in keep)
     dropped_plain = len(lines) - len(keep) - dropped_numeric
     kept = "\n".join(lines[i] for i in sorted(keep))
-    note = "...[опущено строк: %d с числами, %d без]" % (dropped_numeric, dropped_plain)
+    note = f"...[опущено строк: {dropped_numeric} с числами, {dropped_plain} без]"
     return kept + "\n" + note
 
 

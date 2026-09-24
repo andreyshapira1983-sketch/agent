@@ -141,8 +141,8 @@ def test_a_book_window_yields_sentences_not_its_lines():
     )
     assert _statements(window) == [
         "Consequence is that (fig 1.5) a self-consistent loop of dependencies occurs.",
-        "This is one elementary example of the general principle of plasmas requiring a "
-        "self-consistent solution of Maxwell’s equations plus the particle dynamics of the plasma.",
+        ("This is one elementary example of the general principle of plasmas requiring a "
+         "self-consistent solution of Maxwell’s equations plus the particle dynamics of the plasma."),
     ]
     # Пункт списка — факт и без точки: так пишут документацию.
     assert _statements("- Default timeout is 30 seconds\nUniversity of Cambridge") == [

@@ -77,7 +77,7 @@ def _say(fake: FakeLLM, **answer) -> None:
 
 
 def test_a_short_question_on_an_empty_memory_costs_no_model_call(workspace: Path) -> None:
-    _loop_, fake, _id = _stored_first(workspace)
+    _, fake, _id = _stored_first(workspace)
     assert fake.calls == [], "на пустой памяти сверять не с чем — модель не зовётся"
 
 

@@ -66,7 +66,7 @@ def test_a_rare_word_outweighs_a_common_one() -> None:
               for w in ("первый", "второй", "третий", "четвёртый", "пятый")]
     rare = _record("Кэш прогрет полностью заново.", hours_ago=24)
 
-    chosen = _only_question_channel().select(common + [rare], "кэш запрос")
+    chosen = _only_question_channel().select([*common, rare], "кэш запрос")
 
     assert chosen and chosen[0] is rare, "частое слово перевесило редкое"
 

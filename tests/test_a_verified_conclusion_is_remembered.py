@@ -29,13 +29,13 @@ _ANSWER = (
 
 
 def _episode(**kw) -> EpisodeRecord:
-    base = dict(
-        goal="q", question="Как называется раздел 2.2 в книге Judson «Abstract Algebra»?",
-        outcome="success", summary="s", full_answer=_ANSWER, completion_state="achieved",
-        verified_chunks=2, unverified_chunks=0, tools_used=["shell_exec", "file_read"],
-        source_labels=["file:math_study/library/txt/Judson_AbstractAlgebra.txt"],
-        defect_signals=[], usage_eligible=True,
-    )
+    base = {
+        "goal": "q", "question": "Как называется раздел 2.2 в книге Judson «Abstract Algebra»?",
+        "outcome": "success", "summary": "s", "full_answer": _ANSWER, "completion_state": "achieved",
+        "verified_chunks": 2, "unverified_chunks": 0, "tools_used": ["shell_exec", "file_read"],
+        "source_labels": ["file:math_study/library/txt/Judson_AbstractAlgebra.txt"],
+        "defect_signals": [], "usage_eligible": True,
+    }
     base.update(kw)
     return EpisodeRecord(**base)
 

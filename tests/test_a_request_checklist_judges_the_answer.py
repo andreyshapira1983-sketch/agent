@@ -66,9 +66,9 @@ class _Llm(FakeLLM):
             self.calls.append({"system": system, "user": user})
             if self.fail_judge:
                 raise RuntimeError("provider down")
-            numbers = [int(n) for n in re.findall(r"^(\d+)\. ", user.split("QUESTIONS:")[1], re.M)]
+            numbers = [int(n) for n in re.findall(r"^(\d+)\. ", user.split("QUESTIONS:")[1], re.MULTILINE)]
             return json.dumps({"answers": [{"n": n, "answer": a, "why": "t"}
-                                           for n, a in zip(numbers, self.judge)]})
+                                           for n, a in zip(numbers, self.judge, strict=False)]})
         body = super().complete(system, user, **kwargs)
         nonce = re.search(r"\[\[agent\.completion:([a-f0-9]+):<token>\]\]", system)
         return f"{body}\n[[agent.completion:{nonce[1]}:achieved]]" if nonce else body

@@ -65,7 +65,7 @@ def test_a_lesson_of_the_same_kind_surfaces_without_shared_words() -> None:
         _record("Погода в Флориде не влияет на работу сервера.", days_ago=3),
     ]
     selected = MemoryRetrievalPolicy().select_with_report(
-        noise + [lesson], "поставь библиотеку, которой не хватает",
+        [*noise, lesson], "поставь библиотеку, которой не хватает",
     ).selected
     assert any("окружение" in (r.content or "") for r in selected)
 

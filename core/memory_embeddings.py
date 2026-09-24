@@ -83,13 +83,13 @@ _instruct = False
 
 def set_encoder(fn: Callable[[list[str]], Any] | None) -> None:
     """Подменить кодировщик (тесты): fn(тексты) -> нормированные векторы."""
-    global _encoder_override
+    global _encoder_override  # noqa: PLW0603 — подмена кодировщика в тестах
     _encoder_override = fn
     _vectors.clear()
 
 
 def _encoder() -> Callable[[list[str]], Any] | None:
-    global _model, _model_failed, _cache_file, _instruct
+    global _model, _model_failed, _cache_file, _instruct  # noqa: PLW0603 — одна модель на процесс
     if _encoder_override is not None:
         return _encoder_override
     path = os.environ.get(MODEL_ENV, "").strip()
@@ -114,7 +114,7 @@ def _encoder() -> Callable[[list[str]], Any] | None:
 
 
 def _key(text: str) -> str:
-    return hashlib.sha1((text or "").encode("utf-8")).hexdigest()
+    return hashlib.sha1((text or "").encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _load_cache() -> None:
@@ -124,7 +124,7 @@ def _load_cache() -> None:
         import numpy as np
 
         data = np.load(_cache_file, allow_pickle=False)
-        for k, v in zip(data["keys"], data["vecs"]):
+        for k, v in zip(data["keys"], data["vecs"], strict=True):
             _vectors[str(k)] = v
     except Exception:  # noqa: BLE001 — испорченный кэш пересчитывается
         _vectors.clear()
@@ -140,8 +140,8 @@ def _save_cache() -> None:
         tmp = _cache_file.with_suffix(".tmp.npz")
         np.savez_compressed(tmp, keys=np.array(keys), vecs=np.stack([_vectors[k] for k in keys]))
         os.replace(tmp, _cache_file)
-    except Exception:  # noqa: BLE001 — кэш не обязателен
-        pass
+    except Exception:  # noqa: BLE001 — кэш не обязателен: не записался — пересчитаем
+        return
 
 
 def _query(text: str) -> str:
@@ -164,7 +164,7 @@ def semantic_scores(query: str, texts: Sequence[str]) -> list[float] | None:
         missing = [i for i, k in enumerate(keys) if k not in _vectors]
         if missing:
             fresh = enc([_passage(texts[i] or "") for i in missing])
-            for i, v in zip(missing, fresh):
+            for i, v in zip(missing, fresh, strict=True):
                 _vectors[keys[i]] = np.asarray(v, dtype=np.float32)
             _save_cache()
         q = np.asarray(enc([_query(query)])[0], dtype=np.float32)
@@ -181,7 +181,7 @@ def _min_max(values: Sequence[float]) -> list[float]:
 def convex(lexical: Sequence[float], semantic: Sequence[float], alpha: float = ALPHA) -> list[float]:
     """α·смысл + (1 − α)·слова, каждое min-max нормировано (Bruch et al. 2023)."""
     lex, sem = _min_max(lexical), _min_max(semantic)
-    return [alpha * s + (1.0 - alpha) * w for w, s in zip(lex, sem)]
+    return [alpha * s + (1.0 - alpha) * w for w, s in zip(lex, sem, strict=True)]
 
 
 def rrf(*score_lists: Sequence[float], k: int = RRF_K) -> list[float]:

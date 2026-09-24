@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from contextvars import ContextVar
+from types import MappingProxyType
 from typing import Any
 
 #: То, что блок ПОКАЗАЛ модели в этом прогоне, — чтобы верификатор принимал
@@ -11,7 +12,7 @@ from typing import Any
 #: хранилища и durable_writes, а пул улик знал только пять полей процесса;
 #: «(run_id=…) [runtime:run_id]» вырезалось как выдуманная ссылка, и верный
 #: эпизод терял допуск в опыт за то, что сделал, как велели.
-_SHOWN: ContextVar[dict[str, str]] = ContextVar("runtime_self_shown", default={})
+_SHOWN: ContextVar[Mapping[str, str]] = ContextVar("runtime_self_shown", default=MappingProxyType({}))
 
 
 def shown_facts(run_id: str) -> dict[str, str]:

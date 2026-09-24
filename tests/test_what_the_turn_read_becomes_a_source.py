@@ -15,14 +15,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.read_sources_registry import register_read_sources
-
-
 # НАСТОЯЩИЕ Evidence и ProvenanceChain, а не двойники. 23.09 эти тесты были
 # зелёными на выдуманном поле `locator`, которого у улики нет (там `source_id`),
 # и три часа подтверждали мою ошибку вместо жизни. Двойник проверяет того, кто
 # его написал; настоящий объект проверяет код.
 from core.evidence import Evidence, ProvenanceChain
+from core.read_sources_registry import register_read_sources
 
 
 def _Evidence(kind: str, locator: str, title: str = "", content_hash: str = "") -> Evidence:
