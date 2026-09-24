@@ -22,13 +22,25 @@
 
 Границы: включается флагом `observe_before_answer` (по умолчанию выключен,
 переменная окружения AGENT_OBSERVE_BEFORE_ANSWER в `app/bootstrap.py`);
-число кругов ограничено тем же `max_total_replans`, что и перепланирование
-после провалов; выводы инструментов передаются как ДАННЫЕ и уже прошли
-редактирование секретов в `_execute_step`.
+выводы инструментов передаются как ДАННЫЕ и уже прошли редактирование
+секретов в `_execute_step`.
+
+Когда кругам конец. До 2026-09-24 круги делили один счётчик с
+перепланированием после провалов (`max_total_replans`, в кампании 5–6), и
+38 ходов из 75 за день кончились записью «attempt budget spent», а не
+пустым планом: 18 вакансий из 20, рендер, упавший на одной строке и
+подменённый старым видео. Литература останавливает иначе: OpenHands — по
+застреванию (одно действие с тем же наблюдением 4 раза, та же ошибка 3), а
+SWE-agent сознательно меряет ход деньгами, не шагами, потому что число шагов
+у моделей разнится в разы; жёсткий предел итераций «обрезает трудные задачи»
+(arXiv 2606.27009). Здесь так же: круг с продвижением идёт до пустого плана,
+датчика одинаковых кругов или предохранителя `round_failsafe`; бюджет ошибок
+считает только круги со сбоями (`charged_attempts`).
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -209,7 +221,7 @@ def steps_to_run(loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]
     # ещё одно чтение, запись откладывалась дважды и легла лишь на последнем
     # круге — на исправление по выводу patch_check кругов не осталось.
     if getattr(st, "writes_deferred_once", False) or (
-            policy is not None and st.attempt >= policy.max_total_replans):
+            policy is not None and st.attempt >= round_failsafe(loop)):
         return steps
     kept = defer_blind_writes(loop, steps, loop.log.log)
     if len(kept) < len(steps):
@@ -313,6 +325,33 @@ def unfilled_placeholders(content: str) -> list[str]:
 #: Сколько одинаковых кругов подряд — петля, а не работа.
 _STUCK_ROUNDS = 3
 
+#: Предохранитель, не бюджет: останавливают пустой план и датчик застревания.
+#: Круг у нас — пакет из нескольких вызовов, поэтому он в разы меньше
+#: предела шагов OpenHands (100). Переменная AGENT_MAX_ROUNDS.
+ROUND_FAILSAFE = 20
+
+
+def round_failsafe(loop: Any) -> int:
+    """Последний допустимый круг хода; не меньше бюджета перепланирования."""
+    own = getattr(loop, "max_observation_rounds", None)
+    try:
+        value = int(own or os.environ.get("AGENT_MAX_ROUNDS") or ROUND_FAILSAFE)
+    except ValueError:
+        value = ROUND_FAILSAFE
+    return max(value, loop.replan_policy.max_total_replans)
+
+
+def charged_attempts(loop: Any, attempt: int, failure_history: Sequence[Any]) -> int:
+    """Сколько попыток списать с бюджета ошибок: круги со сбоями, а не все круги.
+
+    Круг, который продвинул работу, ошибкой не был. У предохранителя — все
+    круги разом, чтобы ход без сбоев и без результата не шёл вечно.
+    """
+    if attempt >= round_failsafe(loop):
+        return max(attempt, loop.replan_policy.max_total_replans)
+    failed = {getattr(t, "attempt", 0) for t in failure_history if getattr(t, "attempt", 0) <= attempt}
+    return max(1, len(failed))
+
 
 def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> str:
     """Что круг сделал и что получил — чтобы узнать повтор один в один."""
@@ -370,7 +409,7 @@ def continue_after_observation(
     # arXiv 2503.13657). Беда, от которой правило ставили 19.09 (та же запись по
     # кругу до конца бюджета), с 22.09 закрыта датчиком одинаковых кругов ниже;
     # «сделано» решает планировщик — пустым планом.
-    limit = loop.replan_policy.max_total_replans
+    limit = round_failsafe(loop)
     if st.attempt >= limit:
         loop.log.log("observation_round_skipped", {
             "attempt": st.attempt, "max_total": limit, "reason": "attempt budget spent",

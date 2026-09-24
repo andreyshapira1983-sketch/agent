@@ -3,7 +3,6 @@
 These focus on Russian morphology, which is where naive substring matching
 falls apart.
 """
-import pytest
 
 from core.lang_match import (
     STEM_MIN,

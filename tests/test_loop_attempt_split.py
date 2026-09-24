@@ -327,6 +327,15 @@ _DECLARED_EDITS = (
         ("(can_skip_planner(st.user_question, file_hint=st.file_hint) or "
          "is_social_turn(self, st.user_question, file_hint=st.file_hint))"),
     ),
+    (  # 2026-09-24: круги с продвижением не списываются с бюджета ошибок (core/observation_round.py)
+        "format_replan_context(st.failure_history, st.attempt, self.replan_policy.max_total_replans,",
+        "format_replan_context(st.failure_history, st.attempt, round_failsafe(self),",
+    ),
+    (
+        "self.replan_policy.decide(failure_history=st.failure_history, completed_attempts=st.attempt)",
+        ("self.replan_policy.decide(failure_history=st.failure_history, "
+         "completed_attempts=charged_attempts(self, st.attempt, st.failure_history))"),
+    ),
 )
 
 

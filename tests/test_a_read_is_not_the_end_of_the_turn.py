@@ -156,16 +156,34 @@ def test_an_empty_plan_after_observing_ends_the_turn(workspace: Path):
     assert not loop.last_replan_exhausted
 
 
-def test_the_rounds_are_bounded_by_the_attempt_budget(workspace: Path):
+def test_the_rounds_are_bounded_by_the_failsafe(workspace: Path):
     """Планировщик, который читает без конца, не держит ход вечно."""
-    (workspace / "a.txt").write_text("alpha", encoding="utf-8")
-    planner = _ScriptedPlanner([[_src("file_read", {"path": "a.txt"})]] * 10)
+    for i in range(10):
+        (workspace / f"a{i}.txt").write_text(f"part {i}", encoding="utf-8")
+    planner = _ScriptedPlanner([[_src("file_read", {"path": f"a{i}.txt"})] for i in range(10)])
     loop = _loop(workspace, planner, observe=True)
+    loop.max_observation_rounds = 4
 
     loop.run("Что написано в a.txt?")
 
-    assert len(planner.contexts) == loop.replan_policy.max_total_replans
+    assert len(planner.contexts) == 4
     assert _events(loop, "observation_round_skipped")
+
+
+def test_rounds_that_make_progress_are_not_cut_by_the_error_budget(workspace: Path):
+    """2026-09-24: 38 ходов из 75 кончились «attempt budget spent» на 6-м круге —
+    круги с продвижением делили счётчик с перепланированием после провалов.
+    Восемь разных кругов и пустой план: ход кончает планировщик, не счётчик."""
+    for i in range(8):
+        (workspace / f"a{i}.txt").write_text(f"part {i}", encoding="utf-8")
+    planner = _ScriptedPlanner([[_src("file_read", {"path": f"a{i}.txt"})] for i in range(8)] + [[]])
+    loop = _loop(workspace, planner, observe=True)
+    loop.replan_policy.max_total_replans = 6
+
+    loop.run("Собери все части a0..a7.")
+
+    assert len(planner.contexts) == 9, "девятый круг — пустой план, ход кончил планировщик"
+    assert not _events(loop, "observation_round_skipped")
 
 
 def test_results_of_every_round_reach_the_answer(workspace: Path):
