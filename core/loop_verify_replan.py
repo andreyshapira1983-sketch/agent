@@ -28,6 +28,7 @@ from core.evidence import ProvenanceChain, evidence_from_tool_result
 from core.file_request_intent import force_file_hint_read_when_explicit
 from core.model_usage import ModelBudgetExceeded
 from core.models import Goal, Plan
+from core.observation_round import charged_attempts
 from core.planner import PlannerOutput
 from core.replan import ReplanTrigger, count_failures, format_replan_context
 from core.source_ranker import SourceRankingReport
@@ -256,7 +257,8 @@ class AgentLoopVerifyReplan:
 
                 decision = self.replan_policy.decide(
                     failure_history=st.failure_history,
-                    completed_attempts=st.attempt + verify_replan_attempt,
+                    completed_attempts=charged_attempts(self, st.attempt, st.failure_history)
+                    + verify_replan_attempt,
                 )
 
                 if decision.action != "continue":
