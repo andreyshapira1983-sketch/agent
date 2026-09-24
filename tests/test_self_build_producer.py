@@ -1245,7 +1245,18 @@ def test_oversized_split_manager_refusal_does_not_publish_refactor(workspace, mo
     assert inbox.list() == []
 
 
+def _proven_split(monkeypatch):
+    """Доставка разреза проверяется при ЕСТЬ доказательстве; без него разреза
+    нет вовсе (tests/test_an_unproven_split_is_never_made_alone.py, 24.09)."""
+    from types import SimpleNamespace
+
+    import core.split_proof as sp
+    monkeypatch.setattr(sp, "proof_for", lambda rel, index: SimpleNamespace(
+        kind="multi_subject", names=(), loc=200))
+
+
 def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypatch):
+    _proven_split(monkeypatch)
     # Site 2: a split the mapper accepts but that exceeds the single-shot Builder
     # budget is also routed to the deterministic splitter rather than refused.
     import core.incremental_splitter as isp
@@ -1277,6 +1288,7 @@ def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypat
 
 
 def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
+    _proven_split(monkeypatch)
     # If even the deterministic planner cannot prove a safe step, we honestly
     # refuse (no_patch) with the planner's reason — still no Builder, no apply.
     import core.incremental_splitter as isp
@@ -1313,6 +1325,7 @@ def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
 
 
 def test_oversized_split_planner_crash_is_surfaced_not_disguised(workspace, monkeypatch):
+    _proven_split(monkeypatch)
     # A CRASHING planner (splitter present but raising) must NOT be silently
     # swallowed into the caller's generic refusal. It surfaces as a distinct
     # no_patch carrying the exception type + an incremental_splitter_error veto,
@@ -1358,6 +1371,7 @@ def test_oversized_split_planner_crash_is_surfaced_not_disguised(workspace, monk
 
 
 def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
+    _proven_split(monkeypatch)
     # Integration: the REAL deterministic planner (not monkeypatched) runs on a
     # small real module and its step is published through produce as a normal
     # self-apply approval. Only the routing threshold is lowered so a tiny file
