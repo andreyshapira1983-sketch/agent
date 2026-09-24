@@ -357,7 +357,10 @@ class AgentLoopStepExecution:
         trigger = self._compose_write_content(step, done)
         if trigger is not None:
             return step, None, trigger
-        return self._run_step_parallel(step)
+        result = self._run_step_parallel(step)
+        from core.write_at_execution import remember_read
+        remember_read(self, result[0], result[1])
+        return result
 
     def _compose_write_content(self, step: PlanStep, done: list[Any]) -> ReplanTrigger | None:
         """Собрать текст записи по заданию шага — уже по выводам этого пакета."""

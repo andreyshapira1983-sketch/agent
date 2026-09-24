@@ -15,11 +15,31 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
-#: Сколько вывода одного шага уходит в сборку текста.
-_PER_OUTPUT_CHARS = 4000
-_TOTAL_CHARS = 20000
+#: Сколько вывода одного шага уходит в сборку текста. Было 4000 и 20000:
+#: 24.09 писатель правки не видел конца compose_content (строка ~130 файла
+#: в 18 тыс. знаков) и не мог вставить туда вызов — не видел места.
+_PER_OUTPUT_CHARS = 12000
+_TOTAL_CHARS = 48000
+#: Чтения, которые писатель помнит весь ход, а не только текущий план.
+_READ_TOOLS = frozenset({"file_read", "find_in_files", "list_dir", "read_logs",
+                         "diff_file", "convert_file", "python_probe"})
+_REMEMBERED_READS = 12
+#: Файл правки для patch_check и признаки того, что в нём блоки, а не слова.
+_EDITS_NAME = "edits.txt"
+_FILE_LINE = re.compile(r"^FILE:\s*\S", re.MULTILINE)
+_BLOCK_LINE = re.compile(r"^<<<<<<< (?:SEARCH|LINES \d+-\d+)", re.MULTILINE)
+_EDITS_FORM = (
+    "\n\nФорма файла правки (её читает patch_check). Для КАЖДОГО изменения:\n"
+    "FILE:<путь>\n<<<<<<< SEARCH\n<строки из вывода чтения, дословно>\n=======\n"
+    "<новые строки>\n>>>>>>> REPLACE\n"
+    "Новый файл — тот же блок с пустым SEARCH. Не unified diff (---/+++/@@), не «SEARCH:» "
+    "с двоеточием; метки замысла плана — не образец. Если нужных строк в выводах нет, "
+    "ответь одной строкой «нужные строки не прочитаны» — запись не состоится, "
+    "и план прочитает их заново."
+)
 _SYSTEM = (
     "Ты пишешь СОДЕРЖИМОЕ файла по заданию. В ответе — только текст файла, "
     "без объяснений, без ```-ограды и без вступления. Пиши по выводам шагов "
@@ -101,11 +121,12 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
     arguments = spec.get("arguments") or {}
     instruction = str(arguments.get("write_instruction") or "").strip()
     path = str(arguments.get("path") or "")
-    outputs = _outputs_block(done)
+    outputs = _outputs_block(_with_earlier_reads(loop, done))
     llm = _writer_llm(loop)
     if llm is None:
         raise RuntimeError("нет модели для сборки текста записи")
-    user = (f"Файл: {path}\nЗадание: {instruction}\n\n"
+    user = (f"Файл: {path}\nЗадание: {instruction}"
+            + (_EDITS_FORM if _is_edits(path) else "") + "\n\n"
             + (f"Выводы шагов этого хода:\n{outputs}" if outputs
                else "В этом ходе шаги ещё ничего не вернули."))
     # Предел и БЕЗ продолжения. Замер 2026-09-24: дважды за ночь модель
@@ -128,8 +149,54 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
             "модель зациклилась, файл не записан")
     if looks_like_unfilled_content(text):
         raise RuntimeError("собранный текст — незаполненный шаблон")
+    _refuse_edits_without_blocks(path, text)
     _refuse_note_without_its_contract(loop, path, text)
     return text
+
+
+def _is_edits(path: str) -> bool:
+    return path.replace("\\", "/").rsplit("/", 1)[-1] == _EDITS_NAME
+
+
+def _refuse_edits_without_blocks(path: str, text: str) -> None:
+    """В файл правки идут только блоки: отказ словами — провал шага, не содержимое.
+
+    24.09: из шести записей edits.txt за 50 секунд три были текстом отказа
+    («нужные строки не прочитаны», «Файл не найден.») — и затирали прошлую,
+    почти готовую правку.
+    """
+    if _is_edits(path) and not (_FILE_LINE.search(text) and _BLOCK_LINE.search(text)):
+        raise RuntimeError(
+            "в файл правки пошёл текст без блоков (FILE: и <<<<<<< SEARCH или LINES a-b) — "
+            f"файл не перезаписан; начало текста: {text[:160]!r}")
+
+
+def remember_read(loop: Any, step: Any, outcome: Any) -> None:
+    """Запомнить вывод чтения на весь ход (след = ход): после перепланирования
+    писатель его видит. 24.09 после каждого перепланирования писатель писал
+    «нужные строки не прочитаны» — прочитанное в прошлом круге для него исчезало."""
+    spec = getattr(step, "action_spec", None) or {}
+    if spec.get("tool_name") not in _READ_TOOLS or not isinstance(outcome, dict):
+        return
+    if outcome.get("status", "success") != "success":
+        return
+    turn = str(getattr(getattr(loop, "log", None), "trace_id", "") or "")
+    store = getattr(loop, "_writer_reads", None)
+    if not store or store[0] != turn:
+        store = (turn, [])
+        loop._writer_reads = store
+    store[1].append((step, outcome, None))
+    del store[1][:-_REMEMBERED_READS]
+
+
+def _with_earlier_reads(loop: Any, done: list[Any]) -> list[Any]:
+    """Выводы текущего плана, затем — чтения прошлых кругов этого же хода."""
+    store = getattr(loop, "_writer_reads", None)
+    turn = str(getattr(getattr(loop, "log", None), "trace_id", "") or "")
+    if not store or store[0] != turn:
+        return list(done)
+    here = {id(item[0]) for item in done}
+    return list(done) + [item for item in store[1] if id(item[0]) not in here]
 
 
 def _refuse_note_without_its_contract(loop: Any, path: str, text: str) -> None:
