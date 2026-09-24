@@ -191,7 +191,7 @@ def test_the_audit_looks_where_the_concern_is() -> None:
 
 
 def test_a_bare_linter_directive_is_not_a_justification() -> None:
-    """Audit of this audit (docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md).
+    """Audit of this audit (CLOSURE_AUDIT_2026-08-22.md in git history).
 
     The field's named failure for a "zero unexplained" report is that the
     comments turn out to be fig leaves. Probed: 8 of 127 silent handlers were

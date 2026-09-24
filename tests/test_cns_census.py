@@ -36,7 +36,6 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
-import re
 
 CORE = pathlib.Path(__file__).resolve().parent.parent / "core"
 SNAPSHOT = CORE.parent / "knowledge" / "maps" / "cns_census.json"

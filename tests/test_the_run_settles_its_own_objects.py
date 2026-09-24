@@ -66,7 +66,7 @@ def test_a_completed_run_settles_done(workspace: Path) -> None:
 
 
 def test_a_budget_interruption_settles_too(workspace: Path) -> None:
-    """Audit of this closure (docs/audit/archive/CLOSURE_AUDIT_2026-08-22.md).
+    """Audit of this closure (CLOSURE_AUDIT_2026-08-22.md in git history).
 
     The field's rule for settle-on-exit is that a status written at ONE exit
     lies about the others. Probed by parsing the attempt loop: it has no

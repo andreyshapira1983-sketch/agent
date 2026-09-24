@@ -1,6 +1,6 @@
 """The registry's tally must match the registry's own sections.
 
-`docs/INDEX.md` makes MASTER_ISSUE_REGISTRY the single owner of issue status.
+MASTER_ISSUE_REGISTRY is the single owner of issue status.
 A hand-typed tally broke that three times in one session, ending with the
 document claiming "50 issues total — this tally is the authoritative count"
 four lines below "Total is now 53".

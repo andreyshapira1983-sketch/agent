@@ -10,7 +10,7 @@ review lists "long-lived credentials stored in environment variables", and the
 LiteLLM supply-chain payload paid off precisely because a credential harvester
 running in-process finds them. Our own OWASP self-assessment put ASI03
 (Identity & Privilege Abuse) as the weakest row. See
-`docs/audit/archive/INCIDENT_CATALOGUE_2024_2026.md`.
+`INCIDENT_CATALOGUE_2024_2026.md` in git history.
 
 What was ALREADY closed and is asserted here so it stays closed:
   * `shell_exec` passes an env ALLOWLIST (`_safe_env`: PATH, SystemRoot,

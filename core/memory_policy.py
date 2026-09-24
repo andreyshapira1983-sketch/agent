@@ -653,12 +653,31 @@ class MemoryRetrievalPolicy:
     #: беда «записал промах вечером, повторил наутро»: урок, который не
     #: всплывает в момент работы, работой не является.
     lessons_by_kind: int = 2
+    #: Слепков «Вопрос: … Вывод: …» в основном канале — не больше стольких.
+    #: 24.09 их 82 из 195 (42%), и они занимали места по совпадению слов
+    #: вопроса, вытесняя уроки. Самый подходящий слепок проходит — когда
+    #: спрашивают ровно о том обмене, он верный ответ.
+    transcripts_in_main: int = 1
     #: Сколько записей, ближайших по СМЫСЛУ, допускается в отбор без общих
     #: слов с вопросом (гибридный поиск: кандидаты — объединение выдач обоих
     #: поисков). Иначе перефразировка без единого общего слова («поставь
     #: библиотеку» и «ставя себе пакет») не доходит даже до ранжирования.
     #: Работает, только когда включён поиск по смыслу (core/memory_embeddings).
     semantic_candidates: int = 3
+
+    def _take_with_transcript_quota(self, scored: list) -> list[MemoryRecord]:
+        """Первые max_records по баллу, но слепков — не больше квоты."""
+        out: list[MemoryRecord] = []
+        transcripts = 0
+        for _score, r in scored:
+            if len(out) >= self.max_records:
+                break
+            if _is_transcript(r.content if isinstance(r.content, str) else str(r.content)):
+                if transcripts >= self.transcripts_in_main:
+                    continue
+                transcripts += 1
+            out.append(r)
+        return out
 
     def _add_lessons_by_work_kind(
         self,
@@ -767,7 +786,7 @@ class MemoryRetrievalPolicy:
 
         # Higher score first, then newer first.
         scored.sort(key=lambda pair: (pair[0], pair[1].created_at), reverse=True)
-        selected = [r for _score, r in scored[: self.max_records]]
+        selected = self._take_with_transcript_quota(scored)
         selected = self._add_lessons_by_work_kind(selected, records, q_kinds, relevance)
 
         # A cap is not a relevance judgment: these records DID clear the

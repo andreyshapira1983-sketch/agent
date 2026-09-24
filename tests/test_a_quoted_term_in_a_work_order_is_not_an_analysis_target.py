@@ -1,6 +1,6 @@
 """A quoted term inside a work order is not an analysis target (R7, 2026-09-05).
 
-Work order 1 («flights TLV→BER», docs/audit/WORK_ORDER_FLIGHTS_2026-09-05.md):
+Work order 1 («flights TLV→BER», WORK_ORDER_FLIGHTS_2026-09-05.md in git history):
 the order carried «изначально показанная» — 21 characters inside 770 of
 directive, and the directive contained «покажи». The referent resolver took
 the quote as an explicit_quote analysis target, the loop went down the

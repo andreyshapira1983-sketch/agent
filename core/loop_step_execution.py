@@ -289,7 +289,7 @@ class AgentLoopStepExecution:
             # the only plans that need a read to reach a write — were the
             # plans whose `{{step:N.output}}` never got filled: two repair
             # attempts that morning wrote the literal 17-byte string to disk
-            # (docs/audit/EXAM_SELF_KNOWLEDGE_2026-09-05.md, turns 12–13).
+            # (EXAM_SELF_KNOWLEDGE_2026-09-05.md in git history, turns 12–13).
             ordered: list[tuple[PlanStep, dict[str, Any] | None, ReplanTrigger | None]] = []
             for step in sorted(steps, key=lambda s: s.order):
                 ordered.append(self._run_step_after_references(step, ordered, plan_steps))
