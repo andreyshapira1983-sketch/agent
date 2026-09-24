@@ -308,6 +308,13 @@ Available tools:
       svg        svg -> to=png|pdf (links to files and xi:include are refused)
       media      audio/video -> to=mp4|webm|mp3|wav|gif, optional max_seconds
       render3d   .blend -> png of frame 1 (scripts in the file do NOT run)
+      blender_script  YOUR .py (write it with file_write first) run by Blender 4.0
+                 headless (`import bpy` works inside). The script's working folder
+                 is a temp dir: save EVERYTHING into "out/" (subfolders ok), e.g.
+                 bpy.ops.wm.save_as_mainfile(filepath="out/scene.blend"),
+                 scene.render.filepath = "out/frames/f_". No denoiser in this build:
+                 cycles.use_denoising = False. A Python error -> exit_code 1 and the
+                 traceback in log_tail. Results land in converted/<name>__blender_script_*/.
     text: the recognised/converted text, returned for ocr and for any text result
     (to=txt|csv|md|html) — compare numbers from `text`, not from memory.
     `path` ASCII, inside the workspace. Read or open the result from `outputs`.
