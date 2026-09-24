@@ -393,6 +393,29 @@ def _ask_for_a_goal(
             max(0, after_calls - before_calls), max(0, after_cost - before_cost))
 
 
+def _wait_for_usd_limit(workspace: Any, ledger: Any, cycle: int, goal: str,
+                        now_fn: Any, sleep_fn: Any, pause: float) -> bool:
+    """Предел $ в час (план субботы з): превышен — цикл пишет «жду» и спит.
+
+    Предел — `usd_per_hour` в config/budget_limits.json; нет его — False.
+    """
+    from core.usd_spend import usd_hour_limit, usd_last_hour
+    limit = usd_hour_limit(Path(workspace))
+    if limit is None:
+        return False
+    spent = usd_last_hour(Path(workspace))
+    if spent < limit:
+        return False
+    ledger.append(CampaignCycleRecord(
+        cycle=cycle, ts=now_fn().isoformat(), goal=goal, action="<usd_limit>",
+        action_title="waiting: hourly dollar limit reached", severity="low", priority=0,
+        risk="read_only", idle=True, llm_calls_spent=0, cost_units_spent=0, result="waiting",
+        reason=f"usd_hour_limit: spent ${spent:.2f} of ${limit:.2f} in the last hour",
+        work_done=False, usd_last_hour=spent))
+    sleep_fn(max(pause, 60.0))
+    return True
+
+
 def run_campaign(
     config: CampaignConfig,
     *,
@@ -641,6 +664,9 @@ def run_campaign(
                 status = "stopped"
                 break
 
+        if _wait_for_usd_limit(workspace, ledger, cycle, current_goal, now_fn, sleep_fn,
+                               float(config.cycle_pause_seconds or 60)):
+            continue
         if config.max_llm_calls and llm_calls_used >= config.max_llm_calls:
             stop_reason = f"budget_exhausted:llm_calls={llm_calls_used}/{config.max_llm_calls}"
             status = "stopped"

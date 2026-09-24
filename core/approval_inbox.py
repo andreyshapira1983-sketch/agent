@@ -34,6 +34,9 @@ def _content_id(data: dict) -> str:
 
 ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
 ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external"]
+#: Правка кода полосой самоприменения (core/self_apply_bridge.SELF_APPLY_OPERATION;
+#: строкой, чтобы ящик не тянул полосу при импорте).
+_SELF_APPLY_OPERATION = "self_apply_lane.run"
 _VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
 _VALID_RISKS = {"read_only", "reversible", "irreversible", "external"}
 
@@ -390,7 +393,12 @@ class ApprovalInbox:
         expired = 0
         new_items: list[ApprovalInboxItem] = []
         for item in self.items:
-            if item.status == "pending" and item.expires_at:
+            # Одобренная, но не исполненная правка кода тоже снимается по сроку
+            # (план субботы ж, 24.09: заявка разреза step_sanitizer висела
+            # «одобренной» бессрочно и ожила, когда код снова совпал с основой).
+            # Постоянные разрешения держат свой срок сами (_grant_is_live).
+            stale_patch = item.status == "approved" and item.operation == _SELF_APPLY_OPERATION
+            if (item.status == "pending" or stale_patch) and item.expires_at:
                 try:
                     exp = datetime.fromisoformat(item.expires_at)
                     if exp.tzinfo is None:
