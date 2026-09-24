@@ -188,6 +188,17 @@ def _pdf_text(raw: bytes) -> str:
     return text
 
 
+def _mostly_latin(text: str) -> bool:
+    """Кириллица есть, но её меньше 10% букв — это латинский текст с подменами.
+
+    Русский документ — больше половины кириллицы; английский, испорченный
+    похожими буквами, — единицы процентов.
+    """
+    letters = [ch for ch in text if ch.isalpha()]
+    cyrillic = sum(1 for ch in letters if "Ѐ" <= ch <= "ӿ")
+    return bool(cyrillic) and cyrillic < 0.10 * len(letters)
+
+
 def _ocr_scanned_pdf(raw: bytes) -> str:
     """Скан без текстового слоя — распознать теми же программами, что convert_file.
 
@@ -204,9 +215,15 @@ def _ocr_scanned_pdf(raw: bytes) -> str:
 
     with _tempfile.TemporaryDirectory(prefix="web_fetch_ocr_") as root:
         _Path(root, "scan.pdf").write_bytes(raw)
+        tool = ConvertFileTool(_Path(root), runner=_ocr_runner)
         try:
-            out = ConvertFileTool(_Path(root), runner=_ocr_runner).run(
-                op="ocr", path="scan.pdf", max_pages=PDF_OCR_MAX_PAGES)
+            out = tool.run(op="ocr", path="scan.pdf", max_pages=PDF_OCR_MAX_PAGES)
+            # Живая проверка 24.09 (Cooley–Tukey, 1965): с rus+eng английский скан
+            # вышел с кириллицей на месте похожих букв — «ап N Х N», «т sparse».
+            # Числа и слова такой улики не сверяются с источником. Почти без
+            # кириллицы — документ английский: распознать его английским.
+            if _mostly_latin(str(out.get("text") or "")):
+                out = tool.run(op="ocr", path="scan.pdf", lang="eng", max_pages=PDF_OCR_MAX_PAGES)
         except ConvertRefused as exc:
             raise ValueError(f"PDF carries no extractable text (scanned images?) and OCR "
                              f"is unavailable: {exc}") from None
