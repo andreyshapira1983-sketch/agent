@@ -83,6 +83,11 @@ WORKSPACE_IMPORT_ENV = "PYTHON_PROBE_WORKSPACE_IMPORT"
 _WORKSPACE_PACKAGES = ("core", "tools", "app", "cli")
 
 
+def _is_glob(value: str) -> bool:
+    """Строка — шаблон пути (glob), а не путь: в ней есть * или ?."""
+    return "*" in value or "?" in value
+
+
 def _with_workspace_on_path(code: str, root: Path) -> str:
     """Опыт, которому виден корень рабочей папки.
 
@@ -195,7 +200,7 @@ class PythonProbeTool(Tool):
         copied: list[str] = []
         total = sum((Path(cwd) / rel).stat().st_size for rel in given)
         for rel in self._missing_inputs(code, inputs):
-            if _is_credential_path(rel) or len(given) + len(copied) >= _INPUT_MAX_FILES:
+            if _is_glob(rel) or _is_credential_path(rel) or len(given) + len(copied) >= _INPUT_MAX_FILES:
                 continue
             size = (self.workspace_root / rel).stat().st_size
             if total + size > _INPUT_MAX_TOTAL:
@@ -206,6 +211,21 @@ class PythonProbeTool(Tool):
                 continue
             total += size
         return copied
+
+    def _enveloped_inputs(self, rels: list[str]) -> list[str]:
+        """Переданные файлы-журналы, чьи строки завёрнуты в конверт состояния."""
+        found: list[str] = []
+        for rel in rels:
+            if self.workspace_root is None or not rel.endswith(".jsonl"):
+                continue
+            try:
+                with (self.workspace_root / rel).open(encoding="utf-8", errors="replace") as fh:
+                    head = fh.readline(4096)
+            except OSError:
+                continue
+            if '"_integrity"' in head and '"payload"' in head:
+                found.append(rel)
+        return found
 
     def _missing_inputs(self, code: str, inputs: list[str] | None) -> list[str]:
         """Файлы рабочей папки, которые код называет, но в `inputs` не передал.
@@ -226,6 +246,21 @@ class PythonProbeTool(Tool):
         for value in sorted(named):
             rel = Path(value)
             if rel.is_absolute() or ".." in rel.parts or rel.as_posix() in given:
+                continue
+            if _is_glob(value):
+                # ШАБЛОН считается наравне с каталогом. Замер 2026-09-24: девять
+                # проб подряд делали glob("logs/trace_*.jsonl") без inputs, в
+                # пустой папке лаборатории получали ноль и докладывали «поле
+                # пустое» — строка со звёздочкой не файл и не каталог, проверка
+                # молчала. Шаблон, под который в рабочей папке есть файлы, не
+                # переданные в inputs, — тот же невидимый отказ.
+                try:
+                    hits = [p.relative_to(self.workspace_root).as_posix()
+                            for p in self.workspace_root.glob(value) if p.is_file()]
+                except (OSError, ValueError, NotImplementedError):
+                    continue
+                if hits and not all(h in given for h in hits):
+                    missing.append(value)
                 continue
             try:
                 target = self.workspace_root / rel
@@ -316,6 +351,12 @@ class PythonProbeTool(Tool):
                     if self.workspace_root is not None and (self.workspace_root / p).is_dir()]
             notes.append(f"workspace paths named in the code but not passed in "
                          f"inputs: {missing}; the lab cannot see them — add them to inputs")
+            if patterns := [p for p in missing if _is_glob(p)]:
+                notes.append(f"{patterns} are GLOB PATTERNS matching files in the workspace, "
+                             "but the lab starts in an empty temp folder: the glob returns "
+                             "NOTHING there, so any count or 'empty' result is not a "
+                             "measurement — pass the files in inputs, or search them with "
+                             "find_in_files instead")
             if dirs:
                 # Каталог через inputs не передашь — только перечислением файлов.
                 # Без этой строки совет «add them to inputs» невыполним, а счёт
@@ -324,6 +365,15 @@ class PythonProbeTool(Tool):
                              "temp folder, so a count over them is not a measurement "
                              "of the code — pass the individual files in inputs, or "
                              "read the directory with file_read/find_in_files instead")
+        if enveloped := self._enveloped_inputs(copied + auto):
+            # Замер 2026-09-24: проба читала поля строки снаружи конверта и
+            # доложила «у всех 20 эпизодов trace_id, tools_used и текст пусты»
+            # — у всех 118 они заполнены. Урок в памяти не всплыл; говорит
+            # инструмент — в момент действия.
+            notes.append(f"{enveloped}: every line is an envelope "
+                         '{"_integrity": ..., "payload": {...}} — the fields live INSIDE '
+                         'payload: use row.get("payload", row) before reading them; '
+                         "an 'empty' field read outside payload is not a measurement")
         if not workspace_import and any(
                 f"No module named '{pkg}" in stderr for pkg in _WORKSPACE_PACKAGES):
             notes.append(f"the agent's own modules are not importable here because "
