@@ -33,6 +33,23 @@ def test_a_failing_script_cannot_look_like_success() -> None:
     assert argv[-1] == "in.py"
 
 
+def test_a_crashed_script_is_a_failed_step_with_its_traceback(tmp_path: Path) -> None:
+    """24.09, 18:53 (trace_22b942a8): Blender упал с кодом 1, инструмент вернул
+    success, цикл сбоя не увидел — тот же скрипт ушёл повторно без правки, а
+    результатом выдано старое видео. Код выхода ≠ 0 — провал шага, и причина
+    несёт хвост журнала, где Blender перечислил допустимые значения."""
+    live = {"op": "blender_script", "input": "scripts/scene_short.py", "exit_code": 1, "outputs": [],
+            "log_tail": ("Traceback (most recent call last):\n  File \"in.py\", line 39\n"
+                         "TypeError: bpy_struct: item.attr = val: enum \"AgX - Base Contrast\" not found in "
+                         "('None', 'Very High Contrast', 'High Contrast', 'Medium Contrast')\n"),
+            "error": "blender_script produced no output (exit 1)"}
+    ok, issues = ConvertFileTool(tmp_path).validate_output(live)
+    assert ok is False
+    assert "exit 1" in issues[0] and "Medium Contrast" in issues[0]
+    good = {**live, "exit_code": 0, "outputs": ["converted/x/scene.mp4"], "log_tail": ""}
+    assert ConvertFileTool(tmp_path).validate_output(good) == (True, [])
+
+
 def test_a_link_out_of_the_sandbox_is_not_collected(tmp_path: Path) -> None:
     out, dest = tmp_path / "out", tmp_path / "dest"
     (out / "frames").mkdir(parents=True)

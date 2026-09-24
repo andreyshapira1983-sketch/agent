@@ -261,6 +261,26 @@ class ConvertFileTool(Tool):
             result["error"] = f"{op} produced no output (exit {code})"
         return result
 
+    def validate_output(self, output: Any) -> tuple[bool, list[str]]:
+        """Ненулевой код выхода — провал шага, а не «успех с полем error».
+
+        24.09, 18:53: Blender упал на `view_settings.look = 'AgX - Base Contrast'`
+        (журнал сам перечислял допустимые значения), инструмент вернул success,
+        цикл сбоя не увидел — тот же скрипт запущен повторно без правки, а
+        результатом выдано старое видео с диска. Хвост журнала едет в причину:
+        по нему планировщик и карточки ошибок видят, что чинить.
+        """
+        if not isinstance(output, dict):
+            return False, ["convert_file output must be a dict"]
+        code = output.get("exit_code")
+        if code not in (0, None):
+            tail = str(output.get("log_tail") or "").strip()[-800:]
+            kept = len(output.get("outputs") or [])
+            return False, [f"{output.get('op')} failed with exit {code}; outputs kept: {kept}; log tail:\n{tail}"]
+        if not output.get("outputs"):
+            return False, [str(output.get("error") or "conversion produced no output")]
+        return True, []
+
     def _ocr_pages(self, tmp: Path, lang: str, timeout: int) -> tuple[int, str]:
         pages = sorted(tmp.glob("page-*.png"))
         if not pages:
