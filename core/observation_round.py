@@ -324,6 +324,12 @@ def unfilled_placeholders(content: str) -> list[str]:
 
 #: Сколько одинаковых кругов подряд — петля, а не работа.
 _STUCK_ROUNDS = 3
+#: Одно действие с тем же результатом — столько раз за ход, и круги кончаются.
+#: OpenHands StuckDetector: повтор пары «действие → наблюдение» 4 раза. Ночь
+#: 24→25.09: find_in_files «def complete» 7 раз за минуту с одним ответом —
+#: круги целиком не совпадали, соседние шаги были разные, датчик кругов молчал.
+_SAME_ACTION_STOP = 4
+_SAME_ACTION_WARN = 2
 
 #: Предохранитель, не бюджет: останавливают пустой план и датчик застревания.
 #: Круг у нас — пакет из нескольких вызовов, поэтому он в разы меньше
@@ -388,6 +394,30 @@ def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> s
     return hashlib.sha256("\n".join(steps + outs).encode("utf-8", "replace")).hexdigest()
 
 
+def _action_repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> tuple[int, str]:
+    """Худший повтор ОДНОГО действия с тем же результатом за ход: (раз, что за действие)."""
+    import hashlib
+
+    counts = getattr(st, "action_repeats", None)
+    if counts is None:
+        counts = {}
+        st.action_repeats = counts
+    by_label = {str((s.action_spec or {}).get("source_label") or ""): s
+                for s in getattr(st.plan, "steps", None) or []}
+    for label, art in attempt_artifacts.items():
+        step = by_label.get(label)
+        if step is None or getattr(step, "status", "") != "done":
+            continue
+        spec = step.action_spec or {}
+        what = json.dumps({"tool": spec.get("tool_name"), "args": spec.get("arguments")},
+                          ensure_ascii=False, sort_keys=True, default=str)
+        seen = hashlib.sha256(_as_text((art or {}).get("output"))[:4000].encode("utf-8", "replace"))
+        key = what + seen.hexdigest()
+        counts[key] = (counts.get(key, (0, what))[0] + 1, what)
+    worst = max(counts.values(), default=(0, ""))
+    return worst[0], worst[1][:200]
+
+
 def _repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> int:
     """Сколько последних кругов подряд совпадают с этим (1 — повтора нет).
 
@@ -440,6 +470,13 @@ def continue_after_observation(
             "attempt": st.attempt, "reason": f"turn dollar budget spent: ${spent:.2f} of ${cap:.2f}",
         })
         return False
+    same, what = _action_repeats(st, attempt_artifacts)
+    if same >= _SAME_ACTION_STOP:
+        loop.log.log("observation_round_skipped", {
+            "attempt": st.attempt, "reason": f"stuck: one action gave the same result {same} times",
+            "action": what,
+        })
+        return False
     repeats = _repeats(st, attempt_artifacts)
     if repeats >= _STUCK_ROUNDS:
         loop.log.log("observation_round_skipped", {
@@ -450,6 +487,10 @@ def continue_after_observation(
         st.plan, attempt_artifacts,
         earlier=sorted(set(st.artifacts) - set(attempt_artifacts)),
         notes=experience_notes(loop, attempt_artifacts))
+    if same >= _SAME_ACTION_WARN:
+        block = (f"REPEAT: the step {what} already returned THIS SAME output {same} times. "
+                 "Running it again will not change it: use what it returned, or do something else.\n\n"
+                 + block)
     if repeats > 1:
         loop.log.log("observation_round_repeated", {"attempt": st.attempt, "repeats": repeats})
         block = (f"REPEAT: the last {repeats} rounds ran the SAME steps and got the SAME outputs. "

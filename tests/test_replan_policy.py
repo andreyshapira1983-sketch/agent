@@ -141,23 +141,32 @@ class TestDecideCoreCases:
         assert "different" in d.advice_for_planner.lower()
         assert d.failure_counts == {"tool_error": 1}
 
-    def test_two_tool_errors_exhausts_budget(self):
-        """tool_error budget is 2 → 2 occurrences must stop."""
-        history = [FakeTrigger(code="tool_error"), FakeTrigger(code="tool_error")]
-        d = self.policy.decide(history, completed_attempts=2)
+    def test_the_same_tool_error_three_times_exhausts_budget(self):
+        """tool_error считается по ОДНОМУ действию: третий такой же сбой — стоп
+        (OpenHands StuckDetector: одно действие, та же ошибка, 3 раза)."""
+        history = [FakeTrigger(code="tool_error")] * 3
+        d = self.policy.decide(history, completed_attempts=3)
         assert d.action == "abort_no_retry"
         assert "tool_error" in d.reason
-        assert "2/2" in d.reason
+        assert "3/3" in d.reason
 
-    def test_two_web_empty_exhausts(self):
-        history = [FakeTrigger(code="web_empty"), FakeTrigger(code="web_empty")]
+    def test_two_different_tool_errors_do_not_stop_the_turn(self):
+        """Ночь 24→25.09: пять кругов шли с продвижением, две РАЗНЫЕ ошибки
+        инструмента («tool_error 2/2») оборвали ход."""
+        history = [FakeTrigger(code="tool_error", tool_name="patch_check", arguments={"path": "a"}),
+                   FakeTrigger(code="tool_error", tool_name="file_read", arguments={"path": "b"})]
         d = self.policy.decide(history, completed_attempts=2)
+        assert d.action == "continue"
+
+    def test_the_same_empty_search_three_times_exhausts(self):
+        history = [FakeTrigger(code="web_empty")] * 3
+        d = self.policy.decide(history, completed_attempts=3)
         assert d.action == "abort_no_retry"
         assert "web_empty" in d.reason
 
-    def test_two_timeout_exhausts(self):
-        history = [FakeTrigger(code="timeout"), FakeTrigger(code="timeout")]
-        d = self.policy.decide(history, completed_attempts=2)
+    def test_the_same_timeout_three_times_exhausts(self):
+        history = [FakeTrigger(code="timeout")] * 3
+        d = self.policy.decide(history, completed_attempts=3)
         assert d.action == "abort_no_retry"
         assert "timeout" in d.reason
 
