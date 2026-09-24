@@ -256,7 +256,39 @@ def _verdict(result: dict[str, Any]) -> dict[str, str]:
         return {"verdict": "red", "why": "no test in the patch — a change without a test proves nothing"}
     if result.get("tests_exit_code") != 0 or result.get("full_exit_code") not in (0, None):
         return {"verdict": "red", "why": "tests are not green"}
+    if result.get("witness_exit_code") == 0:
+        return {"verdict": "red", "why": (
+            "your new test passes on the OLD code too — it does not witness the change; "
+            "make it fail before the fix and pass after it")}
     return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
+
+
+#: Сколько соседних тестов (импортирующих изменённый модуль) добавлять к прогону.
+_NEIGHBOR_LIMIT = 15
+
+
+def _neighbor_tests(root: Path, source: list[str], exclude: set[str]) -> list[str]:
+    """Существующие тесты, которые импортируют изменённые модули кода."""
+    import re
+
+    mods = [p[:-3].replace("/", ".") for p in source if p.endswith(".py")]
+    if not mods:
+        return []
+    pattern = re.compile(r"^\s*(?:from|import)\s+(" + "|".join(re.escape(m) for m in mods) + r")\b",
+                         re.MULTILINE)
+    found: list[str] = []
+    for test in sorted((root / "tests").glob("test_*.py")):
+        rel = test.relative_to(root).as_posix()
+        if rel in exclude:
+            continue
+        try:
+            if pattern.search(test.read_text(encoding="utf-8", errors="replace")):
+                found.append(rel)
+        except OSError:
+            continue
+        if len(found) >= _NEIGHBOR_LIMIT:
+            break
+    return found
 
 
 def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
@@ -361,7 +393,12 @@ class PatchCheckTool(Tool):
             code, out = self._run([sys.executable, "-m", "ruff", "check", *py], copy)
             result["ruff"] = "not installed" if "No module named ruff" in out else (
                 "clean" if code == 0 else _tail(out, 20))
-            wanted = list(dict.fromkeys([*(tests or []), *(p for p in py if p.startswith("tests/"))]))
+            own_tests = [p for p in py if p.startswith("tests/")]
+            source = [p for p in py if not p.startswith("tests/")]
+            neighbors = _neighbor_tests(copy, source, exclude=set(own_tests) | set(tests or []))
+            if neighbors:
+                result["neighbor_tests"] = neighbors
+            wanted = list(dict.fromkeys([*(tests or []), *own_tests, *neighbors]))
             for t in wanted:
                 require_ascii_identifier(t, role="patch_check test path")
             if wanted:
@@ -370,6 +407,17 @@ class PatchCheckTool(Tool):
             else:
                 result["tests_exit_code"] = None
                 result["tests_output"] = "no test file in the patch and none named — a change without a test proves nothing"
+            if result.get("tests_exit_code") == 0 and own_tests and source:
+                # Свидетель: новый тест обязан ПАДАТЬ на старом коде. 2026-09-24:
+                # «зелёная» правка агента прошла только свои два теста, которые
+                # проходили и до правки, а ломала 5 соседних — подгонка под прибор.
+                witness = Path(tmp) / "witness"
+                self._clone(witness)
+                errs = apply_blocks(witness, [b for b in blocks if b["path"] in own_tests])
+                if not errs:
+                    code, out = self._run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                                           *own_tests], witness)
+                    result.update(witness_exit_code=code, witness_output=_tail(out, 15))
             if full and result.get("tests_exit_code") not in (0, None):
                 # 2026-09-22 15:33–15:40: свой тест красный, а полный набор (3 мин)
                 # гонялся каждый круг — три круга из шести ушли на ожидание.
