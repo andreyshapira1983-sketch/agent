@@ -19,11 +19,18 @@
     вызова модели;
   * модель отвечает «social» только когда для ответа не нужен ни один факт — ни
     о мире, ни о файлах, ни о новостях, ни о делах и журналах самого агента;
-  * сомнение, сбой, неразборчивый ответ — обычный путь.
+  * сомнение, сбой, неразборчивый ответ — обычный путь;
+  * исчерпанный бюджет — не сбой классификатора: остановка хода проходит насквозь.
+
+Работает только в разговоре с человеком: переключатель AGENT_SOCIAL_TURN_CLASSIFIER
+ставит мостик чата. Цели кампании болтовнёй не бывают, и лишний вызов модели на
+каждую короткую цель — чистый расход (первый прогон тестов бюджета это показал:
+вызов классификатора съедал ответ, расписанный планировщику).
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -33,6 +40,9 @@ from core.task_complexity import (
     needs_live_grounding,
     tool_signal_present,
 )
+
+#: Переключатель: включает мостик разговора (ask_agent.py), не кампания.
+ENV_FLAG = "AGENT_SOCIAL_TURN_CLASSIFIER"
 
 #: Длиннее — уже не реплика, а поручение; классификатор не зовётся.
 MAX_CHARS = 300
@@ -51,6 +61,8 @@ _JSON_RE = re.compile(r"\{[^{}]*\}")
 
 def is_social_turn(loop: Any, text: str, *, file_hint: str | None = None) -> bool:
     """Реплика — чистая болтовня, которой не нужны ни планировщик, ни инструменты."""
+    if os.environ.get(ENV_FLAG, "").strip().lower() not in ("1", "on", "true", "yes"):
+        return False
     if file_hint or not isinstance(text, str):
         return False
     stripped = text.strip()
@@ -62,13 +74,16 @@ def is_social_turn(loop: Any, text: str, *, file_hint: str | None = None) -> boo
     router = getattr(loop, "model_router", None)
     if router is None:
         return False
-    try:
-        from core.model_router import ModelRole
+    from core.model_router import ModelRole
+    from core.model_usage import ModelBudgetExceeded
 
+    try:
         raw = router.for_role(ModelRole.MEMORY_SUMMARY).complete(
             system=_SYSTEM, user=stripped, max_tokens=20, temperature=0.0, json_object=True)
         found = _JSON_RE.search(str(raw or ""))
         social = bool(found) and json.loads(found.group(0)).get("social") is True
+    except ModelBudgetExceeded:
+        raise
     except Exception:  # noqa: BLE001 — сбой классификатора = обычный путь, никогда не короткий
         social = False
     log = getattr(loop, "log", None)

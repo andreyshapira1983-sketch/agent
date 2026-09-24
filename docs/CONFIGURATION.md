@@ -93,6 +93,11 @@ Find them with:
 grep -rn "AGENT_MAX_TOKENS\|AGENT_MAX_CONTINUATIONS\|AGENT_AUTO_CONTINUE\|AGENT_EVIDENCE_FILE_CHARS\|AGENT_EVIDENCE_TOTAL_CHARS\|AGENT_SELF_BUILD_COOLDOWN_HOURS\|AGENT_MODEL_CATALOG_PATH\|AGENT_MODEL_CATALOG_TTL_DAYS\|AGENT_TEST_TIMEOUT_SECONDS" core/ main.py agent_tick.py
 ```
 
+`AGENT_SOCIAL_TURN_CLASSIFIER=1` lets a short no-tool message that one cheap model
+call classifies as pure small talk skip the planner and the verification tail
+(`core/social_turn.py`). Off by default; the chat bridge turns it on, the campaign
+does not (its goals are never small talk).
+
 `AGENT_SERVICE_*` variables belong to the Windows-service shell contract
 (`app/windows_service.py`); per `knowledge/doctrine/ROADMAP.md` that service is not
 implemented, so they configure a contract only.
