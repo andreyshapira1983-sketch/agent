@@ -53,6 +53,7 @@ from tools.network_safety import (
     host_patterns_from_env,
     reserve_egress,
 )
+from tools.reddit_feed import feed_as_text, reddit_feed_url
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -315,10 +316,14 @@ class WebFetchTool(Tool):
 
     def run(self, url: str, find: str = "") -> dict[str, Any]:
         self._network_policy.validate_url(url, role="web_fetch url")
+        # Страница Reddit собирается скриптом — читаем её ленту (tools/reddit_feed.py).
+        feed_url = reddit_feed_url(url)
+        if feed_url:
+            self._network_policy.validate_url(feed_url, role="web_fetch reddit feed url")
         reserve_egress(self.budget_ledger, tool_name="web_fetch", target=url)
 
         req = urllib.request.Request(  # noqa: S310 — validate_url above enforces the scheme allow-list and egress policy
-            url,
+            feed_url or url,
             headers={
                 "User-Agent": USER_AGENT,
                 # Prefer plain text / HTML — gives the server a hint.
@@ -364,9 +369,13 @@ class WebFetchTool(Tool):
                 # below still produces SOME text.
                 pass
 
-        self._check_content_type(content_type)
+        if not (feed_url and "xml" in (content_type or "").lower()):
+            self._check_content_type(content_type)
 
-        if "application/pdf" in (content_type or "").lower():
+        if feed_url and "xml" in (content_type or "").lower():
+            text_raw = raw.decode(self._extract_charset(content_type) or "utf-8", errors="replace")
+            text_clean = feed_as_text(text_raw)
+        elif "application/pdf" in (content_type or "").lower():
             if truncated:
                 raise ValueError(
                     f"PDF is larger than the {limit} byte read cap and a "
