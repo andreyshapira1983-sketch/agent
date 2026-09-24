@@ -93,16 +93,13 @@ def _run() -> tuple[_TimingOutShell, FakePlanner]:
     return tool, planner
 
 
-def test_the_same_timeout_buys_two_retries() -> None:
-    """Precondition: the producer must actually fire and its budget must apply.
-
-    timeout считается по ОДНОМУ действию: та же команда, третий тайм-аут — стоп
-    (OpenHands StuckDetector, 3 повтора «действие → ошибка»; правка 2026-09-25)."""
+def test_the_timeout_buys_exactly_one_retry() -> None:
+    """Precondition: the producer must actually fire and its budget must apply."""
     tool, planner = _run()
-    assert tool.calls == 3, (
-        "the same command timing out stops on its third timeout, not before"
+    assert tool.calls == 2, (
+        "timeout carries max_occurrences=2, so the first hit must not end the run"
     )
-    assert len(planner.calls) == 3
+    assert len(planner.calls) == 2
 
 
 def test_the_retry_prompt_names_the_timeout_rather_than_some_other_failure() -> None:
