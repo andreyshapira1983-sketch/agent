@@ -264,6 +264,28 @@ def test_the_operator_brake_on_auto_memory_stops_learning(tmp_path: Path) -> Non
     assert (tmp_path / "data" / "failure_cards.jsonl").exists()
 
 
+
+def test_a_loop_without_a_workspace_writes_no_cards_where_it_runs(tmp_path: Path, monkeypatch) -> None:
+    """Запасной `Path.cwd()` писал data/failure_cards.jsonl в папку процесса:
+    тест без file_read оставил его в копии /root/verify, и соседний замер живого
+    состояния упал (2026-09-24). Нет рабочей папки — нет и карточек."""
+    trace = tmp_path / "trace.jsonl"
+    events = _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok()))
+    trace.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+    run_dir = tmp_path / "cwd"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+
+    class _Bare:
+        log = _Log(trace)
+
+    learn_after_turn(_Bare())
+    trig = ReplanTrigger(code="tool_error", step_id="s", tool_name="python_probe", arguments={},
+                         reason=_ERR, attempt=0)
+    assert with_past_experience(_Bare(), trig) is trig
+    assert experience_notes(_Bare(), {"x": {"tool": "python_probe", "output": _probe_fail()["output"]}}) == {}
+    assert not (run_dir / "data").exists()
+
 def test_the_loop_uses_it_where_failures_are_read() -> None:
     import inspect
 

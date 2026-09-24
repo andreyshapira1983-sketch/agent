@@ -256,10 +256,13 @@ def witness_note(workspace: Path | str, text: str) -> str | None:
     return f"ТЕСТ {m.group(1)}::{m.group(2)} ОХРАНЯЕТ: {head[:300]}"
 
 
-def _workspace(loop: Any) -> Path:
+def _workspace(loop: Any) -> Path | None:
+    """Рабочая папка цикла. Нет её — карточек нет: запасной `Path.cwd()` писал
+    data/failure_cards.jsonl туда, где запущен процесс (тест в копии /root/verify,
+    2026-09-24)."""
     root = getattr(loop, "_file_read_workspace_root", None)
     found = root() if callable(root) else None
-    return Path(found) if found else Path.cwd()
+    return Path(found) if found else None
 
 
 def with_past_experience(loop: Any, trigger: Any) -> Any:
@@ -267,6 +270,8 @@ def with_past_experience(loop: Any, trigger: Any) -> Any:
     if trigger is None:
         return trigger
     ws = _workspace(loop)
+    if ws is None:
+        return trigger
     reason = str(getattr(trigger, "reason", "") or "")
     notes = [n for n in (note_for(ws, trigger.tool_name or "", reason), witness_note(ws, reason)) if n]
     if not notes:
@@ -279,6 +284,8 @@ def with_past_experience(loop: Any, trigger: Any) -> Any:
 def experience_notes(loop: Any, artifacts: dict[str, dict[str, Any]]) -> dict[str, str]:
     """Для круга наблюдения: метка шага → прошлый опыт по его мягкому провалу."""
     ws, out = _workspace(loop), {}
+    if ws is None:
+        return out
     for label, meta in artifacts.items():
         tool = str(meta.get("tool") or "")
         text = failure_text(tool, meta.get("output"))
@@ -423,13 +430,14 @@ def learn_after_turn(loop: Any) -> None:
         return
     log = getattr(loop, "log", None)
     path = getattr(log, "path", None)
-    if path is None:
+    ws = _workspace(loop)
+    if path is None or ws is None:
         return
     try:
         from core.model_router import ModelRole
         router = getattr(loop, "model_router", None)
         llm = router.for_role(ModelRole.MEMORY_SUMMARY) if router is not None else None
-        learn_from_events(_workspace(loop), read_events(path), llm,
+        learn_from_events(ws, read_events(path), llm,
                           trace_id=str(getattr(log, "trace_id", "") or ""))
     except Exception as exc:  # noqa: BLE001 — учёба не должна ронять ход; причина — в журнал
         _log(loop, "failure_cards_error", {"error": f"{type(exc).__name__}: {exc}"[:300]})
