@@ -187,6 +187,35 @@ def test_a_write_that_did_not_compose_is_learned_too(tmp_path: Path) -> None:
     assert "начни с FILE:" in with_past_experience(_Loop(tmp_path), trig).reason
 
 
+def test_a_guard_refusal_teaches_no_lesson(tmp_path: Path) -> None:
+    """24.09: из отказов сторожа выучено «лимит голоса исчерпан — пиши в журнал
+    дефектов» и «гейт блокирует __import__ — используй importlib.import_module».
+    После отказа удачный вызов — не лекарство, а часто обход."""
+    for err in ("PermissionError: voice budget spent: 3 of 3 calls to the human already made",
+                "ValueError: refused before execution: '__import__' bypasses the import gate"):
+        ws = tmp_path / str(abs(hash(err)))
+        llm = _Llm("Когда X — обойди его так-то")
+        ev = _events(("journal_append", {}, {"status": "error", "error": err, "output": None}),
+                     ("journal_append", {}, {"status": "success", "output": {"appended": True}}))
+        learn_from_events(ws, ev, llm)
+        card = next(iter(CardStore(ws).cards.values()))
+        assert llm.calls == 0 and card.status == "guard" and card.lesson is None, err
+
+
+def test_a_lesson_the_reviewer_rejected_is_not_learned_again(tmp_path: Path) -> None:
+    llm = _Llm("Когда X — делай Y")
+    learn_from_events(tmp_path, _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok())), llm)
+    store = CardStore(tmp_path)
+    card = next(iter(store.cards.values()))
+    card.status, card.lesson = "rejected", None
+    store.save()
+    again = [{**e, "ts": "2026-09-30" + e["ts"][10:]} for e in
+             _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok()))]
+    learn_from_events(tmp_path, again, llm)
+    assert llm.calls == 1 and CardStore(tmp_path).cards[card.sig].status == "rejected"
+    assert note_for(tmp_path, "python_probe", _ERR) is None
+
+
 def test_the_same_trace_is_not_counted_twice(tmp_path: Path) -> None:
     ev = _events(("python_probe", {}, _probe_fail()))
     learn_from_events(tmp_path, ev, None, trace_id="t1")

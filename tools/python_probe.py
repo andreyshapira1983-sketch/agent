@@ -64,6 +64,9 @@ _FORBIDDEN_OS_CALLS = frozenset({
     "system", "popen", "spawnl", "spawnv", "kill", "chmod", "chown",
 })
 
+#: Имена динамического импорта: атрибутом, строкой или импортом — всё обход.
+_DYNAMIC_IMPORT_NAMES = frozenset({"__import__", "import_module"})
+
 _OUTPUT_CAP = 16 * 1024  # 16 KiB на поток: эксперимент — не дамп
 
 #: Выключатель импорта модулей рабочей папки. Ставит ОПЕРАТОР в окружении
@@ -101,10 +104,83 @@ def _with_workspace_on_path(code: str, root: Path) -> str:
     )
 
 
+#: События аудита Python (docs.python.org, «Audit events table»), которые —
+#: действие, а не замер: процесс и сеть. Удаление, переименование и запись
+#: файлов судятся по пути: внутри папки опыта и временной папки можно.
+#: ctypes здесь НЕТ: numpy/matplotlib и сам Python грузят через него свои
+#: библиотеки при импорте (проверка 24.09 уронила обычный замер). Из текста опыта
+#: ctypes запрещён гейтом; через ctypes растяжку можно обойти — поэтому она и
+#: не стена (документация Python: audit hooks — не песочница).
+_RUNTIME_ACTIONS = frozenset({
+    "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn",
+    "os.fork", "os.forkpty", "pty.spawn", "os.kill", "os.startfile",
+    "socket.connect", "socket.bind", "socket.sendto", "socket.getaddrinfo",
+})
+_RUNTIME_PATH_EVENTS = frozenset({"os.remove", "os.rmdir", "shutil.rmtree", "os.rename"})
+
+
+def _with_runtime_tripwire(code: str) -> str:
+    """Опыт с растяжкой внутри: действие отказывается и при обходе проверки текста.
+
+    24.09: проверка текста ловила `import subprocess` и `__import__`, но
+    `importlib.import_module("subprocess")`, `builtins.__import__` и
+    `Path(...).write_text` проходили, а карточки прошлых ошибок успели выучить
+    урок «используй importlib.import_module». Документация Python прямо
+    говорит, что хук аудита — не песочница: умышленный код его обойдёт. Это
+    растяжка для агента, честно пошедшего по выученному обходу, а не стена;
+    стена — отдельный пользователь, как у convert_file (решение оператора).
+    """
+    guard = (
+        "import sys as _pg_sys, os as _pg_os, tempfile as _pg_tmp\n"
+        "_pg_sys.dont_write_bytecode = True\n"
+        "_pg_roots = {_pg_os.path.realpath(_pg_os.getcwd()),"
+        " _pg_os.path.realpath(_pg_tmp.gettempdir())}\n"
+        f"_pg_actions = {sorted(_RUNTIME_ACTIONS)!r}\n"
+        f"_pg_paths = {sorted(_RUNTIME_PATH_EVENTS)!r}\n"
+        "_pg_write = (_pg_os.O_WRONLY | _pg_os.O_RDWR | _pg_os.O_APPEND | _pg_os.O_CREAT"
+        " | _pg_os.O_TRUNC)\n"
+        "def _pg_inside(p):\n"
+        "    try:\n"
+        "        raw = _pg_os.fsdecode(p)\n"
+        "        r = _pg_os.path.realpath(raw)\n"
+        "    except (TypeError, ValueError):\n"
+        "        return isinstance(p, int)\n"
+        "    if raw.lower() == _pg_os.devnull.lower():\n"
+        "        return True\n"
+        "    return r == _pg_os.devnull or any(r == t or r.startswith(t + _pg_os.sep)"
+        " for t in _pg_roots)\n"
+        "def _pg_hook(event, args):\n"
+        "    if event in _pg_actions:\n"
+        "        raise RuntimeError('refused at run time: ' + event + ' is an action, not a measurement')\n"
+        "    if event in _pg_paths and not all(_pg_inside(a) for a in args[:2] if a is not None"
+        " and not isinstance(a, int)):\n"
+        "        raise RuntimeError('refused at run time: ' + event + ' outside the experiment folder')\n"
+        "    if event == 'open' and len(args) > 2 and isinstance(args[2], int)"
+        " and args[2] & _pg_write and not _pg_inside(args[0]):\n"
+        "        raise RuntimeError('refused at run time: writing outside the experiment folder')\n"
+        "_pg_sys.addaudithook(_pg_hook)\n"
+    )
+    return guard + f"exec(compile({code!r}, '<string>', 'exec'))\n"
+
+
 def _forbidden_reason(code: str) -> str | None:
     """Одна названная причина отказа или None. Судит структуру, не строки."""
     tree = ast.parse(code)
     for node in ast.walk(tree):
+        # Обходы гейта, проверенные 24.09 опытом: importlib.import_module,
+        # from importlib import import_module, builtins.__import__,
+        # getattr(…, "__import__"), exec/eval строки (код в строке гейт не видит).
+        # Тот же класс ломал «песочницу» smolagents (CVE-2025-5120, CVE-2025-9959).
+        if isinstance(node, ast.Attribute) and node.attr in _DYNAMIC_IMPORT_NAMES:
+            return f"'{node.attr}' bypasses the import gate"
+        if isinstance(node, ast.Constant) and node.value in _DYNAMIC_IMPORT_NAMES:
+            return f"the name '{node.value}' in a string bypasses the import gate"
+        if isinstance(node, ast.ImportFrom) and any(
+                a.name in _DYNAMIC_IMPORT_NAMES for a in node.names):
+            return "importing import_module bypasses the import gate"
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ("exec", "eval", "compile", "import_module")):
+            return f"{node.func.id}() hides code from the import gate"
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             names = (
                 [a.name for a in node.names] if isinstance(node, ast.Import)
@@ -320,8 +396,9 @@ class PythonProbeTool(Tool):
                     # товаров выдумкой. PYTHONIOENCODING не годится: `-I` его
                     # игнорирует.
                     [sys.executable, "-I", "-X", "utf8", "-c",
-                     _with_workspace_on_path(code, self.workspace_root)
-                     if workspace_import else code],
+                     _with_runtime_tripwire(
+                         _with_workspace_on_path(code, self.workspace_root)
+                         if workspace_import else code)],
                     cwd=cwd, env=env, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=max(1, int(timeout_seconds)), check=False,

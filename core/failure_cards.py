@@ -59,7 +59,7 @@ class Card:
     tool: str
     error: str
     lesson: str | None = None
-    status: str = "unlearned"      # unlearned | active | retired
+    status: str = "unlearned"      # unlearned | active | retired | guard | rejected
     created: str = ""
     last_seen: str = ""
     seen: int = 1
@@ -70,6 +70,25 @@ class Card:
 
 
 # ── подпись ошибки ──────────────────────────────────────────────────────────
+
+#: Карточки, на которых модель может учиться. «guard» — отказ сторожа: после
+#: него удачный следующий вызов не лекарство, а часто обход (24.09 выучено
+#: «лимит голоса исчерпан — пиши в журнал дефектов» и «гейт блокирует
+#: __import__ — используй importlib.import_module»). «rejected» — урок
+#: отвергнут проверяющим и не учится заново.
+_LEARNABLE = frozenset({"unlearned", "retired"})
+
+#: Отказ защиты, а не поломка: запрет, лимит, «не замер, а действие».
+_GUARD_RE = re.compile(
+    r"PermissionError|refus|отказ|not allowed|bypass|budget spent|запрещ|"
+    r"is an action, not a measurement|turns a measurement into an action",
+    re.IGNORECASE)
+
+
+def is_guard_refusal(text: str) -> bool:
+    """Ошибка — отказ сторожа: урок из неё не рождается."""
+    return bool(_GUARD_RE.search(text or ""))
+
 
 def failure_text(tool: str, output: Any, error: str | None = None) -> str | None:
     """Текст провала шага; None — шаг удался.
@@ -361,13 +380,14 @@ def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: 
                 card.status = "retired"
         if card is None:
             card = Card(sig=sig, tool=r["tool"], error=r["fail"][:300], created=r["ts"],
-                        last_seen=r["ts"], seen=0, source_trace=r["trace"])
+                        last_seen=r["ts"], seen=0, source_trace=r["trace"],
+                        status="guard" if is_guard_refusal(r["fail"]) else "unlearned")
             store.cards[sig] = card
         card.seen += 1
         card.last_seen = r["ts"]
         fixed = next((x for x in later if not x["fail"]), None)
-        if (card.status != "active" and fixed is not None and card.asked < _MAX_ASKS
-                and asked < max_new and llm is not None):
+        if (card.status in _LEARNABLE and not is_guard_refusal(r["fail"]) and fixed is not None
+                and card.asked < _MAX_ASKS and asked < max_new and llm is not None):
             asked += 1
             card.asked += 1
             try:
