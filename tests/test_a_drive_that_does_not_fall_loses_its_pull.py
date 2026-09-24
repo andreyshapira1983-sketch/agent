@@ -123,4 +123,5 @@ def test_open_defects_raise_the_need_to_repair_itself(tmp_path) -> None:
     registry = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH)
     registry.upsert_failure("FileNotFoundError: нет файла core/x.py", "2026-09-22T00:00:00+00:00")
     drive = compute_drives(tmp_path, now)["self_improvement_need"]
-    assert drive["value"] > 0.2 and "открытых дефектов в реестре: 1" in drive["why"]
+    # 24.09: вес — повод × «выходит ли починка»; без истории починок — половина.
+    assert drive["value"] > 0.1 and "открытых дефектов в реестре с задачей: 1" in drive["why"]

@@ -8,10 +8,19 @@
 2026-09-19).
 
 Этот модуль — ТОЛЬКО измерение. Каждый драйв считается из того, что уже лежит
-на диске: журнала кампании, эпизодов, ящика одобрений, лестницы наблюдений.
-Модель ничего не выдумывает; значение — число 0..1 с объяснением, откуда оно.
-Драйв растёт со временем без нужного события и гасится этим событием:
-`1 - exp(-часов / tau)`. Поведение агента здесь не меняется.
+на диске: журнала кампании, решений драйвов, ящика одобрений, лестницы
+наблюдений. Модель ничего не выдумывает; значение — число 0..1 с объяснением.
+
+Интерес — от событий и прогресса, а не от часов (слово оператора 24.09). До того
+предметный драйв рос формулой `1 - exp(-часов / tau)`: три часа без математики —
+«хочется математики», даже освоенной или раз за разом проваливаемой, а список
+предметов был расписанием. Теперь, по литературе (MAGELLAN, ICML 2025; Oudeyer —
+learning progress; OMNI): интерес области — ПРОГРЕСС в учёбе, модуль разницы
+доли удач в последних попытках и в предыдущих; освоенное и невыходящее интереса
+не дают, почти не пробованное даёт небольшой постоянный интерес «попробовать».
+Самоулучшение — дефекты с названной задачей и доказанные правки, умноженные на
+то, выходит ли починка (замер 24.09: 69 попыток, 1% удач — беговая дорожка).
+От часов остался только сигнал простоя `idle_time`, и содержания он не даёт.
 
     python -m core.drives            # текущие драйвы этой рабочей папки
 """
@@ -20,7 +29,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +40,18 @@ DOMAINS: dict[str, tuple[str, ...]] = {
     "physics": ("knowledge_library/physics/",),
     "cs": ("knowledge_library/cs/",),
 }
-_WEB_TOOLS = frozenset({"web_search", "web_fetch", "rss_fetch"})
 
-#: Время (часы), за которое драйв без события поднимается до ~0.63.
-TAU_HOURS = {"idle_time": 0.5, "competence": 3.0, "world": 6.0, "self": 6.0}
+#: Время (часы), за которое сигнал простоя поднимается до ~0.63. Единственные
+#: часы среди драйвов: простой — сигнал, а не содержание (`_NOT_CONTENT`).
+TAU_HOURS = {"idle_time": 0.5}
+#: Прогресс судится по стольким последним попыткам драйва (пополам: было/стало).
+LP_WINDOW = 8
+#: Меньше стольких попыток — прогресса не видно; интерес — «попробовать».
+LP_MIN_ATTEMPTS = 4
+#: Интерес к почти не пробованной области; убывает с каждой попыткой.
+EXPLORE_VALUE = 0.3
+#: Старше стольких дней попытка забыта: давно заброшенная область снова новая.
+ATTEMPT_HORIZON_DAYS = 7
 _WORK_RESULTS = frozenset({"completed"})
 #: Поломка — действие было, а результата нет. Простой («нечего делать») и пропуск
 #: повтора — не поломка: это `idle_time`, иначе один факт считался бы дважды.
@@ -82,16 +99,6 @@ def _ago(since: datetime | None, now: datetime) -> str:
     return f"{minutes} мин назад" if minutes < 120 else f"{minutes // 60} ч назад"
 
 
-def episode_domains(episode: dict[str, Any]) -> set[str]:
-    """Области, в которых работал эпизод: по путям в вопросе/источниках и по веб-инструментам."""
-    text = " ".join([str(episode.get("question") or ""),
-                     " ".join(str(s) for s in episode.get("source_labels") or [])]).replace("\\", "/")
-    found = {d for d, marks in DOMAINS.items() if any(m in text for m in marks)}
-    if _WEB_TOOLS & set(episode.get("tools_used") or []):
-        found.add("world")
-    return found
-
-
 def _similarity(goals: list[str]) -> float:
     """Средняя попарная схожесть последних целей (Жаккар по словам)."""
     sets = [set(_WORD.findall(g.lower())) for g in goals if g]
@@ -129,22 +136,12 @@ def open_obligations(root: Path) -> list[dict[str, Any]]:
     return out
 
 
-#: Потребность «улучшить себя» меряется двумя вещами: сколько прошло с
-#: последней СВОЕЙ правки кода и есть ли материал — крупный собственный модуль,
+#: Материал «улучшить себя» — собственный модуль с доказательством правки,
 #: который сейчас никто не ждёт в ящике и по которому нет урока отката. Замер
 #: 2026-09-19/20: после включения драйвов агент читал свой код в 133 задачах из
-#: 198 и не подал ни одной заявки на правку — потребности «сделать себя лучше»
-#: в списке не было вовсе, а задачи от драйвов по построению только читают.
+#: 198 и не подал ни одной заявки на правку — задачи от драйвов только читали.
 _OWN_CODE_DIRS = ("core", "tools")
 _SELF_CHANGE_OPS = frozenset({"self_apply_lane.run"})
-
-
-def last_self_change(root: Path) -> datetime | None:
-    """Когда агент в последний раз ИЗМЕНИЛ свой код (исполненная заявка полосы)."""
-    stamps = [t for r in _rows(root / "data" / "approval_inbox.jsonl")
-              if r.get("operation") in _SELF_CHANGE_OPS and r.get("status") == "executed"
-              for t in [_ts(r.get("updated_at") or r.get("created_at"))] if t]
-    return max(stamps, default=None)
 
 
 def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]]:
@@ -219,14 +216,82 @@ def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, 
     return out[:limit]
 
 
-def _open_defect_count(root: Path) -> int:
-    """Сколько дефектов реестра ждут починки (0 — реестра нет или он пуст)."""
+def _tasked_defect_count(root: Path) -> int:
+    """Сколько открытых дефектов реестра можно чинить: у них названа задача.
+
+    Дефект без задачи правкой не закрывается (core/patch_route.py его и не
+    берёт) — звать к нему значило крутить пустой цикл.
+    """
     try:
         from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
 
-        return len(SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved())
+        return sum(1 for i in SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved()
+                   if str(i.suggested_next_action or "").strip())
     except Exception:  # noqa: BLE001 — нечитаемый реестр = ноль поводов, остальное считается
         return 0
+
+
+def drive_outcomes(root: Path, now: datetime) -> dict[str, list[bool]]:
+    """Исходы целей по драйву, по порядку: True — судья кампании засчитал цель.
+
+    Решение драйва (data/drive_decisions.jsonl) связывается с первым исходом той
+    же цели в журнале кампании; попытки старше ATTEMPT_HORIZON_DAYS и позже
+    `now` не считаются (второе — чтобы замер можно было переиграть в прошлом).
+    """
+    ledger: dict[str, list[tuple[datetime, str]]] = {}
+    for r in _rows(root / "data" / "campaign_ledger.jsonl"):
+        t = _ts(r.get("ts"))
+        if t is not None and r.get("goal") and r.get("result") in _WORK_RESULTS | _BROKEN_RESULTS:
+            ledger.setdefault(str(r["goal"]), []).append((t, str(r["result"])))
+    horizon = now - timedelta(days=ATTEMPT_HORIZON_DAYS)
+    out: dict[str, list[bool]] = {}
+    for d in _rows(root / "data" / "drive_decisions.jsonl"):
+        t = _ts(d.get("ts"))
+        if (d.get("status") != "proposed" or not d.get("drive") or not d.get("goal")
+                or t is None or not horizon <= t <= now):
+            continue
+        result = next((res for rt, res in ledger.get(str(d["goal"]), []) if t <= rt <= now), None)
+        if result is not None:
+            out.setdefault(str(d["drive"]), []).append(result in _WORK_RESULTS)
+    return out
+
+
+#: Драйвы-события: повод — факт на диске, и выход их целей судит их вес.
+_EVENT_DRIVES = ("stuck_need", "maintenance_need", "uncertainty", "unfinished_obligations",
+                 "novelty_need")
+
+
+def _learnable(outcomes: list[bool]) -> float:
+    """Выходит ли цель драйва: доля удач по Лапласу; меньше LP_MIN_ATTEMPTS — 1.0.
+
+    MAGELLAN: невыучиваемую сейчас цель не брать. Без истории судить не о чем,
+    и вес не трогается.
+    """
+    if len(outcomes) < LP_MIN_ATTEMPTS:
+        return 1.0
+    return (sum(outcomes) + 1) / (len(outcomes) + 2)
+
+
+def learning_interest(outcomes: list[bool]) -> tuple[float, str, str]:
+    """Интерес к области по прогрессу: (значение, режим, объяснение без чисел-проводов).
+
+    Прогресс в учёбе — модуль разницы доли удач «стало» и «было» в последних
+    LP_WINDOW попытках (absolute learning progress, Oudeyer; MAGELLAN). Освоенное
+    (всё выходит) и невыходящее (ничего не выходит) дают ноль; меняющееся —
+    интерес. Попыток меньше LP_MIN_ATTEMPTS — прогресса не видно: небольшой
+    интерес «попробовать», убывающий с каждой попыткой.
+    """
+    recent = outcomes[-LP_WINDOW:]
+    n = len(recent)
+    if n < LP_MIN_ATTEMPTS:
+        return (EXPLORE_VALUE * (1 - n / LP_MIN_ATTEMPTS), "explore",
+                f"недавних попыток: {n} — область почти не пробована")
+    half = n // 2
+    early, late = recent[:half], recent[half:]
+    progress = abs(sum(late) / len(late) - sum(early) / len(early))
+    return (progress, "progress",
+            (f"удачи в последних попытках: было {sum(early)} из {len(early)}, "
+             f"стало {sum(late)} из {len(late)}"))
 
 
 def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[str, dict[str, Any]]:
@@ -234,7 +299,6 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     root = Path(workspace)
     now = now or datetime.now(timezone.utc)
     ledger = _rows(root / "data" / "campaign_ledger.jsonl")
-    episodes = _rows(root / "data" / "episodic_memory.jsonl")
     drives: dict[str, dict[str, Any]] = {}
 
     last_work = max((t for r in ledger if r.get("result") in _WORK_RESULTS
@@ -242,13 +306,10 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
     drives["idle_time"] = {"value": _growth(last_work, now, TAU_HOURS["idle_time"]),
                            "why": f"последний полезный цикл: {_ago(last_work, now)}"}
 
+    outcomes = drive_outcomes(root, now)
     for domain in [*DOMAINS, "world"]:
-        last = max((t for e in episodes if e.get("outcome") == "success" and domain in episode_domains(e)
-                    for t in [_ts(e.get("created_at"))] if t), default=None)
-        tau = TAU_HOURS["world"] if domain == "world" else TAU_HOURS["competence"]
-        label = "в интернете" if domain == "world" else f"по области {domain}"
-        drives[f"competence_{domain}"] = {"value": _growth(last, now, tau),
-                                          "why": f"последняя успешная задача {label}: {_ago(last, now)}"}
+        value, mode, why = learning_interest(outcomes.get(f"competence_{domain}", []))
+        drives[f"competence_{domain}"] = {"value": value, "mode": mode, "why": why}
 
     recent_goals: list[str] = []
     for r in reversed(ledger):
@@ -266,20 +327,23 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
                                         "why": f"незавершённых дел, которые можно сдвинуть: {len(pending)}"}
 
     targets = self_improvement_proofs(root)
-    changed = last_self_change(root)
-    # Открытые дефекты реестра — такой же повод чинить себя, как дубль или
-    # раскол: 2026-09-22 вес был ноль при семи открытых дефектах, потому что
-    # считались только структурные доказательства, и путь самопочинки
-    # (core/patch_route.py) не запускался ни разу.
-    open_defects = _open_defect_count(root)
+    # Повод чинить себя — событие: дефект с названной задачей или доказанная
+    # правка (2026-09-22: вес был ноль при семи открытых дефектах). Не время с
+    # последней правки. И поводу веришь настолько, насколько починка выходит:
+    # замер 24.09 — 69 попыток самоулучшения, 1% удач, последние 8 пустые;
+    # это не учёба, а беговая дорожка (MAGELLAN: невыучиваемую цель не брать).
+    tasked = _tasked_defect_count(root)
+    material = tasked + len(targets)
+    repairs = outcomes.get("self_improvement_need", [])[-LP_WINDOW:]
+    learnable = _learnable(repairs)
     drives["self_improvement_need"] = {
-        "value": (_growth(changed, now, TAU_HOURS["self"]) if targets
-                  else 1.0 - math.exp(-open_defects / 3) if open_defects else 0.0),
-        "why": (f"последняя своя правка кода: {_ago(changed, now)}; "
-                + (f"доказано: {targets[0][2].describe(targets[0][0])}" if targets
-                   else f"открытых дефектов в реестре: {open_defects}" if open_defects
-                   else "ни доказательства правки, ни открытых дефектов — "
-                        "или всё занято ящиком или уроками")),
+        "value": (1.0 - math.exp(-material / 3)) * learnable if material else 0.0,
+        "why": (f"открытых дефектов в реестре с задачей: {tasked}"
+                + (f"; доказано: {targets[0][2].describe(targets[0][0])}" if targets else "")
+                + f"; удач в последних починках: {sum(repairs)} из {len(repairs)}"
+                if material else
+                "ни доказательства правки, ни дефекта с задачей — "
+                "или всё занято ящиком или уроками"),
     }
 
     tail = ledger[-20:]
@@ -307,6 +371,18 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
         "value": 1.0 - math.exp(-stuck / 2) if stuck else 0.0,
         "why": (f"признаков застревания: {stuck}" if stuck else "застревания не видно"),
     }
+
+    # Повод-событие без выхода — тоже беговая дорожка. Живые данные 24.09 после
+    # правки выше: сверху встало «застревание» (0.78), а 8 его последних целей
+    # пустые, 32% удач за всё время. Одно правило на все драйвы-события: вес
+    # умножается на то, выходят ли их цели; без истории вес не трогается.
+    for name in _EVENT_DRIVES:
+        if name in drives:
+            done = outcomes.get(name, [])[-LP_WINDOW:]
+            factor = _learnable(done)
+            if factor < 1.0:
+                drives[name]["value"] *= factor
+                drives[name]["why"] += f"; выходит: {sum(done)} из {len(done)}"
 
     drives["economic_opportunity"] = {"value": 0.0,
                                       "why": "источник оплачиваемой работы не подключён — честный ноль"}
