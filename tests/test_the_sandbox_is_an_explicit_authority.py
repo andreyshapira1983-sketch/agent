@@ -1046,7 +1046,7 @@ def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="права группы и остальных есть только на POSIX")
-@pytest.mark.parametrize("mode", [0o666, 0o646, 0o664])
+@pytest.mark.parametrize("mode", [0o666, 0o646, 0o606])
 def test_a_marker_others_can_write_is_no_authority(workspace: Path, mode: int) -> None:
     """Как StrictModes в OpenSSH: файл, в который может писать не только
     владелец, могли подменить — полномочия нет. 24.09 метка на сервере лежала
@@ -1057,7 +1057,8 @@ def test_a_marker_others_can_write_is_no_authority(workspace: Path, mode: int) -
 
 
 @pytest.mark.skipif(os.name != "posix", reason="права группы и остальных есть только на POSIX")
-def test_a_marker_only_its_owner_writes_is_an_authority(workspace: Path) -> None:
+@pytest.mark.parametrize("mode", [0o644, 0o664, 0o600])
+def test_a_marker_the_world_cannot_write_is_an_authority(workspace: Path, mode: int) -> None:
     _marker(workspace)
-    (workspace / SANDBOX_MARKER).chmod(0o644)
+    (workspace / SANDBOX_MARKER).chmod(mode)
     assert load_sandbox_authority(workspace, env=_env(True)) is not None
