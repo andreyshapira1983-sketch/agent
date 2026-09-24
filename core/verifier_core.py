@@ -16,6 +16,7 @@ from core.evidence_classes import (
 from .claim_arithmetic import evaluate as evaluate_claim_arithmetic
 from .verifier_absence import (
     absence_certifiable,
+    absence_certified_by_search,
     absence_reason,
     absent_literal_reason,
     denies_own_evidence_reason,
@@ -468,7 +469,10 @@ def _judge_cited(
     # MIR-060 (e): у утверждения об ОТСУТСТВИИ сертификата быть не
     # может — гейт (d) его опровергает, этот не даёт подтвердить
     # (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
-    _abs_uncert = any_matched and not absence_certifiable(chunk_text, "")
+    # Отсутствие, доказанное полным поиском в названной области, — исключение
+    # из стены (e): это не усечённая выдержка (verifier_absence).
+    _abs_uncert = any_matched and not (absence_certifiable(chunk_text, "")
+                                       or absence_certified_by_search(chunk_text, chunk_evs))
     if any_matched and not _abs_uncert and not (
         chunk_reason is not None and chunk_reason.code == "count_mismatch"
     ) and not _entailment_denied(chunk_text, chunk_evs, matched_ids, llm, stat_figures=stat_figures):

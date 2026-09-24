@@ -469,7 +469,12 @@ _PRESENCE_RE = re.compile(
     r"(?:(?<!не\s)\bнайден\w*|\bпрочита\w*|\bпрочё?л\w*|\bзавершил\w*|\bесть\b"
     r"|(?<!не\s)\bсуществу\w*|(?<!не\s)\bприсутству\w*|\bна\s+месте\b"
     r"|\bзаписан\w*|\bсоздан\w*|\bread\b|\bfound\b|\bexists?\b|\bis\s+present\b"
-    r"|\bcompleted\b|\bfinished\b|\bwritten\b|\bcreated\b)",
+    r"|\bcompleted\b|\bfinished\b|\bwritten\b|\bcreated\b"
+    # Назвать — значит сказать, что есть. Ночь 24→25.09: «В `core/` нет класса
+    # `LLMClient` — единственный клиент называется `LLM`» получило
+    # absence_refuted_by_evidence словом `llm` из второй части, где `LLM`
+    # как раз утверждается (trace_ad09b21e…).
+    r"|(?<!не\s)\bназыва\w*|(?<!не\s)\bзов[её]т\w*|\bis\s+called\b|\bis\s+named\b)",
     re.IGNORECASE,
 )
 #: Границы частей сложного предложения: запятая, точка с запятой, тире.
@@ -656,3 +661,34 @@ def _cited_path(source_id: str) -> str:
 def absence_certifiable(claim: str, excerpt: str) -> bool:
     """Можно ли вообще СЕРТИФИЦИРОВАТЬ утверждение об отсутствии выдержкой."""
     return not asserts_absence(claim)
+
+
+#: Отчёт поиска о ненайденном (tools/find_in_files.py): искомое и область.
+_SEARCH_NONE_RE = re.compile(
+    r"no matches for (['\"])(?P<query>.+?)\1 in \d+ text files under (?P<scope>\S+)")
+
+
+def absence_certified_by_search(claim: str, evidences: list[Any]) -> bool:
+    """Отсутствие доказано ПОЛНЫМ поиском: искомое и область названы в утверждении.
+
+    Стена MIR-060 (e) стоит на правиле «отсутствие в выдержке не доказывает
+    ничего: выдержка усечена». Отчёт поиска — не выдержка: инструмент сам
+    говорит, что прошёл все файлы области и не нашёл (замкнутый мир в
+    названной области). Ночь 24→25.09: «В tools/ нет ни одного вхождения
+    requests.post» по отчёту «no matches for 'requests.post' in 30 text files
+    under tools» получило «проверить нельзя». Узко: только find_in_files, только
+    если искомое и область те же, что в утверждении.
+    """
+    if not asserts_absence(claim):
+        return False
+    low = (claim or "").lower().replace("\\", "/")
+    for ev in evidences or []:
+        if getattr(ev, "obtained_via", "") != "find_in_files":
+            continue
+        m = _SEARCH_NONE_RE.search(getattr(ev, "excerpt", "") or "")
+        if not m or m.group("query").lower() not in low:
+            continue
+        scope = m.group("scope").replace("\\", "/").rstrip("/").lower()
+        if scope in (".", "") or scope in low:
+            return True
+    return False
