@@ -294,6 +294,42 @@ class _DeclaredObservationRound(ast.NodeTransformer):
         return node
 
 
+#: Правки цикла ПОСЛЕ переноса, объявленные задним числом 2026-09-24. С 19.09
+#: история была обрезана, этот тест молча уходил в skip, и две намеренные правки
+#: легли без объявления. Когда полная история вернулась с GitHub, тест их сразу
+#: назвал. Каждая — (было, стало, коммит); было обязано встретиться ровно
+#: один раз в нормализованном тексте (ast.unparse), иначе правку надо объявить
+#: заново. Остальное тело по-прежнему сверяется с историей символ в символ.
+_DECLARED_EDITS = (
+    (  # 483f2e4, 8cb2f50 (2026-09-20): датчик «довод ↔ действие» читает обоснование шага
+        "_ra_report = check_reasoning_actions(st.planner_out.reasoning, [s['tool'] for s in st.planner_out.sources])",
+        ("_sources = list(st.planner_out.sources)\n"
+        "        _with_rationale = sum((1 for s in _sources if s.get('rationale')))\n"
+        "        _ra_mode = 'rationale' if _with_rationale else 'keywords'\n"
+        "        _ra_report = check_by_rationale(_sources) if _with_rationale else "
+        "check_reasoning_actions(st.planner_out.reasoning, [s['tool'] for s in _sources])"),
+    ),
+    (  # 8cb2f50 (2026-09-20): журнал говорит, каким способом судила проверка
+        "self.log.log('reasoning_action_mismatch', {**_ra_report.to_log_payload(), 'attempt': st.attempt})",
+        ("self.log.log('reasoning_action_mismatch', {**_ra_report.to_log_payload(), 'mode': _ra_mode, "
+        "'steps_with_rationale': _with_rationale, 'steps_total': len(_sources), 'attempt': st.attempt})"),
+    ),
+    (  # 248122d, 73a5518 (2026-09-21/22): прочитанное не перечитывается, запись после свежего чтения ждёт
+        "self._execute_steps_parallel(st.plan.steps)",
+        "self._execute_steps_parallel(steps_to_run(self, st, attempt_artifacts))",
+    ),
+)
+
+
+def _apply_declared_edits(src: str) -> str:
+    for before, after in _DECLARED_EDITS:
+        assert src.count(before) == 1, (
+            f"объявленная правка встречается {src.count(before)} раз вместо одного — "
+            f"объяви её заново: {before[:80]}")
+        src = src.replace(before, after, 1)
+    return src
+
+
 def test_the_loop_moved_under_one_declared_substitution():
     """История + объявленная подстановка = то, что лежит в новом модуле."""
     old_src = _history()
@@ -341,6 +377,7 @@ def test_the_loop_moved_under_one_declared_substitution():
         "запись сброшенных шагов рассчитана РОВНО на один цикл исполнения шагов, "
         f"а их {drop_recording.inserted} — правку надо объявить заново"
     )
+    expected = ast.parse(_apply_declared_edits(ast.unparse(expected)))
     got = ast.parse(ast.unparse(new_loop))
     assert ast.dump(expected) == ast.dump(got), (
         "тело цикла отличается от истории СВЕРХ объявленной подстановки и "
