@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.lang_match import any_term_matches, normalize_text, tokenize
-from core.workspace_reference import names_workspace_path
-
 
 def _keeps_step_references(fn: Any) -> Any:
     """Перестановка шагов плана переносит и номера в ссылках {{step:N.output}}.
@@ -91,97 +88,6 @@ _PROJECT_MEMORY_TAG_TERMS = (
     "tech_debt.md",
     "tech-debt.md",
 )
-# Signals that a question is introspection about the agent's OWN private repo /
-# self — code, architecture, memory, sub-agents, its own PRs. The public web
-# cannot answer these; a web_search here only returns generic noise (e.g. a CNN
-# homepage) that then pollutes the source registry. See _drop_web_lookup_for_introspection.
-_SELF_REPO_INTROSPECTION_TERMS = (
-    # English
-    "your repository", "your repo", "your codebase", "your code",
-    "your architecture", "your own architecture", "your memory",
-    "your long-term memory", "your subagent", "your sub-agent",
-    "your subagents", "your sub-agents", "your behavior", "your behaviour",
-    "your own behavior", "your own behaviour", "yourself", "self-repair",
-    "self repair", "your weaknesses", "your own weaknesses", "your tests",
-    # Russian (stemmed to survive inflection)
-    "свой репозитор", "своё репозитор", "своем репозитор", "своём репозитор",
-    "твой репозитор", "твоем репозитор", "твоём репозитор",
-    "своей архитектур", "свою архитектур", "своего кода", "твоей архитектур",
-    "своей памяти", "твоей памяти", "долговременной памяти", "долговременную память",
-    "своём поведени", "своем поведени", "твоём поведени", "твоем поведени",
-    "своего поведени", "твоего поведени", "субагент", "суб-агент",
-    "своих слабых мест", "свои слабые места", "своей работе", "своей работы",
-    "в собственной работе", "собственной архитектур",
-)
-# Negative guard: signals the question genuinely wants outside / current / web
-# information or a comparison against a named external system. When present, the
-# web egress is legitimate and must NOT be dropped even if a self-repo term also
-# appears (e.g. "compare your architecture with AutoGen").
-_EXTERNAL_LOOKUP_TERMS = (
-    "http://", "https://", "www.",
-    "latest news", "current news", "on the web", "on the internet",
-    "search the web", "search online", "look it up", "look up online",
-    "autogen", "metagpt", "langchain", "langgraph", "crewai", "autogpt",
-    "arxiv", "research paper", "papers on", "state of the art", "state-of-the-art",
-    # Russian
-    "в интернете", "в сети интернет", "в вебе", "в вэбе",
-    "последние новости", "поиск в интернете", "на рынке", "в открытых источник",
-    "научн", "статью", "статьи про",
-)
-# Comparison verbs ("compare", "сравни") do NOT by themselves imply an external
-# lookup — you can compare the agent against its OWN past state ("сравни своё
-# поведение с состоянием до этих PR"). A genuine *external* comparison is
-# signalled by the comparison TARGET (a named framework above, a URL, or a web
-# phrase). Treating a bare comparison verb as external caused a real regression:
-# the substring "сравни с" matched inside "сравни своё…", so a purely
-# introspective question was mis-flagged as external and web_search was allowed
-# to run, polluting the source registry. See _wants_external_lookup.
-
-# --- Russian morphological rule for self-repo introspection -------------------
-# A hand-written stem list cannot keep up with Russian possessive-pronoun
-# inflection (свой/своя/своё/свои/своего/своей/своих/своим/своём/свою, and the
-# твой-/собственн- families). Instead of enumerating every pronoun+noun phrase,
-# the Russian rule detects a self-referential pronoun (a *closed* inflection
-# set, matched as whole tokens after ё->е normalization) co-occurring with a
-# self-domain noun *stem*. This is boundary-correct and inflection-robust.
-_RU_SELF_PRONOUNS = frozenset(
-    normalize_text(w)
-    for w in (
-        "свой", "своя", "своё", "свое", "свои", "своего", "своей", "своих",
-        "своим", "своими", "своём", "своем", "свою",
-        "твой", "твоя", "твоё", "твое", "твои", "твоего", "твоей", "твоих",
-        "твоим", "твоими", "твоём", "твоем", "твою",
-        "себя", "себе", "собой",
-        "собственный", "собственная", "собственное", "собственные",
-        "собственного", "собственной", "собственных", "собственную",
-        "собственным", "собственными", "собственном",
-    )
-)
-# Self-domain noun stems (prefix-matched on token starts, so all inflections of
-# репозиторий/архитектура/память/поведение/… are covered).
-_RU_SELF_DOMAIN_STEMS = tuple(
-    normalize_text(s)
-    for s in (
-        "репозитор", "архитектур", "памят", "поведени", "субагент",
-        "планировщик", "верификатор", "код", "кодбейз", "модул", "слаб",
-        "тест", "самовосстановл", "реестр", "эпизод", "процедурн", "навык",
-    )
-)
-
-
-def _ru_pronoun_domain_introspection(tokens: tuple[str, ...]) -> bool:
-    """True when a self-domain noun stem immediately follows a Russian self-
-    referential pronoun (e.g. "свою архитектуру", "свой репозиторий",
-    "своими тестами").
-    """
-    for i, tok in enumerate(tokens):
-        if tok not in _RU_SELF_PRONOUNS:
-            continue
-        if i + 1 < len(tokens):
-            nxt = tokens[i + 1]
-            if any(nxt.startswith(stem) for stem in _RU_SELF_DOMAIN_STEMS):
-                return True
-    return False
 
 
 DOCTRINE_CORPORATE_STRONG_TERMS = (
@@ -380,38 +286,6 @@ def _should_prefer_memory_over_readme(question: str, history: str) -> bool:
         and not _explicitly_requests_readme(question)
         and not _explicitly_requests_architecture_reference(question)
     )
-
-
-def _wants_external_lookup(question: str) -> bool:
-    """True when the question genuinely needs outside/web/current information
-    or a comparison against a named external system — the one case where web
-    egress on a self-referential question is still legitimate.
-    """
-    return any_term_matches(question or "", _EXTERNAL_LOOKUP_TERMS)
-
-
-def _is_self_repo_introspection_question(question: str) -> bool:
-    """True when the question is purely about the agent's OWN private repo/self
-    and carries no external-lookup intent. Such questions cannot be answered by
-    the public web; a web_search only harvests irrelevant noise that pollutes
-    the source registry."""
-    # Наш файл, названный по имени, — интроспекция без всякого словаря. Таблица
-    # из 51 термина не совпала ни разу с «Открой core/loop.py…», и планировщик
-    # трижды искал `SynthesisState tests site:tests/` в интернете (2026-08-15).
-    # Четвёртый структурный факт (MIR-098, половина «символ», 2026-08-28):
-    # класс/функция ИЗ РЕПОЗИТОРИЯ, названные без пути, — интроспекция.
-    # «Что делает AutonomousQueueRunReport» не совпадало ни с одним из
-    # 51 термина, и план уходил искать собственный класс в интернете.
-    from core.workspace_reference import names_repo_symbol
-
-    if not (
-        names_workspace_path(question or "")
-        or names_repo_symbol(question or "")
-        or any_term_matches(question or "", _SELF_REPO_INTROSPECTION_TERMS)
-        or _ru_pronoun_domain_introspection(tokenize(question or ""))
-    ):
-        return False
-    return not _wants_external_lookup(question)
 
 
 def is_doctrine_corporate_question(question: str) -> bool:
@@ -984,34 +858,6 @@ def _drop_readme_status_sources(
             warnings.append(
                 "file_read README.md dropped for broad project status because "
                 "fresh long_term_memory is available"
-            )
-            continue
-        filtered.append(src)
-    return filtered
-
-
-# Web-egress tools that reach the public internet with an open-ended query.
-# On a pure self-repo introspection question these can only return irrelevant
-# hits that pollute the source registry, so they are dropped at plan time.
-_WEB_EGRESS_TOOLS = frozenset({"web_search", "web_fetch", "rss_fetch"})
-
-
-@_keeps_step_references
-def _drop_web_lookup_for_introspection(
-    sources: list[dict[str, Any]],
-    warnings: list[str],
-) -> list[dict[str, Any]]:
-    """Remove web-egress steps from a plan for a self-repo introspection
-    question. The public web cannot answer "what changed in your own repo / what
-    bug is in your architecture / what's in your memory"; a web_search there only
-    harvests noise (e.g. a CNN homepage) that then gets ingested as a source."""
-    filtered: list[dict[str, Any]] = []
-    for src in sources:
-        if src.get("tool") in _WEB_EGRESS_TOOLS:
-            label = src.get("label") or src.get("tool")
-            warnings.append(
-                f"{src.get('tool')} dropped for self-repo introspection question "
-                f"(public web cannot answer it; would pollute the source registry): {label}"
             )
             continue
         filtered.append(src)

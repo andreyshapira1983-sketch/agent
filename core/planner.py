@@ -22,7 +22,6 @@ from typing import Any
 
 from core.doc_routing import (
     _drop_readme_status_sources,
-    _drop_web_lookup_for_introspection,
     _ensure_confidence_evidence_sources_first,
     _ensure_doctrine_docs_first,
     _ensure_memory_governance_docs_first,
@@ -31,7 +30,6 @@ from core.doc_routing import (
     _explicitly_requests_readme,
     _is_memory_governance_question,
     _is_self_repair_doctrine_question,
-    _is_self_repo_introspection_question,
     _is_subagent_governance_question,
     _requests_implementation_detail,
     _should_prefer_memory_over_readme,
@@ -266,8 +264,6 @@ class LLMPlanner:
         )
         if _should_prefer_memory_over_readme(question, history):
             sources = _drop_readme_status_sources(sources, step_warnings)
-        if _is_self_repo_introspection_question(question):
-            sources = _drop_web_lookup_for_introspection(sources, step_warnings)
         if is_confidence_evidence_diagnostic_question(question) and self._confidence_sources_here():
             if "file_read" in self.hidden_tools:
                 step_warnings.append(

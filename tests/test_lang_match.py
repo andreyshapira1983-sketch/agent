@@ -1,15 +1,10 @@
-"""Tests for the language-aware, token-boundary term matcher (core.lang_match)
-and its use in the planner's self-repo introspection / external-lookup routing.
+"""Tests for the language-aware, token-boundary term matcher (core.lang_match).
 
 These focus on Russian morphology, which is where naive substring matching
 falls apart.
 """
 import pytest
 
-from core.doc_routing import (
-    _is_self_repo_introspection_question,
-    _wants_external_lookup,
-)
 from core.lang_match import (
     STEM_MIN,
     any_term_matches,
@@ -58,61 +53,3 @@ class TestTokenBoundaryMatching:
         terms = ("langchain", "в интернете")
         assert any_term_matches("посмотри в интернете", terms) is True
         assert any_term_matches("просто вопрос", terms) is False
-
-
-class TestRussianIntrospectionMorphology:
-    @pytest.mark.parametrize(
-        "question",
-        [
-            "в своих репозиториях",
-            "своего репозитория",
-            "в своём репозитории",
-            "проверь свою архитектуру",
-            "что в твоей долговременной памяти",
-            "найди в своих слабых местах",
-            "посмотри своими тестами свой код",
-            "как устроены твои субагенты",
-            "опиши свою собственную архитектуру памяти",
-            "сравни своё поведение с прошлым состоянием",
-        ],
-    )
-    def test_inflected_self_questions_detected(self, question):
-        assert _is_self_repo_introspection_question(question) is True
-
-    @pytest.mark.parametrize(
-        "question",
-        [
-            "какая сегодня погода в Москве",
-            "сравни свою архитектуру с AutoGen",
-            "последние новости про GPT-5",
-            "найди статьи про агентов на arxiv",
-            "прочитай https://example.com",
-        ],
-    )
-    def test_non_self_or_external_not_flagged(self, question):
-        assert _is_self_repo_introspection_question(question) is False
-
-    def test_external_comparison_with_named_framework_wins(self):
-        q = "сравни свою архитектуру с AutoGen"
-        assert _wants_external_lookup(q) is True
-        assert _is_self_repo_introspection_question(q) is False
-
-    def test_self_comparison_against_own_past_is_not_external(self):
-        q = "сравни своё текущее поведение с состоянием до этих PR"
-        assert _wants_external_lookup(q) is False
-
-    @pytest.mark.parametrize(
-        "question",
-        [
-            # Over-breadth guard: a self-pronoun and a domain-ish noun both occur,
-            # but the pronoun does NOT directly modify the domain noun — these are
-            # about the outside world and must stay eligible for a web lookup.
-            "в своей стране какая архитектура власти",
-            "в своём городе где сдают тесты на covid",
-            "своими руками собрал модуль питания для дома",
-            "в своей компании внедрил реестр клиентов, как лучше",
-            "расскажи про свой любимый язык и его код",
-        ],
-    )
-    def test_pronoun_and_domain_without_adjacency_not_flagged(self, question):
-        assert _is_self_repo_introspection_question(question) is False

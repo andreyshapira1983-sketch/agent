@@ -1628,25 +1628,19 @@ Two changes, both measured rather than argued:
 The line that survives is defensible: an explicit request routes, a passing
 mention does not.
 
-**The web search.** `_drop_web_lookup_for_introspection` exists precisely to stop
-the agent searching the public web for its own code, and its table holds 51
-phrases. A task naming `core/loop.py`, `SynthesisState` and `tests/` matched
-none, so the planner searched for `SynthesisState tests site:tests/` three
-identical times and exhausted its replan budget.
-
-`core/workspace_reference.py` answers the question the table was approximating:
-`names_workspace_path` extracts path-shaped tokens and asks the filesystem
-whether we own them. Existence is the whole point — `numpy.py` in a question
-about the public web is a word, `core/loop.py` is this repository — so no
-phrasing evades it and none false-fires. It joins the introspection predicate as
-a first-class route in; the 51 terms stay as the fallback for questions that
-name no path.
-
-Deliberately NOT applied to the plan router. Tried first and reverted: an
-existing test asserts that «Проверь .\main.py и .\core\operator_intent.py и
-скажи какие файлы менять» IS an implementation-plan request, and it is right —
-a request can name paths and still order a plan. The path fact answers "can the
-public web help", not "what does the operator want".
+**The web search.** Until 2026-09-24 `_drop_web_lookup_for_introspection`
+stripped web steps from any question that "sounded like" introspection — a
+51-phrase table, a Russian pronoun+stem rule, then path and repo-symbol facts.
+Every patch caught the last phrasing and missed the next: on 2026-09-24 it cut
+six web searches the operator had asked for outright («зайди в интернет»),
+because the question also mentioned the agent's own work. The guard is gone.
+Whether to search is the planner's decision (Adaptive-RAG, Self-RAG). A
+post-search relevance filter was measured and rejected: e5 cosine on 618 hits
+from the agent's own traces gave a median of 0.815 for hits it used and 0.814
+for the rest, so any threshold cuts useful hits as fast as noise. CRAG's
+evaluator is a fine-tuned T5-large (arXiv 2401.15884), not a cosine.
+`core/workspace_reference.py` stays: reflection and the campaign
+ledger still ask the disk whether a named path is ours.
 
 ## Numbers cost what memory was already starved of
 
