@@ -115,7 +115,7 @@ def _actual_modules() -> set[str]:
 #: место. Каждая строка проверена по коду при записи; меняется код — меняется она.
 WIRING = (
     ("Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; "
-     "there is no tools/registry.py."),
+     "there is no separate registry module."),
     ("`Tool` and `ToolRegistry` live in `tools/base.py`; a tool's `risk` is a plain string "
      "(`Risk = Literal[\"read_only\", \"reversible\", \"irreversible\", \"external\"]`), "
      "not an enum."),

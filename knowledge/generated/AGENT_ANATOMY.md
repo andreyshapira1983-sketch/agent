@@ -349,7 +349,7 @@ _Core data models and the LLM client wrapper._
 
 ## Where things are wired (outside core/)
 
-- Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; there is no tools/registry.py.
+- Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; there is no separate registry module.
 - `Tool` and `ToolRegistry` live in `tools/base.py`; a tool's `risk` is a plain string (`Risk = Literal["read_only", "reversible", "irreversible", "external"]`), not an enum.
 - A model call goes through a role object: `model_router.for_role(ModelRole.X).complete(system=..., user=...)` (`core/model_router.py`); that wrapper records tokens and dollars and checks the budget. A tool that needs a model is given `model_router` in `app/bootstrap.py`, as `tools/spawn_subagent.py` is.
 - Self-repair: an edit is written to `proposals/selffix/<name>/edits.txt` (FILE: + SEARCH/REPLACE or LINES blocks) and tried by `patch_check` on a copy of the repo.
