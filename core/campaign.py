@@ -53,7 +53,7 @@ from core.campaign_ledger import (
     spent_units_by_action,
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
-from core.campaign_verdict import judge_and_record
+from core.campaign_verdict import judge_and_record, judge_campaign
 from core.capability_events import last_capability_change_ts
 from core.run_context import run_cost_envelope
 from core.self_stop_record import record_self_stop, record_stop_observation
@@ -144,6 +144,26 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
             f"закрыть сигнал иначе"
         ),
     )
+
+
+def goal_met_now(goal: str, success_check: str, workspace: Any, started_at: Any) -> bool:
+    """Сошёлся ли критерий цели свежим следом — после КАЖДОГО рабочего цикла.
+
+    Ночь 24→25.09: объяснение наблюдения записывалось в первом цикле, а
+    кампания судила цель только при смене: крутила «объяснять нечего», ловила
+    повтор, спала 7.5 мин (25 мин — 2 полезных цикла из 13). Судья читает мир
+    без модели, вердикт здесь не пишется — его пишет judge_closing_goal при
+    смене. Не знаем — не меняем.
+    """
+    if not str(success_check or "").strip():
+        return False
+    try:
+        since = started_at.timestamp()
+        verdict = judge_campaign(goal=goal, success_check=success_check,
+                                 workspace=workspace, since=since)
+    except Exception:  # noqa: BLE001 — судья не валит цикл
+        return False
+    return verdict.get("verdict") == "verified"
 
 
 def judge_closing_goal(agent: Any, *, workspace: Any, goal: str, success_check: str,
@@ -940,6 +960,11 @@ def run_campaign(
             _log(agent, "campaign_cycle_work", record.to_dict())
             _emit_cycle(record)
             consecutive_errors = 0
+            # Цель судится после каждого рабочего цикла (goal_met_now).
+            met = outcome.did_work and goal_met_now(current_goal, current_success_check,
+                                                    workspace, goal_started_at)
+            if met and _switch_goal(cycle, "goal verified after this cycle"):
+                continue
             if idle_streak >= config.max_idle_streak:
                 if _stall(cycle, f"goal exhausted: {idle_streak}_cycles_without_new_action",
                           f"no_progress_stall:{idle_streak}_cycles_without_new_action"):
