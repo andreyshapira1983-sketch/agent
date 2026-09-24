@@ -47,6 +47,16 @@ from core.self_repair_utils import _tests_passed as _tests_ok
 # Directories whose ``*.py`` files may be auto-applied in this lane.
 _ALLOWED_CODE_DIRS = ("core", "cli", "tools", "tests")
 
+#: Что самоправка агента не трогает никогда — одно множество для обоих путей
+#: (эта полоса и core/patch_route.py).
+PROTECTED_CORE: frozenset[str] = frozenset({
+    "core/root_principles.py", "core/governance.py", "core/injection_guard.py",
+    "tools/python_probe.py", "tools/convert_file.py",
+    "tests/test_capability_baseline.py", "tests/capability_tasks.py",
+    "scripts/capability_baseline.py", "scripts/check_function_length_baseline.py",
+    "scripts/check_ceo_file_baseline.py", "tests/test_ruff_config.py",
+})
+
 # Explicit denylist — checked *before* the allowlist so a sensitive path can
 # never slip through even if it also happens to look allowlisted (e.g. a
 # ``.md`` file under ``.github``). Matching is by exact relative path or by a
@@ -64,6 +74,11 @@ _DENY_EXACT = frozenset(
         # числом — подсудимый не правит материалы своего дела.
         "docs/audit/MASTER_ISSUE_REGISTRY.md",
         "docs/audit/HISTORICAL_FAILURE_LEDGER.md",
+        # Защищённое ядро (журнал исследований оператора 25.09, «Недостающие
+        # части пазла»: ошибка самомодификации не должна уметь сломать
+        # тормоза; исполнитель не оценивает сам себя). Главные правила,
+        # песочницы, сторож подмены инструкций и ПЛАНКИ, которыми его меряют.
+        *PROTECTED_CORE,
     }
 )
 

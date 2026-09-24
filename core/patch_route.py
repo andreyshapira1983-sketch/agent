@@ -211,7 +211,9 @@ def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] |
 
 
 def _forbidden(paths: list[str]) -> list[str]:
-    return [p for p in paths if p.startswith(_FORBIDDEN)]
+    from core.self_apply_lane import PROTECTED_CORE
+
+    return [p for p in paths if p.startswith(_FORBIDDEN) or p.replace("\\", "/") in PROTECTED_CORE]
 
 
 def _merge(root: Path, branch: str) -> str:
