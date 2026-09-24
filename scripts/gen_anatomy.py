@@ -107,6 +107,43 @@ def _actual_modules() -> set[str]:
     }
 
 
+#: Где что подключается ЗА ПРЕДЕЛАМИ core/. Ночь 24→25.09: агент искал
+#: tools/registry.py, `def build_registry`, `TOOLS =` — угадывал устройство, а
+#: не читал; место регистрации инструментов прочитал только после шести заходов.
+#: Журнал исследований оператора (25.09, «Размер файлов и чтение кода ИИ»):
+#: карта репозитория для агента сильнее нарезки файлов — агенту важнее найти
+#: место. Каждая строка проверена по коду при записи; меняется код — меняется она.
+WIRING = (
+    ("Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; "
+     "there is no tools/registry.py."),
+    ("`Tool` and `ToolRegistry` live in `tools/base.py`; a tool's `risk` is a plain string "
+     "(`Risk = Literal[\"read_only\", \"reversible\", \"irreversible\", \"external\"]`), "
+     "not an enum."),
+    ("A model call goes through a role object: `model_router.for_role(ModelRole.X).complete("
+     "system=..., user=...)` (`core/model_router.py`); that wrapper records tokens and dollars "
+     "and checks the budget. A tool that needs a model is given `model_router` in "
+     "`app/bootstrap.py`, as `tools/spawn_subagent.py` is."),
+    ("Self-repair: an edit is written to `proposals/selffix/<name>/edits.txt` "
+     "(FILE: + SEARCH/REPLACE or LINES blocks) and tried by `patch_check` on a copy of the repo."),
+)
+
+
+def _tools_rows() -> list[str]:
+    tools_dir = os.path.join(os.path.dirname(CORE), "tools")
+    rows = []
+    if not os.path.isdir(tools_dir):
+        return rows
+    for entry in sorted(os.listdir(tools_dir)):
+        if not entry.endswith(".py") or entry == "__init__.py":
+            continue
+        try:
+            text = Path(os.path.join(tools_dir, entry)).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        rows.append(f"| `tools/{entry[:-3]}` | {purpose_from_source(text)} |")
+    return rows
+
+
 def build_document(
     *,
     actual: set[str] | None = None,
@@ -176,6 +213,15 @@ def build_document(
         for m in mods:
             out.append(f"| `core/{m}` | {purpose(m)} |")
         out.append("")
+
+    out.append("## Where things are wired (outside core/)")
+    out.append("")
+    out.extend(f"- {line}" for line in WIRING)
+    out.append("")
+    out.append("| Tool module | Purpose |")
+    out.append("| ----------- | ------- |")
+    out.extend(_tools_rows())
+    out.append("")
 
     return "\n".join(out)
 
