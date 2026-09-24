@@ -416,7 +416,9 @@ class AgentLoopResponseDeciders:
         # Светская реплика хвоста не несёт: 2026-09-21 «Привет, как дела?» →
         # «подтверждено 2 из 5, уверенность: низкая» — отчёт о надёжности беседы.
         from core.conversation_contract import classify_register
-        if user_question and classify_register(user_question) == "small_talk":
+        from core.social_turn import is_marked_social
+        if user_question and (classify_register(user_question) == "small_talk"
+                              or is_marked_social(self, user_question)):
             self.log.log("verification_tail_skipped", {"reason": "small_talk"})
             return
         if self.last_verification is not None:
