@@ -318,6 +318,15 @@ def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         p = ev.get("payload") or {}
         if ev.get("event") == "tool_call":
             calls[str(p.get("id"))] = (str(p.get("tool_name") or ""), p.get("arguments"))
+        elif ev.get("event") == "write_compose_failed":
+            # Текст записи не собрался — file_write даже не зван, но для агента
+            # это провал записи, и планировщик видит его как сбой file_write
+            # (loop_step_execution._compose_write_content). Живой замер 24.09:
+            # «в файл правки пошёл текст без блоков» трижды за один ход, и ни
+            # одной карточки — учёба смотрела только на вызовы инструментов.
+            out.append({"tool": "file_write", "args": {"path": p.get("path")}, "output": None,
+                        "fail": f"текст записи не собрался: {p.get('error') or ''}",
+                        "ts": str(ev.get("ts") or ""), "trace": str(ev.get("trace_id") or "")})
         elif ev.get("event") == "tool_result":
             tool, args = calls.get(str(p.get("tool_call_id")), ("", None))
             err = p.get("error") if p.get("status") != "success" else None
