@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 249 modules across 12 groups._
+_Total: 251 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -25,6 +25,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/workspace_reference` | Does this text name something that exists in the workspace? |
 | `core/file_request_intent` | What kind of file request is this question? |
 | `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |
+| `core/warning_words` | Предупреждения проверки — человеческими словами у самого утверждения. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
 | `core/user_profile` | User Profile — Layer 4 (User Mental Model). |
@@ -110,6 +111,7 @@ _Planning, verification, clarification, control loop._
 | `core/clarification_policy` | Clarification Policy (§3 Cognitive Core — Clarification Policy). |
 | `core/pending_clarification` | The question a clarification asked ABOUT, kept until the operator answers. |
 | `core/answer_contradiction` | Одно утверждение, объявленное и Фактом, и Непроверенным — в одном ответе. |
+| `core/turn_provenance` | Порождено этим ходом или только использовано — по диску, а не по словам. |
 | `core/instruction_conflict_gate` | Instruction Conflict Gate — турникет между уверенным приказом и ``git add``. |
 | `core/directive_extractor` | Turn instruction *text* into ranked ``Directive`` objects. |
 | `core/root_principles` | Корневые принципы агента — выше любого одобрения (слово оператора 24.09). |
