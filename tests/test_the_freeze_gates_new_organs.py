@@ -1,23 +1,20 @@
-"""Заморозка — датчик раскрытия: новый кодовый файл без записи краснит.
+"""Заморозка 2026-08-20 снята 2026-09-24: журнал её периода полон, дальше — свобода.
 
-Оговорка второго экзаменатора (Codex, 2026-08-28): реестр исключений сам по
-себе ничего не предотвращает. Этот тест — механизированная половина ответа,
-и его имя честное: это ДАТЧИК РАСКРЫТИЯ, не ворота разрешения. Предварительное
-разрешение — свойство процесса (слово оператора до стройки), и репозиторий
-может принудить только к записи, не к разрешению: тест живёт в том же дереве,
-что и код, и обгонять стройку не умеет. Что он гарантирует: файл, рождённый
-после заморозки в любом кодовом доме (core/, cli/, app/, tools/, api/,
-включая подкаталоги) и не названный по имени в docs/audit/AUTONOMY_FREEZE.md,
-валит батарею — тихой стройки не бывает.
+Был датчик раскрытия (Codex, 2026-08-28): новый кодовый файл после заморозки,
+не названный в docs/audit/AUTONOMY_FREEZE.md, валил батарею. С 19.09 он молча
+уходил в skip — история была обрезана коммитом «Baseline before the 24h
+autonomous run», и базовой точки заморозки в ней не было. 24.09 полная история
+нашлась на GitHub, датчик показал 23 незаписанных модуля — и в тот же день
+оператор снял заморозку: «разморозку сделай полноценно».
 
-Честные слепые пятна, названные экзаменатором и не закрытые: новая
-функциональность ВНУТРИ старого модуля структурному датчику не видна
-(семантика, не имена); при недоступной git-истории — skip, но оба живых
-прогонщика историю имеют (домашний клон полный; CI качает fetch-depth: 0
-ради gitleaks — проверено 2026-08-28).
-
-Базовая линия — последний коммит дня заморозки (2026-08-20), прочитан из
-истории: `git rev-list -1 --before=2026-08-21 HEAD`.
+Что проверяется теперь:
+* документ говорит о снятии прямо (метка FREEZE LIFTED и слово оператора);
+* журнал периода заморозки ПОЛОН: каждый кодовый файл, которого не было в
+  базовой точке (1577b85, последний коммит дня заморозки) и который есть в
+  коммите снятия, назван в документе. Файлы после снятия не проверяются —
+  запрета больше нет.
+Без истории — skip, как и раньше, но теперь история подшивается с GitHub
+(`refs/history/github-main` + `git replace --graft`).
 """
 from __future__ import annotations
 
@@ -27,49 +24,61 @@ from pathlib import Path
 import pytest
 
 _FREEZE_BASELINE = "1577b85"
+_LIFT_MARK = "FREEZE LIFTED 2026-09-24"
 _CODE_HOMES = ("core", "cli", "app", "tools", "api")
+_DOC = Path("docs") / "audit" / "AUTONOMY_FREEZE.md"
 
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def _py_files_at(ref: str) -> set[str] | None:
+def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(  # noqa: S603 — fixed argv
-            ["git", "ls-tree", "-r", "--name-only", ref, *_CODE_HOMES],  # noqa: S607
-            cwd=str(_ROOT), capture_output=True, timeout=30, check=False,
+            ["git", *args], cwd=str(_ROOT), capture_output=True, timeout=30, check=False,  # noqa: S607
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if out.returncode != 0:
+    return out.stdout.decode("utf-8") if out.returncode == 0 else None
+
+
+def _py_files_at(ref: str) -> set[str] | None:
+    listing = _git("ls-tree", "-r", "--name-only", ref, *_CODE_HOMES)
+    if listing is None:
         return None
-    names = {
-        line.strip() for line in out.stdout.decode("utf-8").splitlines()
-        if line.strip().endswith(".py")
-    }
+    names = {ln.strip() for ln in listing.splitlines()
+             if ln.strip().endswith(".py") and not ln.strip().endswith("__init__.py")}
     return names or None
 
 
-def test_every_post_freeze_code_file_is_named_in_the_freeze_doc() -> None:
+def _working_tree_files() -> set[str]:
+    return {
+        p.relative_to(_ROOT).as_posix()
+        for home in _CODE_HOMES if (_ROOT / home).is_dir()
+        for p in (_ROOT / home).rglob("*.py")
+        if "__pycache__" not in p.parts and p.name != "__init__.py"
+    }
+
+
+def _doc() -> str:
+    return (_ROOT / _DOC).read_text(encoding="utf-8")
+
+
+def test_the_doc_says_the_freeze_is_lifted_and_by_whose_word() -> None:
+    doc = _doc()
+    assert _LIFT_MARK in doc
+    assert "разморозку сделай полноценно" in doc
+
+
+def test_every_code_file_of_the_freeze_period_is_named_in_the_doc() -> None:
     baseline = _py_files_at(_FREEZE_BASELINE)
     if baseline is None:
         pytest.skip("git history unavailable — cannot read the freeze baseline")
-    current = {
-        p.relative_to(_ROOT).as_posix()
-        for home in _CODE_HOMES
-        for p in (_ROOT / home).rglob("*.py")
-        if (_ROOT / home).is_dir() and "__pycache__" not in p.parts
-        and p.name != "__init__.py"
-    }
-    freeze_doc = (_ROOT / "docs" / "audit" / "AUTONOMY_FREEZE.md").read_text(
-        encoding="utf-8"
-    )
-
-    unrecorded = sorted(
-        name for name in current - baseline
-        if Path(name).name not in freeze_doc
-    )
+    lift_commits = (_git("log", "--reverse", "--format=%H", "-S", _LIFT_MARK, "--", _DOC.as_posix()) or "").split()
+    at_lift = _py_files_at(lift_commits[0]) if lift_commits else _working_tree_files()
+    assert at_lift is not None
+    doc = _doc()
+    unrecorded = sorted(n for n in at_lift - baseline if Path(n).name not in doc)
     assert unrecorded == [], (
-        "кодовые файлы построены после заморозки 2026-08-20 и НЕ записаны в "
-        "docs/audit/AUTONOMY_FREEZE.md (таблица исключений или список "
-        "хирургий): " + ", ".join(unrecorded)
+        "кодовые файлы периода заморозки (2026-08-20 — 2026-09-24) не записаны в "
+        f"{_DOC.as_posix()}: " + ", ".join(unrecorded)
     )
