@@ -505,9 +505,9 @@ def best_run_of_source(ev: Evidence, chain: ProvenanceChain, claim: str) -> Evid
     return min(runs, key=lambda e: len(literals_absent_from_excerpt(claim, e.excerpt or "", e.source_id or "")))
 
 
-def _semantic_nli_check(claim: str, excerpt: str, llm: Any) -> bool:
+def _semantic_nli_check(claim: str, excerpt: str, llm: Any, *, max_chars: int = _MAX_EXCERPT_FOR_NLI) -> bool:
     try:
-        prompt = f"Source excerpt:\n{excerpt[:_MAX_EXCERPT_FOR_NLI]}\n\nClaim: {claim[:300]}\n\nDoes the source excerpt support the claim? Answer yes or no."
+        prompt = f"Source excerpt:\n{excerpt[:max_chars]}\n\nClaim: {claim[:300]}\n\nDoes the source excerpt support the claim? Answer yes or no."
         answer = llm.complete(system=_NLI_SYSTEM, user=prompt, max_tokens=4, temperature=0.0)
         return answer.strip().lower().startswith("yes")
     # FAIL CLOSED, deliberately: this is the NLI support check, and an
