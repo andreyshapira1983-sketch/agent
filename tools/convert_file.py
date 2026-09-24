@@ -30,6 +30,14 @@ Inkscape, ImageMagick, Ghostscript/poppler и Blender стоят и работа
      перезаписывается: имя с меткой действия и времени.
   4. Нельзя сбросить права (не Linux, не root, нет setpriv) — отказ.
      Открытая дверь без замка хуже закрытой.
+  5. Одно действие нарушает п. 1 сознательно — `blender_script` (слово
+     оператора 24.09). 3D-персонажа нельзя собрать фиксированными
+     аргументами: сцену строит СВОЙ скрипт агента, а Blender исполняет его
+     полным Python (руководство, «Scripting & Security»). Держит его та же
+     песочница: nobody, временная папка, свой таймаут; /root с ключами и
+     кодом ему закрыт. Сеть песочница не закрывает — изоляция процесса, а не
+     контейнер; это цена двери, названная оператору до решения. Результаты —
+     всё, что скрипт положил в out/ (с подпапками), под своими именами.
 
 Риск: reversible — создаёт новые файлы в `converted/`, чужого не трогает.
 """
@@ -53,7 +61,7 @@ _MAX_INPUT_BYTES = 200 * 1024 * 1024
 _MAX_TEXT_CHARS = 20000
 _NOBODY = 65534
 _TIMEOUT = {"ocr": 300, "office": 180, "pdf_pages": 180, "image": 120,
-            "svg": 120, "media": 600, "render3d": 600}
+            "svg": 120, "media": 600, "render3d": 600, "blender_script": 900}
 
 _IMAGE_IN = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif")
 #: Вход и выход каждого действия. Всё прочее — отказ до запуска.
@@ -68,6 +76,8 @@ OPS: dict[str, dict[str, tuple[str, ...]]] = {
     "media": {"in": ("mp4", "mov", "mkv", "webm", "avi", "mp3", "wav", "ogg", "m4a", "flac", "gif"),
               "to": ("mp4", "webm", "mp3", "wav", "gif")},
     "render3d": {"in": ("blend",), "to": ("png",)},
+    # Свой скрипт агента; результаты — что скрипт сам положил в out/.
+    "blender_script": {"in": ("py",), "to": ("out",)},
 }
 _OCR_LANGS = ("rus", "eng", "rus+eng")
 #: SVG, которые нельзя отдавать Inkscape: подключение файлов, сущности,
@@ -135,6 +145,12 @@ def _argv(op: str, ext: str, to: str, *, lang: str, width: int | None, max_pages
         limit = ["-t", str(max_seconds)] if max_seconds else []
         return [["ffmpeg", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file",
                  "-i", src, *limit, "-y", f"out/result.{to}"]]
+    if op == "blender_script":
+        # Порядок важен: Blender исполняет аргументы по порядку (руководство,
+        # «Command Line Arguments»), и --python-exit-code после --python уже не
+        # действует — упавший скрипт вернул бы 0 и выглядел успехом.
+        return [["blender", "--background", "--factory-startup", "--threads", "8",
+                 "--python-exit-code", "1", "--python", src]]
     # render3d: без автозапуска скриптов и без пользовательских настроек.
     return [["blender", "--background", "--factory-startup", "--disable-autoexec", src,
              "--render-output", "out/frame_", "--render-format", "PNG", "--render-frame", "1"]]
@@ -177,7 +193,8 @@ class ConvertFileTool(Tool):
         "Run a file program on a workspace file safely: op=ocr (image/pdf -> text), "
         "office (doc/xls/ppt/odt/csv/html -> pdf/docx/xlsx/csv/txt/html), pdf_pages "
         "(pdf -> png pages), image (resize/convert), svg (-> png/pdf), media "
-        "(audio/video -> mp4/webm/mp3/wav/gif), render3d (.blend -> png). The result "
+        "(audio/video -> mp4/webm/mp3/wav/gif), render3d (.blend -> png), blender_script "
+        "(your own .py run by Blender headless; it must save results into out/). The result "
         "goes to converted/. Risk: reversible."
     )
     risk: Risk = "reversible"
@@ -225,6 +242,11 @@ class ConvertFileTool(Tool):
             shutil.rmtree(tmp, ignore_errors=True)
         result: dict[str, Any] = {"op": op, "input": path, "exit_code": code,
                                   "outputs": outputs, "log_tail": log[-600:]}
+        if op == "blender_script":
+            # Хвост журнала Blender — его трассировка при ошибке; пропущенное
+            # (ссылки, чужие файлы, сверх потолков) — названо, а не спрятано.
+            result["log_tail"] = log[-2000:]
+            result["skipped_outputs"] = getattr(self, "_skipped_outputs", 0)
         # Текстовый результат — сразу в вывод, не только файлом. 24.09, приёмка
         # урока 1: Word -> txt лёг в converted/, агент его не дочитал и
         # заявил «суммы сходятся», не видя одной из сторон сравнения.
@@ -253,7 +275,16 @@ class ConvertFileTool(Tool):
         (tmp / "out" / "result.txt").write_text("\n".join(texts), encoding="utf-8")
         return 0, log
 
+    def _collect_tree(self, out: Path, stem: str) -> list[str]:
+        """Результаты своего скрипта — под своими именами в своей папке."""
+        folder = f"{OUTPUT_DIR}/{stem}__blender_script_{time.strftime('%Y%m%d-%H%M%S')}"
+        owner = _NOBODY if self._runner is run_sandboxed else None
+        picked, self._skipped_outputs = _collect_tree_into(out, self.workspace_root / folder, owner)
+        return [f"{folder}/{p.relative_to(out).as_posix()}" for p in picked]
+
     def _collect(self, out: Path, op: str, stem: str) -> list[str]:
+        if op == "blender_script":
+            return self._collect_tree(out, stem)
         files = sorted(p for p in out.iterdir() if p.is_file()) if out.is_dir() else []
         if not files:
             return []
@@ -267,6 +298,49 @@ class ConvertFileTool(Tool):
             shutil.copyfile(f, dest_dir / name)
             saved.append(f"{OUTPUT_DIR}/{name}")
         return saved
+
+
+#: Потолки забора результатов своего скрипта: кадры анимации — сотни файлов.
+_MAX_TREE_FILES = 400
+_MAX_TREE_BYTES = 512 * 1024 * 1024
+
+
+def _collectable(path: Path, owner: int | None) -> bool:
+    """Обычный файл, созданный самим скриптом, — не ссылка и не чужой файл.
+
+    Результаты забирает процесс агента С ПРАВАМИ root. Скрипт в Blender может
+    положить в out/ ссылку на /root/agent-main/.env — копирование прошло бы по
+    ней, и ключи легли бы в converted/. Жёсткую ссылку на чужой файл выдаёт
+    владелец: файлы скрипта принадлежат nobody.
+    """
+    import stat as _stat
+
+    info = path.lstat()
+    if not _stat.S_ISREG(info.st_mode):
+        return False
+    return owner is None or info.st_uid == owner
+
+
+def _collect_tree_into(out: Path, dest: Path, owner: int | None) -> tuple[list[Path], int]:
+    """Что забрать из out/ (с подпапками) и сколько файлов пропущено."""
+    picked, skipped, total = [], 0, 0
+    for path in sorted(out.rglob("*")) if out.is_dir() else []:
+        if path.is_dir() and not path.is_symlink():
+            continue
+        if not _collectable(path, owner) or len(picked) >= _MAX_TREE_FILES:
+            skipped += 1
+            continue
+        size = path.lstat().st_size
+        if total + size > _MAX_TREE_BYTES:
+            skipped += 1
+            continue
+        total += size
+        picked.append(path)
+    for path in picked:
+        target = dest / path.relative_to(out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, target, follow_symlinks=False)
+    return picked, skipped
 
 
 def sanitize_args(args: dict[str, Any], idx: int, warnings: list[str]) -> dict[str, Any] | None:
