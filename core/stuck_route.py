@@ -81,7 +81,8 @@ def stuck_goal(root: Path | str) -> Any:
     goal = (f"Ты застрял: {facts}. Сначала поищи в интернете первоисточник по тому, что не выходит "
             "(web_search и web_fetch), и назови найденное. Если первоисточник не решает — напиши "
             "человеку сам: journal_append path='data/chat_outbox.jsonl', "
-            "record={'author': 'agent', 'text': '<в чём уткнулся, что уже пробовал, чего не хватает>'}. "
+            "record={'author': 'agent', 'reason': 'stuck', 'text': '<в чём уткнулся, что уже "
+            "пробовал, чего не хватает — и один вопрос, на который можно ответить да/нет или выбором?>'}. "
             f"Меняется ровно 1 файл: {OUTBOX_RELPATH}. Остальные файлы только читаются.")
     return DriveGoal(status="proposed", goal=goal,
                      success_check=f"В {OUTBOX_RELPATH} появилась новая запись с вопросом человеку",
