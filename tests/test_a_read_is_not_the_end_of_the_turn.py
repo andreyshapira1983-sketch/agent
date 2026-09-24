@@ -300,3 +300,27 @@ def test_identical_rounds_are_named_and_then_stopped(workspace: Path):
     assert "REPEAT: the last 2 rounds" in planner.contexts[2]
     skipped = _events(loop, "observation_round_skipped")
     assert skipped and "stuck" in skipped[-1]["reason"]
+
+
+def test_a_turn_over_its_dollar_budget_answers_with_what_it_has(workspace: Path, monkeypatch):
+    """Предохранитель денег хода (как per_instance_cost_limit в SWE-agent): круги
+    кончаются, ход отвечает по собранному, а не падает и не жжёт дальше."""
+    import datetime as _dt
+
+    for i in range(8):
+        (workspace / f"a{i}.txt").write_text(f"part {i}", encoding="utf-8")
+    later = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=1)).isoformat()
+    (workspace / "data").mkdir(exist_ok=True)
+    (workspace / "data" / "model_usage.jsonl").write_text(json.dumps({
+        "model": "deepseek-v4-pro", "input_tokens": 2_000_000, "output_tokens": 0,
+        "completed_at": later}) + "\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_TURN_MAX_USD", "0.5")
+    planner = _ScriptedPlanner([[_src("file_read", {"path": f"a{i}.txt"})] for i in range(8)] + [[]])
+    loop = _loop(workspace, planner, observe=True)
+
+    answer = loop.run("Собери все части a0..a7.")
+
+    assert len(planner.contexts) == 1
+    skipped = _events(loop, "observation_round_skipped")
+    assert skipped and "dollar budget" in skipped[-1]["reason"]
+    assert answer

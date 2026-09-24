@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -72,14 +73,35 @@ def _usage_rows(workspace: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def usd_last_hour(workspace: Path, now: datetime | None = None) -> float:
-    """Сколько долларов ушло на вызовы модели за последний час."""
-    since = ((now or datetime.now(timezone.utc)) - timedelta(hours=1)).isoformat()
+def usd_since(workspace: Path, since: datetime) -> float:
+    """Сколько долларов ушло на вызовы модели с момента `since` (UTC)."""
+    mark = since.astimezone(timezone.utc).isoformat()
     total = 0.0
     for row in _usage_rows(workspace):
-        if str(row.get("completed_at") or "") >= since:
+        if str(row.get("completed_at") or "") >= mark:
             total += row_usd(row) or 0.0
     return round(total, 4)
+
+
+def usd_last_hour(workspace: Path, now: datetime | None = None) -> float:
+    """Сколько долларов ушло на вызовы модели за последний час."""
+    return usd_since(workspace, (now or datetime.now(timezone.utc)) - timedelta(hours=1))
+
+
+#: Предел одного хода, $. Как per_instance_cost_limit у SWE-agent ($3 там):
+#: у предела ход не падает, а сдаёт сделанное. Замер 24.09 по 105 ходам:
+#: медиана $0.04, 95-й процентиль $0.41, самый дорогой $1.08 — предел ловит
+#: только разгон, обычную работу не трогает. AGENT_TURN_MAX_USD; 0 — без предела.
+TURN_MAX_USD = 1.0
+
+
+def turn_usd_limit() -> float | None:
+    """Предел $ на ход; None — без предела."""
+    try:
+        value = float(os.environ.get("AGENT_TURN_MAX_USD") or TURN_MAX_USD)
+    except ValueError:
+        value = TURN_MAX_USD
+    return value if value > 0 else None
 
 
 def usd_hour_limit(workspace: Path) -> float | None:
