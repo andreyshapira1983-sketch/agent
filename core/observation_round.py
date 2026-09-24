@@ -33,6 +33,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from core.failure_cards import experience_notes
 from core.replan import VERBATIM_ADVICE_TAG
 
 #: Сколько символов одного вывода и всех вместе видит планировщик. Больше
@@ -218,6 +219,7 @@ def steps_to_run(loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]
 
 def format_observations(
     plan: Any, artifacts: dict[str, dict[str, Any]], earlier: Sequence[str] = (),
+    notes: dict[str, str] | None = None,
 ) -> str:
     """Блок для планировщика: какие шаги уже выполнены и что они вернули.
 
@@ -273,6 +275,8 @@ def format_observations(
             budget -= len(text)
             lines.append(f"[{label}] ({meta.get('tool')})")
             lines.append(text)
+            if notes and label in notes:
+                lines.append(notes[label])
     lines += [
         "Decide what is still missing to fulfil the user's request:",
         "- if the request is already fulfilled, return an EMPTY plan (no steps);",
@@ -444,7 +448,8 @@ def continue_after_observation(
         return False
     block = format_observations(
         st.plan, attempt_artifacts,
-        earlier=sorted(set(st.artifacts) - set(attempt_artifacts)))
+        earlier=sorted(set(st.artifacts) - set(attempt_artifacts)),
+        notes=experience_notes(loop, attempt_artifacts))
     if repeats > 1:
         loop.log.log("observation_round_repeated", {"attempt": st.attempt, "repeats": repeats})
         block = (f"REPEAT: the last {repeats} rounds ran the SAME steps and got the SAME outputs. "

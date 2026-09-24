@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from core.assumption_registry import extract_from_plan
 from core.evidence import ProvenanceChain, evidence_from_tool_result
+from core.failure_cards import with_past_experience
 from core.file_request_intent import force_file_hint_read_when_explicit
 from core.model_usage import ModelBudgetExceeded
 from core.models import ErrorObject, Goal, Plan, PlanStep
@@ -437,7 +438,7 @@ class AgentLoopAttempt:
                 if outcome is None:
                     step.status = "failed"
                     if trigger is not None:
-                        attempt_failures.append(trigger)
+                        attempt_failures.append(with_past_experience(self, trigger))
                     continue
                 self._executed_tools.append(outcome["tool"])
                 attempt_artifacts[outcome["label"]] = {

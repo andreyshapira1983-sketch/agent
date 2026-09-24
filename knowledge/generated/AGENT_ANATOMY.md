@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 246 modules across 12 groups._
+_Total: 247 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -151,6 +151,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/memory` | Working Memory (§4 Memory & Knowledge Governance — short-term, session-scoped). |
 | `core/persistent_memory` | Persistent Memory Record store (§4 — long-term, JSONL on disk). |
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
+| `core/failure_cards` | Карточки прошлых ошибок: «эта ошибка уже была — вот что тогда помогло». |
 | `core/smart_memory_helpers` | Helpers extracted verbatim from ``core/smart_memory.py`` by the incremental splitter. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
