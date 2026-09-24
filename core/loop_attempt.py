@@ -365,8 +365,8 @@ class AgentLoopAttempt:
                     # journal is per-run and disappears from the agent's own
                     # memory, which is where a repeated fault has to be visible.
                     self._defect_signals.append("reasoning_action_mismatch")
-            except Exception:  # noqa: BLE001, S110 — reason stated above
-                pass  # Observational only — must never abort the loop.
+            except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
+                self._sensor_failed("reasoning_action_check", exc)
 
             st.plan = self._build_plan(st.goal, st.planner_out.sources)
             self.log.log("plan", st.plan, steps=len(st.plan.steps), attempt=st.attempt)
@@ -389,8 +389,8 @@ class AgentLoopAttempt:
                                 "assumptions": st._run_assumptions.to_log_payload(),
                             },
                         )
-                except Exception:  # noqa: BLE001, S110 — reason stated above
-                    pass  # Never abort the run.
+                except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
+                    self._sensor_failed("assumption_extractor", exc)
 
             attempt_artifacts: dict[str, dict[str, Any]] = {}
             attempt_failures: list[ReplanTrigger] = []

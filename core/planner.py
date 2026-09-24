@@ -42,6 +42,7 @@ from core.host_tools_context import _build_host_tools_block
 from core.llm import LLM, accepted_flags
 from core.plan_parsing import parse_json
 from core.planner_prompt import PLANNER_SYSTEM, without_tool_blocks
+from core.run_context import run_blocked_tools
 from core.step_sanitizer import sanitize_step
 from tools.base import ToolRegistry
 
@@ -131,11 +132,12 @@ class LLMPlanner:
         self.workspace = workspace
         self.llm = llm
         self.registry = registry
-        # Run-scoped set of tool names to hide from the planner surface. Empty
-        # by default (REPL sees every registered tool). AutonomousRuntime._task_goal
-        # sets this to the run-scoped block set so the planner never *proposes*
-        # tools that PolicyGate would deny on the unattended goal path. Policy
-        # remains the defense-in-depth block at execution time.
+        # Host-level set of tool names to hide from the planner surface. Empty
+        # by default (REPL sees every registered tool). The run's own block set
+        # is NOT written here: it lives in the run context and is read through
+        # `effective_hidden_tools` (MIR-114 — a shared field was restored by a
+        # neighbouring run's cleanup mid-run). Policy remains the
+        # defense-in-depth block at execution time.
         self.hidden_tools: frozenset[str] = frozenset()
         # Defensive copy + validation: every entry must be a relative
         # ASCII path with no traversal. If the caller passes garbage,
@@ -225,7 +227,7 @@ class LLMPlanner:
         host_block = _build_host_tools_block()
         # Скрытые на этом пути инструменты не описываем — см. without_tool_blocks.
         base_system = without_tool_blocks(
-            PLANNER_SYSTEM, getattr(self, "hidden_tools", frozenset()) or frozenset(),
+            PLANNER_SYSTEM, self.effective_hidden_tools(),
         )
         effective_system = base_system + host_block if host_block else base_system
         effective_system += self.lesson_block_for_prompt(  # живой путь уроков
@@ -265,7 +267,7 @@ class LLMPlanner:
         if _should_prefer_memory_over_readme(question, history):
             sources = _drop_readme_status_sources(sources, step_warnings)
         if is_confidence_evidence_diagnostic_question(question) and self._confidence_sources_here():
-            if "file_read" in self.hidden_tools:
+            if "file_read" in self.effective_hidden_tools():
                 step_warnings.append(
                     "confidence/evidence verifier sources required but file_read is hidden on this path"
                 )
@@ -285,7 +287,7 @@ class LLMPlanner:
                         ),
                     )
         if is_doctrine_corporate_question(question) and self._confidence_sources_here(doctrine_docs_present):
-            if "file_read" in self.hidden_tools:
+            if "file_read" in self.effective_hidden_tools():
                 step_warnings.append(
                     "doctrine/corporate docs required but file_read is hidden on this path"
                 )
@@ -354,6 +356,15 @@ class LLMPlanner:
         except KeyError:
             return True
 
+    def effective_hidden_tools(self) -> frozenset[str]:
+        """What this planner hides now: the host's set plus the current run's.
+
+        The run's part comes from the run context, so two overlapping runs each
+        see their own surface and neither's exit restores over the other.
+        """
+        host = getattr(self, "hidden_tools", frozenset()) or frozenset()
+        return frozenset(host) | run_blocked_tools()
+
     def _file_read_available(self) -> bool:
         """Whether a `file_read` step can actually run on this path.
 
@@ -365,7 +376,7 @@ class LLMPlanner:
         is exactly the noisy policy_blocked replan the hidden-tools directive
         exists to prevent, so the gate lives here once and both sides use it.
         """
-        if "file_read" in (getattr(self, "hidden_tools", frozenset()) or frozenset()):
+        if "file_read" in self.effective_hidden_tools():
             return False
         try:
             self.registry.get("file_read")
@@ -382,7 +393,7 @@ class LLMPlanner:
     ) -> str:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         hint = file_hint or "(none)"
-        hidden = getattr(self, "hidden_tools", frozenset()) or frozenset()
+        hidden = self.effective_hidden_tools()
         tool_names = ", ".join(
             t.name for t in self.registry.list() if t.name not in hidden
         )

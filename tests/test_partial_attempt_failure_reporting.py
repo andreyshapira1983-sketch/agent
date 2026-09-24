@@ -32,9 +32,16 @@ harness that invents a label tests its own invention.
 """
 from __future__ import annotations
 
-import pytest
+import json
+from pathlib import Path
 
 from core.completion_obligation import evaluate_completion_obligations
+from core.logger import TraceLogger
+from core.loop import AgentLoop, new_trace_id
+from core.policy import PolicyGate
+from tests.conftest import FakeLLM, FakePlanner
+from tools.base import ToolRegistry
+from tools.file_read import FileReadTool
 
 _ANSWER_NAMING_THE_TOOL = (
     "Conclusion: web_search was blocked by policy, so this answer is partial."
@@ -99,25 +106,58 @@ def test_a_silent_answer_is_still_caught_either_way() -> None:
     assert states == ["silently_missing"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN GAP, measured 2026-08-09 and banked rather than fixed: an "
-        "attempt that produces any artifact breaks before its triggers reach "
-        "failure_history, so a policy denial occurring in that attempt can "
-        "never reach `blocked_and_disclosed`. When this XPASSes the loop "
-        "started carrying the trigger — replace the marker with a plain "
-        "assertion and record which mechanism closed it. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
+_DISCLOSING = (
+    "Conclusion: 3 строки [file_read:doc.txt]; проверку через shell политика "
+    "не разрешила. [file_read:doc.txt]\n"
+    "Facts:\n- 3 lines [file_read:doc.txt]\n"
+    "Sources:\n1. file_read - doc.txt\n"
+    "Confidence: medium\nUnverified: nothing\n"
 )
-def test_a_refusal_is_classified_as_a_refusal_wherever_it_happens() -> None:
+
+
+def test_a_refusal_is_classified_as_a_refusal_wherever_it_happens(tmp_path: Path) -> None:
     """States the property, not a design: a denial should read as a denial.
 
-    The inputs below are what `core/loop_run_tail.py` actually passes after a
-    partially successful attempt — empty codes and empty denied set, because
-    the break at `core/loop_attempt.py:441` came before the extend at :448.
+    Driven through the real loop, not through hand-written arbiter inputs: one
+    attempt where `file_read` succeeds and `shell_exec` (observing, and not
+    registered, so the policy refuses it) is denied. Until 2026-08-14 the
+    success `break` came before the attempt's triggers reached
+    `failure_history`; the extend now sits above it (core/loop_attempt.py,
+    "One list, one place, both outcomes"). The banked version of this test fed
+    the arbiter empty codes by hand, so it could not see that repair — the
+    instrument, not the loop, kept it red until 2026-09-25.
     """
-    assert _tool_obligation(
-        failure_codes=[], denied_tools=()
-    ) == "blocked_and_disclosed"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "doc.txt").write_text("a\nb\nc\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(FileReadTool(workspace_root=workspace))
+    trace_id = new_trace_id()
+    agent = AgentLoop(
+        planner=FakePlanner(sources=[
+            {"tool": "file_read", "arguments": {"path": "doc.txt"},
+             "label": "file:doc.txt", "expected_outcome": "the lines"},
+            {"tool": "shell_exec", "arguments": {"cmd": "wc -l doc.txt"},
+             "label": "stub:shell", "expected_outcome": "blocked"},
+        ]),
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=FakeLLM(responses=[_DISCLOSING] * 4),
+        logger=TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False),
+        memory=None,
+        max_replan_attempts=3,
+    )
+    agent.run("что в doc.txt и сколько строк по wc")
+    events = [
+        json.loads(line)
+        for line in (workspace / "logs" / f"{trace_id}.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    verdicts = [e for e in events if e.get("event") == "completion_obligation"]
+    assert verdicts, "the run must journal an obligation verdict"
+    shell = [o for o in verdicts[-1]["payload"].get("obligations", [])
+             if o.get("kind") == "tool_execution" and "shell_exec" in str(o)]
+    assert shell, f"no obligation names the denied step: {verdicts[-1]['payload']}"
+    assert shell[0]["status"] == "blocked_and_disclosed", (
+        "a policy denial beside a successful step read as an ordinary failure"
+    )

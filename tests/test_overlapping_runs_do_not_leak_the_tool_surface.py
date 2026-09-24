@@ -49,15 +49,14 @@ it would then have executed depends on the gateway, the approval path and the
 tool itself, none of which this experiment touches. The gate holding today is
 defence in depth doing its job, not a reason to leave this.
 
-Banked, not fixed. Which form `hidden_tools` should take is the same decision
-the other axes raised, and it belongs with them.
+FIXED 2026-09-25: the run's block set is read from the run context by
+`Planner.effective_hidden_tools`, the same form the policy axis took on
+2026-08-21; `hidden_tools` keeps only the host's own set.
 """
 from __future__ import annotations
 
 import threading
 from pathlib import Path
-
-import pytest
 
 from agent_tick import UNATTENDED_MEMORY_PROFILE
 from app.bootstrap import build_agent
@@ -144,20 +143,6 @@ def test_a_single_run_hides_and_then_restores_the_surface(workspace: Path) -> No
     assert _advertised(agent)[0] == outside, "the run's hiding outlived the run"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-21 and banked (MIR-114): planner.hidden_tools "
-        "still uses save -> mutate shared field -> finally restore, the shape "
-        "policy.blocked_tools and gateway_dry_run lost the same day. With two runs "
-        "overlapping, the first run's cleanup restores what IT found and the second "
-        "run — still executing — is advertised the full tool surface again, without "
-        "the UNAVAILABLE_TOOLS directive. The gate still denies, so nothing becomes "
-        "callable; what leaks is what the planner is told. Fix unprescribed: this "
-        "axis takes the same decision as the other 26. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_an_overlapping_run_keeps_its_own_tool_surface(workspace: Path) -> None:
     agent = _agent(workspace)
     box: dict = {}

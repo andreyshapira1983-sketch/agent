@@ -1065,18 +1065,10 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         # знаю» и оставляет запрет общим — соразмерность не должна превращаться
         # в лазейку, когда ящик нечитаем (core/gateway_consult.approval_paths).
         self.agent.gateway_approval_paths = approval_paths(self.approval_inbox)
-        # Prune the planner-visible tool surface so the planner does not even
-        # *propose* run-scoped-blocked tools on the unattended goal path. Policy
-        # (below) stays as defense-in-depth if a blocked tool is attempted anyway.
-        planner = getattr(self.agent, "planner", None)
-        planner_supports_hidden = planner is not None and hasattr(planner, "hidden_tools")
-        previous_hidden = (
-            getattr(planner, "hidden_tools", frozenset())
-            if planner_supports_hidden
-            else frozenset()
-        )
-        if planner_supports_hidden:
-            planner.hidden_tools = to_block
+        # The planner-visible tool surface is pruned by the same run context
+        # below: `Planner.effective_hidden_tools` reads the run's block set, so
+        # the planner does not even *propose* a blocked tool, and a neighbouring
+        # run's cleanup cannot widen it mid-run (MIR-114).
         self._log(
             "autonomous_goal_gateway",
             {
@@ -1114,8 +1106,6 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             self.agent.gateway_readiness_blockers = previous_gateway_readiness_blockers
             self.agent.gateway_check_readiness = previous_gateway_check_readiness
             self.agent.suppress_durable_learning_writes = previous_suppress_learning_writes
-            if planner_supports_hidden:
-                planner.hidden_tools = previous_hidden
         # Вопрос с ворот петли — не работа (Д1, замер 2026-09-03: «Я не могу
         # безопасно продолжить. Уточни: …» уходил как done → completed/useful).
         # Та же форма отчёта, что у ветки replan_exhausted ниже: статус
