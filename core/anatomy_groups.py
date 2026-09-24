@@ -50,7 +50,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "lesson_provenance", "attribute_sieve", "lesson_ab_experiment", "charter_goal", "placeholder_text", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
         "verifier_utils", "verifier_absence", "claim_arithmetic", "replan", "reflection", "clarification_gate",
         "clarification_policy", "pending_clarification", "answer_contradiction",
-        "instruction_conflict_gate", "directive_extractor",
+        "instruction_conflict_gate", "directive_extractor", "root_principles",
         "assumption_registry", "referent_resolver",
         "evidence_support", "confidence_vector", "relevance_judge", "draft_refutation", "patch_route", "note_contract", "defect_intake", "stuck_route", "write_at_execution",
         "reasoning_action_check", "best_next_action",

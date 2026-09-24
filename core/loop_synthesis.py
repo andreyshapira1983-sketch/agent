@@ -66,6 +66,7 @@ from core.referent_resolver import (
     is_show_only_directive,
 )
 from core.replan import ReplanTrigger, failures_for_synthesis
+from core.root_principles import with_root_principles
 from core.runtime_self import runtime_self_block
 from core.smart_memory import _COMPLETION_DECLARATIONS
 from core.synth_resilience import (
@@ -302,7 +303,7 @@ class AgentLoopSynthesis:
         # Read the active synthesis contract from the prompt registry so an
         # env/registry override (e.g. a task-specific table-only contract)
         # actually takes effect here instead of being silently ignored.
-        system_prompt = self._resolve_synthesis_contract()
+        system_prompt = with_root_principles(self._resolve_synthesis_contract())
         if completion_nonce:
             # Appended to the system prompt rather than to one of the three
             # user-prompt branches, so every synthesis shape carries it.
