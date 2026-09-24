@@ -443,6 +443,24 @@ def _orders_a_path(demanding: str) -> bool:
     return _action_for(tuple(normalize_text(near).split())) in {"create", "modify"}
 
 
+def _written_paths_only(named: list[str], demanding: str) -> list[str]:
+    """Оставить в долгу только пути из предложений с глаголом записи.
+
+    Разбор по предложениям (2026-09-24): глагол записи стоит лишь в тех
+    предложениях, что называют ЧАСТЬ путей, — эта часть и меняется, прочее
+    читается. Ночь кампании: «В knowledge_library/…/Morin….txt найти раздел …
+    Итог запиши файлом data/notes/….md» кончилась отказом «mixes reading and
+    changing», цикл ушёл впустую. Где чтение и запись в ОДНОМ предложении
+    («прочитай A.py и исправь B.py»), подмножества нет — вопрос, как прежде.
+    Узнано ли «чтение», не важно: путь вне предложений с глаголом записи не
+    долг («найти» стеблем «найд» не ловится, и книга становилась обязанной).
+    """
+    if len(named) <= 1:
+        return named
+    ordered = _ordered_paths(demanding)
+    return ordered if 0 < len(ordered) < len(named) else named
+
+
 def _ordered_paths(demanding: str) -> list[str]:
     """Пути, названные в предложениях с глаголом записи (порядок — как в просьбе)."""
     out: list[str] = []
@@ -610,22 +628,8 @@ def derive_completion_contract(
     # change on A.py too, and an invented duty blocks `achieved` on its own
     # (Copilot, PR #258). One path is safe — "прочитай core/foo.py и исправь
     # его" names a single object and the stricter action wins.
-    # Разбор по предложениям (2026-09-24): глагол записи стоит лишь в тех
-    # предложениях, что называют ЧАСТЬ путей, — эта часть и меняется, прочее
-    # читается. Ночь кампании: «В knowledge_library/…/Morin….txt найти раздел …
-    # Итог запиши файлом data/notes/….md» кончилась отказом «mixes reading and
-    # changing», цикл ушёл впустую. Где чтение и запись в ОДНОМ предложении
-    # («прочитай A.py и исправь B.py»), подмножества нет — отказ как прежде.
-    # Узнано ли «чтение», не важно: путь, стоящий вне предложений с глаголом
-    # записи, не долг («найти» стеблем «найд» не ловится, и без этого книга из
-    # той же задачи становилась обязанной «появиться»).
-    if (
-        not declared_change_set
-        and action in {"create", "modify"}
-        and len(named) > 1
-        and 0 < len(ordered := _ordered_paths(demanding)) < len(named)
-    ):
-        named = ordered
+    if not declared_change_set and action in {"create", "modify"}:
+        named = _written_paths_only(named, demanding)
     if (
         not declared_change_set
         and action in {"create", "modify"}
