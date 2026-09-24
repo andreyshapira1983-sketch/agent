@@ -39,7 +39,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -75,6 +75,25 @@ AssumptionCategory = Literal[
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+#: Через сколько неизменное допущение записывается снова (см. `save_many`).
+_REPEAT_AFTER = timedelta(hours=24)
+
+
+def _recent_keys(rows: list[dict]) -> dict[tuple, datetime]:
+    """(category, text, verified) → когда записано последний раз."""
+    seen: dict[tuple, datetime] = {}
+    for row in rows:
+        try:
+            at = datetime.fromisoformat(str(row.get("created_at")))
+        except ValueError:
+            continue
+        at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        key = (row.get("category"), str(row.get("text") or "").strip(), row.get("verified"))
+        if at > seen.get(key, datetime.min.replace(tzinfo=timezone.utc)):
+            seen[key] = at
+    return seen
 
 
 # ---------------------------------------------------------------------------
@@ -449,12 +468,30 @@ class AssumptionStore:
             append_state_jsonl_unlocked(self.path, [assumption.to_dict()])
 
     def save_many(self, assumptions: list[Assumption]) -> int:
-        """Append multiple assumptions in one lock acquisition."""
+        """Append the assumptions that are NEW; returns how many were written.
+
+        Повтор той же (category, text, verified) моложе суток не пишется. Архив
+        отвечает «что предполагалось в последний раз», а не «сколько раз» (см.
+        `compact`), но чистка жила только в плановой уборке, которую кампания не
+        зовёт: замер 24.09 — 428 из 440 строк повторы, «the user expects a
+        russian language response» ×128. Чистить при записи, как Mem0 (NOOP для
+        уже известного); повтор раз в сутки — как repeat_interval Alertmanager,
+        чтобы неизменный факт не выпадал из `:assumptions`. Каждый ход по-прежнему
+        виден целиком в своём следе (событие `assumption_registered`).
+        """
         if not assumptions:
             return 0
-        payloads = [a.to_dict() for a in assumptions]
         with state_file_lock(self.path):
-            append_state_jsonl_unlocked(self.path, payloads)
+            recent = _recent_keys(read_state_jsonl_unlocked(self.path) if self.path.exists() else [])
+            payloads = []
+            for a in assumptions:
+                key = (a.category, a.text.strip(), a.verified)
+                if recent.get(key, datetime.min.replace(tzinfo=timezone.utc)) > a.created_at - _REPEAT_AFTER:
+                    continue
+                recent[key] = a.created_at
+                payloads.append(a.to_dict())
+            if payloads:
+                append_state_jsonl_unlocked(self.path, payloads)
         return len(payloads)
 
     # ---------- hygiene ----------
