@@ -41,6 +41,7 @@ SLICE_1A_RECEIPT_TOOLS: frozenset[str] = frozenset(
         "web_search",
         "rss_fetch",
         "semantic_scholar_search",
+        "convert_file",
     }
 )
 

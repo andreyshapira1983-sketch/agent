@@ -472,6 +472,27 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     )
 
 
+def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
+    """Улика из convert_file: распознанный текст, иначе путь к файлу-результату.
+
+    Написано агентом 24.09 (задача 4, два свидетеля): запасная ветка давала
+    tool_output из repr(output) без пути исходного файла.
+    """
+    if not isinstance(output, dict):
+        return None
+    source_id = f"file:{args.get('path', 'unknown')}"
+    text = output.get("text", "")
+    if text:
+        return make_evidence(kind="file", source_id=source_id, obtained_via="convert_file",
+                             claim=text, excerpt=text)
+    outputs = output.get("outputs") or []
+    if not outputs:
+        return None
+    produced = str(outputs[0])
+    return make_evidence(kind="file", source_id=source_id, obtained_via="convert_file",
+                         claim=produced, excerpt=produced)
+
+
 def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
     *,
     tool_name: str,
@@ -496,6 +517,8 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     # ---- file_read --------------------------------------------------------
     if tool_name == "file_read":
         return _file_read_evidence(args, output)
+    if tool_name == "convert_file":
+        return _convert_file_evidence(args, output)
 
     # ---- web_search -------------------------------------------------------
     if tool_name == "web_search":
