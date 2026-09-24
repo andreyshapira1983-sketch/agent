@@ -40,6 +40,34 @@ def test_a_scanned_pdf_is_recognised_not_refused(monkeypatch) -> None:
     assert "OCR" in text, "the reader is told the text came from recognition"
 
 
+def _programs_reading(by_lang: dict[str, str]):
+    """Как _fake_programs, но текст страницы зависит от языка распознавания."""
+    def run(argv, cwd: Path, _timeout):
+        if argv[0] == "pdftoppm":
+            (Path(cwd) / "page-1.png").write_bytes(b"png")
+        elif argv[0] == "tesseract":
+            lang = argv[argv.index("-l") + 1]
+            (Path(cwd) / f"{argv[2]}.txt").write_text(by_lang[lang], encoding="utf-8")
+        return 0, ""
+    return run
+
+
+def test_an_english_scan_is_read_in_english(monkeypatch) -> None:
+    """Живая проверка 24.09 (Cooley–Tukey): rus+eng дал «ап N Х N» — кириллицу
+    на месте латиницы; такая улика не сверяется с источником."""
+    mixed = "multiply an N-vector by ап N Х N matrix which can be factored into т sparse matrices " * 3
+    clean = "multiply an N-vector by an N X N matrix which can be factored into m sparse matrices"
+    monkeypatch.setattr(web_fetch, "_ocr_runner", _programs_reading({"rus+eng": mixed, "eng": clean}))
+    text = web_fetch._pdf_text(_blank_pdf())
+    assert clean in text and "ап N" not in text
+
+
+def test_a_russian_scan_keeps_both_languages(monkeypatch) -> None:
+    russian = "Теорема 1. Быстрое преобразование Фурье требует N log N шагов."
+    monkeypatch.setattr(web_fetch, "_ocr_runner", _programs_reading({"rus+eng": russian}))
+    assert russian in web_fetch._pdf_text(_blank_pdf())
+
+
 def test_without_the_sandbox_there_is_no_recognition(monkeypatch) -> None:
     monkeypatch.setattr(convert_file, "sandbox_available", lambda: "no sandbox here")
     with pytest.raises(ValueError, match=r"scanned images.*OCR is unavailable: .*no sandbox here"):
