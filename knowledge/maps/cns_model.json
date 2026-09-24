@@ -48,26 +48,26 @@
    "declared_output_note": "AttemptState.OUTPUTS names eight fields and a test guards exactly that set; this is the ninth channel and it is typed as an input ('does not change during the section') while loop_attempt.py:472 extends it. The OUTPUTS test therefore looks like a complete interface contract and is not.",
    "writers": [
     {
-     "site": "core/loop_attempt.py:484",
+     "site": "core/loop_attempt.py:489",
      "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
      "puts": "failures of an ATTEMPT",
      "call": "extend",
      "_anchor_correction": "read :472 until 2026-08-09 — a blank line by then. All four loop_attempt anchors on this carrier were off by exactly the 24 lines a990e48 removed when it deleted the planner cache; that commit updated census counts and the shape ratchet and left these. Now guarded by tests/test_cns_anchor_integrity.py, which requires an anchor to name its carrier. | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель."
     },
     {
-     "site": "core/loop_verify_replan.py:149",
+     "site": "core/loop_verify_replan.py:150",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._replan_on_refuted_claims",
      "puts": "claim_refuted",
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:255",
+     "site": "core/loop_verify_replan.py:256",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "unresolved_citation",
      "call": "append"
     },
     {
-     "site": "core/loop_verify_replan.py:406",
+     "site": "core/loop_verify_replan.py:407",
      "node": "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
      "puts": "failure of a step executed INSIDE the verify loop — a different kind from the other three",
      "call": "append"
@@ -132,19 +132,19 @@
      "uses": "codes into a journal event; loop_verification.py:154 states it is recorded and never acted on"
     },
     {
-     "site": "core/loop_attempt.py:559",
+     "site": "core/loop_attempt.py:564",
      "role": "dead_end",
      "uses": "log line — the codes inside the replan_exhausted ErrorObject message",
      "_anchor_correction": "read :539 until 2026-08-09; same 24-line shift | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель."
     },
     {
-     "site": "core/loop_attempt.py:569",
+     "site": "core/loop_attempt.py:574",
      "role": "dead_end",
      "uses": "log line — the same ErrorObject's context payload",
      "_anchor_correction": "read :549 until 2026-08-09, by then pointing at action_spec={ inside _build_plan, a method that reads nothing of this carrier | shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py. | shifted 2026-08-22 by +4: the MIR-026 audit extracted `_settle_run_objects` out of the attempt loop so the budget-interrupt exit settles its log objects too, which moved every site below it. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель."
     },
     {
-     "site": "core/loop_attempt.py:172",
+     "site": "core/loop_attempt.py:177",
      "role": "dead_end",
      "uses": "count_failures into the replan_attempt event — found 2026-08-08 while reconciling the map's 6 against this list's 8: BOTH numbers were wrong"
     }
@@ -173,7 +173,7 @@
     },
     {
      "defect": "synthetic attempt number",
-     "detail": "core/loop_verify_replan.py:247 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"
+     "detail": "core/loop_verify_replan.py:248 sets attempt = st.attempt + verify_replan_attempt; that number reaches the planner and the synthesis block as if it were a real attempt"
     },
     {
      "defect": "duplication per verify iteration",
@@ -201,7 +201,7 @@
     "core/loop_step_execution.py:809 (injection_blocked)",
     "core/loop_step_execution.py:1011 (unknown)"
    ],
-   "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:557, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.",
+   "_writers_reachability_census": "2026-08-09. Eleven sites, not eleven live producers. :462 is UNREACHABLE in the shipped system and is a defensive branch: it fires only when action.type != 'tool_call', Action.type is Literal[tool_call, llm_synthesize, output], both production plan builders write tool_call (core/loop_attempt.py:562, core/self_repair.py:274), and no code anywhere in core/cli/app/api/tools deserialises a Plan or PlanStep from external data. :451 was already certified as approval_verdict_stops_the_step (M54/M55) — the site simply was not named. Live and unwalked: :496, :528, :555, :576, plus :789 as a last-resort guard.",
    "_writers_correction": "Recorded THREE writers until 2026-08-09; the code has eleven, all inside the 558-line _execute_step. The three that were listed are exactly the policy_blocked family — the one path C08 had certified (M51) — so a single certified walk had been written down as the carrier's writer set. Not staleness: eleven already existed at b4017bb, the commit that wrote three, and core/loop_step_execution.py has not changed since. Every missing code (verify_failed, web_empty, timeout, injection_blocked, unknown, and two variable codes) is exercised by tests, so these are live sites. Found by tests/test_cns_anchor_integrity.py, which derives the set from the AST instead of from a walk. | shifted 2026-08-27: `core/repo_provenance` imported at the top (+1 to every site below it) and the blocked branch gained a provenance arm that downgrades a block on our OWN committed document to an annotation (+22 below that). Why, and the three rejected alternatives: docs/audit/PROSPECTIVE_AUTONOMY_HAZARD_AUDIT.md §6. | shifted again 2026-08-27: the injection exemption lost two of its three tools and the comment explaining why grew above these sites. | shifted 2026-09-05: the last-resort guard's success return moved into a try/else (TRY300 lint), :910 -> :901; other sites unchanged. | shifted 2026-09-05 (second): step references are now resolved on the effect branch too and an unresolved reference stops the step instead of running it raw (_run_step_after_references, +33 to every site below core/loop_step_execution.py:374); the writer set itself is unchanged. | shifted 2026-09-05 (evening): `core.step_sanitizer.fit_resolved_arguments` imported at the top (+1 to every site below it), the effect/read-only executor computes the plan's step set before dispatch (+3), and `_resolve_references_in` gained the plan-steps parameter and the post-substitution fit (+12 below it); the writer set itself is unchanged. | shifted 2026-09-19: the working-memory cache serves a hit only on a matching freshness stamp (+6 around the cache branch), and a suspicious verdict keeps the output shape (annotate_suspicious_output import, +1 at the top; +1 comment); the writer set itself is unchanged. | shifted 2026-09-22: текст записи собирается в момент исполнения (_compose_write_content, +30 к каждому сайту ниже core/loop_step_execution.py:363); сам набор писателей не изменился. | shifted 2026-09-23: воротам передаются файлы висящих заявок (+3 к сайтам ниже core/loop_step_execution.py:546) — запрет от одной заявки перестал останавливать всю работу; сам набор писателей не изменился.",
    "readers": [
     "core/loop_step_execution.py:145 (consume)"
@@ -298,7 +298,7 @@
    "producer": "ModelUsageLedger.assert_can_start raises ModelBudgetExceeded before the LLM call (core/model_usage.py:216); carrier: the exception itself, through router -> phase -> run() -> guard",
    "in_cycle_catch_sites": [
     {
-     "site": "core/loop_attempt.py:294",
+     "site": "core/loop_attempt.py:299",
      "phase": "planning",
      "does": "saves rich paused checkpoint (goal, steps done/remaining, blocked counter) and re-raises"
     },
@@ -308,7 +308,7 @@
      "does": "same"
     },
     {
-     "site": "core/loop_verify_replan.py:349",
+     "site": "core/loop_verify_replan.py:350",
      "phase": "verification_replan",
      "does": "same"
     }
@@ -457,9 +457,9 @@
    "producer": "_observe_and_route: model_router.for_task(role, question, escalation, task_role) for PLANNER and SYNTHESIZER (core/loop_observe.py:116,156)",
    "carrier": "_task_planner_llm / _task_synth_llm — return values threaded through AttemptState and SynthesisState",
    "consumers": [
-    "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:292)",
+    "planner.plan(llm=st._task_planner_llm) (core/loop_attempt.py:297)",
     "_synthesize(llm=_synth_llm) via the ladder (core/loop_synthesis.py:590)",
-    "verify-replan planner call (core/loop_verify_replan.py:347) — bitten by M23"
+    "verify-replan planner call (core/loop_verify_replan.py:348) — bitten by M23"
    ],
    "evidence": {
     "hole_measured": "M22a+M22b (2026-08-08): both llm= overrides cut -> 221 routing tests green. for_task was still called, its verdict still logged in adaptive_route, and its RESULT silently discarded — every run would execute on the default model. One wire past M11: the operator's escalation reached the router, the router picked the deep model, the loop threw the choice away",
@@ -557,7 +557,7 @@
      "status": "PROVEN — CLOSED in C06 as the arc local_critique_to_replay_admission (M43 plus a behavioural bite with a control pole)"
     },
     {
-     "consumer": "core/loop_attempt.py:194",
+     "consumer": "core/loop_attempt.py:199",
      "does": "SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target instead — the heaviest consequence of the four",
      "status": "UNPROVEN (C08)"
     },
@@ -687,7 +687,7 @@
    "q3_was_the_obligation_state_knowable": "YES, mechanically. derive_completion_contract is a pure function of the REQUEST and runs BEFORE the loop; unmet_obligations(contract, artifacts) is a pure function of (contract, artifacts); the loop holds artifacts. Probed on 'Создай файл docs/report.md': obligations ['file_exists'], unmet with nothing produced ['file_exists'], unmet after the real write []. So at the stop point 'this run owes a file and has not produced it' was computable from values already in hand.",
    "what_this_does_NOT_yet_establish": "That stopping was wrong. The loop's stop is an answer to 'should I try again', decided on failure accounting; the obligation state answers 'did I deliver what was owed'. Two different questions. Knowability is proven; whether the retry decision SHOULD consume it is a design question with a live defense (see below), and no defect is claimed here.",
    "the_defense_on_record": "PROJECT_MAP already argues (from the earlier _run_inner walk) that the full obligation picture is only complete AFTER the loop, so passing the contract down would not cure it. Tested: HALF right. The four-state verdict does need the answer (disclosure is read from the text the operator receives) and the plan. But the 'deliverable produced or not' half needs only (contract, artifacts) — both available at the stop point. The defense holds for the full verdict and fails for the unmet-deliverable half.",
-   "sharper_shape_found": "The loop's SUCCESS condition is 'any artifact survived' (core/loop_attempt.py:469): a run that produced SOME artifact but not the OWED one exits as success and never reaches the failure branch at all. So the candidate is not only about stopping too early on insufficient evidence — it is that success and obligation are different predicates that never meet until C13, after the answer is composed and after every retry mechanism is spent. Already demonstrated without a new probe by the C03 bite: a cycle owing docs/report.md, producing nothing, with NO failures, exits the loop 'successfully' and is judged silently_missing only in the journal afterwards.",
+   "sharper_shape_found": "The loop's SUCCESS condition is 'any artifact survived' (core/loop_attempt.py:474): a run that produced SOME artifact but not the OWED one exits as success and never reaches the failure branch at all. So the candidate is not only about stopping too early on insufficient evidence — it is that success and obligation are different predicates that never meet until C13, after the answer is composed and after every retry mechanism is spent. Already demonstrated without a new probe by the C03 bite: a cycle owing docs/report.md, producing nothing, with NO failures, exits the loop 'successfully' and is judged silently_missing only in the journal afterwards.",
    "ownership": "producer half in C03 (contract) and C08 (artifacts); consumer is C08's retry decision, which does not receive it; the comparison happens in C13. Registered here as a candidate arc, UNPROVEN, pending the operator's verdict on whether the retry decision SHOULD be a consumer at all — that is a contract change, not a repair."
   },
   "multi_file_refusal_authority": {
@@ -712,7 +712,7 @@
    "value": "the forced half of the verdict: validated read-steps (sources), reasoning, warnings",
    "producer": "the same kernel preflight, path-validated against the workspace root",
    "carrier": "forced_sources/forced_reasoning/forced_warnings through AttemptState",
-   "consumer_contract": "on attempt 1 the attempt loop REPLACES the planner output entirely (core/loop_attempt.py:182-185): the kernel's plan executes, the LLM planner is not consulted. On attempt 2+ the forced plan is NOT reapplied — replans go to the real planner; recorded as semantics, not assumed as intent",
+   "consumer_contract": "on attempt 1 the attempt loop REPLACES the planner output entirely (core/loop_attempt.py:187-185): the kernel's plan executes, the LLM planner is not consulted. On attempt 2+ the forced plan is NOT reapplied — replans go to the real planner; recorded as semantics, not assumed as intent",
    "evidence": {
     "M46": "forced_sources forced to None at the loop -> 49 tests across the producer, integration, attempt-split and gates suites stayed green: the kernel's plan was silently replaced by the LLM's. Behavioural bite added 2026-08-08: with an LLM plan naming NO tools, both validated files must still be read; red under M46",
     "granularity_note": "sources/reasoning/warnings travel as one verdict into one consumer contract (one PlannerOutput constructor) — grouped per the granularity clause as one value-tuple -> one contract; the M45 arc is the OTHER half of the verdict with a different consumer, hence a separate arc"
@@ -988,14 +988,14 @@
  },
  "decision_boundaries": {
   "verify_replan_authority": {
-   "site": "core/loop_verify_replan.py:256",
+   "site": "core/loop_verify_replan.py:257",
    "reads": "decision.action from ReplanPolicy",
    "consequence_class": "LOOP",
-   "second_belt": "VERIFY_REPLAN_HARD_CAP = 2 (core/loop_verify_replan.py:217) stops the loop when the verdict is ignored — which is why breaking the wiring changes where the run stops rather than whether it stops",
+   "second_belt": "VERIFY_REPLAN_HARD_CAP = 2 (core/loop_verify_replan.py:218) stops the loop when the verdict is ignored — which is why breaking the wiring changes where the run stops rather than whether it stops",
    "protection": "PROVEN (10240f8)"
   },
   "unresolved_citation_eligibility_gate": {
-   "site": "core/loop_verify_replan.py:222",
+   "site": "core/loop_verify_replan.py:223",
    "reads": "unresolved_urls emptiness",
    "consequence_class": "PHASE",
    "protection": "PROVEN in isolation 2026-08-08: both poles (no citation -> decide never consulted; citation -> consulted), and M20 breaks the GATE, not the detector — 3 red"
@@ -1226,7 +1226,7 @@
     "status": "UNPROVEN",
     "known": "post_tool_trust_boundary PROVEN (08c29cf); failure_history delivery PROVEN and its ARBITER effect PROVEN at L5 through the real call site (M19 — codes emptied at loop_run_tail flips a disclosing run failed_but_reported -> silently_missing, and the verdict is authoritative at banking), while the SYNTHESIS and VERIFICATION consumers' effects stay UNPROVEN — they land in a live model's prompt and the mock cannot show it (prompt_to_model_family); _TRUSTED_INTERNAL_TOOLS hole documented",
     "deferred_arcs_from_other_clusters": [
-     "local_critique_active SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target (core/loop_attempt.py:194) — candidate arc deferred here from C05, unbitten; heaviest of the four",
+     "local_critique_active SKIPS THE PLANNER on attempt 1 and synthesises from the analysis target (core/loop_attempt.py:199) — candidate arc deferred here from C05, unbitten; heaviest of the four",
      "repeat_question_hint -> planner prompt (core/loop_memory_read.py:351-364) — UNPROVEN candidate registered 2026-08-08 by the independent re-audit: the same repeat_ep that feeds the replay admission also builds a planner hint, and no test anywhere mentions repeat_question_hint; delivery unproven, family member in prompt_to_model_family"
     ],
     "opened": "2026-08-08",
@@ -1844,7 +1844,7 @@
      "durable_state": "temporary workspace holding one file",
      "external": "none"
     },
-    "what_survives_the_loss": "The arbiter is NOT blinded. core/loop_attempt.py:412 sets step.status = 'failed', and completion_obligation.py:271 branches on `status == \"failed\" or failure_codes`, so the denied step is still marked and an answer naming the tool is still credited. Three poles measured end to end: a silent answer gives silently_missing, an answer naming web_search gives failed_but_reported. For that distinction the loss is MASKED.",
+    "what_survives_the_loss": "The arbiter is NOT blinded. core/loop_attempt.py:417 sets step.status = 'failed', and completion_obligation.py:271 branches on `status == \"failed\" or failure_codes`, so the denied step is still marked and an answer naming the tool is still credited. Three poles measured end to end: a silent answer gives silently_missing, an answer naming web_search gives failed_but_reported. For that distinction the loss is MASKED.",
     "what_does_not_survive": "blocked_and_disclosed — the state that says a policy DECLINED this rather than it merely not working. That branch tests `tool in denied`, and denied is built at core/loop_run_tail.py:301 from failure_history entries coded policy_blocked. On the success path that list is empty, so the branch is unreachable. Measured at the consumer with everything else held equal — same answer, same step, same status, only the trigger differing: blocked_and_disclosed versus failed_but_reported.",
     "verdict": {
      "REACHABILITY": "PROVEN",
@@ -1860,7 +1860,7 @@
    },
    "empty_plan_provenance": {
     "named_state_space": "WHY the attempt loop's plan has no steps. At least six values: the planner chose none; plan_parse_failed; a step that is not an object; a step missing a tool name; an unregistered tool; a (tool, args) pair on the forbidden list; a step the sanitiser rejected (core/planner.py:_validate_steps).",
-    "observation_boundaries": "The break condition at core/loop_attempt.py:445 partitions those six into TWO — {plan_parse_failed} and {everything else}. The journal partitions them into three, because an unregistered tool also emits plan_tool_drop. The remaining four leave only free-text warning strings.",
+    "observation_boundaries": "The break condition at core/loop_attempt.py:450 partitions those six into TWO — {plan_parse_failed} and {everything else}. The journal partitions them into three, because an unregistered tool also emits plan_tool_drop. The remaining four leave only free-text warning strings.",
     "evaluation_domain": {
      "code": "f889973",
      "held": [
@@ -1909,7 +1909,7 @@
     },
     "the_stated_contract": "The comment above the entry says blocked content must not be retried with the same tool and query, because it would just fetch the same poisoned page.",
     "what_the_measurement_showed_instead": "That half is held by a DIFFERENT mechanism. requires_different_action=True puts (tool, args) on the forbidden list, so with the budget raised to 2 the poisoned call is not repeated at all: attempt 2's plan comes back empty after the filter, and the tool is invoked once, not twice. The budget is not what prevents the repeat.",
-    "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:445 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:639 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
+    "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:450 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:639 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
     "mutation": "ONE integer, core/replan.py:396, max_occurrences 1 -> 2.",
     "observed_consequence": "FULL SUITE GREEN: 7286 passed, 1 xfail, exit 0. Nothing observed it — including the delivery test added the same day, because that test holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice in one cluster.",
     "green_mutation_diagnosis": "Not unreachable, not vacuous. PARTIALLY masked — the repetition half of the stated contract is genuinely held by requires_different_action, so the comment's stated fear does not materialise. NOT masked for the disclosure half: no other mechanism tells the answer that an injection was blocked. Classification: a real unprotected distinction, on a security-relevant constant, whose true role is disclosure rather than the retry limiting its own comment describes.",
@@ -1921,7 +1921,7 @@
     },
     "protection_status": "Was NEGATIVE across 7286 tests. Now held by tests/test_tool_output_passes_the_injection_guard.py::test_under_the_shipped_cap_a_blocked_injection_still_reaches_the_answer, which asserts the stop comes from the injection budget by name so a stop produced by the global cap cannot satisfy it.",
     "scope_limitation": "One constant of fourteen. The other thirteen budgets are unmeasured, and no claim is made about what a live model does with the failure context once it arrives.",
-    "spawned_candidate": "core/loop_attempt.py:445 treats an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools — the same collapse this finding rode on. Registered UNPROVEN, unbitten.",
+    "spawned_candidate": "core/loop_attempt.py:450 treats an empty plan as an intentional zero-tool plan. A plan emptied by the forbidden-action filter is indistinguishable there from a planner that chose no tools — the same collapse this finding rode on. Registered UNPROVEN, unbitten.",
     "no_code_change": "None proposed. Production is read-only for the mapping program, and the constant is correct as it stands; what was missing was an observer."
    },
    "failure_trigger_code": {
@@ -1965,12 +1965,12 @@
     "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:451)",
     "consumers_and_what_each_reads": [
      {
-      "consumer": "core/loop_attempt.py:485",
+      "consumer": "core/loop_attempt.py:490",
       "reads": "equality with 'continue' ONLY — the retry branch",
       "kind": "control"
      },
      {
-      "consumer": "core/loop_verify_replan.py:256",
+      "consumer": "core/loop_verify_replan.py:257",
       "reads": "inequality with 'continue' ONLY — sets replan_exhausted and breaks",
       "kind": "control"
      },

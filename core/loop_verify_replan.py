@@ -257,8 +257,7 @@ class AgentLoopVerifyReplan:
 
                 decision = self.replan_policy.decide(
                     failure_history=st.failure_history,
-                    completed_attempts=charged_attempts(self, st.attempt, st.failure_history)
-                    + verify_replan_attempt,
+                    completed_attempts=charged_attempts(self, st.attempt, st.failure_history) + verify_replan_attempt,
                 )
 
                 if decision.action != "continue":
