@@ -346,3 +346,42 @@ _Core data models and the LLM client wrapper._
 | ------ | ------- |
 | `core/models` | Core data models for the agent (§12.1 of the architecture). |
 | `core/llm` | Thin LLM client wrapper. |
+
+## Where things are wired (outside core/)
+
+- Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; there is no tools/registry.py.
+- `Tool` and `ToolRegistry` live in `tools/base.py`; a tool's `risk` is a plain string (`Risk = Literal["read_only", "reversible", "irreversible", "external"]`), not an enum.
+- A model call goes through a role object: `model_router.for_role(ModelRole.X).complete(system=..., user=...)` (`core/model_router.py`); that wrapper records tokens and dollars and checks the budget. A tool that needs a model is given `model_router` in `app/bootstrap.py`, as `tools/spawn_subagent.py` is.
+- Self-repair: an edit is written to `proposals/selffix/<name>/edits.txt` (FILE: + SEARCH/REPLACE or LINES blocks) and tried by `patch_check` on a copy of the repo.
+
+| Tool module | Purpose |
+| ----------- | ------- |
+| `tools/agent_mcp_server` | MCP transport for the read-only agent view. |
+| `tools/agent_state_view` | Read-only view of this agent's own state, for whoever is watching it. |
+| `tools/base` | Tool abstraction and registry. |
+| `tools/convert_file` | `convert_file` — программы для файлов клиента, запущенные безопасно. |
+| `tools/current_time` | Current Time tool — pure read-only clock query. |
+| `tools/diff_file` | MVP-13.1 — `diff_file` tool: unified diff vs proposed content. |
+| `tools/file_read` | File Read tool — sandboxed to the workspace root. |
+| `tools/file_write` | File Write tool — sandboxed, secret-aware, backup-on-overwrite. |
+| `tools/find_in_files` | Find in Files — поиск по рабочей папке: файлы по имени и строки по тексту. |
+| `tools/journal_append` |  |
+| `tools/json_view` | Компактный вид JSON-ответа: факты не тонут в длинных полях. |
+| `tools/lesson_provenance_tool` | The provenance meter in the planner's hands (read-only). |
+| `tools/list_dir` | List Directory tool — sandboxed to the workspace root. |
+| `tools/memory_bank` |  |
+| `tools/memory_recall` | The agent's own read door into durable memory: a bounded, low-trust search. |
+| `tools/model_roster` | `model_roster` — the agent asks what models it has. |
+| `tools/model_route` | The agent's door to his own routing policy: set or release a role's model. |
+| `tools/network_safety` | Network safety helpers for read-only HTTP tools. |
+| `tools/patch_check` | `patch_check` — проверить свою правку в отдельной копии, не трогая живой код. |
+| `tools/python_probe` | Python Probe — лаборатория: маленький эксперимент над СВОЕЙ средой. |
+| `tools/read_logs` | MVP-13.1 — `read_logs` tool: structured JSONL audit reader. |
+| `tools/reddit_feed` | Reddit читается через свою ленту `.rss`, а не через страницу. |
+| `tools/rss_fetch` | RSS / Atom fetch tool. |
+| `tools/run_tests` | MVP-13.1 — `run_tests` tool: sandboxed pytest runner. |
+| `tools/semantic_scholar_search` | Semantic Scholar Academic Search tool. |
+| `tools/shell_exec` | Shell Exec tool — narrow, sandboxed, with mandatory compensation plan. |
+| `tools/spawn_subagent` | spawn_subagent tool — agent-as-tool pattern for parallel sub-task delegation. |
+| `tools/web_fetch` | MVP-14.2 — `web_fetch` tool: turn a web pointer into a verifiable source. |
+| `tools/web_search` | Web Search tool — read-only, no API key (DuckDuckGo via ddgs). |

@@ -718,9 +718,14 @@ def test_the_anatomy_map_is_not_mutilated_when_the_operator_asks_in_russian(monk
     trimmed = budget_file_content(text, question=question)
     whole = budget_file_content(text, question=question, self_documentation=True)
 
-    assert marker not in trimmed, (
-        "the old 12 000 ceiling no longer cuts this section — if the map "
-        "shrank below it the measurement is stale, re-take it"
+    # Re-taken 2026-09-25: the map gained a wiring section and a tools/ table
+    # whose Russian purposes share «свою» with the question, so the old ceiling
+    # now picks paragraphs by keyword instead of head+tail and the Memory group
+    # happens to survive. The pole the flag must beat is unchanged: the old
+    # ceiling still mutilates the agent's own map.
+    assert len(trimmed) < len(text) and trimmed != text, (
+        "the old 12 000 ceiling no longer cuts the map — if the map shrank "
+        "below it the measurement is stale, re-take it"
     )
     assert whole == text, (
         "the agent's own anatomy must reach the synthesiser whole; it lost "
