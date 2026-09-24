@@ -86,7 +86,10 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: `except OSError: return 0.0` was one of the counted silent handlers, went
 #: with it as the key's only supplier. The handler did not learn to report;
 #: the code that owned it ceased to exist.
-JOURNAL_SILENT_BASELINE = 10
+#: 10 -> 8 (2026-09-25), two repairs: the reasoning/action check and the
+#: assumption extractor in `core/loop_attempt.py` report through
+#: `_sensor_failed` (tests/test_attempt_loop_sensor_silence.py).
+JOURNAL_SILENT_BASELINE = 8
 
 _LAYER = Path("core")
 

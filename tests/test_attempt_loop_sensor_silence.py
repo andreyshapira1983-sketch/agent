@@ -168,31 +168,8 @@ def test_a_broken_reasoning_check_loses_a_durable_defect_signal(tmp_path: Path) 
     "attribute,sources",
     [
         pytest.param("__stagnation__", [_GHOST], id="termination_guard"),
-        pytest.param(
-            "extract_from_plan", [_READ], id="assumption_extractor",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "KNOWN GAP, measured 2026-08-09 and banked rather than "
-                    "fixed: core/loop_attempt.py:359 swallows the failure whole. "
-                    "The neighbouring handler eleven lines below reports through "
-                    "_sensor_failed. When this XPASSes, replace the marker. "
-                    "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]"
-                ),
-            ),
-        ),
-        pytest.param(
-            "check_reasoning_actions", [_READ], id="reasoning_action_check",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "KNOWN GAP, measured 2026-08-09 and banked rather than "
-                    "fixed: core/loop_attempt.py:335 swallows the failure whole, "
-                    "and the signal it drops is banked with the episode. "
-                    "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]"
-                ),
-            ),
-        ),
+        pytest.param("extract_from_plan", [_READ], id="assumption_extractor"),
+        pytest.param("check_reasoning_actions", [_READ], id="reasoning_action_check"),
     ],
 )
 def test_a_sensor_that_dies_inside_the_attempt_loop_is_reported(

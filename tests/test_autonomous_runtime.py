@@ -939,7 +939,7 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
 
     def _capture(*, user_question: str) -> str:
         seen["blocked"] = _effective_blocked(agent)
-        seen["hidden"] = frozenset(agent.planner.hidden_tools)
+        seen["hidden"] = agent.planner.effective_hidden_tools()
         return "analysis"
 
     agent.run = _capture  # type: ignore[method-assign]
@@ -964,7 +964,7 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
         assert "file_write" not in seen["blocked"]
         # Run-scoped: both restored after each run.
         assert agent.policy.blocked_tools == frozenset()
-        assert agent.planner.hidden_tools == frozenset()
+        assert agent.planner.effective_hidden_tools() == frozenset()
 
 
 def test_no_tests_block_restored_after_exception(workspace: Path):
