@@ -48,7 +48,9 @@ VERIFICATION_METHODS: dict[DeliverableKind, str] = {
 # short: every stem here is a claim that this word unambiguously signals the
 # action, and a wrong claim manufactures an obligation the operator never gave.
 _CREATE_STEMS: tuple[str, ...] = (
-    "созда", "напиш", "сформир", "сгенерир", "добав",
+    # «запиш-» (2026-09-24): «Итог запиши файлом data/notes/…» не узнавался
+    # как распоряжение записать — цель кампании кончилась отказом.
+    "созда", "напиш", "запиш", "сформир", "сгенерир", "добав",
     "create", "write", "generate", "add",
 )
 _MODIFY_STEMS: tuple[str, ...] = (
@@ -387,7 +389,9 @@ _PAST_TENSE_RE = _NOT_AN_ORDER_RE
 #: его данных: поля зовутся `added_at`, `updated_at`, `created_at`,
 #: функции — `write_state`, `remove_lock`. Разговор о собственном
 #: устройстве целиком состоит из таких имён.
-_IS_A_NAME_RE = re.compile(r"[_/\\=]|\d")
+#: Круглая скобка (2026-09-24): «remove()» в описании алгоритма — имя метода,
+#: а не приказ «удали»; учебная задача кампании из-за него стала «правкой книги».
+_IS_A_NAME_RE = re.compile(r"[_/\\=(]|\d")
 
 #: Хвост слова после стебля. Приказ по-русски отдают повелительным
 #: наклонением («исправь», «почини», «создай», «сформируй», «удали»,
@@ -437,6 +441,16 @@ def _orders_a_path(demanding: str) -> bool:
     if not near:
         return False
     return _action_for(tuple(normalize_text(near).split())) in {"create", "modify"}
+
+
+def _ordered_paths(demanding: str) -> list[str]:
+    """Пути, названные в предложениях с глаголом записи (порядок — как в просьбе)."""
+    out: list[str] = []
+    for part in _SENTENCE_SPLIT_RE.split(demanding or ""):
+        paths = paths_mentioned(part) if part.strip() else ()
+        if paths and _action_for(tuple(normalize_text(part).split())) in {"create", "modify"}:
+            out += [p for p in paths if p not in out]
+    return out
 
 
 def _in_order_form(tok: str, stem: str) -> bool:
@@ -596,6 +610,22 @@ def derive_completion_contract(
     # change on A.py too, and an invented duty blocks `achieved` on its own
     # (Copilot, PR #258). One path is safe — "прочитай core/foo.py и исправь
     # его" names a single object and the stricter action wins.
+    # Разбор по предложениям (2026-09-24): глагол записи стоит лишь в тех
+    # предложениях, что называют ЧАСТЬ путей, — эта часть и меняется, прочее
+    # читается. Ночь кампании: «В knowledge_library/…/Morin….txt найти раздел …
+    # Итог запиши файлом data/notes/….md» кончилась отказом «mixes reading and
+    # changing», цикл ушёл впустую. Где чтение и запись в ОДНОМ предложении
+    # («прочитай A.py и исправь B.py»), подмножества нет — отказ как прежде.
+    # Узнано ли «чтение», не важно: путь, стоящий вне предложений с глаголом
+    # записи, не долг («найти» стеблем «найд» не ловится, и без этого книга из
+    # той же задачи становилась обязанной «появиться»).
+    if (
+        not declared_change_set
+        and action in {"create", "modify"}
+        and len(named) > 1
+        and 0 < len(ordered := _ordered_paths(demanding)) < len(named)
+    ):
+        named = ordered
     if (
         not declared_change_set
         and action in {"create", "modify"}
