@@ -262,6 +262,64 @@ def _refuse_over_voice_budget(path: str, target: Path) -> None:
         )
 
 
+#: Окно повтора (repeat_interval у Alertmanager): тот же случай не повторяется
+#: человеку раньше, чем через сутки.
+VOICE_REPEAT_WINDOW = _dt.timedelta(hours=24)
+_VOICE_ID_RE = re.compile(r"sii_[0-9a-f]{8,}")
+_VOICE_NAME_RE = re.compile(r"\b[a-z]+(?:_[a-z]+)+\b")
+_VOICE_WORD_RE = re.compile(r"[a-zа-яё_]{4,}")
+
+
+def _voice_fingerprint(text: str) -> tuple[set[str], set[str], set[str]]:
+    low = (text or "").lower()
+    return set(_VOICE_ID_RE.findall(low)), set(_VOICE_NAME_RE.findall(low)), set(_VOICE_WORD_RE.findall(low))
+
+
+def _same_voice_case(a: str, b: str) -> bool:
+    """Тот же случай: общий id дефекта, или общее имя сигнала при заметном
+    совпадении слов, или просто почти тот же текст."""
+    ids_a, names_a, words_a = _voice_fingerprint(a)
+    ids_b, names_b, words_b = _voice_fingerprint(b)
+    union = words_a | words_b
+    jaccard = len(words_a & words_b) / len(union) if union else 0.0
+    return bool(ids_a & ids_b) or (bool(names_a & names_b) and jaccard >= 0.2) or jaccard >= 0.5
+
+
+def _refuse_repeated_voice(path: str, target: Path, record: dict) -> None:
+    """Один случай — одно обращение (план субботы ж, 24.09).
+
+    24.09 все пять суточных обращений ушли за две минуты, и все — одна
+    жалоба на self_contradiction. Практика оповещений (Alertmanager:
+    отпечаток + repeat_interval): повтор того же случая в окне не шлётся.
+    """
+    if path != VOICE_PATH or not target.exists():
+        return
+    text = str(record.get("text") or "")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    try:
+        rows = read_state_jsonl_unlocked(target)
+    except Exception:  # noqa: BLE001 — нечитаемый журнал не запирает голос
+        return
+    for row in rows:
+        payload = row.get("payload", row) if isinstance(row, dict) else {}
+        if not isinstance(payload, dict) or str(payload.get("author") or "").lower() != "agent":
+            continue
+        try:
+            said = _dt.datetime.fromisoformat(str(payload.get("ts") or ""))
+        except ValueError:
+            continue
+        if said.tzinfo is None or now - said > VOICE_REPEAT_WINDOW:
+            continue
+        before = str(payload.get("text") or "")
+        if _same_voice_case(text, before):
+            raise PermissionError(
+                f"already said at {said:%H:%M} UTC: «{before[:90]}…». The human has "
+                "this case; one case is one call. Say it again only with something NEW "
+                "(a result, a measured number, a decision you need) — or put the "
+                "progress into data/self_improvement_issues.jsonl, which every cycle reads."
+            )
+
+
 class JournalAppendTool(Tool):
     name = "journal_append"
     description = (
@@ -315,6 +373,7 @@ class JournalAppendTool(Tool):
         _refuse_owned_state(str(path))
         record = _stamp_voice_record(str(path), record)
         _refuse_over_voice_budget(str(path), target)
+        _refuse_repeated_voice(str(path), target, record)
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
         _refuse_naive_stamps(record)

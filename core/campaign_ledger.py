@@ -44,6 +44,9 @@ class CampaignCycleRecord:
     #: повторяя десятичасовой прогон (аудит автономности 2026-09-17).
     #: Пустая строка = критерий не назван.
     success_check: str = ""
+    #: Долларов на вызовы модели за последний час на момент записи (план
+    #: субботы з, 24.09; core/usd_spend.py). None — не посчитано.
+    usd_last_hour: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +70,7 @@ class CampaignCycleRecord:
             "grounds": self.grounds,
             "decided_by": self.decided_by,
             "work_done": self.work_done,
+            "usd_last_hour": self.usd_last_hour,
         }
 
     def user_summary(self) -> str:
@@ -90,6 +94,11 @@ class CampaignLedger:
         self.records: list[CampaignCycleRecord] = []
 
     def append(self, record: CampaignCycleRecord) -> None:
+        if self.path is not None and record.usd_last_hour is None:
+            from dataclasses import replace
+
+            from core.usd_spend import usd_last_hour
+            record = replace(record, usd_last_hour=usd_last_hour(self.path.parent.parent))
         self.records.append(record)
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)

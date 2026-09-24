@@ -87,7 +87,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "campaign_types", "campaign_verdict", "work_session", "task_queue", "task_lifecycle",
         "checkpoint", "circuit_breaker", "termination_guard", "step_repetition",
         "rate_limiter", "budget_governor", "budget_ledger", "budget_kill_switch",
-        "spend_report",
+        "spend_report", "usd_spend",
         "mentor_channel",
         "run_context", "state_integrity", "state_store_drill", "file_lock",
         "heartbeat_io",
