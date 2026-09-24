@@ -326,6 +326,45 @@ def _refuse_repeated_voice(path: str, target: Path, record: dict) -> None:
             )
 
 
+#: Поводы заговорить первым — ровно эти. Первый шаг «звать ли» отдельно от
+#: «что сказать» (ProAgentBench, arXiv 2602.04482: момент угадывается на 53–61%,
+#: и почти половина обращений лишние); повод назван — значит, его можно
+#: посчитать и потом сверить, отвечал ли человек делом (Proactive Agent,
+#: arXiv 2410.12361). Слово оператора 25.09: «всё доделать».
+VOICE_REASONS = {
+    "wall": "стена, которую открывает только человек (одобрение, доступ, деньги)",
+    "before_irreversible": "неясная цель перед необратимым шагом",
+    "result": "готов результат, о котором человек сам просил",
+    "stuck": "застрял после своих попыток — с их перечнем",
+    "finding": "находка противоречит коду или прежним выводам",
+}
+
+
+def _refuse_unreasoned_voice(path: str, record: dict) -> None:
+    """Обращение называет повод и, кроме доклада о результате, задаёт вопрос.
+
+    Horvitz (CHI 1999): разговор — чтобы снять КЛЮЧЕВУЮ неопределённость, с
+    учётом цены лишнего беспокойства; KnowNo (arXiv 2307.01928): спрашивать,
+    когда вариантов больше одного. Обращение без вопроса — доклад, а доклад
+    не стоит прерывания.
+    """
+    if path != VOICE_PATH or str(record.get("author") or "").strip().lower() != "agent":
+        return
+    reason = str(record.get("reason") or "").strip()
+    if reason not in VOICE_REASONS:
+        raise ValueError(
+            "a call to the human names its reason: record['reason'] one of "
+            + ", ".join(f"'{k}' ({v})" for k, v in VOICE_REASONS.items())
+            + ". No reason from this list — it is not worth an interruption: "
+            "put it into data/self_improvement_issues.jsonl, which every cycle reads."
+        )
+    if reason != "result" and "?" not in str(record.get("text") or ""):
+        raise ValueError(
+            "a call to the human carries a question they can answer (yes/no or a choice): "
+            "without one it is a report, and a report is not worth an interruption."
+        )
+
+
 class JournalAppendTool(Tool):
     name = "journal_append"
     description = (
@@ -378,6 +417,7 @@ class JournalAppendTool(Tool):
         target = self._resolve(str(path))
         _refuse_owned_state(str(path))
         record = _stamp_voice_record(str(path), record)
+        _refuse_unreasoned_voice(str(path), record)
         _refuse_over_voice_budget(str(path), target)
         _refuse_repeated_voice(str(path), target, record)
         contract = _KNOWN_JOURNALS.get(str(path))

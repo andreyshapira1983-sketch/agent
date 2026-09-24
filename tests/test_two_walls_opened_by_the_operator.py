@@ -122,9 +122,9 @@ def test_the_voice_has_a_hard_daily_ceiling(tmp_path: Path) -> None:
     tool = _voice(tmp_path)
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for i in range(VOICE_CALLS_PER_DAY):
-        tool.run(path=VOICE_PATH, record={"author": "agent", "text": f"n{i}", "ts": now})
+        tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": f"n{i}", "ts": now})
     with pytest.raises(PermissionError) as excinfo:
-        tool.run(path=VOICE_PATH, record={"author": "agent", "text": "one too many", "ts": now})
+        tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": "one too many", "ts": now})
     message = str(excinfo.value)
     assert "voice budget spent" in message
     # Отказ обязан НАЗЫВАТЬ выход, иначе агент угадывает причину и молчит.
@@ -135,9 +135,9 @@ def test_yesterdays_calls_do_not_spend_todays_budget(tmp_path: Path) -> None:
     tool = _voice(tmp_path)
     old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=3)).isoformat()
     for i in range(VOICE_CALLS_PER_DAY * 2):
-        tool.run(path=VOICE_PATH, record={"author": "agent", "text": f"old{i}", "ts": old})
+        tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": f"old{i}", "ts": old})
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "today", "ts": now})
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": "today", "ts": now})
 
 
 def test_the_operators_own_lines_do_not_spend_the_agents_budget(tmp_path: Path) -> None:
@@ -146,7 +146,7 @@ def test_the_operators_own_lines_do_not_spend_the_agents_budget(tmp_path: Path) 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for i in range(VOICE_CALLS_PER_DAY * 3):
         tool.run(path=VOICE_PATH, record={"author": "operator", "text": f"q{i}", "ts": now})
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "ответ", "ts": now})
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": "ответ", "ts": now})
 
 
 def test_journal_append_is_no_longer_blocked_on_the_autonomous_path() -> None:
@@ -176,7 +176,7 @@ def test_the_ceiling_holds_on_the_shape_the_agent_actually_writes(tmp_path: Path
     fired_at = None
     for i in range(1, VOICE_CALLS_PER_DAY + 3):
         try:
-            tool.run(path=VOICE_PATH, record={"author": "agent", "text": f"зов {i}"})
+            tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": f"зов {i}"})
         except PermissionError:
             fired_at = fired_at or i
     assert fired_at == VOICE_CALLS_PER_DAY + 1, (
@@ -195,7 +195,7 @@ def test_a_voice_record_is_stamped_at_birth(tmp_path: Path) -> None:
     порядку.
     """
     tool = _voice(tmp_path)
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "без времени"})
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": "без времени"})
     rows = [
         json.loads(line)
         for line in (tmp_path / "data" / "chat_outbox.jsonl").read_text(
@@ -213,7 +213,7 @@ def test_a_stamp_the_caller_named_is_not_overwritten(tmp_path: Path) -> None:
     """Время, названное вызывающим, остаётся его."""
     tool = _voice(tmp_path)
     mine = "2026-01-02T03:04:05+00:00"
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": "своё время", "ts": mine})
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": "своё время", "ts": mine})
     rows = [
         json.loads(line)
         for line in (tmp_path / "data" / "chat_outbox.jsonl").read_text(
@@ -232,6 +232,6 @@ def test_an_ordinary_journal_is_not_stamped(tmp_path: Path) -> None:
     """
     from tools.journal_append import _stamp_voice_record
 
-    record = {"author": "agent", "text": "заметка"}
+    record = {"author": "agent", "reason": "result", "text": "заметка"}
     assert _stamp_voice_record("data/self_improvement_issues.jsonl", record) == record
     assert "ts" not in record
