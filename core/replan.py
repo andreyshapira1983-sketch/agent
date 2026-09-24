@@ -325,11 +325,12 @@ class FailureBudget:
     advice: str
     requires_different_action: bool = False
     #: Считать повторы ОДНОГО действия (инструмент + аргументы), а не все
-    #: случаи типа за ход. Для исправимых ошибок: OpenHands StuckDetector
-    #: останавливает, когда одно действие даёт ту же ошибку 3 раза. Ночь
-    #: 24→25.09: ход, где пять кругов шли с продвижением, оборвали две РАЗНЫЕ
-    #: ошибки инструмента («tool_error 2/2»). Стены (одобрение, политика, нет
-    #: файла) по-прежнему считаются суммой — их не лечат другие аргументы.
+    #: случаи типа за ход. Ночь 24→25.09: ход, где пять кругов шли с
+    #: продвижением, оборвали две РАЗНЫЕ ошибки инструмента («tool_error 2/2»).
+    #: OpenHands StuckDetector тоже смотрит на повтор одного действия (у них —
+    #: 3 раза); порог здесь 2 — планка стенда способностей от 2026-08-05
+    #: (error_reuse-03: «два одинаковых сбоя исчерпывают бюджет»), её не
+    #: опускают. Стены (одобрение, политика, нет файла) считаются суммой.
     per_action: bool = False
 
     def __post_init__(self) -> None:
@@ -347,7 +348,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
     # Tool-level failures: usually fixable with different args or
     # different tool. Give it room to recover.
     "tool_error":     FailureBudget(
-        max_occurrences=3, per_action=True,
+        max_occurrences=2, per_action=True,
         advice=(
             "The tool raised an error. Try DIFFERENT arguments (e.g. a "
             "different path or query) OR pick a different tool. Do not "
@@ -371,7 +372,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
     "verify_failed":  FailureBudget(
-        max_occurrences=3, per_action=True,
+        max_occurrences=2, per_action=True,
         advice=(
             "The tool returned data but verification rejected it. Try a "
             "different tool, or different arguments that would produce "
@@ -398,7 +399,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
     "web_empty":      FailureBudget(
-        max_occurrences=3, per_action=True,
+        max_occurrences=2, per_action=True,
         advice=(
             "Web search returned 0 results. REFORMULATE the query: try "
             "synonyms, drop filters, use more general keywords, or "
@@ -406,7 +407,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
     ),
     "timeout":        FailureBudget(
-        max_occurrences=3, per_action=True,
+        max_occurrences=2, per_action=True,
         advice=(
             "The tool hit its timeout. REDUCE SCOPE: ask for less data, "
             "use a smaller query, or pick a faster tool."

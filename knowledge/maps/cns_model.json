@@ -96,7 +96,7 @@
    ],
    "readers": [
     {
-     "site": "core/replan.py:621",
+     "site": "core/replan.py:622",
      "role": "control",
      "uses": "decide(): global cap and per-type budget",
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
@@ -1891,7 +1891,7 @@
     "no_code_change": "None proposed, and none should be inferred. Production is read-only for the mapping program; whether the answer path ought to learn about a denied tool is a design decision for its owner, which is why the gap is announced rather than closed."
    },
    "injection_budget_decides_visibility": {
-    "named_state_space": "FailureBudget.max_occurrences for injection_blocked — one integer in core/replan.py:403, currently 1.",
+    "named_state_space": "FailureBudget.max_occurrences for injection_blocked — one integer in core/replan.py:404, currently 1.",
     "evaluation_domain": {
      "code": "f889973",
      "held": [
@@ -1910,7 +1910,7 @@
     "the_stated_contract": "The comment above the entry says blocked content must not be retried with the same tool and query, because it would just fetch the same poisoned page.",
     "what_the_measurement_showed_instead": "That half is held by a DIFFERENT mechanism. requires_different_action=True puts (tool, args) on the forbidden list, so with the budget raised to 2 the poisoned call is not repeated at all: attempt 2's plan comes back empty after the filter, and the tool is invoked once, not twice. The budget is not what prevents the repeat.",
     "what_the_budget_actually_decides": "Whether the user is told. With the budget at 2 the empty second plan takes the SUCCESS branch of the attempt loop (core/loop_attempt.py:450 reads an empty plan as an intentional zero-tool plan), so replan_exhausted is never set, the gate at core/loop_synthesis.py:639 hands the synthesizer None, and the answer is composed from general knowledge with no failure context and the word 'injection' nowhere in the prompt. Both poles measured on the same probe: budget 1 gives replan_exhausted=True, <failure_context> present, 'injection' present; budget 2 gives all three False.",
-    "mutation": "ONE integer, core/replan.py:403, max_occurrences 1 -> 2.",
+    "mutation": "ONE integer, core/replan.py:404, max_occurrences 1 -> 2.",
     "observed_consequence": "FULL SUITE GREEN: 7286 passed, 1 xfail, exit 0. Nothing observed it — including the delivery test added the same day, because that test holds max_replan_attempts=1 where the global cap pre-empts the per-type rule. The same evaluation-domain trap twice in one cluster.",
     "green_mutation_diagnosis": "Not unreachable, not vacuous. PARTIALLY masked — the repetition half of the stated contract is genuinely held by requires_different_action, so the comment's stated fear does not materialise. NOT masked for the disclosure half: no other mechanism tells the answer that an injection was blocked. Classification: a real unprotected distinction, on a security-relevant constant, whose true role is disclosure rather than the retry limiting its own comment describes.",
     "verdict": {
@@ -1962,7 +1962,7 @@
     "no_code_change": "None proposed. Production is read-only for the mapping program; the code was already correct and what was missing was an observer."
    },
    "replan_decision_action": {
-    "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:458)",
+    "named_state_space": "ReplanAction = continue | abort_no_retry | abort_exhausted (core/replan.py:459)",
     "consumers_and_what_each_reads": [
      {
       "consumer": "core/loop_attempt.py:490",
