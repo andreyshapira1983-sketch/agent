@@ -25,6 +25,7 @@ def test_the_map_names_the_wiring_places() -> None:
 
 def test_every_wiring_claim_holds_in_the_code() -> None:
     assert "registry.register(" in _read("app/bootstrap.py")
+    assert "there is no separate registry module" in _read("knowledge/generated/AGENT_ANATOMY.md")
     assert not (_REPO / "tools" / "registry.py").exists()
     base = _read("tools/base.py")
     assert "Risk = Literal[" in base and "class ToolRegistry" in base
