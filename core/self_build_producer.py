@@ -1282,6 +1282,34 @@ def publish_incremental_split_step(
     return item, evidence
 
 
+def _unproven_split_report(
+    workspace: str | Path, target: str, gates: list[str], roles: list[RoleOutput],
+) -> ProducerReport:
+    """Без доказательства самостоятельного разреза нет.
+
+    Правило оператора (23.09, повторено 24.09): файл делят, когда в нём чужие
+    функции или его нельзя прочесть — никогда за длину. 24.09 доказательства
+    для core/step_sanitizer.py не было, и раскольщик вынес «самую крупную
+    связную кучку»: три мелкие функции, которые зовёт сам файл, а нечитаемая
+    `sanitize_step` на 765 строк осталась как была. Файл стал короче, читать
+    его легче не стало — и раньше оператор отклонил четыре таких разреза.
+    """
+    from core.splitter_refusals import record_refusal
+
+    reason = (
+        f"no proof that {target} must be split: no duplicate of another module "
+        "and no second subject inside it. Length alone is not a reason (operator "
+        "rule 2026-09-23); an unreadable function is fixed by splitting THAT "
+        "function by meaning, not by moving its neighbours out"
+    )
+    record_refusal(workspace, target, reason)
+    return ProducerReport(
+        status="no_patch", reason=reason, target_path=target,
+        checked_gates=gates, role_outputs=roles,
+        next_human_action="Nothing to split without a proof; nothing was proposed.",
+    )
+
+
 def _deterministic_split_report(
     *,
     workspace: str | Path,
@@ -1314,9 +1342,10 @@ def _deterministic_split_report(
         # группа выносится (core/split_proof.py, 2026-09-21).
         from core.split_proof import index_workspace, proof_for
 
-        plan = plan_incremental_split(
-            workspace, concrete_target,
-            proof=proof_for(concrete_target, index_workspace(workspace)))
+        proof = proof_for(concrete_target, index_workspace(workspace))
+        if proof is None:
+            return _unproven_split_report(workspace, concrete_target, gates, roles)
+        plan = plan_incremental_split(workspace, concrete_target, proof=proof)
     except Exception as exc:  # noqa: BLE001 — a crashing planner must be surfaced, not disguised
         # The splitter IS present but threw on this input — that is a splitter
         # bug, NOT a genuine "no safe step" outcome. Returning None here would let
