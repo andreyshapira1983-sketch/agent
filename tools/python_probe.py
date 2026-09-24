@@ -19,7 +19,11 @@
   * упавший эксперимент — УДАВШИЙСЯ замер: ImportError и есть данные;
     `execution_status` == failed только у таймаута;
   * гейт — защита от случайности, не от противника: это признано, и потому
-    безнадзорному пути инструмент закрыт (см. _AUTONOMOUS_GOAL_BLOCKED_TOOLS).
+    безнадзорному пути инструмент закрыт (см. _AUTONOMOUS_GOAL_BLOCKED_TOOLS);
+  * стена (24.09, слово оператора): опыт идёт под пользователем nobody
+    (`_as_nobody`), которому права сервера закрывают ключи, данные, журналы и
+    чат (server_backup/lock_down_root.sh). Сеть не закрыта — пространства имён
+    в контейнере Vast запрещены.
   * `inputs` (2026-09-19): файлы рабочей папки КОПИРУЮТСЯ в папку эксперимента.
     Замер на внешнем экзамене: суммы 40–60 чисел агент считал в уме и писал
     неверные, а однажды записал круглое 10000 вместо суммы; лаборатория файлов
@@ -209,6 +213,34 @@ def _forbidden_reason(code: str) -> str | None:
     return None
 
 
+def _as_nobody(argv: list[str], cwd: str) -> tuple[list[str], str]:
+    """Опыт под пользователем nobody — стена, а не слой (слово оператора 24.09).
+
+    Литература едина: Python не запереть изнутри Python (smolagents CVE-2025-5120,
+    CVE-2025-9959; документация Python: audit hooks — не песочница); стена —
+    изоляция процесса. Пространства имён в контейнере Vast запрещены
+    (bwrap/nsjail не работают), остаётся наименьший пользователь — как у
+    convert_file. Ключи (.env 600), данные, журналы и чат закрыты ему правами
+    сервера (server_backup/restore_server.sh), код и библиотеки — открыты.
+    Папка опыта и скопированные входы передаются nobody. Linux под root без
+    setpriv — отказ, а не опыт под root; на машине разработчика (не root,
+    не Linux) — опыт под текущим пользователем, с пометкой.
+    """
+    from tools.convert_file import _NOBODY, sandbox_available
+
+    why = sandbox_available()
+    if why is None:
+        for base, _dirs, files in os.walk(cwd):
+            os.chown(base, _NOBODY, _NOBODY)
+            for name in files:
+                os.chown(os.path.join(base, name), _NOBODY, _NOBODY)
+        return (["setpriv", f"--reuid={_NOBODY}", f"--regid={_NOBODY}", "--clear-groups",
+                 "--no-new-privs", *argv], "nobody")
+    if sys.platform.startswith("linux") and os.geteuid() == 0:
+        raise ValueError(f"python_probe does not run as root without the sandbox: {why}")
+    return argv, f"none ({why})"
+
+
 class PythonProbeTool(Tool):
     name = "python_probe"
     description = (
@@ -216,7 +248,8 @@ class PythonProbeTool(Tool):
         "versions, real signatures, whether a feature exists here — or to "
         "COMPUTE over workspace files listed in `inputs` (copied read-only into "
         "the experiment's cwd, open them by the same relative path). The code "
-        "runs in an isolated interpreter with no API keys, a temp cwd, a hard "
+        "runs as the unprivileged user nobody (no access to keys, agent data, logs or "
+        "chat) in an isolated interpreter with a temp cwd, a hard "
         "timeout and an output cap. A failing snippet is a valid measurement "
         "(the ImportError IS the data). Process/network/write operations are "
         "refused. Args: code (str), timeout_seconds (int, default 10), "
@@ -387,18 +420,20 @@ class PythonProbeTool(Tool):
             # кончился. Файл рабочей папки, который код называет, копируется
             # сам — только чтение, те же пределы; ключи — никогда.
             auto = self._auto_inputs(code, inputs, cwd, copied)
+            # `-X utf8`: вывод эксперимента — UTF-8 на любой ОС. Замер
+            # 2026-09-19 (рабочий экзамен, отчёт по продажам): на Windows
+            # ребёнок печатал в кодировке консоли, родитель читал UTF-8,
+            # и кириллица приходила «���»; агент «восстановил» названия
+            # товаров выдумкой. PYTHONIOENCODING не годится: `-I` его
+            # игнорирует.
+            argv, sandbox = _as_nobody(
+                [sys.executable, "-I", "-X", "utf8", "-c",
+                 _with_runtime_tripwire(
+                     _with_workspace_on_path(code, self.workspace_root)
+                     if workspace_import else code)], cwd)
             try:
                 proc = subprocess.run(  # noqa: S603 — argv фиксирован, shell=False
-                    # `-X utf8`: вывод эксперимента — UTF-8 на любой ОС. Замер
-                    # 2026-09-19 (рабочий экзамен, отчёт по продажам): на Windows
-                    # ребёнок печатал в кодировке консоли, родитель читал UTF-8,
-                    # и кириллица приходила «���»; агент «восстановил» названия
-                    # товаров выдумкой. PYTHONIOENCODING не годится: `-I` его
-                    # игнорирует.
-                    [sys.executable, "-I", "-X", "utf8", "-c",
-                     _with_runtime_tripwire(
-                         _with_workspace_on_path(code, self.workspace_root)
-                         if workspace_import else code)],
+                    argv,
                     cwd=cwd, env=env, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=max(1, int(timeout_seconds)), check=False,
@@ -465,6 +500,9 @@ class PythonProbeTool(Tool):
             # Видел ли опыт модули агента. Без этого отказ импорта выглядел
             # как факт о коде (открытая запись агента severity=high).
             "workspace_import": workspace_import,
+            # Под кем шёл опыт: «nobody» — стена стоит; «none (…)» — машина
+            # разработчика, стены нет, и это сказано, а не спрятано.
+            "sandbox": sandbox,
             **({"note": " | ".join(notes)} if notes else {}),
             "exit_code": exit_code,
             "stdout": stdout,
