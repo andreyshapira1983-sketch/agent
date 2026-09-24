@@ -28,6 +28,7 @@ from core.source_registry_store import SourceRegistryStore
 from core.task_queue import DEFAULT_RUNTIME_TASKS_PATH as _DEFAULT_RUNTIME_TASKS_PATH
 from core.user_profile import UserProfileStore
 from tools.base import ToolRegistry
+from tools.convert_file import ConvertFileTool
 from tools.current_time import CurrentTimeTool
 from tools.diff_file import DiffFileTool
 from tools.file_read import FileReadTool
@@ -129,6 +130,8 @@ def build_agent(
     registry.register(PatchCheckTool(workspace_root=workspace))
     registry.register(ReadLogsTool(workspace_root=workspace, live_trace_id=trace_id))
     registry.register(DiffFileTool(workspace_root=workspace))
+    # Программы для файлов клиента под пользователем nobody (tools/convert_file.py).
+    registry.register(ConvertFileTool(workspace_root=workspace))
     # MVP-14.2 — evidence layer: turn web pointers into verifiable sources.
     registry.register(WebFetchTool())
     registry.register(RssFetchTool())

@@ -295,6 +295,21 @@ Available tools:
     content. Use this BEFORE calling file_write to show the user what
     would change. `path` ASCII-only, inside workspace.
 
+- convert_file(op: str, path: str, to: str | None = None, lang: str = "rus+eng",
+               width: int | None = None, max_pages: int = 20, max_seconds: int | None = None)
+    -> {op, input, outputs, exit_code, text?, log_tail}
+    [reversible — the program runs as user nobody in a temp folder; the result
+     is a NEW file in converted/; no approval needed]
+    The ONLY way to run file programs (shell_exec cannot). op:
+      ocr        image or scanned pdf -> text (tesseract; lang rus/eng/rus+eng)
+      office     doc/docx/xls/xlsx/ppt/pptx/odt/ods/rtf/csv/html -> to=pdf|docx|xlsx|csv|txt|html (LibreOffice)
+      pdf_pages  pdf -> png per page (then ocr or look at the pages)
+      image      png/jpg/webp/gif/tiff -> to=png|jpg|webp|pdf, optional width (resize)
+      svg        svg -> to=png|pdf (links to files and xi:include are refused)
+      media      audio/video -> to=mp4|webm|mp3|wav|gif, optional max_seconds
+      render3d   .blend -> png of frame 1 (scripts in the file do NOT run)
+    `path` ASCII, inside the workspace. Read or open the result from `outputs`.
+
 - web_fetch(url: str, find: str = "")
     -> {url, status_code, content_type, fetched_at, content_hash, text, ...}
     [read_only — no approval needed]

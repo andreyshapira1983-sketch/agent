@@ -85,3 +85,6 @@ config/burn_in_sandbox.json
 
 # Вложения оператора с панели (скрепка) — данные, не код.
 inbox/
+
+# Результаты convert_file — данные клиента, не код.
+converted/

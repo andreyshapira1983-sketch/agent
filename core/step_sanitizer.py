@@ -904,6 +904,10 @@ def sanitize_step(
     if tool_name == "patch_check":
         return _sanitize_patch_check(args, idx, warnings)
 
+    if tool_name == "convert_file":
+        from tools.convert_file import sanitize_args
+        return sanitize_args(args, idx, warnings)
+
     if tool_name == "read_logs":
         return _sanitize_read_logs(args, idx, warnings)
 
