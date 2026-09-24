@@ -123,6 +123,16 @@ def test_no_lesson_without_a_success_or_when_the_model_says_unrelated(tmp_path: 
     assert note_for(tmp_path, "python_probe", _ERR) is None
 
 
+def test_a_lesson_about_another_error_code_is_refused(tmp_path: Path) -> None:
+    """Проверка первых 57 уроков (24.09): к ошибке 404 модель написала урок про 403."""
+    def fetch(status: str, reason: str) -> dict:
+        err = f"ValueError: HTTP {reason} fetching 'https://example.org/a-rather-long-page-address': x"
+        return {"status": status, "error": err if status == "error" else None, "output": "ok"}
+    ev = _events(("web_fetch", {}, fetch("error", "404")), ("web_fetch", {}, fetch("success", "")))
+    learn_from_events(tmp_path, ev, _Llm("Когда web_fetch даёт 403 Forbidden — бери другой источник"))
+    assert next(iter(CardStore(tmp_path).cards.values())).lesson is None
+
+
 def test_a_lesson_that_does_not_help_is_retired(tmp_path: Path) -> None:
     learn_from_events(tmp_path, _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok())),
                       _Llm("Когда X — делай Y"))

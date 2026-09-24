@@ -286,8 +286,16 @@ _LESSON_SYSTEM = (
     "инструмента в том же ходе. Если удачный вызов действительно обходит причину "
     "ошибки, напиши ОДНУ строку по-русски не длиннее 200 знаков: «Когда <инструмент> "
     "даёт <суть ошибки> — <что делать иначе>». Общее правило, без номеров шагов и "
-    "частных чисел. Если удачный вызов с ошибкой не связан — ответь ровно НЕТ."
+    "частных чисел. Урок говорит ИМЕННО об этой ошибке — тот же код, то же имя, "
+    "не о похожей. Если удачный вызов с ошибкой не связан — ответь ровно НЕТ."
 )
+_CODE_RE = re.compile(r"\b\d{3}\b")
+
+
+def _lesson_fits(lesson: str, error: str) -> bool:
+    """Урок не называет чужой код ошибки. Проверка 24.09 первых 57 уроков:
+    к ошибке 404 модель написала урок про 403 — такой урок учит не тому."""
+    return all(code in error for code in _CODE_RE.findall(lesson))
 
 
 def _ask_lesson(llm: Any, tool: str, error: str, failed: Any, fixed: Any, fixed_out: Any) -> str | None:
@@ -299,7 +307,7 @@ def _ask_lesson(llm: Any, tool: str, error: str, failed: Any, fixed: Any, fixed_
     line = next((ln.strip() for ln in str(raw or "").splitlines() if ln.strip()), "")
     if not line or line.strip("«».").upper() == "НЕТ" or len(line) > 300:
         return None
-    return line
+    return line if _lesson_fits(line, error) else None
 
 
 def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
