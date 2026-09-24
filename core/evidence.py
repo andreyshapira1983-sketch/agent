@@ -480,7 +480,10 @@ def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     """
     if not isinstance(output, dict):
         return None
-    source_id = f"file:{args.get('path', 'unknown')}"
+    # source_id = метка шага (tools/convert_file.sanitize_args), как у file_read и
+    # diff_file: по ней писатель ответа ставит ссылку, по ней проверка её находит.
+    # 24.09 было «file:<путь>» — все 9 ссылок приёмки урока 1 остались без улики.
+    source_id = f"convert_file:{args.get('op', '')}:{str(args.get('path', 'unknown'))[:60]}"
     text = output.get("text", "")
     if text:
         return make_evidence(kind="file", source_id=source_id, obtained_via="convert_file",
