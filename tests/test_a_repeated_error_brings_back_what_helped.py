@@ -172,6 +172,21 @@ def test_the_same_error_ten_times_is_one_card_not_ten(tmp_path: Path) -> None:
     assert next(iter(cards.values())).seen == 10
 
 
+def test_a_write_that_did_not_compose_is_learned_too(tmp_path: Path) -> None:
+    """Живой замер 24.09: «в файл правки пошёл текст без блоков» трижды за ход,
+    карточек ноль — событие сборки не было вызовом инструмента."""
+    err = "RuntimeError: в файл правки пошёл текст без блоков (FILE: и <<<<<<< SEARCH)"
+    ev = [{"event": "write_compose_failed", "ts": "2026-09-24T16:06:20", "trace_id": "t1",
+           "payload": {"step": 5, "path": "proposals/selffix/x/edits.txt", "error": err}},
+          *_events(("file_write", {"path": "proposals/selffix/x/edits.txt", "content": "FILE: a"},
+                    {"status": "success", "output": {"written": True}}))]
+    ev[1]["ts"] = ev[2]["ts"] = "2026-09-24T16:07:00"
+    learn_from_events(tmp_path, ev, _Llm("Когда file_write не собрал правку без блоков — начни с FILE:"))
+    trig = ReplanTrigger(code="tool_error", step_id="s", tool_name="file_write", arguments={},
+                         reason=f"текст записи не собрался: {err}", attempt=1)
+    assert "начни с FILE:" in with_past_experience(_Loop(tmp_path), trig).reason
+
+
 def test_the_same_trace_is_not_counted_twice(tmp_path: Path) -> None:
     ev = _events(("python_probe", {}, _probe_fail()))
     learn_from_events(tmp_path, ev, None, trace_id="t1")
