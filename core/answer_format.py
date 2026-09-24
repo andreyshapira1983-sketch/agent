@@ -10,6 +10,7 @@ from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
 from core.unsupported_claims import EXCISION_PREFIXES as _EXCISION_PREFIXES
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
+from core.warning_words import humanize_warning_markers
 
 SYSTEM_ANSWER = """You are a careful research analyst.
 
@@ -328,7 +329,7 @@ def format_human_response(answer: str) -> str:
     text.
     """
     if "Conclusion:" not in answer and "conclusion:" not in answer:
-        return answer  # not an Output Contract reply — return as-is
+        return humanize_warning_markers(answer)  # not an Output Contract reply
 
     lines = answer.splitlines()
     section: str | None = None
@@ -465,7 +466,7 @@ def format_human_response(answer: str) -> str:
     if parts and verification_tail_lines:
         parts.extend(verification_tail_lines)
 
-    return "\n\n".join(parts) if parts else answer
+    return humanize_warning_markers("\n\n".join(parts) if parts else answer)
 
 def citation_for_evidence(ev: Evidence) -> str | None:  # noqa: PLR0911 — one branch per evidence kind
     source_id = ev.source_id
