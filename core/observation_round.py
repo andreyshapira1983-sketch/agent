@@ -341,6 +341,25 @@ def round_failsafe(loop: Any) -> int:
     return max(value, loop.replan_policy.max_total_replans)
 
 
+def _turn_spend(loop: Any) -> tuple[float, float | None]:
+    """Потрачено этим ходом и предел хода, $. Нет прогона или рабочей папки — не меряем.
+
+    SWE-agent ограничивает задачу деньгами, а у предела сдаёт сделанное; здесь
+    так же: круги кончаются, ответ пишется по собранному.
+    """
+    from datetime import datetime, timezone
+
+    from core.run_context import current_run
+    from core.usd_spend import turn_usd_limit, usd_since
+
+    cap, run = turn_usd_limit(), current_run()
+    root_of = getattr(loop, "_file_read_workspace_root", None)
+    root = root_of() if callable(root_of) else None
+    if cap is None or run is None or run.started_at <= 0 or root is None:
+        return 0.0, None
+    return usd_since(root, datetime.fromtimestamp(run.started_at, tz=timezone.utc)), cap
+
+
 def charged_attempts(loop: Any, attempt: int, failure_history: Sequence[Any]) -> int:
     """Сколько попыток списать с бюджета ошибок: круги со сбоями, а не все круги.
 
@@ -413,6 +432,12 @@ def continue_after_observation(
     if st.attempt >= limit:
         loop.log.log("observation_round_skipped", {
             "attempt": st.attempt, "max_total": limit, "reason": "attempt budget spent",
+        })
+        return False
+    spent, cap = _turn_spend(loop)
+    if cap is not None and spent >= cap:
+        loop.log.log("observation_round_skipped", {
+            "attempt": st.attempt, "reason": f"turn dollar budget spent: ${spent:.2f} of ${cap:.2f}",
         })
         return False
     repeats = _repeats(st, attempt_artifacts)
