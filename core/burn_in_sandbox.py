@@ -169,6 +169,21 @@ def _same_place(declared: str, workspace: Path) -> bool:
         return False
 
 
+def _others_can_write(path: Path) -> bool:
+    """В метку может писать не только владелец — её могли подменить.
+
+    Правило OpenSSH (StrictModes, по умолчанию «yes»): файл, открытый на запись
+    группе или всем, sshd не читает. 24.09 метка на сервере лежала rw-rw-rw-;
+    закрывал её только каталог /root. На Windows битов группы нет — проверки нет.
+    """
+    if os.name != "posix":
+        return False
+    try:
+        return bool(path.stat().st_mode & 0o022)
+    except OSError:
+        return False
+
+
 def load_sandbox_authority(
     workspace: Any, *, env: Any = None, now: datetime | None = None
 ) -> SandboxAuthority | None:
@@ -183,6 +198,8 @@ def load_sandbox_authority(
         return None
     root = Path(workspace or ".")
     marker = root / SANDBOX_MARKER
+    if _others_can_write(marker):
+        return None
     try:
         raw = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):

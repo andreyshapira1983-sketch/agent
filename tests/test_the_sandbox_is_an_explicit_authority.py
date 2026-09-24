@@ -1043,3 +1043,21 @@ def test_no_comment_in_the_guard_files_names_a_phantom_symbol() -> None:
         f"комментарий называет несуществующий символ: {phantoms} — "
         "такая ссылка создаёт видимость механизма"
     )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="права группы и остальных есть только на POSIX")
+@pytest.mark.parametrize("mode", [0o666, 0o646, 0o664])
+def test_a_marker_others_can_write_is_no_authority(workspace: Path, mode: int) -> None:
+    """Как StrictModes в OpenSSH: файл, в который может писать не только
+    владелец, могли подменить — полномочия нет. 24.09 метка на сервере лежала
+    rw-rw-rw-; снаружи её закрывал только каталог /root."""
+    _marker(workspace)
+    (workspace / SANDBOX_MARKER).chmod(mode)
+    assert load_sandbox_authority(workspace, env=_env(True)) is None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="права группы и остальных есть только на POSIX")
+def test_a_marker_only_its_owner_writes_is_an_authority(workspace: Path) -> None:
+    _marker(workspace)
+    (workspace / SANDBOX_MARKER).chmod(0o644)
+    assert load_sandbox_authority(workspace, env=_env(True)) is not None
