@@ -92,8 +92,12 @@ def failure_text(tool: str, output: Any, error: str | None = None) -> str | None
     if tool == "run_tests" and (output.get("failed") or output.get("errors")):
         names = "\n".join(f"FAILED {n}" for n in output.get("failed_tests") or ())
         return f"{output.get('stdout_tail') or ''}\n{names}".strip()
+    # shell_exec сам судит свою команду (execution_status): его провал приходит
+    # жёстким путём. Удачный вызов с кодом 1 и пустым stderr — это grep без
+    # совпадений, ответ, а не ошибка (замер 24.09: 24 таких «провала» в одной
+    # карточке «exit_code=N»).
     code = output.get("exit_code")
-    if tool in ("python_probe", "shell_exec") and code not in (0, None):
+    if tool == "python_probe" and code not in (0, None):
         stderr = str(output.get("stderr") or "").strip()
         return f"exit_code={code}\n{stderr[-2000:]}" if stderr else f"exit_code={code}"
     return None
