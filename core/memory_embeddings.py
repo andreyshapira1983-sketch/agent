@@ -52,6 +52,25 @@ INSTRUCT_TASK = "Given a web search query, retrieve relevant passages that answe
 ALPHA = 0.5
 #: Reciprocal Rank Fusion (Cormack, Clarke, Büttcher, SIGIR 2009) — для сравнения.
 RRF_K = 60
+#: Квота процессора контейнера (cgroup v2): «квота период» или «max период».
+CPU_MAX_FILE = Path("/sys/fs/cgroup/cpu.max")
+
+
+def cpu_budget(cpu_max: Path = CPU_MAX_FILE) -> int:
+    """Потоки для torch: половина ОПЛАЧЕННЫХ ядер, а не видимых.
+
+    Замер 2026-09-24, сервер Vast: видно 96 ядер, квота контейнера 23. torch
+    брал потоки по видимым, и кампания вместе с разговором держали ~200
+    потоков на 23 ядрах: оба процесса по 8 минут не сдвинулись дальше
+    загрузки модели, 184 записи кодировались 207 секунд. Половина — потому
+    что кампания и разговор работают одновременно.
+    """
+    try:
+        quota, period = cpu_max.read_text(encoding="utf-8").split()[:2]
+        cores = int(quota) // int(period) if quota != "max" else (os.cpu_count() or 1)
+    except (OSError, ValueError):
+        cores = os.cpu_count() or 1
+    return max(1, cores // 2)
 
 _lock = threading.Lock()
 _model: Any = None
@@ -79,8 +98,10 @@ def _encoder() -> Callable[[list[str]], Any] | None:
     with _lock:
         if _model is None:
             try:
+                import torch
                 from sentence_transformers import SentenceTransformer
 
+                torch.set_num_threads(cpu_budget())
                 _model = SentenceTransformer(path, device="cpu")
                 _instruct = "instruct" in Path(path).name.lower()
                 _cache_file = Path(path.rstrip("/\\") + ".cache.npz")
