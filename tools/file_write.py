@@ -130,8 +130,16 @@ class FileWriteTool(Tool):
         return "reversible"
 
     def _is_own_proposal(self, target: Path) -> bool:
-        proposals = (self.workspace_root / "proposals").resolve()
-        return proposals in target.resolve().parents
+        """Свои предложения и свои заметки: proposals/ и data/notes/.
+
+        Заметки — то же решение 2026-09-21: ночь 24→25.09 агент записал заметку
+        data/notes/…_maintenance_need.md, захотел её дополнить — перезапись
+        потребовала человека, которого в кампании нет, и дополнение легло в
+        новый журнал без читателя. Копия перед записью делается и здесь.
+        """
+        resolved = target.resolve().parents
+        return any((self.workspace_root / own).resolve() in resolved
+                   for own in ("proposals", "data/notes"))
 
     # ------------------------------------------------------------------
     # execution

@@ -24,6 +24,18 @@ def test_overwriting_an_own_proposal_is_reversible(tmp_path) -> None:
     assert tool.risk_for({"path": "proposals/new.md"}) == "reversible"
 
 
+def test_overwriting_an_own_note_is_reversible_too(tmp_path) -> None:
+    """Ночь 24→25.09: дополнить свою заметку data/notes/…_maintenance_need.md
+    было нельзя без человека — дополнение ушло в журнал, который никто не читает.
+    Данные вне заметок по-прежнему под одобрением."""
+    tool = FileWriteTool(workspace_root=tmp_path)
+    (tmp_path / "data" / "notes").mkdir(parents=True)
+    (tmp_path / "data" / "notes" / "n.md").write_text("old", encoding="utf-8")
+    (tmp_path / "data" / "episodic_memory.jsonl").write_text("{}", encoding="utf-8")
+    assert tool.risk_for({"path": "data/notes/n.md"}) == "reversible"
+    assert tool.risk_for({"path": "data/episodic_memory.jsonl"}) == "irreversible"
+
+
 def test_bytes_written_are_the_bytes_on_disk(tmp_path) -> None:
     tool = FileWriteTool(workspace_root=tmp_path)
     out = tool.run(path="notes.md", content="строка один\nстрока два\n")
