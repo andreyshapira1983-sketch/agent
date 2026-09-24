@@ -95,3 +95,11 @@ def test_the_writer_is_shown_the_block_form() -> None:
     compose_content(loop, _write(), [_read(1, "x = 1")])
     prompt = loop.llm.prompts[-1]
     assert "<<<<<<< SEARCH" in prompt and ">>>>>>> REPLACE" in prompt and "FILE:" in prompt
+
+
+def test_the_writer_is_told_how_to_add_to_an_existing_file() -> None:
+    """24.09, задача 4: образец говорил только про новый файл, и агент дописал
+    тест в существующий tests/test_evidence.py пустым SEARCH — patch_check отказал."""
+    loop = _loop(_GOOD)
+    compose_content(loop, _write(), [_read(1, "x = 1")])
+    assert "Дописать в существующий" in loop.llm.prompts[-1]
