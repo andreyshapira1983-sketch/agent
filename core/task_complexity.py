@@ -8,11 +8,11 @@ tiers by naming pattern.
 from __future__ import annotations
 
 import re
-from enum import Enum
+from enum import StrEnum
 
 # ── tier enum ─────────────────────────────────────────────────────────────────
 
-class ComplexityTier(str, Enum):
+class ComplexityTier(StrEnum):
     LIGHT    = "light"
     STANDARD = "standard"
     DEEP     = "deep"

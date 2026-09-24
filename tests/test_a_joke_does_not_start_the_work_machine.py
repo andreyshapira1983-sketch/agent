@@ -11,9 +11,18 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.loop_response_deciders import AgentLoopResponseDeciders
+from core.model_usage import ModelBudgetExceeded
 from core.response_draft import ResponseDraft
-from core.social_turn import is_social_turn
+from core.social_turn import ENV_FLAG, is_social_turn
+
+
+@pytest.fixture(autouse=True)
+def _conversation_channel(monkeypatch):
+    """Мостик разговора включает классификатор; здесь — как в разговоре."""
+    monkeypatch.setenv(ENV_FLAG, "1")
 
 
 class _Llm:
@@ -58,6 +67,21 @@ def test_doubt_or_failure_means_the_normal_path() -> None:
     for answer in ("не знаю", '{"social": "maybe"}', RuntimeError("down")):
         loop, _, _ = _loop(answer)
         assert is_social_turn(loop, "Как настроение?") is False
+
+
+def test_outside_the_conversation_channel_no_model_is_called(monkeypatch) -> None:
+    """Цели кампании болтовнёй не бывают: без переключателя — ни одного вызова."""
+    monkeypatch.delenv(ENV_FLAG, raising=False)
+    loop, llm, _ = _loop('{"social": true}')
+    assert is_social_turn(loop, "Расскажи анекдот про роботов") is False
+    assert llm.calls == 0
+
+
+def test_an_exhausted_budget_stops_the_turn_not_the_classifier() -> None:
+    """Первый прогон 24.09: сбой классификатора глотал исчерпанный бюджет."""
+    loop, _, _ = _loop(ModelBudgetExceeded("limit"))
+    with pytest.raises(ModelBudgetExceeded):
+        is_social_turn(loop, "Как настроение?")
 
 
 def test_small_talk_recognised_by_the_classifier_carries_no_report_tail() -> None:
