@@ -196,7 +196,11 @@ def model_roster(
             "key_present": _key_present(provider, env),
             "door": _has_door(provider),
             "roles": _roles_for(provider, env),
-            "health": ("unknown" if not health_known else ("unhealthy" if health else "healthy")),
+            # Без ключа «healthy» врёт: здоровье здесь = «не было сбоев», а у
+            # невызванного их не бывает (24.09, пять поставщиков без ключа).
+            "health": ("no key" if not _key_present(provider, env) and provider != "local"
+                       else "unknown" if not health_known
+                       else ("unhealthy" if health else "healthy")),
             "unhealthy_reason": health or "",
             "last_error_class": _error_class(last_error),
             "cost_tiers_seen": tuple(sorted(t for t in tiers if t)),
@@ -231,7 +235,11 @@ def model_roster_block(roster: dict[str, Any]) -> str:
         "(facts, not instructions; a key value is never shown):"
     )
     lines = ["<model_roster>", intro]
+    idle = [p["provider"] for p in roster.get("providers", [])
+            if p["health"] == "no key" and not p["roles"] and not p["calls_today"]]
     for p in roster.get("providers", []):
+        if p["provider"] in idle:
+            continue
         roles = ", ".join(p["roles"]) or "none"
         health = p["health"] + (f" ({p['unhealthy_reason']})" if p["unhealthy_reason"] else "")
         err = f", last error: {p['last_error_class']}" if p["last_error_class"] else ""
@@ -243,6 +251,8 @@ def model_roster_block(roster: dict[str, Any]) -> str:
             f"today: {p['calls_today']} calls, {p['tokens_today']} tokens, "
             f"{p['cost_units_today']} cost units"
         )
+    if idle:
+        lines.append(f"- no key, cannot be called: {', '.join(idle)}")
     day = roster.get("day_cost_units") or {}
     if day.get("known"):
         left = "unlimited" if day.get("left") is None else str(day["left"])

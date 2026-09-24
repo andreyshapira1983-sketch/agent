@@ -110,7 +110,11 @@ def test_missing_sources_read_as_unknown_not_healthy() -> None:
     unreadable must not widen freedom)."""
     roster = model_roster(usage_ledger=None, budget_ledger=None, env=_ENV, now=_NOW)
 
-    assert all(p["health"] == "unknown" for p in roster["providers"])
+    # «Нет ключа» — факт и без журнала (24.09); у остальных здоровье неизвестно.
+    # Ни один не «healthy»: нечитаемое не расширяет свободу.
+    assert all(p["health"] == ("unknown" if p["key_present"] or p["provider"] == "local" else "no key")
+               for p in roster["providers"])
+    assert not any(p["health"] == "healthy" for p in roster["providers"])
     assert roster["day_cost_units"] == {"known": False}
     assert "Day ceiling: unknown" in model_roster_block(roster)
 
@@ -185,3 +189,18 @@ def test_a_key_without_a_client_is_shown_as_a_key_without_a_door() -> None:
     google_line = next(line for line in text.splitlines() if line.startswith("- google"))
     assert "key present" in google_line and "NO CLIENT IN THIS CODE" in google_line
     assert "NO CLIENT" not in next(line for line in text.splitlines() if line.startswith("- openai"))
+
+
+def test_a_provider_without_a_key_is_not_called_healthy() -> None:
+    """24.09, сервер: агент видел пять поставщиков без ключа со словом «healthy»
+    (здоровье = «не было сбоев», а у невызванного сбоев нет). Прибор, который
+    врёт. Без ключа — «no key», и в подсказке — одной строкой, без шума."""
+    env = {"DEEPSEEK_API_KEY": "ds-secret", "AGENT_PROVIDER": "deepseek"}
+    roster = model_roster(usage_ledger=_Ledger(_rows(), {}), env=env, now=_NOW)
+    by = {p["provider"]: p for p in roster["providers"]}
+
+    assert by["anthropic"]["health"] == "no key"
+    assert by["deepseek"]["health"] == "healthy"
+    text = model_roster_block(roster)
+    assert "healthy" not in next(line for line in text.splitlines() if "anthropic" in line)
+    assert not any(line.startswith("- anthropic") for line in text.splitlines())
