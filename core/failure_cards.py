@@ -50,6 +50,7 @@ _WORKSPACE_RE = re.compile(r"(?:/root/agent-main|[A-Za-z]:\\[^\s'\"]*?agent-main
 _TMP_RE = re.compile(r"/tmp/[^\s'\"]+")  # noqa: S108 — узнаёт путь в тексте ошибки, файлов не создаёт
 _HEX_RE = re.compile(r"\b[0-9a-f]{8,}\b")
 _NUM_RE = re.compile(r"\d+")
+_LONG_QUOTE_RE = re.compile(r"'[^'\n]{31,}'|\"[^\"\n]{31,}\"")
 
 
 @dataclass
@@ -81,13 +82,16 @@ def failure_text(tool: str, output: Any, error: str | None = None) -> str | None
         return str(error)
     if not isinstance(output, dict):
         return None
+    # Самая говорящая строка — последней: когда в тексте нет ни исключения, ни
+    # отказа, подпись берёт последнюю строку (замер 24.09: «exit_code=N» первой
+    # строкой слил все упавшие команды shell_exec в одну карточку).
     if tool == "patch_check" and output.get("verdict") == "red":
-        parts = [str(output.get("why") or ""), *map(str, output.get("errors") or ()),
-                 str(output.get("tests_output") or "")]
+        parts = [str(output.get("why") or ""), str(output.get("tests_output") or ""),
+                 *reversed([str(e) for e in output.get("errors") or ()])]
         return "\n".join(p for p in parts if p) or "patch_check: red"
     if tool == "run_tests" and (output.get("failed") or output.get("errors")):
         names = "\n".join(f"FAILED {n}" for n in output.get("failed_tests") or ())
-        return f"{names}\n{output.get('stdout_tail') or ''}".strip()
+        return f"{output.get('stdout_tail') or ''}\n{names}".strip()
     code = output.get("exit_code")
     if tool in ("python_probe", "shell_exec") and code not in (0, None):
         stderr = str(output.get("stderr") or "").strip()
@@ -110,19 +114,28 @@ def failed_output_reason(output: Any) -> str:
 
 
 def _error_line(text: str) -> str:
+    """Строка, по которой ошибку узнают: исключение с сообщением, отказ, упавший
+    тест, иначе последняя строка вывода (не строка кода выхода)."""
     lines = [ln.strip().removeprefix("E ").strip() for ln in text.splitlines() if ln.strip()]
     for pattern in (_EXC_RE, _REFUSAL_RE):
         found = [m.group(0) for ln in lines if (m := pattern.search(ln))]
-        if found:
-            return found[-1]
+        # «TypeError» без сообщения — обрезанная сводка pytest; она сливала
+        # разные ошибки в одну карточку (замер 24.09: 31 провал под одним именем).
+        told = [f for f in found if ": " in f and len(f.split(": ", 1)[1]) > 3]
+        if told or found:
+            return (told or found)[-1]
     if m := _FAILED_TEST_RE.search(text):
         return f"FAILED {m.group(1)}::{m.group(2)}"
-    return lines[0] if lines else ""
+    rest = [ln for ln in lines if not ln.startswith("exit_code=")]
+    line = rest[-1] if rest else (lines[0] if lines else "")
+    return line.split("stderr: ", 1)[-1]
 
 
 def signature(tool: str, text: str) -> str:
-    """Подпись: инструмент + строка ошибки без чисел, хешей и путей папки."""
+    """Подпись: инструмент + строка ошибки без чисел, хешей, путей папки и
+    длинных цитат (длинная цитата — чужой текст, короткая — имя, её оставляем)."""
     line = _WORKSPACE_RE.sub("", _error_line(text))
+    line = _LONG_QUOTE_RE.sub("'<…>'", line)
     line = _NUM_RE.sub("N", _HEX_RE.sub("H", _TMP_RE.sub("<tmp>", line)))
     return f"{tool}|{' '.join(line.split())[:160]}"
 
