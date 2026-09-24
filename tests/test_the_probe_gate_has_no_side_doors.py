@@ -88,11 +88,13 @@ def test_without_the_wall_a_root_process_refuses_to_run(monkeypatch, tmp_path: P
         python_probe._as_nobody(["python"], str(tmp_path))
 
 
-def test_a_developer_machine_says_there_is_no_wall(monkeypatch) -> None:
-    from tools import convert_file
+def test_a_developer_machine_says_there_is_no_wall(monkeypatch, tmp_path: Path) -> None:
+    from tools import convert_file, python_probe
 
     monkeypatch.setattr(convert_file, "sandbox_available", lambda: "the sandbox needs Linux")
-    assert _run("print(1)")["sandbox"].startswith("none")
+    monkeypatch.setattr(python_probe.sys, "platform", "win32")
+    argv, sandbox = python_probe._as_nobody(["python", "-c", "1"], str(tmp_path))
+    assert argv == ["python", "-c", "1"] and sandbox.startswith("none")
 
 
 needs_sandbox = pytest.mark.skipif(
