@@ -290,14 +290,6 @@ def format_observations(
     return "\n".join(lines)
 
 
-#: Инструменты, которые запускают код, чтобы НАБЛЮДАТЬ. Для параллельного
-#: исполнения они не «только чтение», но работой, которую просил человек, не
-#: являются. Замер 2026-09-19 (рабочий экзамен, «почини по тестам заказчика»):
-#: план «прочитать → прогнать тесты» счёлся сделанной работой, круг наблюдения
-#: пропустили, и агент остановился на диагнозе, не записав правку.
-_OBSERVING_RUNS = frozenset({"run_tests"})
-
-
 #: Заготовка из текста просьбы, перенесённая в результат вместо значения:
 #: «(стр. N)», «ГГГГ-ММ», «<значение>». Замер 2026-09-19 (рабочий экзамен):
 #: справка для заказчика вышла со всеми ссылками вида «(стр. N)» — задание
@@ -316,61 +308,6 @@ _PLACEHOLDER_RE = re.compile(
 def unfilled_placeholders(content: str) -> list[str]:
     """Заготовки, оставшиеся в записанном тексте вместо значений."""
     return sorted({m.group(0) for m in _PLACEHOLDER_RE.finditer(content or "")})
-
-
-def _written_placeholders(plan: Any) -> bool:
-    return any(unfilled_placeholders(((s.action_spec or {}).get("arguments") or {}).get("content") or "")
-               for s in getattr(plan, "steps", None) or [])
-
-
-def _red_tests(attempt_artifacts: dict[str, dict[str, Any]]) -> bool:
-    """В пакете есть прогон тестов, который не зелёный: упавший тест — не упавший шаг.
-
-    Красная проверка своей правки (`patch_check`: не легла, тесты или полный
-    набор не зелёные) — то же самое: 2026-09-22 14:31 ход кончился на ней
-    словами «действие выполнено, ничего не упало».
-    """
-    for meta in attempt_artifacts.values():
-        out = (meta or {}).get("output")
-        tool = (meta or {}).get("tool")
-        if tool == "run_tests" and isinstance(out, dict) and (
-            out.get("failed") or out.get("errors") or out.get("exit_code") not in (0, None)
-        ):
-            return True
-        if tool == "patch_check" and isinstance(out, dict) and out.get("verdict") != "green":
-            return True
-    return False
-
-
-def _effect_completed_cleanly(loop: Any, st: Any, attempt_artifacts: dict | None = None) -> bool:
-    """Пакет что-то изменил, ничего не упало, и планировщик видел, ЧТО он записал.
-
-    Замер 2026-09-19 (задача «сумма по именам»): лаборатория напечатала
-    отладочную строку и JSON, `{{step:3.output}}` унёс в report.json оба, и
-    правило «чистая запись — конец хода» отняло круг, в котором это было бы
-    видно. Запись по ссылке несёт содержимое, которого планировщик не видел, —
-    такой пакет получает круг наблюдения.
-    """
-    from core.step_references import has_step_reference, referenced_steps
-
-    steps = list(getattr(st.plan, "steps", None) or [])
-    only_reads = getattr(loop, "_step_only_reads", None)
-    if not steps or only_reads is None:
-        return False
-    # Шаг хранит уже подставленные аргументы; ссылка видна только в исходном
-    # плане планировщика, шаги идут в его порядке (`_build_plan`).
-    sources = list(getattr(st.planner_out, "sources", None) or [])
-    planned = [src.get("arguments", {}) for src in sources] if len(sources) == len(steps) else []
-    effects = [i for i, s in enumerate(steps)
-               if not only_reads(s) and (s.action_spec or {}).get("tool_name") not in _OBSERVING_RUNS]
-    # Ссылка — на шаг ЭТОГО плана; «{{step:N.output}}» в тексте README — проза
-    # о ссылках (2026-09-22: круг был дан за упоминание, и файл записан трижды).
-    plan_ids = {str(getattr(s, key, "")) for s in steps for key in ("order", "id")} - {""}
-    unseen = not planned or any(
-        has_step_reference(planned[i]) and set(referenced_steps(planned[i])) & plan_ids
-        for i in effects)
-    red = _red_tests(attempt_artifacts or {}) or _written_placeholders(st.plan)
-    return all(s.status == "done" for s in steps) and bool(effects) and not unseen and not red
 
 
 #: Сколько одинаковых кругов подряд — петля, а не работа.
@@ -424,16 +361,15 @@ def continue_after_observation(
     """
     if not getattr(loop, "observe_before_answer", False) or not attempt_artifacts:
         return False
-    if _effect_completed_cleanly(loop, st, attempt_artifacts):
-        # Замер 2026-09-19: после верной записи круг повторял ту же пробу и ту же
-        # запись, пока не кончался бюджет. Пакет, который что-то изменил и в
-        # котором ничего не упало, — работа сделана. Упавший шаг и красные
-        # тесты (шаг прогона при этом успешен — см. `_red_tests`) круг
-        # оставляют: ошибку надо увидеть.
-        loop.log.log("observation_round_skipped", {
-            "attempt": st.attempt, "reason": "effect completed with no failed step",
-        })
-        return False
+    # Правило «пакет что-то записал и ничего не упало — работа сделана» снято
+    # 24.09 (слово оператора). Оно обрывало ход на полпути, и за пять дней ему
+    # трижды добавляли исключения (прогон тестов, заготовка в тексте, красный
+    # patch_check). Последний случай: агент записал RUN.md — инструкцию к ещё не
+    # сделанному видео — и ход кончился на 4-м круге из 6, хотя ни одного
+    # требования задачи не было выполнено. Это преждевременное завершение (MAST,
+    # arXiv 2503.13657). Беда, от которой правило ставили 19.09 (та же запись по
+    # кругу до конца бюджета), с 22.09 закрыта датчиком одинаковых кругов ниже;
+    # «сделано» решает планировщик — пустым планом.
     limit = loop.replan_policy.max_total_replans
     if st.attempt >= limit:
         loop.log.log("observation_round_skipped", {

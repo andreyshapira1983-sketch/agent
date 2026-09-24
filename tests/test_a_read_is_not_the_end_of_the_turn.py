@@ -85,21 +85,32 @@ def test_a_read_leads_to_a_second_round_that_sees_the_output(workspace: Path):
     loop.run("Посчитай сумму чисел в numbers.txt и запиши её в sum.txt")
 
     assert (workspace / "sum.txt").read_text(encoding="utf-8") == "6"
-    assert len(planner.contexts) == 2, "чтение, затем запись — и ход окончен"
+    assert len(planner.contexts) == 3, "чтение, запись, затем пустой план планировщика — конец хода"
     assert "<observed_results>" in planner.contexts[1]
     assert "1\n2\n3" in planner.contexts[1], "второй круг видит, что было прочитано"
     assert "file_read" in planner.contexts[1], "и какие шаги уже выполнены"
     rounds = _events(loop, "observation_round")
-    assert [r["attempt"] for r in rounds] == [1]
+    assert [r["attempt"] for r in rounds] == [1, 2]
 
 
-def test_a_clean_write_ends_the_turn_but_a_failed_step_does_not(workspace: Path):
-    """Замер 2026-09-19: после верной записи круг повторял ту же запись до конца
-    бюджета. Пакет с эффектом без упавших шагов завершает ход; упавший шаг рядом
-    с записью оставляет круг — ошибку надо увидеть."""
+def test_after_a_clean_write_the_planner_decides_not_a_rule(workspace: Path):
+    """24.09 (слово оператора): правило «записал и ничего не упало — сделано»
+    оборвало ход на побочном файле. Агент записал RUN.md — инструкцию к ещё не
+    сделанному видео — и ход кончился на 4-м круге из 6. Теперь после записи
+    планировщик видит, что легло в файл, и сам решает: пустой план — конец."""
     clean = _ScriptedPlanner([[_src("file_write", {"path": "out.txt", "content": "1"})], []])
     _loop(workspace, clean, observe=True).run("Запиши 1 в out.txt")
-    assert len(clean.contexts) == 1
+    assert len(clean.contexts) == 2, "after the write the planner gets a round and ends it empty"
+    assert "Exact content written to out.txt" in clean.contexts[1]
+
+    side_file_first = _ScriptedPlanner([
+        [_src("file_write", {"path": "RUN.md", "content": "how to run"})],
+        [_src("file_write", {"path": "result.txt", "content": "the work itself"})],
+        [],
+    ])
+    _loop(workspace, side_file_first, observe=True).run("Сделай результат и опиши запуск")
+    assert (workspace / "result.txt").read_text(encoding="utf-8") == "the work itself", \
+        "a side file written first must not end the turn before the work"
 
     broken = _ScriptedPlanner([
         [_src("file_write", {"path": "out2.txt", "content": "1"}),
@@ -230,49 +241,20 @@ def test_the_observation_block_is_bounded_and_marks_data_as_data():
     assert "yourself" not in block and "python_probe" in block
 
 
-def test_running_the_tests_is_not_the_work_and_red_tests_keep_the_round():
-    """Замер 2026-09-19 (рабочий экзамен): «прочитать → прогнать тесты» счёлся
-    сделанной работой, и агент остановился на диагнозе, не записав правку."""
-    from types import SimpleNamespace
-
-    from core.observation_round import _effect_completed_cleanly
-
-    def step(tool):
-        return SimpleNamespace(status="done", action_spec={"tool_name": tool, "arguments": {}})
-
-    loop = SimpleNamespace(_step_only_reads=lambda s: s.action_spec["tool_name"] == "file_read")
-    st = SimpleNamespace(plan=SimpleNamespace(steps=[step("file_read"), step("run_tests")]),
-                         planner_out=SimpleNamespace(sources=[{"arguments": {}}, {"arguments": {}}]))
-    assert not _effect_completed_cleanly(loop, st, {}), "прогон тестов — наблюдение, не работа"
-
-    st.plan.steps = [step("file_write"), step("run_tests")]
-    red = {"run_tests:x": {"tool": "run_tests", "output": {"failed": 2, "exit_code": 1}}}
-    green = {"run_tests:x": {"tool": "run_tests", "output": {"failed": 0, "errors": 0, "exit_code": 0}}}
-    assert not _effect_completed_cleanly(loop, st, red), "красные тесты после правки — ещё круг"
-    assert _effect_completed_cleanly(loop, st, green), "правка и зелёные тесты — работа сделана"
-
-
-def test_an_unfilled_template_is_not_finished_work():
+def test_an_unfilled_template_is_named_to_the_planner():
     """Замер 2026-09-19 (рабочий экзамен): справка вышла со ссылками «(стр. N)»
     — агент переписал образец формата вместо номеров страниц."""
     from types import SimpleNamespace
 
-    from core.observation_round import (
-        _effect_completed_cleanly,
-        format_observations,
-        unfilled_placeholders,
-    )
+    from core.observation_round import format_observations, unfilled_placeholders
 
     assert unfilled_placeholders("Экранирование (стр. N). Длина (стр. 12).") == ["стр. N"]
     assert unfilled_placeholders("Страница 327; выручка 2026-04; ПРОГНОЗ 1: да, шагов: 3") == []
 
     step = SimpleNamespace(status="done", order=1, action_spec={
         "tool_name": "file_write", "arguments": {"path": "spravka.md", "content": "Факт (стр. N)."}})
-    loop = SimpleNamespace(_step_only_reads=lambda s: False)
-    st = SimpleNamespace(plan=SimpleNamespace(steps=[step]),
-                         planner_out=SimpleNamespace(sources=[{"arguments": {"content": "Факт (стр. N)."}}]))
-    assert not _effect_completed_cleanly(loop, st, {}), "запись с заготовкой — ещё круг"
-    assert "UNFILLED TEMPLATE in spravka.md" in format_observations(st.plan, {})
+    plan = SimpleNamespace(steps=[step])
+    assert "UNFILLED TEMPLATE in spravka.md" in format_observations(plan, {})
 
 
 def test_the_agent_sees_its_own_tools():
