@@ -256,6 +256,31 @@ def _gate_citation(
     return strict_ok, chunk_reason
 
 
+def _entailment_denied(
+    chunk_text: str, cited: list[Any], llm: Any, *, stat_figures: Any,
+) -> bool:
+    """Процитированное не влечёт утверждение — проверка по смыслу (MIR-060).
+
+    До 24.09 найденная ссылка сама была вердиктом: проверка по смыслу шла
+    лишь для утверждений, у которых ссылка НЕ нашлась. Замер 24.09: ответ
+    «второй свидетель op=office даёт улику» — теста не существовало — получил
+    «подтверждено 8 из 8» по ссылке на вывод patch_check. ALCE (Gao et al.,
+    2023): утверждение подтверждено, если процитированные отрывки его ВЛЕКУТ.
+    Числа уже сверены строже (гейт цифр) — для них не зовём. Нет модели или
+    нет вырезок — прежнее поведение.
+    """
+    if llm is None or stat_figures:
+        return False
+    excerpts = [ev.excerpt for ev in cited if getattr(ev, "excerpt", "")]
+    if not excerpts:
+        return False
+    from .verifier_utils import _semantic_nli_check
+    # Окно шире, чем у поиска по всей цепочке (600): здесь смотрят только
+    # процитированные улики, а подтверждение в выводе инструмента часто стоит
+    # дальше первых сотен знаков — узкое окно ложно отказывало бы верному.
+    return not _semantic_nli_check(chunk_text, "\n---\n".join(excerpts), llm, max_chars=6000)
+
+
 def _judge_unmatched(
     chunk_text: str, cits: list[Any], chain: ProvenanceChain, *, chain_empty: bool,
     llm: Any, annotated: str,
@@ -407,13 +432,21 @@ def _judge_cited(
     # может — гейт (d) его опровергает, этот не даёт подтвердить
     # (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
     _abs_uncert = any_matched and not absence_certifiable(chunk_text, "")
+    _cited = [ev for ev in chunk_evs if ev.id in matched_ids]
     if any_matched and not _abs_uncert and not (
         chunk_reason is not None and chunk_reason.code == "count_mismatch"
-    ):
+    ) and not _entailment_denied(chunk_text, _cited, llm, stat_figures=stat_figures):
         verdict = "verified"
         # Иск снят: другая из процитированных улик подтвердила кусок.
         chunk_reason = None
         annotated = _relabel(annotated, topic_only_replacements + dialogue_replacements + user_asserted_replacements)
+    elif any_matched and not _abs_uncert and chunk_reason is None:
+        # Ссылка нашлась, но процитированное утверждение НЕ ВЛЕЧЁТ (MIR-060).
+        # Не «выдуманная ссылка» (та терминальна и уничтожает ответ): источник
+        # есть и прочитан, он просто не подтверждает сказанного.
+        verdict = "topic_supported_but_claim_unverified"
+        annotated = _relabel(annotated, topic_only_replacements)
+        annotated = annotated.rstrip() + " [цитата-не-подтверждает]"
     elif _abs_uncert and chunk_reason is None:
         # Ниже опровержения намеренно: опровергнутое — доказанная ложь,
         # а это лишь несертифицируемое.
