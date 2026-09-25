@@ -25,8 +25,8 @@ def _artifact_blocks(
     artifacts: dict[str, dict], *, question: str,
 ) -> list[tuple[str, str]]:
     """Render each artifact for the prompt, sparing the agent's own description."""
-    from core.answer_format import format_artifact
     from core.planner import LLMPlanner
+    from core.tool_output_render import format_artifact
 
     self_doc = {p.rstrip("/") for p in LLMPlanner.DEFAULT_SELF_DOCUMENTATION_PATHS}
     blocks: list[tuple[str, str]] = []
