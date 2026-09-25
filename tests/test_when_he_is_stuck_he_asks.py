@@ -43,7 +43,9 @@ def test_the_goal_sends_him_to_the_internet_and_to_the_partner(tmp_path: Path) -
     goal = stuck_goal(tmp_path)
 
     assert "web_search" in goal.goal and "data/chat_outbox.jsonl" in goal.goal
-    assert goal.success_check.startswith("В data/chat_outbox.jsonl")
+    # С 2026-09-26 успех — ЕГО решение, а вопрос человеку — только когда шаг не его
+    # (tests/test_a_decision_about_own_code_is_not_a_question.py).
+    assert goal.success_check.startswith("В data/own_decisions.jsonl")
     assert goal.drive == "stuck_need"
 
 

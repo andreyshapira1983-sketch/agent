@@ -52,6 +52,11 @@ _KNOWN_JOURNALS: dict[str, dict] = {
         "required": ("author", "text"),
         "lists": (),
     },
+    "data/own_decisions.jsonl": {
+        "reader": "core/patch_route.py — следующая цель починки того же дефекта (core/own_decisions.py)",
+        "required": ("id", "about", "decision", "because"),
+        "lists": (),
+    },
 }
 
 #: Слова-заглушки. Поле с таким значением — это дырка, а не запись.

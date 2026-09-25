@@ -146,6 +146,11 @@ def defect_goal(root: Path) -> Any:
         state.setdefault("patch_to_defect", {})[patch] = issue.fingerprint
         _save_state(root, state)
         evidence = "; ".join(issue.evidence[:3])[:900]
+        # Его собственное решение по этому дефекту (core/own_decisions.py) —
+        # читатель журнала решений. Ночь 26.09: вывод был сделан и забыт.
+        from core.own_decisions import decision_line
+
+        decided = decision_line(root, issue.fingerprint)
         # «Меняется ровно 1 файл» — иначе ворота уточнения (core/loop_gates.py)
         # отвечают вопросом вместо работы, а в автомате на вопрос никто не
         # ответит: 2026-09-22 18:21 три цикла подряд ушли в clarify.
@@ -159,7 +164,7 @@ def defect_goal(root: Path) -> Any:
         #     >>>>>>> REPLACE»), и 305 КБ содержимого ушли в мусор. Форма
         #     показана дословно, чтобы её не приходилось угадывать.
         goal = (f"Почини свой дефект «{issue.title}» ({issue.fingerprint}). Улики: {evidence}. "
-                f"Что сделать: {issue.suggested_next_action[:400]}. "
+                f"Что сделать: {issue.suggested_next_action[:400]}. {decided}"
                 f"Меняется ровно 1 файл: {patch}. Все остальные файлы только читаются. "
                 f"В {patch} пиши ТОЛЬКО блоки правки — каждая метка на своей строке:\n"
                 "FILE:core/имя.py\n<<<<<<< SEARCH\n<старый текст дословно>\n=======\n"
