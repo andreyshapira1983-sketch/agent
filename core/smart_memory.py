@@ -555,8 +555,12 @@ class EpisodicMemoryStore:
     def _maybe_prune_unlocked(self) -> int:
         """Evict oldest non-protected episodes when over *max_episodes*.
 
-        Protected episodes (carrying any tag in PROTECTED_TAGS) are never
-        evicted.  Returns the number of records removed.
+        Protected episodes (carrying any tag in PROTECTED_TAGS) go last, not
+        never: once the unprotected rows are all gone, the OLDEST protected
+        ones are evicted too, so the cap holds (MIR-115, operator 2026-09-25,
+        option г; the other half — `lesson` only for a pass that did work —
+        is in core/self_build_memory.py since 2026-09-23). Returns the number
+        of records removed.
         """
         if self.max_episodes <= 0:
             return 0
@@ -574,9 +578,12 @@ class EpisodicMemoryStore:
         to_remove = len(episodes) - self.max_episodes
         if to_remove <= 0:
             return 0
-        # Sort evictable by age ascending so oldest are removed first.
+        # Sort by age ascending so oldest are removed first; protected only
+        # after every evictable row is gone.
         evictable.sort(key=lambda e: e.created_at)
-        kept = evictable[to_remove:] + protected
+        protected.sort(key=lambda e: e.created_at)
+        from_protected = max(0, to_remove - len(evictable))
+        kept = evictable[to_remove:] + protected[from_protected:]
         kept.sort(key=lambda e: e.created_at)
         rewrite_state_jsonl_unlocked(self.path, [e.to_dict() for e in kept])
         return to_remove
