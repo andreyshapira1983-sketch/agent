@@ -93,6 +93,10 @@ class VerificationReport:
     #: 2026-09-21: без этого счётчика ответ нёс «я не проверял X» и внизу
     #: «подтверждено 9 из 9; уверенность: высокая» — считалось лёгкое.
     admitted_unverified_chunks: int = 0
+    #: R2 в теневом режиме (решение оператора 2026-09-25): «число не сошлось
+    #: со своим перечнем в скобках» — только в журнал, на вердикт не влияет.
+    #: Замер: 25 срабатываний на живых ответах, все 25 ложные.
+    shadow_count_mismatch: tuple[dict[str, str], ...] = ()
 
     def to_log_payload(self) -> dict[str, Any]:
         return {
@@ -125,6 +129,7 @@ class VerificationReport:
             # перечисленное наличное. Мера, которая не записывает
             # отвергнутое, не даёт себя перемерить.
             "refutations": self._refutation_records(),
+            "shadow_count_mismatch": list(self.shadow_count_mismatch[: self._REFUTATIONS_LOGGED]),
         }
 
     #: Сколько опровержений попадает в запись. Причины повторяются, а журнал

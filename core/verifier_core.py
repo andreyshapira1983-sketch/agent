@@ -555,6 +555,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     if not all_chunks_text:
         return VerificationReport(total_chunks=0, verified_chunks=0, unverified_chunks=0, cited_but_unmatched_chunks=0, self_declared_chunks=0, structural_chunks=0, chunks=(), annotated_answer=answer, fully_unverified=True, chain_was_empty=chain_empty, disclaimer=(DISCLAIMER_NO_CHAIN if chain_empty else DISCLAIMER_FULLY_UNVERIFIED))
     examined_chunks: list[ClaimChunk] = []
+    shadow_count: list[dict[str, str]] = []
     structural = memory_only_unmatched = 0
     has_dialogue_evidence = dialogue_evidence_present(chain)
     annotated_chunks: list[str] = []
@@ -580,10 +581,18 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             annotated_chunks.append(chunk_text)
             continue
         cits = parse_citations(chunk_text)
-        # R2 (2026-08-13): внутренний гейт — заявленный счёт против собственного
-        # перечисления. Улика о споре предложения с самим собой ничего не знает,
-        # поэтому подтверждённая цитата этот иск НЕ снимает (ветка ниже).
-        chunk_reason: ClaimReason | None = enumeration_count_reason(chunk_text)
+        # R2 (2026-08-13) — заявленный счёт против собственного перечисления в
+        # скобках — с 2026-09-25 в ТЕНЕВОМ режиме, по слову оператора: пишется
+        # в журнал, на вердикт не влияет. Замер: 25 срабатываний на 1397
+        # проверках живых ответов, все 25 ложные (скобки вызова функции,
+        # пример, формула), 9 — и после шести заплаток. Сильное действие
+        # («ложь», перепланирование, переписывание черновика) требует
+        # измеренной точности; у R2 она 0 из 25.
+        _r2 = enumeration_count_reason(chunk_text)
+        if _r2 is not None:
+            shadow_count.append({**_r2.to_log_payload(),
+                                 "claim": " ".join(chunk_text.split())[:160]})
+        chunk_reason: ClaimReason | None = None
         if not cits:
             verdict, annotated, matched_ids = _judge_uncited(
                 chunk_text, chain, chain_empty, has_dialogue_evidence)
@@ -663,4 +672,4 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
         disclaimer = DISCLAIMER_ALL_SELF_DECLARED
     if disclaimer is not None:
         annotated_answer = annotated_answer.rstrip() + "\n\n" + disclaimer
-    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted, refuted_chunks=refuted, admitted_unverified_chunks=_admitted_unverified(all_chunks_text))
+    return VerificationReport(total_chunks=len(examined_chunks), verified_chunks=verified, unverified_chunks=unverified, cited_but_unmatched_chunks=cited_unmatched, self_declared_chunks=self_declared, structural_chunks=structural, chunks=tuple(examined_chunks), annotated_answer=annotated_answer, fully_unverified=fully_unverified, chain_was_empty=chain_empty, disclaimer=disclaimer, malformed_output=malformed_output, topic_supported_but_claim_unverified_chunks=topic_supported, subagent_asserted_chunks=subagent_asserted, receipt_missing_chunks=receipt_missing, dialogue_supported_chunks=dialogue_supported, user_asserted_chunks=user_asserted, refuted_chunks=refuted, admitted_unverified_chunks=_admitted_unverified(all_chunks_text), shadow_count_mismatch=tuple(shadow_count))
