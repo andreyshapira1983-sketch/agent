@@ -132,10 +132,21 @@ def test_status_is_read_only_when_inactive(tmp_path: Path):
     assert not path.exists()  # status must never latch
 
 
-def test_corrupt_state_file_loads_inactive(tmp_path: Path):
+@pytest.mark.parametrize("content", ["{not json", "[]", "null", ""])
+def test_a_corrupt_state_file_is_a_stop_not_a_pass(tmp_path: Path, content: str):
+    """Решение оператора 2026-09-25: испорченный выключатель — стоп.
+
+    До него "{not json" читался как «выключено», и порча файла снимала тормоз.
+    Отсутствующий файл по-прежнему значит «не срабатывал».
+    """
     path = tmp_path / "budget_kill_switch.json"
-    path.write_text("{not json", encoding="utf-8")
-    assert BudgetKillSwitch(path=path).load().active is False
+    path.write_text(content, encoding="utf-8")
+    ks = BudgetKillSwitch(path=path)
+    state = ks.load()
+    assert state.active is True and state.counter == "state_file_unreadable"
+    assert ks.engage_if_needed(_day_snapshot({"llm_calls": {"used": 0, "limit": 0}})).active is True
+    ks.clear()
+    assert ks.load().active is False
 
 
 def test_state_from_dict_roundtrip():
