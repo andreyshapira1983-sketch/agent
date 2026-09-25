@@ -13,8 +13,9 @@ verifies each one against the working tree:
 * **paths** — does the referenced file exist?
 * **line anchors** (`file.py:123`) — is the line within the file's current length?
   A stale anchor is reported as INFO, not an error, when the document declares it
-  as historical provenance (see the `_HISTORICAL_ANCHOR_DOCS` allowlist), because
-  those anchors intentionally point at an old commit.
+  as historical provenance (see the `_HISTORICAL_ANCHOR_DOCS` allowlist) or the
+  line carries the `<!-- historical-ref -->` marker, because those anchors
+  intentionally point at an old commit.
 * **renamed modules** — a path in `_RENAMED_PATHS` still resolves *as history*,
   never as live architecture. Declaring a rename used to exempt the old name
   everywhere, which let a source-of-truth document go on describing a removed
@@ -383,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                             target.read_text(encoding="utf-8", errors="replace").splitlines()
                         )
                     if int(anchor) > line_counts[target]:
-                        if historical:
+                        if historical or _HISTORICAL_REF_MARKER in line:
                             historical_anchors += 1
                         else:
                             stale_anchors.append(
