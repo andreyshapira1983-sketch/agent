@@ -1,37 +1,7 @@
 """Evidence Budget — caps context sent to the synthesizer LLM.
 
-Two complementary limits keep the synthesizer prompt lean:
-
-  1. Per-artifact budget (env AGENT_EVIDENCE_FILE_CHARS, default 96 000 chars ≈ 28 k tokens)
-     A single large file (README, source module) is intelligently trimmed rather than
-     fed whole into the expensive model.
-
-  2. Total evidence budget (env AGENT_EVIDENCE_TOTAL_CHARS, default 100 000 chars ≈ 30 k tokens)
-     Many medium-sized artifacts cannot collectively overwhelm the context window.
-     The LARGEST artifact is trimmed first, preserving smaller ones intact —
-     except for blocks the caller demotes via ``trim_first_labels``, which are
-     spent before any other block is touched regardless of size. Recollection
-     (long-term memory) is demoted this way: "largest first" is the right rule
-     among blocks of the same kind and the wrong one across kinds, because the
-     freshly read file is almost always the largest block.
-
-Realtime Intent extraction:
-  When a file exceeds the per-artifact budget, we do NOT blindly return the first N chars.
-  Instead, the text is split into semantic paragraphs and scored by keyword overlap with the
-  CURRENT question. This is the "Realtime Intent Fix" — the excerpt window is shaped by what
-  the user actually asked right now, not by file structure.
-
-  Example: README is 40 KB but the question is "how do I configure the budget governor?".
-  The function returns the 12 KB of paragraphs that contain budget/governor/config keywords,
-  skipping the project description, installation guide, and licence section entirely.
-
-  If no keyword overlap is found (e.g. the question is very short), the function falls back
-  to head (70%) + tail (30%) slicing so the caller still has partial context.
-
-Constants
----------
-EVIDENCE_FILE_CHARS   = 96_000   override via AGENT_EVIDENCE_FILE_CHARS
-EVIDENCE_TOTAL_CHARS  = 100_000  override via AGENT_EVIDENCE_TOTAL_CHARS
+A per-artifact limit keeps the paragraphs most relevant to the question; a total
+limit trims the largest block first, except demoted blocks (memory), which pay first.
 """
 from __future__ import annotations
 
@@ -42,35 +12,16 @@ from collections.abc import Set as AbstractSet
 
 # ── configurable limits ────────────────────────────────────────────────────────
 
-# Подняты 2026-09-21 с 12 000 / 32 000. Эпизод: вопрос «открой
-# core/smart_memory.py целиком» — агент прочитал все 1756 строк (≈83 КБ), а
-# синтезатору дошло 32 000 знаков: 26 из 36 блоков урезаны до 444 знаков, и
-# ответ честно писал «строки 111–323… не были показаны». Руки прочитали, рот
-# не видел — половина «не подтверждено» про собственный код была этой стеной.
-# Прежние числа ставились под окна в 8–32 k токенов; синтезатор сейчас
-# deepseek-v4-pro с окном 1 048 576. 100 000 знаков ≈ 30 k токенов: самый
-# большой модуль агента (1865 строк, ≈90 КБ) доходит целиком. Цена — до
-# ≈$0.03 за ответ по пиковому тарифу, и только там, где прочитано больше
-# прежнего потолка.
+# 100 000 знаков ≈ 30 k токенов: самый большой модуль агента доходит до
+# синтезатора целиком, иначе ответ не видит прочитанного.
 EVIDENCE_FILE_CHARS:  int = 96_000   # per-artifact ceiling
 EVIDENCE_TOTAL_CHARS: int = 100_000  # total ceiling across all artifacts
 
-# Ceiling for the agent's OWN self-documentation (the planner's hint-free
-# allowlist). Higher than the ordinary per-file limit, and the reason is
-# measured: `knowledge/generated/AGENT_ANATOMY.md` is 19 163 chars, so the
-# 12 000 limit cut 37 % of it. Asked «Опиши свою архитектуру» — a Russian
-# question against an English index — `extract_relevant` found no keyword
-# match, fell back to head+tail, and the middle it dropped was the whole
-# `## Memory & Knowledge Governance` group plus `core/runtime_self`. The
-# agent then described its architecture with the memory layer missing.
-# The total budget below still governs; this only stops a SECOND gate from
-# mutilating the one file the agent is told to read to know itself.
-# 2026-09-21: не ниже обычного потолка файла (иначе «повышенный» стал бы ниже).
+# Ceiling for the agent's own self-documentation (the planner's hint-free
+# allowlist); never below the per-file ceiling. The total budget still governs.
 EVIDENCE_SELF_DOC_CHARS: int = 96_000
 
-# Label under which the `<long_term_memory>` block enters the total budget.
-# Defined here, next to the budget it competes in, so the loop and the tests
-# name the same block instead of repeating a string literal.
+# Label of the `<long_term_memory>` block in the total budget (shared by loop and tests).
 MEMORY_BLOCK_LABEL: str = "long_term_memory"
 
 
@@ -122,14 +73,7 @@ def _keywords(text: str) -> frozenset[str]:
 # ── paragraph splitter ────────────────────────────────────────────────────────
 
 def _split_paragraphs(text: str) -> list[str]:
-    """Split *text* into semantic chunks.
-
-    A new paragraph starts at:
-    - a blank line (one or more consecutive empty lines), OR
-    - a Markdown section header (line starting with ``#``).
-
-    Empty chunks are dropped.
-    """
+    """Split *text* into chunks at blank lines and Markdown headers; drop empty chunks."""
     paras: list[str] = []
     current: list[str] = []
 
@@ -156,40 +100,21 @@ def _split_paragraphs(text: str) -> list[str]:
 
 # ── the notice grammar ───────────────────────────────────────────────────────
 
-#: Every notice a trimmer in this repository writes shares one SHAPE: an
-#: ellipsis butted directly against a bracket (`...[INTENT-BUDGET: …]`,
-#: `...[N chars omitted]...`, `...[truncated]`, `[... N sections omitted ...]`).
-#: Real prose does not do that — an ellipsis and a bracket occur, but not
-#: welded together. The grammar lives HERE, beside the writers, so a new
-#: notice added to this module is caught by shape without anyone remembering
-#: to extend a blacklist (MIR-097's closure criterion: an unseen marker of the
-#: same class must also be stopped). The trailing-unclosed alternative exists
-#: because the budget once cut a notice itself in half — the live registry
-#: held `...[tr` as claim text (2026-08-04).
+#: Every trimmer notice shares one shape — an ellipsis welded to a bracket — so a new
+#: notice is caught by shape, not a blacklist (MIR-097). Unclosed: a notice cut in half.
 _FRAMEWORK_NOTICE_RE = re.compile(
     r"(?:\.\.\.|…)\[[^\[\]\n]{0,200}(?:\]|$)"   # ...[NOTICE]  or cut-off ...[NOTI
     r"|\[\.\.\.[^\[\]\n]{0,200}\]"              # [... N sections omitted ...]
 )
 
 
-#: Скобочное содержимое, которое НИКОГДА не бывает нашей меткой: чистое
-#: число (библиографическое «...[1998]») и один символ (цитатное усечение
-#: «...[и]»). Найдено ревизией закрытия MIR-097 против названного полем
-#: провала срезки-по-форме — «жёсткое правило по форме съедает живой текст».
-#: Что НЕ устранимо на этом уровне и записано как есть: «...[typing]»
-#: структурно неотличима от «...[truncated]» — одно слово в скобках после
-#: многоточия. Цена ложного срабатывания — отвергнутое утверждение, а не
-#: испорченный факт, поэтому остаток оставлен в безопасную сторону.
+#: Никогда не наша метка: число («...[1998]») и один символ («...[и]»). «...[typing]»
+#: от «...[truncated]» не отличить — ложное срабатывание лишь отвергает утверждение.
 _NOT_A_NOTICE_RE = re.compile(r"^(?:\d+|.)$")
 
 
 def carries_framework_notice(text: str) -> bool:
-    """Did a trimmer's own voice end up inside this text?
-
-    Consumed by the claim extractor: a sentence carrying a notice was never
-    fully written by the source, so it is refused rather than cleaned — half a
-    sentence is not a fact. See docs/CODE_NOTES.md, "The trimmer's voice".
-    """
+    """True when a trimmer's notice ended up inside *text* (the claim extractor refuses it)."""
     for match in _FRAMEWORK_NOTICE_RE.finditer(text or ""):
         inner = match.group(0).strip(".…[]").strip()
         if inner and _NOT_A_NOTICE_RE.match(inner):
@@ -200,13 +125,8 @@ def carries_framework_notice(text: str) -> bool:
 
 # ── intent-aware extraction ───────────────────────────────────────────────────
 
-#: Appended to every trim notice. The notice used to state THAT content was
-#: cut and stop there; measured live (probe round 4, 2026-08-02), the model
-#: read the notice, said honestly it was truncated — and then reasoned from
-#: the fragment and guessed a function signature wrong. One round later a
-#: single human hint ("don't guess, grep") produced the correct behaviour
-#: immediately. This line is that hint, delivered where the model is
-#: guaranteed to read it, every time it matters.
+#: Appended to every trim notice: told only THAT content was cut, the model guessed
+#: from the fragment; a "grep, don't guess" hint fixes that.
 _TEACH_RECOVERY = (
     "; NOT the whole file — to find what is missing, run grep -n via "
     "shell_exec, then read that exact window"
@@ -216,25 +136,8 @@ _TEACH_RECOVERY = (
 def extract_relevant(text: str, *, question: str, budget: int) -> str:
     """Return a question-relevant excerpt of *text* within *budget* chars.
 
-    Algorithm
-    ---------
-    1. If ``len(text) <= budget``, return unchanged.
-    2. Split text into paragraphs at blank lines / Markdown headers.
-    3. Score each paragraph: overlap(para_keywords, question_keywords) / question_keywords.
-    4. Always include paragraph 0 (file preamble / module docstring).
-    5. Greedily add highest-scoring paragraphs until *budget* is exhausted.
-    6. Emit selected paragraphs in original document order with gap notices.
-    7. Append a budget notice: ``...[INTENT-BUDGET: X of Y chars]``.
-
-    Fallback (no keyword overlap):
-      Return head (70% of budget) + tail (30% of budget) with a gap notice,
-      so the synthesizer still has partial context even for very terse questions.
-
-    Parameters
-    ----------
-    text     : full artifact content (may be megabytes)
-    question : the user's current question (drives keyword scoring)
-    budget   : maximum chars to return (must be > 0)
+    Paragraphs are ranked by keyword overlap with *question* (paragraph 0 always kept)
+    and emitted in document order; with no overlap, falls back to head 70% + tail 30%.
     """
     if not text or budget <= 0:
         return text[:budget] if budget > 0 else ""
@@ -247,10 +150,8 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
 
     paras = _split_paragraphs(text)
     if not paras:
-        # Unparseable blob → simple head-truncate
         return text[:budget] + f"\n...[INTENT-BUDGET: {budget} of {original_len} chars; head only]"
 
-    # Score every paragraph
     scored: list[tuple[float, int, str]] = []
     for idx, para in enumerate(paras):
         p_kw  = _keywords(para)
@@ -260,7 +161,6 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
     any_match = any(s > 0.0 for s, _, _ in scored)
 
     if not any_match:
-        # Fallback: head + tail
         head_budget = int(budget * 0.70)
         tail_budget = budget - head_budget
         head = text[:head_budget]
@@ -274,7 +174,6 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         )
         return result + notice
 
-    # Greedy selection: always keep para[0], then fill by descending score
     selected: set[int] = {0}
     used = len(paras[0]) + 1  # +1 for separator
 
@@ -287,7 +186,6 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         selected.add(idx)
         used += cost
 
-    # Emit in original document order
     ordered = sorted(selected)
     parts: list[str] = []
     prev   = -1
@@ -303,8 +201,7 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         parts.append(f"[... {tail_skip} section{'s' if tail_skip > 1 else ''} omitted at end ...]")
 
     body = "\n\n".join(parts)
-    # Gap notices and "\n\n" separators push body past budget.
-    # Post-trim so the total stays close to the requested limit.
+    # Gap notices and separators can push body past budget.
     if len(body) > budget:
         body = body[:budget]
     notice = (
@@ -359,16 +256,10 @@ def apply_total_budget(
     trim_first_labels: AbstractSet[str] | None = None,
     min_useful: Mapping[str, int] | None = None,
 ) -> tuple[list[tuple[str, str]], bool]:
-    """Trim evidence blocks until their total fits in
-    AGENT_EVIDENCE_TOTAL_CHARS.
+    """Trim evidence blocks until their total fits AGENT_EVIDENCE_TOTAL_CHARS.
 
-    Blocks whose label appears in *trim_first_labels* are **demoted**: they
-    are spent before any other block is touched, largest demoted block
-    first, down to the content floor. Only when no demoted block can shrink
-    further does a normal block get trimmed. This is what keeps recollection from
-    outranking the file the agent just read: memory is smaller than a
-    fresh source file, so "largest first" alone would always cut the fresh
-    evidence and never memory.
+    Blocks in *trim_first_labels* are spent first, so memory never outranks the file
+    just read; *min_useful* maps a label to the size below which it is dropped whole.
     """
     budget = _total_chars()
     total  = sum(len(c) for _, c in blocks)
@@ -376,41 +267,26 @@ def apply_total_budget(
         return blocks, False
 
     result = list(blocks)
-    # Keep original content for each block so repeated trims slice the source,
-    # not the already-trimmed-with-notice string.
+    # Repeated trims slice the original, not the already-trimmed string.
     originals = [c for _, c in result]
     sizes     = [len(c) for c in originals]
     was_trimmed = False
 
-    # Upper-bound notice overhead used when sizing the cut: over-reserving
-    # only makes a trim slightly deeper, never leaves the budget violated.
-    # Notice = "\n...[TOTAL-BUDGET: trimmed to NNNNN of NNNNN chars to fit NNNNN-char total evidence budget]"
+    # Upper bound on notice length; over-reserving only makes a trim slightly deeper.
     _NOTICE_OVERHEAD = 120
 
-    # MIR-073 (measured live 2026-08-03): `target = old_len - excess` dumps the
-    # ENTIRE overflow into one block, so the largest block — almost always the
-    # file the planner just chose to read — sank to the 50-char floor while its
-    # siblings stayed pristine, and the self-analysis task became structurally
-    # unwinnable. First pass: no NON-demoted block goes below a fair share of
-    # the budget; the surplus still comes off largest-first, it just cascades.
-    # Demoted blocks (memory) keep the absolute floor in both passes — they pay
-    # first BY DESIGN (their own measured incident). Second pass repeats with
-    # the absolute floor for everyone. A budget smaller than the sum of floors
-    # plus notices is mathematically unsatisfiable — then, exactly as before
-    # this change, the loop runs out of candidates and returns the best fit.
+    # Pass 1 keeps non-demoted blocks at a fair share, so the overflow cascades instead
+    # of sinking the largest block (the file just read) to the floor (MIR-073).
+    # Pass 2 uses the absolute floor for everyone.
     _fair_min = max(_MIN_CONTENT, budget // (2 * max(1, len(blocks))))
 
-    # A bare string is an iterable of characters; treating "memory" as six
-    # one-letter labels would silently demote nothing.
+    # A bare string would iterate as one-letter labels and demote nothing.
     if isinstance(trim_first_labels, str):
         trim_first_labels = {trim_first_labels}
     demoted = frozenset(trim_first_labels or ())
-    _useful_floors = dict(min_useful or {})   # resolved once, not per trim
+    _useful_floors = dict(min_useful or {})
 
-    # Content chars each block currently keeps (before its notice). The cut
-    # target must be computed from THIS, not from the original length: with
-    # cascading trims a block can be picked twice, and an original-length
-    # basis would let the second pick re-grow it past its first trim.
+    # Content chars each block keeps now; a block picked twice must not re-grow.
     kepts = list(sizes)
 
     def _floor_for(index: int, relaxed: bool) -> int:
@@ -432,12 +308,8 @@ def apply_total_budget(
             prev_total = current_total
 
             excess = current_total - budget
-            # A block that is already as small as trimming can make it gives
-            # nothing back; keeping it in the pool would stall the loop on the
-            # no-progress guard and leave the budget violated. Measured against
-            # the real notice length, not the padded reserve above — the
-            # difference is ~30 chars per block, which is exactly the window
-            # where a block that could still shrink used to be skipped.
+            # A block at its smallest possible size would stall the loop; measured
+            # with the real notice length, not the padded reserve.
             candidates = [
                 i for i in range(len(sizes))
                 if sizes[i] > _smallest_possible(i, relaxed)
@@ -448,22 +320,14 @@ def apply_total_budget(
             biggest = max(preferred or candidates, key=lambda i: sizes[i])
 
             old_len   = len(originals[biggest])
-            # new_len must be small enough that (new_len + notice_overhead)
-            # fits the required reduction, but never below this pass's floor.
-            # The basis is the CURRENT kept length (see `kepts` above).
+            # Based on the current kept length, never below this pass's floor.
             target    = kepts[biggest] - excess - _NOTICE_OVERHEAD
             new_len   = max(_floor_for(biggest, relaxed), target)
             label     = result[biggest][0]
-            # A block whose smallest indivisible item no longer fits keeps
-            # nothing usable: memory rebuilt from WHOLE records returns none,
-            # while the stub still costs its notice. Measured live 2026-08-04
-            # (`memory_trimmed=True, memory_chars_kept=0`). Drop it outright —
-            # "whole items or an honest zero".
+            # If the smallest whole item no longer fits, the block keeps nothing usable
+            # yet still costs its notice: drop it whole, saying so in the prompt.
             floor_useful = _useful_floors.get(label)
             if floor_useful is not None and new_len < floor_useful:
-                # Dropped, but not silently: `kepts` stays 0 so every reader
-                # still sees "nothing survived", while the prompt says so out
-                # loud instead of leaving a hole.
                 dropped = _drop_notice(len(originals[biggest]))
                 result[biggest] = (label, dropped)
                 sizes[biggest]  = len(dropped)
@@ -488,11 +352,8 @@ def budget_file_content(
 ) -> str:
     """Apply the per-artifact budget to a single file artifact.
 
-    ``self_documentation`` raises the ceiling to
-    AGENT_EVIDENCE_SELF_DOC_CHARS for the files the planner may read without
-    a hint — see the constant for the measurement that forced it. The caller
-    decides, not this module: the allowlist lives with the planner and this
-    file imports nothing from ``core`` (INV-1, core imports downward only).
+    ``self_documentation`` raises the ceiling to AGENT_EVIDENCE_SELF_DOC_CHARS; the
+    caller decides, since this leaf module imports nothing from ``core`` (INV-1).
     """
     limit = _self_doc_chars() if self_documentation else _file_chars()
     if len(content) <= limit:
@@ -501,9 +362,7 @@ def budget_file_content(
 
 
 # ── The long-term-memory block: shared vocabulary with its builder ──────────
-# One definition shared by the module that TRIMS the block, the module that
-# BUILDS it (loop_methods2 imports these back) and the rebuilder below. This
-# module is a leaf, so the direction stays cycle-free.
+# Shared with the block's builder (loop_methods2 imports these); this module is a leaf.
 MEMORY_OPEN_TAG: str = "<long_term_memory>"
 MEMORY_CLOSE_TAG: str = "</long_term_memory>"
 
@@ -512,18 +371,14 @@ _TRIM_NOTICE_RE = re.compile(
     r"\n\.\.\.\[TOTAL-BUDGET: trimmed to (\d+) of (\d+) chars "
 )
 
-# A block dropped whole reports kept=0 through the same reader, so
-# `evidence_budget_trim` still says «822 -> 0» instead of omitting the block
-# and leaving the operator to infer what happened to it.
+# A block dropped whole reports kept=0 through the same reader as a trimmed one.
 _DROP_NOTICE_RE = re.compile(
     r"\[TOTAL-BUDGET: dropped whole — (\d+) chars did not fit"
 )
 
 
 def total_trims(blocks: list[tuple[str, str]]) -> list[tuple[str, int, int]]:
-    """(label, kept_chars, original_chars) for every total-budget-trimmed
-    block.
-    """
+    """(label, kept_chars, original_chars) for every block the total budget trimmed or dropped."""
     out: list[tuple[str, int, int]] = []
     for label, content in blocks:
         matches = list(_TRIM_NOTICE_RE.finditer(content))
@@ -546,53 +401,18 @@ def rebuild_trimmed_memory(
 ) -> tuple[str, set[str]]:
     """Rebuild a char-sliced `<long_term_memory>` block from whole records.
 
-    Two things are taken from their writers rather than re-derived, because
-    every defect this function has had came from re-deriving them:
-
-    * the cut length, read from the budget's own notice ("trimmed to N of M
-      chars") and cross-checked against *original*. Measuring the common
-      prefix instead looked equivalent and was not — the notice opens with
-      ``\\n...[``, so when the original continued with the same characters
-      the scan ran past the cut and mangled the notice, in the worst case
-      deleting the words that say the block was shortened at all;
-    * the record boundaries, taken as *record_lines* — the ``(id, line)``
-      pairs the retrieval built the block from, in order — so offsets are
-      arithmetic. Finding boundaries by pattern cannot tell a record's real
-      header from the same shape QUOTED inside another record's content:
-      the quoting record was truncated at the quote while still advertised
-      whole, and the quoted id was offered as citable while what the model
-      actually saw was the quoter's paraphrase of it.
-
-    A record is kept only when its whole line fits inside the cut. Anything
-    less reaches the model truncated mid-content while its id is advertised
-    as citable.
-
-    Consequence worth stating: the budget always reserves ~120 chars for
-    its notice, so a block holding a single record is dropped whole
-    whenever it is trimmed at all. That is "whole records only" applied
-    honestly — a partial record is exactly what this repair prevents — not
-    an oversight.
-
-    Returns ``("", set())`` when no record survived whole, and whenever the
-    block cannot be accounted for: notice missing, notice describing a
-    different block, a cut longer than the block, or *record_lines* that do
-    not reproduce *original* exactly. Fail closed — memory we cannot
-    explain does not go to the model.
+    The cut length comes from the budget's notice and record boundaries from
+    *record_lines* (the ``(id, line)`` pairs the block was built from) — re-deriving
+    either by scanning or pattern proved wrong. Only records whose whole line fits
+    survive. Returns ``("", set())`` when none does or the block cannot be accounted
+    for (fail closed).
     """
-    # The notice the budget appended is the LAST match: a record's own text
-    # can quote an older notice, and the budget writes its cut at the end.
-    # Assigned inside the body (not an empty `for x in ...: pass`) so the
-    # intent is visible to linters, without materialising every match the
-    # way a list would.
-    # The drop notice is the one non-record content that IS accounted for: the
-    # budget wrote it deliberately, in place of a block it spent to nothing.
-    # Fail-closed exists so unexplainable memory never reaches the model; this
-    # is the opposite case, and returning "" here would silently discard the
-    # very sentence that stops "dropped" reading as "never existed".
+    # A drop notice is accounted-for content: keep it, or "dropped" reads as "never existed".
     drop = _DROP_NOTICE_RE.search(trimmed)
     if drop is not None and int(drop.group(1)) == len(original):
         return trimmed, set()
 
+    # The budget's notice is the LAST match: a record may quote an older one.
     notice_match = None
     for match in _TRIM_NOTICE_RE.finditer(trimmed):
         notice_match = match
