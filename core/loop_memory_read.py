@@ -87,6 +87,7 @@ class AgentLoopMemoryRead:
         # Берётся у соседней примеси: работает через MRO, но связь между
         # модулями обязана быть записана, иначе её видно только на прогоне.
         _durable_learning_suppressed: Any
+        _file_read_workspace_root: Any
 
     def _retrieve_persistent(self, question: str) -> str:
         """Pick + format relevant persistent records for prompt injection.
@@ -352,7 +353,7 @@ class AgentLoopMemoryRead:
         else:
             procedures = []
             procedures_rejected_by = {}
-        block = format_experience_context(episodes=episodes, procedures=procedures)
+        block = self._code_checked(format_experience_context(episodes=episodes, procedures=procedures), "experience")
         family = self._family_product_warnings(episodes) if block else []
         block += _family_appendix(family)
         self.log.log(
@@ -451,6 +452,16 @@ class AgentLoopMemoryRead:
         text = self._workflow_block(question)
         return block + "\n\n" + text if block and text else (block or text)
 
+    def _code_checked(self, block: str, source: str) -> str:
+        """Ссылки памяти на код — сверены с кодом сейчас (core/code_citations.py)."""
+        from core.code_citations import annotate_lines
+
+        root = self._file_read_workspace_root() if hasattr(self, "_file_read_workspace_root") else None
+        block, marked = annotate_lines(root, block)
+        if marked:
+            self.log.log("stale_code_citation", {"source": source, "lines": marked})
+        return block
+
     def _workflow_block(self, question: str) -> str:
         """Шаблоны работы по AWM (core/workflow_memory.py).
 
@@ -484,7 +495,7 @@ class AgentLoopMemoryRead:
         """
         lines: list[str] = []
         for record in records:
-            line = self.retrieval_policy.format_for_prompt([record])
+            line = self._code_checked(self.retrieval_policy.format_for_prompt([record]), "long_term")
             # By PREFIX, not by exact tag: `<long_term_memory attr="x">` reads
             # as a boundary to the model just as well as the bare tag. This is
             # the rule the `<analysis_target` defence uses (`core/loop.py`).

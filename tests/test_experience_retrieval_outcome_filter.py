@@ -28,6 +28,11 @@ def _fake_self(store):
         # Сшивка семьи (MIR-184) — не предмет этого сьюта; фальшивое «я»
         # обязано нести метод, который читатель теперь зовёт.
         _family_product_warnings=lambda episodes: [],
+        # Сверка ссылок на код и шаблоны AWM — тоже не предмет этого сьюта
+        # (свои тесты: test_a_memory_that_names_vanished_code_says_so,
+        # test_a_workflow_is_a_reusable_routine_not_a_trace).
+        _code_checked=lambda block, source: block,
+        _workflow_block=lambda question: "",
     )
 
 
