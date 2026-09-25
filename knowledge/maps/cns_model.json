@@ -96,13 +96,13 @@
    ],
    "readers": [
     {
-     "site": "core/replan.py:622",
+     "site": "core/replan.py:468",
      "role": "control",
      "uses": "decide(): global cap and per-type budget",
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
     },
     {
-     "site": "core/replan.py:232",
+     "site": "core/replan.py:158",
      "role": "control",
      "uses": "format_replan_context(): whole list becomes planner prompt text",
      "_anchor_correction": "shifted 2026-08-14: st.failure_history.extend moved above the success `break` in the attempt loop, and core/replan.py gained WORLD_FACING_FAILURE_TYPES above these sites. Caught by tests/test_cns_anchor_integrity.py."
