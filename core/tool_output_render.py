@@ -65,17 +65,9 @@ def format_artifact(
         return "\n".join(lines)
     if tool_name == "file_read" and isinstance(output, str):
         from core.evidence_budget import budget_file_content
-        # Numbered HERE and nowhere else. The model is asked for «какая строка»
-        # and `file_read` returns bare text, so every number it gave was counted
-        # by eye: measured 2026-08-15, it answered 164 and 382 where the truth
-        # was 385 and 450. The evidence record keeps the raw text — it is
-        # quoted, matched against citations and split into claims, and a number
-        # wedged in there becomes part of a durable claim (the MIR-097 shape).
-        #
-        # Before the budget, not after: the per-file budget extracts the
-        # question-relevant part rather than the head, so a number attached
-        # afterwards would name the line's position in the excerpt instead of
-        # in the file — a lie exactly where precision was the point.
+        # Строки здесь НЕ нумеруются (number_lines не подключена): номер попал бы в
+        # запись свидетельства. Если подключать — до бюджета, иначе номер будет
+        # позицией в выдержке, а не в файле.
         return budget_file_content(
             output, question=question, self_documentation=self_documentation,
         )

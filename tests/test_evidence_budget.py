@@ -353,7 +353,7 @@ def test_unknown_demoted_label_is_harmless(monkeypatch):
     assert sum(len(c) for _, c in result) <= 400
 
 
-# ── integration: format_artifact (moved to core.answer_format) ───────────────────────────────────
+# ── integration: format_artifact (lives in core.tool_output_render) ───────────────────────────────────
 
 def test_format_artifact_small_file_unchanged():
     """Files smaller than the per-artifact budget pass through untouched."""
