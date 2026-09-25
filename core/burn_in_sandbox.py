@@ -356,7 +356,7 @@ class TermedSinks(frozenset):
     что полномочие открыло.
     """
 
-    __slots__ = ("_granted", "_deadline")
+    __slots__ = ("_deadline", "_granted")
 
     def __new__(cls, base, granted, deadline):
         self = super().__new__(cls, frozenset(base) | frozenset(granted))

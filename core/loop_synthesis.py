@@ -225,7 +225,7 @@ class AgentLoopSynthesis:
         block = getattr(self, "_self_defects_block", "") or ""
         return f"{block}\n\n" if block else ""
 
-    def _synthesize(  # noqa: PLR0913, PLR0917 — the roster rides beside the memory block (exam 2026-09-04)
+    def _synthesize(  # noqa: PLR0913 — the roster rides beside the memory block (exam 2026-09-04)
         self,
         goal: Goal,
         artifacts: dict[str, dict[str, Any]],

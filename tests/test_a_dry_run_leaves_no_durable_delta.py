@@ -53,7 +53,7 @@ def _seed_identical_episodes(workspace: Path, count: int = 3) -> EpisodicMemoryS
 
 
 def _install_fake_agent(monkeypatch: Any) -> _FakeAgent:
-    import app.bootstrap as bootstrap
+    from app import bootstrap
 
     agent = _FakeAgent()
     monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: agent)

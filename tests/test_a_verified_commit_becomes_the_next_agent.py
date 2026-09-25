@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """WHY THIS EXISTS.
 
 Ревизия PR #333, дефект 5 — единственный, который ломал сам замысел опыта:
@@ -41,7 +40,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 # ── маленький настоящий репозиторий ──────────────────────────────────────────
 #
@@ -131,7 +129,9 @@ def test_a_verified_commit_becomes_the_next_head(repo: Path) -> None:
     двигалась — следующий цикл стартовал из того же кода.
     """
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        offer_verified_commit,
     )
 
     start = _git(repo, "rev-parse", "HEAD")
@@ -219,7 +219,9 @@ def test_a_sibling_commit_is_refused(repo: Path) -> None:
     молча откатить опыт вбок.
     """
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        offer_verified_commit,
     )
 
     first = _candidate(repo, path="core/widget.py", text="VALUE = 2\n")
@@ -260,7 +262,9 @@ def test_a_commit_touching_the_fence_is_refused(repo: Path) -> None:
     уже изменённый код.
     """
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        offer_verified_commit,
     )
 
     start = experiment_head(repo)
@@ -290,7 +294,9 @@ def test_the_supervisor_protects_itself(repo: Path) -> None:
 def test_a_red_battery_refuses_and_leaves_the_head_alone(repo: Path) -> None:
     """Красная перепроверка — отказ, и голова опыта не двигается."""
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        offer_verified_commit,
     )
 
     start = experiment_head(repo)
@@ -327,7 +333,9 @@ def test_a_refusal_leaves_no_worktree_behind(repo: Path) -> None:
 def test_every_decision_is_written_down(repo: Path) -> None:
     """И принятие, и отказ попадают в журнал. Молчание — не исход."""
     from core.burn_in_supervisor import (
-        adoption_log, adopt_offer, offer_verified_commit,
+        adopt_offer,
+        adoption_log,
+        offer_verified_commit,
     )
 
     good = _candidate(repo)
@@ -349,7 +357,10 @@ def test_every_decision_is_written_down(repo: Path) -> None:
 def test_the_head_survives_a_restart(repo: Path) -> None:
     """Голова опыта переживает перезапуск — иначе цепочка не длиннее одного шага."""
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, next_start_point, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        next_start_point,
+        offer_verified_commit,
     )
 
     sha = _candidate(repo)
@@ -438,7 +449,9 @@ def test_the_next_cycle_starts_from_the_adopted_commit(repo: Path, tmp_path: Pat
     работать продолжал старый код.
     """
     from core.burn_in_supervisor import (
-        adopt_offer, materialise_next_cycle, offer_verified_commit,
+        adopt_offer,
+        materialise_next_cycle,
+        offer_verified_commit,
     )
 
     sha = _candidate(repo, text="VALUE = 42\n")
@@ -464,7 +477,9 @@ def test_the_next_cycle_cannot_be_asked_for_another_commit(
     SHA, выбрал бы себе любой — включая свой непринятый.
     """
     from core.burn_in_supervisor import (
-        SupervisorError, adopt_offer, materialise_next_cycle,
+        SupervisorError,
+        adopt_offer,
+        materialise_next_cycle,
         offer_verified_commit,
     )
 
@@ -486,7 +501,9 @@ def test_materialising_the_next_cycle_leaves_the_checkout_alone(
     не трогаются — это условие всего замысла, а не деталь.
     """
     from core.burn_in_supervisor import (
-        adopt_offer, materialise_next_cycle, offer_verified_commit,
+        adopt_offer,
+        materialise_next_cycle,
+        offer_verified_commit,
     )
 
     before_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -510,7 +527,9 @@ def test_the_second_cycle_reuses_its_tree(repo: Path, tmp_path: Path) -> None:
     новую голову, а не упасть на «worktree уже существует».
     """
     from core.burn_in_supervisor import (
-        adopt_offer, materialise_next_cycle, offer_verified_commit,
+        adopt_offer,
+        materialise_next_cycle,
+        offer_verified_commit,
     )
 
     first = _candidate(repo, text="VALUE = 2\n")
@@ -588,7 +607,9 @@ def test_a_missing_head_pointer_still_means_the_first_cycle(repo: Path) -> None:
 def test_a_candidate_may_not_carry_the_experiments_memory(repo: Path) -> None:
     """Кандидат, тронувший указатель опыта, отвергается забором."""
     from core.burn_in_supervisor import (
-        SUPERVISOR_FENCE, adopt_offer, offer_verified_commit,
+        SUPERVISOR_FENCE,
+        adopt_offer,
+        offer_verified_commit,
     )
 
     assert "state/burn_in_head.json" in SUPERVISOR_FENCE, (
@@ -677,7 +698,9 @@ def test_two_adoptions_cannot_race_past_the_same_head(repo: Path) -> None:
     import threading
 
     from core.burn_in_supervisor import (
-        adopt_offer, experiment_head, offer_verified_commit,
+        adopt_offer,
+        experiment_head,
+        offer_verified_commit,
     )
 
     base = _git(repo, "rev-parse", "HEAD")
@@ -795,13 +818,13 @@ def test_the_head_is_read_under_the_same_lock_that_creates_the_tree(
     real_git = sup._git
 
     @contextlib.contextmanager
-    def watched_lock(path):  # noqa: ANN001, ANN202
+    def watched_lock(path):
         events.append("замок взят")
         with real_lock(path):
             yield
         events.append("замок отпущен")
 
-    def watched_git(where, *args):  # noqa: ANN001, ANN202
+    def watched_git(where, *args):
         if args[:2] == ("worktree", "add"):
             events.append("дерево заведено")
         return real_git(where, *args)

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Принимающий: кто переводит проверенный кандидат в рабочее состояние опыта.
 
 ПОЧЕМУ ЭТОТ МОДУЛЬ СУЩЕСТВУЕТ ОТДЕЛЬНО ОТ ПОЛОСЫ.
@@ -55,23 +54,24 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.file_lock import exclusive_file_lock
 
 __all__ = [
-    "AdoptionVerdict",
     "SUPERVISOR_FENCE",
+    "AdoptionVerdict",
     "adopt_offer",
     "adoption_log",
     "experiment_head",
     "materialise_next_cycle",
     "next_start_point",
-    "offer_verified_commit",
     "offer_ledger",
+    "offer_verified_commit",
 ]
 
 #: Забор принимающего. Шире забора песочницы ровно на одну запись — на самого

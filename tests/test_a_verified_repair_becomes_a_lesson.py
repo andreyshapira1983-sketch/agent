@@ -138,7 +138,6 @@ def test_a_rolled_back_autonomous_apply_leaves_a_lesson(
     Красный свидетель: до правки автономный путь не звал запись уроков вовсе,
     поэтому после отката на диске не появлялось ничего.
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
     _grant(inbox)
@@ -166,7 +165,6 @@ def test_a_verified_candidate_leaves_a_lesson(
     событие и делает его `core/burn_in_supervisor.adopt_offer`
     (ревизия PR #333, дефект 5).
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
     _grant(inbox)
@@ -186,7 +184,6 @@ def test_a_lesson_carries_its_provenance(workspace: Path, monkeypatch: Any) -> N
     Урок без происхождения нельзя ни проверить, ни отозвать: непонятно, из
     какого сбоя он вырос и чем подтверждён.
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
     _grant(inbox)
@@ -213,7 +210,6 @@ def test_a_later_similar_change_consumes_the_lesson(
     Без этого откат ничему не учит — следующий тик подаёт ту же правку, полоса
     снова гоняет батарею, снова откатывает, и так до конца суток.
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
     _grant(inbox)
@@ -240,7 +236,6 @@ def test_a_different_target_is_not_shadowed_by_the_lesson(
     Иначе один откат остановил бы петлю целиком, и «обучение» стало бы
     выключателем.
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
 
     inbox = _inbox(workspace)
     _grant(inbox)
@@ -259,7 +254,6 @@ def test_the_lesson_store_is_machine_readable(workspace: Path, monkeypatch: Any)
     """Урок хранится строками JSON, а не прозой: его обязан читать код."""
     import json
 
-    from core.rule_approved_apply import drain_rule_approved_proposals
     from core.self_build_rules import default_lessons_path
 
     inbox = _inbox(workspace)
@@ -284,7 +278,6 @@ def test_an_import_rollback_still_yields_its_hard_rule(
     детерминированно; заменить его прозой значило бы разменять проверяемое
     на общее.
     """
-    from core.rule_approved_apply import drain_rule_approved_proposals
     from core.self_build_rules import RuleStore, default_rules_path
 
     inbox = _inbox(workspace)
