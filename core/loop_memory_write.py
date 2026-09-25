@@ -144,14 +144,7 @@ class AgentLoopMemoryWrite:
         verifier_failure: bool = False,
         declared_completion: str | None = None,
     ) -> None:
-        """Write episodic/procedural/consolidation memory after a cycle.
-
-        Experience memory is best-effort. A malformed local state file should
-        be quarantined by the state layer, not crash the user-facing answer.
-        """
-        # Episode, procedure and consolidation are three separate sinks: a path
-        # may be allowed to bank an episode while procedural promotion and
-        # consolidation stay off.
+        """Write episodic/procedural memory after a cycle; best-effort, never crashes the answer."""
         may_episode = not self._durable_learning_suppressed("episode")
         may_procedure = not self._durable_learning_suppressed("procedure")
         if may_episode:
@@ -176,13 +169,8 @@ class AgentLoopMemoryWrite:
         ):
             return
         run = current_run()
-        # Building the episode is guarded separately from writing it, because a
-        # `TypeError` here is a CALL-SIGNATURE DEFECT, not a memory fault: the
-        # factory was invoked with an argument it does not accept (or without
-        # one it requires). Laundering that into a `smart_memory_error` log line
-        # hid the defect completely — the cycle answered normally and simply
-        # banked nothing. So `TypeError` from this call PROPAGATES; every other
-        # failure of the factory stays best-effort, as before.
+        # A `TypeError` here is a call-signature defect, not a memory fault, so
+        # it propagates; logging it would silently bank nothing.
         try:
             episode = episode_from_agent_cycle(
                 goal=goal_description,
@@ -193,48 +181,30 @@ class AgentLoopMemoryWrite:
                 verified_chunks=verified_chunks,
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
-                # Тот же вектор, что печатает предупреждение оператору. Зачем:
-                # docs/CODE_NOTES.md, «Cited, scored, admitted — and off topic».
+                # Тот же вектор, что печатает предупреждение оператору.
                 relevance_score=getattr(
                     self.last_confidence_vector, "relevance_score", None),
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
-                # Семейная связка тика (MIR-184): по ней читатель впрыска
-                # сошьёт этот эпизод с продуктовым исходом того же прогона.
+                # Сшивает эпизод с продуктовым исходом того же прогона (MIR-184).
                 trace_id=str(getattr(self.log, "trace_id", "") or ""),
-                # Admission is decided per episode, not by a global switch:
-                # MIR-002/041/046 are fixed, so the blanket quarantine is
-                # lifted — but only evidenced, completed, non-replay episodes
-                # (or curated lessons) become reusable experience. Everything
-                # else stays fail-closed, and `None` remains reserved for rows
-                # that predate the field. See `decide_usage_eligibility`.
                 usage_eligible=None,   # resolved by `admit_for_storage` below
-                # Attribution comes from what actually executed, over the
-                # procedures this run selected -- never matched by workflow_key,
-                # which MIR-050 measured to pool unrelated goals. () is a real
-                # answer here ("nothing applied"), distinct from a legacy None.
+                # Attributed by what actually executed, never by workflow_key,
+                # which pools unrelated goals (MIR-050).
                 used_procedure_ids=resolve_used_procedures(
                     selected=list(getattr(self, "_last_procedure_records", []) or []),
                     executed_tools=list(getattr(self, "_executed_tools", []) or []),
                 ),
-                # Passed in by the caller that owns the synthesis, never read
-                # off `self`: instance state outlives its run, and the paths
-                # that bank without synthesising would inherit the previous
-                # run's verdict. A replay or a refusal declares nothing.
+                # Passed in, not read off `self`: instance state outlives its
+                # run and would leak the previous run's verdict.
                 declared_completion=declared_completion,
-                # Read off `self` deliberately, unlike `declared_completion`:
-                # these are accumulated by the sensors as the cycle runs, not
-                # produced by the synthesis this method owns. The reset in
-                # `loop.py` is what keeps a previous run's faults from leaking
-                # in. `getattr` with a default keeps a caller that never entered
-                # the loop (a direct unit-test build) distinguishable — it gets
-                # None, "never collected", rather than a false "none fired".
+                # Sensor-accumulated and reset per run in `loop.py`; None means
+                # "never collected", distinct from "none fired".
                 defect_signals=getattr(self, "_defect_signals", None),
                 on_audit=self.log.log,
             )
         except TypeError:
-            # Visible on purpose — see the comment above.
             raise
         except Exception as exc:  # noqa: BLE001
             self.log.log(
@@ -246,13 +216,10 @@ class AgentLoopMemoryWrite:
             )
             return
         try:
-            # The same helper the store applies. Called here so the write event
-            # below can report the verdict that actually landed; the store's own
-            # call is then a no-op, and no write site can skip the policy.
+            # Called here too so the write event reports the verdict that landed.
             episode = admit_for_storage(episode)
             if self.episodic_store is not None and may_episode:
-                # save_once, not save: a run that reaches this site twice must
-                # bank one episode, not two. Bounded by the store's FIFO window.
+                # save_once: a run reaching this site twice banks one episode.
                 written = self.episodic_store.save_once(episode)
                 if written:
                     self._log_causal_observation(episode)
@@ -284,17 +251,10 @@ class AgentLoopMemoryWrite:
                         "verified_chunks": episode.verified_chunks,
                         "unverified_chunks": episode.unverified_chunks,
                         "weak_chunks": episode.weak_chunks,
-                        # Surfaced in the event too: an operator reading the
-                        # journal should see the run's own faults next to its
-                        # verdict, not have to open the episode store.
                         "defect_signals": (
                             None if episode.defect_signals is None
                             else list(episode.defect_signals)
                         ),
-                        # The admission verdict was not reportable before: an
-                        # operator reading this event could see what was banked
-                        # but not whether anything would ever be allowed to read
-                        # it back.
                         "usage_eligible": episode.usage_eligible,
                     },
                 )
@@ -304,34 +264,17 @@ class AgentLoopMemoryWrite:
             procedure = None
             created = False
             if self.procedural_store is not None and may_procedure:
-                # A verifier that threw measured nothing. Its soft-fail records
-                # `verified=0, unverified=0`, which falls through the outcome
-                # derivation to `success` — so without this the crash would
-                # mint a procedure and raise its confidence on evidence that
-                # was never taken. `usage_eligible` cannot help: the procedural
-                # path does not read it.
-                # Credit/debit the procedures this run actually USED — the SOLE
-                # credit path (operator ruling 2026-08-02). Positive credit no
-                # longer comes from upsert's tool-set match; it comes from here,
-                # causally attributed (MIR-049), or not at all. Runs BEFORE
-                # upsert on purpose: upsert now merges provenance without credit,
-                # and the merge records this episode id — so it must not run
-                # first, or the credit idempotency (episode id already in the
-                # procedure's provenance) would skip the very credit this run
-                # earned. Only the positive direction is withheld on a crash.
+                # The sole credit path (MIR-049). Must run BEFORE upsert: upsert
+                # records this episode id, and credit idempotency would then skip it.
+                # A crashed verifier measured nothing (yet reads as `success`),
+                # so it gets no positive credit and mints no procedure.
                 feedback = self.procedural_store.apply_episode_feedback(
                     episode, allow_credit=not verifier_failure
                 )
-                # Create or merge the procedure distilled from this run. Merge is
-                # provenance-only: a fresh candidate is born unproven and earns
-                # standing only through the causal feedback above, never by a
-                # repeated tool-set match.
+                # Merge is provenance-only; standing comes only from feedback above.
                 if not verifier_failure:
                     procedure, created = self.procedural_store.upsert_from_episode(episode)
-                # `offered` closes the counterfactual: applied=0 alone cannot
-                # distinguish "no procedure was suggested" from "two were
-                # suggested and neither was actually applied" — the second is
-                # a signal about retrieval quality, the first is not.
+                # `offered` separates "nothing suggested" from "suggested but not applied".
                 offered = len(getattr(self, "_last_procedure_records", []) or [])
                 self.log.log(
                     "procedure_feedback",
@@ -348,13 +291,8 @@ class AgentLoopMemoryWrite:
                     },
                 )
 
-            # Per-cycle consolidation RETIRED here 2026-08-22, executing the
-            # operator's ruling of 2026-07-19 (MIR-044): the report is a pure
-            # tally of statuses the procedures already hold, so persisting one
-            # every cycle bought 255 reports / 738 KB that exactly one display
-            # command ever read. The tally is computed ON DEMAND now —
-            # `:memory-consolidate` and `:smart-memory` call
-            # `consolidate_memory` fresh; nothing persists.
+            # No per-cycle consolidation (MIR-044): the tally is computed on
+            # demand by `:memory-consolidate` / `:smart-memory`.
         except Exception as exc:  # noqa: BLE001
             self.log.log(
                 "smart_memory_error",
