@@ -281,8 +281,7 @@ def output_contract_requires_headers(system_prompt: str | None) -> bool:
 
 _VERIF_MARKER_RE = re.compile(
     r"\s*\["
-    r"(?:unverified"
-    r"|verified:[^\]]*"
+    r"(?:verified:[^\]]*"
     r"|declared:[^\]]*"
     r")\]",
     re.IGNORECASE,
@@ -291,8 +290,15 @@ _VERIF_MARKER_RE = re.compile(
 def _strip_verification_markers(text: str) -> str:
     """Убрать из ответа человеку пометки проверки — КРОМЕ предупреждающей.
 
-    Снимаются `[unverified]`, `[verified:…]`, `[declared:…]`. НЕ снимается
-    `[topic-only:…]`, и это не пропуск в словаре, а граница.
+    Снимаются `[verified:…]` и `[declared:…]`. НЕ снимаются `[topic-only:…]`
+    и `[unverified…]`, и это не пропуск в словаре, а граница.
+
+    Голый `[unverified]` снимался до 2026-09-25 как «нейтральный», но он стоит
+    у ОДНОГО утверждения и говорит «у этого нет источника». Снятый, он делал
+    утверждение без опоры неотличимым от проверенного. «Silence Is
+    Endorsement» (arXiv 2609.20211): без пометки «не проверено» модель-наблюдатель
+    одобряет такое утверждение с 5% до 60% (Llama-3.1-8B). Теперь он доходит до
+    края показа и там становится словами (core/warning_words.py).
 
     Разница в том, что пометка НЕСЁТ. Первые три либо нейтральны, либо говорят
     о состоянии проверки в целом. `topic-only` говорит иное: источник по теме,
@@ -313,7 +319,7 @@ _ANSWER_CITATION_RE = re.compile(
     r"file_read:[^\]]*|search:[^\]]*|"
     r"test:[^\]]*|log:[^\]]*|shell:[^\]]*|diff:[^\]]*|memory:[^\]]*|sensor:[^\]]*|"
     r"user:target|user:[^\]]*|artifact:[^\]]*|prior_turn:[^\]]*|"
-    r"user|declared:[^\]]*|verified:[^\]]*|unverified(?::[^\]]*)?)"
+    r"user|declared:[^\]]*|verified:[^\]]*|unverified:[^\]]*)"
     r"(?:\s*;\s*[^\]]*)?\]",
     re.IGNORECASE,
 )

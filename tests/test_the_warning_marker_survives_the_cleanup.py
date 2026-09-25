@@ -10,7 +10,6 @@ from core.answer_format import _strip_verification_markers
 
 
 @pytest.mark.parametrize("marker", [
-    "[unverified]",
     "[verified:web:1]",
     "[declared:runtime:mode]",
 ])
@@ -24,6 +23,20 @@ def test_the_warning_marker_is_kept() -> None:
         "предупреждение о том, что источник утверждения не подтверждает, "
         "вычищено из ответа — человек видит более уверенный ответ, чем есть"
     )
+
+
+def test_an_uncited_claim_keeps_its_warning_and_the_human_reads_words() -> None:
+    """2026-09-25: a bare `[unverified]` sits on ONE claim and says it has no
+    source. Stripped, the claim looked checked — "Silence Is Endorsement"
+    (arXiv 2609.20211): without the mark a monitor approves 5% -> 60%."""
+    from core.answer_format import format_human_response
+
+    kept = _strip_verification_markers("Утверждение без источника [unverified].")
+    assert "[unverified]" in kept
+    shown = format_human_response(
+        "Conclusion: Итог [unverified]\nFacts:\n- Без источника [unverified]\nConfidence: low")
+    assert "[unverified]" not in shown, "a machine tag reached the human"
+    assert shown.count("не проверено — источника нет") == 2, shown
 
 
 def test_the_docstring_states_the_boundary() -> None:
