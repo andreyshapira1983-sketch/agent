@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.compensation import CompensationAction, CompensationPlan
+from core.control_files import control_file_hit, refuse_message
 from core.secret_scanner import contains_secret
 from tools.base import Risk, Tool, require_ascii_identifier
 
@@ -103,6 +104,12 @@ class FileWriteTool(Tool):
             raise PermissionError(
                 f"Path escapes workspace: {candidate}"
             ) from exc
+        # Тормоза — только оператору, и одобрение этого не снимает
+        # (core/control_files.py). Отказ здесь делает и risk_for
+        # «irreversible», и run() — PermissionError до любой записи.
+        guarded = control_file_hit(self.workspace_root, candidate)
+        if guarded:
+            raise PermissionError(refuse_message(guarded))
         return candidate
 
     # ------------------------------------------------------------------

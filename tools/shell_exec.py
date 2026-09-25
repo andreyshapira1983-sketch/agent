@@ -49,6 +49,7 @@ from core.bounded_subprocess import (
     run_with_tree_kill,
 )
 from core.compensation import CompensationAction, CompensationPlan
+from core.control_files import control_file_hit, refuse_message
 from core.redaction import redact_text
 from tools.base import Risk, Tool, require_ascii_identifier
 
@@ -632,6 +633,11 @@ class ShellExecTool(Tool):
             raise PermissionError(
                 f"shell_exec path '{path_str}' escapes workspace"
             ) from exc
+        # `touch` пустого выключателя или лимитов — та же запись тормоза
+        # (core/control_files.py): запрет до одобрения.
+        guarded = control_file_hit(self.workspace_root, candidate)
+        if guarded:
+            raise PermissionError(refuse_message(guarded))
         return candidate
 
     # ------------------------------------------------------------------

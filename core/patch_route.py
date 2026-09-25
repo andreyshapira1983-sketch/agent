@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.control_files import CONTROL_RELPATHS
+
 DAILY_CAP = 5
 #: Пометка дефекта, который правкой кода не закрывается (среда, доступ, деньги):
 #: его решает человек, и путь самопочинки такие пропускает.
@@ -42,6 +44,9 @@ _FORBIDDEN = (
     "core/budget", "core/standing_grant", "core/self_apply", "core/patch_route",
     "core/actuation_gateway", "core/kill", "core/safe_vcs", "tools/web_", "tools/shell_exec",
     "tools/patch_check", "tools/run_tests", "app/", "cli/", ".env", ".git",
+    # Тормоза целиком (core/control_files.py): правка без человека не трогает
+    # ни их, ни модуль, который их перечисляет.
+    "core/control_files", "config/", *CONTROL_RELPATHS,
 )
 
 

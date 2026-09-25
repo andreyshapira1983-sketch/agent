@@ -448,19 +448,24 @@ class AgentLoopMemoryRead:
                 # Re-ask detection must never abort the main loop.
                 pass
 
-        # Шаблоны работы по AWM (core/workflow_memory.py): лежат рядом с
-        # процедурами; нет файла — нет блока, ход как прежде.
-        if self.procedural_store is not None:
-            from core.workflow_memory import FILE_NAME, WorkflowMemoryStore, format_workflows
+        text = self._workflow_block(question)
+        return block + "\n\n" + text if block and text else (block or text)
 
-            workflows = WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
-            if workflows:
-                self.log.log("workflow_memory_inject",
-                             {"workflow_ids": [w.id for w in workflows], "kinds": sorted({w.kind for w in workflows})})
-                text = format_workflows(workflows)
-                block = block + "\n\n" + text if block else text
+    def _workflow_block(self, question: str) -> str:
+        """Шаблоны работы по AWM (core/workflow_memory.py).
 
-        return block
+        Лежат рядом с процедурами; нет файла — нет блока, ход как прежде.
+        """
+        if self.procedural_store is None:
+            return ""
+        from core.workflow_memory import FILE_NAME, WorkflowMemoryStore, format_workflows
+
+        workflows = WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
+        if not workflows:
+            return ""
+        self.log.log("workflow_memory_inject",
+                     {"workflow_ids": [w.id for w in workflows], "kinds": sorted({w.kind for w in workflows})})
+        return format_workflows(workflows)
 
     def memory_record_lines(self, records: list) -> list[str]:
         """One formatted prompt line per record, wrapper tags neutralised.
