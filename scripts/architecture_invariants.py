@@ -44,7 +44,9 @@ _PRODUCTION_ROOTS = (
     # covering the hole by coincidence.
     "docker",
 )
-_PRODUCTION_FILES = ("agent_tick.py", "main.py")
+#: Точки входа. scripts/market_worker.py — исполнитель Agent Market, живой
+#: процесс опроса площадки (запущен 2026-09-25), а не разовый замер.
+_PRODUCTION_FILES = ("agent_tick.py", "main.py", "scripts/market_worker.py")
 
 #: Modules exempt from INV-2 with a stated reason. Keep this list short and
 #: argued — every entry is a mechanism that cannot run.
