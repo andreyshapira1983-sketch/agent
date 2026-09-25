@@ -28,7 +28,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "alert_ack",
     ]),
     ("Perception & Adversarial Defense (§2)", "Input handling and injection/exfiltration defense.", [
-        "injection_guard", "redaction", "data_classifier", "dlp", "secret_scanner",
+        "injection_guard", "egress_flow", "redaction", "data_classifier", "dlp", "secret_scanner",
         "repo_provenance",
         "rule_approved_apply",
         "command_subjects",

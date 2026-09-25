@@ -14,6 +14,7 @@ from asyncio import CancelledError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from core.egress_flow import EgressLedger
 from core.evidence import (
     ProvenanceChain,
 )
@@ -188,6 +189,8 @@ class AgentLoop(
                 # снова станут неразличимы, а это ровно чинимый дефект.
                 self.log.log("run_identity_unavailable",
                              {"run_id": _ctx.run_id, "missing": "trace_id"})
+            # Журнал потока данных наружу для ворот — новый на каждый ход (core/egress_flow.py).
+            self.policy.egress = EgressLedger(user_question)
             try:
                 return self._run_inner(
                     user_question=user_question,

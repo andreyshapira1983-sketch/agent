@@ -41,6 +41,9 @@ class PolicyGate:
         # есть ли нажим (бюджет на исходе), и почему. Под нажимом ЛЮБОЕ
         # обратимое действие ждёт человека. None — нажим не меряется.
         self.pressure: Any = None
+        # Поток данных наружу (core/egress_flow.py): журнал хода — что просил
+        # человек и что прочитано. Задаёт цикл в начале хода; None — не меряется.
+        self.egress: Any = None
 
     def _effective_blocked_tools(self) -> frozenset[str]:
         """The host's block set UNION the current run's own.
@@ -97,6 +100,13 @@ class PolicyGate:
                     "(effects disabled / dry-run)")
                 ],
             )
+
+        # «Только чтение» по адресу из прочитанного с частными данными в нём —
+        # это отправка наружу, а не чтение (CaMeL: смотреть, откуда пришли части вызова).
+        leak = self.egress.leak(action.tool_name, action.parameters or {}) if self.egress is not None else None
+        if leak:
+            return PolicyDecision(policy_id=POLICY_ID, subject=tool.name, action="tool_call",
+                                  decision="escalate", reasons=[leak])
 
         # Argument-aware risk: e.g. file_write is `reversible` when the
         # target is a new path but `irreversible` when it would overwrite.
