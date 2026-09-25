@@ -36,6 +36,7 @@ from typing import Any
 
 from core.mentor_channel import mentor_block, open_questions
 from core.state_integrity import read_state_jsonl_unlocked
+from core.word_overlap import word_set as _tokens
 
 CHARTER_RELPATH = Path("knowledge") / "doctrine" / "future" / "CORPORATE_MODEL.md"
 
@@ -348,14 +349,6 @@ def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
     # прозвучала месяц назад.
     pairs = sorted(worked_ts.items(), key=lambda kv: kv[1])
     return tuple(pairs[-_RECENT_GOALS:])
-
-
-def _tokens(text: str) -> frozenset[str]:
-    return frozenset(
-        w for w in "".join(
-            c.lower() if c.isalnum() else " " for c in text
-        ).split() if len(w) > 2
-    )
 
 
 #: Артефакт, НАД которым цель работает: её личность. Вскрытие 19:31
