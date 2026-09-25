@@ -1046,7 +1046,7 @@ for MIR-002 and MIR-041 (approved next step) · then the minimal file set for th
 ### MIR-021 — ODD coverage gap (rocket/hacking under-detected)
 - **Aliases:** LPF-018. **Provenance:** previously_documented (re-framed as coverage gap, not missing classifier).
 - **Sources:** LIVE_PROBE_FINDINGS.md.
-- **Files/functions:** `core/operational_domain.py`; `core/loop.py:653` `_check_operational_domain` (runs pre-planning, no-LLM).
+- **Files/functions:** `core/operational_domain.py`; `core/loop_gates.py:322` `_check_operational_domain` (runs pre-planning, no-LLM).
 - **Symptom:** "rocket"/"hacking" may route as `general_question` because the ODD heuristic under-detects.
 - **Root cause:** heuristic coverage, not an absent/never-called gate.
 - **Production path:** pre-plan ODD gate.
