@@ -25,7 +25,10 @@ core/smart_memory.py»; судья находил в мире `core/smart_memory
 * ``missing``      — хотя бы один назван и не найден;
 * ``unverifiable`` — наблюдаемого следа не названо (в том числе когда
                      критерия не назвали вовсе: четыре точки входа задают
-                     цель строкой, и 63 строки живого реестра пришли без него).
+                     цель строкой, и 63 строки живого реестра пришли без него);
+* ``unmet``        — свежие следы есть, но по СОДЕРЖАНИЮ критерий не выполнен
+                     (core/goal_content_judge.py, 2026-09-25: судья читает
+                     продукт, каждое «да» — с цитатой, найденной в файле).
 
 Чего здесь НЕТ намеренно. Никто на этот вердикт пока не опирается: страж
 повторов не меняется. Сначала факт должен существовать и быть проверяемым.
@@ -46,7 +49,7 @@ VERDICT_RELPATH = "data/campaign_verdicts.jsonl"
 
 #: Слова вердикта. Список закрыт: незнание, выданное за проверку, обязано
 #: называться отдельно от проверки.
-VERDICTS = ("verified", "preexisting", "missing", "unverifiable")
+VERDICTS = ("verified", "preexisting", "missing", "unverifiable", "unmet")
 
 _UNSTATED = "критерий не назван: цель поставлена без проверки"
 
@@ -112,7 +115,7 @@ def against_start(observation: dict[str, Any], workspace: Any, since: float | No
 
 
 def judge_campaign(
-    *, goal: str, success_check: str, workspace: Any, since: float | None = None,
+    *, goal: str, success_check: str, workspace: Any, since: float | None = None, llm: Any = None,
 ) -> dict[str, Any]:
     """Сказать, сошёлся ли критерий кампании, и чем это наблюдается."""
     check = str(success_check or "").strip()
@@ -149,6 +152,8 @@ def judge_campaign(
                 "следы найдены, но все старше начала прогона: "
                 + ", ".join(named)
             )
+        else:
+            verdict, reason = _content(check, fresh, workspace, llm, verdict, reason)
     if not check:
         # Непоставленный критерий и поставленный, но непроверяемый, дают одно
         # слово `unverifiable` — и это правда: проверить нечем. Но причина у
@@ -163,6 +168,17 @@ def judge_campaign(
         "missing_traces": missing,
         "fresh_traces": fresh,
     }
+
+
+def _content(check: str, fresh: list[str], workspace: Any, llm: Any,
+             verdict: str, reason: str) -> tuple[str, str]:
+    """Свежий след прочитан судьёй содержания; без модели вердикт прежний."""
+    from core.goal_content_judge import judge_content
+
+    content = judge_content(check, fresh, workspace, llm)
+    if content is None or content["met"]:
+        return verdict, reason
+    return "unmet", "по содержанию не выполнено: " + "; ".join(content["unmet"])[:400]
 
 
 def record_campaign_verdict(workspace: Any, verdict: dict[str, Any]) -> dict[str, Any]:
@@ -181,6 +197,7 @@ def record_campaign_verdict(workspace: Any, verdict: dict[str, Any]) -> dict[str
 def judge_and_record(
     *, goal: str, success_check: str, workspace: Any, started_at: Any, ts: Any,
     stop_reason: str = "", cycles_run: int = 0, proposals: int = 0, artifacts: int = 0,
+    llm: Any = None,
 ) -> tuple[dict[str, Any], str]:
     """Судить цель, назвать прогон и положить вердикт в журнал.
 
@@ -194,7 +211,7 @@ def judge_and_record(
     except (AttributeError, OverflowError, OSError, ValueError):
         since = None
     verdict = judge_campaign(
-        goal=goal, success_check=success_check, workspace=workspace, since=since,
+        goal=goal, success_check=success_check, workspace=workspace, since=since, llm=llm,
     )
     # Чей это вердикт: без прогона его нельзя ни перепроверить, ни привязать
     # к строкам реестра. Считает судья, называет прогон.
@@ -234,6 +251,6 @@ def verdict_summary_line(verdict: dict[str, Any]) -> str:
         tail = "  older than this run: " + ", ".join(
             str(n) for n in verdict.get("named_traces") or []
         )
-    elif word == "unverifiable":
+    elif word in ("unverifiable", "unmet"):
         tail = "  " + str(verdict.get("reason") or "")
     return f"goal_achieved={word}{tail}"
