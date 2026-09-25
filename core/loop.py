@@ -607,7 +607,7 @@ class AgentLoop(
 
         # Strip internal verification markers before user-facing output.
         # Must happen AFTER output_policy which needs [verified:...] markers.
-        answer = _strip_verification_markers(answer)
+        answer = self._honor_requested_format(_strip_verification_markers(answer), user_question, draft_answer, _task_synth_llm)
 
         # Кусок 16 разбора `_run_inner`: обязательства завершения живут в
         # `core/loop_run_tail.py`. Наблюдательно — вердикт в журнал, ход не меняется.
