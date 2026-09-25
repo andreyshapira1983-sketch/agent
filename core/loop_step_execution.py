@@ -1046,6 +1046,10 @@ class AgentLoopStepExecution:
         ):
             result = tool.invoke(call)
         self.log.log("tool_result", result, status=result.status, latency_ms=result.latency_ms)
+        # Прочитанное — в журнал потока наружу (core/egress_flow.py) для ворот.
+        egress = getattr(self.policy, "egress", None)
+        if egress is not None:
+            egress.note(action.tool_name, result.output)
         # MVP-11 Compensation capture: a successful tool call may carry a
         # `compensation_plan` block in its structured output. The agent
         # owns the plan registry from here on — `rollback()` reads from

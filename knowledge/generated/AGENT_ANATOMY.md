@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 267 modules across 12 groups._
+_Total: 268 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -42,6 +42,7 @@ _Input handling and injection/exfiltration defense._
 | Module | Purpose |
 | ------ | ------- |
 | `core/injection_guard` | Indirect Prompt Injection Defence (§2 Adversarial Defense). |
+| `core/egress_flow` | Поток данных наружу: частное прочитанное не уходит по адресу из прочитанного. |
 | `core/redaction` | Universal redaction layer (§7). |
 | `core/data_classifier` | Data Classifier (§7 Data Governance). |
 | `core/dlp` | DLP helpers for sensitive personal data. |
