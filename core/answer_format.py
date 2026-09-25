@@ -9,6 +9,10 @@ from core.degraded_route import NOTICE_PREFIX as _SUBSTITUTED_MODEL_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
 from core.requested_format import is_tail_line as is_requested_tail_line
+
+# Отрисовка вывода инструментов для модели живёт в core/tool_output_render.py;
+# реэкспорт — прежние импорты берут эти имена отсюда.
+from core.tool_output_render import format_artifact, number_lines  # noqa: F401
 from core.unsupported_claims import EXCISION_PREFIXES as _EXCISION_PREFIXES
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
 from core.warning_words import humanize_warning_markers
@@ -553,78 +557,6 @@ def format_allowed_citations_block(
     lines.append("</allowed_citations>")
     return "\n".join(lines) + "\n\n" if len(lines) > 2 else ""
 
-
-def number_lines(content: str, *, original: str | None = None) -> str:
-    """Prefix each line with its TRUE 1-based number in *original*, for the
-    prompt only.
-    """
-    lines = (content or "").splitlines()
-    if not lines:
-        return content or ""
-    source = (original or content or "").splitlines()
-    width = max(2, len(str(len(source))))
-
-    out: list[str] = []
-    cursor = 0
-    for line in lines:
-        number: int | None = None
-        if original is None:
-            number = len(out) + 1
-        else:
-            for idx in range(cursor, len(source)):
-                if source[idx] == line:
-                    number, cursor = idx + 1, idx + 1
-                    break
-        gutter = f"{number:>{width}}" if number else " " * width
-        out.append(f"{gutter}\t{line}")
-    numbered = "\n".join(out)
-    return numbered + ("\n" if (content or "").endswith("\n") else "")
-
-
-
-def format_artifact(
-    tool_name: str | None,
-    output: Any,
-    *,
-    question: str = "",
-    self_documentation: bool = False,
-) -> str:
-    """Render a tool output into a stable string the LLM can ground on."""
-    if tool_name == "web_search" and isinstance(output, list):
-        if not output:
-            return "(no results)"
-        lines: list[str] = []
-        for r in output:
-            title   = r.get("title") or "(no title)"
-            url     = r.get("url") or ""
-            snippet = r.get("snippet") or ""
-            source  = r.get("source") or "duckduckgo"
-            lines.append(f"- {title}")
-            lines.append(f"  url: {url}")
-            if snippet:
-                lines.append(f"  snippet: {snippet}")
-            lines.append(f"  provider: {source}")
-        return "\n".join(lines)
-    if tool_name == "file_read" and isinstance(output, str):
-        from core.evidence_budget import budget_file_content
-        # Numbered HERE and nowhere else. The model is asked for «какая строка»
-        # and `file_read` returns bare text, so every number it gave was counted
-        # by eye: measured 2026-08-15, it answered 164 and 382 where the truth
-        # was 385 and 450. The evidence record keeps the raw text — it is
-        # quoted, matched against citations and split into claims, and a number
-        # wedged in there becomes part of a durable claim (the MIR-097 shape).
-        #
-        # Before the budget, not after: the per-file budget extracts the
-        # question-relevant part rather than the head, so a number attached
-        # afterwards would name the line's position in the excerpt instead of
-        # in the file — a lie exactly where precision was the point.
-        return budget_file_content(
-            output, question=question, self_documentation=self_documentation,
-        )
-    if tool_name == "list_dir" and isinstance(output, str):
-        return output
-    # Fallback: stringify whatever came back.
-    return str(output)
 
 def file_scope_notice(
     question: str,

@@ -211,7 +211,7 @@ def need_text(drive: str, info: dict[str, Any], root: Path) -> str:
 
 
 def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str = "") -> dict[str, Any] | None:
-    from core.charter_goal import _unattended_tools, _workspace_inventory
+    from core.workspace_inventory import unattended_tools, workspace_inventory
 
     system = (
         "Ты — автономный агент. Сейчас у тебя есть потребность — ниже она описана. Предложи "
@@ -228,8 +228,8 @@ def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str =
     sample = _library_sample(root, drive)
     if sample:
         parts.append("Книги этой области у тебя:\n" + "\n".join(sample))
-    parts.append("Что лежит в рабочей папке:\n" + "\n".join(_workspace_inventory(root)))
-    parts.append("Инструменты: " + ", ".join(_unattended_tools(root)))
+    parts.append("Что лежит в рабочей папке:\n" + "\n".join(workspace_inventory(root)))
+    parts.append("Инструменты: " + ", ".join(unattended_tools(root)))
     recent = _recent_tasks(root)
     if recent:
         parts.append("Твои последние задачи и их исход:\n" + "\n".join(recent))

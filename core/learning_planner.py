@@ -19,6 +19,7 @@ from core.doc_routing import (
     is_doctrine_corporate_question,
 )
 from core.ingestion import DEFAULT_PROJECT_LIMIT, SKIP_DIR_NAMES, TEXT_EXTENSIONS
+from core.ingestion_utils import _relative_label as _rel
 
 if TYPE_CHECKING:
     from core.source_registry import SourceRecord
@@ -407,16 +408,6 @@ def _apply_staleness(
     if age_h < stale_hours:
         return max(1, score - 60)  # deprioritise, but keep eligible
     return score
-
-
-def _rel(workspace: Path, path: Path) -> str:
-    try:
-        return path.resolve().relative_to(workspace.resolve()).as_posix()
-    except Exception:  # noqa: BLE001 — reason stated above
-        # Same as `core/ingestion_utils._relative_label`: `relative_to` raises
-        # on any path outside the workspace, which is an ordinary case with an
-        # ordinary answer, not a failure.
-        return str(path)
 
 
 _DEFAULT_CORE_FILES = frozenset({
