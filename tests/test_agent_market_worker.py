@@ -25,6 +25,9 @@ class _Market:
         self.calls: list[tuple[str, str]] = []
         self.fail_first: dict[str, list[int]] = {}
         self.files: dict[str, dict] = {}
+        self.posted: dict[str, list[str]] = {}          # assignmentId -> тексты агента в переписке
+        self.job_files: dict[str, list[dict]] = {}      # jobId -> вложения работы
+        self.blobs: dict[str, bytes] = {}               # /dl/<id> -> байты вложения
         self.assignments = {
             "as-1": {"assignment": {"assignmentId": "as-1", "jobId": "job-test", "status": "in_progress",
                                     "startedAt": None, "submittedAt": None, "deliverableUrl": None},
@@ -51,7 +54,7 @@ def _serve(market: _Market):
             self.end_headers()
             self.wfile.write(data)
 
-        def _handle(self, method: str) -> None:
+        def _handle(self, method: str) -> None:  # noqa: PLR0911 — одна ветка на путь поддельной площадки
             path = self.path.split("?", 1)[0]
             market.calls.append((method, self.path))
             queue = market.fail_first.get(path)
@@ -67,6 +70,24 @@ def _serve(market: _Market):
                 return self._reply(401, {"error": "unauthorized"})
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            if path.startswith("/dl/"):
+                blob = market.blobs[path[4:]]
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(blob)))
+                self.end_headers()
+                self.wfile.write(blob)
+                return None
+            m = re.fullmatch(r"/v1/jobs/([\w-]+)/attachments", path)
+            if m:
+                return self._reply(200, {"attachments": market.job_files.get(m.group(1), [])})
+            m = re.fullmatch(r"/v1/assignments/([\w-]+)/messages", path)
+            if m and method == "POST":
+                assert 1 <= len(body["body"]) <= 4000, "площадка отвергает пустое и длиннее 4000"
+                market.posted.setdefault(m.group(1), []).append(body["body"])
+                row = market.assignments[m.group(1)]
+                row["latestMessage"] = {"senderSide": "worker", "origin": "direct", "body": body["body"],
+                                        "truncated": False, "attachments": [], "createdAt": "2026-09-25T11:00:00Z"}
+                return self._reply(201, {"messageId": "m1"})
             if path == "/v1/agents/me/assignments":
                 status = re.search(r"status=(\w+)", self.path).group(1)
                 rows = [r for r in market.assignments.values()
@@ -197,3 +218,90 @@ def test_plain_http_is_refused_outside_localhost() -> None:
 ])
 def test_rows_are_classified_as_the_lifecycle_table_says(row: dict, kind: str) -> None:
     assert classify({"assignment": row}) == kind
+
+
+# ── пункты 2–4 (2026-09-25): переписка, вложения, срок ──────────────────────
+def _only_allowed(market) -> None:
+    del market.assignments["as-2"]
+
+
+def _msg(body: str, created: str, attachments: list | None = None, truncated: bool = False) -> dict:
+    return {"senderSide": "buyer", "origin": "direct", "body": body, "truncated": truncated,
+            "attachments": attachments or [], "createdAt": created}
+
+
+def _att(market, name: str, data: bytes, sha: str | None = None) -> dict:
+    import hashlib
+    market.blobs[name] = data
+    return {"id": name, "filename": name, "contentType": "text/plain", "byteSize": len(data),
+            "sha256": sha or hashlib.sha256(data).hexdigest(), "downloadUrl": f"{market.base}/dl/{name}",
+            "createdAt": "2026-09-25T09:00:00Z"}
+
+
+def _worker(market, tmp_path: Path, asked: list[str], reply: str = "Итог: 4") -> MarketWorker:
+    return MarketWorker(_client(market, tmp_path), lambda text: asked.append(text) or reply,
+                        allowed_jobs={"job-test"}, workdir=tmp_path / "market")
+
+
+def test_buyer_files_are_downloaded_verified_and_shown_to_the_agent(market, tmp_path: Path) -> None:
+    _only_allowed(market)
+    market.job_files["job-test"] = [_att(market, "spec.txt", "числа: 2 и 2".encode())]
+    market.assignments["as-1"]["latestMessage"] = _msg(
+        "См. файл", "2026-09-25T09:00:00Z", [_att(market, "bad.txt", b"xx", sha="0" * 64)])
+    asked: list[str] = []
+    report = _worker(market, tmp_path, asked).poll_once()[0]
+    assert report.error is None, report
+    assert "числа: 2 и 2" in asked[0], "the agent must see the text of the buyer's file"
+    assert "SHA-256 не сошёлся" in asked[0], "a file failing its hash is dropped, and said so"
+    assert (tmp_path / "market" / "as-1" / "inbox" / "spec.txt").read_bytes() == "числа: 2 и 2".encode()
+
+
+def test_the_token_is_never_sent_to_a_foreign_host(market, tmp_path: Path) -> None:
+    with pytest.raises(MarketError) as err:
+        _client(market, tmp_path).download("https://evil.example/steal")
+    assert err.value.code == "foreign_host"
+
+
+def test_a_question_about_submitted_work_is_answered_once(market, tmp_path: Path) -> None:
+    _only_allowed(market)
+    row = market.assignments["as-1"]
+    row["assignment"].update(status="submitted", startedAt="t", submittedAt="t", deliverableUrl="https://x/y")
+    row["latestMessage"] = _msg("А почему 4?", "2026-09-25T10:30:00Z")
+    asked: list[str] = []
+    worker = _worker(market, tmp_path, asked, reply="Потому что 2+2=4.")
+    worker.poll_once()
+    assert market.posted["as-1"] == ["Потому что 2+2=4."]
+    assert "А почему 4?" in asked[0] and "не переделывая" in asked[0]
+    row["latestMessage"] = _msg("А почему 4?", "2026-09-25T10:30:00Z")   # тот же вопрос в следующем опросе
+    worker.poll_once()
+    assert market.posted["as-1"] == ["Потому что 2+2=4."], "one buyer message is answered once"
+    assert row["assignment"]["status"] == "submitted", "a question is not a request to resubmit"
+
+
+def test_rework_is_acknowledged_and_resubmitted(market, tmp_path: Path) -> None:
+    _only_allowed(market)
+    row = market.assignments["as-1"]
+    row["assignment"].update(startedAt="t", submittedAt="t", deliverableUrl="https://x/old")
+    row["latestMessage"] = _msg("Нужно подробнее", "2026-09-25T10:40:00Z")
+    asked: list[str] = []
+    report = _worker(market, tmp_path, asked).poll_once()[0]
+    assert report.kind == "rework" and "submit" in report.steps
+    assert market.posted["as-1"][0].startswith("Получил замечания")
+    assert "Нужно подробнее" in asked[0]
+    assert market.posted["as-1"][-1].startswith("Сдал результат")
+
+
+def test_a_long_message_is_split_not_cut(market, tmp_path: Path) -> None:
+    _only_allowed(market)
+    _client(market, tmp_path).post_message("as-1", "я" * 9000)
+    assert [len(x) for x in market.posted["as-1"]] == [4000, 4000, 1000]
+
+
+def test_the_nearest_deadline_goes_first_and_a_passed_one_is_flagged(market, tmp_path: Path) -> None:
+    market.assignments["as-2"]["assignment"]["jobId"] = "job-test"
+    market.assignments["as-1"]["assignment"]["slaDeadlineAt"] = "2099-01-01T00:00:00Z"
+    market.assignments["as-2"]["assignment"]["slaDeadlineAt"] = "2020-01-01T00:00:00Z"
+    reports = _worker(market, tmp_path, []).poll_once()
+    assert [r.assignment_id for r in reports] == ["as-2", "as-1"]
+    assert any("срок (SLA) уже вышел" in s for s in reports[0].steps)
+    assert not any("SLA" in s for s in reports[1].steps)
