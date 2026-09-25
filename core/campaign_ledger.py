@@ -143,6 +143,22 @@ def spent_units_by_action(rows: list[dict[str, Any]]) -> dict[str, int]:
     return spent
 
 
+def _row_was_useful(row: dict[str, Any]) -> bool:
+    """Полезен цикл, СДЕЛАВШИЙ работу, — той же меркой, что судит кампания.
+
+    Раньше полезность считалась вычитанием «всё, кроме простоя, повтора и
+    исключения», и каждое падение шло в полезные. Замер живого реестра
+    владельца (ветка #349, 2026-09-18, перенесено 25.09): 160 строк,
+    объявлено `useful=144`, работу или продукт несут ВОСЕМЬ. Строки старше
+    поля `work_done` судит продукт — стереть их историю значило бы не
+    исправить счёт, а переписать прошлое.
+    """
+    recorded = row.get("work_done")
+    if isinstance(recorded, bool):
+        return recorded
+    return bool(row.get("proposal") or row.get("artifact"))
+
+
 def _format_ledger_row(row: dict[str, Any]) -> str:
     cycle = row.get("cycle", "?")
     action = row.get("action", "?")
@@ -179,9 +195,10 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
     idle = sum(1 for r in rows if r.get("idle"))
     repeats = sum(1 for r in rows if r.get("result") == "repeat")
     errors = sum(1 for r in rows if r.get("result") == "error")
+    failed = sum(1 for r in rows if r.get("result") == "failed")
     artifacts = sum(1 for r in rows if r.get("artifact"))
     proposals = sum(1 for r in rows if r.get("proposal"))
-    useful = total - idle - repeats - errors
+    useful = sum(1 for r in rows if _row_was_useful(r))
     result_counts: dict[str, int] = {}
     for r in rows:
         key = "idle" if r.get("idle") else str(r.get("result", "?"))
@@ -196,7 +213,7 @@ def summarise_ledger(rows: list[dict[str, Any]], *, recent: int = 10) -> str:
         "=== campaign ledger ===",
         (
             f"cycles_logged={total}  useful={useful}  idle={idle}  repeats={repeats}  errors={errors}  "
-            f"llm_calls={llm_calls}  cost_units={cost_units}  proposals={proposals}  artifacts={artifacts}"
+            f"failed={failed}  llm_calls={llm_calls}  cost_units={cost_units}  proposals={proposals}  artifacts={artifacts}"
         ),
         f"by_result: {by_result}",
         f"goals_seen ({len(goals)}): " + "; ".join(goals[:5]) + (" …" if len(goals) > 5 else ""),
