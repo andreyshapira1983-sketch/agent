@@ -28,6 +28,8 @@ CONTROL_RELPATHS: tuple[str, ...] = (
     "data/patch_route_state.json",
     "config/vetoed_goals.txt",
     ".env",
+    # Решения Клода по очереди на суд (core/judge_queue.py): подсудимый их не пишет.
+    "data/judge_rulings.jsonl",
 )
 
 

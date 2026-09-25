@@ -19,7 +19,8 @@ Self-Improvement», MAGELLAN) польза — это последующее и�
 4. `code_survived` — правка кода агента из цикла стоит в основной ветке и не
    откачена;
 5. `goal_verified` — судья цели (core/campaign_verdict.py) признал её критерий
-   выполненным;
+   выполненным, И Клод подтвердил это вне хода (core/judge_queue.py; слово
+   оператора 25.09: пока не судил Клод, решение предварительное, в зачёт нет);
 6. `tests_passed` — цикл что-то создал и прогнал тесты, и они зелёные.
 
 Заказы площадки считаются отдельно: принятая покупателем работа —
@@ -52,10 +53,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.judge_queue import rulings
+
 WINDOW_DAYS = 3
 SIGNALS = ("approved", "read_later", "memory_used", "code_survived", "goal_verified", "tests_passed")
 #: Признаки, которые ставит не сам агент и не его судья (вне петли).
-OUT_OF_BAND = frozenset({"approved"})
+OUT_OF_BAND = frozenset({"approved", "goal_verified"})
 _READ_TOOLS = frozenset({"file_read", "find_in_files", "diff_file", "convert_file"})
 _PATH_RE = re.compile(r"(?<![\w/.])((?:data|proposals|knowledge|docs|core|tools|tests|cli|scripts|"
                       r"converted|math_study|knowledge_library)/[\w./-]+\.\w+)")
@@ -164,8 +167,11 @@ def _green(output: Any) -> bool:
 
 
 def _verified_goals(data: Path) -> list[tuple[datetime, str]]:
+    """Цели, признанные достигнутыми, — только подтверждённые Клодом."""
+    confirmed = {i for i, r in rulings(data.parent).items() if r.get("verdict") == "confirmed"}
     return sorted((m, str(r.get("goal") or "")) for r in _rows(data / "campaign_verdicts.jsonl")
-                  if r.get("verdict") == "verified" and (m := _ts(r.get("ts"))))
+                  if r.get("verdict") == "verified" and r.get("judge_item") in confirmed
+                  and (m := _ts(r.get("ts"))))
 
 
 def _between(items: list[tuple[datetime, str]], start: datetime, end: datetime) -> list[str]:
