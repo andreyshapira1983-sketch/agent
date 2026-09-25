@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from core.knowledge_pipeline import ConflictRecord, ConflictResolver
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
+from core.unit_score import clamp_unit as _bounded
 
 ConflictDecision = Literal["suggested", "needs_review"]
 
@@ -239,11 +240,3 @@ class ConflictReview:
             reasons=tuple(reasons),
             claims=ranked,
         )
-
-
-def _bounded(value: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = 0.0
-    return max(0.0, min(1.0, number))
