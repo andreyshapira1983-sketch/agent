@@ -505,7 +505,7 @@ class AgentLoopMemoryWrite:
         question = " ".join(str(getattr(episode, "question", "") or "").split())
         similar = similar_conclusions(content, existing)
         # Модель предлагает, ворота решают (memory_consolidation.gate).
-        return gate(consolidate(getattr(self, "llm", None), content, question, similar), question, similar)
+        return gate(consolidate(getattr(self, "llm", None), content, question, similar), content, similar)
 
     def _record_aborted_episode(self, question: str, *, reason: str) -> None:
         """Bank a `failed` episode for a run that did not complete.

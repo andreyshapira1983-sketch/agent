@@ -160,37 +160,38 @@ def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Co
 #: слияние пропускать через ворота, а не запускать после каждого хода.
 #: Замер 2026-09-25 на сервере: 8 слияний (UPDATE), удалений 0, все 8 — один
 #: и тот же вопрос, уточнённый. Номер цели и раньше сверялся с показанными
-#: кандидатами (consolidate выше); не проверялось другое — ТОТ ЖЕ ли предмет:
-#: это решало одно слово модели.
-_SUBJECT_JACCARD = 0.5
-_PATHLIKE = re.compile(r"[\w./-]+/[\w./-]+|[\w-]+\.(?:txt|py|md|pdf|json|jsonl)\b")
+#: кандидатами (consolidate выше); не проверялось, что слитое не потеряло знаний.
+#:
+#: Мерка ворот — та, которой этот модуль был принят 23.09: слияние сохранило
+#: 205 из 208 чисел обеих записей (разделы, страницы, строки, формулы). Слитый
+#: текст, потерявший хоть одно число старой или новой записи, не пишется —
+#: обе записи остаются рядом. Первая редакция ворот сравнивала СЛОВА вопросов
+#: и остановила каноническое слияние («формулировка теоремы Нётер у Тонга» +
+#: «пример теоремы Нётер у Тонга»: 2 общих основы из 11) — словами предмет не
+#: определить, это делает модель; ворота проверяют, что она ничего не выронила.
+_NUMBER = re.compile(r"\d+(?:[.,:/-]\d+)*")
 _NESTED = re.compile(r"^\s*Вопрос:.*?Вывод:\s*", re.DOTALL)
 
 
-def _question_of(content: str) -> str:
-    return (content or "").split("\n", 1)[0].removeprefix("Вопрос: ")
+def _numbers(text: str) -> set[str]:
+    """Числа ВЫВОДА: строка «Вопрос: …» по замыслу берётся у прежней записи."""
+    body = "\n".join(ln for ln in _without_sources(text or "").splitlines() if not ln.startswith("Вопрос:"))
+    return set(_NUMBER.findall(body))
 
 
-def same_subject(old_question: str, new_question: str) -> bool:
-    """Один ли предмет: почти те же слова вопроса или один и тот же названный файл."""
-    words = [set(re.findall(r"\w{4,}", (q or "").lower())) for q in (old_question, new_question)]
-    if words[0] and words[1] and len(words[0] & words[1]) / len(words[0] | words[1]) >= _SUBJECT_JACCARD:
-        return True
-    paths = [set(_PATHLIKE.findall(q or "")) for q in (old_question, new_question)]
-    return bool(paths[0] & paths[1])
-
-
-def gate(decision: Consolidation, question: str, candidates: list[Any]) -> Consolidation:
-    """UPDATE/DELETE — только над показанным кандидатом и того же предмета; иначе ADD."""
+def gate(decision: Consolidation, new_content: str, candidates: list[Any]) -> Consolidation:
+    """UPDATE — только над показанным кандидатом и без потери чисел; иначе ADD."""
     if decision.operation not in ("UPDATE", "DELETE"):
         return decision
     target = next((r for r in candidates if getattr(r, "id", None) == decision.target_id), None)
     if target is None:
         return Consolidation("ADD", title=decision.title,
                              reason=f"gate: {decision.operation} target is not among the shown candidates")
-    if not same_subject(_question_of(str(target.content)), question):
-        return Consolidation("ADD", title=decision.title,
-                             reason=f"gate: {decision.operation} refused, different subject")
+    if decision.operation == "UPDATE":
+        lost = sorted((_numbers(str(target.content)) | _numbers(new_content)) - _numbers(decision.merged or ""))
+        if lost:
+            return Consolidation("ADD", title=decision.title,
+                                 reason=f"gate: the merge would drop {', '.join(lost[:5])}; both kept")
     return decision
 
 
