@@ -23,7 +23,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "activity_decider",
         "workspace_reference",
         "file_request_intent",
-        "answer_format", "warning_words", "lang_match", "output_policy", "user_profile", "truth_hype_filter",
+        "answer_format", "tool_output_render", "warning_words", "lang_match", "output_policy", "user_profile", "truth_hype_filter",
         "conversation_contract", "social_turn",
         "alert_ack",
     ]),

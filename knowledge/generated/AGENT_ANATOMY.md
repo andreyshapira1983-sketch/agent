@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 279 modules across 12 groups._
+_Total: 280 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -26,6 +26,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/workspace_reference` | Does this text name something that exists in the workspace? |
 | `core/file_request_intent` | What kind of file request is this question? |
 | `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |
+| `core/tool_output_render` | Как вывод инструмента выглядит для модели: текст, на который она опирается. |
 | `core/warning_words` | Предупреждения проверки — человеческими словами у самого утверждения. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
