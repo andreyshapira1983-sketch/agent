@@ -109,7 +109,7 @@ _OWNED_STATE: dict[str, str] = {
            "reasoning_roster", "runtime_schedules", "runtime_tasks",
            "self_build_lessons", "self_build_rules", "self_stops",
            "source_registry", "splitter_refusals", "standing_grant_usage", "subagent_predictions", "subagent_quarantine",
-           "tool_receipts", "user_profile", "value_reviews",
+           "tool_receipts", "user_profile", "value_reviews", "workflow_memory",
        )},
 }
 
