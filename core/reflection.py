@@ -12,6 +12,7 @@ from core.learning_planner import LearningPlan, LearningPlanner
 from core.llm import LLM
 from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
+from core.weak_spot_retrieval import evidence_query
 from core.workspace_reference import names_workspace_path
 
 
@@ -620,14 +621,22 @@ class ReflectionEngine:
         warnings: list[str],
     ) -> LearningPlan | None:
         """Return a LearningPlan focused on the weak spots found, or None."""
-        # Only "learn_more" and "repair" actions warrant deeper ingestion.
-        focus_areas = list(
-            dict.fromkeys(
-                lesson.focus_area
-                for lesson in lessons
-                if lesson.action in ("learn_more", "repair") and lesson.focus_area
+        # Only "learn_more" and "repair" actions warrant deeper ingestion — and
+        # only a weak spot that cites its evidence (MIR-106, 2026-09-25:
+        # reflection grounding, arXiv 2603.07670 §4.3). The evidence is the
+        # error pattern the lesson came from; it also becomes the BM25 query
+        # for the files to study (core/weak_spot_retrieval.py).
+        wanted = [
+            lesson for lesson in lessons
+            if lesson.action in ("learn_more", "repair") and lesson.focus_area
+        ]
+        grounded = [lesson for lesson in wanted if evidence_query(lesson)]
+        if len(grounded) < len(wanted):
+            warnings.append(
+                "weak spots without evidence are not studied: "
+                + ", ".join(lesson.focus_area for lesson in wanted if lesson not in grounded)
             )
-        )
+        focus_areas = list(dict.fromkeys(lesson.focus_area for lesson in grounded))
         if not focus_areas:
             return None
 
@@ -637,6 +646,7 @@ class ReflectionEngine:
                 workspace=self.workspace,
                 goal=goal,
                 limit=config.learning_limit,
+                evidence_query=" ".join(evidence_query(lesson) for lesson in grounded),
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
             # Same channel as the lesson synthesiser above: `None` never

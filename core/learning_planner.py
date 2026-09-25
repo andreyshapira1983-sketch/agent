@@ -82,6 +82,7 @@ class LearningPlanner:
         limit: int = DEFAULT_PROJECT_LIMIT,
         source_registry: _SourceLookup | None = None,
         stale_hours: float = _STALE_HOURS,
+        evidence_query: str = "",
     ) -> LearningPlan:
         if limit < 1:
             raise ValueError("limit must be >= 1")
@@ -89,6 +90,15 @@ class LearningPlanner:
         target = _resolve_inside_workspace(workspace, root)
         if not target.exists():
             raise FileNotFoundError(f"Path not found: {target}")
+        # MIR-106: слабое место с уликой ищет свои файлы BM25 (core/weak_spot_retrieval.py).
+        retrieved: frozenset[str] = frozenset()
+        if evidence_query:
+            from core.weak_spot_retrieval import retrieve_files
+
+            retrieved = frozenset(r.casefold() for r in retrieve_files(workspace, evidence_query))
+            if not retrieved and not _named_candidates(workspace, _named_paths(goal.casefold())):
+                return LearningPlan(goal=goal, root=_rel(workspace, target), source_paths=(),
+                                    reasons=("evidence of the weak spot matched no code file — nothing to study",))
 
         candidates = [target] if target.is_file() else list(_iter_candidates(target))
         scored: list[tuple[int, str, Path, list[str]]] = []
@@ -115,6 +125,9 @@ class LearningPlanner:
                 skipped.append(f"{_rel(workspace, path)}: unsupported extension")
                 continue
             score, reasons = _score(path, workspace=workspace, goal=goal_l, named=named)
+            if retrieved and _rel(workspace, path).casefold() in retrieved:
+                score += _RETRIEVED_BY_EVIDENCE_BONUS
+                reasons.append("retrieved by the weak spot's evidence (BM25)")
             if score <= 0:
                 skipped.append(f"{_rel(workspace, path)}: low learning value")
                 continue
@@ -230,6 +243,9 @@ def _score(
 #: confidence (360+) source priorities: a file the goal names outright is the
 #: subject of the pass, not a candidate for it.
 _NAMED_BY_GOAL_BONUS = 500
+#: Выше любого общего бонуса (README 100, ядро 70), ниже названного пути:
+#: найденное по улике — предмет прохода, но путь, названный прямо, точнее.
+_RETRIEVED_BY_EVIDENCE_BONUS = 200
 
 #: The dot is load-bearing, not an oversight: it is the only thing separating a
 #: path from an ordinary word in a sentence. Widening this to extensionless
