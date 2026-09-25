@@ -336,6 +336,16 @@ _DECLARED_EDITS = (
         ("self.replan_policy.decide(failure_history=st.failure_history, "
          "completed_attempts=charged_attempts(self, st.attempt, st.failure_history))"),
     ),
+    (  # 2026-09-25: упавший датчик «довод ↔ действие» называет себя в журнале
+        "self._defect_signals.append('reasoning_action_mismatch')\n    except Exception:\n        pass",
+        ("self._defect_signals.append('reasoning_action_mismatch')\n    except Exception as exc:\n"
+         "        self._sensor_failed('reasoning_action_check', exc)"),
+    ),
+    (  # 2026-09-25: упавший извлекатель допущений называет себя в журнале
+        "'assumptions': st._run_assumptions.to_log_payload()})\n        except Exception:\n            pass",
+        ("'assumptions': st._run_assumptions.to_log_payload()})\n        except Exception as exc:\n"
+         "            self._sensor_failed('assumption_extractor', exc)"),
+    ),
 )
 
 

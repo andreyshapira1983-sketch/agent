@@ -132,11 +132,9 @@ class LLMPlanner:
         self.workspace = workspace
         self.llm = llm
         self.registry = registry
-        # Host-level set of tool names to hide from the planner surface. Empty
-        # by default (REPL sees every registered tool). The run's own block set
-        # is NOT written here: it lives in the run context and is read through
-        # `effective_hidden_tools` (MIR-114 — a shared field was restored by a
-        # neighbouring run's cleanup mid-run). Policy remains the
+        # Host-level tool names hidden from the planner surface (empty: the REPL
+        # sees all). The run's own block set lives in the run context and is
+        # read through `effective_hidden_tools` (MIR-114). Policy remains the
         # defense-in-depth block at execution time.
         self.hidden_tools: frozenset[str] = frozenset()
         # Defensive copy + validation: every entry must be a relative
@@ -357,13 +355,8 @@ class LLMPlanner:
             return True
 
     def effective_hidden_tools(self) -> frozenset[str]:
-        """What this planner hides now: the host's set plus the current run's.
-
-        The run's part comes from the run context, so two overlapping runs each
-        see their own surface and neither's exit restores over the other.
-        """
-        host = getattr(self, "hidden_tools", frozenset()) or frozenset()
-        return frozenset(host) | run_blocked_tools()
+        """The host's hidden set plus the current run's, each run its own (MIR-114)."""
+        return frozenset(getattr(self, "hidden_tools", frozenset()) or ()) | run_blocked_tools()
 
     def _file_read_available(self) -> bool:
         """Whether a `file_read` step can actually run on this path.
