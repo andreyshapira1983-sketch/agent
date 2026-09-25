@@ -146,8 +146,7 @@ def defect_goal(root: Path) -> Any:
         state.setdefault("patch_to_defect", {})[patch] = issue.fingerprint
         _save_state(root, state)
         evidence = "; ".join(issue.evidence[:3])[:900]
-        # Его собственное решение по этому дефекту (core/own_decisions.py) —
-        # читатель журнала решений. Ночь 26.09: вывод был сделан и забыт.
+        # Его собственное решение по этому дефекту (core/own_decisions.py).
         from core.own_decisions import decision_line
 
         decided = decision_line(root, issue.fingerprint)
