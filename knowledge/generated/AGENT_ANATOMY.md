@@ -70,7 +70,7 @@ _Planning, verification, clarification, control loop._
 | `core/memory_hygiene_commands` | Memory hygiene as operator and daemon commands: expire, dedupe, prune, archive. |
 | `core/loop_memory_read` | Чтение памяти циклом: долгая, опытная, сводка. |
 | `core/loop_memory_write` | Запись памяти циклом — и право на неё. |
-| `core/loop_response_deciders` | Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно. |
+| `core/loop_response_deciders` | Черновик ответа и решатели над ним — миксин ``AgentLoop`` между синтезом и композицией. |
 | `core/loop_synthesis` | Синтез ответа — метод `_synthesize`, вырезанный из ``core/loop.py`` дословно. |
 | `core/loop_synthesis_state` | State holder for `core.loop_synthesis`. |
 | `core/loop_synthesis_helpers` | Helper functions used by `core.loop_synthesis.AgentLoopSynthesis`. |
@@ -111,7 +111,7 @@ _Planning, verification, clarification, control loop._
 | `core/verifier_absence` | Certifying a claim of ABSENCE — the half of verification a citation cannot do. |
 | `core/claim_arithmetic` | Deterministic evaluation of arithmetic claims against a key=value excerpt. |
 | `core/entailment_scope` | Какие утверждения со ссылкой сверять по смыслу моделью (MIR-060). |
-| `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
+| `core/replan` | Re-planning policy: structured failure types + per-type retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |
 | `core/clarification_policy` | Clarification Policy (§3 Cognitive Core — Clarification Policy). |
@@ -167,7 +167,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/workflow_memory` | Шаблоны работы по Agent Workflow Memory (Wang et al., arXiv 2409.07429). |
 | `core/failure_cards` | Карточки прошлых ошибок: «эта ошибка уже была — вот что тогда помогло». |
 | `core/smart_memory_helpers` | Helpers extracted verbatim from ``core/smart_memory.py`` by the incremental splitter. |
-| `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
+| `core/memory_policy` | Memory write and retrieval policies: what may be persisted and what is recalled into a prompt. |
 | `core/work_kinds` | Род работы: чем человек сейчас занят, а не какими словами он это назвал. |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
 | `core/bilingual_terms` | Russian question, English record — one domain vocabulary between them. |
@@ -341,7 +341,7 @@ _Model discovery, routing, usage accounting._
 
 | Module | Purpose |
 | ------ | ------- |
-| `core/model_catalog` | Dynamic Model Catalog — discovers available models from provider APIs. |
+| `core/model_catalog` | Dynamic Model Catalog — discovers provider models and picks the best one per complexity tier. |
 | `core/model_discovery` | Live Model Discovery + Provider Catalog diff — read-only / dry-run (TD-011/012). |
 | `core/model_router` | Role-based model routing. |
 | `core/model_usage` | Model usage ledger and budget checks. |
