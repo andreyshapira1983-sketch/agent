@@ -19,6 +19,7 @@ from core.model_usage import ModelUsageLedger
 from core.persistent_memory import PersistentMemoryStore
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
+from core.pressure_gate import pressure_of
 from core.smart_memory import (
     EpisodicMemoryStore,
     MemoryConsolidationStore,
@@ -160,11 +161,9 @@ def build_agent(
         write_policy = MemoryWritePolicy(frozen_sources={"agent-auto"})
     else:
         write_policy = MemoryWritePolicy()
-    budget_ledger = BudgetLedger.from_env(
-        path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
-        logger=logger,
-        config_path=workspace / "config" / "budget_limits.json",
-    )
+    budget_ledger = BudgetLedger.from_env(path=workspace / DEFAULT_BUDGET_LEDGER_PATH, logger=logger,
+                                          config_path=workspace / "config" / "budget_limits.json")
+    policy.pressure = pressure_of(budget_ledger)  # «тревога» числом: core/pressure_gate.py
     model_usage_ledger = ModelUsageLedger.from_env(
         path=workspace / DEFAULT_MODEL_USAGE_PATH,
         logger=logger,

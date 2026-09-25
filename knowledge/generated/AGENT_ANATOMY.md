@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 264 modules across 12 groups._
+_Total: 265 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -243,6 +243,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/code_citations` | Ссылка памяти на код сверяется с кодом в момент чтения. |
 | `core/wake_events` | Что будит спящую кампанию: перемена мира, а не ход часов. |
 | `core/subagent_predictions` | Предсказание помощника против факта — сверка при его завершении. |
+| `core/pressure_gate` | «Тревога» числом: под нажимом бюджета действия с последствиями ждут человека. |
 | `core/spend_report` | Зеркало трат: что агент потратил и что за это получил. |
 | `core/usd_spend` | Расход в долларах по журналу вызовов модели — и предел в час (план субботы, пункт з). |
 | `core/mentor_channel` | Канал наставника: вопросы к агенту с совещательной властью. |
