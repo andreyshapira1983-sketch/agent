@@ -92,6 +92,58 @@ _NO_WORK_RESULTS = frozenset({
 
 _JACCARD_REPEAT = 0.6
 
+#: Баланс «про себя / про мир» — слово оператора 2026-09-25: если из последних
+#: 10 выбранных целей 7 и больше были про себя, следующая обязана смотреть
+#: наружу. Замер того же дня (журнал кампаний 19–24.09): 70 % циклов — про свой
+#: код, детекторы и дефекты, 17 % — про мир, 23–24.09 внешних целей не было ни
+#: одной. Замкнутая петля даёт эхо: без внешней обратной связи модель себя не
+#: исправляет (Huang et al., ICLR 2024), цикл, судящий себя, принимает застой
+#: за прогресс (arXiv 2607.25152). Число 7 из 10 — решение оператора, не
+#: литература.
+_OUTWARD_WINDOW, _OUTWARD_SELF_MAX = 10, 7
+#: Цель смотрит наружу, только если НАЗЫВАЕТ внешний источник. Всё прочее —
+#: работа внутри своей папки. Словарь «про себя» (свой, core/, детектор…)
+#: пробовался и промахивался на живых целях 2026-09-25: «Read the run log where
+#: obligation_silently_missing fired…», «Read the capability map…» выходили
+#: «ничьими», хотя это чтение самого себя.
+_WORLD_RE = _re.compile(
+    r"https?://|интернет|первоисточник|\bweb\b|web_search|web_fetch|\bonline\b|knowledge_library/|"
+    r"math_study/library|книг|учебник|стать[юяией]|\bpaper\b|\bbook\b|arxiv|площадк|"
+    r"agent market|\bmarket\b|заказ",
+    _re.IGNORECASE)
+
+
+def goal_faces(goal: str) -> str:
+    """'world' — цель называет внешний источник; иначе 'self'."""
+    return "world" if _WORLD_RE.search(goal or "") else "self"
+
+
+def _balance_or_abandoned(root: Path, goal: str, outward_due: str, change_ts: str) -> str:
+    """Два отказа за итог прошлых выборов: баланс «про себя» и брошенная цель."""
+    if outward_due and goal_faces(goal) == "self":
+        return (f"{outward_due}; the next goal must face the outside world "
+                "(a web source, a library book, a market order)")
+    abandoned = _repeats_recent(goal, _abandoned_goals(root, change_ts))
+    if abandoned:
+        return (f"goal abandoned after {_ABANDON_AFTER}+ paid attempts without a result "
+                f"since the world last changed: {abandoned[:80]!r}")
+    return ""
+
+
+def _outward_due(root: Path) -> str:
+    """Причина «пора наружу» ("" — не пора): счёт по последним выбранным целям."""
+    from core.state_integrity import read_state_jsonl
+
+    try:
+        rows = read_state_jsonl(root / DECISIONS_RELPATH)
+    except Exception:  # noqa: BLE001 — сомнение = правило молчит, выбор не падает
+        return ""
+    chosen = [str(r.get("goal") or "") for r in rows if r.get("status") == "proposed"][-_OUTWARD_WINDOW:]
+    own = sum(1 for g in chosen if goal_faces(g) == "self")
+    if len(chosen) < _OUTWARD_WINDOW or own < _OUTWARD_SELF_MAX:
+        return ""
+    return f"{own} of your last {len(chosen)} chosen goals were about yourself"
+
 
 @dataclass(frozen=True)
 class CharterGoalReport:
@@ -967,8 +1019,18 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         return _declined(f"operator veto list unreadable: {VETO_RELPATH}")
 
     mentor_qs = open_questions(root)
+    outward_due = _outward_due(root)
+    # Правило баланса модель видит ДО траты вызова — там же, где решения своих
+    # ворот: это и есть решение ворот, заранее.
+    declined_now = _recent_declined(root)
+    if outward_due:
+        declined_now += ((
+            "THIS TIME: any goal about your own code, journals, detectors or defects",
+            (f"{outward_due}; the next goal MUST FACE THE OUTSIDE WORLD - name the outside "
+             "source in the goal itself: a web page or paper, a library book, a market order"),
+        ),)
     parsed, why = _ask(
-        llm, charter, anchors, recent, _recent_declined(root),
+        llm, charter, anchors, recent, declined_now,
         _backlog_lines(root), _recent_verdicts(root),
         mentor_questions=mentor_block(mentor_qs),
         stops=stops,
@@ -1017,10 +1079,9 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     if repeated:
         return _declined(
             f"goal repeats a recent campaign goal: {repeated[:80]!r}", goal)
-    abandoned = _repeats_recent(goal, _abandoned_goals(root, change_ts))
-    if abandoned:
-        return _declined(f"goal abandoned after {_ABANDON_AFTER}+ paid attempts without a result "
-                         f"since the world last changed: {abandoned[:80]!r}", goal)
+    blocked = _balance_or_abandoned(root, goal, outward_due, change_ts)
+    if blocked:
+        return _declined(blocked, goal)
     if not check:
         return _declined(
             "success_check is empty — a goal without a check is a wish", goal)
