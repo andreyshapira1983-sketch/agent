@@ -169,30 +169,16 @@ class AgentLoopMemoryRead:
             return []
 
     def _retrieve_experience_memory(self, question: str) -> str:
-        """Inject compact episodic/procedural memory into planning.
+        """Inject compact episodic/procedural memory into planning (guides, never cited as fact).
 
-        This is deliberately separate from `<long_term_memory>`:
-        persistent memory stores user-approved facts, while experience memory
-        stores operational history and reusable workflows. It can guide the
-        planner without becoming a source of factual claims in the final answer.
-
-        Re-ask detection: if the current question is very similar (Jaccard ≥ 0.4)
-        to the stored *question* field of a past episode, the user is likely asking
-        AGAIN because the previous answer was insufficient.  A
-        ``<repeat_question_hint>`` block is appended to signal this to the planner.
+        Appends a ``<repeat_question_hint>`` when a past episode's question is very similar.
         """
         self._last_episode_records = []
         self._last_procedure_records = []
         self._last_best_similar_episode = None
         self._last_best_similar_score = 0.0
-        # Holding the stores and being allowed to read them are separate
-        # permissions. Returning early also leaves `_last_best_similar_episode`
-        # unset, which structurally keeps the fast path from firing.
-        # Counterfactual trace: WHY a record did not come back is where the
-        # information is. `selected=0` alone cannot distinguish "nothing
-        # matched" from "everything matched but was withheld", and those call
-        # for opposite responses. Counted BY REASON, never per record — a
-        # per-record trace would cost more than the retrieval it observes.
+        # Counted by reason, not per record: `selected=0` alone cannot tell
+        # "nothing matched" from "matched but withheld".
         rejected_by: dict[str, int] = {}
         if not getattr(self, "experience_retrieval", True):
             self.log.log(
@@ -209,36 +195,19 @@ class AgentLoopMemoryRead:
             return ""
         if self.episodic_store is None and self.procedural_store is None:
             return ""
-        # Only SUCCESSFUL episodes are fed back as reusable experience; a
-        # `partial`/`failed` episode must not be surfaced as "what worked
-        # before" (CORE-05/LPF-012 — the self-reinforcing loop). Curated
-        # `lesson` episodes are kept regardless: they are learn-from-failure by
-        # design. Over-fetch, then filter, then cap so up to 3 GOOD episodes
-        # still surface even when some top matches were non-success.
-        # `is_usage_eligible` is the second, independent filter: outcome asks
-        # "did this go well", eligibility asks "is this episode allowed to
-        # steer anything at all". Legacy and quarantined episodes stay stored
-        # and auditable but never reach the planner.
+        # Only successful episodes (or curated `lesson`s) are reused, else
+        # failures self-reinforce (CORE-05). Over-fetch, filter, then cap at 3.
         episodes = []
         readmitted = 0
         if self.episodic_store is not None:
-            # `search_with_report` rather than `search`: the store drops
-            # episodes for reasons only it can see (no token overlap, its own
-            # cap), and counting only what it handed back is how
-            # `selected=0, rejected_by={}` stayed reachable on 200 episodes.
+            # With report: only the store knows why it dropped an episode.
             found = self.episodic_store.search_with_report(question, limit=6)
             rejected_by = _merge_rejection_reasons(rejected_by, found.rejected_by)
             for ep in found.episodes:
                 if not (ep.outcome == "success" or "lesson" in ep.tags):
                     rejected_by["outcome"] = rejected_by.get("outcome", 0) + 1
                     continue
-                # Checked here as well as at admission, not instead of it: the
-                # stored `usage_eligible` bit was decided by whatever rule was
-                # in force when the episode was banked, and this reader must
-                # answer for its own use case. A `lesson` keeps its context
-                # arm — surfacing a failure as a warning is the whole point of
-                # the tag — but an ordinary episode has to have finished the
-                # job before it may steer a later one.
+                # Rechecked here: the stored bit reflects the rule at banking time.
                 if "lesson" not in ep.tags and effective_completion(ep) != "achieved":
                     rejected_by["not_achieved"] = rejected_by.get("not_achieved", 0) + 1
                     continue
@@ -249,16 +218,11 @@ class AgentLoopMemoryRead:
                     rejected_by["over_limit"] = rejected_by.get("over_limit", 0) + 1
                     continue
                 episodes.append(ep)
-        # ── Surface repair lessons for files mentioned in the question ────
-        # search() gives a +50 boost to protected-tag episodes so they usually
-        # appear in the top-3, but when the question contains a file path that
-        # exactly matches a lesson's summary we fetch them explicitly as a
-        # fallback — e.g. ":repair core/foo.py" should always see lessons
-        # about core/foo.py even if the token overlap is otherwise low.
+        # Fallback: lessons about a file path named in the question surface even
+        # when token overlap is low (e.g. ":repair core/foo.py").
         if self.episodic_store is not None:
             lessons = self.episodic_store.search_by_tags(["lesson"], limit=5)
             q_lower = question.lower()
-            # Extract path-like tokens: words containing "/" or ending in ".py"
             path_tokens = [
                 w.strip("\"',:;()")
                 for w in q_lower.split()
@@ -272,11 +236,7 @@ class AgentLoopMemoryRead:
                     and any(tok in lesson.summary.lower() for tok in path_tokens)
                 ):
                     episodes.append(lesson)
-                    # This lesson was already charged to some rejection reason
-                    # by the first pass, and which one is not knowable here
-                    # without a per-record trace. Reported as its own number
-                    # rather than guessed at and subtracted: with it, the
-                    # reader reconciles as
+                    # Already counted in some rejection reason; reconcile as
                     # `selected - readmitted + sum(rejected_by) == candidates`.
                     readmitted += 1
         procedures, procedures_rejected_by = self._procedures_unless_workflow(question)
@@ -293,39 +253,28 @@ class AgentLoopMemoryRead:
                 "procedure_ids": [proc.id for proc in procedures],
                 "chars": len(block),
                 "rejected_by": rejected_by,
-                # Why procedures did not surface — no longer a silent zero. Absent
-                # means zero, like every reason key.
+                # Absent means zero, like every reason key.
                 **({"procedures_rejected_by": procedures_rejected_by}
                    if procedures_rejected_by else {}),
-                # Absent means zero, like every reason key.
                 **({"readmitted": readmitted} if readmitted else {}),
             },
         )
         self._last_episode_records = list(episodes)
         self._last_procedure_records = list(procedures)
 
-        # ── Re-ask detection ──────────────────────────────────────────
-        # Jaccard по различающим словам вопроса. 0.40 — НЕ рабочий порог:
-        # у кандидата с неизмеренным качеством он падает до 0.30, а измеренного
-        # качества нет ни у одного из 142 живых эпизодов (замер 2026-08-25).
-        # Замер и границы: MIR-024 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+        # Re-ask detection. 0.40 — не рабочий порог: без измеренного качества
+        # кандидата он падает до 0.30 (MIR-024).
         _REPEAT_THRESHOLD = 0.40
         if self.episodic_store is not None:
             try:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
                     question, threshold=_REPEAT_THRESHOLD
                 )
-                # Third door, and the most dangerous one: this feeds the fast
-                # path, which returns a stored answer verbatim in place of a
-                # real cycle. An ineligible match is dropped here rather than
-                # at the fast-path gate, so re-ask hints cannot lean on it
-                # either.
+                # Feeds the fast path (a stored answer returned verbatim), so an
+                # ineligible match is dropped here, before hints can use it too.
                 if repeat_ep is not None and not is_usage_eligible(repeat_ep):
                     repeat_ep, repeat_score = None, 0.0
-                # Store for the fast-path admission in run(). (This line used
-                # to also claim "planner-cache checks": false — the planner
-                # cache keys on (question hash, store mtime, file_hint) and
-                # reads neither field. Verified by search 2026-08-08.)
+                # For the fast-path admission in run().
                 self._last_best_similar_episode = repeat_ep
                 self._last_best_similar_score = repeat_score
                 if repeat_ep is not None:
@@ -372,7 +321,7 @@ class AgentLoopMemoryRead:
                         },
                     )
                     block = block + "\n\n" + hint if block else hint
-            except Exception:  # noqa: BLE001, S110 — reason stated above
+            except Exception:  # noqa: BLE001, S110 — reason stated below
                 # Re-ask detection must never abort the main loop.
                 pass
 
