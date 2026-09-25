@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 276 modules across 12 groups._
+_Total: 277 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -175,6 +175,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
 | `core/learned_conclusion` | Что ход ВЫЯСНИЛ — в долговременную память, а не что он прочитал по пути. |
+| `core/self_knowledge` | Знание о себе и предметная задача: что из памяти НЕ подмешивать при чтении. |
 | `core/memory_consolidation` | Сверка нового вывода с памятью ПЕРЕД записью — фаза обновления Mem0. |
 | `core/memory_embeddings` | Поиск по смыслу для долговременной памяти: multilingual-e5-large-instruct. |
 | `core/cache_freshness` | Можно ли отдать прошлый результат шага вместо нового вызова. |
