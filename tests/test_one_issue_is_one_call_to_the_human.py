@@ -26,8 +26,14 @@ _SAME = [
 ]
 
 
-def _say(tool: JournalAppendTool, text: str) -> None:
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": text, "ts": _NOW})
+#: С 25.09 зов обязан назвать повод и спросить (test_a_call_to_the_human_names_its_reason_and_asks.py);
+#: здесь проверяется другое — повтор того же случая, — поэтому повод и вопрос одинаковы у всех.
+_ASK = " Что пробовать дальше?"
+
+
+def _say(tool: JournalAppendTool, text: str, *, reason: str = "stuck", ts: str = _NOW) -> None:
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": reason,
+                                      "text": text if "?" in text else text + _ASK, "ts": ts})
 
 
 def test_the_same_issue_is_said_once(tmp_path: Path) -> None:
@@ -42,11 +48,12 @@ def test_the_same_issue_is_said_once(tmp_path: Path) -> None:
 def test_a_different_issue_still_gets_through(tmp_path: Path) -> None:
     tool = JournalAppendTool(workspace_root=tmp_path)
     _say(tool, _SAME[0])
-    _say(tool, "Нужен ключ к сайту заказчика: без него не могу проверить выгрузку, пробовал web_fetch — 403.")
+    _say(tool, "Нужен ключ к сайту заказчика: без него не могу проверить выгрузку, пробовал web_fetch — 403. "
+               "Дашь ключ?", reason="wall")
 
 
 def test_the_same_issue_can_be_said_again_the_next_day(tmp_path: Path) -> None:
     tool = JournalAppendTool(workspace_root=tmp_path)
     old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=30)).isoformat()
-    tool.run(path=VOICE_PATH, record={"author": "agent", "text": _SAME[0], "ts": old})
+    _say(tool, _SAME[0], ts=old)
     _say(tool, _SAME[1])
