@@ -12,7 +12,7 @@
   повторяющийся кусок работы (подзадача, а не вся задача);
 * изменчивое (пути, запросы, числа) заменяется переменными в фигурных скобках;
 * шаблон — описание плюс шаги, у шага — зачем он и каким инструментом;
-* группы — как «сайт» в AWM; у нас это род работы (core/memory_policy.work_kinds),
+* группы — как «сайт» в AWM; у нас это род работы (core/work_kinds.work_kinds),
   и в подсказку идут шаблоны рода текущего вопроса.
 
 Ограничения из той же статьи, которые надо помнить: жёсткая цепочка шагов
@@ -30,12 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from core.ids import new_id
-from core.memory_policy import work_kinds
 from core.state_integrity import (
     read_state_jsonl_unlocked,
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
+from core.work_kinds import work_kinds
 
 FILE_NAME = "workflow_memory.jsonl"
 #: Сколько опытов группы показывать модели: больше — дороже и не лучше.

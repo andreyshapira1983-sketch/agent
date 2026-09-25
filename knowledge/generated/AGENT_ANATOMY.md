@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 269 modules across 12 groups._
+_Total: 280 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -26,6 +26,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | `core/workspace_reference` | Does this text name something that exists in the workspace? |
 | `core/file_request_intent` | What kind of file request is this question? |
 | `core/answer_format` | Как ответ выглядит: контракт вывода, человеческая печать, цитаты. |
+| `core/tool_output_render` | Как вывод инструмента выглядит для модели: текст, на который она опирается. |
 | `core/warning_words` | Предупреждения проверки — человеческими словами у самого утверждения. |
 | `core/lang_match` | Language-aware term matching for question routing. |
 | `core/output_policy` | Ranker-to-output policy. |
@@ -87,11 +88,13 @@ _Planning, verification, clarification, control loop._
 | `core/causal_store` | Наблюдения переживают ход — первая перекладина причинной лестницы. |
 | `core/causal_climb` | Подъём по причинной лестнице: гипотезы, вмешательства, обобщение. |
 | `core/causal_claim_store` | Хранилище причинных утверждений выше первой ступени + выжимка уроков. |
+| `core/word_overlap` | Грубое сходство двух текстов: набор слов и доля общих (мера Жаккара). |
 | `core/causal_climb_action` | Слайс 1 органа подъёма: наблюдение → конкурирующие объяснения (MIR-096). |
 | `core/lesson_provenance` | Causal-provenance meter for lessons (read-only, no delivery organ here). |
 | `core/attribute_sieve` | Attribute-phantom sieve: attribute access is verified like call kwargs. |
 | `core/lesson_ab_experiment` | The differentiating experiment: lesson OFF vs ON, everything else equal. |
 | `core/charter_goal` | Агент выбирает следующую цель кампании сам — отталкиваясь от хартии. |
+| `core/workspace_inventory` | Опись рабочего места для выбора цели: что лежит на диске и какие руки открыты. |
 | `core/placeholder_text` | Шаблон там, где должен стоять адрес или содержимое. |
 | `core/planner_prompt` | The planner's system prompt (§3 Cognitive Core: Planning). |
 | `core/plan_parsing` | Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning). |
@@ -159,11 +162,13 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | ------ | ------- |
 | `core/memory` | Working Memory (§4 Memory & Knowledge Governance — short-term, session-scoped). |
 | `core/persistent_memory` | Persistent Memory Record store (§4 — long-term, JSONL on disk). |
+| `core/memory_door` | Дверь записи в постоянную память — дверь самого агента (его устройство, его отказы). |
 | `core/smart_memory` | Episodic, procedural and consolidation memory for autonomous operation. |
 | `core/workflow_memory` | Шаблоны работы по Agent Workflow Memory (Wang et al., arXiv 2409.07429). |
 | `core/failure_cards` | Карточки прошлых ошибок: «эта ошибка уже была — вот что тогда помогло». |
 | `core/smart_memory_helpers` | Helpers extracted verbatim from ``core/smart_memory.py`` by the incremental splitter. |
 | `core/memory_policy` | Memory Write Policy + Memory Retrieval Policy (§4 + §12.4). |
+| `core/work_kinds` | Род работы: чем человек сейчас занят, а не какими словами он это назвал. |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
 | `core/bilingual_terms` | Russian question, English record — one domain vocabulary between them. |
 | `core/topic_tokens` | Из текста — тема, и вес темы: насколько слово вообще что-то разрешает. |
@@ -172,6 +177,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/knowledge_use_policy` | Contextual memory-use policy. |
 | `core/knowledge_pipeline` | Knowledge pipeline integration. |
 | `core/learned_conclusion` | Что ход ВЫЯСНИЛ — в долговременную память, а не что он прочитал по пути. |
+| `core/self_knowledge` | Знание о себе и предметная задача: что из памяти НЕ подмешивать при чтении. |
 | `core/memory_consolidation` | Сверка нового вывода с памятью ПЕРЕД записью — фаза обновления Mem0. |
 | `core/memory_embeddings` | Поиск по смыслу для долговременной памяти: multilingual-e5-large-instruct. |
 | `core/cache_freshness` | Можно ли отдать прошлый результат шага вместо нового вызова. |
@@ -188,6 +194,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/source_registry_store` | Persistent store for SourceRegistry. |
 | `core/source_library` | Curated online source library for controlled web learning. |
 | `core/source_ranker` | MVP-14.3 — Source Ranker / Evidence Trust Layer. |
+| `core/unit_score` | Оценка в долях единицы: доверие к источнику, уверенность в утверждении. |
 | `core/read_sources_registry` | Прочитанное в работе становится источником, а не только конспектом. |
 | `core/source_connectors` | Source Connector Registry. |
 
@@ -234,6 +241,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/goal_content_judge` | Судья цели читает ПРОДУКТ, а не только находит его на диске. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
+| `core/record_fields` | Строгий разбор полей сохранённых записей: UTC-отметки и булевы флаги. |
 | `core/task_lifecycle` | One place that decides what a finished run does to its queue row (MIR-039). |
 | `core/checkpoint` | §3.5 Checkpoint / Resume — durable mid-run state. |
 | `core/circuit_breaker` | Circuit breaker for bounded autonomous runtime runs. |
@@ -306,7 +314,9 @@ _Reflection-driven repair, self-build, value gating._
 | `core/anatomy_sync` | Keeping the anatomy map and its group table in step with a proposal. |
 | `core/self_build_supervisor` | Lightweight, read-only self-build supervisor cycle. |
 | `core/self_build_memory` | Record self-build / self-apply attempt outcomes into episodic memory. |
+| `core/self_improvement_signals` | Сигналы неудач самоулучшения: откуда они берутся и куда уходят. |
 | `core/self_build_rules` | Hard rules learned from self-build rollbacks. |
+| `core/self_build_lessons` | Уроки самоправки с происхождением: что сломалось, что сделали, чем проверено. |
 | `core/veto_cause` | Was a self-build veto a verdict on the target, or our own pipeline breaking? |
 | `core/builder_reply_diagnosis` | Say what was wrong with a builder reply, in words rather than in silence. |
 | `core/self_task_producer` | Stage A: propose a grounded coding task plus its FAILING acceptance test, and drop exactly one ``self_build_task.approve`` item for a human. |
@@ -364,6 +374,7 @@ _Core data models and the LLM client wrapper._
 | ------ | ------- |
 | `core/models` | Core data models for the agent (§12.1 of the architecture). |
 | `core/llm` | Thin LLM client wrapper. |
+| `core/reasoning_roster` | Реестр моделей, которые тратят бюджет вывода на рассуждение («молчавших»). |
 
 ## Who judges an answer, and in what order
 

@@ -20,6 +20,7 @@ from core.source_registry import (
 )
 from core.source_registry_store import SourceRegistryStore
 from core.truth_hype_filter import evaluate as evaluate_truth_hype
+from core.unit_score import clamp_unit as _bounded
 
 KnowledgeDecision = Literal["save", "reject"]
 
@@ -1127,14 +1128,6 @@ def _distinct_values(values: Iterable[str]) -> list[str]:
         if not any(_values_equivalent(value, rep) for rep in reps):
             reps.append(value)
     return reps
-
-
-def _bounded(value: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = 0.0
-    return max(0.0, min(1.0, number))
 
 
 def _claim_id() -> str:
