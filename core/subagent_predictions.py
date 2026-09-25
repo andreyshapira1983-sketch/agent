@@ -88,3 +88,35 @@ def tally(workspace: Path | str) -> dict[str, Any]:
         "missed_by_role": dict(Counter(str(r.get("role") or "") for r in missed).most_common(5)),
         "usd": round(sum(float(r.get("usd") or 0) for r in rows), 4),
     }
+
+
+# ── приём шага плана (перенесено из core/step_sanitizer.py 2026-09-25: файл
+#    упёрся в потолок размера, а эти правила — про помощника, не про разбор) ──
+
+def expect_sources_arg(args: dict[str, Any]) -> dict[str, int]:
+    """Проверяемое число источников из шага плана — или ничего.
+
+    Не число — не ошибка: сверка возьмёт первое число из `expect` или назовёт
+    предсказание непроверяемым.
+    """
+    sources = args.get("expect_sources")
+    if isinstance(sources, int) and not isinstance(sources, bool) and 0 <= sources <= 20:
+        return {"expect_sources": sources}
+    return {}
+
+
+def subagent_reason(args: dict[str, Any], idx: int, warnings: list[str]) -> tuple[str, str] | None:
+    """Зачем помощник и что он вернёт — или None (шаг отброшен).
+
+    Правило оператора 2026-09-25: создавать помощника можно, но письменно —
+    «зачем помощник, а не прямой вызов» и проверяемое «что вернёт». Ночь 24.09:
+    37 помощников в трёх ходах поиска вакансий дали 0–1 объявление.
+    """
+    why, expect = args.get("why"), args.get("expect")
+    if isinstance(why, str) and why.strip() and isinstance(expect, str) and expect.strip():
+        return why.strip()[:400], expect.strip()[:400]
+    warnings.append(
+        f"step[{idx}]: spawn_subagent requires 'why' (why a sub-agent and not a direct "
+        "tool call) and 'expect' (what exactly it will return), dropped"
+    )
+    return None
