@@ -1284,7 +1284,7 @@ def sanitize_step(
             "context": context,
             "contract_name": contract_name,
             "why": reason[0],
-            "expect": reason[1],
+            "expect": reason[1], **_expect_sources(args),
         }
         if cleaned_tools is not None:
             clean_args["allowed_tools"] = cleaned_tools
@@ -1301,6 +1301,18 @@ def sanitize_step(
 
     warnings.append(f"step[{idx}]: tool '{tool_name}' has no sanitiser, dropped")
     return None
+
+
+def _expect_sources(args: dict[str, Any]) -> dict[str, int]:
+    """Проверяемое число источников (core/subagent_predictions.py) или ничего.
+
+    Не число — не ошибка: сверка возьмёт первое число из `expect` или назовёт
+    предсказание непроверяемым.
+    """
+    sources = args.get("expect_sources")
+    if isinstance(sources, int) and not isinstance(sources, bool) and 0 <= sources <= 20:
+        return {"expect_sources": sources}
+    return {}
 
 
 def _subagent_reason(args: dict[str, Any], idx: int, warnings: list[str]) -> tuple[str, str] | None:

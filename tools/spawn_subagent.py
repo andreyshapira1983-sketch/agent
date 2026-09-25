@@ -96,6 +96,7 @@ class SpawnSubagentTool(Tool):
         contract_name: str | None = None,
         why: str = "",
         expect: str = "",
+        expect_sources: int | None = None,
     ) -> str:
         """Execute a sub-agent and return its answer as a string.
 
@@ -124,6 +125,9 @@ class SpawnSubagentTool(Tool):
         name = self._resolve_contract_name(contract_name, role)
 
         # ── delegate to runner ───────────────────────────────────────
+        from datetime import datetime, timezone
+
+        started = datetime.now(timezone.utc)
         result = self._runner.run(
             contract_name=name,
             role=role,
@@ -139,7 +143,8 @@ class SpawnSubagentTool(Tool):
         from core.subagent_quarantine import quarantine_finding
 
         quarantine_finding(self.workspace_root, result)
-        self._record_prediction(name, role, objective, why, expect, result)
+        self._record_prediction(name, role, objective, why, expect, result,
+                                expect_sources=expect_sources, started=started)
 
         # The child's external evidences ride beside the text: the attempt
         # loop folds them into the parent's chain (work order 1, 2026-09-05 —
@@ -154,24 +159,33 @@ class SpawnSubagentTool(Tool):
                 + f"\n  expected       : {str(expect).strip()[:400]}")
 
     def _record_prediction(self, name: str, role: str, objective: str, why: str, expect: str,
-                           result: SubAgentRunResult) -> None:
-        """Предсказание рядом с фактом — сверяется потом, а не на слово (журнал оператора
-        «Память и под-агенты»: сильным обоснование делает проверяемое предсказание)."""
-        import json
-        from datetime import datetime, timezone
+                           result: SubAgentRunResult, *, expect_sources: int | None = None,
+                           started: Any = None) -> None:
+        """Предсказание рядом с фактом и сверка сразу (core/subagent_predictions.py).
 
-        row = {"ts": datetime.now(timezone.utc).isoformat(), "name": name, "role": role,
-               "objective": objective[:400], "why": str(why)[:400], "expect": str(expect)[:400],
-               "status": getattr(result, "status", ""),
-               "external_evidence_count": getattr(result, "external_evidence_count", 0),
-               "answer_chars": len(str(getattr(result, "answer", "") or ""))}
-        try:
-            path = self.workspace_root / "data" / "subagent_predictions.jsonl"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-        except OSError:
-            return
+        Журнал оператора «Память и под-агенты»: сильным обоснование делает
+        проверяемое предсказание, сверенное с фактом при завершении помощника.
+        """
+        from core.subagent_predictions import (
+            child_tool_calls,
+            compare,
+            predicted_sources,
+            record,
+        )
+        from core.usd_spend import usd_since
+
+        expected, how = predicted_sources(str(expect), expect_sources)
+        status = str(getattr(result, "status", "") or "")
+        sources = int(getattr(result, "external_evidence_count", 0) or 0)
+        record(self.workspace_root, {
+            "name": name, "role": role, "objective": objective[:400], "why": str(why)[:400],
+            "expect": str(expect)[:400], "expected_sources": expected, "prediction": how,
+            "status": status, "sources": sources,
+            "answer_chars": len(str(getattr(result, "answer", "") or "")),
+            "tool_calls": child_tool_calls(self.log_dir, str(getattr(result, "trace_id", ""))),
+            "usd": usd_since(self.workspace_root, started) if started is not None else None,
+            "met": compare(expected, sources, status),
+        })
 
     # ------------------------------------------------------------------
     # Validation helpers

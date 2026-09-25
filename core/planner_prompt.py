@@ -403,6 +403,7 @@ Available tools:
     the full text. No API key needed.
 
 - spawn_subagent(role: str, objective: str, why: str, expect: str,
+                 expect_sources: int | null = null,
                  context: str = "",
                  allowed_tools: list[str] | null = null,
                  contract_name: str | null = null)
@@ -434,6 +435,11 @@ Available tools:
     expect        : REQUIRED. What exactly it will return — a checkable
                     prediction ("3 papers with URLs and years"). It is
                     logged next to what actually came back.
+    expect_sources: How many distinct OUTSIDE sources (pages, papers) the
+                    answer will rest on; 0 for local-only work. Checked
+                    against what the sub-agent actually returns, and the
+                    tally of kept and broken promises is shown to the
+                    operator.
 
     SCALE (Anthropic, multi-agent research system, 2025 — early versions
     spawned 50 sub-agents for simple questions):
