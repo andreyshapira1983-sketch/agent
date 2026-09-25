@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.stuck_route import stuck_evidence, stuck_goal
+from core.stuck_route import STUCK_PREFIX, stuck_evidence, stuck_goal
 
 
 def _ledger(root: Path, goals: list[str]) -> None:
@@ -25,7 +25,7 @@ def test_a_failed_ask_is_counted_not_quoted(tmp_path: Path) -> None:
     first = stuck_goal_text(tmp_path, ["Почини свой дефект X"] * 2)
     _ledger(tmp_path, ["Почини свой дефект X"] * 2 + [first] * 2)
     goal = stuck_goal(tmp_path).goal
-    assert goal.count("Ты застрял") == 1, goal
+    assert goal.count(STUCK_PREFIX) == 1, goal
     assert "Почини свой дефект X" in goal
     assert "сама прошла впустую 2 раз" in goal
 
@@ -37,7 +37,7 @@ def test_the_real_subject_is_kept_after_many_rounds(tmp_path: Path) -> None:
         goals = goals + [stuck_goal(tmp_path).goal] * 2
     _ledger(tmp_path, goals)
     evidence = stuck_evidence(tmp_path)
-    assert all("Ты застрял" not in e for e in evidence), evidence
+    assert all(STUCK_PREFIX not in e for e in evidence), evidence
     assert any("Почини свой дефект X" in e for e in evidence), evidence
 
 
