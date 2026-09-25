@@ -8,6 +8,7 @@ from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 from core.degraded_route import NOTICE_PREFIX as _SUBSTITUTED_MODEL_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
+from core.requested_format import is_tail_line as is_requested_tail_line
 from core.unsupported_claims import EXCISION_PREFIXES as _EXCISION_PREFIXES
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
 from core.warning_words import humanize_warning_markers
@@ -393,10 +394,12 @@ def format_human_response(answer: str) -> str:
         # sections, i.e. exactly where the section walk used to drop them
         # (measured live, 2026-08-03) — so both are bucketed by their fixed
         # prefixes, independent of the current section.
+        # Заданная человеком строка ответа (core/requested_format.py) стоит там
+        # же — последней, после «Safety», где обход разделов всё выбрасывает.
         if stripped.startswith(
             (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX,
              _SUBSTITUTED_MODEL_PREFIX, *_EXCISION_PREFIXES)
-        ):
+        ) or (section == "skip" and is_requested_tail_line(stripped)):
             verification_tail_lines.append(stripped)
             continue
 

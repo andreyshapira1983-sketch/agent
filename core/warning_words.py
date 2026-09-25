@@ -39,6 +39,8 @@ _EN = {
     "no-receipt": "no tool receipt — unconfirmed",
     "unverified": "unchecked — no source",
 }
+#: Виды меток-предупреждений: кто снимает метку со строки, обязан сказать это словами.
+WARNING_KINDS: tuple[str, ...] = (*_RU, "цитата-не-подтверждает")
 _MARKER_RE = re.compile(
     r"\s*\[(topic-only|claim-figure-unverified|absence-unverifiable|claim-refuted|"
     r"улика-без-этих-слов|dialogue-supported|subagent-asserted|no-receipt|unverified)(?::([^\]]*))?\]")

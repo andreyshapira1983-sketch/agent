@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from core.completion_obligation import evaluate_completion_obligations
 from core.redaction import redact_dlp_text
 from core.request_checklist import judge_contract_checklist
+from core.requested_format import honor, llm_converter, requested_labels
 
 
 class AgentLoopRunTail:
@@ -270,6 +271,22 @@ class AgentLoopRunTail:
 
         return answer, verification, weak_chunks
 
+
+    def _honor_requested_format(
+        self, answer: str, user_question: str, draft_answer: str, synth_llm: Any,
+    ) -> str:
+        """Заданная человеком строка ответа — последней и без наших меток.
+
+        После композиции и снятия пометок, до обязательств: те читают ровно тот
+        текст, что уйдёт человеку. Почему так — в `core/requested_format.py`.
+        """
+        if not requested_labels(user_question):
+            return answer
+        llm = synth_llm if synth_llm is not None else getattr(self, "llm", None)
+        honored = honor(answer, question=user_question, draft=draft_answer or "",
+                        convert=llm_converter(llm, user_question))
+        self.log.log("requested_format", {"origins": honored.origins})
+        return honored.text
 
     def _check_completion_obligations(
         self,
