@@ -64,6 +64,32 @@ DEFAULT_MAX_BYTES = 1 * 1024 * 1024            # 1 MiB
 MAX_URL_LEN = 2048
 USER_AGENT = "AutonomousAgent/MVP-14.2 (+evidence-layer)"
 
+#: «Здесь нет такого ресурса» — наблюдение о мире, а не поломка инструмента.
+#: RFC 9110 §15.5.5: 404 — «the origin server did not find a current
+#: representation for the target resource»; §15.5.11: 410 — то же, надолго.
+#: Экзамен 2026-09-25, задача про несуществующий пакет PyPI: API ответил 404
+#: трижды, инструмент поднимал ошибку, доказательство не легло в улики, агент
+#: крутил 14 вызовов, а проверка срезала верный ответ «пакета нет» (2 из 5
+#: прогонов провалены). Прочие коды (401/403/429/5xx) — по-прежнему ошибка:
+#: они ничего не говорят о существовании.
+_NOT_FOUND_CODES = frozenset({404, 410})
+
+
+def _not_found_result(url: str, code: int, reason: str, started: float) -> dict[str, Any]:
+    text = (f"HTTP {code} {reason or 'Not Found'}: {url} — the origin server has no current "
+            f"representation of this resource (RFC 9110).")
+    return {
+        "url": url, "requested_url": url, "status_code": code, "not_found": True,
+        "content_type": "", "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "text": text, "text_truncated": False, "full_length": len(text), "bytes": 0,
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
+        "compensation_plan": {
+            "id": "noop", "actions": [{"kind": "noop", "description": "web_fetch is read-only"}],
+            "tool_name": "web_fetch", "description": "web_fetch makes no changes; no rollback needed",
+        },
+    }
+
 ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 
 ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
@@ -346,6 +372,8 @@ class WebFetchTool(Tool):
                 limit = self._read_limit_for(content_type)
                 raw = resp.read(limit + 1)
         except urllib.error.HTTPError as e:
+            if e.code in _NOT_FOUND_CODES:
+                return _not_found_result(url, e.code, str(e.reason or ""), started)
             raise ValueError(
                 f"HTTP {e.code} fetching {url!r}: {e.reason}"
             ) from None
