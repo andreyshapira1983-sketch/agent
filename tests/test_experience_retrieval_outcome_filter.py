@@ -33,6 +33,7 @@ def _fake_self(store):
         # test_a_workflow_is_a_reusable_routine_not_a_trace).
         _code_checked=lambda block, source: block,
         _workflow_block=lambda question: "",
+        _procedures_unless_workflow=lambda question: ([], {}),
     )
 
 
