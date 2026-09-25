@@ -127,6 +127,27 @@ WIRING = (
      "(FILE: + SEARCH/REPLACE or LINES blocks) and tried by `patch_check` on a copy of the repo."),
 )
 
+#: Кто судит ответ и в каком порядке (сведение слоёв, слово оператора 25.09:
+#: «кто судит ответы» — раздел карты, не новый документ). Порядок — порядок
+#: хода; «how» — код или модель: судья-модель той же семьи, что и работник,
+#: завышает своё (arXiv 2404.13076), поэтому итоговое «да» уходит Клоду.
+#: Каждый модуль сверяется с core/ тестом `test_the_map_says_who_judges`.
+JUDGES = (
+    ("synthesis", "draft_refutation", "code", "a draft that contradicts its own evidence is rewritten once"),
+    ("verify", "verifier_core", "code + model", "each claim needs a matching cited source; a model checks the source entails it"),
+    ("verify", "relevance_judge", "model", "does the answer address what was asked (per claim: yes / no / idk)"),
+    ("compose", "answer_contradiction", "code", "one claim stated both as a fact and as unverified"),
+    ("compose", "unsupported_claims", "code", "claims whose citations do not match this turn's sources are cut"),
+    ("compose", "low_evidence_policy", "code", "an answer with too little verified support is shortened, guesses hidden"),
+    ("compose", "output_policy", "code", "the source ranking's warnings reach the answer"),
+    ("after compose", "requested_format", "code (+ model to rewrite)", "the line the user prescribed ends the answer, clean"),
+    ("after compose", "completion_obligation", "code", "an obligation the turn incurred and left unmet"),
+    ("after compose", "request_checklist", "model", "each requirement of the request as a yes/no question (TICK)"),
+    ("goal closure", "campaign_verdict", "code", "the goal's criterion observed in the world, traces newer than the run"),
+    ("goal closure", "goal_content_judge", "model", "what the product SAYS meets the criterion; every yes needs a quote"),
+    ("out of band", "judge_queue", "Claude, outside the run", "every 'goal met' is provisional until Claude rules"),
+)
+
 
 def _tools_rows() -> list[str]:
     tools_dir = os.path.join(os.path.dirname(CORE), "tools")
@@ -214,6 +235,15 @@ def build_document(
             out.append(f"| `core/{m}` | {purpose(m)} |")
         out.append("")
 
+    out.append("## Who judges an answer, and in what order")
+    out.append("")
+    out.append("| Stage | Module | How | What it judges |")
+    out.append("| ----- | ------ | --- | -------------- |")
+    out.extend(f"| {stage} | `core/{mod}` | {how} | {what} |" for stage, mod, how, what in JUDGES)
+    out.append("")
+    out.append("Exams judge from outside the agent: the nightly anchor exam and the work exam "
+               "check files and tests, not the agent's words.")
+    out.append("")
     out.append("## Where things are wired (outside core/)")
     out.append("")
     out.extend(f"- {line}" for line in WIRING)
