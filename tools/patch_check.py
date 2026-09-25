@@ -95,6 +95,24 @@ _UNIFIED_DIFF = re.compile(r"^(?:--- |\+\+\+ |@@ -\d)", re.MULTILINE)
 _VALID_MARKER = re.compile(r"^(?:<{7} SEARCH|={7}|>{7} REPLACE|<{7} LINES \d+-\d+)$")
 
 
+def after_lines_hint(raw: str, stray: str) -> str:
+    """Текст сразу за закрытым блоком LINES — это новый текст, положенный не туда.
+
+    loop_journal 24.09: агент клал в LINES старые строки, закрывал блок и писал
+    новые ПОСЛЕ «>>>>>>> REPLACE»; отказ «text outside blocks» молчал почему —
+    подсказка видела только выброшенный кусок, а не блок перед ним.
+    """
+    at = raw.find(stray.strip()[:80]) if stray.strip() else -1
+    before = raw[:at].rstrip() if at > 0 else ""
+    if not before.endswith("REPLACE"):
+        return ""
+    opened = list(_OPENING.finditer(before))
+    if not opened or opened[-1].group(1) != "LINES":
+        return ""
+    return ("новый текст стоит ПОСЛЕ '>>>>>>> REPLACE': в блоке LINES a-b между маркерами пишется "
+            "НОВЫЙ текст строк a-b (или «старый / ======= / новый») — перенеси его внутрь блока")
+
+
 def marker_hint(stray: str) -> str:
     """Чем выброшенный текст отличается от правильного блока, или пусто.
 
@@ -378,7 +396,7 @@ class PatchCheckTool(Tool):
         if stray:
             return {"applied": False, "verdict": "red", "why": "text outside blocks",
                     "errors": [f"text outside any block is ignored — put it inside a block: {t!r}"
-                               + (f" | подсказка: {h}" if (h := marker_hint(t)) else "")
+                               + (f" | подсказка: {h}" if (h := after_lines_hint(raw, t) or marker_hint(t)) else "")
                                for t in stray]}
         if not blocks:
             return {"applied": False, "verdict": "red", "why": "no blocks",
