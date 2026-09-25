@@ -124,7 +124,7 @@ class AgentLoopMemoryRead:
                 },
             )
             return ""
-        from core.learned_conclusion import is_self_knowledge, self_knowledge_off_topic
+        from core.self_knowledge import is_self_knowledge, self_knowledge_off_topic
 
         allowed = list(use_report.allowed)
         if self_knowledge_off_topic(question):  # предметной задаче — предмет, не разборы себя
