@@ -24,7 +24,12 @@ OUTBOX_RELPATH = "data/chat_outbox.jsonl"
 #: Начало цели «спроси». Её собственный провал считается, но не цитируется:
 #: 24.09 каждый провал вкладывал её текст в следующую — «Ты застрял: цель «Ты
 #: застрял: цель «Почини…»»», а предмет уходил за обрезку в 120 символов.
-STUCK_PREFIX = "Ты застрял:"
+#: 2026-09-25: без слова «застрял». Работа Anthropic (arXiv 2604.07729): внутреннее
+#: «отчаяние» модели включают провалы и нехватка бюджета, и оно причинно ведёт к
+#: подгонке результата; строка «ты застрял» в подсказке — тот же нажим текстом.
+#: Прежняя приставка остаётся опознаваемой в старых строках журнала.
+STUCK_PREFIX = "Цель не продвигается:"
+_STUCK_PREFIXES = (STUCK_PREFIX, "Ты застрял:")
 _UNPRODUCTIVE = frozenset({"empty", "failed", "idle", "blocked"})
 MAX_EVIDENCE = 3
 
@@ -51,7 +56,7 @@ def stuck_evidence(root: Path | str) -> list[str]:
     for row in ledger:
         if str(row.get("result")) in _UNPRODUCTIVE:
             goal = str(row.get("goal") or "")
-            if goal.startswith(STUCK_PREFIX):
+            if goal.startswith(_STUCK_PREFIXES):
                 asks_failed += 1
                 continue
             goals[goal[:120]] = goals.get(goal[:120], 0) + 1
@@ -78,7 +83,7 @@ def stuck_goal(root: Path | str) -> Any:
     if not evidence:
         return None
     facts = "; ".join(evidence)
-    goal = (f"Ты застрял: {facts}. Сначала поищи в интернете первоисточник по тому, что не выходит "
+    goal = (f"{STUCK_PREFIX} {facts}. Сначала поищи в интернете первоисточник по тому, что не выходит "
             "(web_search и web_fetch), и назови найденное. Если первоисточник не решает — напиши "
             "человеку сам: journal_append path='data/chat_outbox.jsonl', "
             "record={'author': 'agent', 'reason': 'stuck', 'text': '<в чём уткнулся, что уже "

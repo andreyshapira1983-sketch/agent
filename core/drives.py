@@ -384,8 +384,11 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
                 drives[name]["value"] *= factor
                 drives[name]["why"] += f"; выходит: {sum(done)} из {len(done)}"
 
+    # Слово оператора 2026-09-25: источник есть (Agent Market, core/market_worker.py),
+    # но заказы берутся только его «да» на каждый (этап 1) и не раньше, чем агент
+    # готов, — драйв, тянущий к заработку сам, этому противоречил бы.
     drives["economic_opportunity"] = {"value": 0.0,
-                                      "why": "источник оплачиваемой работы не подключён — честный ноль"}
+                                      "why": "площадка подключена, но заказ — только по слову оператора; ноль по его решению"}
     return drives
 
 
