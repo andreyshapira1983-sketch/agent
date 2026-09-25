@@ -1,9 +1,6 @@
 """Task Complexity Assessment — automatic model tier selection.
 
-Model names are NEVER hardcoded here. Actual model selection is in
-core/model_catalog.py which queries the provider's own API
-(anthropic.models.list / openai.models.list) and classifies results into
-tiers by naming pattern.
+No model names here: core/model_catalog.py maps tiers to the provider's actual models.
 """
 from __future__ import annotations
 
@@ -18,8 +15,6 @@ class ComplexityTier(StrEnum):
     DEEP     = "deep"
 
 
-
-
 # ── role-level overrides ──────────────────────────────────────────────────────
 
 # Model roles that are always LIGHT regardless of task text.
@@ -27,15 +22,8 @@ _ALWAYS_LIGHT_ROLES: frozenset[str] = frozenset({
     "memory_summary",  # summaries never need a frontier model
 })
 
-# Task roles (as produced by core.role_router.RoleRouter) for which LIGHT is
-# never an acceptable tier, however the request happens to be phrased.
-#
-# The router already knows the request is a repair or a coding task before the
-# model is chosen — that signal used to be computed and then dropped, so a
-# short "fix this" could be answered by the cheapest model. These two roles are
-# the ones where a weak plan changes source code, so they are pinned to at
-# least STANDARD. DEEP is still reachable: the DEEP check runs first and is
-# unaffected. Every other role keeps the normal text-driven behaviour.
+# Task roles (from core.role_router.RoleRouter) never allowed LIGHT, however phrased:
+# a weak plan here changes source code. DEEP stays reachable.
 _NEVER_LIGHT_TASK_ROLES: frozenset[str] = frozenset({
     "repair",      # root-cause analysis, regression hunting, self-repair
     "programmer",  # writes or edits code
@@ -44,9 +32,8 @@ _NEVER_LIGHT_TASK_ROLES: frozenset[str] = frozenset({
 
 # ── signals ───────────────────────────────────────────────────────────────────
 
-# Any of these substrings in the task text → DEEP tier.
-# Multi-lingual (RU + EN). Substrings, not whole words — so "архитектур"
-# matches "архитектура", "архитектуры", "архитектурный", etc.
+# Any of these substrings → DEEP tier. Substrings, not whole words, so Russian
+# stems ("архитектур") match every form.
 _DEEP_SIGNALS: frozenset[str] = frozenset({
     # Architecture & system design
     "архитектур",   "architecture",   "system design",  "design system",
@@ -69,7 +56,7 @@ _DEEP_SIGNALS: frozenset[str] = frozenset({
     "полную документацию", "full documentation", "complete documentation",
 })
 
-# Any of these substrings + short text → LIGHT tier.
+# Any of these (word-boundary match) + short text → LIGHT tier.
 _LIGHT_SIGNALS: frozenset[str] = frozenset({
     # Greetings
     "привет",   "hello",    "hi",     "hey",    "добрый",
@@ -90,33 +77,17 @@ _LIGHT_SIGNALS: frozenset[str] = frozenset({
     "версия",   "version",   "changelog",
 })
 
-# Base length unit for the LIGHT gate. LIGHT is chosen only when a LIGHT
-# signal is present AND the text is shorter than _SHORT_TEXT_THRESHOLD * 4
-# (~180 chars); short text alone never forces LIGHT. See assess_complexity.
+# LIGHT needs a LIGHT signal AND text shorter than this * 4 (~180 chars);
+# short text alone never forces LIGHT.
 _SHORT_TEXT_THRESHOLD = 45
 
 
 def _compile_light_signal(signal: str) -> re.Pattern[str]:
     """Compile one LIGHT signal into a boundary-aware pattern.
 
-    LIGHT signals must NOT be matched as bare substrings. Doing so let short
-    English entries fire from inside unrelated words and quietly demoted real
-    engineering work to the cheapest model — ``"hi"`` matched ``"this"``,
-    ``"hey"`` matched ``"they"``, ``"version"`` matched ``"conversion"``.
-
-    Left edge
-        Always a word boundary. A signal may never start in the middle of a
-        longer word.
-
-    Right edge
-        A word boundary for signals ending in an ASCII letter or digit: the
-        English entries are written as whole words and gain nothing from
-        prefix matching. Signals ending in any other character (the Cyrillic
-        entries) keep prefix semantics on purpose, because they are written as
-        stems — ``"готов"`` must still match ``"готова"`` and ``"готовность"``.
-
-    Both edges only ever make the match *narrower*, so the failure direction is
-    LIGHT → STANDARD: a slightly more expensive model, never a weaker one.
+    Bare substrings let ``"hi"`` match ``"this"``. The left edge is always a word
+    boundary; the right edge only for signals ending in an ASCII letter or digit, so
+    Cyrillic stems keep prefix matching (``"готов"`` → ``"готовность"``).
     """
     pattern = r"\b" + re.escape(signal)
     if signal and (signal[-1].isascii() and signal[-1].isalnum()):
@@ -124,17 +95,14 @@ def _compile_light_signal(signal: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
-# Compiled once at import; ordering is irrelevant because any single match
-# decides the tier. Sorted purely so diagnostics are deterministic.
+# Sorted only so diagnostics are deterministic; any single match decides.
 _LIGHT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (signal, _compile_light_signal(signal)) for signal in sorted(_LIGHT_SIGNALS)
 )
 
 # ── вопрос о самом агенте ─────────────────────────────────────────────────────
-# Два условия, оба обязательны: агента назвали — обращением (ты / тебя /
-# твой / you / your) или возвратным местоимением (себя / свои / yourself) —
-# И спрашивают именно про НЕГО: природа, желания, устройство, ошибки.
-# Одного обращения мало: «покажи, что ты нашёл в файле» — про файл, не про него.
+# Нужны оба условия: агента назвали (ты / себя / you) И спрашивают про него самого;
+# «покажи, что ты нашёл в файле» — про файл, не про него.
 _AGENT_NAMED_RE = re.compile(
     r"\b(?:ты|тебе|тебя|тобой|твой|твоя|твои|твоё|твое|своих|свои|себе|себя|"
     r"you|your|yourself)\b"
@@ -149,20 +117,12 @@ _AGENT_SUBJECT_RE = re.compile(
 
 
 def asks_about_the_agent(normalized: str) -> bool:
-    """Спрашивают ли у агента про него самого?
-
-    Диагностический помощник: делает решение читаемым в тестах и журналах.
-    Вход — уже приведённый к нижнему регистру текст.
-    """
+    """Спрашивают ли у агента про него самого? Вход — текст в нижнем регистре."""
     return bool(_AGENT_NAMED_RE.search(normalized) and _AGENT_SUBJECT_RE.search(normalized))
 
 
 def matched_light_signals(text: str) -> list[str]:
-    """Return every LIGHT signal that matches ``text`` under boundary rules.
-
-    Diagnostic helper: makes routing decisions explainable in tests and logs
-    without re-implementing the matching rule at the call site.
-    """
+    """Return every LIGHT signal that matches ``text`` under boundary rules (diagnostics)."""
     if not isinstance(text, str):
         return []
     normalized = text.strip().casefold()
@@ -179,34 +139,12 @@ def assess_complexity(
     role: str = "planner",
     task_role: str | None = None,
 ) -> ComplexityTier:
-    """Rule-based complexity assessment. No LLM call. O(n) in signal count.
+    """Rule-based complexity tier, no LLM call.
 
-    Parameters
-    ──────────
-    role
-        The *model* role (planner, synthesizer, memory_summary, …).
-    task_role
-        The *task* role decided by :class:`core.role_router.RoleRouter`
-        (repair, programmer, researcher, …), when the caller knows it. Roles
-        in ``_NEVER_LIGHT_TASK_ROLES`` can never be classified LIGHT.
-
-    Priority order
-    ──────────────
-    1. Role-level overrides  (e.g. memory_summary → always LIGHT)
-    2. Empty / non-string    → STANDARD
-    3. DEEP signals          (substring match in normalized text) → DEEP
-    4. LIGHT signals         (word-boundary match, see _compile_light_signal)
-       AND text shorter than ``_SHORT_TEXT_THRESHOLD * 4`` (~180 chars)
-       AND ``task_role`` not in ``_NEVER_LIGHT_TASK_ROLES`` → LIGHT
-    5. Default               → STANDARD
-
-    There is intentionally NO "any very short text → LIGHT" rule: short text
-    with no recognized LIGHT signal still falls through to STANDARD (the
-    conservative default). See ``test_very_short_text_no_signals_is_standard``.
-
-    DEEP signals remain plain substring matches. That direction is fail-safe —
-    a false positive buys a stronger model. Only the LIGHT gate, where a false
-    positive buys a *weaker* one, requires word boundaries.
+    *role* is the model role; *task_role* is the RoleRouter task role, if known.
+    Order: role override → DEEP (substring) → LIGHT (signal + short text, task role
+    allowed, not about the agent) → STANDARD. DEEP is fail-safe as a plain substring
+    match: a false positive only buys a stronger model.
     """
     if role in _ALWAYS_LIGHT_ROLES:
         return ComplexityTier.LIGHT
@@ -219,20 +157,14 @@ def assess_complexity(
 
     normalized = stripped.casefold()
 
-    # DEEP check first — highest priority
     for signal in _DEEP_SIGNALS:
         if signal in normalized:
             return ComplexityTier.DEEP
 
-    # LIGHT check — only when the text is short enough AND the task role
-    # tolerates a cheap model at all.
     if isinstance(task_role, str) and task_role in _NEVER_LIGHT_TASK_ROLES:
         return ComplexityTier.STANDARD
 
-    # Вопрос о самом агенте не бывает лёгким, даже если он короткий и несёт
-    # бытовой сигнал. Измерено на живом прогоне (см.
-    # tests/test_introspection_never_light.py): «скажи что ты думаешь о себе»
-    # уходило на нано-модель только потому, что уложилось в лимит длины.
+    # Вопрос о самом агенте не бывает лёгким, даже короткий и с бытовым сигналом.
     if asks_about_the_agent(normalized):
         return ComplexityTier.STANDARD
 
@@ -255,13 +187,8 @@ def tier_label(tier: ComplexityTier) -> str:
 
 
 # ── live grounding signals ────────────────────────────────────────────────────
-#
-# When a task mentions time-sensitive keywords the agent must NOT rely on
-# its training-data snapshot. Instead the planner should add a web_search
-# step to retrieve fresh information before synthesising the answer.
-#
-# False positives are cheap (one extra search). False negatives produce
-# stale / wrong answers. So the signal list is deliberately broad.
+# Time-sensitive keywords → the planner adds a web_search step. Broad on purpose:
+# a false positive costs one search, a false negative a stale answer.
 
 _LIVE_GROUNDING_SIGNALS: frozenset[str] = frozenset({
     # ── English temporal / recency ──
@@ -300,26 +227,10 @@ def needs_live_grounding(text: str) -> bool:
 
 
 # ── cheap-path planner gate ───────────────────────────────────────────────────
-#
-# Trivial operator chatter (config-flag echoes, greetings, one-line "what is X"
-# questions) never needs an external tool. Yet the loop still spends a full
-# planner LLM call (~7k input tokens in practice) only to have the planner
-# answer "no tools needed" and return an empty plan. ``can_skip_planner``
-# lets the loop bypass that wasted call and synthesise the answer directly.
-#
-# Safety contract
-# ---------------
-# * Pure function — no I/O, no LLM.
-# * POSITIVE-signal gate: returns True only when a trivial signal is present
-#   (config-flag pattern or a LIGHT-complexity signal). When in doubt it
-#   returns False so the planner still runs — a missed skip only costs one
-#   extra planner call, whereas a wrong skip could drop a needed tool step.
-# * Any hint that a tool might be required (file hint, tool keyword, live
-#   grounding, DEEP task) forces False.
+# A missed skip costs one planner call; a wrong skip could drop a needed tool step.
+# So every gate below errs toward running the planner.
 
-# Substrings that suggest the request may need a tool (read a file, search the
-# web, run a command, mutate state, …). Matching is deliberately broad: a false
-# positive here just means the planner runs as before (safe), never a wrong skip.
+# Substrings hinting a tool may be needed; broad on purpose.
 _TOOL_SIGNALS: frozenset[str] = frozenset({
     # EN — file / path / io
     "read", "file", "path", "directory", "folder", "grep", "cat ",
@@ -347,10 +258,8 @@ _TOOL_SIGNALS: frozenset[str] = frozenset({
 # ``auto_model_update=false`` — a single ``key=value`` token, no free text.
 _CONFIG_FLAG_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*=\s*[^\s=]+$")
 
-# Whole-word greeting / thanks tokens. Matched on tokenized words (never as raw
-# substrings) so short tokens like "hi" can't match inside "this"/"which". A
-# message counts as a pure greeting only when EVERY word is in this set, so
-# "напиши привет" (has a tool verb) or "hi, read the file" never qualify.
+# Whole-word greeting/thanks tokens; a message qualifies only if EVERY word is here,
+# so "hi, read the file" never does.
 _GREETING_WORDS: frozenset[str] = frozenset({
     # EN
     "hello", "hi", "hey", "good", "morning", "evening", "afternoon",
@@ -358,11 +267,7 @@ _GREETING_WORDS: frozenset[str] = frozenset({
     # RU
     "привет", "здравствуй", "здравствуйте", "хай", "добрый", "доброе",
     "день", "вечер", "утро", "спасибо", "благодарю",
-    # Social FILLER only (MIR-020): «Привет, как дела?» and "hello there" each
-    # spent a full planner call to receive an empty plan, because one filler
-    # word broke the all-words rule. Content words never belong here — a
-    # missed skip costs one planner call, a wrong skip could drop a needed
-    # tool step, so the asymmetry stays conservative.
+    # Social filler only, never content words (MIR-020).
     # EN filler
     "how", "are", "doing", "there", "all", "everyone", "night",
     "bye", "goodbye",
@@ -378,11 +283,9 @@ _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def _is_pure_greeting(normalized: str) -> bool:
-    """True when *normalized* is a short message of only greeting/thanks words.
+    """True when *normalized* is at most 5 words, all from _GREETING_WORDS.
 
-    Cap 5, not 4: «привет, как у тебя дела» is five words of pure filler and
-    was paying a planner call (MIR-020). Content words are outside the
-    vocabulary, so longer real questions still fail the all-words rule.
+    Cap 5 fits «привет, как у тебя дела» (MIR-020).
     """
     words = _WORD_RE.findall(normalized)
     if not words or len(words) > 5:
@@ -393,34 +296,16 @@ def _is_pure_greeting(normalized: str) -> bool:
 def tool_signal_present(normalized: str) -> bool:
     """В реплике (уже в нижнем регистре) есть слово-признак инструмента.
 
-    Один список на оба коротких пути: словарный (`can_skip_planner`) и
-    классификатор болтовни (`core/social_turn.py`).
+    Общий список для `can_skip_planner` и `core/social_turn.py`.
     """
     return any(sig in normalized for sig in _TOOL_SIGNALS)
 
 
 def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
-    """Return True when the planner LLM call can be safely skipped.
+    """Return True when the planner LLM call can be safely skipped; never raises.
 
-    The loop uses this to route trivial, no-tool operator input straight to
-    the synthesizer (one LLM call) instead of paying for a planner call that
-    would only return an empty plan.
-
-    Returns True only when ALL hold:
-    * no explicit file hint,
-    * text is a short string (``<= _CHEAP_PATH_MAX_CHARS``),
-    * no tool-signal keyword is present,
-    * the task does not need live/fresh web grounding,
-    * the task is not DEEP complexity, AND
-    * a positive trivial signal is present — either a ``key=value`` config
-      flag echo or a pure greeting / thanks message.
-
-    The positive signal is intentionally narrow: ambiguous "what is X" / "list"
-    / "define" phrasing can legitimately require a tool (web_search, file read),
-    so those are NOT skipped — a missed skip only costs one extra planner call,
-    whereas a wrong skip could drop a needed tool step.
-
-    Pure and deterministic; never raises.
+    Only short text with no file hint, tool signal, live-grounding need or DEEP tier,
+    AND a ``key=value`` flag echo or pure greeting; "what is X" may need a tool.
     """
     if file_hint:
         return False
@@ -432,7 +317,6 @@ def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
 
     normalized = stripped.casefold()
 
-    # Disqualifiers — any hint a tool may be needed forces the planner to run.
     if tool_signal_present(normalized):
         return False
     if needs_live_grounding(stripped):
@@ -440,7 +324,6 @@ def can_skip_planner(text: str, *, file_hint: str | None = None) -> bool:
     if assess_complexity(stripped) is ComplexityTier.DEEP:
         return False
 
-    # Positive trivial signal required.
     if _CONFIG_FLAG_RE.match(stripped):
         return True
     return _is_pure_greeting(normalized)
