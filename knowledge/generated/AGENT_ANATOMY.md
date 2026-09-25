@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 251 modules across 12 groups._
+_Total: 252 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -105,6 +105,7 @@ _Planning, verification, clarification, control loop._
 | `core/verifier_utils` | Verifier text utilities: chunk splitting, citation parsing and matching, and statistical-claim detection. |
 | `core/verifier_absence` | Certifying a claim of ABSENCE — the half of verification a citation cannot do. |
 | `core/claim_arithmetic` | Deterministic evaluation of arithmetic claims against a key=value excerpt. |
+| `core/entailment_scope` | Какие утверждения со ссылкой сверять по смыслу моделью (MIR-060). |
 | `core/replan` | MVP-12 — Re-planning policy: structured failure types + retry budgets. |
 | `core/reflection` | Reflection engine — self-improvement feedback loop. |
 | `core/clarification_gate` | Clarification Gate — режим переспроса (ask, don't build). |

@@ -162,20 +162,56 @@ class _RefusesEverything:
         return "NO"
 
 
-@pytest.mark.xfail(strict=True, reason=_MIR_060 + " (resolution short-circuits evaluation) "
-                   "[until: 2026-09-30 — перемерь; чини или пере-датируй явным коммитом]")
-def test_the_semantic_check_is_consulted_for_a_resolved_citation():
-    """`_find_semantic_support` is reachable only when nothing matched.
+def test_a_derived_claim_the_arithmetic_cannot_decide_goes_to_the_model():
+    """Operator decision 2026-09-25, the middle path of direction (a).
 
-    So for exactly the claims that need evaluating — the ones that DID cite a
-    real source — the entailment check never runs. Measured: a model that
-    refuses every claim changes nothing, and is not asked once.
+    A resolved citation is not a verdict: a DERIVED claim (inference,
+    comparison, count, generalisation) that the arithmetic gate does not
+    recognise is put to the model, and a refusal keeps it from `verified`.
     """
     llm = _RefusesEverything()
-    verdict = _verdict("The three values sum to 99", llm=llm)
-
-    assert llm.calls, (
-        "the entailment check was never consulted for a claim whose citation "
-        "resolved — resolution short-circuits evaluation"
-    )
+    verdict = _verdict("Therefore beta is the only value above alpha", llm=llm)
+    assert llm.calls, "a derived claim with a resolved citation was never judged by the model"
     assert verdict != "verified"
+
+
+def test_what_the_arithmetic_decided_costs_no_model_call():
+    llm = _RefusesEverything()
+    assert _verdict("The three values sum to 99", llm=llm) != "verified"
+    assert not llm.calls, "the sum was already computed; asking the model is paid twice"
+
+
+def test_a_literal_restatement_costs_no_model_call():
+    llm = _RefusesEverything()
+    assert _verdict("The file contains beta=2", llm=llm) == "verified"
+    assert not llm.calls, "a literal quotation must stay free"
+
+
+def test_the_judge_stops_at_its_budget():
+    from core.entailment_scope import BudgetedJudge
+
+    judge = BudgetedJudge(_RefusesEverything(), max_calls=1)
+    report = verify(
+        answer=("Therefore beta is the only value above alpha [file:vals.txt]\n\n"
+                "So gamma is always the largest key [file:vals.txt]"),
+        chain=_chain(), entailment_llm=judge, expects_contract_headers=False,
+    )
+    assert judge.spent == 1, f"the per-answer budget was not kept: {judge.spent} calls"
+    assert len(report.chunks) == 2
+
+
+def test_the_live_loop_gets_a_judge_only_from_a_real_router():
+    from core.entailment_scope import BudgetedJudge, judge_for
+    from core.model_router import ModelRouter
+
+    assert judge_for(ModelRouter.single(_RefusesEverything())) is None, (
+        "a single shared client would eat the answers scripted for synthesis")
+
+    class _Router:
+        _static_llm = None
+
+        def for_role(self, role):
+            assert role == "verifier", "the judge must ride the cheap verifier role"
+            return _RefusesEverything()
+
+    assert isinstance(judge_for(_Router()), BudgetedJudge)

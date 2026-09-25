@@ -263,10 +263,17 @@ class AgentLoopVerification:
 
         log = getattr(self, "log", None)
         trace_id = str(getattr(log, "trace_id", "") or "") if log is not None else ""
+        from core.entailment_scope import judge_for
+
+        # MIR-060, решение оператора 25.09: выведенное утверждение со ссылкой
+        # сверяется по смыслу дешёвой моделью, с лимитом на ответ. До этого
+        # проверка по смыслу существовала только в тестах — сюда модель не шла.
+        judge = judge_for(getattr(self, "model_router", None), log)
         root = self._file_read_workspace_root()
         if root is None:
-            return {"receipt_ledger": None, "trace_id": trace_id or None}
+            return {"receipt_ledger": None, "trace_id": trace_id or None, "entailment_llm": judge}
         return {
             "receipt_ledger": ToolReceiptLedger(default_receipts_path(root)),
             "trace_id": trace_id or None,
+            "entailment_llm": judge,
         }

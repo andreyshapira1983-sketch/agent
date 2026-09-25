@@ -14,6 +14,7 @@ from core.evidence_classes import (
 )
 
 from .claim_arithmetic import evaluate as evaluate_claim_arithmetic
+from .entailment_scope import needs_entailment
 from .verifier_absence import (
     absence_certifiable,
     absence_certified_by_search,
@@ -274,10 +275,11 @@ def _entailment_denied(
     Числа уже сверены строже (гейт цифр) — для них не зовём. Нет модели или
     нет вырезок — прежнее поведение.
     """
-    if llm is None or stat_figures:
+    if llm is None or stat_figures or getattr(llm, "remaining", 1) <= 0:
         return False
     excerpts = [ev.excerpt for ev in chunk_evs if ev.id in matched_ids and getattr(ev, "excerpt", "")]
-    if not excerpts:
+    # 25.09, решение оператора: только выведенное и не решённое пересчётом.
+    if not excerpts or not needs_entailment(chunk_text, excerpts):
         return False
     from .verifier_utils import _semantic_nli_check
     # Окно шире, чем у поиска по всей цепочке (600): здесь смотрят только
@@ -390,7 +392,7 @@ def _absence_proven(chunk_text: str, chunk_evs: list) -> bool:
 
 def _judge_cited(
     chunk_text: str, cits: list[Any], chain: ProvenanceChain, *, chain_empty: bool,
-    llm: Any, chunk_reason: ClaimReason | None,
+    llm: Any, chunk_reason: ClaimReason | None, entail_llm: Any = None,
 ) -> tuple[str, str, list[str], ClaimReason | None, bool]:
     """Вердикт куска со ссылками: (вердикт, размеченный текст, id улик,
     причина, «только память без совпадения»).
@@ -478,7 +480,7 @@ def _judge_cited(
     _abs_uncert = any_matched and not _absence_proven(chunk_text, chunk_evs)
     if any_matched and not _abs_uncert and not (
         chunk_reason is not None and chunk_reason.code == "count_mismatch"
-    ) and not _entailment_denied(chunk_text, chunk_evs, matched_ids, llm, stat_figures=stat_figures):
+    ) and not _entailment_denied(chunk_text, chunk_evs, matched_ids, entail_llm or llm, stat_figures=stat_figures):
         verdict = "verified"
         # Иск снят: другая из процитированных улик подтвердила кусок.
         chunk_reason = None
@@ -540,7 +542,7 @@ def _judge_cited(
     return verdict, annotated, matched_ids, chunk_reason, memory_only
 
 
-def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True) -> VerificationReport:
+def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_question: str | None = None, receipt_ledger: Any = None, trace_id: str | None = None, expects_contract_headers: bool = True, entailment_llm: Any = None) -> VerificationReport:
     chain_empty = len(chain) == 0
     if user_question and user_question.strip():
         user_ev = make_evidence(kind="user_explicit", source_id="user:current_turn", obtained_via="user_input", claim="Operator-provided text for the current turn", excerpt=user_question.strip())
@@ -587,7 +589,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 chunk_text, chain, chain_empty, has_dialogue_evidence)
         else:
             verdict, annotated, matched_ids, chunk_reason, _memory_only = _judge_cited(
-                chunk_text, cits, chain, chain_empty=chain_empty, llm=llm,
+                chunk_text, cits, chain, chain_empty=chain_empty, llm=llm, entail_llm=entailment_llm,
                 chunk_reason=chunk_reason)
             memory_only_unmatched += _memory_only
         examined_chunks.append(ClaimChunk(text=chunk_text, citations=tuple(cits),

@@ -48,7 +48,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "planner", "causal_store", "causal_climb", "causal_claim_store",
         "causal_climb_action",
         "lesson_provenance", "attribute_sieve", "lesson_ab_experiment", "charter_goal", "placeholder_text", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
-        "verifier_utils", "verifier_absence", "claim_arithmetic", "replan", "reflection", "clarification_gate",
+        "verifier_utils", "verifier_absence", "claim_arithmetic", "entailment_scope", "replan", "reflection", "clarification_gate",
         "clarification_policy", "pending_clarification", "answer_contradiction", "turn_provenance",
         "instruction_conflict_gate", "directive_extractor", "root_principles",
         "assumption_registry", "referent_resolver",
