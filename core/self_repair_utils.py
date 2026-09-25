@@ -10,21 +10,46 @@ from typing import Any
 _WHOLE_SUITE = frozenset({"", ".", "tests", "tests/"})
 
 
+#: Коды выхода pytest, которыми прогон НА СТАРОМ КОДЕ свидетельствует о дефекте:
+#: 1 — тесты упали; 2 — прерван или ошибка сбора (новый тест импортирует то, чего
+#: до правки нет; SWE-bench такой FAIL_TO_PASS тоже считает падением). 3 —
+#: внутренняя ошибка pytest, 4 — ошибка вызова, 5 — не собран ни один тест: ни
+#: один из них дефекта не показывает (пустой тестовый файл давал 5 и проходил).
+_WITNESS_EXIT_CODES = frozenset({1, 2})
+
+
+def red_before_fix(output: Any, proposal: Any = None) -> bool:
+    """ОДНО правило «воспроизведено до правки» — для самопочинки и для свидетеля.
+
+    Было два (сведение слоёв, 25.09): `_diagnosis_verified` (MIR-110) требовал,
+    чтобы упавший тест был НАЗВАН диагнозом, а свидетель patch_route/patch_check
+    реально гонял новый тест НА СТАРОМ КОДЕ, но верил любому ненулевому коду.
+    Плюсы обоих: прогон на старом коде не завис, в нём упал тест (Agentless),
+    код выхода — падение, а не «тестов нет», и, если известно предложение,
+    упавший тест им назван (`_names_failure`). Свидетель гоняет только новые
+    тесты правки, поэтому у него упавшее названо самим прогоном.
+    """
+    if not isinstance(output, dict) or output.get("timed_out") is not False:
+        return False
+    code = output.get("exit_code")
+    if code is not None and code not in _WITNESS_EXIT_CODES:
+        return False
+    failed = [str(t) for t in output.get("failed_tests") or []]
+    counted = "failed" in output or "errors" in output or failed
+    red = (bool(failed) or int(output.get("failed") or 0) + int(output.get("errors") or 0) > 0
+           if counted else code in _WITNESS_EXIT_CODES)
+    if not red or proposal is None:
+        return red
+    return any(_names_failure(proposal, test_id) for test_id in failed)
+
+
 def _diagnosis_verified(output: Any, proposal: Any = None) -> bool:
     """Диагноз проверен, только если прогон до правки воспроизвёл дефект (MIR-110).
 
     Решение оператора 25.09, вариант «а» (как в Agentless: тест, воспроизводящий
-    ошибку, падает до правки): прогон не завис, в нём есть упавший тест, и —
-    когда известно предложение — этот тест в нём НАЗВАН (см. `_names_failure`).
-    До 25.09 проверенным считался любой не зависший прогон, и зелёный тоже.
+    ошибку, падает до правки). Само правило — `red_before_fix`, одно на двоих.
     """
-    if not isinstance(output, dict) or output.get("timed_out") is not False:
-        return False
-    failed = [str(t) for t in output.get("failed_tests") or []]
-    red = bool(failed) or int(output.get("failed") or 0) + int(output.get("errors") or 0) > 0
-    if not red or proposal is None:
-        return red
-    return any(_names_failure(proposal, test_id) for test_id in failed)
+    return red_before_fix(output, proposal)
 
 
 def _names_failure(proposal: Any, test_id: str) -> bool:

@@ -47,6 +47,8 @@ _FORBIDDEN = (
     # Тормоза целиком (core/control_files.py): правка без человека не трогает
     # ни их, ни модуль, который их перечисляет.
     "core/control_files", "config/", *CONTROL_RELPATHS,
+    # Правило свидетеля «упал до правки» (red_before_fix): судья самой самоправки.
+    "core/self_repair_utils",
 )
 
 
@@ -261,6 +263,7 @@ def settle_patch(agent: Any, workspace: Path | str, success_check: str) -> dict[
     from core.budget_kill_switch import BudgetKillSwitch, default_path
     from core.safe_vcs import SafeVCS
     from core.self_apply_bridge import build_self_apply_payload, run_approved_self_apply
+    from core.self_repair_utils import red_before_fix
     from tools.patch_check import PatchCheckTool, patched_contents
     from tools.run_tests import RunTestsTool
 
@@ -282,7 +285,9 @@ def settle_patch(agent: Any, workspace: Path | str, success_check: str) -> dict[
     # дефект закрывается правкой КОДА, чей новый тест падал на старом коде.
     # Правка одних тестов или без свидетеля код не чинит — её несут человеку.
     code_files = [p for p in check.get("files") or [] if not str(p).replace("\\", "/").startswith("tests/")]
-    if not code_files or check.get("witness_exit_code") in (None, 0):
+    # Одно правило с самопочинкой (core/self_repair_utils.red_before_fix): код 5
+    # «тестов нет» — не свидетель, хоть и не ноль.
+    if not code_files or not red_before_fix({"timed_out": False, "exit_code": check.get("witness_exit_code")}):
         _log(root, {"patch": rel, "result": "no_witness", "files": check.get("files")})
         return {"verdict": "missing", "reason": "нет свидетеля: правка должна менять код и нести "
                 "новый тест, который падает до правки и проходит после"}
