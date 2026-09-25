@@ -305,3 +305,30 @@ def test_the_nearest_deadline_goes_first_and_a_passed_one_is_flagged(market, tmp
     assert [r.assignment_id for r in reports] == ["as-2", "as-1"]
     assert any("срок (SLA) уже вышел" in s for s in reports[0].steps)
     assert not any("SLA" in s for s in reports[1].steps)
+
+
+def test_every_order_gets_a_profit_line_that_the_payout_completes(market, tmp_path: Path) -> None:
+    """Учёт прибыли по заказу (core/market_ledger.py): оплата − 5 % − модель."""
+    from core.market_ledger import MarketLedger, summary
+
+    market.assignments["as-1"]["assignment"].update(escrowAmount="2.00", escrowToken="USDC")
+    worker = MarketWorker(_client(market, tmp_path), lambda text: "# Ответ\n\n4", allowed_jobs={"job-test"},
+                          workdir=tmp_path / "market", cost_since=lambda since: 0.03)
+    worker.poll_once()
+    ledger = MarketLedger(tmp_path / "market" / "ledger.json")
+    line = ledger.lines()["as-1"]
+    assert (line.runs, line.model_usd, line.escrow_amount, line.net()) == (1, 0.03, 2.0, None)
+    assert "as-2" not in ledger.lines(), "an order we did not work is not ours to count"
+
+    market.assignments["as-1"]["assignment"].update(status="accepted", finalizedAt="2026-09-25T12:00:00Z")
+    worker.poll_once()
+    line = ledger.lines()["as-1"]
+    assert line.status == "accepted" and line.accepted_at == "2026-09-25T12:00:00Z"
+    assert line.net() == 1.87
+
+    ledger.mark("as-1", claude_intervention=True, claude_minutes=6, operator_minutes=4)
+    stats = summary(ledger.lines())
+    assert stats["accepted"] == 1 and stats["claude_intervention_share"] == 1.0 and stats["unmarked"] == 0
+    assert stats["net_usd_per_human_hour"] == round(1.87 / (10 / 60), 2)
+    with pytest.raises(ValueError, match="not a manual column"):
+        ledger.mark("as-1", model_usd=0)
