@@ -500,11 +500,12 @@ class AgentLoopMemoryWrite:
 
     def _consolidate_conclusion(self, content: str, episode: Any, existing: list[Any]) -> Any:
         """Решение Mem0 по новому выводу: ADD / UPDATE / DELETE / NOOP."""
-        from core.memory_consolidation import consolidate, similar_conclusions
+        from core.memory_consolidation import consolidate, gate, similar_conclusions
 
         question = " ".join(str(getattr(episode, "question", "") or "").split())
         similar = similar_conclusions(content, existing)
-        return consolidate(getattr(self, "llm", None), content, question, similar)
+        # Модель предлагает, ворота решают (memory_consolidation.gate).
+        return gate(consolidate(getattr(self, "llm", None), content, question, similar), question, similar)
 
     def _record_aborted_episode(self, question: str, *, reason: str) -> None:
         """Bank a `failed` episode for a run that did not complete.

@@ -48,6 +48,7 @@ Scalable Long-Term Memory», arXiv 2504.19413, раздел 3.1 и Алгори�
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -153,11 +154,55 @@ def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Co
     )
 
 
+#: Ворота слияния — «Useful Memories Become Faulty» (arXiv 2605.12978): память,
+#: которую модель непрерывно переписывает, сначала полезнее, потом хуже, чем
+#: без памяти; корень — шаг слияния, не опыт. Рецепт: сырое хранить как улику,
+#: слияние пропускать через ворота, а не запускать после каждого хода.
+#: Замер 2026-09-25 на сервере: 8 слияний (UPDATE), удалений 0, все 8 — один
+#: и тот же вопрос, уточнённый. Номер цели и раньше сверялся с показанными
+#: кандидатами (consolidate выше); не проверялось другое — ТОТ ЖЕ ли предмет:
+#: это решало одно слово модели.
+_SUBJECT_JACCARD = 0.5
+_PATHLIKE = re.compile(r"[\w./-]+/[\w./-]+|[\w-]+\.(?:txt|py|md|pdf|json|jsonl)\b")
+_NESTED = re.compile(r"^\s*Вопрос:.*?Вывод:\s*", re.DOTALL)
+
+
+def _question_of(content: str) -> str:
+    return (content or "").split("\n", 1)[0].removeprefix("Вопрос: ")
+
+
+def same_subject(old_question: str, new_question: str) -> bool:
+    """Один ли предмет: почти те же слова вопроса или один и тот же названный файл."""
+    words = [set(re.findall(r"\w{4,}", (q or "").lower())) for q in (old_question, new_question)]
+    if words[0] and words[1] and len(words[0] & words[1]) / len(words[0] | words[1]) >= _SUBJECT_JACCARD:
+        return True
+    paths = [set(_PATHLIKE.findall(q or "")) for q in (old_question, new_question)]
+    return bool(paths[0] & paths[1])
+
+
+def gate(decision: Consolidation, question: str, candidates: list[Any]) -> Consolidation:
+    """UPDATE/DELETE — только над показанным кандидатом и того же предмета; иначе ADD."""
+    if decision.operation not in ("UPDATE", "DELETE"):
+        return decision
+    target = next((r for r in candidates if getattr(r, "id", None) == decision.target_id), None)
+    if target is None:
+        return Consolidation("ADD", title=decision.title,
+                             reason=f"gate: {decision.operation} target is not among the shown candidates")
+    if not same_subject(_question_of(str(target.content)), question):
+        return Consolidation("ADD", title=decision.title,
+                             reason=f"gate: {decision.operation} refused, different subject")
+    return decision
+
+
 def merged_content(new_content: str, target_content: str, merged: str) -> str:
     """Слитая запись: вопрос прежней записи, слитый вывод, источники обеих.
 
-    Вопрос берётся у прежней записи, чтобы её ключ не поплыл.
+    Вопрос берётся у прежней записи, чтобы её ключ не поплыл. Модель порой
+    повторяет в слитом выводе «Вопрос: … Вывод: …», и при каждом слиянии
+    вложенность росла (живая память 2026-09-25) — такие головы срезаются.
     """
+    while _NESTED.match(merged or ""):
+        merged = _NESTED.sub("", merged, count=1)
     def line(content: str, prefix: str) -> str:
         return next((ln[len(prefix):].strip() for ln in (content or "").splitlines()
                      if ln.startswith(prefix)), "")
