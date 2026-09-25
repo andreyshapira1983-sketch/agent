@@ -210,6 +210,33 @@ def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] |
     }
 
 
+#: Пометки, которыми тест выключают, не удаляя.
+_SILENCERS = ("pytest.mark.skip", "pytest.skip(", "pytest.mark.xfail", "@unittest.skip")
+
+
+def weakened_judges(root: Path, contents: dict[str, str]) -> list[str]:
+    """Существующие тесты, которые правка делает МЕНЬШЕ (2026-09-25).
+
+    Путь без человека вправе добавлять тесты, но не ослаблять судей: меньше
+    `test_*`, меньше `assert` или новые skip/xfail. Darwin Gödel Machine
+    (Sakana, 2025): в части прогонов агент снял метки, по которым детектор
+    ловил подделку, и получил ложный «успех». Ослабление — решение человека.
+    """
+    from core.self_apply_lane import _test_surface
+
+    out: list[str] = []
+    for rel, after_src in contents.items():
+        path = root / rel
+        if not rel.replace("\\", "/").startswith("tests/") or not path.is_file():
+            continue
+        before_src = path.read_text(encoding="utf-8", errors="replace")
+        before, after = _test_surface(before_src), _test_surface(after_src)
+        silenced = sum(after_src.count(s) for s in _SILENCERS) > sum(before_src.count(s) for s in _SILENCERS)
+        if before is None or after is None or after[0] < before[0] or after[1] < before[1] or silenced:
+            out.append(rel)
+    return out
+
+
 def _forbidden(paths: list[str]) -> list[str]:
     from core.self_apply_lane import PROTECTED_CORE
 
@@ -246,11 +273,25 @@ def settle_patch(agent: Any, workspace: Path | str, success_check: str) -> dict[
     if blocked:
         _log(root, {"patch": rel, "result": "forbidden", "files": blocked})
         return {"verdict": "missing", "reason": "правка трогает запретное: " + ", ".join(blocked)}
+    # Воспроизведение до правки (Agentless; «правдоподобная ≠ верная» в APR):
+    # дефект закрывается правкой КОДА, чей новый тест падал на старом коде.
+    # Правка одних тестов или без свидетеля код не чинит — её несут человеку.
+    code_files = [p for p in check.get("files") or [] if not str(p).replace("\\", "/").startswith("tests/")]
+    if not code_files or check.get("witness_exit_code") in (None, 0):
+        _log(root, {"patch": rel, "result": "no_witness", "files": check.get("files")})
+        return {"verdict": "missing", "reason": "нет свидетеля: правка должна менять код и нести "
+                "новый тест, который падает до правки и проходит после"}
+    contents = patched_contents(root, rel)
+    weakened = weakened_judges(root, contents)
+    if weakened:
+        _log(root, {"patch": rel, "result": "weakens_judges", "files": weakened})
+        return {"verdict": "missing", "reason": "правка ослабляет существующие тесты — это решает "
+                "человек: " + ", ".join(weakened)}
     state, today = _state(root), _now().date().isoformat()
     if state["applied"].get(today, 0) >= DAILY_CAP:
         _log(root, {"patch": rel, "result": "daily_cap"})
         return {"verdict": "missing", "reason": f"дневной потолок {DAILY_CAP} правок исчерпан"}
-    files = [{"path": p, "content": c} for p, c in patched_contents(root, rel).items()]
+    files = [{"path": p, "content": c} for p, c in contents.items()]
     inbox = ApprovalInbox(path=root / "data" / "approval_inbox.jsonl")
     item = inbox.add(operation="self_apply_lane.run", summary=f"self-repair {rel}", risk="reversible",
                      reasons=("patch_check green with full suite",),
