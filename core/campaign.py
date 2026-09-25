@@ -146,7 +146,15 @@ def _cost_cap_record(*, cycle: int, ts: str, goal: str, action: BestNextAction,
     )
 
 
-def goal_met_now(goal: str, success_check: str, workspace: Any, started_at: Any) -> bool:
+def _verifier_llm(agent: Any) -> Any:
+    """Модель-проверяющий для судьи содержания (core/goal_content_judge.py) или None."""
+    try:
+        return agent.model_router.for_role("verifier")
+    except Exception:  # noqa: BLE001 — нет роутера (тесты, сухой прогон) — судья по файлам
+        return None
+
+
+def goal_met_now(goal: str, success_check: str, workspace: Any, started_at: Any, llm: Any = None) -> bool:
     """Сошёлся ли критерий цели свежим следом — после КАЖДОГО рабочего цикла.
 
     Ночь 24→25.09: объяснение наблюдения записывалось в первом цикле, а
@@ -160,7 +168,7 @@ def goal_met_now(goal: str, success_check: str, workspace: Any, started_at: Any)
     try:
         since = started_at.timestamp()
         verdict = judge_campaign(goal=goal, success_check=success_check,
-                                 workspace=workspace, since=since)
+                                 workspace=workspace, since=since, llm=llm)
     except Exception:  # noqa: BLE001 — судья не валит цикл
         return False
     return verdict.get("verdict") == "verified"
@@ -186,7 +194,7 @@ def judge_closing_goal(agent: Any, *, workspace: Any, goal: str, success_check: 
         verdict, error = judge_and_record(
             goal=goal, success_check=success_check, workspace=workspace,
             started_at=started_at, ts=ts, stop_reason=why, cycles_run=cycle,
-            proposals=proposals, artifacts=artifacts,
+            proposals=proposals, artifacts=artifacts, llm=_verifier_llm(agent),
         )
     except Exception as exc:  # noqa: BLE001 — показание не валит прогон
         _log(agent, "campaign_goal_verdict_failed",
@@ -961,7 +969,7 @@ def run_campaign(
             consecutive_errors = 0
             # Цель судится после каждого рабочего цикла (goal_met_now).
             met = outcome.did_work and goal_met_now(current_goal, current_success_check,
-                                                    workspace, goal_started_at)
+                                                    workspace, goal_started_at, _verifier_llm(agent))
             if met and _switch_goal(cycle, "goal verified after this cycle"):
                 continue
             if idle_streak >= config.max_idle_streak:
@@ -1097,7 +1105,7 @@ def run_campaign(
         goal=current_goal, success_check=current_success_check,
         workspace=workspace, started_at=started_at, ts=now_fn(),
         stop_reason=stop_reason, cycles_run=len(records),
-        proposals=proposals, artifacts=artifacts,
+        proposals=proposals, artifacts=artifacts, llm=_verifier_llm(agent),
     )
     result.success_verdict = verdict
     if verdict_error:

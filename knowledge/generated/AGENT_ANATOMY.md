@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 263 modules across 12 groups._
+_Total: 264 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -227,6 +227,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/drive_goal` | Задача от драйва: что сейчас важно — решает внутреннее состояние, что делать — модель. |
 | `core/campaign_types` | Campaign value types: configuration, per-action outcome, and the result of a finished campaign. |
 | `core/campaign_verdict` | Вердикт кампании: сошёлся ли ЕЁ критерий, и записан ли этот факт. |
+| `core/goal_content_judge` | Судья цели читает ПРОДУКТ, а не только находит его на диске. |
 | `core/work_session` | MVP-17.1  Long Work Session Skeleton. |
 | `core/task_queue` | Persistent task queue for autonomous runtime work. |
 | `core/task_lifecycle` | One place that decides what a finished run does to its queue row (MIR-039). |
