@@ -73,6 +73,7 @@ def test_only_a_human_approval_counts_as_approved(tmp_path: Path) -> None:
                   "updated_at": "2026-09-22T12:00:00+00:00"})
     _ws(tmp_path, [filed], [], approval_inbox=inbox)
     assert _one(tmp_path).signals["approved"] is True
+    assert summary(measure(tmp_path, window_days=3, now=NOW))["out_of_band"] == 1
     # Тот же ящик, но цикл заявки не подавал: чужая заявка в том же окне не его.
     _ws(tmp_path, [_cycle("2026-09-22T10:00:00+00:00", "read a book")], [], approval_inbox=inbox)
     assert _one(tmp_path).signals["approved"] is False
@@ -94,6 +95,8 @@ def test_machine_checks_count_without_a_human(tmp_path: Path) -> None:
         campaign_verdicts=[{"ts": "2026-09-22T10:01:00+00:00", "goal": "fix the parser", "verdict": "verified"}])
     cycle = _one(tmp_path)
     assert cycle.signals["tests_passed"] and cycle.signals["goal_verified"] and cycle.verdict == "useful"
+    # Свои тесты и свой судья — польза, но не подтверждение извне.
+    assert summary([cycle])["out_of_band"] == 0
 
 
 def test_a_young_cycle_is_pending_and_the_summary_counts_honestly(tmp_path: Path) -> None:

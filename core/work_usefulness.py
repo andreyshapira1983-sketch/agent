@@ -28,6 +28,12 @@ Self-Improvement», MAGELLAN) польза — это последующее и�
 Записи через `journal_append` продуктом не считаются: это служебные журналы,
 система читает их постоянно, и «прочитано позже» ничего бы не значило.
 
+ИЗВНЕ петли из них только `approved` (и принятые покупателем заказы): остальное
+судит сам агент или его собственный судья. Долгий цикл, судящий себя, принимает
+застой за прогресс (arXiv 2607.25152: нужен оценщик вне петли с независимым
+доступом к миру), поэтому сводка считает подтверждённое извне отдельно —
+`out_of_band`, — и расхождение двух чисел видно сразу.
+
 Иначе — «сделано, пока без пользы»; моложе окна — «рано судить». Модуль только
 считает: выбор целей он не двигает (сначала убедиться, что мерило не врёт).
 
@@ -48,6 +54,8 @@ from typing import Any
 
 WINDOW_DAYS = 3
 SIGNALS = ("approved", "read_later", "memory_used", "code_survived", "goal_verified", "tests_passed")
+#: Признаки, которые ставит не сам агент и не его судья (вне петли).
+OUT_OF_BAND = frozenset({"approved"})
 _READ_TOOLS = frozenset({"file_read", "find_in_files", "diff_file", "convert_file"})
 _PATH_RE = re.compile(r"(?<![\w/.])((?:data|proposals|knowledge|docs|core|tools|tests|cli|scripts|"
                       r"converted|math_study|knowledge_library)/[\w./-]+\.\w+)")
@@ -277,6 +285,7 @@ def summary(cycles: list[CycleUse], market: int | None = None) -> dict[str, Any]
         "worked_cycles": len(cycles),
         "judged": len(judged),
         "useful": len(useful),
+        "out_of_band": sum(1 for c in judged if any(c.signals.get(s) for s in OUT_OF_BAND)),
         "useful_share": round(len(useful) / len(judged), 3) if judged else None,
         "pending": len(cycles) - len(judged),
         "by_signal": {s: sum(1 for c in judged if c.signals.get(s)) for s in SIGNALS},
