@@ -40,6 +40,8 @@ _TOKEN_RE = re.compile(r"aat_[0-9a-fA-F]{8,}")
 #: у любого адреса в журнале вычищается. Нашёл тест 2026-09-25.
 _URL_QUERY_RE = re.compile(r"(https?://[^\s\"\\?]+)\?[^\s\"\\]*")
 _BODY_LOG_CHARS = 2000
+#: Предел одного сообщения в переписке (flows/messaging.md: 1–4000 знаков).
+MESSAGE_LIMIT = 4000
 
 
 class MarketError(Exception):
@@ -193,8 +195,42 @@ class MarketClient:
     def start(self, assignment_id: str) -> dict:
         return self.request("POST", f"/v1/assignments/{assignment_id}/start")
 
-    def messages(self, assignment_id: str) -> Any:
-        return self.request("GET", f"/v1/assignments/{assignment_id}/messages")
+    def messages(self, assignment_id: str, limit: int = 20) -> list[dict]:
+        """Переписка, новые сверху (flows/messaging.md)."""
+        return (self.request("GET", f"/v1/assignments/{assignment_id}/messages?limit={limit}") or {}).get(
+            "messages", [])
+
+    def post_message(self, assignment_id: str, body: str) -> None:
+        """Написать покупателю. Больше 4000 знаков площадка отвергает — делим
+        на части, а не режем: обрезанный ответ молча теряет конец."""
+        text = body.strip()
+        while text:
+            chunk, text = text[:MESSAGE_LIMIT], text[MESSAGE_LIMIT:]
+            self.request("POST", f"/v1/assignments/{assignment_id}/messages", {"body": chunk})
+
+    def job_attachments(self, job_id: str) -> list[dict]:
+        return (self.request("GET", f"/v1/jobs/{job_id}/attachments") or {}).get("attachments", [])
+
+    def download(self, url: str) -> bytes:
+        """Скачать вложение покупателя токеном — но ТОЛЬКО с адреса площадки:
+        отдать токен чужому хосту из присланной ссылки нельзя ни при каких условиях."""
+        full = url if url.startswith("http") else f"{self.base_url}{url}"
+        if not full.startswith(self.base_url + "/"):
+            raise MarketError(0, "foreign_host", "ссылка на вложение ведёт не на площадку — токен туда не идёт")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                status, resp_headers, data = self._send("GET", full, None, headers)
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+                status, resp_headers, data = 0, {}, str(exc).encode()
+            self._log({"ts": datetime.now(timezone.utc).isoformat(), "method": "GET", "path": full.split("?", 1)[0],
+                       "attempt": attempt, "status": status, "response": f"<{len(data)} bytes>"})
+            if 200 <= status < 300:
+                return data
+            if not (status in {0, 429} or status >= 500) or attempt == self.max_attempts:
+                raise MarketError(status, "download_failed", data[:200].decode("utf-8", "replace"))
+            self._sleep(self._backoff(attempt, resp_headers.get("Retry-After")))
+        raise MarketError(0, "download_failed", "исчерпаны попытки")  # pragma: no cover
 
     def upload_file(self, filename: str, data: bytes) -> str:
         """reserve → PUT (без токена: адрес подписан сам) → complete; вернуть fileUrl."""
