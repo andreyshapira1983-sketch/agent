@@ -63,6 +63,8 @@ PROTECTED_CORE: frozenset[str] = frozenset({
     "core/usd_spend.py", "core/control_files.py", "core/policy.py", "core/approval.py",
     "core/approval_inbox.py", "core/actuation_gateway.py", "core/self_apply_lane.py",
     "core/self_apply_bridge.py", "core/patch_route.py",
+    # Правило «воспроизведено до правки» — судья самоправки (сведение, 25.09).
+    "core/self_repair_utils.py",
 })
 
 # Explicit denylist — checked *before* the allowlist so a sensitive path can

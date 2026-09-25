@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from core.redaction import redact_text
+from core.self_repair_utils import red_before_fix
 from tools.base import Risk, Tool, require_ascii_identifier
 
 _BLOCK_RE = re.compile(
@@ -282,6 +283,12 @@ def _verdict(result: dict[str, Any]) -> dict[str, str]:
         return {"verdict": "red", "why": (
             "your new test passes on the OLD code too — it does not witness the change; "
             "make it fail before the fix and pass after it")}
+    if "witness_exit_code" in result and not red_before_fix(
+            {"timed_out": False, "exit_code": result["witness_exit_code"]}):
+        return {"verdict": "red", "why": (
+            f"on the OLD code your new tests ended with pytest exit code {result['witness_exit_code']} "
+            "(no test collected, usage or internal error) — that shows no defect; "
+            "the new test must FAIL before the fix")}
     return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
 
 
