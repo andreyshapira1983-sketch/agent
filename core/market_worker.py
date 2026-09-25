@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import Any
 
 from core.market_client import MarketClient, MarketError
+from core.market_ledger import FILE_NAME as LEDGER_FILE
+from core.market_ledger import MarketLedger
 
 #: Меньше этого до срока — предупреждение: работа агента на заказ идёт минуты
 #: (замер 2026-09-25 на поддельной площадке: 291 с на объяснение в 5–8 фраз).
@@ -98,10 +100,22 @@ class CycleReport:
 
 class MarketWorker:
     def __init__(self, client: MarketClient, run_task: Callable[[str], str], *,
-                 allowed_jobs: set[str], workdir: Path | str) -> None:
+                 allowed_jobs: set[str], workdir: Path | str,
+                 cost_since: Callable[[datetime], float] | None = None) -> None:
         self.client, self.run_task = client, run_task
         self.allowed_jobs, self.workdir = set(allowed_jobs), Path(workdir)
         self.state_path = self.workdir / "state.json"
+        # Учёт прибыли по заказу (core/market_ledger.py); cost_since — доллары
+        # модели с момента (core/usd_spend.usd_since), без него — 0.
+        self.ledger, self.cost_since = MarketLedger(self.workdir / LEDGER_FILE), cost_since
+
+    def _run(self, row: dict[str, Any], prompt: str) -> str:
+        started = datetime.now(timezone.utc)
+        try:
+            return (self.run_task(prompt) or "").strip()
+        finally:
+            spent = self.cost_since(started) if self.cost_since else None
+            self.ledger.add_run(row, (datetime.now(timezone.utc) - started).total_seconds(), spent)
 
     # ── память о прочитанном ─────────────────────────────────────────────────
     def _state(self) -> dict[str, Any]:
@@ -126,6 +140,8 @@ class MarketWorker:
     # ── проход опроса ─────────────────────────────────────────────────────────
     def poll_once(self) -> list[CycleReport]:
         rows = self.client.my_assignments("in_progress") + self.client.my_assignments("submitted")
+        for row in rows + self.client.my_assignments("accepted"):
+            self.ledger.observe(row)
         # Самый близкий срок — первым: до него покупатель вправе отменить даром.
         rows.sort(key=lambda r: sla_seconds_left(r) if sla_seconds_left(r) is not None else float("inf"))
         reports = []
@@ -211,7 +227,7 @@ class MarketWorker:
         prompt = (brief(row, files, self._thread(row, aid))
                   + "\n\nРабота уже сдана. Покупатель спрашивает о ней — ответь ему коротко и по делу, "
                     "не переделывая работу:\n" + str(msg.get("body") or ""))
-        answer = (self.run_task(prompt) or "").strip()
+        answer = self._run(row, prompt)
         if answer:
             self.client.post_message(aid, answer)
             report.steps.append("ответ покупателю в переписке")
@@ -229,7 +245,7 @@ class MarketWorker:
         files = self._files(row, aid)
         if files:
             report.steps.append(f"файлов покупателя: {len(files)}")
-        answer = (self.run_task(brief(row, files, self._thread(row, aid))) or "").strip()
+        answer = self._run(row, brief(row, files, self._thread(row, aid)))
         if not answer:
             report.error = "агент не дал ответа — сдавать нечего"
             return
