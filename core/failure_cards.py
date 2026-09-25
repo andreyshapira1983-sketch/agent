@@ -36,6 +36,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from core.code_citations import annotate
+
 CARDS_RELPATH = Path("data") / "failure_cards.jsonl"
 MAX_CARDS = 300
 MAX_NEW_PER_TURN = 2
@@ -230,7 +232,8 @@ def note_for(workspace: Path | str, tool: str, text: str) -> str | None:
     tally = f"встречалась {card.seen} раз"
     if card.hits + card.misses:
         tally += f"; урок помог {card.hits} из {card.hits + card.misses}"
-    return f"ПРОШЛЫЙ ОПЫТ ({tally}): {card.lesson}"
+    # Урок мог называть код, которого больше нет (core/code_citations.py).
+    return f"ПРОШЛЫЙ ОПЫТ ({tally}): {annotate(workspace, card.lesson)}"
 
 
 def witness_note(workspace: Path | str, text: str) -> str | None:
