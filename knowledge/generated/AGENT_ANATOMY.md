@@ -127,8 +127,8 @@ _Planning, verification, clarification, control loop._
 | `core/patch_route` | Самопочинка без человека в петле: дефект → правка → patch_check → свой код. |
 | `core/note_contract` | Договор конспекта: что обязано быть в следе учебной задачи, решает код. |
 | `core/defect_intake` | Свой сбой становится дефектом реестра, а не только наблюдением. |
-| `core/stuck_route` | Уткнулся — собери улики и реши; человека — только когда шаг не твой. |
-| `core/own_decisions` | Чьё решение: своё — записать и делать, чужое — спросить человека. |
+| `core/stuck_route` | Уткнулся — собери улики и реши; человека — только когда шаг не твой (core/own_decisions.py). |
+| `core/own_decisions` | Чьё решение: о своём коде, проверках и тестах решает агент (обратимо, судят тесты); человеку — только HUMAN_ONLY. |
 | `core/write_at_execution` | Текст записи собирается в момент исполнения, а не при планировании. |
 | `core/reasoning_action_check` | Reasoning ↔ action consistency check — MAST FM-2.6 (13.2%). |
 | `core/best_next_action` | Priority intelligence: choose the single most important next action. |
