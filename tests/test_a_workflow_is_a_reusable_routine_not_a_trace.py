@@ -91,3 +91,28 @@ def test_the_live_loop_puts_workflows_of_the_kind_into_its_experience_block(tmp_
                                          "read it -> file_read {source_file}"))])
     block = agent._retrieve_experience_memory(question)
     assert "<agent_workflows>" in block and "Check a claim against its file" in block
+
+
+def test_a_kind_with_a_workflow_gets_the_workflow_not_the_procedures_too(tmp_path: Path) -> None:
+    """Экзамен 2×2 (25.09): процедуры 67, шаблоны 66, оба вместе 63 — одно из двух."""
+    from types import SimpleNamespace
+
+    from core.loop_memory_read import AgentLoopMemoryRead
+
+    searched = []
+    store = SimpleNamespace(path=tmp_path / "procedural_memory.jsonl",
+                            search_with_report=lambda q, **kw: searched.append(q) or SimpleNamespace(
+                                procedures=["proc"], rejected_by={}))
+    me = SimpleNamespace(procedural_store=store, _question_salience=lambda: None)
+    me._workflows_for = lambda q: AgentLoopMemoryRead._workflows_for(me, q)
+
+    # Нет шаблона рода — процедуры, как прежде.
+    assert AgentLoopMemoryRead._procedures_unless_workflow(me, "проверь источник") == (["proc"], {})
+    WorkflowMemoryStore(tmp_path / FILE_NAME).replace_kind(
+        "source", [WorkflowRecord(kind="source", description="Check", steps=("a -> find_in_files", "b -> file_read"))])
+    # Шаблон есть — процедур нет, и журнал говорит почему.
+    assert AgentLoopMemoryRead._procedures_unless_workflow(me, "проверь источник") == (
+        [], {"covered_by_workflow": 1})
+    # Род без шаблона по-прежнему получает процедуры.
+    assert AgentLoopMemoryRead._procedures_unless_workflow(me, "посчитай цену заказа")[0] in (["proc"], [])
+    assert len(searched) >= 1

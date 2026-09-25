@@ -344,15 +344,7 @@ class AgentLoopMemoryRead:
                     # reader reconciles as
                     # `selected - readmitted + sum(rejected_by) == candidates`.
                     readmitted += 1
-        if self.procedural_store is not None:
-            proc_result = self.procedural_store.search_with_report(
-                question, limit=3, salience=self._question_salience(),
-            )
-            procedures = proc_result.procedures
-            procedures_rejected_by = proc_result.rejected_by
-        else:
-            procedures = []
-            procedures_rejected_by = {}
+        procedures, procedures_rejected_by = self._procedures_unless_workflow(question)
         block = self._code_checked(format_experience_context(episodes=episodes, procedures=procedures), "experience")
         family = self._family_product_warnings(episodes) if block else []
         block += _family_appendix(family)
@@ -462,16 +454,37 @@ class AgentLoopMemoryRead:
             self.log.log("stale_code_citation", {"source": source, "lines": marked})
         return block
 
-    def _workflow_block(self, question: str) -> str:
-        """Шаблоны работы по AWM (core/workflow_memory.py).
+    def _workflows_for(self, question: str) -> list:
+        """Шаблоны работы рода этого вопроса (core/workflow_memory.py); нет файла — нет шаблонов."""
+        if self.procedural_store is None:
+            return []
+        from core.workflow_memory import FILE_NAME, WorkflowMemoryStore
 
-        Лежат рядом с процедурами; нет файла — нет блока, ход как прежде.
+        return WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
+
+    def _procedures_unless_workflow(self, question: str) -> tuple[list, dict[str, int]]:
+        """Процедуры — только там, где у рода работы нет шаблона. Одно из двух, не оба.
+
+        Экзамен 2×2, 25.09 (30 задач × 3 прогона): процедуры 67, шаблоны 66,
+        ничего 60, оба вместе 63 — каждый слой помогает, вместе мешают. Шаблон
+        строится ИЗ тех же процедур (`workflow_memory.experience_lines`), и
+        вдвоём они показывают один опыт дважды. AWM (arXiv 2409.07429, против
+        Synapse): обобщённый шаблон тянет к частному случаю меньше целого следа,
+        поэтому где шаблон есть — он; процедуры покрывают остальные рода.
         """
         if self.procedural_store is None:
-            return ""
-        from core.workflow_memory import FILE_NAME, WorkflowMemoryStore, format_workflows
+            return [], {}
+        workflows = self._workflows_for(question)
+        if workflows:
+            return [], {"covered_by_workflow": len(workflows)}
+        found = self.procedural_store.search_with_report(question, limit=3, salience=self._question_salience())
+        return found.procedures, found.rejected_by
 
-        workflows = WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
+    def _workflow_block(self, question: str) -> str:
+        """Шаблоны работы по AWM в подсказку; нет шаблонов — нет блока, ход как прежде."""
+        from core.workflow_memory import format_workflows
+
+        workflows = self._workflows_for(question)
         if not workflows:
             return ""
         self.log.log("workflow_memory_inject",
