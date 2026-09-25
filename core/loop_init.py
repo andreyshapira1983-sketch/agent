@@ -43,7 +43,7 @@ if TYPE_CHECKING:  # pragma: no cover — только для подписи
 class AgentLoopInit:
     """Конструктор цикла: раскладка переданного по полям."""
 
-    def __init__(  # noqa: PLR0913 — flat: depth 2, no branching state to follow
+    def __init__(  # noqa: PLR0913, PLR0917 — flat: depth 2, no branching state to follow
         self,
         registry: ToolRegistry,
         policy: PolicyGate,

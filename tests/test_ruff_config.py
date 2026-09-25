@@ -23,7 +23,7 @@ _REPO = Path(__file__).resolve().parents[1]
 _CONFIG = _REPO / "ruff.toml"
 
 #: Линт-долг: только вниз; поднимать — лишь с причиной в сообщении коммита.
-_BASELINE_FINDINGS = 44
+_BASELINE_FINDINGS = 43  # ruff 0.16.1 (the server); an older ruff drops PLR0917 noqa as unused
 
 #: Семейства, без которых наша дисциплина рассыпается: F — неопределённые
 #: имена, I — порядок импортов, S/BLE — безопасность и широкие `except`
