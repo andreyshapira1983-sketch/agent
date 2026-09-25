@@ -96,6 +96,7 @@
     "loop_memory_commands.py::AgentLoopMemoryCommands.forget": [],
     "loop_memory_commands.py::AgentLoopMemoryCommands.list_persistent": [],
     "loop_memory_commands.py::AgentLoopMemoryCommands.remember": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._code_checked": [],
     "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings": [],
     "loop_memory_read.py::AgentLoopMemoryRead._question_salience": [],
     "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory": [
@@ -103,6 +104,7 @@
       "callers"
     ],
     "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._workflow_block": [],
     "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines": [],
     "loop_memory_read.py::AgentLoopMemoryRead.smart_memory_summary": [],
     "loop_memory_read.py::_family_appendix": [],
@@ -428,6 +430,14 @@
       "loop_memory_commands.py::AgentLoopMemoryCommands.remember"
     ],
     [
+      "loop_memory_read.py::AgentLoopMemoryRead._code_checked",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
+      "loop_memory_read.py::AgentLoopMemoryRead._code_checked"
+    ],
+    [
       "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
       "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings"
     ],
@@ -436,12 +446,20 @@
       "loop_memory_read.py::AgentLoopMemoryRead._question_salience"
     ],
     [
+      "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory",
+      "loop_memory_read.py::AgentLoopMemoryRead._workflow_block"
+    ],
+    [
       "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent",
       "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines"
     ],
     [
       "loop_memory_read.py::AgentLoopMemoryRead._retrieve_persistent",
       "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines",
+      "loop_memory_read.py::AgentLoopMemoryRead._code_checked"
     ],
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation",
