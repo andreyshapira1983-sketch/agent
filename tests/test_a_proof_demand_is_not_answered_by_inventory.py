@@ -17,10 +17,12 @@ local-critique door, where «Покажи» resolves to critiquing the previous
 answer. Banked as xfail per the operator's ruling («сначала зафиксировать
 класс»); when either XPASSes, the gap was closed — replace the marker with
 a plain assertion and record the mechanism.
+
+CLOSED 2026-09-25: both routes ask `core/proof_demand.demands_demonstration`
+— the capability shortcut steps aside, and local critique is refused — so a
+demand for demonstration reaches the planner.
 """
 from __future__ import annotations
-
-import pytest
 
 from core.operator_intent import route_operator_intent
 from core.referent_resolver import (
@@ -32,37 +34,11 @@ from core.referent_resolver import (
 _EXAM = "скажи что ты умеешь делать и докажи что ты умеешь это делать"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-17 and banked rather than fixed: the "
-        "capability-check shortcut matches inventory wording and ignores the "
-        "proof marker — a demand for demonstration is answered outside the "
-        "loop with tools_used=[]. The desired contract: a proof marker "
-        "(«докажи», «продемонстрируй», «покажи на практике») turns the "
-        "completion contract into claim -> demonstration -> evidence, which "
-        "no out-of-loop inventory can satisfy."
-        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_proof_demand_does_not_take_the_inventory_shortcut() -> None:
     intent = route_operator_intent(_EXAM)
     assert intent is None or intent.kind != "capability_check"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-17 (live probe, turn 2 of 3) and banked "
-        "rather than fixed: with a prior turn in the session, «Ты умеешь "
-        "проверять свой runtime? Покажи.» resolves to prior-turn local "
-        "critique — the route that cannot demonstrate anything — because "
-        "«покажи» reads as a critique directive. Same family as the R6 "
-        "cross-time intercept: a contract demanding demonstration must not "
-        "ride a tool-less route."
-        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_proof_demand_with_history_does_not_ride_local_critique() -> None:
     prior = PriorTurnRef(
         turn_id="turn_prev",
@@ -89,3 +65,18 @@ def test_the_class_is_narrow_a_bare_proof_question_reaches_the_planner() -> None
     ):
         intent = route_operator_intent(text)
         assert intent is None or intent.kind != "capability_check", text
+
+
+def test_a_plain_inventory_question_still_takes_the_shortcut() -> None:
+    """The fix must not buy correctness by closing the shortcut altogether."""
+    for text in ("что ты умеешь делать", "покажи свои способности"):
+        intent = route_operator_intent(text)
+        assert intent is not None and intent.kind == "capability_check", text
+
+
+def test_show_without_an_ability_question_is_still_critique_wording() -> None:
+    from core.proof_demand import demands_demonstration
+
+    assert not demands_demonstration("покажи ошибки в этом тексте")
+    assert demands_demonstration("Ты умеешь проверять свой runtime? Покажи.")
+    assert demands_demonstration("what can you do? prove it")

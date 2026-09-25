@@ -37,6 +37,7 @@ from .operator_intent_patterns import (
     _matches_urgent_status,
     _matches_weakness_finder,
 )
+from .proof_demand import demands_demonstration
 
 OperatorIntentKind = Literal[
     "shell_command_hint",
@@ -169,7 +170,9 @@ def route_operator_intent(text: str) -> OperatorIntent | None:  # noqa: PLR0911,
             command=":coding-readiness",
             reason="safe programming readiness wording",
         )
-    if _matches_capability_check(normalized):
+    # Просьба доказать делом не отвечается перечнем вне цикла: её ведёт
+    # планировщик, который умеет показать (core/proof_demand.py).
+    if _matches_capability_check(normalized) and not demands_demonstration(normalized):
         return OperatorIntent(
             kind="capability_check",
             command="operator-capabilities",

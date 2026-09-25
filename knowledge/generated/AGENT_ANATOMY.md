@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 252 modules across 12 groups._
+_Total: 254 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -19,6 +19,7 @@ _Operator-facing I/O, intent routing, output shaping._
 | Module | Purpose |
 | ------ | ------- |
 | `core/operator_intent` | Conversational routing for operator-control requests. |
+| `core/proof_demand` | Просьба ПОКАЗАТЬ делом, а не рассказать: такой ход не отвечается перечнем. |
 | `core/operator_intent_patterns` | Trigger phrases and matchers behind the no-LLM operator-intent router, including the one-inserted-word tolerance and the suppression guards that stay strict. |
 | `core/intent_understanding` | Intent understanding — the translator between plain human language and the autonomous agent's actions. |
 | `core/activity_decider` | Activity-type decider: the door must not choose the mind. |
@@ -304,6 +305,7 @@ _Reflection-driven repair, self-build, value gating._
 | `core/dependency_map` | Project import/dependency map for self-build changes. |
 | `core/causal_lesson` | От замеченного отклонения до усвоенного правила — состояниями, не подписями. |
 | `core/learning_planner` | Learning planner. |
+| `core/weak_spot_retrieval` | Слабое место рефлексии → улики → файлы кода (MIR-106). |
 | `core/value_review` | TD-032 — human value-review verdicts for self-build / self-apply outcomes. |
 | `core/proposal_value_gate` | Deterministic pre-publish value gate for self-build proposals (TD-035). |
 | `core/release_hygiene` | Release artifact hygiene checks. |

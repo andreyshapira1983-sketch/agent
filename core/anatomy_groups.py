@@ -19,7 +19,7 @@
 
 GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [
-        "operator_intent", "operator_intent_patterns", "intent_understanding",
+        "operator_intent", "proof_demand", "operator_intent_patterns", "intent_understanding",
         "activity_decider",
         "workspace_reference",
         "file_request_intent",
@@ -110,7 +110,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "writer_completion",
         "self_improvement_issues", "self_defect_reminder", "incremental_splitter", "split_proof", "splitter_refusals", "dependency_map",
         "causal_lesson",
-        "learning_planner", "value_review", "proposal_value_gate", "release_hygiene",
+        "learning_planner", "weak_spot_retrieval", "value_review", "proposal_value_gate", "release_hygiene",
     ]),
     ("Model Management (§6 / §12)", "Model discovery, routing, usage accounting.", [
         "model_catalog", "model_discovery", "model_router", "model_usage",

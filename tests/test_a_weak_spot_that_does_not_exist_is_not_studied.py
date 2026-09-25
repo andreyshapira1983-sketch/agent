@@ -18,13 +18,19 @@ Historical logs, current code: a different question.
 The residual is narrower and still live. The guard can only question a name
 that LOOKS like a path. `"memory subsystem"` is unresolvable by shape, passes
 through untouched, and reaches the planner — which answers it with very
-nearly the default source list. That is what the strict xfail banks.
+nearly the default source list. That is what the strict xfail banked.
+
+CLOSED 2026-09-25, by two published practices, opened before the change:
+reflection grounding (arXiv 2603.07670, section 4.3: a reflection must cite
+concrete episodes) and BM25 file retrieval from a natural-language problem
+(SWE-bench, section 4.1). A weak spot is studied only with its evidence (the
+error pattern the lesson came from); that evidence is the BM25 query for the
+code files to read (`core/weak_spot_retrieval.py`). A topic with no evidence
+is not studied at all, so the default list no longer stands in for it.
 """
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -56,26 +62,46 @@ def test_a_path_shaped_phantom_is_refused_before_it_becomes_a_goal() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, re-measured 2026-08-20 and banked rather than fixed "
-        "(MIR-106): a topic-shaped weak spot cannot be checked against disk, "
-        "and naming one changes nothing — 'planner interface design' returns "
-        "the same five sources as naming no weak spot at all, and as a "
-        "nonsense topic. Recorded honestly since today (learning_grounding -> "
-        "'unresolvable'), but no policy chosen: refuse, study anyway and say "
-        "so, or treat an unresolvable self-diagnosis as its own defect signal. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
-def test_naming_a_topic_weak_spot_changes_what_is_studied() -> None:
+def _lesson(focus: str, pattern=None):
+    from core.reflection import Lesson
+
+    return Lesson(insight="x", action="learn_more", focus_area=focus, pattern=pattern)
+
+
+def _timeout_pattern():
+    from core.reflection import ErrorPattern
+
+    return ErrorPattern(event_type="tool_result_error", tool_name="web_fetch",
+                        sample_message="ReadTimeout: HTTPSConnectionPool read timed out",
+                        count=3, trace_ids=["trace_a", "trace_b"])
+
+
+def _engine(tmp_path: Path):
+    from core.reflection import ReflectionEngine
+
+    return ReflectionEngine(workspace=_REPO, persistent_memory=None, llm=None,
+                            log_dir=tmp_path)
+
+
+def test_a_weak_spot_with_evidence_changes_what_is_studied(tmp_path: Path) -> None:
+    from core.reflection import ReflectionConfig
+
+    warnings: list[str] = []
+    plan = _engine(tmp_path)._build_learning_plan(
+        [_lesson("network fetching reliability", _timeout_pattern())],
+        ReflectionConfig(learning_limit=5), warnings)
     bare = list(_plan_for([], _REPO).source_paths)
-    topic = list(_plan_for(["planner interface design"], _REPO).source_paths)
-    nonsense = list(_plan_for(["ZZZQQQ nonexistent topic 8811"], _REPO).source_paths)
-    assert topic != bare, (
-        f"naming a weak spot studied exactly what naming nothing studies: {bare}"
-    )
-    assert topic != nonsense, (
-        f"a topic and gibberish produced the same study plan: {topic}"
-    )
+    assert plan is not None and "tools/web_fetch.py" in plan.source_paths, plan
+    assert list(plan.source_paths) != bare
+
+
+def test_a_weak_spot_without_evidence_is_not_studied(tmp_path: Path) -> None:
+    """A topic the model named with no error pattern behind it — the old case
+    'planner interface design' — no longer gets the default list."""
+    from core.reflection import ReflectionConfig
+
+    warnings: list[str] = []
+    plan = _engine(tmp_path)._build_learning_plan(
+        [_lesson("planner interface design")], ReflectionConfig(learning_limit=5), warnings)
+    assert plan is None
+    assert any("without evidence" in w for w in warnings), warnings

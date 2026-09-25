@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from core.proof_demand import demands_demonstration
+
 # Shadow / rollout flag — loop wiring (PR2+) must default this to False.
 FEATURE_FLAG = "referent_resolver_v1"
 FEATURE_FLAG_DEFAULT = False
@@ -185,6 +187,10 @@ def is_local_critique_eligible(decision: ReferentDecision) -> bool:
     if demands_cross_time_proof(decision.directive_excerpt or "") or (
         demands_cross_time_proof(target)
     ):
+        return False
+    # Та же семья (2026-09-25): «Умеешь …? Покажи.» — просьба показать делом;
+    # путь критики без инструментов показать не может (core/proof_demand.py).
+    if demands_demonstration(decision.directive_excerpt or ""):
         return False
     return is_critique_directive(decision.directive_excerpt or "")
 
