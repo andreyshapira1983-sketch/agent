@@ -26,6 +26,7 @@ _RU = {
     "dialogue-supported": "по нашему разговору, не по источнику",
     "subagent-asserted": "со слов помощника, не проверено",
     "no-receipt": "у инструмента нет квитанции — не подтверждено",
+    "unverified": "не проверено — источника нет",
 }
 _EN = {
     "topic-only": "the source is on topic but does not confirm this",
@@ -36,10 +37,11 @@ _EN = {
     "dialogue-supported": "from our conversation, not a source",
     "subagent-asserted": "a helper's word, unchecked",
     "no-receipt": "no tool receipt — unconfirmed",
+    "unverified": "unchecked — no source",
 }
 _MARKER_RE = re.compile(
     r"\s*\[(topic-only|claim-figure-unverified|absence-unverifiable|claim-refuted|"
-    r"улика-без-этих-слов|dialogue-supported|subagent-asserted|no-receipt)(?::([^\]]*))?\]")
+    r"улика-без-этих-слов|dialogue-supported|subagent-asserted|no-receipt|unverified)(?::([^\]]*))?\]")
 #: `[unverified:…]` ставится вместе с `[no-receipt]` и сам по себе ничего не добавляет.
 _UNVERIFIED_BODY_RE = re.compile(r"\s*\[unverified:[^\]]*\]")
 _URL_RE = re.compile(r"https?://\S+")
