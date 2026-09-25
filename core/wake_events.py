@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,22 @@ def _outside_head(workspace: Path) -> str | None:
                 return sha
         return ""
     return None
+
+
+def outside_commit_ts(workspace: str | Path) -> str:
+    """Время (ISO, UTC) последней чужой правки основной ветки; "" — неизвестно."""
+    sha = _outside_head(Path(workspace))
+    if not sha:
+        return ""
+    try:
+        out = subprocess.run(["git", "-C", str(workspace), "show", "-s", "--format=%cI", sha],  # noqa: S603, S607
+                             capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    try:
+        return datetime.fromisoformat(out.stdout.strip()).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        return ""
 
 
 def wake_files() -> list[Path]:

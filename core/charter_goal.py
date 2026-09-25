@@ -206,6 +206,40 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
     return tuple(list(collapsed.values())[-_RECENT_STOPS:])
 
 
+#: Столько ПЛАТНЫХ заходов без результата — и цель брошена до перемены мира.
+#: Voyager (arXiv 2305.16291): после четырёх неудачных раундов задача
+#: оставляется. Замер 2026-09-25 по журналу 19–24.09: 16 целей получили 4+
+#: платных захода без работы, одна — 34 (свести повтор в core/secret_scanner.py);
+#: исходы без работы по замыслу «не занимают тему», и предела не было.
+_ABANDON_AFTER = 4
+
+
+def _abandoned_goals(workspace: Path, world_ts: str) -> tuple[str, ...]:
+    """Цели с `_ABANDON_AFTER`+ платными заходами без работы после перемены мира.
+
+    Платный — с вызовами модели: ожидание одобрения, стена на воротах и
+    простой попыткой не считаются (MIR-117). Перемена мира — журнал способностей
+    или чужая правка основной ветки (core/wake_events.py): после неё цель снова
+    открыта, как и у стража повторов.
+    """
+    from core.wake_events import outside_commit_ts
+
+    since = max(world_ts or "", outside_commit_ts(workspace))
+    misses: dict[str, int] = {}
+    path = workspace / "data" / "campaign_ledger.jsonl"
+    for line in path.read_text(encoding="utf-8").splitlines() if path.is_file() else []:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        p = row.get("payload") if isinstance(row.get("payload"), dict) else row
+        goal = str(p.get("goal") or "").strip()
+        if (goal and p.get("work_done") is False and int(p.get("llm_calls_spent") or 0) > 0
+                and str(p.get("ts") or "") > since):
+            misses[goal] = misses.get(goal, 0) + 1
+    return tuple(g for g, n in misses.items() if n >= _ABANDON_AFTER)
+
+
 def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
     """Цели, которые действительно ЗАНИМАЛИ прогон, а не просто прозвучали.
 
@@ -983,6 +1017,10 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     if repeated:
         return _declined(
             f"goal repeats a recent campaign goal: {repeated[:80]!r}", goal)
+    abandoned = _repeats_recent(goal, _abandoned_goals(root, change_ts))
+    if abandoned:
+        return _declined(f"goal abandoned after {_ABANDON_AFTER}+ paid attempts without a result "
+                         f"since the world last changed: {abandoned[:80]!r}", goal)
     if not check:
         return _declined(
             "success_check is empty — a goal without a check is a wish", goal)
