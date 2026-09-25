@@ -54,9 +54,9 @@ from core.campaign_ledger import (
 )
 from core.campaign_types import CampaignActionOutcome, CampaignConfig, CampaignResult
 from core.campaign_verdict import judge_and_record, judge_campaign
-from core.capability_events import last_capability_change_ts
 from core.run_context import run_cost_envelope
 from core.self_stop_record import record_self_stop, record_stop_observation
+from core.wake_events import wake_mark, woken_by
 
 # Предметный страж повторов — авторство агента (DEDUP_DESIGN/DEDUP_TIMING,
 # WEAVE ред.2 §1): белый список статичен и известен до исполнения.
@@ -570,13 +570,14 @@ def run_campaign(
         """Блок 8: ограниченное ожидание ВНУТРИ процесса вместо смерти.
 
         Только для прогона с выбором цели (смены): без `next_goal` прежняя
-        семантика остановки сохраняется. Просыпается по журналу перемен мира
-        или новому одобрению; иначе — по периодической перепроверке.
+        семантика остановки сохраняется. Просыпается по событию
+        (core/wake_events.py: перемена мира, чужая правка кода, слово оператора,
+        найм) или новому одобрению; иначе — по периодической перепроверке.
         """
         nonlocal idle_streak, streak_repeats, goal_switches
         if next_goal is None:
             return False
-        mark = last_capability_change_ts(workspace)
+        mark = wake_mark(workspace)
         approved_before = _approved_ids(approval_inbox)
         # Темп ожидания — темп прогона: без паузы между циклами (тесты, ручной
         # запуск) ожидание не спит, а лишь занимает цикл; в смене с паузой 60 с
@@ -592,11 +593,9 @@ def run_campaign(
             step = min(pace, limit - waited)
             sleep_fn(step)
             waited += step
-            if last_capability_change_ts(workspace) != mark:
-                woke = "world_changed"
-                break
-            if _approved_ids(approval_inbox) - approved_before:
-                woke = "new_approval"
+            woke = woken_by(mark, wake_mark(workspace)) or (
+                "new_approval" if _approved_ids(approval_inbox) - approved_before else "")
+            if woke:
                 break
         record = CampaignCycleRecord(
             cycle=cycle, ts=now_fn().isoformat(), goal=current_goal,
