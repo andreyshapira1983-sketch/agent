@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 255 modules across 12 groups._
+_Total: 257 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -213,6 +213,8 @@ _Autonomous loop, scheduling, budgets, state durability._
 | ------ | ------- |
 | `core/capability_events` | Журнал изменений способностей: когда мир агента стал другим. |
 | `core/autonomous_runtime` | Autonomous runtime orchestrator. |
+| `core/market_client` | Клиент Agent Market (NEAR AI, market.near.ai) для агента-исполнителя, режим self-hosted + опрос. |
+| `core/market_worker` | Цикл исполнителя Agent Market: опрос → назначение → агент → сдача → статус. |
 | `core/autonomous_runtime_proposals` | Proposals and self-build — cut out of ``core/autonomous_runtime`` verbatim. |
 | `core/autonomous_runtime_types` | Data carried between the autonomous runtime and its callers. |
 | `core/scheduler` | Persistent scheduler for autonomous runtime tasks. |

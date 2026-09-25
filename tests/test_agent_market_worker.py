@@ -1,0 +1,199 @@
+"""Agent Market: полный цикл исполнителя против поддельной площадки по её контракту.
+
+Поддельная площадка — настоящий HTTP-сервер на 127.0.0.1 с путями и формами
+ответов из /openapi.json и worker-lifecycle.md: клиент идёт по тому же
+urllib/http.client, что и к market.near.ai. Живой площадки тест не трогает.
+"""
+from __future__ import annotations
+
+import json
+import re
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from core.market_client import MarketClient, MarketError
+from core.market_worker import MarketWorker, classify
+
+TOKEN = "aat_" + "0123456789abcdef" * 2
+
+
+class _Market:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.fail_first: dict[str, list[int]] = {}
+        self.files: dict[str, dict] = {}
+        self.assignments = {
+            "as-1": {"assignment": {"assignmentId": "as-1", "jobId": "job-test", "status": "in_progress",
+                                    "startedAt": None, "submittedAt": None, "deliverableUrl": None},
+                     "job": {"jobId": "job-test", "title": "Посчитай 2+2", "description": "Ответ числом.",
+                             "tags": ["math"]}, "latestMessage": None},
+            "as-2": {"assignment": {"assignmentId": "as-2", "jobId": "job-foreign", "status": "in_progress",
+                                    "startedAt": None, "submittedAt": None, "deliverableUrl": None},
+                     "job": {"jobId": "job-foreign", "title": "Чужая работа"}, "latestMessage": None},
+        }
+
+
+def _serve(market: _Market):
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a) -> None:  # тише в выводе тестов
+            pass
+
+        def _reply(self, code: int, body: dict | None = None, headers: dict | None = None) -> None:
+            data = json.dumps(body or {}).encode()
+            self.send_response(code)
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _handle(self, method: str) -> None:
+            path = self.path.split("?", 1)[0]
+            market.calls.append((method, self.path))
+            queue = market.fail_first.get(path)
+            if queue:
+                code = queue.pop(0)
+                return self._reply(code, {"error": "boom"}, {"Retry-After": "0"} if code == 429 else None)
+            if path.startswith("/upload/"):
+                n = int(self.headers.get("Content-Length", 0))
+                market.files[path.rsplit("/", 1)[1]]["bytes"] = self.rfile.read(n)
+                market.files[path.rsplit("/", 1)[1]]["put_headers"] = dict(self.headers)
+                return self._reply(200)
+            if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                return self._reply(401, {"error": "unauthorized"})
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            if path == "/v1/agents/me/assignments":
+                status = re.search(r"status=(\w+)", self.path).group(1)
+                rows = [r for r in market.assignments.values()
+                        if status == "all" or r["assignment"]["status"] == status]
+                return self._reply(200, {"assignments": rows})
+            m = re.fullmatch(r"/v1/assignments/([\w-]+)/(start|submit)", path)
+            if m:
+                a = market.assignments[m.group(1)]["assignment"]
+                if m.group(2) == "start":
+                    a["startedAt"] = "2026-09-25T10:00:00Z"
+                    return self._reply(200, {"startedAt": a["startedAt"]})
+                if not body.get("deliverableUrl", "").startswith(("https://", "http://127.0.0.1")):
+                    return self._reply(400, {"error": "validation_error", "message": "bad url"})
+                a.update(status="submitted", submittedAt="2026-09-25T10:05:00Z",
+                         deliverableUrl=body["deliverableUrl"], deliverableHash=body.get("deliverableHash"))
+                return self._reply(200, a)
+            if path == "/v1/files":
+                fid = f"f{len(market.files) + 1}"
+                base = f"http://127.0.0.1:{self.server.server_address[1]}"
+                market.files[fid] = {"meta": body, "completed": False}
+                return self._reply(201, {"fileId": fid, "uploadUrl": f"{base}/files/{fid}",
+                                         "directUploadUrl": f"{base}/upload/{fid}?sig=secret",
+                                         "fileUrl": f"{base}/files/{fid}/{body['filename']}",
+                                         "byteSize": body["byteSize"], "expiresInSecs": 1800})
+            m = re.fullmatch(r"/v1/files/(\w+)/complete", path)
+            if m:
+                market.files[m.group(1)]["completed"] = True
+                return self._reply(200, {"fileId": m.group(1)})
+            return self._reply(404, {"error": "not_found"})
+
+        def do_GET(self) -> None:
+            self._handle("GET")
+
+        def do_POST(self) -> None:
+            self._handle("POST")
+
+        def do_PUT(self) -> None:
+            self._handle("PUT")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.fixture
+def market():
+    m = _Market()
+    server = _serve(m)
+    m.base = f"http://127.0.0.1:{server.server_address[1]}"
+    yield m
+    server.shutdown()
+
+
+def _client(market, tmp_path: Path, **kw) -> MarketClient:
+    return MarketClient(token=TOKEN, base_url=market.base, log_path=tmp_path / "market_api.jsonl",
+                        sleep=lambda s: None, **kw)
+
+
+def test_the_full_cycle_assignment_agent_submit_status(market, tmp_path: Path) -> None:
+    asked: list[str] = []
+    worker = MarketWorker(_client(market, tmp_path), lambda text: asked.append(text) or "# Ответ\n\n4",
+                          allowed_jobs={"job-test"}, workdir=tmp_path / "market")
+    reports = {r.assignment_id: r for r in worker.poll_once()}
+    done = reports["as-1"]
+    assert done.error is None, done
+    assert done.steps[0] == "start" and "submit" in done.steps and done.status_after == "submitted"
+    assert "Посчитай 2+2" in asked[0]
+    f = next(iter(market.files.values()))
+    assert f["completed"] and f["bytes"] == "# Ответ\n\n4".encode()
+    assert "Authorization" not in f["put_headers"] and "Content-Type" not in f["put_headers"]
+    a = market.assignments["as-1"]["assignment"]
+    assert a["status"] == "submitted" and len(a["deliverableHash"]) == 64
+
+
+def test_a_job_not_allowed_by_the_operator_is_not_even_started(market, tmp_path: Path) -> None:
+    worker = MarketWorker(_client(market, tmp_path), lambda text: "x", allowed_jobs=set(),
+                          workdir=tmp_path / "market")
+    reports = worker.poll_once()
+    assert all("не взято" in r.steps[0] for r in reports)
+    assert not [c for c in market.calls if c[0] == "POST"], "nothing may be started or submitted"
+    assert market.assignments["as-1"]["assignment"]["startedAt"] is None
+
+
+def test_no_bid_is_ever_placed(market, tmp_path: Path) -> None:
+    worker = MarketWorker(_client(market, tmp_path), lambda text: "ok", allowed_jobs={"job-test"},
+                          workdir=tmp_path / "market")
+    worker.poll_once()
+    assert not [c for c in market.calls if "/bids" in c[1] and c[0] == "POST"]
+    assert not hasattr(MarketClient, "place_bid")
+
+
+def test_server_errors_and_rate_limits_are_retried(market, tmp_path: Path) -> None:
+    market.fail_first["/v1/agents/me/assignments"] = [503, 429]
+    rows = _client(market, tmp_path).my_assignments("all")
+    assert len(rows) == 2
+    log = [json.loads(x) for x in (tmp_path / "market_api.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["status"] for r in log] == [503, 429, 200]
+
+
+def test_a_client_error_is_not_retried(market, tmp_path: Path) -> None:
+    client = MarketClient(token="aat_" + "f" * 32, base_url=market.base, log_path=tmp_path / "m.jsonl",
+                          sleep=lambda s: None)
+    with pytest.raises(MarketError) as err:
+        client.my_assignments()
+    assert err.value.status == 401 and err.value.code == "unauthorized"
+    assert len((tmp_path / "m.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_the_token_never_reaches_the_log(market, tmp_path: Path) -> None:
+    worker = MarketWorker(_client(market, tmp_path), lambda text: f"echo {TOKEN}", allowed_jobs={"job-test"},
+                          workdir=tmp_path / "market")
+    worker.poll_once()
+    text = (tmp_path / "market_api.jsonl").read_text(encoding="utf-8")
+    assert TOKEN not in text and "sig=secret" not in text
+
+
+def test_plain_http_is_refused_outside_localhost() -> None:
+    with pytest.raises(MarketError):
+        MarketClient(token=TOKEN, base_url="http://market.near.ai")
+
+
+@pytest.mark.parametrize(("row", "kind"), [
+    ({"status": "in_progress", "startedAt": None, "deliverableUrl": None}, "fresh"),
+    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": None}, "in_flight"),
+    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": "u", "submittedAt": "t"}, "rework"),
+    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": "u", "submittedAt": None}, "redo"),
+    ({"status": "accepted"}, "accepted"),
+])
+def test_rows_are_classified_as_the_lifecycle_table_says(row: dict, kind: str) -> None:
+    assert classify({"assignment": row}) == kind
