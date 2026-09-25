@@ -55,6 +55,14 @@ PROTECTED_CORE: frozenset[str] = frozenset({
     "tests/test_capability_baseline.py", "tests/capability_tasks.py",
     "scripts/capability_baseline.py", "scripts/check_function_length_baseline.py",
     "scripts/check_ceo_file_baseline.py", "tests/test_ruff_config.py",
+    # Код самих тормозов и ворот одобрения — слово оператора 2026-09-25:
+    # полоса не вправе даже ПРЕДЛАГАТЬ их правку (раньше могла положить её на
+    # ветку для его глаза). Выключатель и лимиты расхода, список тормозов,
+    # ворота и ящик одобрений, оба пути самоправки.
+    "core/budget_kill_switch.py", "core/budget_governor.py", "core/budget_ledger.py",
+    "core/usd_spend.py", "core/control_files.py", "core/policy.py", "core/approval.py",
+    "core/approval_inbox.py", "core/actuation_gateway.py", "core/self_apply_lane.py",
+    "core/self_apply_bridge.py", "core/patch_route.py",
 })
 
 # Explicit denylist — checked *before* the allowlist so a sensitive path can

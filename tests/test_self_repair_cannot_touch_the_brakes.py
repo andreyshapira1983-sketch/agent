@@ -14,7 +14,10 @@ from core.patch_route import _forbidden
 from core.self_apply_lane import PROTECTED_CORE, _is_denied
 
 _BRAKES = ["core/root_principles.py", "tools/python_probe.py", "tools/convert_file.py",
-           "tests/test_capability_baseline.py", "scripts/check_function_length_baseline.py"]
+           "tests/test_capability_baseline.py", "scripts/check_function_length_baseline.py",
+           # Слово оператора 2026-09-25: код тормозов нельзя даже предложить.
+           "core/budget_kill_switch.py", "core/budget_ledger.py", "core/usd_spend.py",
+           "core/control_files.py", "core/approval_inbox.py", "core/self_apply_lane.py"]
 
 
 @pytest.mark.parametrize("path", _BRAKES)

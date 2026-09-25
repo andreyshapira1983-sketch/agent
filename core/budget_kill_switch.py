@@ -49,6 +49,10 @@ _GUARDED_WINDOW = "day"
 # this verbatim as its heartbeat/report reason so operators can grep for it.
 REASON_ENGAGED = "budget_kill_switch"
 
+# `counter` of a latch that is on because its state file could not be read —
+# the stop names why, and `limit_source` carries the read error.
+UNREADABLE_COUNTER = "state_file_unreadable"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -197,16 +201,33 @@ class BudgetKillSwitch:
     )
 
     def load(self) -> KillSwitchState:
-        """Return the latched state, or inactive when absent/corrupt."""
+        """Return the latched state: inactive only when the file is ABSENT.
+
+        A file that exists but cannot be read is a stop, not a pass (operator's
+        decision 2026-09-25). Until then a corrupt latch read as "inactive", so
+        a torn write or a stray byte released the brake it was meant to hold;
+        a deny list that answers "allowed" for what it cannot parse is the
+        failure the kill-switch literature names first. The operator clears it
+        with `:kill-switch clear`, as any latch.
+        """
         try:
             raw = self.path.read_text(encoding="utf-8")
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return KillSwitchState.inactive()
+        except (OSError, ValueError) as exc:
+            return self._unreadable(f"{type(exc).__name__}: {exc}")
         try:
             data = json.loads(raw)
         except ValueError:
-            return KillSwitchState.inactive()
+            return self._unreadable("not JSON")
+        if not isinstance(data, Mapping):
+            return self._unreadable(f"JSON {type(data).__name__}, not an object")
         return KillSwitchState.from_dict(data)
+
+    @staticmethod
+    def _unreadable(detail: str) -> KillSwitchState:
+        return KillSwitchState(active=True, reason=REASON_ENGAGED, counter=UNREADABLE_COUNTER,
+                               limit_source=detail[:200], timestamp=_now_iso())
 
     def _write(self, state: KillSwitchState) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
