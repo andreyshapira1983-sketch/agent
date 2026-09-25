@@ -13,6 +13,13 @@ R2, ЖИВОЙ СЛУЧАЙ B1 (`trace_4f295f8f`): заключение заяв
 допуском в обучение. Инвариант: заявленный счёт, противоречащий СОБСТВЕННОМУ
 перечислению в том же предложении, — доказанная ложь, и подтверждённая цитата
 её не отмывает: противоречие внутреннее, улика о нём ничего не знает.
+
+R2 В ТЕНИ с 2026-09-25 (слово оператора). Замер на живых ответах сервера
+(1397 проверок, 20–24.09): 25 срабатываний, все 25 ложные — скобки вызова
+функции, пример, формула. Сильное действие требует измеренной точности, поэтому
+R2 теперь только пишет `shadow_count_mismatch` в журнал. Ложь B1 ловит проверка
+по смыслу (MIR-060, core/entailment_scope.py): счёт — выведенное утверждение,
+его судит модель.
 """
 from __future__ import annotations
 
@@ -120,51 +127,46 @@ def test_a_single_source_lie_is_still_refuted() -> None:
     assert report.refuted_chunks >= 1
 
 
-def test_a_claimed_count_contradicting_its_own_enumeration_is_refuted() -> None:
-    """ГЛАВНОЕ R2: «пять полок (A1, B2, C4, D0)» — форма B1 дословно."""
-    answer = (
-        "Conclusion: Файл содержит пять полок (A1, B2, C4, D0). "
-        "[file:probe_r1/inventory.txt]\n"
-        "Facts:\n- В файле присутствуют полки A1, B2, C4 и D0 "
-        "[file:probe_r1/inventory.txt]\n"
-        "Sources:\n1. file:probe_r1/inventory.txt - inv\n"
-        "Confidence: high\nUnverified: nothing\n"
-    )
-    report = verify(
-        answer=answer,
-        chain=_chain(_file("probe_r1/inventory.txt",
-                           "item: axle-207, shelf: B2\nitem: rotor-33, shelf: A1\n"
-                           "item: gasket-9, shelf: C4\nitem: stator-6, shelf: D0\n")),
-        user_question="какие полки",
-    )
-    refuted = [c for c in report.chunks if c.verdict == "refuted"]
-    assert refuted, [c.verdict for c in report.chunks]
-    assert refuted[0].reason is not None
-    assert refuted[0].reason.code == "count_mismatch"
+class _SaysNo:
+    """A judge that answers NO to every entailment question, and counts asks."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, **_kw) -> str:
+        self.calls += 1
+        return "NO"
 
 
-def test_an_item_the_sentence_itself_rejects_is_not_counted() -> None:
-    """Вторая ложь B1: «три позиции (…, stator-6: 7 шт. не подходит)» — само
-    предложение исключило третий пункт, значит перечислено две."""
-    answer = (
-        "Conclusion: Есть три позиции с qty меньше 6 (rotor-33: 5 шт., "
-        "gasket-9: 0 шт., stator-6: 7 шт. не подходит). "
-        "[file:probe_r1/inventory.txt]\n"
-        "Facts:\n- rotor-33 имеет qty 5 [file:probe_r1/inventory.txt]\n"
-        "Sources:\n1. file:probe_r1/inventory.txt - inv\n"
-        "Confidence: high\nUnverified: nothing\n"
-    )
-    report = verify(
-        answer=answer,
-        chain=_chain(_file("probe_r1/inventory.txt",
-                           "item: rotor-33, qty: 5\nitem: gasket-9, qty: 0\n"
-                           "item: stator-6, qty: 7\n")),
-        user_question="какие позиции в дефиците",
-    )
-    assert any(
-        c.verdict == "refuted" and c.reason and c.reason.code == "count_mismatch"
-        for c in report.chunks
-    ), [(c.verdict, getattr(c.reason, "code", None)) for c in report.chunks]
+_B1 = (
+    "Conclusion: Файл содержит пять полок (A1, B2, C4, D0). "
+    "[file:probe_r1/inventory.txt]\n"
+    "Facts:\n- В файле присутствуют полки A1, B2, C4 и D0 "
+    "[file:probe_r1/inventory.txt]\n"
+    "Sources:\n1. file:probe_r1/inventory.txt - inv\n"
+    "Confidence: high\nUnverified: nothing\n"
+)
+_B1_EXCERPT = ("item: axle-207, shelf: B2\nitem: rotor-33, shelf: A1\n"
+               "item: gasket-9, shelf: C4\nitem: stator-6, shelf: D0\n")
+
+
+def test_r2_writes_its_mismatch_to_the_journal_and_does_not_judge() -> None:
+    """Тень: «пять полок (A1, B2, C4, D0)» — сигнал в журнале, вердикт не из R2."""
+    report = verify(answer=_B1, chain=_chain(_file("probe_r1/inventory.txt", _B1_EXCERPT)),
+                    user_question="какие полки")
+    assert not any(c.reason and c.reason.code == "count_mismatch" for c in report.chunks)
+    shadow = report.to_log_payload()["shadow_count_mismatch"]
+    assert shadow and shadow[0]["expected"] == "5" and shadow[0]["actual"] == "4"
+
+
+def test_the_b1_lie_is_still_caught_by_the_entailment_judge() -> None:
+    """Живой цикл даёт проверке судью (MIR-060): счёт «пять» — выведенное
+    утверждение, и модель, сказавшая «не следует», не даёт ему `verified`."""
+    judge = _SaysNo()
+    report = verify(answer=_B1, chain=_chain(_file("probe_r1/inventory.txt", _B1_EXCERPT)),
+                    user_question="какие полки", entailment_llm=judge)
+    assert judge.calls, "the count claim never reached the entailment judge"
+    assert report.chunks[0].verdict != "verified", [c.verdict for c in report.chunks]
 
 
 def test_a_correct_count_is_left_alone() -> None:
@@ -184,23 +186,3 @@ def test_a_correct_count_is_left_alone() -> None:
             user_question="какие полки",
         )
         assert report.refuted_chunks == 0, lead
-
-
-def test_the_internal_contradiction_survives_a_resolved_citation() -> None:
-    """Разрешившаяся цитата не отмывает внутреннее противоречие: улика ничего
-    не знает о споре предложения с самим собой."""
-    answer = (
-        "Conclusion: Есть пять полок (A1, B2, C4, D0). [file:inv.txt]\n"
-        "Facts:\n- полки A1, B2, C4, D0 [file:inv.txt]\n"
-        "Sources:\n1. file:inv.txt - inv\n"
-        "Confidence: high\nUnverified: nothing\n"
-    )
-    report = verify(
-        answer=answer,
-        chain=_chain(_file("inv.txt", "полки A1, B2, C4, D0 перечислены\n")),
-        user_question="какие полки",
-    )
-    assert any(
-        c.verdict == "refuted" and c.reason and c.reason.code == "count_mismatch"
-        for c in report.chunks
-    )

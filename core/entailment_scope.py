@@ -22,7 +22,8 @@ JUDGE_CALLS_PER_ANSWER = 6
 _DERIVED_RE = re.compile(
     r"больше|меньше|выше|ниже|раньше|позже|быстрее|медленнее|чаще|реже|равн|столько же"
     r"|значит|следовательно|поэтому|потому что|так как|отсюда|итого|всего|кажд|ни один"
-    r"|никогда|всегда|единствен|только|втор|трет|перв|\b(?:все|всех|один|одна|два|две|три)\b"
+    r"|никогда|всегда|единствен|только|втор|трет|перв"
+    r"|\b(?:все|всех|один|одна|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять)\b"
     r"|\b(?:more|less|fewer|greater|smaller|larger|higher|lower|faster|slower|before|after"
     r"|equal|same as|therefore|thus|hence|because|so|implies|means|total|every|all|none"
     r"|never|always|only|first|second|third|one|two|three|four|five)\b",
