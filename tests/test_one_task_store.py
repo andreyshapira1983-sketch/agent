@@ -94,6 +94,9 @@ def test_every_module_that_queues_tasks_names_the_same_file():
             named[path.relative_to(_REPO).as_posix()] = files
 
     all_files = set().union(*named.values()) if named else set()
+    # Очередь решений на суд Клода (core/judge_queue.py) — не задачи: в ней
+    # «цель достигнута», ждущее вердикта, и никто из неё работу не берёт.
+    all_files -= {"judge_queue.jsonl"}
     assert all_files <= {"runtime_tasks.jsonl"}, (
         "очередь задач снова разъехалась по нескольким файлам:\n  "
         + "\n  ".join(f"{mod}: {sorted(files)}" for mod, files in sorted(named.items()))
