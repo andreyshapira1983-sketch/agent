@@ -123,6 +123,6 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "team_executor", "team_plan",
     ]),
     ("Cross-Cutting: Data Models & LLM (§12)", "Core data models and the LLM client wrapper.", [
-        "models", "llm",
+        "models", "llm", "reasoning_roster",
     ]),
 ]

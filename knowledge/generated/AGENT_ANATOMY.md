@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 274 modules across 12 groups._
+_Total: 275 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -369,6 +369,7 @@ _Core data models and the LLM client wrapper._
 | ------ | ------- |
 | `core/models` | Core data models for the agent (§12.1 of the architecture). |
 | `core/llm` | Thin LLM client wrapper. |
+| `core/reasoning_roster` | Реестр моделей, которые тратят бюджет вывода на рассуждение («молчавших»). |
 
 ## Who judges an answer, and in what order
 
