@@ -560,6 +560,7 @@ def collect_dry_health_pass(
         "kill_switch": _kill_switch_payload(workspace, budget),
         "self_build": _self_build_payload(workspace, now),
         "value_reviews": _value_review_payload(workspace),
+        "usefulness": _usefulness_payload(workspace),
         "git": (git_status_fn or _git_tree_payload)(workspace),
     }
     payload["next_safe_action"] = _select_next_safe_action(payload)
@@ -621,10 +622,30 @@ def _format_dry_health_pass(payload: dict[str, Any]) -> str:
         ),
         "value reviews: "
         + ", ".join(f"{verdict}={value_counts.get(verdict, 0)}" for verdict in VALUE_VERDICTS),
+        _fmt_usefulness(payload.get("usefulness") or {}),
         f"git tree: {git.get('status', 'unknown')}",
         f"next safe action: {payload.get('next_safe_action')}",
     ]
     return "\n".join(lines)
+
+
+def _usefulness_payload(workspace: Path) -> dict[str, Any]:
+    """Пригодилась ли работа кампании потом (core/work_usefulness.py, 2026-09-25)."""
+    from core.work_usefulness import market_accepted, measure, summary
+
+    try:
+        return {"status": "known", **summary(measure(workspace), market_accepted(workspace))}
+    except (OSError, ValueError) as exc:
+        return {"status": "unknown", "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def _fmt_usefulness(use: dict[str, Any]) -> str:
+    if use.get("status") != "known":
+        return f"useful work: unknown ({use.get('reason', 'not measured')})"
+    share = use.get("useful_share")
+    return (f"useful work (used later): {use.get('useful')} of {use.get('judged')} judged cycles "
+            f"({'-' if share is None else f'{share:.0%}'}); no durable product {use.get('no_product_named')}; "
+            f"pending {use.get('pending')}")
 
 
 def _handle_dry_health_pass(rest: str, _agent: Any, workspace: Path) -> bool:
