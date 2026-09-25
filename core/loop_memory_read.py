@@ -448,6 +448,18 @@ class AgentLoopMemoryRead:
                 # Re-ask detection must never abort the main loop.
                 pass
 
+        # Шаблоны работы по AWM (core/workflow_memory.py): лежат рядом с
+        # процедурами; нет файла — нет блока, ход как прежде.
+        if self.procedural_store is not None:
+            from core.workflow_memory import FILE_NAME, WorkflowMemoryStore, format_workflows
+
+            workflows = WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
+            if workflows:
+                self.log.log("workflow_memory_inject",
+                             {"workflow_ids": [w.id for w in workflows], "kinds": sorted({w.kind for w in workflows})})
+                text = format_workflows(workflows)
+                block = block + "\n\n" + text if block else text
+
         return block
 
     def memory_record_lines(self, records: list) -> list[str]:
