@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from core.evidence import Evidence, ProvenanceChain
 from core.ids import new_id
 from core.source_ranker import SourceRank, SourceRankingReport
+from core.unit_score import clamp_unit as _bounded_trust
 
 SourceType = Literal[
     "book",
@@ -506,14 +507,6 @@ def _domain(locator: str) -> str:
     host = parsed.netloc or parsed.path.split("/", 1)[0]
     host = host.lower().strip()
     return host.removeprefix("www.")
-
-
-def _bounded_trust(value: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        number = 0.0
-    return max(0.0, min(1.0, number))
 
 
 def _counts(values: Iterable[str]) -> dict[str, int]:

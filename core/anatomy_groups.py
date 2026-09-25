@@ -70,7 +70,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
         "conflict_review", "conflict_episode",
-        "source_registry", "source_registry_store", "source_library", "source_ranker",
+        "source_registry", "source_registry_store", "source_library", "source_ranker", "unit_score",
         "read_sources_registry",
         "source_connectors",
     ]),
