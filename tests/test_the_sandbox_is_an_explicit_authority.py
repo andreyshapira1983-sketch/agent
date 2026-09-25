@@ -520,7 +520,6 @@ def test_a_sandbox_candidate_reaches_the_offer_ledger(
 def test_a_rolled_back_candidate_is_not_offered(workspace: Path, monkeypatch: Any) -> None:
     """Откаченное не предъявляется: принимать нечего и незачем."""
     import core.self_apply_bridge as bridge
-
     from core.burn_in_supervisor import offer_ledger
     from core.rule_approved_apply import drain_rule_approved_proposals
 
