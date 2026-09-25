@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from core.word_overlap import jaccard as _jaccard
+
 # Регистр «малый разговор»: приветствия, благодарности, прощания, «как дела»
 # по-русски и по-английски. Слово целиком (\b), чтобы «приветствие судьи» не
 # считалось за «привет»; потолок длины — короткая фраза, не письмо.
@@ -56,12 +58,6 @@ def _tokens(text: str) -> frozenset[str]:
     return frozenset(re.findall(r"[a-zа-яё0-9]{3,}", lowered)) | (
         words & _POLARITY_WORDS
     )
-
-
-def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
-    if not a or not b:
-        return 0.0
-    return len(a & b) / len(a | b)
 
 
 def classify_register(incoming: str) -> str:

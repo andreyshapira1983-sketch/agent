@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.proof_demand import demands_demonstration
+from core.word_overlap import jaccard as _jaccard
 
 # Shadow / rollout flag — loop wiring (PR2+) must default this to False.
 FEATURE_FLAG = "referent_resolver_v1"
@@ -214,14 +215,6 @@ def _now() -> datetime:
 
 def _token_set(text: str) -> set[str]:
     return set(re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9_]{3,}", text.casefold()))
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
 
 
 @dataclass(frozen=True)

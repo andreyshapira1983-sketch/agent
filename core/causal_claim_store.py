@@ -17,6 +17,7 @@ from core.causal_lesson import (
     state_of,
 )
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
+from core.word_overlap import word_set as _lesson_tokens
 
 _CLAIMS_FILENAME = "causal_claims.jsonl"
 
@@ -206,13 +207,6 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
 #: provenance, not planner actions, and `distilled_lessons` does not pass
 #: them on. Consumers: `core.self_task_producer._lesson_prompt_parts`.
 LESSON_MACHINE_ACTIONS: frozenset[str] = frozenset({"include_real_signatures"})
-
-
-def _lesson_tokens(text: str) -> frozenset[str]:
-    return frozenset(
-        w for w in "".join(c.lower() if c.isalnum() else " " for c in text).split()
-        if len(w) > 2
-    )
 
 
 def lesson_applies(lesson: LessonCard, *, question: str = "", file_hint: str = "") -> bool:

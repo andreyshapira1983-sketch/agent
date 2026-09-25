@@ -45,7 +45,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "loop_verification", "loop_observe", "loop_run_tail", "loop_context",
         "loop_attempt", "loop_verify_replan", "loop_init", "loop_gates",
         "observation_round",
-        "planner", "causal_store", "causal_climb", "causal_claim_store",
+        "planner", "causal_store", "causal_climb", "causal_claim_store", "word_overlap",
         "causal_climb_action",
         "lesson_provenance", "attribute_sieve", "lesson_ab_experiment", "charter_goal", "placeholder_text", "planner_prompt", "plan_parsing", "doc_routing", "host_tools_context", "step_sanitizer", "verifier", "verifier_core", "verifier_models", "verifier_patterns", "verification_summary", "sensor_journal",
         "verifier_utils", "verifier_absence", "claim_arithmetic", "entailment_scope", "replan", "reflection", "clarification_gate",
