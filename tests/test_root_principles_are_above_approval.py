@@ -32,3 +32,18 @@ def test_approval_does_not_unlock_them_and_refusal_is_on_substance() -> None:
 def test_the_block_is_added_once() -> None:
     once = with_root_principles("SYSTEM")
     assert with_root_principles(once) == once and once.count("ROOT PRINCIPLES") == 1
+
+
+def test_the_other_half_an_unneeded_refusal_is_a_failure_too() -> None:
+    """Замер ценностей 25.09: 54 % безобидных задач AgentHarm отказаны «по ценностям».
+
+    Первоисточники блока говорят и это: Model Spec — лучшие намерения и узкий
+    отказ; конституция Claude — бесполезность не бывает безопасной сама по
+    себе; arXiv 2510.08158 — отказы на слова-триггеры. Свидетель по делу —
+    повторный замер ценностей; этот тест лишь не даёт половине пропасть.
+    """
+    text = ROOT_PRINCIPLES.lower()
+    assert "unneeded refusal is a failure too" in text
+    assert "judge what the request would do" in text and "not its words" in text
+    assert "decline that part and do the rest" in text
+    assert "name who would be" in text
