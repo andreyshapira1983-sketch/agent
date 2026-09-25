@@ -561,6 +561,7 @@ def collect_dry_health_pass(
         "self_build": _self_build_payload(workspace, now),
         "value_reviews": _value_review_payload(workspace),
         "usefulness": _usefulness_payload(workspace),
+        "subagent_promises": _subagent_promises(workspace),
         "git": (git_status_fn or _git_tree_payload)(workspace),
     }
     payload["next_safe_action"] = _select_next_safe_action(payload)
@@ -623,6 +624,7 @@ def _format_dry_health_pass(payload: dict[str, Any]) -> str:
         "value reviews: "
         + ", ".join(f"{verdict}={value_counts.get(verdict, 0)}" for verdict in VALUE_VERDICTS),
         _fmt_usefulness(payload.get("usefulness") or {}),
+        _fmt_promises(payload.get("subagent_promises") or {}),
         f"git tree: {git.get('status', 'unknown')}",
         f"next safe action: {payload.get('next_safe_action')}",
     ]
@@ -637,6 +639,21 @@ def _usefulness_payload(workspace: Path) -> dict[str, Any]:
         return {"status": "known", **summary(measure(workspace), market_accepted(workspace))}
     except (OSError, ValueError) as exc:
         return {"status": "unknown", "reason": f"{type(exc).__name__}: {exc}"}
+
+
+def _subagent_promises(workspace: Path) -> dict[str, Any]:
+    """Обещал помощник / вернул помощник (core/subagent_predictions.py)."""
+    from core.subagent_predictions import tally
+
+    return tally(workspace)
+
+
+def _fmt_promises(t: dict[str, Any]) -> str:
+    if not t.get("runs"):
+        return "sub-agent promises: no runs recorded"
+    return (f"sub-agent promises: kept {t.get('met')} of {t.get('checkable')} checkable "
+            f"({t.get('runs')} runs); sources promised {t.get('promised_sources')}, "
+            f"delivered {t.get('delivered_sources')}; missed by role {t.get('missed_by_role')}")
 
 
 def _fmt_usefulness(use: dict[str, Any]) -> str:
