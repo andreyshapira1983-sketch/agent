@@ -121,15 +121,26 @@ class MemoryWritePolicy:
     ) -> MemoryWriteDecision:
         """Decide whether `content` may reach persistent storage.
 
-        `existing` (e.g. `store.load()`) enables the near-duplicate check;
-        `recent_writes` enables the echo check on recent `agent-auto` writes.
+        `existing` lets the policy refuse near-duplicates of records already
+        on disk. Pass `store.load()` from the caller — the policy never
+        reads the store itself, keeping it a pure function over inputs.
+
+        `recent_writes` is the time-windowed rolling log of recent `agent-
+        auto` writes (from `core.memory_echo_antibody`). When supplied, the
+        Memory Echo Antibody (A1) refuses an `agent-auto` record that merely
+        re-states something the agent already wrote in the last window — the
+        "echo chamber" failure mode. `user-explicit` writes are never
+        affected.
         """
         reasons: list[str] = []
         tags_set = {t.strip().lower() for t in tags if t}
         text = (content or "").strip()
 
-        # Frozen source is refused first: PolicyGate never sees memory writes
-        # from the knowledge pipeline, so this is the only brake on them.
+        # --- context freeze (operator brake) -----------------------------
+        # When a write source is frozen for this run, refuse before any
+        # content checks. This closes the side channel where the knowledge
+        # pipeline auto-persists 'agent-auto' records that PolicyGate never
+        # sees (file_write approval does not cover memory writes).
         if (source or "").strip().lower() in self.frozen_sources:
             return MemoryWriteDecision(
                 "reject",
@@ -139,7 +150,8 @@ class MemoryWritePolicy:
                 ],
             )
 
-        # Hard blocks: never save, regardless of consent.
+        # --- hard blocks (never save, regardless of consent) -------------
+
         if not text:
             return MemoryWriteDecision("reject", ["empty content"])
 
@@ -149,7 +161,11 @@ class MemoryWritePolicy:
         if len(text) > MAX_CONTENT_LEN:
             return MemoryWriteDecision("reject", [f"too long (>{MAX_CONTENT_LEN} chars)"])
 
-        # All secret hits are surfaced so the audit trail records every signal.
+        # Secret signals: delegate to the single source of truth so a new
+        # pattern added in `secret_scanner.py` is honoured by the policy
+        # without code changes here. ALL hits are surfaced so the audit
+        # trail records every signal (regex span AND keyword evidence),
+        # not just the first one that fired.
         is_secret, secret_reasons = contains_secret(text)
         if is_secret:
             return MemoryWriteDecision("reject", secret_reasons)
@@ -172,6 +188,8 @@ class MemoryWritePolicy:
                 "reject", [f"carries blocked tag(s): {sorted(blocked)}"]
             )
 
+        # --- consent gate (must be user-sourced OR remember-worthy tag) --
+
         if source != "user-explicit" and not (tags_set & CONSENT_TAGS):
             return MemoryWriteDecision(
                 "reject",
@@ -181,6 +199,11 @@ class MemoryWritePolicy:
                 ],
             )
 
+        # --- third-party data gate (§7 "данные других людей") ------------
+        # When the record belongs to someone outside the first-party set,
+        # the only way to persist it is an explicit cross-owner consent
+        # tag. Prevents "I learned X about my client; let me just save it"
+        # from happening without intent.
         owner_normalised = (owner or "").strip().lower() or "self"
         if owner_normalised not in FIRST_PARTY_OWNERS and CROSS_OWNER_CONSENT_TAG not in tags_set:
             return MemoryWriteDecision(
@@ -191,8 +214,13 @@ class MemoryWritePolicy:
                 ],
             )
 
-        # Echo gate: catches the agent re-stating its own recent lessons, which
-        # dedup misses because it has no clock and no notion of source.
+        # --- echo gate (A1 Memory Echo Antibody) -------------------------
+        # Before the on-disk dedup check, refuse an `agent-auto` write that
+        # echoes something the agent itself wrote in the recent window. This
+        # catches the "echo chamber" (re-stating the same lesson cycle after
+        # cycle) that plain dedup misses because dedup has no clock and no
+        # notion of source. `user-explicit` writes pass straight through —
+        # the detector no-ops for anything that is not `agent-auto`.
         recent_list = list(recent_writes)
         if recent_list:
             from core.memory_echo_antibody import detect_memory_echo
@@ -205,8 +233,15 @@ class MemoryWritePolicy:
             if echo.is_reject:
                 return MemoryWriteDecision("reject", [echo.reason])
 
+        # --- dedup gate (§4 Memory Hygiene MVP-10) ------------------------
+        # Refuse to persist a near-duplicate of something already on disk.
+        # Threshold matches `core.hygiene.DEFAULT_DEDUP_THRESHOLD`. The
+        # existing list is supplied by the caller (typically
+        # `store.load()`), so this policy stays a pure function.
         existing_list = list(existing)
         if existing_list:
+            # Local import keeps memory_policy import-free of hygiene at
+            # module load time (and breaks the otherwise-tempting cycle).
             from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
             match = find_duplicate(
