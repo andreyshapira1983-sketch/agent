@@ -17,6 +17,7 @@ from .claim_arithmetic import evaluate as evaluate_claim_arithmetic
 from .entailment_scope import needs_entailment
 from .verifier_absence import (
     absence_certifiable,
+    absence_certified_by_not_found,
     absence_certified_by_search,
     absence_reason,
     absent_literal_reason,
@@ -386,8 +387,10 @@ def _union_clears_literal(
 
 def _absence_proven(chunk_text: str, chunk_evs: list) -> bool:
     """Отсутствие не утверждается — или доказано полным поиском названной области
-    (исключение из стены (e): отчёт поиска — не усечённая выдержка)."""
-    return absence_certifiable(chunk_text, "") or absence_certified_by_search(chunk_text, chunk_evs)
+    или ответом сервера «здесь нет» на адрес, где назван предмет (исключения из
+    стены (e): ни отчёт поиска, ни 404 — не усечённая выдержка)."""
+    return (absence_certifiable(chunk_text, "") or absence_certified_by_search(chunk_text, chunk_evs)
+            or absence_certified_by_not_found(chunk_text, chunk_evs))
 
 
 def _judge_cited(

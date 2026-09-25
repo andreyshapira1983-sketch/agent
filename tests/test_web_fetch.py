@@ -370,10 +370,13 @@ class TestGzipDecompression:
 
 class TestNetworkErrors:
     def test_http_error_surfaces_clean(self):
+        # Был 404. С 2026-09-25 404/410 — наблюдение «ресурса нет» (RFC 9110
+        # §15.5.5; tests/test_a_404_is_an_observation_not_a_failure.py), а
+        # ошибкой остаётся то, что о существовании ничего не говорит.
         opener = _StubOpener(raise_exc=urllib.error.HTTPError(
-            url="https://x", code=404, msg="Not Found", hdrs=None, fp=None,
+            url="https://x", code=500, msg="Internal Server Error", hdrs=None, fp=None,
         ))
-        with pytest.raises(ValueError, match="HTTP 404"):
+        with pytest.raises(ValueError, match="HTTP 500"):
             WebFetchTool(opener=opener).run(url="https://x/")
 
     def test_url_error_surfaces_clean(self):

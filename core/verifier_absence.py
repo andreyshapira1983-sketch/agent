@@ -668,6 +668,44 @@ _SEARCH_NONE_RE = re.compile(
     r"no matches for (['\"])(?P<query>.+?)\1 in \d+ text files under (?P<scope>\S+)")
 
 
+#: Ответ «ресурса нет» (tools/web_fetch.py, 404/410): код и адрес.
+_NOT_FOUND_RE = re.compile(r"^HTTP (?:404|410)\b[^:]*: (?P<url>\S+)")
+#: Части адреса, которые называют не предмет, а устройство сайта.
+_GENERIC_SEGMENTS = frozenset({"json", "simple", "project", "projects", "pypi", "api", "v1", "v2",
+                               "www", "http", "https", "index", "search", "package", "packages"})
+
+
+def absence_certified_by_not_found(claim: str, evidences: list[Any]) -> bool:
+    """Отсутствие доказано ответом сервера «здесь нет» на адрес, где назван предмет.
+
+    RFC 9110 §15.5.5: 404 — сервер-источник не нашёл текущего представления
+    ресурса. Экзамен 2026-09-25: «пакета zqxv-nonexistent-2026 на PyPI нет» при
+    трёх 404 от pypi.org/pypi/zqxv-nonexistent-2026/json получило «проверить
+    нельзя», и ответ срезали. Узко, как у поиска: только web_fetch, только если
+    часть адреса, называющая предмет (не «json», не «pypi»), стоит в утверждении.
+
+    Улику такой ответ даёт в обход H-01 (core/evidence.py: страница-ошибка — не
+    источник): выдача web_fetch с `not_found` — источник ровно для одного
+    утверждения, «по этому адресу ничего нет», и сертифицирует его только здесь.
+    """
+    if not asserts_absence(claim):
+        return False
+    low = (claim or "").lower()
+    for ev in evidences or []:
+        if getattr(ev, "obtained_via", "") != "web_fetch":
+            continue
+        m = _NOT_FOUND_RE.search(getattr(ev, "excerpt", "") or "")
+        if not m:
+            continue
+        # Имя сайта предмет не называет: «на github нет X» не доказывается 404
+        # любой страницы github. Смотрится только путь.
+        path = m.group("url").split("://", 1)[-1].split("?", 1)[0].lower().partition("/")[2]
+        segments = [s for s in re.split(r"[/.]", path) if len(s) >= 4 and s not in _GENERIC_SEGMENTS]
+        if any(s in low for s in segments):
+            return True
+    return False
+
+
 def absence_certified_by_search(claim: str, evidences: list[Any]) -> bool:
     """Отсутствие доказано ПОЛНЫМ поиском: искомое и область названы в утверждении.
 

@@ -569,7 +569,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         # верификатора, и второй судья над той же областью спорил бы с первым.
         # Страница-ошибка не источник ни для какого утверждения, кем бы оно ни
         # было, поэтому решение принадлежит границе фабрики улик.
-        if looks_like_error_page(text):
+        if looks_like_error_page(text) and output.get("not_found") is not True:  # 404: verifier_absence
             return None
         ch = output.get("content_hash")
         # Trust the tool's own hash when present — it covers more bytes
