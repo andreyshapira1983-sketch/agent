@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -128,7 +129,11 @@ class MarketWorker:
         state = self._state()
         state.setdefault(aid, {}).update(fields)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+        # Через временный файл и замену: падение посреди записи оставляет старое
+        # состояние, а не обрывок, из-за которого забылось бы всё прочитанное.
+        tmp = self.state_path.with_name(self.state_path.name + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, self.state_path)
 
     def _fresh_buyer_message(self, row: dict[str, Any]) -> dict | None:
         msg = row.get("latestMessage") or {}
@@ -158,7 +163,10 @@ class MarketWorker:
             self._note_sla(report)
             fresh_msg = self._fresh_buyer_message(row)
             try:
-                if report.kind in ("fresh", "rework", "redo") or (report.kind == "in_flight" and fresh_msg):
+                # «in_flight» — начато и не сдано: так выглядит заказ после падения
+                # посреди работы. Раньше без нового слова покупателя он пропускался,
+                # и брошенный заказ ждал истечения срока.
+                if report.kind in ("fresh", "in_flight", "rework", "redo"):
                     self._work(row, report, fresh_msg)
                 elif report.kind == "submitted" and fresh_msg:
                     self._answer_question(row, report, fresh_msg)
@@ -210,9 +218,11 @@ class MarketWorker:
             out.append(f"- {name} ({len(data)} байт), сохранён: {path.as_posix()}{preview}")
         return out
 
-    def _thread(self, row: dict[str, Any], aid: str) -> str:
-        """Полная переписка, когда встроенное сообщение обрезано (truncated)."""
-        if not (row.get("latestMessage") or {}).get("truncated"):
+    def _thread(self, row: dict[str, Any], aid: str, *, force: bool = False) -> str:
+        """Полная переписка: когда встроенное сообщение обрезано, или когда просили
+        (доработка: после нашего «беру в доработку» последним стоит наше слово, а
+        замечание покупателя — только в переписке)."""
+        if not force and not (row.get("latestMessage") or {}).get("truncated"):
             return ""
         msgs = reversed(self.client.messages(aid))
         return "\n".join(f"[{'агент' if m.get('senderAgentId') else 'покупатель'}] {m.get('body', '')}" for m in msgs)
@@ -235,33 +245,61 @@ class MarketWorker:
 
     # ── работа и сдача ────────────────────────────────────────────────────────
     def _work(self, row: dict[str, Any], report: CycleReport, fresh_msg: dict | None) -> None:
-        aid = report.assignment_id
+        """Работа шагами с записью итога каждого шага: упавший посреди заказа
+        исполнитель после перезапуска продолжает с последнего сделанного шага, а
+        не делает сделанное заново (AWS Builders' Library, «Making retries safe
+        with idempotent APIs»: итог побочного действия записан — повтор берёт
+        записанное). Раунд — первая сдача или одна доработка: его ключ не
+        меняется, пока раунд не сдан, и меняется со сдачей.
+        """
+        aid, a = report.assignment_id, row.get("assignment") or {}
+        round_key = str(a.get("submittedAt") or a.get("deliverableUrl") or "first")
+        done = self._state().get(aid, {})
+        same_round = done.get("round") == round_key
         if report.kind == "fresh":
             self.client.start(aid)
             report.steps.append("start")
-        if report.kind == "rework" and fresh_msg:
+        if report.kind == "rework" and not (same_round and done.get("ack")):
             self.client.post_message(aid, "Получил замечания, беру в доработку.")
+            self._remember(aid, round=round_key, ack=True, answer=False, url=None)
+            done, same_round = self._state().get(aid, {}), True
             report.steps.append("замечания подтверждены в переписке")
-        files = self._files(row, aid)
-        if files:
-            report.steps.append(f"файлов покупателя: {len(files)}")
-        answer = self._run(row, brief(row, files, self._thread(row, aid)))
-        if not answer:
-            report.error = "агент не дал ответа — сдавать нечего"
-            return
-        report.steps.append(f"агент ответил ({len(answer)} знаков)")
-        data = answer.encode("utf-8")
         local = self.workdir / aid / "deliverable.md"
-        local.parent.mkdir(parents=True, exist_ok=True)
-        local.write_bytes(data)
-        url = self.client.upload_file(f"deliverable-{aid[:8]}.md", data)
-        report.steps.append("файл загружен на площадку")
+        if same_round and done.get("answer") and local.is_file():
+            data = local.read_bytes()
+            report.steps.append("ответ агента взят из сохранённого — продолжение после перезапуска")
+        else:
+            files = self._files(row, aid)
+            if files:
+                report.steps.append(f"файлов покупателя: {len(files)}")
+            thread = self._thread(row, aid, force=report.kind in ("rework", "redo"))
+            answer = self._run(row, brief(row, files, thread))
+            if not answer:
+                report.error = "агент не дал ответа — сдавать нечего"
+                return
+            report.steps.append(f"агент ответил ({len(answer)} знаков)")
+            data = answer.encode("utf-8")
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_bytes(data)
+            self._remember(aid, round=round_key, answer=True, url=None)
+            done, same_round = self._state().get(aid, {}), True
+        url = done.get("url") if same_round else None
+        if url:
+            report.steps.append("файл уже был загружен — повторно не грузится")
+        else:
+            url = self.client.upload_file(f"deliverable-{aid[:8]}.md", data)
+            self._remember(aid, url=url)
+            report.steps.append("файл загружен на площадку")
+        # Прочитанное — ДО сдачи: работу поднимает вид заказа, а не слово, так что
+        # после падения здесь раунд всё равно доделается; а упав после сдачи,
+        # старое замечание не придёт потом как новый вопрос о сданной работе.
+        self._mark_seen(aid, fresh_msg)
         self.client.submit(aid, url, hashlib.sha256(data).hexdigest())
         report.steps.append("submit")
         report.deliverable_url = url
-        first_line = next((ln.strip(" #") for ln in answer.splitlines() if ln.strip()), "")[:200]
+        text = data.decode("utf-8", errors="replace")
+        first_line = next((ln.strip(" #") for ln in text.splitlines() if ln.strip()), "")[:200]
         self.client.post_message(aid, f"Сдал результат: {first_line}")
-        self._mark_seen(aid, fresh_msg)
         found = self.client.find_assignment(aid)
         report.status_after = ((found or {}).get("assignment") or {}).get("status")
         report.steps.append(f"статус после сдачи: {report.status_after}")
