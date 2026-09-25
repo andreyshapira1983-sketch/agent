@@ -187,11 +187,26 @@ def record_campaign_verdict(workspace: Any, verdict: dict[str, Any]) -> dict[str
     Его читатели (`_recent_goals`, `spent_units_by_action`, `summarise_ledger`)
     считают «строка = цикл», и строка не-цикла сломала бы каждого из них.
     """
+    if verdict.get("verdict") == "verified":
+        verdict = {**verdict, "judge_item": _to_judge(workspace, verdict)}
     path = Path(workspace or ".") / VERDICT_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     with state_file_lock(path):
         append_state_jsonl_unlocked(path, [dict(verdict)])
     return verdict
+
+
+def _to_judge(workspace: Any, verdict: dict[str, Any]) -> str:
+    """«Достигнуто» — Клоду на суд (core/judge_queue.py); до его решения это не зачёт."""
+    from core.judge_queue import submit
+
+    try:
+        return submit(workspace or ".", kind="goal_verified", subject=str(verdict.get("goal") or ""),
+                      provisional="verified", evidence=list(verdict.get("fresh_traces") or ()),
+                      detail=f"success_check: {verdict.get('success_check') or ''}; "
+                             f"reason: {verdict.get('reason') or ''}")
+    except OSError:
+        return ""  # очередь недоступна — вердикт остаётся без суда, то есть не в зачёт
 
 
 def judge_and_record(

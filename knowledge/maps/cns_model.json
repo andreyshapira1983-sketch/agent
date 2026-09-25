@@ -115,16 +115,16 @@
      "_anchor_correction": "shifted 2026-09-19 (+6: the runtime_self block lists the registered tools minus the blocked ones; +22 below the gate). shifted 2026-09-05 (+6: spend_block on _synthesize and the sensor citations offered on the no-tool branch, exam of 2026-09-04). shifted 2026-08-15: _log_budget_trim lifted out of _synthesize for the function-length ratchet, moving every line below it. Caught by tests/test_cns_anchor_integrity.py. Shifted again 2026-08-17: SynthesisState and helpers split into satellite modules (ain_c166 applied by hand), every line moved. Caught by the same guard. | сдвинулось 2026-09-20: сверено по коду, а не по памяти — tests/test_cns_anchor_integrity.py требует, чтобы строка называла носитель. | сдвинулось 2026-09-21 на +13 (вставлен _self_defects_prompt); gated_by исправлен с :630 (строка документации, устарел ещё до этой правки) на :710 — место, где отбирается подмножество для мира. | сдвинулось 2026-09-21 ещё раз: сборка <failure_context> и <safety_notes> вынесена из _synthesize в функции модуля (_synthesize был сверх предела операторов линтера, 105 > 100); читатель теперь — вызов _failure_context_block(failure_history) в _synthesize, писатели +12, граница :781."
     },
     {
-     "site": "core/loop_run_tail.py:307",
+     "site": "core/loop_run_tail.py:324",
      "role": "control",
      "uses": "policy_blocked triggers -> denied_tools for the obligation arbiter",
-     "_anchor_correction": "сдвинулось 2026-09-24 на +1: импорт judge_contract_checklist (чек-лист поручения); сверено по строке — читается failure_history."
+     "_anchor_correction": "сдвинулось 2026-09-24 на +1: импорт judge_contract_checklist (чек-лист поручения); сверено по строке — читается failure_history. | сдвинулось 2026-09-25 на +17: импорт и метод _honor_requested_format (заданная строка ответа); сверено по строке."
     },
     {
-     "site": "core/loop_run_tail.py:321",
+     "site": "core/loop_run_tail.py:338",
      "role": "control",
      "uses": "failure codes -> obligation arbiter",
-     "_anchor_correction": "сдвинулось 2026-09-24 на +1: импорт judge_contract_checklist; сверено по строке."
+     "_anchor_correction": "сдвинулось 2026-09-24 на +1: импорт judge_contract_checklist; сверено по строке. | сдвинулось 2026-09-25 на +17: _honor_requested_format; сверено по строке."
     },
     {
      "site": "core/subsystem_disagreement.py:82",

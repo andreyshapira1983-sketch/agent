@@ -92,11 +92,26 @@ def test_machine_checks_count_without_a_human(tmp_path: Path) -> None:
          _call("2026-09-22T09:30:00+00:00", "run_tests", "tests", cid="tc_t"),
          {"ts": "2026-09-22T09:31:00+00:00", "event": "tool_result",
           "payload": {"tool_call_id": "tc_t", "output": {"exit_code": 0, "passed": 12, "failed": 0}}}],
-        campaign_verdicts=[{"ts": "2026-09-22T10:01:00+00:00", "goal": "fix the parser", "verdict": "verified"}])
+        campaign_verdicts=[{"ts": "2026-09-22T10:01:00+00:00", "goal": "fix the parser", "verdict": "verified",
+                            "judge_item": "jq_parser"}])
     cycle = _one(tmp_path)
-    assert cycle.signals["tests_passed"] and cycle.signals["goal_verified"] and cycle.verdict == "useful"
-    # Свои тесты и свой судья — польза, но не подтверждение извне.
+    # Свои тесты — польза, но не подтверждение извне; «достигнуто» своего судьи
+    # без решения Клода — предварительное и в зачёт не идёт (core/judge_queue.py).
+    assert cycle.signals["tests_passed"] and not cycle.signals["goal_verified"] and cycle.verdict == "useful"
     assert summary([cycle])["out_of_band"] == 0
+
+
+def test_a_goal_claude_confirmed_counts_as_out_of_band(tmp_path: Path) -> None:
+    from core.judge_queue import pending, rule, submit
+
+    item = submit(tmp_path, kind="goal_verified", subject="fix the parser", provisional="verified")
+    _ws(tmp_path, [_cycle("2026-09-22T10:00:00+00:00", "fix the parser")], [],
+        campaign_verdicts=[{"ts": "2026-09-22T10:01:00+00:00", "goal": "fix the parser", "verdict": "verified",
+                            "judge_item": item}])
+    assert [p["id"] for p in pending(tmp_path)] == [item]
+    rule(tmp_path, item, "confirmed", "parser tests green, fix in place")
+    cycle = _one(tmp_path)
+    assert cycle.signals["goal_verified"] and summary([cycle])["out_of_band"] == 1
 
 
 def test_a_young_cycle_is_pending_and_the_summary_counts_honestly(tmp_path: Path) -> None:
