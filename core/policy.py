@@ -9,6 +9,8 @@ Unknown tool             -> deny
 """
 from __future__ import annotations
 
+from typing import Any
+
 from core.models import Action, PolicyDecision
 from tools.base import ToolRegistry
 
@@ -35,6 +37,10 @@ class PolicyGate:
         # remaining `reversible` (new-file) path. Empty by default so existing
         # behaviour is unchanged.
         self.escalate_reversible_tools: frozenset[str] = frozenset()
+        # «Тревога» числом (core/pressure_gate.py): вызываемое, которое говорит,
+        # есть ли нажим (бюджет на исходе), и почему. Под нажимом ЛЮБОЕ
+        # обратимое действие ждёт человека. None — нажим не меряется.
+        self.pressure: Any = None
 
     def _effective_blocked_tools(self) -> frozenset[str]:
         """The host's block set UNION the current run's own.
@@ -106,6 +112,13 @@ class PolicyGate:
                 reasons=["read-only tool"],
             )
         if effective_risk == "reversible":
+            pressed = self.pressure() if callable(self.pressure) else ""
+            if pressed:
+                return PolicyDecision(
+                    policy_id=POLICY_ID, subject=tool.name, action="tool_call", decision="escalate",
+                    reasons=[(f"reversible action ({tool.name}) under budget pressure ({pressed}): "
+                              "effects wait for a human until the window refills")],
+                )
             if action.tool_name in self.escalate_reversible_tools:
                 return PolicyDecision(
                     policy_id=POLICY_ID,
