@@ -6,9 +6,40 @@ from __future__ import annotations
 
 from typing import Any
 
+#: Весь набор — не «названный тест»: красное где-то в нём не воспроизводит ЭТОТ диагноз.
+_WHOLE_SUITE = frozenset({"", ".", "tests", "tests/"})
 
-def _diagnosis_verified(output: Any) -> bool:
-    return isinstance(output, dict) and output.get("timed_out") is False
+
+def _diagnosis_verified(output: Any, proposal: Any = None) -> bool:
+    """Диагноз проверен, только если прогон до правки воспроизвёл дефект (MIR-110).
+
+    Решение оператора 25.09, вариант «а» (как в Agentless: тест, воспроизводящий
+    ошибку, падает до правки): прогон не завис, в нём есть упавший тест, и —
+    когда известно предложение — этот тест в нём НАЗВАН (см. `_names_failure`).
+    До 25.09 проверенным считался любой не зависший прогон, и зелёный тоже.
+    """
+    if not isinstance(output, dict) or output.get("timed_out") is not False:
+        return False
+    failed = [str(t) for t in output.get("failed_tests") or []]
+    red = bool(failed) or int(output.get("failed") or 0) + int(output.get("errors") or 0) > 0
+    if not red or proposal is None:
+        return red
+    return any(_names_failure(proposal, test_id) for test_id in failed)
+
+
+def _names_failure(proposal: Any, test_id: str) -> bool:
+    """Назван ли упавший тест: узкой областью прогона или в тексте диагноза."""
+    if getattr(proposal, "test_pattern", None):
+        return True  # прогон шёл с -k: всё упавшее в нём выбрано по имени
+    path = test_id.split("::", maxsplit=1)[0]
+    for scope in getattr(proposal, "test_paths", ()) or ():
+        scope = str(scope).strip().rstrip("/")
+        if scope not in _WHOLE_SUITE and (path == scope or path.startswith(scope + "/")):
+            return True
+    func = test_id.rsplit("::", maxsplit=1)[-1].split("[", maxsplit=1)[0]
+    said = " ".join([str(getattr(proposal, "reason", "") or "")]
+                    + [str(e) for e in getattr(proposal, "evidence", ()) or ()])
+    return test_id in said or (len(func) > 4 and func in said)
 
 
 def _tests_passed(output: Any) -> bool:

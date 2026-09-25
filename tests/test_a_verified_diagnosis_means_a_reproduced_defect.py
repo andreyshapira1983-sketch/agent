@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.self_repair_models import RepairProposal
 from core.self_repair_utils import _diagnosis_verified
 
 _GREEN = {"timed_out": False, "exit_code": 0, "failed": 0, "errors": 0}
@@ -51,19 +52,34 @@ def test_a_reproduced_defect_is_a_verified_diagnosis() -> None:
     assert _diagnosis_verified(_RED) is True
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-20 and banked rather than fixed "
-        "(MIR-110): `_diagnosis_verified` returns True for a baseline run in "
-        "which nothing failed, so a repair proposal against healthy code is "
-        "governed as though its diagnosis had been verified. The invariant: a "
-        "baseline that reproduced no failure is not a verified diagnosis. The "
-        "definition is unprescribed — reproduce-the-named-failure, a "
-        "citation-verified diagnosis, or a named failing test are different "
-        "policies and the choice belongs to the operator."
-        " [until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_green_baseline_is_not_a_verified_diagnosis() -> None:
+    """FIXED 2026-09-25 — the operator chose option (a): reproduce the named failure."""
     assert _diagnosis_verified(_GREEN) is False
+    assert _diagnosis_verified(_GREEN, _proposal()) is False
+
+
+_FAILED = {"timed_out": False, "exit_code": 1, "failed": 1, "errors": 0,
+           "failed_tests": ["tests/test_units.py::test_meters_to_feet"]}
+
+
+def _proposal(**kw) -> RepairProposal:
+    return RepairProposal(path="core/units.py", proposed_content="x = 1\n", **kw)
+
+
+def test_a_red_test_the_diagnosis_does_not_name_verifies_nothing() -> None:
+    """Something red somewhere in the whole suite is not THIS defect reproduced."""
+    assert _diagnosis_verified(_FAILED, _proposal(reason="off-by-one in parse()")) is False
+
+
+@pytest.mark.parametrize("kw", [
+    {"reason": "test_meters_to_feet fails: factor 3.28 is applied twice"},
+    {"evidence": ("tests/test_units.py::test_meters_to_feet",)},
+    {"test_paths": ("tests/test_units.py",)},
+    {"test_pattern": "meters"},
+], ids=["named_in_reason", "named_in_evidence", "named_by_path", "named_by_pattern"])
+def test_a_reproduced_named_failure_is_a_verified_diagnosis(kw) -> None:
+    assert _diagnosis_verified(_FAILED, _proposal(**kw)) is True
+
+
+def test_a_red_run_without_test_names_cannot_show_the_named_one_failed() -> None:
+    assert _diagnosis_verified(_RED, _proposal(reason="test_meters_to_feet")) is False

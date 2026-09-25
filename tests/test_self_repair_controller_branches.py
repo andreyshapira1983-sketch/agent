@@ -160,19 +160,18 @@ def _proposal(**kw: Any) -> RepairProposal:
     return RepairProposal(**base)
 
 
-# Defaults that drive a full SUCCESS: baseline verified (timed_out False),
-# diff non-empty, post tests green and matching baseline pass count.
+#: The baseline reproduces the failure the proposal's evidence names — since
+#: 2026-09-25 (MIR-110, option a) nothing less is a verified diagnosis.
+_BASELINE_RED = {"timed_out": False, "exit_code": 1, "passed": 4, "failed": 1, "errors": 0,
+                 "failed_tests": ["tests/test_example.py::test_x"]}
+_POST_GREEN = {"timed_out": False, "exit_code": 0, "passed": 5, "failed": 0, "errors": 0}
+
+
+# Defaults that drive a full SUCCESS: the baseline reproduces the named
+# failure, diff non-empty, post tests green and not below the baseline count.
 def _success_tool_outputs() -> dict[str, dict[str, Any]]:
     return {
-        "run_tests": {
-            "output": {
-                "timed_out": False,
-                "exit_code": 0,
-                "passed": 5,
-                "failed": 0,
-                "errors": 0,
-            }
-        },
+        "run_tests": {"outputs": [{"output": dict(_BASELINE_RED)}, {"output": dict(_POST_GREEN)}]},
         "diff_file": {"output": {"additions": 1, "deletions": 1, "diff": "x"}},
         "file_write": {"output": {"path": "core/example.py", "bytes_written": 16}},
     }
@@ -388,14 +387,14 @@ class _DenyRollbackGovernance(GovernancePolicy):
 
 
 def test_governance_denied_rollback_marks_report_failed(tmp_path: Path):
-    # baseline green (5 passed) then a regressing patch (post: 2 passed, 3
-    # failed) → measured_confidence 0.4 < 0.6 → controller tries to roll back,
-    # but governance vetoes ROLLBACK → status failed, rollback recorded as
-    # governance_denied, agent.rollback() never invoked.
+    # baseline reproduces the named failure (4 passed) then a regressing patch
+    # (post: 2 passed, 3 failed) → measured_confidence 0.5 < 0.6 → controller
+    # tries to roll back, but governance vetoes ROLLBACK → status failed,
+    # rollback recorded as governance_denied, agent.rollback() never invoked.
     outputs = _success_tool_outputs()
     outputs["run_tests"] = {
         "outputs": [
-            {"output": {"timed_out": False, "exit_code": 0, "passed": 5, "failed": 0, "errors": 0}},
+            {"output": dict(_BASELINE_RED)},
             {"output": {"timed_out": False, "exit_code": 1, "passed": 2, "failed": 3, "errors": 0}},
         ]
     }
@@ -450,3 +449,22 @@ def test_write_applied_but_invalid_output_is_rolled_back(tmp_path: Path):
     assert rb and rb[0].status == "ok"
     assert report.status == "rolled_back"
 
+
+
+def test_healthy_code_is_not_repaired_as_if_diagnosed(tmp_path: Path):
+    """MIR-110, operator decision 2026-09-25 (option a), at the controller.
+
+    The baseline is green: nothing the diagnosis names was reproduced, so the
+    diff is governed as unverified and governance refuses the write.
+    """
+    outputs = _success_tool_outputs()
+    outputs["run_tests"] = {"output": dict(_POST_GREEN)}
+    agent = _FakeAgent(tool_outputs=outputs)
+
+    report = SelfRepairController(agent, workspace_root=tmp_path).run(_proposal())
+
+    assert report.status != "repaired"
+    assert agent.compensation_log == [], "healthy code was written to"
+    write = [s for s in report.steps if s.name == "write"]
+    assert write and write[0].status == "governance_denied"
+    assert "verified diagnosis" in str(write[0].governance)

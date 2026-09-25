@@ -370,6 +370,13 @@ class TestSelfRepairChain:
 # Self-repair controller — diagnose -> diff -> approval -> write -> tests
 # ============================================================
 
+#: Since 2026-09-25 (MIR-110, option a) a diagnosis is verified only when the
+#: baseline reproduces the failure it NAMES; these baselines name test_value.
+_RED_NAMED = b"FAILED tests/test_module.py::test_value - assert 1 == 42\n1 failed, 2 passed in 0.05s\n"
+_RED_NAMED_ONE = b"FAILED tests/test_module.py::test_value - assert 1 == 42\n1 failed in 0.05s\n"
+_DIAGNOSIS = "test_value expects VALUE == 42"
+
+
 class TestSelfRepairController:
     def test_repair_success_writes_after_approval_and_green_tests(
         self,
@@ -382,7 +389,7 @@ class TestSelfRepairController:
         _fake_pytest_sequence(
             monkeypatch,
             [
-                (1, b"1 failed, 2 passed in 0.05s\n"),
+                (1, _RED_NAMED),
                 (0, b"3 passed in 0.05s\n"),
             ],
         )
@@ -393,7 +400,7 @@ class TestSelfRepairController:
                 path="module.py",
                 proposed_content="VALUE = 42\n",
                 test_paths=("tests",),
-                reason="test-driven repair",
+                reason="test_value expects VALUE == 42",
             ),
             workspace_root=workspace,
         )
@@ -420,7 +427,7 @@ class TestSelfRepairController:
         _fake_pytest_sequence(
             monkeypatch,
             [
-                (1, b"1 failed, 2 passed in 0.05s\n"),
+                (1, _RED_NAMED),
                 (1, b"1 failed, 2 passed in 0.05s\n"),
             ],
         )
@@ -431,6 +438,7 @@ class TestSelfRepairController:
                 path="module.py",
                 proposed_content="VALUE = 42\n",
                 test_paths=("tests",),
+                reason=_DIAGNOSIS,
             ),
             workspace_root=workspace,
         )
@@ -449,7 +457,7 @@ class TestSelfRepairController:
         target = workspace / "module.py"
         target.write_text("VALUE = 1\n", encoding="utf-8")
 
-        _fake_pytest_sequence(monkeypatch, [(1, b"1 failed in 0.05s\n")])
+        _fake_pytest_sequence(monkeypatch, [(1, _RED_NAMED_ONE)])
         agent, log_path = _build_agent(
             workspace,
             canned_sources=[],
@@ -460,6 +468,7 @@ class TestSelfRepairController:
             RepairProposal(
                 path="module.py",
                 proposed_content="VALUE = 42\n",
+                reason=_DIAGNOSIS,
             ),
             workspace_root=workspace,
         )
@@ -479,13 +488,14 @@ class TestSelfRepairController:
         target = workspace / "module.py"
         target.write_text("VALUE = 1\n", encoding="utf-8")
 
-        _fake_pytest_sequence(monkeypatch, [(1, b"1 failed in 0.05s\n")])
+        _fake_pytest_sequence(monkeypatch, [(1, _RED_NAMED_ONE)])
         agent, _ = _build_agent(workspace, canned_sources=[])
 
         report = agent.repair(
             RepairProposal(
                 path="module.py",
                 proposed_content="VALUE = 1\n",
+                reason=_DIAGNOSIS,
             ),
             workspace_root=workspace,
         )
@@ -502,7 +512,7 @@ class TestSelfRepairController:
         target = workspace / "module.py"
         target.write_text("VALUE = 1\n", encoding="utf-8")
 
-        _fake_pytest_sequence(monkeypatch, [(1, b"1 failed in 0.05s\n")])
+        _fake_pytest_sequence(monkeypatch, [(1, _RED_NAMED_ONE)])
         agent, log_path = _build_agent(workspace, canned_sources=[])
 
         report = agent.repair(
@@ -510,7 +520,7 @@ class TestSelfRepairController:
                 path="module.py",
                 proposed_content="VALUE = 42\n",
                 confidence=0.40,
-                evidence=("failing test observed",),
+                evidence=("tests/test_module.py::test_value failed",),
             ),
             workspace_root=workspace,
         )
