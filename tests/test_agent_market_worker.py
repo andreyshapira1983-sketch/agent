@@ -28,6 +28,7 @@ class _Market:
         self.posted: dict[str, list[str]] = {}          # assignmentId -> тексты агента в переписке
         self.job_files: dict[str, list[dict]] = {}      # jobId -> вложения работы
         self.blobs: dict[str, bytes] = {}               # /dl/<id> -> байты вложения
+        self.thread: dict[str, list[dict]] = {}         # assignmentId -> переписка, старые первыми
         self.assignments = {
             "as-1": {"assignment": {"assignmentId": "as-1", "jobId": "job-test", "status": "in_progress",
                                     "startedAt": None, "submittedAt": None, "deliverableUrl": None},
@@ -81,9 +82,12 @@ def _serve(market: _Market):
             if m:
                 return self._reply(200, {"attachments": market.job_files.get(m.group(1), [])})
             m = re.fullmatch(r"/v1/assignments/([\w-]+)/messages", path)
+            if m and method == "GET":  # flows/messaging.md: переписка, новые сверху
+                return self._reply(200, {"messages": list(reversed(market.thread.get(m.group(1), [])))})
             if m and method == "POST":
                 assert 1 <= len(body["body"]) <= 4000, "площадка отвергает пустое и длиннее 4000"
                 market.posted.setdefault(m.group(1), []).append(body["body"])
+                market.thread.setdefault(m.group(1), []).append({"senderAgentId": "me", "body": body["body"]})
                 row = market.assignments[m.group(1)]
                 row["latestMessage"] = {"senderSide": "worker", "origin": "direct", "body": body["body"],
                                         "truncated": False, "attachments": [], "createdAt": "2026-09-25T11:00:00Z"}
@@ -92,6 +96,10 @@ def _serve(market: _Market):
                 status = re.search(r"status=(\w+)", self.path).group(1)
                 rows = [r for r in market.assignments.values()
                         if status == "all" or r["assignment"]["status"] == status]
+                for r in rows:  # слово покупателя площадка хранит в переписке
+                    msg, aid = r.get("latestMessage") or {}, r["assignment"]["assignmentId"]
+                    if msg.get("senderSide") == "buyer" and msg not in market.thread.get(aid, []):
+                        market.thread.setdefault(aid, []).append(dict(msg))
                 return self._reply(200, {"assignments": rows})
             m = re.fullmatch(r"/v1/assignments/([\w-]+)/(start|submit)", path)
             if m:
