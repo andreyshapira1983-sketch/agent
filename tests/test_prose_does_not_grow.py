@@ -8,7 +8,7 @@ from pathlib import Path
 
 _CORE = Path(__file__).resolve().parents[1] / "core"
 
-_BASELINE_PROSE_LINES = 19000
+_BASELINE_PROSE_LINES = 18744
 
 
 def _prose_lines(source: str) -> int:
