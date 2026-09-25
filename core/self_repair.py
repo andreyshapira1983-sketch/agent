@@ -90,7 +90,7 @@ class SelfRepairController:
             self._finish(report)
             return report
 
-        diagnosis_verified = _diagnosis_verified(baseline.output)
+        diagnosis_verified = _diagnosis_verified(baseline.output, proposal)
 
         diff = self._execute_tool(
             name="diff",
