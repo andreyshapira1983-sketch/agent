@@ -26,8 +26,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
 
@@ -52,21 +50,6 @@ def test_pruning_still_enforces_the_cap_when_rows_are_evictable(
     assert len(store.load()) <= 5
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN GAP, measured 2026-08-21 and banked rather than fixed "
-        "(MIR-115): _maybe_prune_unlocked computes to_remove from the total "
-        "but may only evict unprotected rows, so once protected rows exceed "
-        "max_episodes the store stays above its cap forever and each further "
-        "protected write raises the floor. Since every self-build episode is "
-        "tagged `lesson` and `lesson` is protected, the protected set grows "
-        "without a ceiling. Fix unprescribed: cap the protected set, expire "
-        "protection, or stop granting it automatically — three different "
-        "policies about what the agent may keep. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
 def test_a_store_of_protected_episodes_still_obeys_its_cap(
     workspace: Path,
 ) -> None:
@@ -78,3 +61,19 @@ def test_a_store_of_protected_episodes_still_obeys_its_cap(
         f"the store holds {len(kept)} episodes against a cap of 5 — pruning "
         "cannot evict any of them, so the cap is now decorative"
     )
+    assert sorted(e.goal for e in kept) == ["g4", "g5", "g6", "g7", "g8"], (
+        "the OLDEST protected episodes must go first (operator 2026-09-25, option г)"
+    )
+
+
+def test_protected_episodes_go_only_after_every_unprotected_one(
+    workspace: Path,
+) -> None:
+    store = EpisodicMemoryStore(workspace / "episodes.jsonl", max_episodes=5)
+    for n in range(3):
+        store.save(_episode(n, protected=True))
+    for n in range(3, 9):
+        store.save(_episode(n, protected=False))
+    kept = {e.goal for e in store.load()}
+    assert {"g0", "g1", "g2"} <= kept, "a protected episode was evicted while unprotected ones remained"
+    assert len(kept) == 5
