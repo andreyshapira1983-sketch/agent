@@ -1,30 +1,7 @@
-"""Черновик ответа и решатели над ним — вырезано из ``core/loop.py`` дословно.
+"""Черновик ответа и решатели над ним — миксин ``AgentLoop`` между синтезом и композицией.
 
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Второй кусок раскола `core/loop.py` (первым был `loop_step_execution`) и
-первый — раскола метода: файл держался на 3408 строках, из которых 2213
-занимал один `_run_inner`. После этого куска: 3174 и 1981.
-
-Здесь живёт участок между синтезом и композицией: сырой ответ становится
-``ResponseDraft``, и семь решателей высказываются о нём — объяснение
-проверки (MIR-069), сильный причинный кредит памяти (MIR-074), переспрос при
-нулевой проверке самоанализа (MIR-075), политика ранжировщика источников,
-гейт уточнений при исчерпанном перепланировании, структурное принуждение
-ответа и раскрытие подменённой модели. Каждый либо переписывает утверждения
-(``set_body``), либо навешивает что-то о них (``add_notice``); склейка — одна,
-в ``render()`` у вызывающего.
-До черновика все писали в одну переменную и побеждал последний, из-за чего
-усечение могло удалить уточняющие вопросы, которые цикл только что решил
-задать (измерено; см. `core/response_draft.py`).
-
-Границу выбрали не на глаз: у этого участка из всего вороха run-локалей
-`_run_inner` на входе всего шесть имён, а наружу он отдаёт ровно черновик.
-Тела перенесены символ в символ, что пинится AST-сверкой с историей в
-`tests/test_loop_response_deciders_split.py`.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
+Каждый решатель либо переписывает утверждения (``set_body``), либо навешивает
+заметку (``add_notice``); склейка одна — ``render()`` у вызывающего.
 """
 from __future__ import annotations
 
@@ -45,11 +22,8 @@ from core.turn_provenance import older_than_turn
 from core.unsupported_claims import apply_answer_enforcement
 from core.verification_summary import build_verification_summary
 
-#: What the user gets when the answer-safety check itself broke. Deterministic
-#: and free of factual claims on purpose: the draft it replaces is the one
-#: enforcement was about to remove, so repeating any of it would defeat the
-#: refusal. No traceback reaches the reader — the stage and the exception type
-#: go to the journal, where they belong.
+#: Answer when the answer-safety check itself broke. Free of factual claims on
+#: purpose: repeating the withheld draft would defeat the refusal.
 ENFORCEMENT_FAILURE_ANSWER = (
     "Conclusion: I could not verify the claims in the draft, and the "
     "answer-safety check failed [general-knowledge].\n"
@@ -64,22 +38,11 @@ ENFORCEMENT_FAILURE_ANSWER = (
 
 
 class EnforcementFallbackUnavailable(RuntimeError):
-    """The safe refusal could not be built either — a controlled failure.
-
-    Raised rather than returning the original draft. The measured damage is
-    that the original carries a confident unsupported claim; handing it over
-    because the recovery path also broke would deliver exactly what the whole
-    mechanism exists to withhold.
-    """
+    """The safe refusal could not be built either; raised instead of returning the draft."""
 
 
 class AgentLoopResponseDeciders:
-    """Сборка черновика ответа: кто и что вправе о нём сказать.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """Сборка черновика ответа: кто и что вправе о нём сказать."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -92,14 +55,10 @@ class AgentLoopResponseDeciders:
         last_confidence_vector: Any
         last_evidence_support: Any
         last_role_context: Any
-        # Заводит `core/loop.py` за ход, дописывает `core/loop_attempt.py`.
-        # Отсюда сюда кладётся `self_contradiction` — единственная дорога от
-        # рубежа принятия ответа к рубежу допуска в обучение.
+        # Сюда кладётся `self_contradiction` — дорога от принятия ответа к допуску в обучение.
         _defect_signals: Any
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Атрибуты, а не заглушки-функции: иначе каждый вызов ложно помечается E1111.
         _durable_learning_suppressed: Any
         _sensor_failed: Any
         _file_read_workspace_root: Any
@@ -107,18 +66,8 @@ class AgentLoopResponseDeciders:
     def _safe_answer_after_enforcement_failure(
         self, *, stage: str, exc: BaseException,
     ) -> ResponseDraft:
-        """A refusal built on a FRESH object, never through the broken one.
-
-        Order matters and is the reason this is a separate method: the failure
-        is recorded first, then the replacement is built independently. Writing
-        the safe text through `draft.set_body` would be calling the mechanism
-        that may have just raised — and on a `set_body` failure that recursion
-        ends with the dangerous original going out anyway.
-        """
-        # One guard, not two: recording the failure is best effort, and the
-        # refusal must leave even if nothing could be written about it. Both
-        # steps live under the same `except` because they share that rule and
-        # splitting them only doubles the suppression.
+        """Refusal on a FRESH object, never via `draft.set_body`, which may be what just failed."""
+        # Recording is best effort: the refusal must leave even if nothing is written.
         try:
             self.log.log(
                 "answer_enforcement_failed",
@@ -145,17 +94,8 @@ class AgentLoopResponseDeciders:
     def _disclose_substituted_model(self, draft: Any) -> None:
         """Сказать в ОТВЕТЕ, если его написал запасной поставщик.
 
-        Живой сеанс 2026-08-15: десять отказов Anthropic подряд, все пять ходов
-        написал `gpt-4o-mini`, и оператор пять ходов принимал его отговорки
-        («я не могу читать», «я не могу обучаться») за свойства своего агента.
-        Маршрут был записан двадцать один раз — в журнале, которого читатель
-        ответа не видит.
-
-        Читается из леджера расходов: маршрут каждого вызова там уже есть, и
-        второй источник той же правды смог бы с ним разойтись.
-
-        Зачем: docs/CODE_NOTES.md, «The answer was not written by the model you
-        chose».
+        Маршрут читается из леджера расходов — второй источник той же правды мог бы
+        разойтись. См. docs/CODE_NOTES.md, «The answer was not written by the model you chose».
         """
         try:
             ledger = getattr(getattr(self, "model_router", None), "usage_ledger", None)
@@ -176,28 +116,16 @@ class AgentLoopResponseDeciders:
                 author="degraded_route", channel="append", text=notice,
             )
         except (AttributeError, TypeError, ValueError) as exc:
-            # Узко и намеренно: сюда попадает только кривая запись леджера или
-            # черновик без `add_notice`. Предупреждение не вправе ронять ответ,
-            # но и молчать о своём провале не вправе — иначе на месте дефекта,
-            # который оно закрывает, окажется оно само.
+            # Узко: кривая запись леджера или черновик без `add_notice`. Ответ
+            # не роняем, но о провале пишем в журнал.
             self.log.log("model_substitution_disclosure_failed", {
                 "error_type": type(exc).__name__, "error": str(exc)[:300],
             })
 
     def _credit_memory_records_used_in_the_answer(self) -> None:
-        """Strong causal credit for memory that actually held up.
-
-        Lifted out of `_build_response_draft` because it is not about
-        building a draft at all: it is memory accounting, and it landed
-        there only because the verifier verdict and the evidence chain
-        happen to both be in scope at that point (census entry for this
-        file). The length ratchet asked for the same cut independently.
-        """
-        # MIR-074 phase 1 (operator ruling): STRONG causal credit. A record
-        # cited [memory:<id>] in a chunk the verifier marked `verified` has
-        # completed the full chain — retrieved → changed the answer →
-        # independently checked. Injection alone stays a near-zero signal
-        # (access_count); this is the one that counts.
+        """Strong causal credit (MIR-074) for memory records cited in verified chunks."""
+        # A [memory:<id>] cite in a `verified` chunk completes retrieved → used → checked;
+        # injection alone stays a near-zero signal (access_count).
         if (
             self.last_verification is not None
             and self.last_provenance is not None
@@ -225,9 +153,7 @@ class AgentLoopResponseDeciders:
                                 _seen_rids.add(_rid)
                                 _credited.append(_rid)
                 if _credited:
-                    # One load, all increments in memory, ONE rewrite — an
-                    # answer crediting N records must not trigger N full-file
-                    # rewrites (review round #294).
+                    # One load, ONE rewrite: N credited records must not cause N full-file rewrites.
                     _records = self.persistent_store.load()
                     _updated: list[str] = []
                     _new_records = []
@@ -242,10 +168,6 @@ class AgentLoopResponseDeciders:
                         else:
                             _new_records.append(_rec)
                     if _updated:
-                        # Through the public bulk operation now. This site had
-                        # the right idea first — "one load, all increments in
-                        # memory, ONE rewrite" (review #294) — but reached past
-                        # the API to get it, because none existed. It does now.
                         self.persistent_store.update_many(
                             r for r in _new_records if r.id in _seen_rids
                         )
@@ -254,8 +176,7 @@ class AgentLoopResponseDeciders:
                             {"record_ids": _updated, "count": len(_updated)},
                         )
             except Exception as _cc_exc:  # noqa: BLE001 — reason stated above
-                # Credit must never break the answer — and its failure must
-                # not be invisible (the MIR-077 rule).
+                # Credit must never break the answer, nor fail invisibly (MIR-077).
                 try:
                     self.log.log(
                         "memory_causal_credit_failed",
@@ -268,16 +189,11 @@ class AgentLoopResponseDeciders:
                     pass
 
     def _headline_check(self, draft: ResponseDraft) -> None:
-        """Заголовок против фактов того же ответа — видно, но не карантин.
+        """Доклад о действиях, свежесть и заголовок против фактов ответа — видно, но не карантин.
 
-        2026-09-21, 05:52: «признак присутствует в обоих файлах» в выводе и
-        «в коде инструмента имя в явном виде отсутствует» в фактах. Сигнал
-        наблюдающий (нет в DISQUALIFYING_DEFECT_SIGNALS): на 111 живых ответах
-        он сработал один раз — ровно на этом. Разбор:
-        tests/test_the_headline_is_held_to_its_own_facts.py
+        Сигнал о заголовке наблюдающий (нет в DISQUALIFYING_DEFECT_SIGNALS).
         """
-        # Доклад о записи сверяется с тем, что цикл выполнил (2026-09-21:
-        # «записано, 9412 байт» при нуле действий и «не записал» при четырёх).
+        # Доклад о записи сверяется с тем, что цикл реально выполнил.
         ledger = action_report_mismatch(draft.body, list(getattr(self, "_executed_tools", []) or []))
         if ledger:
             self._defect_signals.append("action_report_mismatch")
@@ -315,36 +231,9 @@ class AgentLoopResponseDeciders:
         verifier_failure: bool,
         completion_contract: Any = None,
     ) -> ResponseDraft:
-        """The structural layer, and its failure path.
-
-        Lifted out of `_build_response_draft` because it is one
-        responsibility with one failure contract — and because the
-        function-length ratchet said so when the failure path was added.
-        Returns the draft to use: the same object when enforcement
-        succeeded, a fresh safe refusal when it did not.
-        """
-        # Answer enforcement (PR3): low-evidence truncation, local-critique
-        # empty-rewrite skip, verifier soft-fail, claim-level short path.
-        # Evidence support stays observational; this is the structural layer.
-        #
-        # The handler below used to be a bare `except: pass`, and measuring what
-        # that cost settled the design (census A2, 2026-08-05). Reproduced on a
-        # draft the policy really truncates: healthy, 1291 chars became 460 and
-        # the answer opened "no claim could be backed by the sources gathered
-        # this cycle"; with an exception injected, the user received the whole
-        # 1291 chars opening "the API returns 42 on every call" — a confident
-        # factual claim the evidence did not support. Both events that would
-        # have said so were the ones that vanished.
-        #
-        # So returning the original draft is FORBIDDEN by measurement: it is
-        # precisely the text enforcement existed to remove. Failing closed on
-        # CONTENT without taking the cycle down is the only option the evidence
-        # leaves.
-        #
-        # `_stage` names which of the six operations broke. Six, not one — and
-        # `set_body` is among them, which is why the safe answer below is built
-        # on an independent object rather than written through the mechanism
-        # that may have just failed.
+        """Structural answer enforcement; returns the same draft, or a fresh safe refusal."""
+        # Fail closed on content: returning the original draft on error would deliver
+        # the very claims enforcement removes. `_stage` names the step that broke.
         _stage = "read_state"
         try:
             _ranking = self.last_source_ranking
@@ -365,14 +254,9 @@ class AgentLoopResponseDeciders:
                 answer=draft.body,
                 question=user_question,
             )
-            # Enforcement judges the CLAIMS, so it is handed the body alone.
-            # Handing it the composed text would let it measure — and delete —
-            # notices that are not claims and that no verdict about the evidence
-            # can make untrue.
+            # Enforcement judges CLAIMS, so it gets the body alone — notices are not claims.
             _stage = "apply_enforcement"
-            # Work order 1, defect 3 (2026-09-05): the attempts the chain
-            # records (HTTP 429, unsupported, blocked, empty) are the support
-            # an honest «could not confirm» stands on.
+            # Recorded failed attempts (429, blocked, empty) back an honest «could not confirm».
             from core.low_evidence_policy import count_blocked_attempts
 
             _enf = apply_answer_enforcement(
@@ -394,10 +278,8 @@ class AgentLoopResponseDeciders:
                     _enf.low_evidence_payload or _enf.to_log_payload(),
                 )
             _stage = "bank_contradiction"
-            # Сигнал дефекта — единственная дорога от рубежа принятия ответа к
-            # рубежу обучения: `decide_usage_eligibility` читает его и не пускает
-            # самоопровергнувшийся ответ в опыт. Ставится по НАХОДКЕ, а не по
-            # исходу: более сильное действие могло забрать исход себе.
+            # `decide_usage_eligibility` по сигналу не пускает ответ в опыт. Ставится по
+            # НАХОДКЕ, а не по исходу: исход могло забрать более сильное действие.
             if getattr(_enf, "contradictions", ()):
                 self._defect_signals.append("self_contradiction")
             # R4: фабрикация цитат — тот же класс ложности, судья другой.
@@ -412,10 +294,6 @@ class AgentLoopResponseDeciders:
             _stage = "headline_check"
             self._headline_check(draft)
         except Exception as _enf_exc:  # noqa: BLE001 — отчёт в помощнике ниже
-            # Reported, not swallowed: `_safe_answer_after_enforcement_failure`
-            # writes `answer_enforcement_failed` and banks the defect signal
-            # before building the refusal. The report is one call away rather
-            # than inline because the refusal must be built on a FRESH object.
             draft = self._safe_answer_after_enforcement_failure(
                 stage=_stage, exc=_enf_exc,
             )
@@ -424,13 +302,8 @@ class AgentLoopResponseDeciders:
 
     def _add_verification_summary(self, draft: ResponseDraft, user_question: str = "") -> None:
         """Name the verified text after enforcement has decided what survived."""
-        # MIR-069 (phase 1): the five-point verification explanation — what was
-        # checked, how, on what evidence, what remains unverified, how
-        # confident. Full text goes to the journal; the compact tail rides the
-        # notice ledger so a later body rewrite cannot delete it. Nothing
-        # examined → no tail (the disclaimers already speak for that case).
-        # Светская реплика хвоста не несёт: 2026-09-21 «Привет, как дела?» →
-        # «подтверждено 2 из 5, уверенность: низкая» — отчёт о надёжности беседы.
+        # MIR-069: the tail rides the notice ledger so a later body rewrite cannot delete it.
+        # Светская реплика хвоста не несёт — отчёт о надёжности беседы бессмыслен.
         from core.conversation_contract import classify_register
         from core.social_turn import is_marked_social
         if user_question and (classify_register(user_question) == "small_talk"
@@ -457,9 +330,7 @@ class AgentLoopResponseDeciders:
                         text=_vsummary.tail,
                     )
             except Exception as _vs_exc:  # noqa: BLE001 — reason stated above
-                # The explanation must never break the answer — but its
-                # failure must not be invisible either (review round #283):
-                # the journal says why this turn carries no explanation.
+                # Never breaks the answer; the journal says why no explanation came.
                 try:
                     self.log.log(
                         "verification_explained_failed",
@@ -480,25 +351,17 @@ class AgentLoopResponseDeciders:
         replan_exhausted: bool,
         local_critique_active: bool,
         verifier_failure: bool,
-        # Параметром, не полем: состоянию с «completion» в имени запрещено
-        # переживать ход (`tests/test_completion_marker.py`), и запрет верен.
+        # Параметром, не полем: состоянию с «completion» в имени нельзя переживать ход.
         completion_contract: Any = None,
         failure_history: Any = (),
     ) -> ResponseDraft:
-        """Черновик ответа после всех решателей, до композиции.
-
-        Вызывающий склеивает его сам (``render()``) — так единственная точка
-        арбитража остаётся в цикле, на виду, а не прячется за этим методом.
-        """
+        """Черновик ответа после всех решателей, до композиции (``render()`` — у вызывающего)."""
         draft = ResponseDraft(body=answer)
 
         self._credit_memory_records_used_in_the_answer()
 
-        # MIR-075: ask back instead of only philosophising unsupported. Fires
-        # ONLY when the self-analysis sensor marked this turn AND the answer's
-        # own verification counted zero verified chunks over a non-empty claim
-        # set — the operator's measured «он не переспрашивает» shape. Question
-        # wording is never inspected (the lexical route died in #263).
+        # MIR-075: ask back when a self-analysis turn verified zero of a non-empty
+        # claim set. Question wording is never inspected.
         if (
             self.last_verification is not None
             and self.last_verification.total_chunks > 0
@@ -542,9 +405,7 @@ class AgentLoopResponseDeciders:
             replan_exhausted=replan_exhausted,
         )
         if policy_result.applied:
-            # Body edits (capped Confidence, downgraded realtime tags) are
-            # corrections to the claims; the warnings are about the run and are
-            # composed onto whatever body survives.
+            # Body edits correct the claims; warnings are about the run and ride as notices.
             draft.set_body(policy_result.answer, by="output_policy")
             for _warning in policy_result.warnings:
                 draft.add_notice(
@@ -554,14 +415,8 @@ class AgentLoopResponseDeciders:
                 )
             self.log.log("output_policy", policy_result.to_log_payload())
 
-        # B-1 Clarification Gate — режим переспроса. When the loop is STUCK
-        # (replan exhausted == loop_suspected), the mature response is to ASK,
-        # not to keep building. The gate's minimal clarifying questions go above
-        # the honest answer so the operator can narrow the frame. Pure and
-        # deterministic (no LLM, no I/O); best-effort so it can never take down
-        # the response path.
-        # Застрял на собственном черновике (ссылки, арифметика) — рамку задачи
-        # человек не прояснит; веб-экзамен 2026-09-19, см. frame_questions_help.
+        # B-1 Clarification Gate: when STUCK (replan exhausted), ASK narrowing questions first.
+        # Застрял на собственном черновике (ссылки, арифметика) — рамку человек не прояснит.
         from core.clarification_gate import frame_questions_help
         failure_codes = [getattr(t, "code", "") for t in failure_history or ()]
         frame_clear = completion_contract is not None and not getattr(completion_contract, "ambiguities", None) \

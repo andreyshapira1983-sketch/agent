@@ -233,6 +233,20 @@ def test_the_marker_covers_only_its_own_line(tmp_path):
     assert _count(result.stdout, "live references") == 1
 
 
+def test_the_marker_also_declares_a_stale_line_anchor_historical(tmp_path):
+    """A line marked historical may keep an out-of-range anchor; an unmarked one may not."""
+    root = _docs_tree(
+        tmp_path,
+        "REGISTRY.md",
+        f"Operator said «в {LIVE_MODULE}:99999 почини» <!-- historical-ref -->.\n\n"
+        f"The gate lives at `{LIVE_MODULE}:99999`.\n",
+    )
+    result = _run("--docs", str(root))
+    assert result.returncode == 1, result.stdout
+    assert "REGISTRY.md:3" in result.stdout
+    assert "REGISTRY.md:1" not in result.stdout
+
+
 def test_a_document_declared_historical_keeps_the_old_name(tmp_path):
     """The dated-record mechanism: whole-document, by explicit allowlist."""
     root = _docs_tree(

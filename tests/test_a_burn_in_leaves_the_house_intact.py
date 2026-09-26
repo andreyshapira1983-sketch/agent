@@ -54,7 +54,7 @@ def _house_print(root: Path) -> dict[str, tuple[int, int]]:
             p = Path(dirpath) / name
             try:
                 st = p.stat()
-            except OSError:  # noqa: PERF203 — исчезнувший файл тоже различие
+            except OSError:
                 out[str(p)] = (-1, -1)
                 continue
             out[str(p)] = (st.st_size, st.st_mtime_ns)
@@ -174,7 +174,7 @@ def test_state_files_parse_at_the_end(sandbox: Path, monkeypatch: Any) -> None:
                 continue
             try:
                 json.loads(line)
-            except json.JSONDecodeError as exc:  # noqa: PERF203 — нужно имя строки
+            except json.JSONDecodeError as exc:
                 pytest.fail(f"{path.name}:{lineno} не читается: {exc}")
             checked += 1
 

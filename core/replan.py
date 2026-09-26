@@ -1,28 +1,6 @@
-"""MVP-12 — Re-planning policy: structured failure types + retry budgets.
+"""Re-planning policy: structured failure types + per-type retry budgets.
 
-The agent loop already collects `ReplanTrigger` records for every failed
-step. Up through MVP-11 those triggers fed a single global counter
-(`max_replan_attempts`). That was enough to prevent infinite loops, but
-it gave every failure the same retry budget — a flaky `tool_error` was
-treated identically to an `approval_deny`, where retrying the SAME
-dangerous action is exactly the wrong thing to do.
-
-MVP-12 splits the policy into three pieces:
-
-  - `FailureType`    : the structured taxonomy of WHY a step failed.
-  - `FailureBudget`  : per-type retry budget + planner advice + a flag
-                       that says "do not let the planner repeat the exact
-                       same (tool, args) pair on the next attempt."
-  - `ReplanPolicy`   : pure function from (failure_history, attempt) to
-                       a `ReplanDecision`. The loop calls it BEFORE each
-                       attempt and respects its verdict.
-
-The policy is deliberately a plain data structure (`Mapping[FailureType,
-FailureBudget]`) rather than a class hierarchy. Callers can override one
-budget for a specific test or run without subclassing anything.
-
-This module is intentionally side-effect-free: no logging, no I/O, no
-hidden state. The loop owns logging; `ReplanPolicy` just decides.
+Side-effect-free: `ReplanPolicy` only decides; the loop owns logging.
 """
 from __future__ import annotations
 
@@ -37,13 +15,8 @@ from typing import Any, Literal
 # FailureType — the taxonomy
 # ---------------------------------------------------------------------------
 
-# Stable identifiers for every kind of step failure the loop knows how to
-# detect. Each value MUST also appear in `DEFAULT_BUDGETS` below.
-#
-# Naming convention: lower_snake_case, no domain prefix, no version
-# suffix. These strings appear in JSONL audit events and in
-# <replan_context> blocks the planner reads, so they double as a tiny
-# vocabulary the LLM is expected to understand.
+# Each value MUST also appear in `DEFAULT_BUDGETS`. The strings reach the
+# planner via <replan_context>, so they are vocabulary the LLM reads.
 FailureType = Literal[
     "tool_error",            # tool raised / returned status=error
     "file_not_found",        # file_read / diff_file: path does not exist on disk
@@ -54,9 +27,9 @@ FailureType = Literal[
     "approval_abort",        # human aborted the prompt (Ctrl-C / EOF)
     "approval_unavailable",  # no approval channel wired but risk needed one
     "policy_blocked",        # PolicyGate refused (unknown tool, missing reg)
-    "unresolved_citation",   # MVP-14.5: Verifier saw [web:URL] but no web_fetch ran
-    "claim_refuted",         # MIR-060 (b): arithmetic over the cited excerpt says NO
-    "injection_blocked",     # §2 Adversarial Defence: tool output contained injection
+    "unresolved_citation",   # Verifier saw [web:URL] but no web_fetch ran
+    "claim_refuted",         # arithmetic over the cited excerpt says NO
+    "injection_blocked",     # tool output contained injection
     "plan_parse_failed",     # planner LLM output was not valid JSON
     "step_dropped",          # sanitiser/validator removed a planned step before it ran
     "unknown",               # safety net for any code path the audit missed
@@ -80,28 +53,9 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "unknown",
 )
 
-#: Failures that describe the WORLD rather than the agent's own retry
-#: machinery. The distinction earns its keep at one place: a turn that failed a
-#: step and still answered must be able to SAY what failed, because the user's
-#: question may have been about exactly that ("does this file exist?"). A turn
-#: whose planner produced unparseable JSON and then recovered has nothing to
-#: tell the user — that is bookkeeping.
-#:
-#: Added 2026-08-14, measured: `file_read README.md` raised FileNotFoundError
-#: beside a step that worked, so the attempt "succeeded" and the failure was
-#: dropped; asked whether the file exists, the agent could only answer "cannot
-#: be determined". The tool had told it.
-#:
-#: Deliberately NOT here: `plan_parse_failed`, `unresolved_citation`,
-#: `claim_refuted`, `verify_failed`, `unknown` — internal outcomes whose
-#: disclosure on a recovered run is noise, and whose withholding while replan
-#: is unexhausted is pinned by
-#: `tests/test_failure_history_reaches_arbitration.py`.
-#:
-#: `step_dropped` IS here (2026-09-05, exam turns 35–36): a step the sanitiser
-#: removed is a fact about what the turn did NOT do, and the reason lived only
-#: in the `planner` event's warnings — the agent, asked why its search never
-#: ran, blamed an unrelated error and repeated the same argument next turn.
+#: Failures about the WORLD, not the retry machinery: a turn that still answered
+#: must be able to say what failed (the question may be "does this file exist?").
+#: Internal outcomes (plan_parse_failed, verify_failed, ...) stay out as noise.
 WORLD_FACING_FAILURE_TYPES: frozenset[str] = frozenset({
     "tool_error",
     "file_not_found",
@@ -121,10 +75,8 @@ def world_facing_failures(triggers: list[ReplanTrigger] | None) -> list[ReplanTr
     return [t for t in (triggers or []) if t.code in WORLD_FACING_FAILURE_TYPES]
 
 
-#: Требования ко второй сборке черновика. 2026-09-22: переписывание «не про
-#: вопрос» и дочитывание своих файлов клали требование в историю провалов, а
-#: синтезатору шли только WORLD_FACING — требование до модели не доходило, и
-#: вторая сборка писалась вслепую, тем же запросом.
+#: Требования ко второй сборке черновика: без них синтезатор видит только
+#: WORLD_FACING и пересобирает ответ вслепую.
 SYNTHESIS_DEMAND_TYPES: frozenset[str] = frozenset({
     "answer_off_topic", "unverified_own_file", "draft_contradicts_evidence",
 })
@@ -151,15 +103,7 @@ _DROPPED_STEP_RE = re.compile(
 def dropped_step_triggers(
     warnings: Iterable[str] | None, *, attempt: int,
 ) -> list[ReplanTrigger]:
-    """One `step_dropped` trigger per step the sanitiser removed.
-
-    A dropped step is a failure of the plan, not of a tool, and until
-    2026-09-05 it was recorded nowhere a later reader could reach: the
-    warning sat in the `planner` event and the loop went on as if the step
-    had never been planned. This turns each such warning into the same
-    record every other failure gets, so the synthesizer can say what did not
-    run and why, and a replan sees the rule it broke.
-    """
+    """One `step_dropped` trigger per step the sanitiser removed."""
     triggers: list[ReplanTrigger] = []
     for warning in warnings or ():
         match = _DROPPED_STEP_RE.match(str(warning).strip())
@@ -181,29 +125,13 @@ def dropped_step_triggers(
 # ReplanTrigger — the structured failure record the loop collects
 # ---------------------------------------------------------------------------
 
-# Moved here from core/loop.py (2026-08-02): this module's own docstring opens
-# with "the agent loop already collects ReplanTrigger records", `ReplanPolicy`
-# consumes them, and `FailureType` — the type of their `code` field — lives
-# here. The record was the one piece of the replan vocabulary still defined at
-# the collection site instead of with the rest of its language.
-
 
 @dataclass(frozen=True)
 class ReplanTrigger:
     """Structured record of one failed PlanStep.
 
-    Lives in two places:
-      - `AgentLoop._last_step_failure` — scratch slot set by
-        `_execute_step` at every early-return; the parent loop drains it
-        right after the step returns None.
-      - `failure_history` inside `run()` — the cumulative list across
-        attempts, formatted into a `<replan_context>` block fed to the
-        planner.
-
-    `arguments` are stored verbatim from the failed step. They are
-    redacted at log time by `TraceLogger` and again before the planner
-    prompt is sent, so a credential pasted in by the LLM into a tool
-    argument cannot leak via the replan path either.
+    `arguments` are verbatim; redaction happens at log time and before the
+    planner prompt is sent.
     """
 
     code: FailureType
@@ -222,10 +150,8 @@ def count_failures(history: list[ReplanTrigger]) -> dict[str, int]:
     return counts
 
 
-#: Совет, начинающийся с этого тега, — выводы инструментов для круга
-#: наблюдения (core/observation_round.py). Он вставляется ДОСЛОВНО: обычный
-#: совет сдвигается отступом и теряет пустые строки, а для содержимого файла
-#: это порча данных, которые планировщик должен переписать точно.
+#: Совет с этим тегом (выводы круга наблюдения) вставляется ДОСЛОВНО: отступ и
+#: потеря пустых строк портили бы содержимое файлов, которое переписывают точно.
 VERBATIM_ADVICE_TAG = "<observed_results>"
 
 
@@ -236,28 +162,9 @@ def format_replan_context(
     advice: str = "",
     forbidden_actions: tuple[tuple[str, str], ...] = (),
 ) -> str:
-    """Build the <replan_context> block fed to the planner.
+    """Build the <replan_context> block fed to the planner ("" if nothing to say).
 
-    Empty string when there's nothing to replan against (first attempt
-    and no prior failures). Otherwise a compact XML block listing each
-    failed step with its code, tool, arguments, and reason — exactly
-    the shape the planner's system prompt has been told to consume.
-
-    MVP-12 additions:
-      - `advice` is the `ReplanDecision.advice_for_planner` string
-        composed from per-FailureType budgets. It tells the planner
-        what KIND of correction to make.
-      - `forbidden_actions` lists (tool, args_json) pairs the planner
-        must NOT propose again. Surfaced inline so the LLM can read
-        and respect it; the sanitiser also enforces it as defence in
-        depth.
-
-    We do NOT redact secrets here because:
-      - tool arguments came from the planner's previous output, which
-        was itself redacted before going to the LLM, so they cannot
-        contain raw secrets that the planner hadn't already seen;
-      - `LLMPlanner.plan` runs `redact_text` over the assembled user
-        prompt one more time as a safety net.
+    No redaction here: `LLMPlanner.plan` redacts the assembled prompt.
     """
     if not failure_history and not advice and not forbidden_actions:
         return ""
@@ -306,31 +213,15 @@ def format_replan_context(
 class FailureBudget:
     """Retry budget + planner guidance for one failure type.
 
-    Attributes ---------- max_occurrences: How many times this failure type
-    may occur across the WHOLE run (including the first time) before the
-    loop must stop. A budget of 1 means "no retry at all". A budget of 2
-    means "one retry allowed". Must be >= 1 (a value of 0 would be a
-    contract violation: by the time we read the budget we already saw the
-    failure once). advice: Human-readable guidance attached to the next
-    planner prompt's <replan_context> block. Keep it short and concrete; the
-    LLM reads dozens of these. requires_different_action: When True, the
-    loop tells the planner sanitiser to REJECT any step that repeats the
-    exact same (tool, arguments) pair from a previous attempt's failure.
-    This is the right behaviour for approval_deny, approval_abort,
-    policy_blocked — retrying the same action would be either wasteful or
-    unsafe.
+    `max_occurrences` counts the first failure too (1 = no retry);
+    `requires_different_action` forbids repeating the same (tool, arguments).
     """
 
     max_occurrences: int
     advice: str
     requires_different_action: bool = False
-    #: Считать повторы ОДНОГО действия (инструмент + аргументы), а не все
-    #: случаи типа за ход. Ночь 24→25.09: ход, где пять кругов шли с
-    #: продвижением, оборвали две РАЗНЫЕ ошибки инструмента («tool_error 2/2»).
-    #: OpenHands StuckDetector тоже смотрит на повтор одного действия (у них —
-    #: 3 раза); порог здесь 2 — планка стенда способностей от 2026-08-05
-    #: (error_reuse-03: «два одинаковых сбоя исчерпывают бюджет»), её не
-    #: опускают. Стены (одобрение, политика, нет файла) считаются суммой.
+    #: Считать повторы ОДНОГО действия (инструмент + аргументы), а не все случаи
+    #: типа: разные ошибки не должны обрывать ход с продвижением.
     per_action: bool = False
 
     def __post_init__(self) -> None:
@@ -340,13 +231,9 @@ class FailureBudget:
             )
 
 
-# Default budgets. Tuned to be conservative on dangerous failures and
-# permissive on recoverable ones. The numbers are deliberately small —
-# the agent should rarely burn more than two replans before either
-# succeeding or returning an honest failure.
+# Conservative on dangerous failures, permissive on recoverable ones; small on
+# purpose — rarely more than two replans before success or an honest failure.
 DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
-    # Tool-level failures: usually fixable with different args or
-    # different tool. Give it room to recover.
     "tool_error":     FailureBudget(
         max_occurrences=2, per_action=True,
         advice=(
@@ -355,10 +242,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "submit the same (tool, arguments) pair."
         ),
     ),
-    # A requested file does not exist on disk. This is a hard fact: the
-    # file cannot be discovered by searching the web, and the agent must
-    # NOT create it from general knowledge (hallucination risk). Stop
-    # immediately and acknowledge the absence honestly.
+    # A hard fact: the web cannot find it and recreating it would be
+    # hallucination, so stop and say it is absent.
     "file_not_found": FailureBudget(
         max_occurrences=1,
         advice=(
@@ -379,15 +264,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "richer / more relevant output."
         ),
     ),
-    # MIR-060 (b). Distinct from every other entry here: the failure is not
-    # that a tool broke, it is that the ANSWER was wrong and we can say by how
-    # much. The advice therefore carries the arithmetic itself — the trigger's
-    # `reason` already holds "the sum is 6, not 99, over alpha=1 beta=2
-    # gamma=3", and `format_replan_context` puts it in front of the next
-    # attempt. A budget of 2 because a refuted computation is a fixable
-    # mistake, not a broken environment: one correction is usually enough, and
-    # a model that gets it wrong twice with the numbers in hand will not get it
-    # right on a third pass.
+    # The ANSWER was wrong, not a tool; the trigger's `reason` carries the
+    # correct value. One correction: wrong twice with the numbers in hand won't fix.
     "claim_refuted":  FailureBudget(
         max_occurrences=2,
         advice=(
@@ -414,13 +292,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
     ),
 
-    # Approval / policy failures: retrying the SAME dangerous action is
-    # wasteful (the human said no) or impossible (no provider wired).
-    # The `requires_different_action=True` flag puts the rejected
-    # (tool, args) pair into the planner's forbidden_actions list, so
-    # the only way a retry can run is if the planner proposes a
-    # different — typically safer — action. `max_occurrences=2` therefore
-    # encodes "you get exactly one chance to propose a safe alternative".
+    # Approval/policy: the rejected pair is forbidden, so max_occurrences=2
+    # means exactly one chance to propose a safer alternative.
     "approval_deny":         FailureBudget(
         max_occurrences=2,
         advice=(
@@ -439,8 +312,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
         requires_different_action=True,
     ),
-    # No provider is a configuration issue, not something a retry fixes.
-    # Stop after the first occurrence so we don't waste an attempt.
+    # A configuration issue: a retry cannot fix it.
     "approval_unavailable":  FailureBudget(
         max_occurrences=1,
         advice=(
@@ -463,9 +335,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "web_search just burns tokens without resolving any "
             "citation."
         ),
-        # The whole point is to ADD a NEW (web_fetch, {url: ...}) pair —
-        # we WANT the planner to add fetches for the same URLs the
-        # previous answer cited. Repeats are good here, not forbidden.
+        # Fetching the same cited URLs is the fix, so repeats are allowed.
         requires_different_action=False,
     ),
     "policy_blocked":        FailureBudget(
@@ -478,8 +348,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
 
-    # §2 Adversarial Defence: blocked content must not be retried with the
-    # same tool + query — it would just fetch the same poisoned page.
+    # The same tool + query would just fetch the same poisoned page.
     "injection_blocked": FailureBudget(
         max_occurrences=1,
         advice=(
@@ -492,12 +361,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
 
-    # The previous LLM reply was not valid JSON. The cheapest fix is
-    # to ask again with a hard reminder of the contract. Two attempts
-    # is enough: if the model can't return JSON twice in a row, it's
-    # not going to on the third try either, and we'd rather honestly
-    # tell the user the plan failed than synthesise a confident answer
-    # from no plan at all.
+    # A model that can't return JSON twice won't on the third try; better an
+    # honest failure than a confident answer from no plan.
     "plan_parse_failed": FailureBudget(
         max_occurrences=2,
         advice=(
@@ -510,10 +375,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
     ),
 
-    # A step the sanitiser removed before it ran. The reason is in the
-    # trigger, verbatim — it names the argument and the rule. One retry:
-    # the planner rewrites that step within the rule or picks another tool;
-    # a second identical drop means the rule is not being read.
+    # One retry: a second identical drop means the rule is not being read.
     "step_dropped": FailureBudget(
         max_occurrences=2,
         advice=(
@@ -529,7 +391,6 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
 
-    # Safety-net.
     "unknown":        FailureBudget(
         max_occurrences=1,
         advice=(
@@ -540,9 +401,7 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
 }
 
 
-# Independent global cap. Even if every per-type budget would allow more
-# attempts, the loop hard-stops after this many. Keeps total wall-time
-# bounded for the user.
+# Global cap independent of per-type budgets; bounds total wall-time.
 DEFAULT_MAX_TOTAL_REPLANS = 3
 
 
@@ -550,11 +409,7 @@ DEFAULT_MAX_TOTAL_REPLANS = 3
 # ReplanDecision — typed result of policy.decide()
 # ---------------------------------------------------------------------------
 
-# Action vocabulary:
-#   continue        : the loop SHOULD run another planner attempt
-#   abort_no_retry  : a per-type budget was exhausted; stop with an
-#                     honest synthesised answer (no more attempts)
-#   abort_exhausted : the global cap was hit; stop with replan_exhausted
+# abort_no_retry: a per-type budget ran out; abort_exhausted: the global cap.
 ReplanAction = Literal["continue", "abort_no_retry", "abort_exhausted"]
 
 
@@ -566,10 +421,7 @@ class ReplanDecision:
     reason: str                          # short audit-log-friendly note
     advice_for_planner: str = ""         # concatenated FailureBudget.advice strings
     failure_counts: Mapping[FailureType, int] = field(default_factory=dict)
-    forbidden_actions: tuple[tuple[str, str], ...] = ()
-    # forbidden_actions is a tuple of (tool_name, canonical_args_json) pairs
-    # the next planner attempt must NOT repeat. Set by budgets where
-    # requires_different_action=True.
+    forbidden_actions: tuple[tuple[str, str], ...] = ()  # (tool, canonical args JSON)
 
     def to_log_payload(self) -> dict[str, Any]:
         """JSON-safe shape for TraceLogger consumption."""
@@ -590,9 +442,7 @@ class ReplanDecision:
 class ReplanPolicy:
     """Decides whether the loop may try another planning attempt.
 
-    Construct once at AgentLoop init time; call `decide()` once per
-    attempt boundary. The class is `frozen=False` only so the caller
-    can swap budgets in tests; in normal use treat it as immutable.
+    Not frozen only so tests can swap budgets; treat as immutable.
     """
 
     budgets: Mapping[FailureType, FailureBudget] = field(
@@ -613,10 +463,6 @@ class ReplanPolicy:
                 f"so the decision logic never hits an undefined branch."
             )
 
-    # ------------------------------------------------------------------
-    # decide(): the only public method
-    # ------------------------------------------------------------------
-
     def decide(
         self,
         failure_history: Iterable[Any],
@@ -624,13 +470,8 @@ class ReplanPolicy:
     ) -> ReplanDecision:
         """Return what the loop should do before its next attempt.
 
-        Parameters ---------- failure_history: Iterable of
-        `ReplanTrigger`-like objects. Only the `code` attribute is read (it
-        must be a `FailureType` string) plus `tool_name` and `arguments` for
-        forbidden-action tracking. Defined as `Any` so this module doesn't
-        have to import the loop's dataclass (avoids a cycle).
-        completed_attempts: How many planner attempts have already finished
-        (>=1 by the time decide() is called the first time).
+        `failure_history` items are duck-typed: `code`, `tool_name`, `arguments`.
+        `completed_attempts` must be >= 1.
         """
         if completed_attempts < 1:
             raise ValueError(
@@ -643,9 +484,6 @@ class ReplanPolicy:
             self._coerce_code(t) for t in triggers
         )
 
-        # 1. Global cap — independent of per-type budgets so a noisy
-        #    pipeline of mixed-type failures cannot exceed the user's
-        #    wall-time expectations.
         if completed_attempts >= self.max_total_replans:
             return ReplanDecision(
                 action="abort_exhausted",
@@ -658,9 +496,7 @@ class ReplanPolicy:
                 forbidden_actions=self._forbidden_actions(triggers),
             )
 
-        # 2. Per-type budget — first type that hit its ceiling wins.
-        #    Order is FailureType definition order so the audit log is
-        #    deterministic across runs.
+        # First exhausted type wins, in declaration order for a deterministic log.
         for code in ALL_FAILURE_TYPES:
             budget = self.budgets[code]
             seen = (self._worst_repeat(triggers, code) if budget.per_action
@@ -677,8 +513,6 @@ class ReplanPolicy:
                     forbidden_actions=self._forbidden_actions(triggers),
                 )
 
-        # 3. Continue: compose advice from every distinct failure type
-        #    seen so far. Deduplicate but keep declaration order.
         seen_types = [t for t in ALL_FAILURE_TYPES if counts.get(t, 0) > 0]
         advice_lines = [self.budgets[t].advice for t in seen_types]
         return ReplanDecision(
@@ -688,10 +522,6 @@ class ReplanPolicy:
             failure_counts=dict(counts),
             forbidden_actions=self._forbidden_actions(triggers),
         )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _coerce_code(trigger: Any) -> FailureType:
@@ -733,9 +563,7 @@ class ReplanPolicy:
             try:
                 canonical = json.dumps(arguments, sort_keys=True, ensure_ascii=False)
             except TypeError:
-                # Arguments contained something non-JSON-able. Skip the
-                # forbidden entry rather than crash — the planner advice
-                # text still warns the LLM.
+                # Skip rather than crash; the advice text still warns the LLM.
                 continue
             key = (tool_name, canonical)
             if key in seen:
@@ -745,6 +573,4 @@ class ReplanPolicy:
         return tuple(forbidden)
 
 
-# Приехало из `core/loop_helpers.py`: бюджет попыток перепланирования —
-# предмет этого модуля, рядом с `DEFAULT_MAX_TOTAL_REPLANS`.
 DEFAULT_MAX_REPLAN_ATTEMPTS = 3

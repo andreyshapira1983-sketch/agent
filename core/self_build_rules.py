@@ -17,6 +17,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Уроки с происхождением — отдельный журнал со своими воротами записи и своим
 # блокирующим читателем — живут в core/self_build_lessons.py. Здесь остаётся
@@ -33,6 +34,9 @@ from core.self_build_lessons import (  # noqa: F401
     lesson_from_apply_result,
     lesson_write_verdict,
 )
+
+if TYPE_CHECKING:
+    from typing import Any
 
 RULES_FILENAME = "self_build_rules.jsonl"
 

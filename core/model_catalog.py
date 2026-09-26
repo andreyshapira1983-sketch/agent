@@ -1,50 +1,7 @@
-"""Dynamic Model Catalog — discovers available models from provider APIs.
+"""Dynamic Model Catalog — discovers provider models and picks the best one per complexity tier.
 
-NO MODEL NAMES ARE HARDCODED HERE.
-
-The catalog:
-  1. Reads env-var overrides first   (AGENT_MODEL_TIER_{LIGHT,STANDARD,DEEP})
-  2. Reads config/model_catalog.json  (written by :refresh-models command)
-  3. Queries the provider's own API  (anthropic.models.list / openai.models.list)
-  4. Returns ""                       (caller falls through to for_role() default)
-
-Tier classification — by naming PATTERN, never by version number:
-  LIGHT:    model name contains any of: haiku | mini | nano | small | flash | lite
-  DEEP:     OpenAI o-series (regex: o followed by digit — o1, o3, o4, o5, ...)
-            OR name contains: opus | thinking | ultra
-  STANDARD: everything else (sonnet, gpt-4o, gemini-pro, llama-3, ...)
-
-The OpenAI o-series (reasoning models) are detected by a regex that matches
-"o" preceded by a non-word character and followed by a digit, so o4-mini,
-o5, o6-mini, ... are automatically DEEP without any code change.
-gpt-4o is NOT matched because the "o" there is not followed by a digit.
-
-When a provider releases "claude-haiku-7-3" tomorrow, it is automatically
-classified as LIGHT. The code never needs to change.
-
-Cache file: config/model_catalog.json
-  - Written by refresh_catalog() / :refresh-models command
-  - TTL: AGENT_MODEL_CATALOG_TTL_DAYS (default 7)
-  - Schema:
-      {
-        "updated_at": "<iso8601>",
-        "providers": {
-          "anthropic": {
-            "models": [{"id": "...", "tier": "light|standard|deep"}, ...],
-            "tier_best": {"light": "...", "standard": "...", "deep": "..."},
-            # Only when this provider could not be ASKED this time and its
-            # previous models were kept rather than dropped (MIR-170):
-            "carried_over": true, "carried_reason": "...", "carried_from": "..."
-          },
-          ...
-        },
-        # Only when at least one provider could not be asked:
-        "unreachable": {"anthropic": "AuthenticationError: ..."}
-      }
-
-The "best" model per tier is the one with the highest lexicographic id
-(most recent by convention: providers append version numbers that sort
-lexicographically in recency order, e.g. claude-haiku-3-5 < claude-haiku-4-0).
+Lookup: env override (AGENT_MODEL_TIER_*) -> cached config/model_catalog.json -> provider API.
+Tiers come from family-name patterns, never version numbers, so new releases need no code change.
 """
 from __future__ import annotations
 
@@ -61,45 +18,37 @@ from core.task_complexity import ComplexityTier
 logger = logging.getLogger(__name__)
 
 # ── classification patterns ───────────────────────────────────────────────────
-# These are FAMILY NAMES, not version-specific identifiers.
 
 _LIGHT_PATTERNS: tuple[str, ...] = (
-    "haiku",    # Anthropic lightweight family
-    "mini",     # OpenAI lightweight GPT (gpt-4o-mini, gpt-4.1-mini, …)
-    "nano",     # Google / future providers
-    "small",    # generic "small" variants
-    "flash",    # Google Gemini flash
-    "lite",     # generic "lite" variants
+    "haiku",
+    "mini",
+    "nano",
+    "small",
+    "flash",
+    "lite",
 )
 
 _DEEP_PATTERNS: tuple[str, ...] = (
-    "opus",     # Anthropic flagship
-    "thinking", # Anthropic extended thinking
-    "ultra",    # generic "ultra"
-    # OpenAI o-series is handled by _O_SERIES_RE below, not string patterns.
-    # This avoids false positives from "o1" appearing in unrelated names.
+    "opus",
+    "thinking",
+    "ultra",
+    # OpenAI o-series goes through _O_SERIES_RE: a bare "o1" substring gives false positives.
 )
 
-# Regex for OpenAI o-series reasoning models: o1, o3, o4, o5, ... (and their -mini variants).
-# Pattern: "o" preceded by a non-word char (or string start), followed by a digit.
-# Matches:  "o1-preview", "o3", "o4-mini", "o5-turbo"
-# No match: "gpt-4o", "proto3", "claude-3-opus" (o is not followed by a digit)
+# OpenAI o-series ("o3", "o4-mini"): "o" at a word start followed by a digit; not "gpt-4o".
 _O_SERIES_RE = re.compile(r"(?<![\w])o\d", re.IGNORECASE)
 
-# Env-var names for explicit overrides
 _TIER_ENV: dict[ComplexityTier, str] = {
     ComplexityTier.LIGHT:    "AGENT_MODEL_TIER_LIGHT",
     ComplexityTier.STANDARD: "AGENT_MODEL_TIER_STANDARD",
     ComplexityTier.DEEP:     "AGENT_MODEL_TIER_DEEP",
 }
 
-# Default cache path; can override via AGENT_MODEL_CATALOG_PATH
+# Overridable via AGENT_MODEL_CATALOG_PATH.
 _DEFAULT_CATALOG_PATH = Path("config") / "model_catalog.json"
 _DEFAULT_TTL_DAYS = 7
 
-# ISO date YYYY-MM-DD inside model names
 _ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
-# Compact date YYYYMMDD inside model names
 _COMPACT_DATE_RE = re.compile(r"(\d{8})")
 
 
@@ -108,7 +57,6 @@ def _model_recency_key(model_id: str) -> tuple:
     name = model_id
     year, month, day = 0, 0, 0
 
-    # 1. Extract and remove ISO date YYYY-MM-DD
     m = _ISO_DATE_RE.search(name)
     if m:
         y = int(m.group(1))
@@ -116,7 +64,6 @@ def _model_recency_key(model_id: str) -> tuple:
             year, month, day = y, int(m.group(2)), int(m.group(3))
             name = name[:m.start()] + name[m.end():]
 
-    # 2. Extract and remove compact date YYYYMMDD (only if no ISO date found)
     if not year:
         m = _COMPACT_DATE_RE.search(name)
         if m:
@@ -126,7 +73,7 @@ def _model_recency_key(model_id: str) -> tuple:
                 year, month, day = y, int(raw[4:6]), int(raw[6:8])
                 name = name[:m.start()] + name[m.end():]
 
-    # 3. Extract remaining digit groups as version numbers (major, minor)
+    # Remaining digit groups are the version (major, minor).
     parts = [int(d) for d in re.findall(r"\d+", name) if len(d) <= 4]
     major = parts[0] if parts else 0
     minor = parts[1] if len(parts) > 1 else 0
@@ -137,18 +84,12 @@ def _model_recency_key(model_id: str) -> tuple:
 # ── tier classification ───────────────────────────────────────────────────────
 
 def classify_model(model_id: str) -> ComplexityTier:
-    """Classify a model into a tier by its name pattern.
-
-    No version numbers — only family keywords and structural patterns.
-    """
+    """Classify a model into a tier by its family-name pattern."""
     n = model_id.casefold()
-    # OpenAI o-series reasoning models → always DEEP
     if _O_SERIES_RE.search(n):
         return ComplexityTier.DEEP
-    # Other flagship/reasoning keywords → DEEP
     if any(p in n for p in _DEEP_PATTERNS):
         return ComplexityTier.DEEP
-    # Lightweight family names → LIGHT
     if any(p in n for p in _LIGHT_PATTERNS):
         return ComplexityTier.LIGHT
     return ComplexityTier.STANDARD
@@ -215,12 +156,7 @@ def _fetch_anthropic(api_key: str | None = None) -> list[str]:
 
 
 def _fetch_openai(api_key: str | None = None) -> list[str]:
-    """Return chat/completion model IDs available on the OpenAI API.
-
-    Keeps only text-generation models (GPT family and o-series reasoning).
-    Excludes: embeddings, image/video generation, audio, realtime streaming,
-    fine-tuning base models, and legacy models.
-    """
+    """Return text-generation model IDs (GPT family and o-series) available on the OpenAI API."""
     import openai  # optional dep — only needed at refresh time
     key = api_key or os.getenv("OPENAI_API_KEY", "")
     if not key:
@@ -228,9 +164,7 @@ def _fetch_openai(api_key: str | None = None) -> list[str]:
     client = openai.OpenAI(api_key=key)
     all_models = client.models.list()
 
-    # Allowlist: only GPT chat models and o-series reasoning models
     _ALLOW_RE = re.compile(r"^(gpt-|chatgpt-|o\d)", re.IGNORECASE)
-    # Denylist: non-text-generation capabilities
     _DENY = (
         "embedding", "dall-e", "whisper", "tts", "realtime", "sora",
         "audio", "transcri", "babbage", "davinci", "ada", "curie",
@@ -244,12 +178,7 @@ def _fetch_openai(api_key: str | None = None) -> list[str]:
 
 
 def _fetch_deepseek(api_key: str | None = None) -> list[str]:
-    """Модели DeepSeek: их API совместим с OpenAI (GET /models).
-
-    24.09 каталог держал только снятый список OpenAI 18.09 — DeepSeek, у
-    которого единственный ключ, в каталоге не было вовсе: опрашивать его было
-    нечем.
-    """
+    """Модели DeepSeek через OpenAI-совместимый API (GET /models)."""
     import openai  # optional dep — only needed at refresh time
     key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
     if not key:
@@ -274,22 +203,9 @@ def discover_catalog(
 ) -> dict[str, Any]:
     """Query provider model lists and classify them — WITHOUT writing anything.
 
-    This is the read-only half of :func:`refresh_catalog`. It performs the
-    same provider queries and tier classification and returns the resulting
-    catalog dict, but it never touches ``config/model_catalog.json``.
-
-    IMPORTANT: querying a provider's model list is a metadata-only, non-
-    inference provider call — it runs no LLM inference and generates no
-    completion — but it is still a real network/provider call, and it should be
-    recorded as provider metadata access rather than an LLM inference call.
-
-    This paragraph used to promise that only an explicit operator request could
-    trigger it. That was untrue: ``ensure_fresh_catalog`` fires this from an
-    ordinary tier lookup once the cache expires — once per process, gated by
-    AGENT_CATALOG_AUTOREFRESH. The behaviour is deliberate (a dead catalog
-    silently downgrades every failover), so the promise was corrected rather
-    than the code. Worth knowing, because it is how a read-looking call reached
-    the network and rewrote config while MIR-170 was being measured.
+    Still a real network call (metadata only, no inference). Note that
+    ``ensure_fresh_catalog`` reaches it from an ordinary tier lookup once the
+    cache expires, once per process (AGENT_CATALOG_AUTOREFRESH).
     """
     providers = providers or list(_FETCHERS.keys())
     api_keys  = api_keys or {}
@@ -298,8 +214,7 @@ def discover_catalog(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "providers":  {},
     }
-    #: Поставщики, которых спросить НЕ УДАЛОСЬ, и почему. Отсутствие ключа
-    #: означает «все спрошенные ответили», а не «никого не спрашивали».
+    #: Поставщики, которых не удалось спросить, и почему.
     unreachable: dict[str, str] = {}
 
     for provider in providers:
@@ -311,8 +226,7 @@ def discover_catalog(
             model_ids = fetcher(api_keys.get(provider))
         except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
             logger.warning("model fetch failed for %s: %s", provider, exc)
-            # «Не смогли спросить» — не «ответил пусто». Раньше поставщик просто
-            # пропускался, и сохранение объявляло его безмодельным (MIR-170).
+            # «Не смогли спросить» — не «ответил пусто» (MIR-170).
             unreachable[provider] = f"{type(exc).__name__}: {exc}"[:200]
             continue
 
@@ -321,7 +235,7 @@ def discover_catalog(
             for mid in model_ids
         ]
 
-        # Best model per tier = newest by date/version extracted from the name
+        # Best per tier = newest by date/version parsed from the name.
         tier_best: dict[str, str] = {}
         for tier in ComplexityTier:
             candidates = [m["id"] for m in classified if m["tier"] == tier.value]
@@ -347,13 +261,7 @@ def refresh_catalog(
     *,
     api_keys: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Query provider APIs, classify models, and SAVE the cache.
-
-    Thin write wrapper over :func:`discover_catalog`: it performs the same
-    read-only discovery and then persists the result to
-    ``config/model_catalog.json``. Behaviour is unchanged from before the
-    discover/refresh split.
-    """
+    """Run :func:`discover_catalog`, carry over unreachable providers, and SAVE the cache."""
     catalog = discover_catalog(providers, api_keys=api_keys)
     _carry_over_unreachable(catalog)
     _save_catalog(catalog)
@@ -361,12 +269,7 @@ def refresh_catalog(
 
 
 def _read_catalog_file() -> dict[str, Any]:
-    """Каталог с диска НЕЗАВИСИМО от срока годности.
-
-    `_load_catalog` намеренно отдаёт пустоту просроченному — но перенос нужен
-    ровно тогда, когда каталог просрочен и потому обновляется. Просроченные
-    сведения о недоступном поставщике лучше, чем объявление его пустым.
-    """
+    """Каталог с диска независимо от срока годности: перенос нужен как раз для просроченного."""
     path = _catalog_path()
     if not path.exists():
         return {}
@@ -378,11 +281,9 @@ def _read_catalog_file() -> dict[str, Any]:
 
 
 def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
-    """Сохранить прежние модели поставщика, которого не смогли спросить.
+    """Сохранить прежние модели поставщика, которого не смогли спросить (MIR-170).
 
-    Переносится ТОЛЬКО при ошибке запроса. Честный пустой ответ — это ответ, и
-    он записывается как есть, иначе поставщик, снявший все модели, остался бы в
-    каталоге навсегда. Замер: MIR-170.
+    Только при ошибке запроса: честный пустой ответ записывается как есть.
     """
     unreachable = catalog.get("unreachable") or {}
     if not unreachable:
@@ -396,8 +297,7 @@ def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
         entry = dict(prior)
         entry["carried_over"] = True
         entry["carried_reason"] = reason
-        # Дата ПЕРВОГО переноса, а не последнего: иначе запись молодела бы с
-        # каждым обновлением и выглядела свежее, чем она есть.
+        # Дата первого переноса, иначе запись молодела бы с каждым обновлением.
         entry.setdefault("carried_from", previous.get("updated_at"))
         catalog["providers"][provider] = entry
         logger.warning(
@@ -408,8 +308,7 @@ def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
 
 # ── autorefresh: обновление прежде подстройки ─────────────────────────────────
 
-#: Одна попытка на процесс: неудачное обновление не молотит по сети на каждый
-#: вызов маршрутизатора. Тесты сбрасывают флаг через monkeypatch.
+#: Одна попытка на процесс, чтобы сбойное обновление не молотило по сети.
 _AUTOREFRESH_DONE = False
 
 
@@ -419,7 +318,7 @@ def _autorefresh_enabled() -> bool:
 
 
 def _credentialed_providers() -> list[str]:
-    """Провайдеры, к которым ЕСТЬ ключи: без ключей не бывает и сети."""
+    """Провайдеры, для которых заданы ключи."""
     out = []
     if os.getenv("ANTHROPIC_API_KEY", "").strip():
         out.append("anthropic")
@@ -454,24 +353,13 @@ def ensure_fresh_catalog() -> str:
 # ── main public function ──────────────────────────────────────────────────────
 
 def tier_model_for(tier: ComplexityTier, provider: str) -> str:
-    """Return the best available model name for *tier* + *provider*.
-
-    Lookup order:
-      1. env var  AGENT_MODEL_TIER_{LIGHT|STANDARD|DEEP}  (operator override)
-      2. config/model_catalog.json — a DEAD cache is first refreshed once
-         (``ensure_fresh_catalog``), then re-read; refresh before adapt
-      3. ""  → caller falls through to for_role() default
-
-    No model names are hardcoded. Returns "" if nothing is configured.
-    """
-    # 1. env override — always wins
+    """Best model for *tier* + *provider*: env override, then catalog (refreshed once if dead), else ""."""
     env_var = _TIER_ENV.get(tier, "")
     if env_var:
         override = os.getenv(env_var, "").strip()
         if override:
             return override
 
-    # 2. catalog cache; смерть кэша — повод обновить, не повод подстроиться
     catalog = _load_catalog()
     if catalog is None:
         ensure_fresh_catalog()
@@ -482,18 +370,11 @@ def tier_model_for(tier: ComplexityTier, provider: str) -> str:
         if model:
             return model
 
-    # 3. not found — caller uses its own default
     return ""
 
 
 def catalog_freshness() -> dict[str, Any]:
-    """Is the cache usable, and if not, why — in numbers the operator can act
-    on.
-
-    Statuses are kept distinct because they need different actions:
-    ``missing`` (never built), ``expired`` (stale, refresh it), ``fresh``,
-    ``unreadable`` (corrupt file).
-    """
+    """Cache status (missing / expired / fresh / unreadable) with age and TTL for the operator."""
     hint = "run :refresh-models to rebuild the catalog"
     path = _catalog_path()
     if not path.exists():
@@ -502,10 +383,7 @@ def catalog_freshness() -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         age_days = _catalog_age_days(data)
-    # A corrupt or unreadable catalog file must degrade to "unreadable"
-    # rather than raise: this is a STATUS query, and callers use it to
-    # decide whether to refresh. Raising here would break the refresh path
-    # that exists to repair exactly this condition.
+    # Must not raise: callers use this status to decide on the refresh that repairs it.
     except Exception as exc:  # noqa: BLE001
         return {"status": "unreadable", "expired": False, "age_days": None,
                 "ttl_days": _ttl_days(), "path": str(path),
@@ -546,8 +424,8 @@ def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
         return None
     try:
         return tier_model_for(classify_model(str(model)), provider) or None
-    except Exception:  # noqa: BLE001 — каталог ходит в сеть; отказоустойчивость
-        return None    # важнее любой его беды, и None здесь = прежнее поведение
+    except Exception:  # noqa: BLE001 — каталог ходит в сеть; None = прежнее поведение
+        return None
 
 
 def offered_models(provider: str) -> frozenset[str]:
