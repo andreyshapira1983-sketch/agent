@@ -33,9 +33,10 @@ def test_the_answer_reaches_the_human_without_the_evidence_list_and_score():
     assert "Проверка:" not in human
 
 
-def test_a_warning_stays_at_its_claim_as_a_short_human_word():
+def test_a_warning_is_said_once_in_plain_words_not_as_tags():
+    """Оператор 27.09: «(не проверял)» после каждой фразы — тоже кухня; одна оговорка в конце."""
     human = format_human_response(_LIVE)
-    assert "коротко (не проверял)" in human
+    assert "(не проверял)" not in human
     assert "[цитата-не-подтверждает]" not in human
     assert "источник по теме" not in human
     assert "Чего я не проверил: что самосборка стоит" in human
@@ -57,3 +58,17 @@ def test_the_off_topic_warning_is_said_in_words():
 def test_outside_the_chat_the_task_answer_keeps_its_facts(monkeypatch):
     monkeypatch.delenv("AGENT_HUMAN_CHAT")
     assert "untracked-файл" in format_human_response(_LIVE)
+
+
+_LIVE_2709 = (
+    "Conclusion: Правка готова и проверена: в `tools/convert_file.py` добавлена операция "
+    "`pdf_text` [topic-only:tool:patch_check]. Файла нет [tool:find_in_files]."
+)
+
+
+def test_code_quotes_and_tool_tags_do_not_reach_the_chat():
+    """Живой случай 27.09, Телеграм: `кавычки кода` и [tool:find_in_files] приходили как есть."""
+    human = format_human_response(_LIVE_2709)
+    assert "`" not in human and "[" not in human, human
+    assert "tools/convert_file.py" in human
+    assert human.endswith("Часть этого я не проверял."), human

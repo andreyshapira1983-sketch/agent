@@ -16,7 +16,7 @@ from core.requested_format import is_tail_line as is_requested_tail_line
 from core.tool_output_render import format_artifact, number_lines  # noqa: F401
 from core.unsupported_claims import EXCISION_PREFIXES as _EXCISION_PREFIXES
 from core.verification_summary import TAIL_PREFIX as _VERIFICATION_TAIL_PREFIX
-from core.warning_words import humanize_warning_markers
+from core.warning_words import humanize_warning_markers, strip_warning_markers
 
 SYSTEM_ANSWER = """You are a careful research analyst.
 
@@ -322,7 +322,7 @@ def _strip_verification_markers(text: str) -> str:
 
 _ANSWER_CITATION_RE = re.compile(
     r"\s*\[(?:general-knowledge|web:[^\]]*|file:[^\]]*|file_write:[^\]]*|"
-    r"file_read:[^\]]*|search:[^\]]*|"
+    r"file_read:[^\]]*|search:[^\]]*|tool:[^\]]*|"
     r"test:[^\]]*|log:[^\]]*|shell:[^\]]*|diff:[^\]]*|memory:[^\]]*|sensor:[^\]]*|"
     r"user:target|user:[^\]]*|artifact:[^\]]*|prior_turn:[^\]]*|"
     r"user|declared:[^\]]*|verified:[^\]]*|unverified:[^\]]*)"
@@ -347,12 +347,24 @@ def _spoken_tail(lines: list[str]) -> list[str]:
     return kept
 
 
+def _chat_plain(text: str) -> str:
+    """Разговор (оператор 27.09): ни меток, ни `кавычек кода`, ни оговорок в скобках — одна фраза в конце."""
+    text, warned = strip_warning_markers(text)
+    text = _ANSWER_CITATION_RE.sub("", text)
+    text = re.sub(r"(?<!`)`(?!`)|\*\*", "", text)
+    text = "\n".join(re.sub(r"[ \t]{2,}", " ", line).rstrip() for line in text.splitlines())
+    if warned and "Чего я не проверил" not in text:
+        text += "\n\nЧасть этого я не проверял."
+    return text.strip()
+
+
 def format_human_response(answer: str) -> str:
     """Convert the internal Output Contract format to clean human-readable
     text.
     """
+    chat = os.environ.get("AGENT_HUMAN_CHAT") == "1"
     if "Conclusion:" not in answer and "conclusion:" not in answer:
-        return humanize_warning_markers(answer)  # not an Output Contract reply
+        return _chat_plain(answer) if chat else humanize_warning_markers(answer)
 
     lines = answer.splitlines()
     section: str | None = None
@@ -479,7 +491,6 @@ def format_human_response(answer: str) -> str:
     facts_block = "\n".join(facts_lines).strip()
 
     # Разговор (мостик чата, оператор 26.09): улики и счёт проверки — в журнал.
-    chat = os.environ.get("AGENT_HUMAN_CHAT") == "1"
     parts: list[str] = []
     if conclusion:
         parts.append(conclusion)
@@ -493,7 +504,8 @@ def format_human_response(answer: str) -> str:
     if parts and verification_tail_lines:
         parts.extend(_spoken_tail(verification_tail_lines) if chat else verification_tail_lines)
 
-    return humanize_warning_markers("\n\n".join(parts) if parts else answer)
+    joined = "\n\n".join(parts) if parts else answer
+    return _chat_plain(joined) if chat else humanize_warning_markers(joined)
 
 def citation_for_evidence(ev: Evidence) -> str | None:  # noqa: PLR0911 — one branch per evidence kind
     source_id = ev.source_id
