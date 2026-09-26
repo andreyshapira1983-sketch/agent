@@ -138,7 +138,7 @@ def failed_output_reason(output: Any) -> str:
     return "tool execution failed"
 
 
-def _error_line(text: str) -> str:
+def error_line(text: str) -> str:
     """Строка, по которой ошибку узнают: исключение с сообщением, отказ, упавший
     тест, иначе последняя строка вывода (не строка кода выхода)."""
     lines = [ln.strip().removeprefix("E ").strip() for ln in text.splitlines() if ln.strip()]
@@ -159,7 +159,7 @@ def _error_line(text: str) -> str:
 def signature(tool: str, text: str) -> str:
     """Подпись: инструмент + строка ошибки без чисел, хешей, путей папки и
     длинных цитат (длинная цитата — чужой текст, короткая — имя, её оставляем)."""
-    line = _WORKSPACE_RE.sub("", _error_line(text))
+    line = _WORKSPACE_RE.sub("", error_line(text))
     line = _LONG_QUOTE_RE.sub("'<…>'", line)
     line = _NUM_RE.sub("N", _HEX_RE.sub("H", _TMP_RE.sub("<tmp>", line)))
     return f"{tool}|{' '.join(line.split())[:160]}"
