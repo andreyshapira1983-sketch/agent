@@ -35,14 +35,6 @@ EvidenceClass = Literal[
     "generative",
 ]
 
-ALL_EVIDENCE_CLASSES: tuple[EvidenceClass, ...] = (
-    "external_world",
-    "session_dialogue",
-    "trace",
-    "self_analysis",
-    "generative",
-)
-
 #: Evidence kinds (``core.evidence.EvidenceKind``) per class. ``llm_claim`` and
 #: ``unknown`` are deliberately absent: an ungrounded model assertion belongs to
 #: no evidence class and stays unsupported.
