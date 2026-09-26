@@ -531,6 +531,11 @@ def _sanitize_convert_file(
     return sanitize_args(args, idx, warnings)
 
 
+def _warn_extra_args(args: dict[str, Any], allowed: Any, tool: str, idx: int, warnings: list[str]) -> None:
+    if extra := sorted(set(args) - set(allowed)):
+        warnings.append(f"step[{idx}]: {tool} dropping unexpected args {extra!r}")
+
+
 def sanitize_step(
     tool_name: str,
     args: dict[str, Any],
@@ -987,10 +992,6 @@ def sanitize_step(
                 f"step[{idx}]: list_dir path '{path}' contains '..', dropped"
             )
             return None
-        if path.startswith(("/", "\\")) or (len(path) >= 2 and path[1] == ":"):
-            # Absolute paths are validated by the tool; pass them through
-            # so the tool can give a clear PermissionError.
-            pass
         return {
             "tool": "list_dir",
             "arguments": {"path": path},
@@ -1038,9 +1039,7 @@ def sanitize_step(
     if tool_name == "memory_recall":
         # The read door (2026-09-04): exactly one string, `term`; read-only.
         term = str(args.get("term") or "").strip()
-        extra = sorted(set(args) - {"term"})
-        if extra:
-            warnings.append(f"step[{idx}]: memory_recall dropping unexpected args {extra!r}")
+        _warn_extra_args(args, {"term"}, "memory_recall", idx, warnings)
         if not term:
             warnings.append(f"step[{idx}]: memory_recall needs a non-empty term; step dropped")
             return None
@@ -1063,9 +1062,7 @@ def sanitize_step(
             warnings.append(f"step[{idx}]: model_route missing {missing}; step dropped")
             return None
         keep = {k: str(args[k]).strip() for k in ("role", "provider", "model", "reason", "evidence") if args.get(k)}
-        extra = sorted(set(args) - set(keep) - {"model", "evidence"})
-        if extra:
-            warnings.append(f"step[{idx}]: model_route dropping unexpected args {extra!r}")
+        _warn_extra_args(args, {*keep, "model", "evidence"}, "model_route", idx, warnings)
         return {
             "tool": "model_route",
             "arguments": keep,
@@ -1086,12 +1083,7 @@ def sanitize_step(
                 f"{missing!r}, dropping step"
             )
             return None
-        # Drop any extra arguments the planner accidentally adds.
-        extra = sorted(set(args.keys()) - set(required))
-        if extra:
-            warnings.append(
-                f"step[{idx}]: memory_bank dropping unexpected args {extra!r}"
-            )
+        _warn_extra_args(args, required, "memory_bank", idx, warnings)
         kind = args["kind"]
         return {
             "tool": "memory_bank",
@@ -1133,12 +1125,8 @@ def sanitize_step(
         fields = args.get("fields_of_study")
         if isinstance(fields, str) and fields.strip():
             arguments["fields_of_study"] = fields.strip()
-        extra = sorted(set(args) - {"query", "max_results", "fields_of_study"})
-        if extra:
-            warnings.append(
-                f"step[{idx}]: semantic_scholar_search dropping unexpected "
-                f"args {extra!r}"
-            )
+        _warn_extra_args(args, {"query", "max_results", "fields_of_study"},
+                         "semantic_scholar_search", idx, warnings)
         return {
             "tool": "semantic_scholar_search",
             "arguments": arguments,
@@ -1167,12 +1155,7 @@ def sanitize_step(
                 f"got {type(args['record']).__name__}, dropping step"
             )
             return None
-        # Drop any extra arguments the planner accidentally adds.
-        extra = sorted(set(args.keys()) - set(required))
-        if extra:
-            warnings.append(
-                f"step[{idx}]: journal_append dropping unexpected args {extra!r}"
-            )
+        _warn_extra_args(args, required, "journal_append", idx, warnings)
         path = args["path"]
         return {
             "tool": "journal_append",
