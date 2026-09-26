@@ -27,6 +27,8 @@ def _stuck(root: Path) -> None:
 
 
 def _append(root: Path, path: str, record: dict) -> None:
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "logs" / "trace_271045b1.jsonl").write_text("x\n", encoding="utf-8")
     JournalAppendTool(workspace_root=root).run(path=path, record=record)
 
 
@@ -43,7 +45,7 @@ def test_only_this_goals_own_decision_completes_it(tmp_path: Path) -> None:
     _stuck(tmp_path)
     goal = stuck_goal(tmp_path)
     rid = goal.success_check.split('"id": "')[1].rstrip('"')
-    old = {"id": "reshenie-00000000", "about": "другое", "decision": "старое", "because": "b"}
+    old = {"id": "reshenie-00000000", "about": "другое", "decision": "старое", "because": "logs/trace_271045b1.jsonl"}
     _append(tmp_path, DECISIONS_RELPATH, old)
     assert observe_success_check(goal.success_check, tmp_path)["verdict"] == "missing", \
         "a file that already exists must not pass for this goal's decision"
@@ -51,7 +53,7 @@ def test_only_this_goals_own_decision_completes_it(tmp_path: Path) -> None:
     _append(tmp_path, DECISIONS_RELPATH, {
         "id": rid, "about": "sii_dda321e2221d400d",
         "decision": "эталон — факт записи файла на диске; правлю core/answer_contradiction.py",
-        "because": "logs/trace_271045b1: инструмент с отказом попал в executed_tools"})
+        "because": "logs/trace_271045b1.jsonl: инструмент с отказом попал в executed_tools"})
     assert observe_success_check(goal.success_check, tmp_path)["verdict"] == "verified"
 
 
@@ -69,7 +71,7 @@ def test_the_next_repair_goal_carries_his_own_decision(tmp_path: Path) -> None:
     fingerprint = SelfImprovementIssueRegistry(path).unresolved()[0].fingerprint
     _append(tmp_path, DECISIONS_RELPATH, {
         "id": "reshenie-1", "about": fingerprint,
-        "decision": "эталон — факт записи файла на диске", "because": "trace 271045b1"})
+        "decision": "эталон — факт записи файла на диске", "because": "logs/trace_271045b1.jsonl"})
 
     goal = defect_goal(tmp_path).goal
 
