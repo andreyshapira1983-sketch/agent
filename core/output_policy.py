@@ -25,6 +25,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.lang_match import looks_russian
 from core.source_ranker import SourceRankingReport
 
 
@@ -94,12 +95,8 @@ def apply_ranker_output_policy(
     )
 
 
-def _looks_russian(text: str) -> bool:
-    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
-
-
 def _realtime_warning(question: str) -> str:
-    if _looks_russian(question):
+    if looks_russian(question):
         return (
             "Найденные источники открылись, но они недостаточны для "
             "подтверждения realtime-значения без специализированного live "
@@ -112,7 +109,7 @@ def _realtime_warning(question: str) -> str:
 
 
 def _stale_realtime_warning(question: str) -> str:
-    if _looks_russian(question):
+    if looks_russian(question):
         return (
             "Realtime-источник найден, но свежесть данных ограничивает "
             "уверенность ответа."
@@ -124,7 +121,7 @@ def _stale_realtime_warning(question: str) -> str:
 
 
 def _replan_warning(question: str) -> str:
-    if _looks_russian(question):
+    if looks_russian(question):
         return (
             "Часть проверки была остановлена из-за исчерпания replan-бюджета; "
             "некоторые данные могли остаться неподтверждёнными."
