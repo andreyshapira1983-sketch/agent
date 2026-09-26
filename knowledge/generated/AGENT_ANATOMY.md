@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 280 modules across 12 groups._
+_Total: 281 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -232,6 +232,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/scheduler` | Persistent scheduler for autonomous runtime tasks. |
 | `core/campaign` | 24/48h autonomous work campaign engine. |
 | `core/campaign_io` | Campaign I/O helpers: journal writes, cost totals, and the default signal-gathering and action-executing callbacks. |
+| `core/goal_progress` | Файл прогресса цели человека: заход читает его первым и дописывает в конце. |
 | `core/campaign_ledger` | Append-only campaign ledger: one record per cycle, plus loading and summarising the rows. |
 | `core/drives` | Внутренние драйвы — физиология вокруг модели, считаемая из журналов. |
 | `core/drive_goal` | Задача от драйва: что сейчас важно — решает внутреннее состояние, что делать — модель. |
