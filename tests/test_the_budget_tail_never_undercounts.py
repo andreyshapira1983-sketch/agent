@@ -53,13 +53,6 @@ def test_garbage_lines_in_the_tail_do_not_lower_the_count(tmp_path: Path) -> Non
     assert _used(ledger) == _IN_WINDOW
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="BUG: строка журнала, которая разбирается как JSON, но не объект ([..], число, строка), "
-    "роняет хвостовое чтение AttributeError (raw.get у не-dict), и check/reserve падают вместо "
-    "решения — только когда журнал длиннее _TAIL_READ_BYTES [until: 2026-10-03 — владелец чинит]",
-)
 def test_a_non_object_json_line_in_the_tail_is_skipped_not_fatal(tmp_path: Path) -> None:
     """Строка JSON, которая не объект, в хвосте большого журнала пропускается, как при полном чтении."""
     ledger = _ledger(tmp_path)

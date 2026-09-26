@@ -218,7 +218,7 @@ class BudgetLedger:
                     raw = json.loads(line)
                 except ValueError:
                     continue
-                payload = raw.get("payload", raw)
+                payload = raw.get("payload", raw) if isinstance(raw, dict) else None
                 if not isinstance(payload, dict):
                     continue
                 try:
