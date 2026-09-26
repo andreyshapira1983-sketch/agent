@@ -36,7 +36,7 @@ def test_an_uncited_claim_keeps_its_warning_and_the_human_reads_words() -> None:
     shown = format_human_response(
         "Conclusion: Итог [unverified]\nFacts:\n- Без источника [unverified]\nConfidence: low")
     assert "[unverified]" not in shown, "a machine tag reached the human"
-    assert shown.count("не проверено — источника нет") == 2, shown
+    assert shown.count("не проверял") == 2, shown
 
 
 def test_the_docstring_states_the_boundary() -> None:
