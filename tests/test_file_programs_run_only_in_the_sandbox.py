@@ -203,6 +203,21 @@ def test_pdf_pages_become_images(tmp_path: Path) -> None:
 
 
 @needs_sandbox
+@_needs("pdftotext", "soffice")
+def test_pdf_text_keeps_two_columns_on_one_line(tmp_path: Path) -> None:
+    import docx
+    d = docx.Document()
+    d.add_paragraph("LEFT" + " " * 40 + "RIGHT")
+    d.save(tmp_path / "two_col.docx")
+    tool = ConvertFileTool(workspace_root=tmp_path)
+    pdf = tool.run(op="office", path="two_col.docx", to="pdf")["outputs"][0]
+    result = tool.run(op="pdf_text", path=pdf)
+    assert result["exit_code"] == 0, result
+    lines = result["text"].splitlines()
+    assert any("LEFT" in line and "RIGHT" in line for line in lines), lines
+
+
+@needs_sandbox
 @_needs("convert")
 def test_image_is_resized(tmp_path: Path) -> None:
     from PIL import Image

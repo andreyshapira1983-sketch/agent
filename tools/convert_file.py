@@ -60,7 +60,7 @@ OUTPUT_DIR = "converted"
 _MAX_INPUT_BYTES = 200 * 1024 * 1024
 _MAX_TEXT_CHARS = 20000
 _NOBODY = 65534
-_TIMEOUT = {"ocr": 300, "office": 180, "pdf_pages": 180, "image": 120,
+_TIMEOUT = {"ocr": 300, "office": 180, "pdf_pages": 180, "pdf_text": 180, "image": 120,
             "svg": 120, "media": 600, "render3d": 600, "blender_script": 900}
 
 _IMAGE_IN = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif")
@@ -76,6 +76,7 @@ OPS: dict[str, dict[str, tuple[str, ...]]] = {
     "media": {"in": ("mp4", "mov", "mkv", "webm", "avi", "mp3", "wav", "ogg", "m4a", "flac", "gif"),
               "to": ("mp4", "webm", "mp3", "wav", "gif")},
     "render3d": {"in": ("blend",), "to": ("png",)},
+    "pdf_text": {"in": ("pdf",), "to": ("txt",)},
     # Свой скрипт агента; результаты — что скрипт сам положил в out/.
     "blender_script": {"in": ("py",), "to": ("out",)},
 }
@@ -136,6 +137,8 @@ def _argv(op: str, ext: str, to: str, *, lang: str, width: int | None, max_pages
                  "--convert-to", to, "--outdir", "out", src]]
     if op == "pdf_pages":
         return [["pdftoppm", "-r", "150", "-png", "-f", "1", "-l", str(max_pages), src, "out/page"]]
+    if op == "pdf_text":
+        return [["pdftotext", "-layout", "-nopgbrk", src, "out/result.txt"]]
     if op == "image":
         size = ["-resize", f"{width}x"] if width else []
         return [["convert", f"{ext}:{src}", *size, f"{to}:out/result.{to}"]]
