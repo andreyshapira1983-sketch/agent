@@ -255,8 +255,8 @@ class AgentLoopStepExecution:
         """
         if not steps:
             return []
-        if len(steps) == 1:
-            return [self._run_step_parallel(steps[0])]
+        # Одиночный шаг идёт тем же путём, что и пакет: сборка текста записи и ссылки.
+        # Короткая дорожка для него пропускала обе проверки — запись падала на write_instruction.
         # Всё, что план называет шагом — по id и по номеру: резолвер отличает
         # по этому множеству ссылку от прозы, упоминающей форму ссылки.
         plan_steps = frozenset({s.id for s in steps} | {str(s.order) for s in steps})
