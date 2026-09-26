@@ -19,6 +19,7 @@ _SHOWN = 4
 _ANSWER_CHARS = 900
 _QUOTED_PATH = re.compile(r"'([^']+)'")
 _PATCH_FILE = re.compile(r"proposals/selffix/[\w.\-]+/edits\.txt")
+_MEMORY_CITATION = re.compile(r"\s*\[(?:[\w-]+:)*memory:[^\]\s]+\]")
 
 
 def progress_path(workspace: Any, goal: str) -> Path:
@@ -73,6 +74,8 @@ class PassProgress:
         self.root, self.path = Path(workspace), progress_path(workspace, goal)
         self.rel = f"{PROGRESS_DIR}/{self.path.name}"
         self.effects_before = len(_effects(agent))
+        agent.memory_given_to_goal = frozenset(
+            i for r in _rows(self.path)[-_SHOWN:] for i in (r.get("recalled") or ()))
 
     def prompt(self, focused_goal: str) -> str:
         rows = _rows(self.path)[-_SHOWN:]
@@ -95,7 +98,11 @@ class PassProgress:
                 written.append(found.group(1))
         text = " ".join(str(answer or "").split())
         text = text[text.find("Conclusion:"):] if "Conclusion:" in text else text  # без шапки «Evidence scope»
-        row = {"ts": datetime.now(timezone.utc).isoformat(), "written": written[:10], "answer": text[:_ANSWER_CHARS]}
+        text = _MEMORY_CITATION.sub("", text)
+        recalled = [str(getattr(r, "id", "")) for r in getattr(self.agent, "_last_persistent_records", None) or ()]
+        self.agent.memory_given_to_goal = frozenset()
+        row = {"ts": datetime.now(timezone.utc).isoformat(), "written": written[:10], "answer": text[:_ANSWER_CHARS],
+               "recalled": recalled[:10]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -104,5 +111,7 @@ class PassProgress:
 def start_pass(agent: Any, workspace: Any, config: Any, action: Any) -> PassProgress | None:
     """Файл ведётся только для захода на цель человека (своя цель агента сменяется драйвами)."""
     if getattr(action, "action", "") != "pursue_goal" or getattr(config, "goal_is_self", False):
+        if agent is not None:
+            agent.memory_given_to_goal = frozenset()
         return None
     return PassProgress(agent, workspace, str(getattr(config, "goal", "") or ""))
