@@ -961,14 +961,9 @@ def _default_execute_action(
     from core.approval_inbox import ApprovalInbox
     from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
     from core.budget_governor import BudgetLimits
+    from core.goal_progress import start_pass
 
-    # Замер 2026-09-04 (вечер OpenAI, 65 центов): под целью «выполни
-    # одобренный раскол X» цикл сначала ПЛАТИЛ за полный прогон модели
-    # (планировщик + синтез, ~25k токенов), и лишь потом производитель заявок
-    # отвечал бесплатным «approval_wait: цель уже ждёт полосы». Девять таких
-    # циклов, три из них — по расколам, одобренным в тот же день; ноль заявок.
-    # Ожидание человека читается ДО прогона и стоит ноль: одобренное — не
-    # предмет для нового предложения, а недавно отклонённое — остывает (L10).
+    # Ожидание человека читается ДО прогона и стоит ноль (замер 2026-09-04: 9 платных циклов, 0 заявок; L10).
     if action.action == "propose_engineering_task" and not config.dry_run:
         refused = _engineering_preflight(
             agent=agent, workspace=workspace, action=action, config=config,
@@ -978,7 +973,9 @@ def _default_execute_action(
             return refused
 
     llm_before, cost_before = _cost_totals(agent)
+    progress = start_pass(agent, workspace, config, action)
     focused_goal = _action_focused_goal(config.goal, action)
+    focused_goal = progress.prompt(focused_goal) if progress else focused_goal
     # A3 (2026-09-03): предложение этого цикла — ДЕЛЬТА ящика, не его размер.
     # Абсолютный счёт делал любой цикл «полезным», пока в ящике лежала чужая
     # вчерашняя заявка, и гасил страж «loop_suspected».
@@ -1010,6 +1007,8 @@ def _default_execute_action(
     )
     proposal = _approvals_born(_inbox, _pending_before)
     goal_answer, artifact = _goal_answer_and_digest(report)
+    if progress is not None:
+        progress.finish(goal_answer)
     # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
     # здесь в 160-значном дайджесте: четвёртый прогон дня процитировал свой
     # дефект из настоящей трассы, получил 6 из 6 подтверждённых — и кампания
