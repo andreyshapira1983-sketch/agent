@@ -241,10 +241,10 @@ def clarification_for_replan_exhausted() -> ClarificationOutcome:
     return for_loop_suspected()
 
 
-#: Причины застревания, лежащие в собственном черновике агента: ссылка ответа
-#: не нашла улику, арифметика над цитатой не сошлась. Рамку задачи они не
-#: касаются — человек не может ответить на них, уточнив «что строить».
-_DRAFT_ONLY_CAUSES = frozenset({"unresolved_citation", "claim_refuted"})
+#: Причины застревания вне рамки задачи: ссылка черновика без улики, арифметика
+#: над цитатой, источник, отвергнутый защитой от инъекций (страница о защите
+#: цитирует атаку). Уточнив «что строить», человек ни одну из них не снимет.
+_NOT_FRAME_CAUSES = frozenset({"unresolved_citation", "claim_refuted", "injection_blocked"})
 
 
 def frame_questions_help(
@@ -269,7 +269,7 @@ def frame_questions_help(
     if gathered and frame_clear:
         return False
     codes = set(failure_codes or ())
-    return not codes or not codes <= _DRAFT_ONLY_CAUSES
+    return not codes or not codes <= _NOT_FRAME_CAUSES
 
 
 # ── ask-back for unsupported self-analysis (MIR-075) ─────────────────────────
