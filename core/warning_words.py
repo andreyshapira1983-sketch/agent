@@ -61,6 +61,12 @@ def _russian(text: str) -> bool:
     return 3 * len(_CYRILLIC_RE.findall(text)) >= len(_LATIN_RE.findall(text))
 
 
+def strip_warning_markers(text: str) -> tuple[str, int]:
+    """Снять метки-предупреждения целиком (разговор в чате); вернуть текст и их число."""
+    plain = _UNVERIFIED_BODY_RE.sub("", text or "")
+    return _MARKER_RE.sub("", plain), len(_MARKER_RE.findall(plain))
+
+
 def humanize_warning_markers(text: str) -> str:
     """Метки-предупреждения -> короткая оговорка в скобках; адрес источника остаётся."""
     if "[" not in (text or ""):
