@@ -18,7 +18,6 @@ must NOT contain any high-confidence credential pattern (delegated to
 """
 from __future__ import annotations
 
-import re
 import shutil
 import time
 from pathlib import Path
@@ -30,46 +29,6 @@ from core.secret_scanner import contains_secret
 from tools.base import Risk, Tool, require_ascii_identifier
 
 MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
-
-
-# A whole-content single angle-bracket token, e.g. "<to be synthesized ...>".
-_SINGLE_TAG_RE = re.compile(r"^<[^<>\n]+>$")
-
-# Keywords that mark an unfilled template even when it has no inner whitespace.
-_PLACEHOLDER_HINTS = (
-    "to be",
-    "tbd",
-    "todo",
-    "placeholder",
-    "synthes",  # synthesize / synthesized
-    "fill in",
-    "fill-in",
-    "your text",
-    "goes here",
-    "insert ",
-)
-
-
-def _looks_like_unfilled_placeholder(content: str) -> bool:
-    """True when `content` is a single unfilled template token.
-
-    The planner sometimes emits a ``file_write`` step *before* the text it
-    means to save has been synthesized, leaving a literal angle-bracket
-    placeholder like ``<to be synthesized from the three files>`` as the
-    ``content`` argument. Executing that stub creates a junk file that looks
-    "done" while holding no real content (observed: a 45-byte
-    ``about_me.txt``). A whole-content single angle-bracket token is never a
-    legitimate document, so we refuse it as a hard rule and let the caller
-    synthesize the real text first.
-    """
-    stripped = content.strip()
-    if not _SINGLE_TAG_RE.match(stripped):
-        return False
-    inner = stripped[1:-1]
-    if any(ch.isspace() for ch in inner):
-        return True
-    lowered = stripped.casefold()
-    return any(hint in lowered for hint in _PLACEHOLDER_HINTS)
 
 
 class FileWriteTool(Tool):
@@ -171,11 +130,7 @@ class FileWriteTool(Tool):
                 f"refusing to write to an unfilled placeholder path: {path!r} — "
                 "the plan carries a template where an address belongs"
             )
-        # Два стража, а не один: местный знает угловую форму, общий — ещё и
-        # записку конвейеру («TODO: executor заполняет…»), которой местный не
-        # знал, когда автономный прогон нацелился ею в core/loop.py
-        # (docs/CODE_NOTES.md, «A note to the pipeline is not file content»).
-        if _looks_like_unfilled_placeholder(content) or looks_like_unfilled_content(content):
+        if looks_like_unfilled_content(content):
             raise ValueError(
                 "refusing to write an unfilled placeholder to disk: "
                 f"{content.strip()!r}. Synthesize the real content first, "
