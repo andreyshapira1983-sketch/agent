@@ -180,7 +180,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/self_knowledge` | Знание о себе и предметная задача: что из памяти НЕ подмешивать при чтении. |
 | `core/memory_consolidation` | Сверка нового вывода с памятью ПЕРЕД записью — фаза обновления Mem0. |
 | `core/memory_embeddings` | Поиск по смыслу для долговременной памяти: multilingual-e5-large-instruct. |
-| `core/cache_freshness` | Можно ли отдать прошлый результат шага вместо нового вызова. |
+| `core/cache_freshness` | Прошлый результат шага отдаётся вместо вызова, только если мир не мог измениться. |
 | `core/ingestion` | Controlled document/code ingestion. |
 | `core/ingestion_reports` | Ingestion result types: what a file, web or RSS ingest run reports back. |
 | `core/ingestion_utils` | Ingestion helpers: workspace-confined path resolution, project file walking, and text chunking. |
