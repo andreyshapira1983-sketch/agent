@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 #: Сколько вывода одного шага уходит в сборку текста. Было 4000 и 20000:
@@ -128,7 +129,7 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
     if llm is None:
         raise RuntimeError("нет модели для сборки текста записи")
     user = (f"Файл: {path}\nЗадание: {instruction}"
-            + (_EDITS_FORM if _is_edits(path) else "") + "\n\n"
+            + (_EDITS_FORM if _is_edits(path) else "") + _current_edits(loop, path) + "\n\n"
             + (f"Выводы шагов этого хода:\n{outputs}" if outputs
                else "В этом ходе шаги ещё ничего не вернули."))
     # Предел и БЕЗ продолжения. Замер 2026-09-24: дважды за ночь модель
@@ -158,6 +159,26 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
 
 def _is_edits(path: str) -> bool:
     return path.replace("\\", "/").rsplit("/", 1)[-1] == _EDITS_NAME
+
+
+def _current_edits(loop: Any, path: str) -> str:
+    getter = getattr(loop, "_file_read_workspace_root", None)
+    if not _is_edits(path) or not callable(getter):
+        return ""
+    try:
+        root = Path(getter()).resolve()
+        target = (root / path).resolve()
+        text = target.read_text(encoding="utf-8", errors="replace") if target.is_relative_to(root) else ""
+    except (OSError, TypeError, ValueError):
+        return ""
+    if not text.strip():
+        return ""
+    from core.redaction import prepare_text_for_llm_boundary
+
+    shown, _meta = prepare_text_for_llm_boundary(text[:_PER_OUTPUT_CHARS])
+    cut = f" (показано {_PER_OUTPUT_CHARS} из {len(text)} знаков)" if len(text) > _PER_OUTPUT_CHARS else ""
+    return ("\n\nСейчас в этом файле лежит (запись заменит его ЦЕЛИКОМ; блоки, которые остаются "
+            f"в силе, перенеси дословно){cut}:\n{shown}")
 
 
 def _refuse_edits_without_blocks(path: str, text: str) -> None:
