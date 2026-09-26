@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 281 modules across 12 groups._
+_Total: 282 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -168,6 +168,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/failure_cards` | Карточки прошлых ошибок: «эта ошибка уже была — вот что тогда помогло». |
 | `core/smart_memory_helpers` | Helpers extracted verbatim from ``core/smart_memory.py`` by the incremental splitter. |
 | `core/memory_policy` | Memory write and retrieval policies: what may be persisted and what is recalled into a prompt. |
+| `core/bm25` | Лексический ранжир BM25 (k1=1.2, b=0.75, IDF в форме Lucene) и его токены. |
 | `core/work_kinds` | Род работы: чем человек сейчас занят, а не какими словами он это назвал. |
 | `core/memory_echo_antibody` | Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself. |
 | `core/bilingual_terms` | Russian question, English record — one domain vocabulary between them. |

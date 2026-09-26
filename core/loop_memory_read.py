@@ -86,11 +86,17 @@ class AgentLoopMemoryRead:
         allowed = list(use_report.allowed)
         if self_knowledge_off_topic(question):  # предметной задаче — предмет, не разборы себя
             allowed = [r for r in allowed if not is_self_knowledge(getattr(r, "content", ""))]
+        off_topic = len(use_report.allowed) - len(allowed)
+        given = getattr(self, "memory_given_to_goal", None) or frozenset()
+        fresh = [r for r in allowed if r.id not in given]
+        given_before, allowed = len(allowed) - len(fresh), fresh
         selection = self.retrieval_policy.select_with_report(allowed, question)
         selected = selection.selected
         rejected_by = _merge_rejection_reasons(use_report.rejected_by, selection.rejected_by)
-        if len(allowed) < len(use_report.allowed):
-            rejected_by["self_knowledge_off_topic"] = len(use_report.allowed) - len(allowed)
+        if off_topic:
+            rejected_by["self_knowledge_off_topic"] = off_topic
+        if given_before:
+            rejected_by["given_in_earlier_pass"] = given_before
         if not selected:
             self.log.log(
                 "persistent_memory_inject",

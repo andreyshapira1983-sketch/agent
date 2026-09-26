@@ -90,7 +90,7 @@ class Consolidation:
 
 def similar_conclusions(content: str, records: list[Any], top_s: int = TOP_S) -> list[Any]:
     """До top_s прежних ВЫВОДОВ, похожих на новый, по BM25; только с общими словами."""
-    from core.memory_policy import _bm25_scores, _term_counts, _tokens
+    from core.bm25 import bm25_scores, term_counts, tokens
 
     pool = [r for r in records if "conclusion" in (getattr(r, "tags", None) or [])]
     if not pool:
@@ -98,7 +98,7 @@ def similar_conclusions(content: str, records: list[Any], top_s: int = TOP_S) ->
     from core.memory_embeddings import fused_relevance
 
     texts = [_without_sources(str(r.content)) for r in pool]
-    lexical = _bm25_scores(_tokens(_without_sources(content)), [_term_counts(t, []) for t in texts])
+    lexical = bm25_scores(tokens(_without_sources(content)), [term_counts(t, []) for t in texts])
     # Mem0 достаёт top-s похожих по векторам; без смысла — по общим словам.
     fused, semantic = fused_relevance(_without_sources(content), texts, lexical)
     ranked = sorted(range(len(pool)), key=lambda i: -fused[i])

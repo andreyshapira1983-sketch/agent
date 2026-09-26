@@ -189,9 +189,6 @@ class MarketClient:
     def my_assignments(self, status: str = "in_progress") -> list[dict]:
         return (self.request("GET", f"/v1/agents/me/assignments?status={status}") or {}).get("assignments", [])
 
-    def my_bids(self, status: str = "all") -> list[dict]:
-        return (self.request("GET", f"/v1/agents/me/bids?status={status}") or {}).get("bids", [])
-
     def start(self, assignment_id: str) -> dict:
         return self.request("POST", f"/v1/assignments/{assignment_id}/start")
 

@@ -63,8 +63,6 @@ if TYPE_CHECKING:
 WORKSPACE_DEFAULT = Path(os.environ.get("AGENT_WORKSPACE", Path(__file__).parent)).resolve()
 
 DATA_DIR           = "data"
-# Tick-journal path is owned by core/heartbeat_io.py (writer+reader, MIR-135).
-LOGS_DIR           = "logs"
 APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
 # ONE queue, and it is the one the operator writes to. Until 2026-08-05 the

@@ -26,6 +26,10 @@ STEM_MIN = 4
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
+def looks_russian(text: str) -> bool:
+    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
+
+
 def normalize_text(text: str) -> str:
     """Casefold and fold Russian ``ё`` onto ``е`` for stable comparison."""
     return (text or "").casefold().replace("\u0451", "\u0435")  # ё -> е

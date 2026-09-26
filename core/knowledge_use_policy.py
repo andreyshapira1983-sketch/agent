@@ -5,8 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.bm25 import tag_tokens as _retrieval_tag_tokens
 from core.memory_policy import _query_tokens as _retrieval_query_tokens
-from core.memory_policy import _tag_tokens as _retrieval_tag_tokens
 from core.models import MemoryRecord
 from core.role_router import RoleContext
 
