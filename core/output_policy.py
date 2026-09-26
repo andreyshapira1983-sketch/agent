@@ -12,11 +12,8 @@ Two kinds of output, kept apart on purpose:
   and are applied here.
 * **warnings** — prose *about* the answer. Reported in ``warnings`` and merged
   into the ``Unverified:`` section by :class:`core.response_draft.ResponseDraft`
-  at composition time, not here. This module used to merge them itself, which
-  meant a later decider that rewrote the body deleted them: a measured
-  ``replan_exhausted`` turn logged ``applied=True`` and shipped an answer with
-  no trace of the warning. A caveat about a run outlives the claims it was
-  attached to, so it is composed onto whatever body survives.
+  at composition time, not here: a caveat about a run outlives the claims it
+  was attached to, so it is composed onto whatever body survives.
 """
 
 from __future__ import annotations
@@ -26,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.lang_match import looks_russian
+from core.response_draft import _merge_unverified  # noqa: F401
 from core.source_ranker import SourceRankingReport
 
 
@@ -173,52 +171,6 @@ def _rewrite_confidence(answer: str, ceiling: str) -> str:
         repl_header,
         updated,
     )
-
-
-def _merge_unverified(answer: str, note: str) -> str:
-    if re.search(r"(?im)^Unverified\s*:\s*nothing\s*$", answer):
-        return re.sub(
-            r"(?im)^Unverified\s*:\s*nothing\s*$",
-            f"Unverified: {note}",
-            answer,
-            count=1,
-        )
-    if re.search(r"(?im)^Unverified\s*:\s*(?!nothing\s*$).+\S\s*$", answer):
-        return re.sub(
-            r"(?im)^(Unverified\s*:\s*.+\S)\s*$",
-            rf"\1; {note}",
-            answer,
-            count=1,
-        )
-    if re.search(r"(?im)^\*\*Unverified:\*\*\s*nothing\s*$", answer):
-        return re.sub(
-            r"(?im)^\*\*Unverified:\*\*\s*nothing\s*$",
-            f"**Unverified:** {note}",
-            answer,
-            count=1,
-        )
-    if re.search(r"(?im)^\*\*Unverified\*\*\s*:?\s*nothing\s*$", answer):
-        return re.sub(
-            r"(?im)^\*\*Unverified\*\*\s*:?\s*nothing\s*$",
-            f"**Unverified:** {note}",
-            answer,
-            count=1,
-        )
-    if re.search(r"(?im)^Unverified\s*:\s*$", answer):
-        return re.sub(
-            r"(?im)^Unverified\s*:\s*$",
-            f"Unverified:\n- {note}",
-            answer,
-            count=1,
-        )
-    if re.search(r"(?im)^#+\s*Unverified\s*$", answer):
-        return re.sub(
-            r"(?im)^(#+\s*Unverified\s*)$",
-            rf"\1\n- {note}",
-            answer,
-            count=1,
-        )
-    return answer.rstrip() + f"\nUnverified: {note}\n"
 
 
 def _confidence_rank(value: str) -> int:

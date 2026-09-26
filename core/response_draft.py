@@ -55,15 +55,60 @@ found by reading the code — which is how this defect was found.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
-
-from core.output_policy import _merge_unverified
 
 Channel = Literal["body", "prepend", "unverified_note", "append"]
 
 #: Channels that carry something *about* the answer rather than a claim in it.
 NOTICE_CHANNELS: frozenset[str] = frozenset({"prepend", "unverified_note", "append"})
+
+
+def _merge_unverified(answer: str, note: str) -> str:
+    if re.search(r"(?im)^Unverified\s*:\s*nothing\s*$", answer):
+        return re.sub(
+            r"(?im)^Unverified\s*:\s*nothing\s*$",
+            f"Unverified: {note}",
+            answer,
+            count=1,
+        )
+    if re.search(r"(?im)^Unverified\s*:\s*(?!nothing\s*$).+\S\s*$", answer):
+        return re.sub(
+            r"(?im)^(Unverified\s*:\s*.+\S)\s*$",
+            rf"\1; {note}",
+            answer,
+            count=1,
+        )
+    if re.search(r"(?im)^\*\*Unverified:\*\*\s*nothing\s*$", answer):
+        return re.sub(
+            r"(?im)^\*\*Unverified:\*\*\s*nothing\s*$",
+            f"**Unverified:** {note}",
+            answer,
+            count=1,
+        )
+    if re.search(r"(?im)^\*\*Unverified\*\*\s*:?\s*nothing\s*$", answer):
+        return re.sub(
+            r"(?im)^\*\*Unverified\*\*\s*:?\s*nothing\s*$",
+            f"**Unverified:** {note}",
+            answer,
+            count=1,
+        )
+    if re.search(r"(?im)^Unverified\s*:\s*$", answer):
+        return re.sub(
+            r"(?im)^Unverified\s*:\s*$",
+            f"Unverified:\n- {note}",
+            answer,
+            count=1,
+        )
+    if re.search(r"(?im)^#+\s*Unverified\s*$", answer):
+        return re.sub(
+            r"(?im)^(#+\s*Unverified\s*)$",
+            rf"\1\n- {note}",
+            answer,
+            count=1,
+        )
+    return answer.rstrip() + f"\nUnverified: {note}\n"
 
 
 @dataclass(frozen=True)
