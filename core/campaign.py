@@ -251,7 +251,7 @@ _EMPTY_ROUND_MARK = "~operator_goal_empty_pass_"
 def _reopen_operator_goal(action: BestNextAction, config: CampaignConfig, agent: Any,
                           effects_before: int, attempted: set[str]) -> None:
     """Цель человека получает новый заход; стоп — после трёх заходов подряд без записи."""
-    if action.action != PURSUE_GOAL or config.goal_is_self or config.goal_first:
+    if action.action != PURSUE_GOAL or config.goal_is_self:
         return
     marks = {m for m in attempted if m.startswith(_EMPTY_ROUND_MARK)}
     if _effects_count(agent) > effects_before:
