@@ -12,10 +12,9 @@ numbers.txt после того, как заказчик дописал стро
 не мог измениться.
 
   * веб-источники — в пределах сессии, как и было (страница не наша);
-  * file_read — пока у файла те же время изменения и размер;
-  * всё остальное (прогон тестов, лаборатория, поиск и листинг по рабочей
-    папке, запись, время, память) — вызывается заново: результат зависит от
-    состояния, которое меняется, или само его меняет.
+  * file_read и find_in_files по одному файлу — пока у файла те же время изменения и размер;
+  * python_probe — пока в ходе не было ни одного действия с планом отката (записи);
+  * всё остальное (прогон тестов, поиск по папке, запись, время, память) — вызывается заново.
 """
 from __future__ import annotations
 
@@ -25,16 +24,24 @@ from typing import Any
 _REMOTE_READS = frozenset({"web_search", "web_fetch", "semantic_scholar_search", "rss_fetch"})
 
 
-def cache_stamp(tool_name: str, arguments: dict[str, Any], root: Path | None) -> str | None:
-    """Отпечаток состояния, при котором результат верен; None — не отдавать из кэша."""
+def cache_stamp(tool_name: str, arguments: dict[str, Any], root: Path | None,
+                effects: int | None = None) -> str | None:
+    """Отпечаток состояния, при котором результат верен; None — не отдавать из кэша.
+
+    effects — сколько действий с планом отката уже было; меняется при каждой записи.
+    """
     if tool_name in _REMOTE_READS:
         return "remote"
-    if tool_name != "file_read" or root is None:
+    if tool_name == "python_probe":
+        return None if effects is None else f"effects:{effects}"
+    if tool_name not in ("file_read", "find_in_files") or root is None:
         return None
     raw = str((arguments or {}).get("path") or "").strip().replace("\\", "/")
     if not raw:
         return None
     target = Path(raw) if Path(raw).is_absolute() else Path(root) / raw
+    if tool_name == "find_in_files" and not target.is_file():
+        return None  # у папки время меняется только при добавлении и удалении, не при правке
     try:
         st = target.resolve().stat()
     except OSError:

@@ -490,7 +490,7 @@ class AgentLoopStepExecution:
         # Memory cache short-circuit — only for a result the world cannot have
         # changed since (`core/cache_freshness.py`).
         from core.cache_freshness import cache_stamp
-        stamp = cache_stamp(tool_name, arguments, self._file_read_workspace_root()) if tool_name else None
+        stamp = cache_stamp(tool_name, arguments, self._file_read_workspace_root(), len(getattr(self, "compensation_log", None) or ())) if tool_name else None
         if self.memory is not None and tool_name and stamp is not None:
             cached = self.memory.cache_lookup(tool_name, arguments)
             if cached is not None and cached.get("stamp") != stamp:
@@ -511,7 +511,7 @@ class AgentLoopStepExecution:
                     "tool": tool_name,
                     "arguments": arguments,
                     "output": cached["output"],
-                    "issues": ["served from working-memory cache"],
+                    "issues": ["served from working-memory cache", "повтор: этот вызов уже сделан, мир с тех пор не менялся — действуй по результату или смени подход"],
                 }
 
         action = Action(
