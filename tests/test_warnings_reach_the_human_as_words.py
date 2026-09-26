@@ -23,8 +23,8 @@ def test_no_machine_marker_is_left_for_the_human() -> None:
 
 def test_the_warning_itself_survives_in_words() -> None:
     shown = humanize_warning_markers(LIVE_1559)
-    assert "не подтверждает" in shown and "число не сверено" in shown
-    assert "проверить нельзя" in humanize_warning_markers(LIVE_1825)
+    assert "не проверял" in shown and "число не сверял" in shown
+    assert "проверить не могу" in humanize_warning_markers(LIVE_1825)
 
 
 def test_the_source_address_is_kept() -> None:
@@ -33,7 +33,7 @@ def test_the_source_address_is_kept() -> None:
 
 def test_an_english_answer_gets_english_words() -> None:
     shown = humanize_warning_markers("The median rate is $26/h [claim-figure-unverified].")
-    assert "number not checked" in shown and "[" not in shown
+    assert "number unchecked" in shown and "[" not in shown
 
 
 def test_the_display_edge_translates_both_kinds_of_answer() -> None:

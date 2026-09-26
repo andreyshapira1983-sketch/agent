@@ -1,6 +1,7 @@
 """Как ответ выглядит: контракт вывода, человеческая печать, цитаты."""
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -335,6 +336,17 @@ _EMPTY_QUOTE_LINE_RE = re.compile(r"^>+\s*$")
 _LEDGER_NOTICE_PREFIX = "⚠️ По журналу хода:"
 
 
+def _spoken_tail(lines: list[str]) -> list[str]:
+    """Хвост проверки человеку: счёт уходит, остаются отказ в черновике и «не тот вопрос»."""
+    kept: list[str] = []
+    for line in lines:
+        if not line.startswith(_VERIFICATION_TAIL_PREFIX) or "отклонённый черновик" in line:
+            kept.append(line)
+        elif "не на заданный вопрос" in line:
+            kept.append("Возможно, я ответил не на тот вопрос.")
+    return kept
+
+
 def format_human_response(answer: str) -> str:
     """Convert the internal Output Contract format to clean human-readable
     text.
@@ -466,18 +478,20 @@ def format_human_response(answer: str) -> str:
     conclusion = re.sub(r"\s{2,}", " ", conclusion).strip()
     facts_block = "\n".join(facts_lines).strip()
 
+    # Разговор (мостик чата, оператор 26.09): улики и счёт проверки — в журнал.
+    chat = os.environ.get("AGENT_HUMAN_CHAT") == "1"
     parts: list[str] = []
     if conclusion:
         parts.append(conclusion)
-    if facts_block:
+    if facts_block and (not chat or not conclusion or conclusion.endswith(":") or "```" in facts_block):
         parts.append(facts_block)
     if unverified_lines:
         note = " ".join(unverified_lines)
-        parts.append(f"⚠️ Не подтверждено: {note}")
+        parts.append(f"Чего я не проверил: {note}" if chat else f"⚠️ Не подтверждено: {note}")
     if parts and ledger_lines:
         parts.extend(ledger_lines)
     if parts and verification_tail_lines:
-        parts.extend(verification_tail_lines)
+        parts.extend(_spoken_tail(verification_tail_lines) if chat else verification_tail_lines)
 
     return humanize_warning_markers("\n\n".join(parts) if parts else answer)
 

@@ -17,33 +17,37 @@ from __future__ import annotations
 
 import re
 
+# Оговорка от первого лица и коротко, как сказал бы человек (оператор 26.09).
 _RU = {
-    "topic-only": "источник по теме, но этого прямо не подтверждает",
-    "claim-figure-unverified": "число не сверено с источником",
-    "absence-unverifiable": "что этого нет — проверить нельзя",
-    "claim-refuted": "проверка этому противоречит",
-    "улика-без-этих-слов": "в источнике этих слов нет",
-    "dialogue-supported": "по нашему разговору, не по источнику",
-    "subagent-asserted": "со слов помощника, не проверено",
-    "no-receipt": "у инструмента нет квитанции — не подтверждено",
-    "unverified": "не проверено — источника нет",
+    "topic-only": "не проверял",
+    "claim-figure-unverified": "число не сверял",
+    "absence-unverifiable": "что этого нет, проверить не могу",
+    "claim-refuted": "но проверка говорит обратное",
+    "улика-без-этих-слов": "в источнике этого нет",
+    "dialogue-supported": "по нашему разговору",
+    "subagent-asserted": "со слов помощника",
+    "no-receipt": "не проверял",
+    "unverified": "не проверял",
+    "цитата-не-подтверждает": "не проверял",
 }
 _EN = {
-    "topic-only": "the source is on topic but does not confirm this",
-    "claim-figure-unverified": "number not checked against a source",
-    "absence-unverifiable": "absence cannot be verified",
-    "claim-refuted": "the check contradicts this",
-    "улика-без-этих-слов": "the source does not contain these words",
-    "dialogue-supported": "from our conversation, not a source",
-    "subagent-asserted": "a helper's word, unchecked",
-    "no-receipt": "no tool receipt — unconfirmed",
-    "unverified": "unchecked — no source",
+    "topic-only": "unchecked",
+    "claim-figure-unverified": "number unchecked",
+    "absence-unverifiable": "can't verify it's absent",
+    "claim-refuted": "but the check says otherwise",
+    "улика-без-этих-слов": "the source doesn't say this",
+    "dialogue-supported": "from our conversation",
+    "subagent-asserted": "a helper's word",
+    "no-receipt": "unchecked",
+    "unverified": "unchecked",
+    "цитата-не-подтверждает": "unchecked",
 }
 #: Виды меток-предупреждений: кто снимает метку со строки, обязан сказать это словами.
-WARNING_KINDS: tuple[str, ...] = (*_RU, "цитата-не-подтверждает")
+WARNING_KINDS: tuple[str, ...] = tuple(_RU)
 _MARKER_RE = re.compile(
     r"\s*\[(topic-only|claim-figure-unverified|absence-unverifiable|claim-refuted|"
-    r"улика-без-этих-слов|dialogue-supported|subagent-asserted|no-receipt|unverified)(?::([^\]]*))?\]")
+    r"улика-без-этих-слов|dialogue-supported|subagent-asserted|no-receipt|unverified|"
+    r"цитата-не-подтверждает)(?::([^\]]*))?\]")
 #: `[unverified:…]` ставится вместе с `[no-receipt]` и сам по себе ничего не добавляет.
 _UNVERIFIED_BODY_RE = re.compile(r"\s*\[unverified:[^\]]*\]")
 _URL_RE = re.compile(r"https?://\S+")
@@ -70,9 +74,9 @@ def humanize_warning_markers(text: str) -> str:
     def say(match: re.Match[str]) -> str:
         kind, body = match.group(1), match.group(2) or ""
         line = plain.count("\n", 0, match.start())
-        if (line, kind) in seen_at_line:
+        if (line, words[kind]) in seen_at_line:
             return ""
-        seen_at_line.add((line, kind))
+        seen_at_line.add((line, words[kind]))
         url = _URL_RE.search(body)
         source = f"{url.group(0).rstrip('.,;')} — " if url else ""
         return f" ({source}{words[kind]})"
