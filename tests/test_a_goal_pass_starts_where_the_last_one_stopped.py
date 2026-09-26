@@ -30,7 +30,8 @@ def _run_passes(tmp_path: Path, monkeypatch: Any, *, goal_is_self: bool = False,
 
     seen: list[str] = []
     agent = SimpleNamespace(log=None, compensation_log=[])
-    answers = iter(["Правка ушей начата, проверка красная: нет поля registry.tools", "второй заход"])
+    answers = iter(["Evidence scope: I only have evidence for " + "a.md, " * 200
+                    + "Conclusion: Правка ушей начата, проверка красная: нет поля registry.tools", "второй заход"])
 
     class _Runtime:
         def __init__(self, agent_: Any, **_kw: Any) -> None:

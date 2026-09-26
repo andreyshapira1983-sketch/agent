@@ -60,8 +60,9 @@ class PassProgress:
             found = _QUOTED_PATH.search(str(getattr(plan, "description", "") or ""))
             if found and found.group(1) not in written:
                 written.append(found.group(1))
-        row = {"ts": datetime.now(timezone.utc).isoformat(), "written": written[:10],
-               "answer": " ".join(str(answer or "").split())[:_ANSWER_CHARS]}
+        text = " ".join(str(answer or "").split())
+        text = text[text.find("Conclusion:"):] if "Conclusion:" in text else text  # без шапки «Evidence scope»
+        row = {"ts": datetime.now(timezone.utc).isoformat(), "written": written[:10], "answer": text[:_ANSWER_CHARS]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
