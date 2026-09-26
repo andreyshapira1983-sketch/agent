@@ -50,10 +50,13 @@ def _run(tmp_path: Path, execute, **cfg):
     )
 
 
-def test_the_goal_itself_is_worked_on_once(tmp_path: Path) -> None:
+def test_the_goal_itself_is_worked_on_not_watched(tmp_path: Path) -> None:
+    """26.09: цель человека получает до трёх заходов подряд без записи (раньше — один)."""
+    from core.campaign import OPERATOR_GOAL_EMPTY_PASSES
+
     execute = _Record()
     result = _run(tmp_path, execute, pursue_goal_when_idle=True)
-    assert execute.actions == [PURSUE_GOAL], execute.actions
+    assert execute.actions == [PURSUE_GOAL] * OPERATOR_GOAL_EMPTY_PASSES, execute.actions
     assert result.records[0].result == "completed"
 
 

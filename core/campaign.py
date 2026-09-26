@@ -243,11 +243,24 @@ def _effects_count(agent: Any) -> int:
     return len(getattr(agent, "compensation_log", None) or ())
 
 
+#: Сколько заходов подряд без записи получает цель человека, прежде чем стоп по простою.
+OPERATOR_GOAL_EMPTY_PASSES = 3
+_EMPTY_ROUND_MARK = "~operator_goal_empty_pass_"
+
+
 def _reopen_operator_goal(action: BestNextAction, config: CampaignConfig, agent: Any,
                           effects_before: int, attempted: set[str]) -> None:
-    """Цель человека получает новый заход, пока прошлый заход что-то записал; пустой — последний."""
-    if action.action == PURSUE_GOAL and not config.goal_is_self and _effects_count(agent) > effects_before:
-        attempted.discard(PURSUE_GOAL)
+    """Цель человека получает новый заход; стоп — после трёх заходов подряд без записи."""
+    if action.action != PURSUE_GOAL or config.goal_is_self or config.goal_first:
+        return
+    marks = {m for m in attempted if m.startswith(_EMPTY_ROUND_MARK)}
+    if _effects_count(agent) > effects_before:
+        attempted.difference_update(marks)
+    elif len(marks) + 1 < OPERATOR_GOAL_EMPTY_PASSES:
+        attempted.add(f"{_EMPTY_ROUND_MARK}{len(marks) + 1}")
+    else:
+        return
+    attempted.discard(PURSUE_GOAL)
 
 
 def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = "",
