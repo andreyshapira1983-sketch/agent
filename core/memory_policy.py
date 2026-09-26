@@ -1,25 +1,6 @@
-"""Memory Write Policy + Memory Retrieval Policy (§4 + §12.4).
+"""Memory write and retrieval policies: what may be persisted and what is recalled into a prompt.
 
-Two gates around the persistent store:
-
-  MemoryWritePolicy
-    Decides BEFORE a record reaches disk. Catches:
-      - secrets and credentials (delegated to `core.secret_scanner`)
-      - blocked tags (transient / temporary / do-not-save)
-      - length extremes (too short / too long)
-      - raw tool-result dumps (structured JSON-y noise)
-      - records lacking explicit consent (must be user-sourced or
-        carry one of the "remember-worthy" tags)
-      - third-party data (owner != "self") without explicit cross-owner
-        consent — see §7 "Безопасность данных других людей".
-
-  MemoryRetrievalPolicy
-    Decides which persistent records get injected into the prompts of
-    the current cycle. BM25 ranking over a keyword-overlap floor, recency
-    tiebreaker, capped count + capped per-record length.
-
-Both policies are pure functions over MemoryRecords + question text and are
-fully testable on their own.
+Both are pure functions over MemoryRecords + question text; the caller supplies the store contents.
 """
 from __future__ import annotations
 
@@ -39,8 +20,7 @@ from core.secret_scanner import contains_secret
 from core.topic_tokens import STOPWORDS as _TOPIC_STOPWORDS
 from core.work_kinds import work_kinds
 
-# `core.hygiene` is imported lazily inside `decide` to avoid an import cycle
-# when `core/hygiene.py` later wants to reach into models / policies.
+# Hygiene/echo modules are imported lazily inside `decide` to avoid an import cycle.
 
 if TYPE_CHECKING:
     from core.memory_echo_antibody import MemoryWriteEvent
@@ -52,18 +32,15 @@ if TYPE_CHECKING:
 
 BLOCKED_TAGS: frozenset[str] = frozenset({"transient", "temporary", "do-not-save", "ephemeral"})
 
-# At least one of these tags (or source="user-explicit") is required.
-# Stops the agent from quietly persisting every passing thought.
+# One of these tags (or source="user-explicit") is required, so the agent
+# does not quietly persist every passing thought.
 CONSENT_TAGS: frozenset[str] = frozenset(
     {"preference", "fact", "decision", "insight", "user-approved", "project"}
 )
 
-# First-party owners. Anything outside this set is treated as third-party
-# data and triggers the cross-owner consent gate below.
+# Any other owner is third-party and needs CROSS_OWNER_CONSENT_TAG to be saved.
 FIRST_PARTY_OWNERS: frozenset[str] = frozenset({"self", "user", "session"})
 
-# Cross-owner consent tag: required when owner is third-party. Without it
-# the agent is not allowed to persist data belonging to another person.
 CROSS_OWNER_CONSENT_TAG = "cross-owner-consent"
 SENSITIVE_DATA_CONSENT_TAG = "sensitive-data-consent"
 
@@ -79,11 +56,10 @@ _PROVENANCE_LINE = re.compile(r"^(?:Источник|Источники):[^\n]*$
 
 
 def cut_keeping_provenance(text: str, limit: int) -> str:
-    """Укоротить запись до `limit`, сохранив её последнюю строку родословной.
+    """Укоротить запись до `limit`, сохранив её последнюю строку «Источник: …».
 
-    Цепочка веб-знания, 2026-09-19: строка «Источник: …» стоит в конце записи,
-    и срез по 400 символам отрезал её у КАЖДОЙ записи вывода — модели велено
-    «подтверди у источника», а источника она не видела. Укорачивается середина.
+    Строка источника стоит в конце записи, и простой срез отрезал её; поэтому
+    укорачивается середина.
     """
     found = list(_PROVENANCE_LINE.finditer(text))
     tail = found[-1].group(0)[:200] if found else ""
@@ -109,24 +85,16 @@ class MemoryWritePolicy:
     """Decides whether a candidate MemoryRecord may reach the persistent store."""
 
     def __init__(self, frozen_sources: Iterable[str] = ()):
-        """`frozen_sources` names write sources that are blocked in this
-        context (run-scoped). Used by the operator brake to freeze agent-
-        initiated ("agent-auto") memory writes so the agent cannot silently
-        grow its own persistent memory without a human in the loop. Empty by
-        default — existing behaviour is unchanged. User writes
-        (source='user-explicit') are never frozen unless explicitly listed.
-        """
+        """`frozen_sources`: write sources blocked for this run (operator brake on "agent-auto")."""
         self.frozen_sources: frozenset[str] = frozenset(
             (s or "").strip().lower() for s in frozen_sources if s
         )
 
     def add_frozen_source(self, source: str) -> bool:
-        """Freeze ``source`` at runtime (run-scoped operator/audit brake).
+        """Freeze ``source`` at runtime; True only if newly frozen.
 
-        Returns True if the source was newly frozen, False if it was already
-        frozen. Callers that later unfreeze can use this so they only lift a
-        freeze they themselves installed — e.g. an audit toggle must not
-        release the ``AGENT_FREEZE_AUTO_MEMORY`` env brake it did not set.
+        The return value lets a caller lift only a freeze it installed itself
+        (e.g. not the ``AGENT_FREEZE_AUTO_MEMORY`` env brake).
         """
         key = (source or "").strip().lower()
         if not key or key in self.frozen_sources:
@@ -153,26 +121,15 @@ class MemoryWritePolicy:
     ) -> MemoryWriteDecision:
         """Decide whether `content` may reach persistent storage.
 
-        `existing` lets the policy refuse near-duplicates of records already
-        on disk. Pass `store.load()` from the caller — the policy never
-        reads the store itself, keeping it a pure function over inputs.
-
-        `recent_writes` is the time-windowed rolling log of recent `agent-
-        auto` writes (from `core.memory_echo_antibody`). When supplied, the
-        Memory Echo Antibody (A1) refuses an `agent-auto` record that merely
-        re-states something the agent already wrote in the last window — the
-        "echo chamber" failure mode. `user-explicit` writes are never
-        affected.
+        `existing` (e.g. `store.load()`) enables the near-duplicate check;
+        `recent_writes` enables the echo check on recent `agent-auto` writes.
         """
         reasons: list[str] = []
         tags_set = {t.strip().lower() for t in tags if t}
         text = (content or "").strip()
 
-        # --- context freeze (operator brake) -----------------------------
-        # When a write source is frozen for this run, refuse before any
-        # content checks. This closes the side channel where the knowledge
-        # pipeline auto-persists 'agent-auto' records that PolicyGate never
-        # sees (file_write approval does not cover memory writes).
+        # Frozen source is refused first: PolicyGate never sees memory writes
+        # from the knowledge pipeline, so this is the only brake on them.
         if (source or "").strip().lower() in self.frozen_sources:
             return MemoryWriteDecision(
                 "reject",
@@ -182,8 +139,7 @@ class MemoryWritePolicy:
                 ],
             )
 
-        # --- hard blocks (never save, regardless of consent) -------------
-
+        # Hard blocks: never save, regardless of consent.
         if not text:
             return MemoryWriteDecision("reject", ["empty content"])
 
@@ -193,11 +149,7 @@ class MemoryWritePolicy:
         if len(text) > MAX_CONTENT_LEN:
             return MemoryWriteDecision("reject", [f"too long (>{MAX_CONTENT_LEN} chars)"])
 
-        # Secret signals: delegate to the single source of truth so a new
-        # pattern added in `secret_scanner.py` is honoured by the policy
-        # without code changes here. ALL hits are surfaced so the audit
-        # trail records every signal (regex span AND keyword evidence),
-        # not just the first one that fired.
+        # All secret hits are surfaced so the audit trail records every signal.
         is_secret, secret_reasons = contains_secret(text)
         if is_secret:
             return MemoryWriteDecision("reject", secret_reasons)
@@ -220,8 +172,6 @@ class MemoryWritePolicy:
                 "reject", [f"carries blocked tag(s): {sorted(blocked)}"]
             )
 
-        # --- consent gate (must be user-sourced OR remember-worthy tag) --
-
         if source != "user-explicit" and not (tags_set & CONSENT_TAGS):
             return MemoryWriteDecision(
                 "reject",
@@ -231,11 +181,6 @@ class MemoryWritePolicy:
                 ],
             )
 
-        # --- third-party data gate (§7 "данные других людей") ------------
-        # When the record belongs to someone outside the first-party set,
-        # the only way to persist it is an explicit cross-owner consent
-        # tag. Prevents "I learned X about my client; let me just save it"
-        # from happening without intent.
         owner_normalised = (owner or "").strip().lower() or "self"
         if owner_normalised not in FIRST_PARTY_OWNERS and CROSS_OWNER_CONSENT_TAG not in tags_set:
             return MemoryWriteDecision(
@@ -246,13 +191,8 @@ class MemoryWritePolicy:
                 ],
             )
 
-        # --- echo gate (A1 Memory Echo Antibody) -------------------------
-        # Before the on-disk dedup check, refuse an `agent-auto` write that
-        # echoes something the agent itself wrote in the recent window. This
-        # catches the "echo chamber" (re-stating the same lesson cycle after
-        # cycle) that plain dedup misses because dedup has no clock and no
-        # notion of source. `user-explicit` writes pass straight through —
-        # the detector no-ops for anything that is not `agent-auto`.
+        # Echo gate: catches the agent re-stating its own recent lessons, which
+        # dedup misses because it has no clock and no notion of source.
         recent_list = list(recent_writes)
         if recent_list:
             from core.memory_echo_antibody import detect_memory_echo
@@ -265,15 +205,8 @@ class MemoryWritePolicy:
             if echo.is_reject:
                 return MemoryWriteDecision("reject", [echo.reason])
 
-        # --- dedup gate (§4 Memory Hygiene MVP-10) ------------------------
-        # Refuse to persist a near-duplicate of something already on disk.
-        # Threshold matches `core.hygiene.DEFAULT_DEDUP_THRESHOLD`. The
-        # existing list is supplied by the caller (typically
-        # `store.load()`), so this policy stays a pure function.
         existing_list = list(existing)
         if existing_list:
-            # Local import keeps memory_policy import-free of hygiene at
-            # module load time (and breaks the otherwise-tempting cycle).
             from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
             match = find_duplicate(
@@ -303,9 +236,7 @@ class MemoryWritePolicy:
 # Retrieval Policy
 # ============================================================
 
-# Words that add no signal to keyword overlap scoring.
-#: Один словарь на обе подсистемы: перенесён в `core/topic_tokens.py`
-#: 2026-08-22 (MIR-008) — расхождение было именно здесь.
+#: Общий с `core/topic_tokens.py` словарь, чтобы подсистемы не расходились (MIR-008).
 _STOPWORDS: frozenset[str] = _TOPIC_STOPWORDS
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
@@ -334,10 +265,8 @@ def _query_tokens(text: str) -> set[str]:
     tokens = _tokens(text)
     if is_broad_project_self_knowledge_question(text):
         tokens |= _BROAD_PROJECT_MEMORY_TOKENS
-    # The operator asks in Russian, memory is written in English, and scoring is
-    # word overlap — so the two never met. Measured on the live store:
-    # "кто владеет архитектурой?" 0 records, "who owns the architecture?" 3.
-    # The bilingual set above only fired for broad self-knowledge questions.
+    # Questions come in Russian while memory is mostly English; without
+    # translation word-overlap scoring never matches them.
     tokens |= english_terms_for(tokens)
     return tokens
 
@@ -416,16 +345,8 @@ def _broad_project_score_adjustment(record: MemoryRecord, base_score: int) -> in
     return score
 
 
-#: BM25 — стандарт лексического поиска (Robertson & Zaragoza, «The Probabilistic
-#: Relevance Framework: BM25 and Beyond»). Параметры — умолчания из той же
-#: литературы: k1 в [1.2, 2.0], b = 0.75; IDF в форме Lucene, всегда > 0.
-#:
-#: Зачем, замерено 2026-09-23: балл был ЧИСЛОМ ОБЩИХ СЛОВ, без поправки на
-#: длину записи и на редкость слова. Длинная запись с большим словарём
-#: выигрывала любой вопрос: нужный урок всплывал 5 раз из 9 на памяти до
-#: 14:30 и 0 из 9 к вечеру, когда в хранилище легли разборы по 2400 знаков
-#: против обычных 770. BM25 делит частоту слова на длину записи относительно
-#: средней (b) и взвешивает слово его редкостью в хранилище (IDF).
+#: BM25 со стандартными параметрами (k1=1.2, b=0.75, IDF в форме Lucene):
+#: без поправки на длину длинные записи выигрывали любой вопрос.
 _BM25_K1 = 1.2
 _BM25_B = 0.75
 _PREFIX_LEN = 4
@@ -443,10 +364,8 @@ def _term_counts(text: str, tags: Iterable[str]) -> Counter[str]:
 def _term_frequency(term: str, counts: Counter[str], prefixes: Counter[str]) -> int:
     """Сколько раз слово вопроса встречается в записи.
 
-    Точное совпадение — как раньше. Если точного нет, засчитывается ОДНО
-    совпадение по первым четырём буквам (русские окончания: «уроки» и «урок»)
-    — то же правило, что было, только теперь по каждому слову, а не на всю
-    запись разом.
+    Без точного совпадения засчитывается одно по первым четырём буквам
+    (русские окончания: «уроки» и «урок»).
     """
     exact = counts.get(term, 0)
     if exact or len(term) < _PREFIX_LEN:
@@ -476,8 +395,7 @@ def _bm25_scores(q_tokens: set[str], docs: list[Counter[str]]) -> list[float]:
     return scores
 
 
-#: Свежесть по Generative Agents (Park et al. 2023, arXiv 2304.03442):
-#: экспоненциальное затухание 0.995 за час.
+#: Свежесть по Generative Agents (Park et al. 2023): затухание 0.995 за час.
 _RECENCY_DECAY_PER_HOUR = 0.995
 
 
@@ -507,42 +425,23 @@ def _record_prompt_note(record: MemoryRecord) -> str:
 
 @dataclass(frozen=True)
 class RetrievalSelection:
-    """What `select` kept, and why each of the rest did not make it.
-
-    Counts are aggregated **by reason, never per record** — a per-record
-    trace would grow with the store and cost more than the retrieval it
-    observes. A reason that did not fire is absent, not zero.
-    """
+    """What `select` kept, and rejection counts by reason (not per record; absent reason = zero)."""
 
     selected: list[MemoryRecord]
     rejected_by: dict[str, int]
 
 
-#: Прибавка за совпадение РОДА РАБОТЫ (словарь и классификатор — core/work_kinds.py).
-#: Соразмерна паре совпавших слов: подсказка
-#: поднимает нужную запись над случайной, но не вытесняет запись, которая
-#: прямо отвечает на вопрос.
+#: Прибавка за совпадение рода работы (core/work_kinds.py), соразмерна паре совпавших слов.
 _WORK_KIND_BONUS = 2
 
 
-
-#: Начало записи, которая является СЛЕПКОМ ОДНОГО ОБМЕНА, а не переносимым
-#: знанием: «Вопрос: … Вывод: …». Замер 2026-09-23: таких 98 из 186, то есть
-#: больше половины хранилища. Они выигрывают отбор по построению — содержат
-#: дословные слова вопроса, — и вытесняют обобщённые уроки. Замерено в
-#: исследовании обучения агентов: обобщённые уроки дают +6.5%, сырые записи
-#: попыток МИНУС 9.5%, то есть вредят.
+#: Начало слепка одного обмена («Вопрос: … Вывод: …»), а не переносимого урока:
+#: слепки выигрывают по дословным словам вопроса и вытесняют уроки.
 _TRANSCRIPT_PREFIXES: tuple[str, ...] = ("вопрос:", "question:")
 
 
 def _is_transcript(text: str) -> bool:
-    """Слепок одного обмена, а не урок.
-
-    Такие записи НЕ выбрасываются и не штрафуются: когда спрашивают именно о
-    том обмене, слепок — верный ответ, и совпадение слов его поднимет. Он
-    только не получает подсказку по РОДУ РАБОТЫ: род работы отвечает на
-    вопрос «как это делается», а слепок отвечает «что однажды спросили».
-    """
+    """Слепок одного обмена, а не урок; не штрафуется, но квотируется и не идёт в канал рода работы."""
     return (text or "").strip().lower().startswith(_TRANSCRIPT_PREFIXES)
 
 
@@ -568,30 +467,13 @@ class MemoryRetrievalPolicy:
         return self.select_with_report(records, question).selected
 
 
-    #: Сколько мест отдано УРОКАМ ПО РОДУ РАБОТЫ — отдельно от мест,
-    #: которые занимают записи, отвечающие на сам вопрос.
-    #:
-    #: Замер 2026-09-23 показал, почему нужен отдельный канал, а не прибавка
-    #: к баллу. Прибавка давала +2 КАЖДОЙ записи того же рода, а их в
-    #: хранилище десятки: ранжирование начинали решать ничьи, и нужный урок
-    #: оставался там же, где был. Отбор по вопросу и напоминание по роду
-    #: работы — две РАЗНЫЕ задачи, и делить между ними три места значит не
-    #: решать ни одной.
-    #:
-    #: Цена: две записи по 400 знаков к подсказке. Против неё — замеренная
-    #: беда «записал промах вечером, повторил наутро»: урок, который не
-    #: всплывает в момент работы, работой не является.
+    #: Места для уроков по роду работы — отдельный канал сверх max_records:
+    #: прибавка к баллу тонула в ничьих между десятками записей того же рода.
     lessons_by_kind: int = 2
-    #: Слепков «Вопрос: … Вывод: …» в основном канале — не больше стольких.
-    #: 24.09 их 82 из 195 (42%), и они занимали места по совпадению слов
-    #: вопроса, вытесняя уроки. Самый подходящий слепок проходит — когда
-    #: спрашивают ровно о том обмене, он верный ответ.
+    #: Предел слепков «Вопрос: … Вывод: …» в основном канале.
     transcripts_in_main: int = 1
-    #: Сколько записей, ближайших по СМЫСЛУ, допускается в отбор без общих
-    #: слов с вопросом (гибридный поиск: кандидаты — объединение выдач обоих
-    #: поисков). Иначе перефразировка без единого общего слова («поставь
-    #: библиотеку» и «ставя себе пакет») не доходит даже до ранжирования.
-    #: Работает, только когда включён поиск по смыслу (core/memory_embeddings).
+    #: Сколько ближайших по смыслу записей проходит без общих слов с вопросом
+    #: (только при включённом core/memory_embeddings).
     semantic_candidates: int = 3
 
     def _take_with_transcript_quota(self, scored: list) -> list[MemoryRecord]:
@@ -615,22 +497,11 @@ class MemoryRetrievalPolicy:
         q_kinds: frozenset[str],
         relevance: list[float] | None = None,
     ) -> list[MemoryRecord]:
-        """Дописывает к отобранному уроки того же рода работы.
+        """Дописывает к отобранному уроки того же рода работы (без слепков обменов).
 
-        Порядок — как у Generative Agents (Park et al. 2023): релевантность
-        вопросу плюс свежесть, обе нормированы в [0, 1], веса равны. Свежесть
-        держится потому, что урок тем вернее описывает нынешний код, чем позже
-        он записан, а устаревший урок бьёт по трудным задачам сильнее, чем
-        помогает (замерено: минус 26%). Но ОДНА свежесть — не отбор: 2026-09-23
-        канал отдавал оба места последним записанным разборам, какими бы ни
-        был вопрос, и нужный урок не всплывал ни разу из девяти. Важность в
-        сумму не входит: поле importance у нас не измеряется. Без релевантности
-        (`relevance is None`) остаётся прежний порядок — самые свежие.
-
-        Слепки обменов («Вопрос: … Вывод: …») сюда не попадают: род работы
-        отвечает на «как это делается», а слепок — на «что однажды спросили».
-        Их в хранилище больше половины (98 из 186 на 2026-09-23), и без этого
-        отсечения канал наполнился бы ими.
+        Порядок как у Generative Agents: нормированные релевантность + свежесть
+        с равными весами; одна свежесть отдавала места случайным свежим записям.
+        Без `relevance` — просто самые свежие.
         """
         if not q_kinds or self.lessons_by_kind <= 0:
             return selected
@@ -648,9 +519,7 @@ class MemoryRetrievalPolicy:
         rel = _min_max([relevance[i] for i, _r in pool]) if relevance else [0.0] * len(pool)
         order = sorted(
             range(len(pool)),
-            # Ничья решается релевантностью: при двух кандидатах нормировка
-            # даёт одному 1+0, другому 0+1, и дата отдала бы место свежему,
-            # но не относящемуся к делу — ровно измеренный сбой.
+            # Ничья (при двух кандидатах 1+0 против 0+1) решается релевантностью, не датой.
             key=lambda k: (rel[k] + fresh[k], rel[k], pool[k][1].created_at),
             reverse=True,
         )
@@ -665,27 +534,21 @@ class MemoryRetrievalPolicy:
             return RetrievalSelection(selected=[], rejected_by={})
         q_tokens = _query_tokens(question) if question else set()
         if not q_tokens:
-            # Nothing was judged about the records at all. Calling this
-            # "below threshold" points the reader at the store when the
-            # question is what produced no searchable tokens.
+            # Not "below_threshold": the question, not the store, had nothing to match.
             return RetrievalSelection(
                 selected=[], rejected_by={"no_query_tokens": len(records)}
             )
 
         below_threshold = 0
         scored: list[tuple[float, MemoryRecord]] = []
-        # РОД РАБОТЫ вопроса — считается один раз, не на каждую запись.
         q_kinds = work_kinds(question)
-        # Порог допуска остался прежним (число общих слов >= min_score):
-        # кто проходил, тот проходит. BM25 решает только ПОРЯДОК. Ветка
-        # «широкий вопрос о проекте» сохраняет свою настроенную прибавку.
+        # Допуск — по числу общих слов (min_score); BM25 решает только порядок.
         broad = is_broad_project_self_knowledge_question(question)
         texts = [r.content if isinstance(r.content, str) else str(r.content) for r in records]
         relevance = _bm25_scores(q_tokens, [
             _term_counts(t, r.tags or []) for t, r in zip(texts, records, strict=True)
         ])
-        # Смысл поверх слов (core/memory_embeddings.py): выпуклая сумма
-        # нормированных баллов; выключен — остаётся один BM25.
+        # Смысл поверх слов; при выключенных эмбеддингах остаётся один BM25.
         from core.memory_embeddings import fused_relevance, top_by_meaning
         relevance, semantic = fused_relevance(question, texts, relevance)
         by_meaning = frozenset() if broad else top_by_meaning(semantic, self.semantic_candidates)
@@ -693,11 +556,9 @@ class MemoryRetrievalPolicy:
             text = r.content if isinstance(r.content, str) else str(r.content)
             r_tokens = _tokens(text)
             score = len(q_tokens & r_tokens)
-            # Tags also count — weak signal but useful when content is terse.
             tag_tokens = _tag_tokens(r.tags or [])
             score += len(q_tokens & tag_tokens)
-            # Prefix match for inflected words (handles Russian morphology):
-            # e.g. "уроки" matches tag "урок", "рефлексии" matches "рефлексия".
+            # Prefix match for Russian inflections ("уроки" vs "урок").
             if score == 0:
                 all_record_tokens = r_tokens | tag_tokens
                 for q in q_tokens:
@@ -713,15 +574,11 @@ class MemoryRetrievalPolicy:
             else:
                 below_threshold += 1
 
-        # Higher score first, then newer first.
         scored.sort(key=lambda pair: (pair[0], pair[1].created_at), reverse=True)
         selected = self._take_with_transcript_quota(scored)
         selected = self._add_lessons_by_work_kind(selected, records, q_kinds, relevance)
 
-        # A cap is not a relevance judgment: these records DID clear the
-        # floor and were cut by max_records. Reported separately because the
-        # two call for opposite responses — raise the cap vs. write better
-        # records.
+        # over_limit is kept apart from below_threshold: raise the cap vs. write better records.
         rejected_by = {
             k: v for k, v in (
                 ("below_threshold", below_threshold),

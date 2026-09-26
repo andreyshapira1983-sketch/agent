@@ -1,23 +1,7 @@
 """What must EXIST or have CHANGED when this request is done (MIR-067).
 
-The result of a task must be represented by a separate structured completion
-contract. The contract is derived from the original request BEFORE the work
-is performed, and carries verifiable obligations together with the way each
-one is verified. A plan and a good textual answer do not by themselves prove
-completion. An unmet obligation forbids the status `achieved`, forbids
-banking a successful episode, and forbids procedural success credit. If an
-obligation cannot be unambiguously derived from the request, the agent must
-ask for clarification rather than guess.
-
-## Small vocabulary on purpose; ambiguity is an ASK, never a guess
-
-Only three deliverables are recognised, each with a mechanical check:
-
-=================== ==============================================
-`file_exists` a path named for creation must exist afterwards
-`file_modified` a path named for change must have been written `tests_green`
-the run must carry a passing test result ===================
-==============================================
+Derived from the request BEFORE the work; an unmet obligation forbids `achieved`.
+A duty that cannot be read unambiguously becomes an ambiguity to ask, never a guess.
 """
 from __future__ import annotations
 
@@ -30,26 +14,18 @@ from core.lang_match import normalize_text
 
 DeliverableKind = Literal["file_exists", "file_modified", "tests_green"]
 
-#: How each deliverable is checked. Named, not free text: the verification
-#: method is part of the contract, so a later reader can tell what "verified"
-#: meant without re-deriving it from the code.
-# `tests_green`, not `tests_pass`: bandit reads any name ending in "pass" as a
-# credential (B105) and flagged this table as a hardcoded password. This
-# repository carries no suppressions — a false positive is answered by a name
-# that is not ambiguous, the same way `_TOKEN_EDGE_PUNCT` became
-# `_FILENAME_EDGE_PUNCT` in the secret scanner.
+#: How each deliverable is checked; part of the contract, so "verified" is explicit.
+# `tests_green`, not `tests_pass`: bandit reads names ending in "pass" as
+# credentials (B105), and the repo carries no suppressions.
 VERIFICATION_METHODS: dict[DeliverableKind, str] = {
     "file_exists": "a successful write artifact targets the path",
     "file_modified": "a successful write artifact targets the path",
     "tests_green": "a run_tests artifact reports success",
 }
 
-# Verb stems, matched on normalized whole tokens by prefix. Kept deliberately
-# short: every stem here is a claim that this word unambiguously signals the
-# action, and a wrong claim manufactures an obligation the operator never gave.
+# Verb stems, matched by prefix on normalized tokens. Kept short: a wrong stem
+# manufactures an obligation the operator never gave.
 _CREATE_STEMS: tuple[str, ...] = (
-    # «запиш-» (2026-09-24): «Итог запиши файлом data/notes/…» не узнавался
-    # как распоряжение записать — цель кампании кончилась отказом.
     "созда", "напиш", "запиш", "сформир", "сгенерир", "добав",
     "create", "write", "generate", "add",
 )
@@ -65,18 +41,11 @@ _READ_STEMS: tuple[str, ...] = (
 )
 
 
-# Explicit operator-declared change-sets override incidental path mentions.
-# The declaration is read from the full request before demanding_text() and
-# before mixed read/modify ambiguity detection. Авторство агента (урок 3,
-# 2026-08-29): его собственный уточнитель шесть раз за ночь спросил «which
-# of them must change» при стоящем в задании «МЕНЯТЬ: ровно один файл» —
-# шестой раз на уроке о починке самого себя.
+# Explicit operator-declared change-sets override incidental path mentions;
+# read from the full request, before demanding_text() and the mixed-request check.
 _EXPLICIT_CHANGE_TARGET_DECLARATIONS: dict[str, re.Pattern[str]] = {
-    # 2026-09-21: «Повтори то же самое. Меняется ровно один файл: X — перезапиши
-    # его. Файл Y — только прочитать» — объявление посреди абзаца и в форме
-    # «меняется» не узнавалось, и ворота трижды спрашивали «какой из путей
-    # менять». Начало предложения, а не только строки; захват — до конца
-    # предложения, чтобы Y «только прочитать» не попал в изменяемые.
+    # Начало предложения, а не только строки; захват — до конца предложения,
+    # чтобы соседнее «Файл Y — только прочитать» не попало в изменяемые.
     "ru": re.compile(
         '(?:^|(?<=[.!?]\\s))[ \\t]*(?:менять|меняется|меняем|изменить|изменяется|изменя(?:ть|йте))\\s*:?\\s*(?:ровно\\s+(?:один|одну|\\d+)\\s+(?:файл|файла|файлов)\\s*[-—:]?\\s*)?(?P<targets>(?:(?![.!?]\\s)[^\\n;])+)',
         re.IGNORECASE | re.MULTILINE,
@@ -111,11 +80,8 @@ _TESTS_PASS_RE = re.compile(
 )
 
 
-#: Классы затребованного, которые извлекатель РАСПОЗНАЁТ, но проверять не умеет.
-#: Каждый образец — заявление «эти слова однозначно просят вот это»; ложное
-#: заявление здесь не выдумывает обязательство (их по-прежнему строят только
-#: пути к файлам), а лишь помечает границу, и цена ошибки соответственно ниже.
-#: Латиница и кириллица порознь: оператор пишет и транслитом тоже.
+#: Классы затребованного, которые извлекатель распознаёт, но проверять не умеет.
+#: Ошибка здесь лишь помечает границу покрытия, а не выдумывает обязательство.
 _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("report_sections", re.compile(
         r"(отчита\w*|отчёт\w*|отчет\w*|доложи)\s+(отдельно|по\s+раздел|разделами)"
@@ -144,21 +110,8 @@ _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-#: Единица задания, названная ЗАГОЛОВКОМ. Три формы метки:
-#:
-#:   `## 3. Найди границу`      — номер с точкой
-#:   `### B. Образец`           — буква с точкой
-#:   `# U01 — Verifier`         — ПОМЕЧЕННАЯ единица: буквы с цифрами,
-#:                                 разделитель — тире, длинное тире или двоеточие
-#:
-#: Третья форма добавлена 2026-08-10 по живому провалу: задание объявило
-#: «Each unit has a stable identifier U01 through U12 … must survive
-#: unchanged», а извлекатель взял семь разделов ФИНАЛЬНОГО ОТЧЁТА (`A.`…`G.`)
-#: и ни одной из двенадцати рабочих единиц. Идентификатор оператора — часть
-#: контракта, а не наша перефразировка, и он сохраняется дословно.
-#:
-#: Только ЗАГОЛОВОК. Упоминание в прозе («сделай как в U01») раздела не
-#: объявляет, и считать его единицей значило бы выдумать пункт.
+#: Единица задания, названная ЗАГОЛОВКОМ: `## 3. …`, `### B. …`, `# U01 — …`.
+#: Идентификатор оператора сохраняется дословно; упоминание в прозе — не единица.
 _REQUESTED_UNIT_RE = re.compile(
     r"^\s{0,3}#{1,4}\s*("
     r"(?:\d{1,2}|[A-Z])\.\s+\S.*?"
@@ -179,16 +132,14 @@ class RequestedUnit:
         return {"title": self.title, "identifier": self.identifier}
 
 
-#: Метка в начале заголовка: `U01`, `R7`, `3`, `B`. Ровно та строка, которую
-#: написал оператор, — по ней и сверяется адресованность.
+#: Метка в начале заголовка (`U01`, `R7`, `3`, `B`) — по ней сверяется адресованность.
 _UNIT_LABEL_RE = re.compile(
     r"^([A-Za-z\u0410-\u042f\u0430-\u044f]{0,4}\d{1,3}|[A-Z])\s*[.\u2014\u2013:-]"
 )
 
 
-#: R1 (2026-08-13, живой B2): вставка теряла `#`, и помеченные единицы
-#: становились невидимыми. Полная строка вида «S1 — Ключи» — единица и без
-#: решётки, но только когда таких строк ДВЕ и больше: одиночная — проза.
+#: Строка «S1 — Ключи» без `#` (вставка теряет решётку) — единица, но только
+#: когда таких строк две и больше: одиночная — проза (R1).
 _PLAIN_UNIT_RE = re.compile(
     r"^\s{0,3}((?:[A-Za-zА-Яа-я]{1,4}\d{1,3})"
     r"\s*[—–:-]\s+\S.*?)\s*$",
@@ -249,9 +200,8 @@ def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
     body = (answer or "").casefold()
     missing: list[str] = []
     for unit in getattr(contract, "requested_units", ()) or ():
-        # Метка засчитывается только начиная с двух знаков: односимвольная
-        # («C») совпала бы с любой буквой в тексте и объявила бы покрытым
-        # всё подряд. Для таких единиц остаётся сверка по заголовку.
+        # Односимвольная метка («C») совпала бы с любой буквой — для неё
+        # остаётся сверка по заголовку.
         ident = (unit.identifier or "").casefold()
         if len(ident) >= 2 and ident in body:
             continue
@@ -297,11 +247,9 @@ class CompletionContract:
     obligations: tuple[ContractObligation, ...] = ()
     ambiguities: tuple[str, ...] = ()
     unsupported_deliverables: tuple[UnsupportedDeliverable, ...] = ()
-    #: Единицы, названные оператором заголовками. Отдельно от
-    #: `unsupported_deliverables`: там классы, здесь предметы.
+    #: Единицы, названные оператором заголовками (предметы, а не классы).
     requested_units: tuple[RequestedUnit, ...] = ()
-    #: Чек-лист поручения (core/request_checklist.py): требования человека как
-    #: вопросы «да/нет», составленные ДО работы. None — выключен или не составлен.
+    #: Чек-лист поручения (core/request_checklist.py); None — не составлен.
     checklist: Any = None
 
     @property
@@ -311,11 +259,7 @@ class CompletionContract:
 
     @property
     def needs_clarification(self) -> bool:
-        """True when the request named an object whose duty could not be read.
-
-        The operator's rule: ask, do not guess. This flag is what a caller
-        acts on; this module never turns an ambiguity into an obligation.
-        """
+        """True when a duty could not be read; the caller asks instead of guessing."""
         return bool(self.ambiguities)
 
     def to_log_payload(self) -> dict[str, Any]:
@@ -335,107 +279,37 @@ def _mentions_read(tokens: tuple[str, ...]) -> bool:
     return any(tok.startswith(stem) for tok in tokens for stem in _READ_STEMS)
 
 
-#: Прошедшее время: «добавил», «написала», «создали», «added». Глагол в нём
-#: рассказывает о сделанном и поручения не несёт.
-#:
-#: Живой разговор 2026-09-20, 19:36: читательский вопрос агенту кончился
-#: встречным уточнением из-за ОДНОГО слова в пересказе его же поступка —
-#: «назвал её в ответе и ДОБАВИЛ, что…». Стебель «добав» стоит в
-#: `_CREATE_STEMS`, и прошедшее время его не смущало. Это повторялось бы
-#: ровно настолько, насколько с агентом разговаривают: всякий разбор его
-#: поступков состоит из «ты написал», «ты создал», «ты добавил».
-#:
-#: Повелительное («добавь») и инфинитив («нужно добавить») не тронуты: по-русски
-#: ни одно из них на -л не кончается, а инфинитив кончается на -ть.
-#: Хвостовая пунктуация отсекается перед проверкой: токены приходят как
-#: «добавил,» — на этом первая редакция и не сработала (проверено прогоном).
+#: Прошедшее время и второе лицо будущего («добавил», «added», «напишешь») —
+#: рассказ или условие, а не поручение. Хвостовая пунктуация («добавил,») допускается.
 _NOT_AN_ORDER_RE = re.compile(
     r"(?:"
     r"л|ла|ло|ли|ed"          # прошедшее: «добавил», «added»
     r"|ешь|ёшь|ишь|ашь"      # второе лицо будущего: «напишешь»
     r")[^\w]*$"
 )
-#: Прежнее имя: третья заплата на это место за вечер показала, что речь
-#: не про одно прошедшее время. Сначала закавыченная фраза («напиши
-#: „данных нет“»), потом прошедшее («ты добавил»), теперь будущее второго
-#: лица («что туда напишешь, то мы увидим»). Общее у всех трёх: глагол
-#: стоит НЕ в поручении, а в рассказе или условии.
-#:
-#: Пятый отказ за вечер показал, что заплаты кончились: в одном вопросе
-#: сработали сразу `add` (процитированный английский глагол), `изменение`
-#: и `изменения` (существительные) и `создать` (инфинитив в пересказе
-#: чужой просьбы). Перечислять формы дальше бессмысленно — два правила
-#: ниже заменяют перечисление: приказ стоит в ФОРМЕ приказа
-#: (`_ORDER_TAIL_RE`) и называет свой ПРЕДМЕТ (`_orders_a_path`).
+#: Прежнее имя. Основные правила — приказ стоит в форме приказа
+#: (`_ORDER_TAIL_RE`) и называет свой предмет (`_orders_a_path`).
 _PAST_TENSE_RE = _NOT_AN_ORDER_RE
 
-#: Имя, а не слово речи: `added_at`, `create_file`, `evidence_kind=source`,
-#: `core/loop.py`. Всё, где есть подчёркивание, косая, точка, знак
-#: равенства или цифра, — это идентификатор из кода или данных.
-#:
-#: Четвёртый ложный отказ того же гейта за вечер, 2026-09-20, 21:12.
-#: Читательский вопрос агенту — сверить два его собственных реестра —
-#: кончился встречным «the request mixes reading and changing over
-#: several paths». Виновато оказалось ОДНО процитированное имя поля:
-#:
-#:     «каждая запись это kind=source с полями locator, ADDED_AT,
-#:      last_read_at, evidence_kind=web_search_hit»
-#:
-#: Токен `added_at,` начинается на английский стебель `add`, а проверка
-#: прошедшего времени (`ed` в конце) до него не достаёт — слово кончается
-#: на `at`. Так название колонки стало приказом что-то создать.
-#:
-#: Это будет повторяться ровно настолько, насколько с агентом говорят о
-#: его данных: поля зовутся `added_at`, `updated_at`, `created_at`,
-#: функции — `write_state`, `remove_lock`. Разговор о собственном
-#: устройстве целиком состоит из таких имён.
-#: Круглая скобка (2026-09-24): «remove()» в описании алгоритма — имя метода,
-#: а не приказ «удали»; учебная задача кампании из-за него стала «правкой книги».
+#: Имя из кода или данных, а не слово речи: `added_at`, `evidence_kind=source`,
+#: `core/loop.py`, `remove()` — иначе имя поля читается как приказ.
 _IS_A_NAME_RE = re.compile(r"[_/\\=(]|\d")
 
-#: Хвост слова после стебля. Приказ по-русски отдают повелительным
-#: наклонением («исправь», «почини», «создай», «сформируй», «удали»,
-#: во множественном — «исправьте») или инфинитивом («нужно добавить»).
-#: Всё остальное распоряжением не является:
-#:
-#:     `изменение`, `изменения`  — существительное, предмет разговора
-#:     `added_at`               — имя колонки в журнале
-#:     `добавил`, `напишешь`    — рассказ и условие
-#:
-#: По-английски приказ совпадает с самим стеблем (`fix`, `create`), и
-#: `added` от него уже отличается — поэтому для латиницы хвост обязан
-#: быть пустым.
+#: Хвост после стебля в форме приказа: повелительное («исправь», «исправьте»)
+#: или инфинитив («добавить»). У латиницы приказ — сам стебель, хвост пуст.
 _ORDER_TAIL_RE = re.compile(
     r"^(?:|и|ь|й|ай|ей|уй)(?:те)?$"           # повелительное
     r"|^(?:ть|ти|ить|ать|ять|еть|уть|овать|ивать|ывать)$"  # инфинитив
 )
 _TAIL_PUNCT_RE = re.compile(r"[^\w]+$")
 
-#: Границы предложения. Точка считается концом только перед пробелом или
-#: концом текста: иначе `core/loop.py` разрезается на «core/loop» и «py»,
-#: путь исчезает, и правило «приказ называет предмет» не находит предмета
-#: (поймано прогоном свидетельского теста).
+#: Границы предложения. Точка — конец только перед пробелом или концом текста,
+#: иначе `core/loop.py` разрезался бы и путь пропадал.
 _SENTENCE_SPLIT_RE = re.compile(r"[.!?;]+(?=\s|$)|\n+")
 
 
 def _orders_a_path(demanding: str) -> bool:
-    """Распоряжается ли просьба ФАЙЛОМ, а не просто содержит глагол письма.
-
-    Пятый ложный отказ гейта за вечер, 2026-09-20, 21:20. Вопрос был
-    читательский — сверить два собственных реестра агента, — а ответом
-    пришло «the request mixes reading and changing over several paths».
-    Сработали два слова, оба в рассказе о РАЗГОВОРЕ, а не о работе:
-
-        «…прочитал его как английский глагол ADD и решил, что я прошу
-         что-то СОЗДАТЬ»
-
-    По форме это настоящий приказ (голый английский стебель и инфинитив),
-    и проверка формы их пропускает честно. Отличает их другое: ни в одном
-    из этих предложений не назван файл. Приказ без предмета — не приказ.
-
-    Просьбы, где пути не названы вовсе, правило не трогает: распоряжаться
-    там нечем, и подсказка `--file` работает как прежде.
-    """
+    """Распоряжается ли просьба ФАЙЛОМ: глагол письма стоит в предложении с путём."""
     parts = [p for p in _SENTENCE_SPLIT_RE.split(demanding or "") if p.strip()]
     near = " . ".join(p for p in parts if paths_mentioned(p))
     if not near:
@@ -446,14 +320,8 @@ def _orders_a_path(demanding: str) -> bool:
 def _written_paths_only(named: list[str], demanding: str) -> list[str]:
     """Оставить в долгу только пути из предложений с глаголом записи.
 
-    Разбор по предложениям (2026-09-24): глагол записи стоит лишь в тех
-    предложениях, что называют ЧАСТЬ путей, — эта часть и меняется, прочее
-    читается. Ночь кампании: «В knowledge_library/…/Morin….txt найти раздел …
-    Итог запиши файлом data/notes/….md» кончилась отказом «mixes reading and
-    changing», цикл ушёл впустую. Где чтение и запись в ОДНОМ предложении
-    («прочитай A.py и исправь B.py»), подмножества нет — вопрос, как прежде.
-    Узнано ли «чтение», не важно: путь вне предложений с глаголом записи не
-    долг («найти» стеблем «найд» не ловится, и книга становилась обязанной).
+    Если такие предложения называют лишь часть путей, прочие — чтение. Когда
+    чтение и запись в одном предложении, подмножества нет и путь остаётся к вопросу.
     """
     if len(named) <= 1:
         return named
@@ -490,8 +358,7 @@ def _action_for(tokens: tuple[str, ...]) -> str:
             for tok in tokens for stem in stems
         )
 
-    # Долг создаёт только распоряжение, поэтому создание и правка читаются
-    # строго по форме. Чтение ничего не обязывает — там строгость лишняя.
+    # Долг создаёт только распоряжение — строгость формы нужна лишь там.
     if _hit(_MODIFY_STEMS, strict=True):
         return "modify"
     if _hit(_CREATE_STEMS, strict=True):
@@ -524,14 +391,8 @@ _ADDRESS_RE = re.compile(r"@|https?://|на\s+адрес|по\s+адресу|в\
 def _deferred_choices(demanding: str) -> list[str]:
     """Выбор, который просьба отдаёт неназванному человеку, — вопрос, а не догадка.
 
-    Операторское задание 2026-08-03 (MIR-075): «он НЕ переспрашивает, он сразу
-    начинает делать». Замер 2026-09-19 (рабочий экзамен): «Сделай для клиента
-    отчёт по data.csv в нужном ему формате и отправь ему» — агент выбрал
-    Markdown сам, а отправку объявил невозможной; вопроса не было. Оператор
-    решил: сначала спрашивать. Правило узкое намеренно (правило «глагол без
-    цели» снято после 8 ложных из 8): оно срабатывает только когда просьба
-    ПРЯМО отсылает к предпочтению третьего лица, которое в ней не названо.
-    Текст неясности — готовый вопрос заказчику: ворота показывают его как есть.
+    Правило узкое намеренно: только прямая отсылка к предпочтению третьего лица.
+    Текст неясности — готовый вопрос заказчику, ворота показывают его как есть.
     """
     out: list[str] = []
     if _DEFERRED_FORMAT_RE.search(demanding):
@@ -543,10 +404,8 @@ def _deferred_choices(demanding: str) -> list[str]:
     return out
 
 
-#: Закавыченный кусок просьбы вместе с глаголом письма перед ним. Внутри
-#: кавычек бывает и предмет работы («создай файл «report.md»»), и просто речь
-#: («так и напиши «данных нет»»). Глагол забирается вместе с фразой: вырезать
-#: один предмет мало — «напиши» без предмета всё равно читается как «создай».
+#: Закавыченный кусок просьбы вместе с глаголом письма перед ним: без фразы
+#: «напиши» всё равно читалось бы как «создай».
 _QUOTED_SPAN_RE = re.compile(
     r"(?:\b(?:напиш|напис|скаж|ответ|отвеч|укаж|пиши|write|say|reply|answer|"
     r"state|print)\w*\s+(?:что\s+|это\s+)?)?"
@@ -558,17 +417,7 @@ _QUOTED_SPAN_RE = re.compile(
 def _without_quoted_prose(text: str) -> str:
     """Просьба без закавыченных ФРАЗ; закавыченные имена файлов остаются.
 
-    Живой разговор 2026-09-20, 19:31: агент не ответил на читательский вопрос,
-    а потребовал уточнения — «the request mixes reading and changing over
-    several paths». Виновато оказалось правило доказательства, которое мостик
-    приклеивает к каждому вопросу: «Если данных нет — так и напиши «данных
-    нет»». Стебель «напиш» стоит в `_CREATE_STEMS`, действие стало `create`,
-    путей в вопросе было три — и просьба объявилась неоднозначной. Замерено:
-    тот же вопрос без правила уточнения не требует.
-
-    Различитель — предмет глагола. «Напиши «данных нет»» — предмет фраза, это
-    речь. «Создай файл «report.md»» — предмет имя файла, это работа. Потому
-    закавыченное вырезается только тогда, когда пути внутри нет.
+    «Напиши «данных нет»» — речь, «создай файл «report.md»» — работа.
     """
     def keep(match: re.Match[str]) -> str:
         quoted = match.group(1)
@@ -584,26 +433,16 @@ def derive_completion_contract(
 ) -> CompletionContract:
     """Read the deliverables out of the REQUEST, before any work happens.
 
-    Deliberately blind to the plan, the artifacts and the answer: they are not
-    parameters. Anything it cannot read unambiguously becomes an ambiguity for
-    the caller to raise with the operator.
+    Blind to plan, artifacts and answer by signature; anything unclear becomes an ambiguity.
     """
     text = question or ""
-    # Долги читаются ТОЛЬКО из требующих предложений. Запрещающие вырезаются
-    # первыми: 2026-08-10 измерено шесть из шести, где `Do not create X` давало
-    # долг «X обязан существовать», а `Не исправляй Y` — «Y обязан измениться».
-    # Единственное обязательство того живого прогона (`tests_green`) пришло из
-    # фразы «…merely to make the test pass», стоявшей внутри запрета. Запрет при
-    # этом никуда не девается — он остаётся в `unsupported_deliverables`, и
-    # читается по ПОЛНОМУ тексту, а не по этому усечению.
+    # Долги — только из требующих предложений: `Do not create X` не долг.
+    # Сам запрет остаётся в `unsupported_deliverables` (по полному тексту).
     demanding = _without_quoted_prose(demanding_text(text))
     tokens = tuple(normalize_text(demanding).split())
     action = _action_for(tokens)
-    # Распоряжение называет свой предмет. Если пути в просьбе есть, но ни
-    # один не стоит в предложении с глаголом письма, просьба ничего не
-    # создаёт и не меняет — она про чтение. Так отсеиваются пересказы вроде
-    # «он решил, что я прошу что-то создать» и оговорки «прав на изменение
-    # файлов здесь нет», стоящие вдали от любого пути.
+    # Распоряжение называет свой предмет: если ни один путь не стоит в
+    # предложении с глаголом письма, просьба про чтение.
     if (
         action in {"create", "modify"}
         and paths_mentioned(demanding)
@@ -623,11 +462,8 @@ def derive_completion_contract(
     else:
         named = list(paths_mentioned(demanding))
 
-    # A request that both reads and changes, over MORE THAN ONE path, cannot
-    # be attributed: "прочитай A.py и исправь B.py" would otherwise owe a
-    # change on A.py too, and an invented duty blocks `achieved` on its own
-    # (Copilot, PR #258). One path is safe — "прочитай core/foo.py и исправь
-    # его" names a single object and the stricter action wins.
+    # Read + change over MORE THAN ONE path cannot be attributed ("прочитай A.py
+    # и исправь B.py"); an invented duty would block `achieved`. One path is safe.
     if not declared_change_set and action in {"create", "modify"}:
         named = _written_paths_only(named, demanding)
     if (
@@ -663,39 +499,8 @@ def derive_completion_contract(
                 derived_from=path,
             ))
 
-    # ── the TARGETLESS-CHANGE ambiguity rule is RETIRED (2026-08-02) ────────
-    #
-    # Scope of this retirement, precisely: only the "a change verb names no
-    # target" rule is gone. The mixed read+change rule above still raises an
-    # ambiguity, and `ambiguities` is still a populated field — it fired 0
-    # times across the same 62 live requests, so it is unexercised rather than
-    # disproven, and there is no evidence on which to retire it.
-    #
-    # Two candidate TARGETLESS rules were tried and BOTH measured at zero
-    # precision:
-    #
-    # * "a path is named under an unrecognised verb" — 4 firings on 48 live
-    #   requests, 2 of them ordinary discussion turns that merely cited a file.
-    # * "a change verb with no path" — 8 firings on 62 live requests, and ALL
-    #   EIGHT were wrong. Every one named its target in prose the vocabulary
-    #   cannot parse ("сделай так, чтобы эпизод сохранял, что пошло не так",
-    #   "почини так, чтобы разные команды давали разные label"), and the eighth
-    #   was a long numbered experiment procedure whose step 7 happened to
-    #   contain "внеси минимальное исправление" — one future, conditional verb
-    #   in a flat bag of tokens, and the whole task was declared targetless.
-    #
-    # A signal that is wrong 8 times out of 8 is not a signal to tune, it is a
-    # claim to withdraw. The operator's clause 6 — ask, do not guess — remains
-    # the goal, and the mixed-request rule still serves it; what is gone is the
-    # rule that could not tell a vague operator from a clear one this module
-    # fails to parse. A request whose target lives in prose now yields an empty
-    # contract that says exactly what is true — no deliverable could be
-    # derived — without adding a false claim about the operator's clarity.
-    #
-    # What this does NOT fix: the vocabulary still cannot express "run an
-    # experiment", so a multi-step procedure still yields no obligations. That
-    # limit is recorded in MIR-067 and is a derivation problem, not a rule to
-    # bolt on here.
+    # No "change verb without a target" ambiguity: it was wrong every time —
+    # the target lived in prose. Such a request yields an empty contract instead.
 
     if _TESTS_PASS_RE.search(demanding):
         obligations.append(ContractObligation(
@@ -707,9 +512,7 @@ def derive_completion_contract(
 
     ambiguities.extend(_deferred_choices(demanding))
 
-    # R1: единица, объявленная без содержания («S3 — Сравнение» последней
-    # строкой обрезанной вставки), — вопрос оператору, не молчание: живой B2
-    # закрыл её achieved 4/4, не сказав ни слова.
+    # Единица без содержания (обрезанная вставка) — вопрос оператору (R1).
     for ident in _units_without_body(text):
         ambiguities.append(
             f"единица «{ident}» объявлена, но не содержит задания — "
@@ -720,15 +523,13 @@ def derive_completion_contract(
         obligations=tuple(obligations),
         ambiguities=tuple(ambiguities),
         unsupported_deliverables=_unsupported_in(text),
-        # По ПОЛНОМУ тексту: единицы называют и запрещающие разделы
-        # тоже («7. Do not repeat the imagined-API failure»).
+        # По ПОЛНОМУ тексту: единицей бывает и запрещающий раздел.
         requested_units=requested_units(text),
     )
 
 
-#: Запрещающее предложение. Маркер обязан стоять ПЕРЕД глаголом действия,
-#: иначе «создай файл, если он не существует» прочиталось бы как запрет.
-#: Латиница, кириллица и транслит порознь: оператор пишет всеми тремя.
+#: Запрещающее предложение. Маркер стоит ПЕРЕД глаголом, иначе «создай файл,
+#: если он не существует» прочиталось бы как запрет.
 _PROHIBITING_CLAUSE_RE = re.compile(
     r"^\s*(?:"
     r"(?:do\s+not|don't|never)"
@@ -739,12 +540,8 @@ _PROHIBITING_CLAUSE_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Границы предложений и однородных частей. Точка с запятой и тире разделяют
-#: «сделай A; не трогай B» — без них запрет утащил бы за собой и требование.
-# CodeQL #19/20 (2026-08-28): ветка `\s+—` заново съедала пробельный хвост с
-# каждого старта — стена пробелов давала квадратуру (×14.5 на вход ×4), а
-# текст сюда приходит из чужих ответов модели. Якорь на самом тире стартует
-# только у «—»; предпробельный хвост уходит в strip у потребителя ниже.
+#: Границы предложений и однородных частей: «сделай A; не трогай B».
+# Якорь на самом тире, а не `\s+—`: иначе стена пробелов даёт квадратичное время.
 _CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|(?<=\s)—\s+)")
 
 
@@ -769,11 +566,8 @@ def _unsupported_in(text: str) -> tuple[UnsupportedDeliverable, ...]:
     return tuple(found)
 
 
-#: Only an explicit write proves a file deliverable. `shell_exec` was here in
-#: the first draft and is not: a shell receipt does not reliably encode which
-#: file it touched, so a read-only command that merely mentions the name would
-#: have satisfied the contract (Codacy, PR #258 — rated a security finding,
-#: and correctly: it is a way to claim a change that never happened).
+#: Only an explicit write proves a file deliverable: a `shell_exec` receipt does
+#: not reliably say which file it touched.
 _WRITE_TOOL = "file_write"
 
 #: The gateway can admit an effect and not perform it. A simulated write is
@@ -806,13 +600,7 @@ def unmet_obligations(
     *,
     artifacts: dict[str, Any] | None = None,
 ) -> tuple[ContractObligation, ...]:
-    """Which contract obligations the run's EVIDENCE does not satisfy.
-
-    Satisfaction is judged against artifacts — what the run actually did —
-    never against the answer text. That is the operator's "a good textual
-    answer does not prove completion", made mechanical: the answer is not a
-    parameter here, so it cannot satisfy anything.
-    """
+    """Which contract obligations the run's artifacts do not satisfy (never the answer text)."""
     artifacts = artifacts or {}
     entries = [(str(label), meta or {}) for label, meta in artifacts.items()]
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """WHY THIS EXISTS.
 
 Ревизия PR #334, три замечания по внешнему принимающему
@@ -30,7 +29,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -172,7 +170,7 @@ def test_a_battery_that_outlives_its_ceiling_is_a_refusal(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Превышенный потолок — отказ с названной причиной, а не исключение."""
-    def _timed_out(argv, *, cwd, env, timeout):  # noqa: ANN001, ANN202
+    def _timed_out(argv, *, cwd, env, timeout):
         return b"", b"", None, True
 
     monkeypatch.setattr(script, "run_with_tree_kill", _timed_out)
@@ -185,7 +183,7 @@ def test_a_battery_that_outlives_its_ceiling_is_a_refusal(
 
 def test_a_green_battery_is_still_green(repo: Path) -> None:
     """Сосед: обычный путь через ограничитель по-прежнему читает исход."""
-    def _ok(argv, *, cwd, env, timeout):  # noqa: ANN001, ANN202
+    def _ok(argv, *, cwd, env, timeout):
         return b"5 passed\n", b"", 0, False
 
     original = script.run_with_tree_kill

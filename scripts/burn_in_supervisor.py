@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Внешний принимающий: один шаг опыта, запускаемый ЧЕЛОВЕКОМ.
 
 Запускать из исходного checkout, а не из того дерева, которое агент меняет:
@@ -29,13 +28,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.bounded_subprocess import run_with_tree_kill  # noqa: E402
-from core.burn_in_supervisor import (  # noqa: E402
+from core.bounded_subprocess import run_with_tree_kill
+from core.burn_in_supervisor import (
+    SupervisorError,
     adopt_offer,
     experiment_head,
     materialise_next_cycle,
     offer_ledger,
-    SupervisorError,
 )
 
 #: Потолок батареи. Десятичасовой опыт не вправе застрять на одном кандидате:
