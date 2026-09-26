@@ -239,6 +239,17 @@ def _pursue_goal_action(idle: BestNextAction, reason: str = "") -> BestNextActio
     )
 
 
+def _effects_count(agent: Any) -> int:
+    return len(getattr(agent, "compensation_log", None) or ())
+
+
+def _reopen_operator_goal(action: BestNextAction, config: CampaignConfig, agent: Any,
+                          effects_before: int, attempted: set[str]) -> None:
+    """Цель человека получает новый заход, пока прошлый заход что-то записал; пустой — последний."""
+    if action.action == PURSUE_GOAL and not config.goal_is_self and _effects_count(agent) > effects_before:
+        attempted.discard(PURSUE_GOAL)
+
+
 def _goal_first(action: BestNextAction, attempted: set[str], goal_action: str = "",
                 goal_is_self: bool = False) -> BestNextAction:
     """Режим «цель первой» (CampaignConfig.goal_first): поломка — меню, иначе цель.
@@ -894,7 +905,7 @@ def run_campaign(
                     break
                 continue
 
-            streak_repeats = False
+            streak_repeats, effects_before = False, _effects_count(agent)
             with _cycle_cost_envelope(agent, config, cost_units_used):
                 outcome = execute(
                     agent=agent,
@@ -932,6 +943,7 @@ def run_campaign(
             # замер 2026-09-19).
             _refused_again(signature, refused_signatures,
                            ran=outcome.ran, result=str(outcome.result))
+            _reopen_operator_goal(action, config, agent, effects_before, attempted_signatures)
             if outcome.did_work:
                 useful_cycles += 1
             failed_in_a_row[signature] = (
