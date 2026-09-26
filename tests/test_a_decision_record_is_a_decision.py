@@ -12,8 +12,8 @@ EVIDENCE = ("logs/campaign_24h_stderr.log", "data/notes/20260926T_morin_hash_tab
             "knowledge_library/cs/txt/Morin_OpenDataStructures_Python.txt", "data/self_improvement_issues.jsonl")
 
 HOLLOW = [
-    ("решение будет сформулировано по собранным уликам: либо конкретный следующий шаг по коду/источнику, "
-     "либо 'спрашиваю человека' с названным случаем",
+    (("решение будет сформулировано по собранным уликам: либо конкретный следующий шаг по коду/источнику, "
+      "либо 'спрашиваю человека' с названным случаем"),
      "улики: data/self_improvement_issues.jsonl, knowledge_library/cs/txt/Morin_OpenDataStructures_Python.txt"),
     ('"""Did this cycle incur an obligation to observe or act, and leave it unmet?', "data/self_improvement_issues.jsonl"),
     ("PLACEHOLDER", "PLACEHOLDER"),
@@ -21,9 +21,10 @@ HOLLOW = [
      "data/self_improvement_issues.jsonl: запись Investigate recurring detector signal"),
 ]
 REAL = [
-    ("Morin-цель закрыта: verdict=verified, конспект создан — повторять её не буду; по дефекту читаю код "
-     "детектора и решаю по коду", "logs/campaign_24h_stderr.log:410 (verdict=verified); "
-     "data/notes/20260926T_morin_hash_tables.md"),
+    (("Morin-цель закрыта: verdict=verified, конспект создан — повторять её не буду; по дефекту читаю код "
+      "детектора и решаю по коду"),
+     ("logs/campaign_24h_stderr.log:410 (verdict=verified); "
+      "data/notes/20260926T_morin_hash_tables.md")),
     ("раздел найден замером (Theorem 5.1 — строка 3746); конспект записан; цель закрываю как выполненную",
      "knowledge_library/cs/txt/Morin_OpenDataStructures_Python.txt:3746 (Theorem 5.1)"),
 ]
