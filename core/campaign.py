@@ -806,10 +806,9 @@ def run_campaign(
                     if _stall(cycle, f"goal idle: {idle_streak}_checks_found_nothing_to_do",
                               f"idle_stall:{idle_streak}_consecutive_idle_cycles"):
                         continue
-                    if streak_repeats:
-                        stop_reason = (
-                            f"idle_stall:{idle_streak}_consecutive_idle_cycles"
-                        )
+                    if streak_repeats or (not config.goal_is_self
+                                          and PURSUE_GOAL in attempted_signatures):
+                        stop_reason = f"idle_stall:{idle_streak}_consecutive_idle_cycles"
                         status = "stopped"
                     else:
                         # Good news must not wear a failure's name: every cycle
