@@ -31,7 +31,6 @@ from core.drives import DOMAINS, _rows, _similarity, compute_drives, open_obliga
 
 STATE_RELPATH = Path("data") / "drive_state.json"
 DECISIONS_RELPATH = Path("data") / "drive_decisions.jsonl"
-WAKE_THRESHOLD = 0.5
 #: Порог — на значение С УЧЁТОМ привыкания. Замер 2026-09-19 (20 мин «цель
 #: первой»): порог стоял на сыром значении 0.2, предметные драйвы дорастают до
 #: него ~40 мин (tau 3 ч), а `uncertainty` (0.89, растёт от собственных
