@@ -67,8 +67,15 @@ _KNOWN_JOURNALS: dict[str, dict] = {
 #: о самом решении.
 _PLACEHOLDERS: frozenset[str] = frozenset({
     "pending", "todo", "tbd", "fixme", "xxx", "n/a", "na", "none", "-", "—",
-    "заполнить", "уточнить", "позже",
+    "заполнить", "уточнить", "позже", "placeholder", "заглушка",
 })
+
+#: Журнал решений агента о своём коде (core/own_decisions.py). Решение — выбор по уже
+#: собранным уликам, а не обещание решить, не план и не вставленный код.
+_DECISIONS_PATH = "data/own_decisions.jsonl"
+_NOT_A_DECISION = ("решение будет", "будет сформулировано", "сначала ")
+_CODE_START = ('"""', "'''", "```", "def ", "class ", "import ", "from ")
+_EVIDENCE_RE = re.compile(r"[\w./-]+\.(?:py|jsonl|json|md|txt|log|toml|yaml|yml)\b")
 
 #: Файлы состояния, у которых есть ХОЗЯИН в коде: класс, который их пишет,
 #: знает схему и отвечает за смысл строки. Сырая строка в таком файле — не
@@ -161,6 +168,22 @@ def _refuse_placeholders(record: dict) -> None:
 _STAMP_KEYS = ("created_at", "updated_at", "completed_at", "started_at",
                "heartbeat_at", "run_after", "first_seen", "last_seen", "ts")
 _ZONE_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
+
+
+def _refuse_hollow_decision(path: str, record: dict, root: Path) -> None:
+    """Запись решения принимается, только если это решение и оно опирается на файл, который есть."""
+    if path != _DECISIONS_PATH:
+        return
+    decision = str(record.get("decision") or "").strip()
+    if decision.startswith(_CODE_START):
+        raise ValueError("decision — это текст кода, а не решение: напиши, что делаешь и почему")
+    if decision.casefold().startswith(_NOT_A_DECISION):
+        raise ValueError("decision — обещание или план, а не решение: реши по уже собранным "
+                         "уликам, что делаешь дальше, и запиши это")
+    cited = _EVIDENCE_RE.findall(str(record.get("because") or ""))
+    if not any((root / c.lstrip("./")).is_file() for c in cited):
+        raise ValueError("because не называет ни одного существующего файла-улики "
+                         f"(названо: {cited[:5] or 'ничего'}): укажи путь к журналу, коду или заметке")
 
 
 def _refuse_naive_stamps(record: dict) -> None:
@@ -437,6 +460,7 @@ class JournalAppendTool(Tool):
         _refuse_repeated_voice(str(path), target, record)
         contract = _KNOWN_JOURNALS.get(str(path))
         _refuse_placeholders(record)
+        _refuse_hollow_decision(str(path), record, Path(self._workspace_root))
         _refuse_naive_stamps(record)
         if contract:
             _refuse_broken_shape(str(path), record, contract)
