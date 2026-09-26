@@ -352,6 +352,7 @@ class PythonProbeTool(Tool):
             and 0 < len(n.value) < 260 and "\n" not in n.value
         }
         missing = []
+        patterns = [v for v in named if _is_glob(v) and "/" not in v]
         for value in sorted(named):
             rel = Path(value)
             if rel.is_absolute() or ".." in rel.parts or rel.as_posix() in given:
@@ -379,10 +380,19 @@ class PythonProbeTool(Tool):
                 # только `is_file()` и промолчала, так что ноль ушёл в ответ как
                 # факт о коде. Невидимый отказ, выглядящий как настоящий ноль, —
                 # его собственная открытая запись в реестре дефектов.
-                covered = any(g == rel.as_posix() or g.startswith(rel.as_posix() + "/")
-                              for g in given)
-                if covered:
-                    continue
+                # Каталог «передан», только если переданы ВСЕ его файлы: 27.09 один
+                # переданный logs/daemon_tick.jsonl закрыл весь logs/, и счёт
+                # Path("logs").glob("trace_*.jsonl") = 0 ушёл в ответ как замер.
+                if target.is_dir():
+                    for pattern in patterns:
+                        hits = {p.relative_to(self.workspace_root).as_posix()
+                                for p in target.glob(pattern) if p.is_file()}
+                        if hits - given:
+                            missing.append(f"{rel.as_posix()}/{pattern}")
+                    inside = {p.relative_to(self.workspace_root).as_posix()
+                              for p in target.rglob("*") if p.is_file()}
+                    if inside and inside <= given:
+                        continue
                 if target.is_file() or (target.is_dir() and any(target.iterdir())):
                     missing.append(rel.as_posix())
             except (OSError, ValueError):
