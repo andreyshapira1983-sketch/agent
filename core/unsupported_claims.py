@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from core.answer_contradiction import contradicted_claims
+from core.lang_match import looks_russian
 from core.low_evidence_policy import evaluate_low_evidence_policy
 
 FEATURE_FLAG = "enforce_unsupported_world_claims"
@@ -98,10 +99,6 @@ class EnforcementResult:
                 c.to_log_payload() for c in self.contradictions
             ]
         return payload
-
-
-def _looks_russian(text: str) -> bool:
-    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
 
 
 def _soft_fail_note(outcome: EnforcementOutcome, locale: str) -> str:
@@ -226,7 +223,7 @@ def apply_answer_enforcement(
     if result.outcome != "none":
         return replace(result, contradictions=found)
 
-    locale = "ru" if (_looks_russian(question) or _looks_russian(answer)) else "en"
+    locale = "ru" if (looks_russian(question) or looks_russian(answer)) else "en"
     note = _contradiction_note(found, locale)
     return replace(
         result,
@@ -247,7 +244,7 @@ def _annotate_unrepresented_prohibitions(
     quoted = [e.evidence for e in entries if getattr(e, "kind", "") == "prohibition"]
     if not quoted:
         return result
-    locale = "ru" if (_looks_russian(question) or _looks_russian(result.answer)) else "en"
+    locale = "ru" if (looks_russian(question) or looks_russian(result.answer)) else "en"
     listed = "; ".join(quoted[:3])
     if locale == "ru":
         note = (
@@ -373,7 +370,7 @@ def _enforce_without_contradictions(
 ) -> EnforcementResult:
     """Apply PR3 enforcement. Never raises."""
     mode_s = mode if mode is not None else enforce_unsupported_claims_mode()
-    locale = "ru" if (_looks_russian(question) or _looks_russian(answer)) else "en"
+    locale = "ru" if (looks_russian(question) or looks_russian(answer)) else "en"
 
     if verifier_failure:
         note = _soft_fail_note("verifier_failure", locale)

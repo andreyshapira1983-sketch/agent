@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.lang_match import looks_russian
+
 _DEFAULT_MIN_TOTAL = 8
 _DEFAULT_MAX_VERIFIED_RATIO = 0.20
 _DEFAULT_UNVERIFIED_FLOOR = 6
@@ -328,10 +330,6 @@ class LowEvidencePolicyResult:
             "suppressed_chars": self.suppressed_chars,
             "suppressed_head": self.suppressed_head,
         }
-
-
-def _looks_russian(text: str) -> bool:
-    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
 
 
 def _insufficient_data_notice(locale: str) -> str:
@@ -672,7 +670,7 @@ def evaluate_low_evidence_policy(
         )
 
     locale = "ru" if (
-        _looks_russian(question) or _looks_russian(answer)
+        looks_russian(question) or looks_russian(answer)
     ) else "en"
 
     verified_texts, dialogue_texts = _surviving_texts(report)
