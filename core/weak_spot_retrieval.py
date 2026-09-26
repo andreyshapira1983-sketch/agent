@@ -22,8 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.bm25 import bm25_scores, term_counts, tokens
 from core.ingestion import SKIP_DIR_NAMES
-from core.memory_policy import _bm25_scores, _term_counts, _tokens
 
 #: Сколько файлов поиск отдаёт в план: столько же, сколько план берёт обычно.
 TOP_K = 5
@@ -42,7 +42,7 @@ def evidence_query(lesson: Any) -> str:
 def retrieve_files(workspace: Path, query: str, *, top_k: int = TOP_K) -> list[str]:
     """Файлы `.py`, лучшие по BM25 против запроса; только с ненулевым баллом."""
     root = Path(workspace).resolve()
-    q = _tokens(query)
+    q = tokens(query)
     if not q:
         return []
     rels: list[str] = []
@@ -62,7 +62,7 @@ def retrieve_files(workspace: Path, query: str, *, top_k: int = TOP_K) -> list[s
             continue
         # Путь — часть документа: имя модуля говорит о нём не меньше текста.
         rels.append(rel)
-        docs.append(_term_counts(rel.replace("/", " ").replace("_", " ") + " " + text, []))
-    scores = _bm25_scores(q, docs)
+        docs.append(term_counts(rel.replace("/", " ").replace("_", " ") + " " + text, []))
+    scores = bm25_scores(q, docs)
     ranked = sorted((s, r) for s, r in zip(scores, rels, strict=True) if s > 0)
     return [r for _s, r in sorted(ranked, key=lambda x: (-x[0], x[1]))[:top_k]]
