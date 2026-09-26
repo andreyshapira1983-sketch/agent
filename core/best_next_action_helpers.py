@@ -132,16 +132,23 @@ def resolve_goal_subject(text: str, *, exists, command_module=None) -> str | Non
                 return module
     return None
 
-def unresolved_goal_targets(text: str, *, exists) -> tuple[str, ...]:
-    """Пути, НАЗВАННЫЕ целью и не существующие в рабочей области.
+def _abs_path_exists(path: str) -> bool:
+    from pathlib import Path
 
-    Замер, отвергнутые варианты и границы: MIR-161 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Нужна, чтобы отказ разрешения не был неотличим от отсутствия имени.
-    """
+    return Path(path).exists()
+
+
+def unresolved_goal_targets(text: str, *, exists, exists_abs=_abs_path_exists) -> tuple[str, ...]:
+    """Пути, названные целью и не существующие ни в рабочей области, ни на диске (MIR-161).
+
+    Путь с «/» в начале проверяется на диске как есть (прогон 26.09: модели в /root/models)."""
+    source = str(text or "")
     out: list[str] = []
-    for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
-        token = raw.replace("\\", "/").strip("`'\",.;:()[]")
+    for match in _SUBJECT_TOKEN_RE.finditer(source):
+        token = match.group(0).replace("\\", "/").strip("`'\",.;:()[]")
         if not token or exists(token) or exists(f"{token}.py"):
+            continue
+        if match.start() > 0 and source[match.start() - 1] == "/" and exists_abs("/" + token):
             continue
         out.append(token)
     return tuple(dict.fromkeys(out))

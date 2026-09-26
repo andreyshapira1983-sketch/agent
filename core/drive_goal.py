@@ -270,6 +270,34 @@ def _with_notes(goal: str, check: str, drive: str, now: datetime) -> tuple[str, 
     return goal, criterion(note)
 
 
+#: Начало хвоста, который `_with_notes` приклеивает к каждой цели.
+_NOTE_TAIL = " Итог запиши файлом "
+_QUOTED = re.compile(r"'([^']{12,})'|«([^»]{12,})»|\"([^\"]{12,})\"")
+
+
+def _goal_subject(goal: str) -> str:
+    return str(goal or "").split(_NOTE_TAIL, 1)[0].strip()
+
+
+def _quoted(text: str) -> set[str]:
+    return {" ".join(next(g for g in m.groups() if g).lower().split()) for m in _QUOTED.finditer(text)}
+
+
+def repeats_recent_goal(goal: str, root: Path, limit: int = 20) -> bool:
+    """Та же задача, что недавняя: по словам без хвоста конспекта или по той же цитате (68 повторов 26.09)."""
+    subject = _goal_subject(goal)
+    quotes = _quoted(subject)
+    recent: list[str] = []
+    for row in _rows(root / "data" / "campaign_ledger.jsonl"):
+        old = _goal_subject(str(row.get("goal") or ""))
+        if old:
+            recent = [g for g in recent if g != old] + [old]
+    for old in recent[-limit:]:
+        if _similarity([subject, old]) >= _REPEAT_SIMILARITY or quotes & _quoted(old):
+            return True
+    return False
+
+
 def _problem(goal: str, root: Path, success_check: str = "") -> str:
     """Почему задачу нельзя выдать, или пусто.
 
@@ -288,8 +316,7 @@ def _problem(goal: str, root: Path, success_check: str = "") -> str:
     if contract.ambiguities:
         return ("исполнитель переспросит человека: " + "; ".join(contract.ambiguities)
                 + " — сформулируй задачу как «найди / прочитай / посчитай / проверь / объясни»")
-    recent = [line.split("] ", 1)[-1] for line in _recent_tasks(root, 20)]
-    if any(_similarity([goal, old]) >= _REPEAT_SIMILARITY for old in recent):
+    if repeats_recent_goal(goal, root):
         return "задача повторяет недавнюю — возьми другой материал или другой вопрос"
     missing = observe_success_check(success_check, root)["missing"] if success_check else []
     if missing:
