@@ -4,6 +4,7 @@ Refuses path traversal and oversized files. Returns plain text.
 """
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,9 @@ class FileReadTool(Tool):
             )
         except OSError:
             return ""
+        # Closest real names first: in a big directory the alphabetical head never reaches them.
+        close = difflib.get_close_matches(target.name, entries, n=8, cutoff=0.4)
+        entries = close + [e for e in entries if e not in close]
         if not entries:
             return ""
 
