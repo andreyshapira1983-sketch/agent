@@ -92,6 +92,13 @@
      "node": "loop_synthesis.py::AgentLoopSynthesis._run_synthesizer_ladder",
      "puts": "draft_contradicts_evidence — черновик противоречит своим уликам; синтезатор переписывает его один раз до ответа (2026-09-22); пишет модульная функция core/draft_refutation.revise_refuted_draft, которую зовёт лестница синтеза — перепись узлов считает только методы цикла",
      "call": "append"
+    },
+    {
+     "site": "core/observation_round.py:400",
+     "node": "loop_attempt.py::AgentLoopAttempt._run_attempt_loop",
+     "puts": "verify_failed — удачный вызов с провалом внутри (красный patch_check, красные тесты, упавший опыт python_probe); пишет модульная функция continue_after_observation, которую зовёт цикл попыток на круге наблюдения",
+     "call": "extend",
+     "_added": "2026-09-27: 11 красных patch_check подряд оставляли счётчик пустым (trace_66e414ca)."
     }
    ],
    "readers": [
