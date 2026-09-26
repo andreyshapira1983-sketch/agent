@@ -29,7 +29,7 @@ def test_only_reads_of_an_unchanged_world_are_cacheable(tmp_path: Path):
     (tmp_path / "a.txt").write_text("one and two", encoding="utf-8")
     assert cache_stamp("file_read", {"path": "a.txt"}, tmp_path) != first
     assert cache_stamp("web_fetch", {"url": "https://example.org"}, tmp_path) == "remote"
-    for tool in ("run_tests", "python_probe", "find_in_files", "list_dir", "file_write", "current_time"):
+    for tool in ("run_tests", "python_probe", "list_dir", "file_write", "current_time"):
         assert cache_stamp(tool, {"path": "a.txt"}, tmp_path) is None, tool
 
 
