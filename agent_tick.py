@@ -1896,13 +1896,13 @@ def run_paced_campaign(
             max_unproductive_streak=max_unproductive_streak,
             max_goal_switches=max_goal_switches,
             pursue_goal_when_idle=pursue_goal_when_idle,
-            # От драйвов цель — один заход: выполненная цель сменяется сразу,
-            # а не после трёх пустых циклов.
+            # От драйвов цель — один заход; цель человека (--goal) тоже важнее меню своих дел
+            # (прогон 26.09: 20 циклов, ни один не по цели оператора).
             # Здесь известна правда: --goal даёт цель человека, драйвы и
             # хартия — его собственную (см. GOAL_GROUNDS).
             goal_is_self=bool(drive_goals or charter_goals),
             **({"max_idle_streak": 1, "goal_first": True, "goal_action": goal_action}
-               if drive_goals else {}),
+               if drive_goals else {} if charter_goals else {"goal_first": True}),
         )
     except ValueError as exc:
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)

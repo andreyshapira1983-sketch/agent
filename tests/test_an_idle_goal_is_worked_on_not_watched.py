@@ -118,7 +118,7 @@ def _goal_first_run(tmp_path: Path, gather, next_goal=None):
     execute = _Record()
     result = run_campaign(
         CampaignConfig(goal=GOAL, max_cycles=4, max_idle_streak=1, dry_run=False,
-                       max_unproductive_streak=0, goal_first=True),
+                       max_unproductive_streak=0, goal_first=True, goal_is_self=True),
         agent=SimpleNamespace(log=None), workspace=str(tmp_path),
         gather_signals=gather, execute_action=execute, next_goal=next_goal,
         now_fn=lambda: datetime(2026, 9, 19, 19, 30, tzinfo=timezone.utc), sleep_fn=lambda _s: None,
