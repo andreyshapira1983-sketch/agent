@@ -35,6 +35,7 @@ SEARCH/REPLACE в Aider). Здесь то же, но без записи в жи
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -289,7 +290,31 @@ def _verdict(result: dict[str, Any]) -> dict[str, str]:
             f"on the OLD code your new tests ended with pytest exit code {result['witness_exit_code']} "
             "(no test collected, usage or internal error) — that shows no defect; "
             "the new test must FAIL before the fix")}
+    if result.get("ruff_new_errors"):
+        return {"verdict": "red", "why": (
+            f"the patch adds {result['ruff_new_errors']} ruff error(s) — see the ruff field")}
     return {"verdict": "green", "why": "the change applies, carries a test, and the tests pass"}
+
+
+_RUFF_FOUND_RE = re.compile(r"Found (\d+) errors?")
+
+
+def _ruff_errors(code: int, out: str) -> int:
+    if code == 0:
+        return 0
+    found = _RUFF_FOUND_RE.search(out)
+    return int(found.group(1)) if found else 1
+
+
+def _scratch(workspace: Path) -> tempfile.TemporaryDirectory[str]:
+    """Папка для копии — рядом с рабочей и открытая на чтение, как живая.
+
+    В /tmp (0700) песочница проб (отдельный пользователь) копию не читала, а
+    сторож записи считает весь /tmp своим: два теста проб падали в любой копии.
+    """
+    scratch = tempfile.TemporaryDirectory(prefix="patch_check_", dir=workspace.parent)
+    os.chmod(scratch.name, 0o755)  # noqa: S103 — копия репозитория, секретов в ней нет
+    return scratch
 
 
 #: Сколько соседних тестов (импортирующих изменённый модуль) добавлять к прогону.
@@ -337,7 +362,7 @@ def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
 #: длинный diff стоял раньше вывода тестов — агент пять кругов не видел новой
 #: ошибки и чинил уже исправленную.
 _ORDER = ("verdict", "why", "applied", "where", "errors", "tests_exit_code", "tests_output",
-          "full_exit_code", "full_output", "ruff", "files", "diff")
+          "full_exit_code", "full_output", "ruff", "ruff_new_errors", "files", "diff")
 #: «applied: True» читалось как «правка уже в файле»: агент писал добавку к своей прошлой попытке.
 _WHERE = ("a throwaway copy — no file on disk changed; every check starts again from the files "
           "on disk, so the patch file must hold the WHOLE change against them")
@@ -411,20 +436,26 @@ class PatchCheckTool(Tool):
         if not blocks:
             return {"applied": False, "verdict": "red", "why": "no blocks",
                     "errors": ["в файле нет блоков FILE:/<<<<<<< SEARCH/=======/>>>>>>> REPLACE или <<<<<<< LINES a-b"]}
-        with tempfile.TemporaryDirectory(prefix="patch_check_") as tmp:
+        with _scratch(self.workspace_root) as tmp:
             copy = Path(tmp) / "repo"
             self._clone(copy)
             files = list(dict.fromkeys(b["path"] for b in blocks))
             originals = {f: (copy / f).read_text(encoding="utf-8") if (copy / f).is_file() else "" for f in files}
+            py = [b["path"] for b in blocks if b["path"].endswith(".py")]
+            # Ошибки ruff, что были в файлах до правки, — не её: считается только прибавка.
+            before = [p for p in dict.fromkeys(py) if (copy / p).is_file()]
+            ruff_before = _ruff_errors(*self._run([sys.executable, "-m", "ruff", "check", *before], copy)) \
+                if before else 0
             errors = apply_blocks(copy, blocks)
             result: dict[str, Any] = {"applied": not errors, "where": _WHERE, "errors": errors, "files": files}
             if errors:
                 return {**result, "verdict": "red", "why": "the patch did not apply"}
             result["diff"] = _diff(copy, originals)
-            py = [b["path"] for b in blocks if b["path"].endswith(".py")]
             code, out = self._run([sys.executable, "-m", "ruff", "check", *py], copy)
             result["ruff"] = "not installed" if "No module named ruff" in out else (
                 "clean" if code == 0 else _tail(out, 20))
+            if result["ruff"] != "not installed":
+                result["ruff_new_errors"] = max(0, _ruff_errors(code, out) - ruff_before)
             own_tests = [p for p in py if p.startswith("tests/")]
             source = [p for p in py if not p.startswith("tests/")]
             neighbors = _neighbor_tests(copy, source, exclude=set(own_tests) | set(tests or []))
