@@ -485,6 +485,46 @@ class TestValidateOutput:
         assert any("no extractable text" in w for w in warnings)
 
 
+def test_pdf_text_uses_pdftotext_layout(monkeypatch):
+    from tools import web_fetch
+
+    class _FakeRun:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, argv, **kwargs):
+            self.calls.append((argv, kwargs))
+            out_path = argv[-1]
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("left column        right column\n")
+            return type("Proc", (), {"returncode": 0})()
+
+    fake = _FakeRun()
+    monkeypatch.setattr(web_fetch.subprocess, "run", fake)
+    result = web_fetch._pdf_text(b"%PDF-1.4 fake")
+    assert "left column" in result
+    assert "right column" in result
+    assert fake.calls
+    argv = fake.calls[0][0]
+    assert "-layout" in argv
+    assert "-f" in argv
+    assert argv[argv.index("-f") + 1] == "1"
+    assert "-l" in argv
+    assert argv[argv.index("-l") + 1] == str(web_fetch.PDF_MAX_PAGES)
+    assert "timeout" in fake.calls[0][1]
+
+
+def test_pdf_text_raises_when_pdftotext_missing(monkeypatch):
+    from tools import web_fetch
+
+    def _raise_file_not_found(argv, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(web_fetch.subprocess, "run", _raise_file_not_found)
+    with pytest.raises(ValueError, match="pdftotext not installed"):
+        web_fetch._pdf_text(b"%PDF-1.4 fake")
+
+
 def test_space_only_lines_do_not_eat_the_window():
     """Веб-экзамен 2026-09-19, набор 2, N12: четверть страницы PyPI — строки
     из одних пробелов; «Released: …» оказывалось на краю окна агента."""
