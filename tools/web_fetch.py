@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -194,22 +195,33 @@ def find_windows(text: str, find: str) -> str:
 def _pdf_text(raw: bytes) -> str:
     """Текст PDF — и ничего, кроме текста.
 
-    Разбор чистым питоном (pypdf): ни внешних программ, ни исполнения. Битый
-    или зашифрованный файл — это отказ с названной причиной, а не пустая
+    Извлечение через pdftotext -layout: внешняя программа, как в convert_file.
+    Битый или зашифрованный файл — это отказ с названной причиной, а не пустая
     строка: молчаливая пустота выглядела бы как «страница без содержания».
     """
-    import io as _io
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
 
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:  # pragma: no cover — зависимость есть в окружении
-        raise ValueError("PDF reading requires pypdf") from exc
-    try:
-        reader = PdfReader(_io.BytesIO(raw))
-        pages = [page.extract_text() or "" for page in reader.pages[:PDF_MAX_PAGES]]
-    except Exception as exc:  # noqa: BLE001 — чужой файл не роняет прогон
-        raise ValueError(f"PDF could not be read: {type(exc).__name__}") from None
-    text = chr(10).join(pages).strip()
+    with _tempfile.TemporaryDirectory(prefix="web_fetch_pdf_") as root:
+        src = _Path(root, "source.pdf")
+        src.write_bytes(raw)
+        out = _Path(root, "result.txt")
+        argv = ["pdftotext", "-layout", "-nopgbrk", "-f", "1", "-l", str(PDF_MAX_PAGES), str(src), str(out)]
+        try:
+            proc = subprocess.run(  # noqa: S603
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError(f"PDF could not be read: pdftotext timed out after {DEFAULT_TIMEOUT_SECONDS}s") from exc
+        except FileNotFoundError as exc:
+            raise ValueError("PDF could not be read: pdftotext not installed") from exc
+        if proc.returncode != 0:
+            raise ValueError(f"PDF could not be read: pdftotext exited {proc.returncode}")
+        text = out.read_text(encoding="utf-8", errors="replace").strip()
     if not text:
         return _ocr_scanned_pdf(raw)
     return text
