@@ -336,8 +336,11 @@ def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
 #: diff последним. 2026-09-22 16:15: показ ответа агенту режется на 6000 знаков,
 #: длинный diff стоял раньше вывода тестов — агент пять кругов не видел новой
 #: ошибки и чинил уже исправленную.
-_ORDER = ("verdict", "why", "applied", "errors", "tests_exit_code", "tests_output",
+_ORDER = ("verdict", "why", "applied", "where", "errors", "tests_exit_code", "tests_output",
           "full_exit_code", "full_output", "ruff", "files", "diff")
+#: «applied: True» читалось как «правка уже в файле»: агент писал добавку к своей прошлой попытке.
+_WHERE = ("a throwaway copy — no file on disk changed; every check starts again from the files "
+          "on disk, so the patch file must hold the WHOLE change against them")
 
 
 def _ordered(result: dict[str, Any]) -> dict[str, Any]:
@@ -414,7 +417,7 @@ class PatchCheckTool(Tool):
             files = list(dict.fromkeys(b["path"] for b in blocks))
             originals = {f: (copy / f).read_text(encoding="utf-8") if (copy / f).is_file() else "" for f in files}
             errors = apply_blocks(copy, blocks)
-            result: dict[str, Any] = {"applied": not errors, "errors": errors, "files": files}
+            result: dict[str, Any] = {"applied": not errors, "where": _WHERE, "errors": errors, "files": files}
             if errors:
                 return {**result, "verdict": "red", "why": "the patch did not apply"}
             result["diff"] = _diff(copy, originals)
