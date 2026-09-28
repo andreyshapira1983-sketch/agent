@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from core.evidence import ProvenanceChain, make_evidence
 from core.source_ranker import (
     is_realtime_question,
@@ -183,3 +185,34 @@ def test_rank_chain_reports_best_and_support_counts():
     payload = report.to_log_payload()
     assert payload["count"] == 2
     assert payload["best"]["kind"] == "file"
+
+
+@pytest.mark.parametrize(
+    ("url", "tier"),
+    [
+        ("https://www.anthropic.com/news/claude", "reputable"),
+        ("https://nvidianews.nvidia.com/news/open-agent-safety-platform", "reputable"),
+        ("https://www.bleepingcomputer.com/news/security/carbonato/", "reputable"),
+        ("https://thehackernews.com/2026/09/carbonato-botnet.html", "reputable"),
+        ("https://www.threatdown.com/blog/carbonato/", "reputable"),
+        ("https://techcrunch.com/2026/09/01/rl-environments/", "reputable"),
+        ("https://arstechnica.com/ai/2026/09/story/", "reputable"),
+        ("https://www.semanticscholar.org/paper/abc", "reputable"),
+        ("https://pypi.org/project/ruff/", "reputable"),
+        ("https://stackoverflow.com/questions/1/how", "blog_or_forum"),
+        ("https://news.ycombinator.com/item?id=1", "blog_or_forum"),
+        ("https://www.linkedin.com/posts/someone_report", "blog_or_forum"),
+        ("https://aitraining.jobs/roles/agentic-eval", "blog_or_forum"),
+        ("https://github.com/sheeeng/nvidia-openshell", "general_web"),
+        ("https://huggingface.co/someone/model", "general_web"),
+        ("https://docs.claude.com/en/docs/intro", "authoritative"),
+        ("https://www.cisa.gov/news-events/alerts", "authoritative"),
+    ],
+)
+def test_vetted_domains_get_their_tier(url: str, tier: str):
+    """Operator-vetted sites rank by kind: primary sources high, forums and aggregators low.
+
+    A whole-site rule cannot tell an official GitHub org from a fork, so github.com stays general.
+    """
+    rank = rank_evidence(_ev("web_page", f"web_page:{url}"), question="Что нового?", now=NOW)
+    assert rank.tier == tier

@@ -90,6 +90,16 @@ _REPUTABLE_DOMAINS = frozenset({
     "pubmed.ncbi.nlm.nih.gov",
     "ncbi.nlm.nih.gov",
     "plato.stanford.edu",
+    # Operator-vetted 28.09: primary AI, security and tech-news sources.
+    "anthropic.com",
+    "nvidia.com",
+    "bleepingcomputer.com",
+    "thehackernews.com",
+    "threatdown.com",
+    "techcrunch.com",
+    "arstechnica.com",
+    "semanticscholar.org",
+    "pypi.org",
     # Note: docs.python.org / developer.mozilla.org / learn.microsoft.com /
     # rfc-editor.org are deliberately NOT listed here — _is_official_domain()
     # below always classifies them as "authoritative" (score 1.00) first, so
@@ -103,6 +113,10 @@ _BLOG_OR_FORUM_DOMAINS = frozenset({
     "quora.com",
     "wordpress.com",
     "blogspot.com",
+    "stackoverflow.com",
+    "news.ycombinator.com",
+    "linkedin.com",
+    "aitraining.jobs",
 })
 
 _REALTIME_DOMAIN_HINTS = frozenset({
