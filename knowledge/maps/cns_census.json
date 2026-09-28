@@ -115,6 +115,11 @@
       "callers"
     ],
     "loop_memory_write.py::AgentLoopMemoryWrite._log_causal_observation": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._mark_replaced": [
+      "discovery",
+      "behavioral_test",
+      "mutation_bite"
+    ],
     "loop_memory_write.py::AgentLoopMemoryWrite._quarantine_conflicted_memory": [],
     "loop_memory_write.py::AgentLoopMemoryWrite._record_aborted_episode": [],
     "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory": [
@@ -489,6 +494,10 @@
       "loop_sensor.py::AgentLoopSensor._sensor_failed"
     ],
     [
+      "loop_memory_write.py::AgentLoopMemoryWrite._mark_replaced",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
+    ],
+    [
       "loop_memory_write.py::AgentLoopMemoryWrite._quarantine_conflicted_memory",
       "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
     ],
@@ -519,6 +528,10 @@
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
       "loop_memory_write.py::AgentLoopMemoryWrite._durable_learning_suppressed"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",
+      "loop_memory_write.py::AgentLoopMemoryWrite._mark_replaced"
     ],
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._remember_conclusion",

@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 282 modules across 12 groups._
+_Total: 283 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -182,6 +182,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/memory_consolidation` | Сверка нового вывода с памятью ПЕРЕД записью — фаза обновления Mem0. |
 | `core/memory_embeddings` | Поиск по смыслу для долговременной памяти: multilingual-e5-large-instruct. |
 | `core/cache_freshness` | Прошлый результат шага отдаётся вместо вызова, только если мир не мог измениться. |
+| `core/jev_judge` | Jev (TypeSafe System One): вероятность, что новый вывод заменяет каждый из прежних похожих. |
 | `core/ingestion` | Controlled document/code ingestion. |
 | `core/ingestion_reports` | Ingestion result types: what a file, web or RSS ingest run reports back. |
 | `core/ingestion_utils` | Ingestion helpers: workspace-confined path resolution, project file walking, and text chunking. |

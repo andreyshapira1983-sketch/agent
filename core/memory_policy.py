@@ -347,11 +347,13 @@ def _min_max(values: list[float]) -> list[float]:
 
 
 def _record_prompt_note(record: MemoryRecord) -> str:
+    replaced = (f"[superseded by {record.superseded_by}; the newer entry is current] "
+                if record.superseded_by else "")
     if not _is_readme_record(record):
-        return ""
+        return replaced
     if _is_live_status_record(record):
-        return "[historical README/reference; confirm with recent memory/logs before treating as current] "
-    return "[README architecture/reference] "
+        return replaced + "[historical README/reference; confirm with recent memory/logs before treating as current] "
+    return replaced + "[README architecture/reference] "
 
 
 @dataclass(frozen=True)

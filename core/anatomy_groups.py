@@ -67,6 +67,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "bilingual_terms", "topic_tokens",
         "memory_hygiene", "episodic_hygiene", "knowledge_use_policy", "knowledge_pipeline",
         "learned_conclusion", "self_knowledge", "memory_consolidation", "memory_embeddings", "cache_freshness",
+        "jev_judge",
         "ingestion", "ingestion_reports", "ingestion_utils",
         "structured_facts", "evidence", "evidence_classes", "evidence_budget",
         "conflict_review", "conflict_episode",
