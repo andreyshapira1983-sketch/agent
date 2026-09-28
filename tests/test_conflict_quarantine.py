@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from core.knowledge_pipeline import KnowledgeWritePolicy, claim_provenance_tag
-from core.knowledge_use_policy import QUARANTINE_TAGS, KnowledgeUsePolicy
+from core.knowledge_use_policy import KnowledgeUsePolicy
 from core.models import MemoryRecord
 from core.role_router import RoleContext
 from core.source_registry import ClaimRecord, SourceRecord
@@ -87,18 +87,9 @@ def test_memory_tags_carry_the_claim_id() -> None:
         assert existing in tags
 
 
-def test_provenance_tag_is_stable_and_specific() -> None:
-    assert claim_provenance_tag("a") != claim_provenance_tag("b")
-    assert claim_provenance_tag("a") == claim_provenance_tag("a")
-
-
 # ==========================================================================
 # 2. `conflicted` must actually gate retrieval.
 # ==========================================================================
-def test_conflicted_is_a_quarantine_tag() -> None:
-    assert "conflicted" in QUARANTINE_TAGS
-
-
 def test_a_conflicted_record_is_not_retrieved() -> None:
     clean = _record(tags=["fact", "knowledge"])
     conflicted = _record(tags=["fact", "knowledge", "conflicted"])

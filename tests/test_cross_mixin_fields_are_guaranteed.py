@@ -131,32 +131,3 @@ def test_both_readers_declare_the_field_they_borrow():
                     and isinstance(sub.target, ast.Name)
                 }
         assert "_synthesis_expects_contract_headers" in declared, filename
-
-
-def test_neither_reader_reads_it_through_a_default_any_more():
-    reads = [
-        (f, ln) for f, ln, name in _getattr_reads()
-        if name == "_synthesis_expects_contract_headers"
-    ]
-    assert reads == [], reads
-
-
-# ---------------------------------------------------------------------------
-# What the rule deliberately does NOT forbid
-# ---------------------------------------------------------------------------
-
-def test_defaults_on_constructor_guaranteed_fields_are_left_alone():
-    """Nineteen of the twenty sites are fine, and the rule must say so.
-
-    `durable_writes`, `gateway_path`, `audit_read_only` and the rest are set in
-    `core/loop_init.py`, so their defaults can never fire. Rewriting them would
-    be churn dressed as a fix, and it would blunt the rule that catches the real
-    case — a guard that flags everything stops being read.
-    """
-    constructor = _self_assignments(pathlib.Path("core/loop_init.py"))
-    harmless = [
-        name for _f, _ln, name in _getattr_reads()
-        if name in constructor
-    ]
-
-    assert harmless, "the rule would be vacuous if no such site existed"

@@ -17,13 +17,6 @@ class TestRiskAndIdentity:
 
 
 class TestRun:
-    def test_no_args_returns_dict(self):
-        result = CurrentTimeTool().run()
-        assert isinstance(result, dict)
-        for key in ("iso_utc", "iso_local", "unix", "weekday",
-                    "year", "month", "day"):
-            assert key in result
-
     def test_unknown_arg_rejected(self):
         with pytest.raises(PermissionError, match="no arguments"):
             CurrentTimeTool().run(when="now")
@@ -99,10 +92,12 @@ class TestValidateOutput:
 
 
 class TestRegistration:
-    def test_registered_in_main(self):
-        # main.py registers CurrentTimeTool — smoke check the import path.
-        from tools.current_time import CurrentTimeTool as Imported
-        assert Imported is CurrentTimeTool
+    def test_registered_in_build_agent(self, tmp_path):
+        """The production agent resolves current_time; without it the planner guesses the date."""
+        from app.bootstrap import build_agent
+
+        agent = build_agent(tmp_path, with_memory=False, with_persistent=False)
+        assert isinstance(agent.registry.get("current_time"), CurrentTimeTool)
 
     def test_safe_for_subagent(self):
         from core.subagent_runner import _SAFE_SUBAGENT_TOOLS

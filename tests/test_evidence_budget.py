@@ -101,13 +101,16 @@ def test_intent_shapes_selection():
 
 
 def test_cyrillic_keywords_work():
-    """Cyrillic question keywords must match Cyrillic content."""
-    text = (
-        "# Раздел о бюджете\n\nБюджет ограничивает количество вызовов LLM в час.\n\n"
-        + "# Other section\n\nThis is about something else entirely.\n\n" * 50
-    )
-    result = extract_relevant(text, question="как работает бюджет?", budget=3_000)
-    assert "бюджет" in result.lower()
+    """A Cyrillic question pulls its paragraph out of the middle of an over-budget file.
+
+    Mid-file and over budget: neither the early return nor the head+tail fallback keeps it.
+    """
+    filler = "This is about something else entirely.\n" * 50   # one paragraph, over budget
+    wanted = "Бюджет ограничивает количество вызовов LLM в час."
+    text = f"# Notes\n\n{filler}\n# Раздел о бюджете\n\n{wanted}\n\n{filler}"
+    result = extract_relevant(text, question="как работает бюджет?", budget=1_000)
+    assert len(text) > 1_000 and "INTENT-BUDGET" in result
+    assert wanted in result
 
 
 # ── budget_file_content ───────────────────────────────────────────────────────
@@ -149,9 +152,20 @@ def test_the_trim_notice_teaches_the_recovery_move(monkeypatch):
     assert "grep -n" not in budget_file_content("short", question="alpha")
 
 
-def test_budget_file_content_default_limit_is_sane():
-    """Default EVIDENCE_FILE_CHARS must be > 0 and < typical model context window."""
-    assert 1_000 < EVIDENCE_FILE_CHARS < 100_000
+def test_budget_file_content_default_limit_is_sane(monkeypatch):
+    """A file the default per-file ceiling keeps whole also passes the total and self-doc budgets.
+
+    A per-file ceiling above either would let a blunter cut undo the relevance extraction.
+    """
+    for name in ("AGENT_EVIDENCE_FILE_CHARS", "AGENT_EVIDENCE_TOTAL_CHARS",
+                 "AGENT_EVIDENCE_SELF_DOC_CHARS"):
+        monkeypatch.delenv(name, raising=False)
+    assert EVIDENCE_FILE_CHARS > 1_000
+    whole = "x" * EVIDENCE_FILE_CHARS
+    assert budget_file_content(whole, question="q") == whole
+    assert budget_file_content(whole, question="q", self_documentation=True) == whole
+    _, was_trimmed = apply_total_budget([("file:big.py", whole)])
+    assert not was_trimmed
 
 
 # ── apply_total_budget ────────────────────────────────────────────────────────

@@ -64,11 +64,12 @@ def _ledger_with_history(tmp_path: Path, action: str, *, units_per_row: int,
     return CampaignLedger(path=path)
 
 
-def _run(tmp_path: Path, ledger: CampaignLedger, action: str, execute, cap: int = 400):
+def _run(tmp_path: Path, ledger: CampaignLedger, action: str, execute, cap: int = 400,
+         max_cycles: int = 3):
     # Потолок задаётся ЯВНО: по умолчанию политика выключена (0) со слова
     # оператора 2026-09-01, но механизм обязан работать, когда его включают.
     return run_campaign(
-        CampaignConfig(goal="g", max_cycles=3, max_cost_units_per_signature=cap),
+        CampaignConfig(goal="g", max_cycles=max_cycles, max_cost_units_per_signature=cap),
         agent=SimpleNamespace(log=None),
         workspace=str(tmp_path),
         gather_signals=_Gather(action),
@@ -142,14 +143,19 @@ def test_a_zero_cost_signature_never_trips(tmp_path: Path) -> None:
 
 
 def test_the_capped_campaign_still_stops_not_spins(tmp_path: Path) -> None:
-    """Эскалация не крутится вечно: серия cost_cap останавливает кампанию."""
+    """Эскалация не крутится вечно: серия cost_cap останавливает кампанию до потолка циклов.
+
+    Потолок циклов выше серии простоя, иначе остановка по нему неотличима от своей.
+    """
     ledger = _ledger_with_history(tmp_path, "improve_x", units_per_row=200, rows=3)
     execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
 
-    result = _run(tmp_path, ledger, "improve_x", execute)
+    result = _run(tmp_path, ledger, "improve_x", execute, max_cycles=10)
 
-    assert result.status in ("stopped", "completed")
-    assert result.cycles_run <= 3
+    assert execute.calls == 0
+    assert result.status == "stopped"
+    assert result.stop_reason.startswith("cost_cap_stall"), result.stop_reason
+    assert result.cycles_run < 10
 
 
 def test_zero_cap_means_off_and_negative_is_rejected() -> None:

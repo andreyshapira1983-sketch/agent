@@ -138,32 +138,99 @@ def test_an_unparseable_row_is_counted_not_dropped(tmp_path: Path):
     )
 
 
-def test_the_task_view_reads_the_one_store():
-    """There is one queue now, and the view must not invent a second.
+def test_the_task_view_reads_the_one_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The view counts runtime_tasks.jsonl by status and lists its newest 20 tasks.
 
-    This test used to assert the opposite — that BOTH stores were returned —
-    because `agent_tick.py` read `data/task_queue.jsonl` while everything an
-    operator touched wrote `data/runtime_tasks.jsonl`. Showing one would have
-    let a reader conclude "nothing queued" while the other side was busy.
-
-    The stores were merged on 2026-08-05 and the second file deleted, so a
-    two-headed view would now report a permanent `missing` error about a store
-    that is gone on purpose — a viewer crying wolf is worse than no viewer.
+    Runs on a store it writes: an error answer from a missing data/ would prove nothing.
     """
     module = _module()
+    data = tmp_path / "data"
+    data.mkdir()
+    rows = [json.dumps({"id": f"t{i}", "status": "done"}) for i in range(21)]
+    rows.append(json.dumps({"_integrity": {"sig": "x"}, "payload": {
+        "id": "t21", "status": "failed", "attempts": 3, "last_error": "timeout"}}))
+    rows.append("not json")
+    (data / "runtime_tasks.jsonl").write_text(chr(10).join(rows) + chr(10), encoding="utf-8")
+    monkeypatch.setattr(module, "_DATA", data)
+
     view = module.task_queue()
+
+    assert "error" not in view, view
     assert "daemon" not in view and "repl_and_health" not in view, sorted(view)
-    assert view.get("store") == "runtime_tasks.jsonl" or "error" in view, view
+    assert view["store"] == "runtime_tasks.jsonl"
+    assert view["by_status"] == {"done": 21, "failed": 1}
+    assert view["unreadable_rows"] == 1
+    assert [t["id"] for t in view["tasks"]] == [f"t{i}" for i in range(2, 22)]
+    assert view["tasks"][-1]["last_error"] == "timeout"
 
 
 @pytest.mark.parametrize("tool", ["task_queue", "approval_inbox",
-                                  "recent_episodes", "run_journal",
-                                  "open_defects"])
-def test_every_tool_answers_without_raising(tool: str):
-    """A tool that raises inside an MCP call gives the caller a stack, not a fact."""
+                                  "recent_episodes", "run_journal"])
+def test_every_tool_names_a_missing_store(tool: str, tmp_path: Path,
+                                          monkeypatch: pytest.MonkeyPatch):
+    """With no data/ and no logs/, every view answers with a named `missing` error.
+
+    Raising hands an MCP caller a stack; an empty answer reads as "nothing there".
+    """
     module = _module()
+    monkeypatch.setattr(module, "_DATA", tmp_path / "data")
+    monkeypatch.setattr(module, "_LOGS", tmp_path / "logs")
+
     result = getattr(module, tool)()
-    assert isinstance(result, dict), (tool, type(result))
+
+    assert result.get("error") == "missing", (tool, result)
+
+
+def test_the_inbox_view_lists_only_pending_items(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch):
+    """Only `pending` items, unwrapped from their envelope, count as what the agent waits on."""
+    module = _module()
+    data = tmp_path / "data"
+    data.mkdir()
+    rows = [
+        {"_integrity": {"sig": "x"}, "payload": {
+            "id": "a1", "operation": "self_apply_lane.run", "summary": "wait",
+            "risk": "low", "status": "pending"}},
+        {"id": "a2", "status": "denied", "summary": "no"},
+        {"id": "a3", "status": "approved", "summary": "yes"},
+        {"id": "a4", "status": "pending", "summary": "also wait"},
+    ]
+    (data / "approval_inbox.jsonl").write_text(
+        "".join(json.dumps(r) + chr(10) for r in rows) + "broken" + chr(10),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_DATA", data)
+
+    view = module.approval_inbox()
+
+    assert view["pending_count"] == 2, view
+    assert view["total"] == 4
+    assert view["unreadable_rows"] == 1
+    assert [p["id"] for p in view["pending"]] == ["a1", "a4"]
+    assert view["pending"][0]["operation"] == "self_apply_lane.run"
+
+
+def test_the_episode_view_returns_the_newest_episodes(tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch):
+    """`limit` keeps the newest episodes, unwrapped; `total` still counts every one."""
+    module = _module()
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "episodic_memory.jsonl").write_text(
+        "".join(
+            json.dumps({"payload": {"id": f"e{i}", "question": f"q{i}", "outcome": "ok"}})
+            + chr(10)
+            for i in range(5)
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_DATA", data)
+
+    view = module.recent_episodes(limit=2)
+
+    assert view["total"] == 5
+    assert [e["id"] for e in view["episodes"]] == ["e3", "e4"]
+    assert view["episodes"][-1]["question"] == "q4"
 
 
 def test_the_transport_holds_no_logic_of_its_own():

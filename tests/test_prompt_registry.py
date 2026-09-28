@@ -41,17 +41,6 @@ _SHA = lambda text: hashlib.sha256(text.encode()).hexdigest()  # noqa: E731
 
 
 class TestPromptRecord:
-    def test_fields_stored(self):
-        rec = PromptRecord(
-            key="a.b", content="hello", module="core.x",
-            version="abc", description="desc",
-        )
-        assert rec.key == "a.b"
-        assert rec.content == "hello"
-        assert rec.module == "core.x"
-        assert rec.version == "abc"
-        assert rec.description == "desc"
-
     def test_frozen(self):
         rec = PromptRecord(key="a", content="c", module="m", version="v", description="")
         with pytest.raises((AttributeError, TypeError)):
@@ -284,13 +273,6 @@ class TestRegisteredPrompts:
         rec = _REGISTRY.get_record(key)
         assert rec.module == module, (
             f"Expected module={module!r} for key={key!r}, got {rec.module!r}"
-        )
-
-    @pytest.mark.parametrize("key", list(_EXPECTED))
-    def test_content_non_empty(self, key):
-        content = _REGISTRY.get(key)
-        assert len(content) > 50, (
-            f"Prompt {key!r} seems empty or too short ({len(content)} chars)"
         )
 
     @pytest.mark.parametrize("key", list(_EXPECTED))

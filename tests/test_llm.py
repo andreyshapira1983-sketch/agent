@@ -343,31 +343,24 @@ class TestUsageTracking:
         assert llm.last_usage["cache_hit_tokens"] is None
         assert llm.last_usage["cache_miss_tokens"] == 0
 
-    def test_continuation_chain_keeps_the_cache_numbers(self):
-        """Цепочка продолжений складывает кэш, а не теряет его.
+    def test_continuation_chain_keeps_the_cache_numbers(self, monkeypatch):
+        """Кэш всех отрезков продолжения доходит до итогового last_usage.
 
-        Так и случилось 2026-09-23: первая правка читала числа у поставщика,
-        все тесты были зелёные, а живой вызов отдавал None — потому что
-        сборщик продолжений пересоздавал last_usage из одних токенов.
-        Тест держит именно тот стык.
+        Итог цепочки `complete()` собирает заново, и кэш теряется именно там.
         """
-        llm = LLM(provider="mock")
-        # Два отрезка сообщили числа — должны сложиться.
-        hit, miss = LLM._agg_cache(None, None, {
-            "cache_hit_tokens": 9_000, "cache_miss_tokens": 300})
-        hit, miss = LLM._agg_cache(hit, miss, {
-            "cache_hit_tokens": 9_000, "cache_miss_tokens": 120})
-        assert (hit, miss) == (18_000, 420)
-        # Молчащий отрезок не обнуляет накопленное.
-        hit, miss = LLM._agg_cache(hit, miss, {
-            "cache_hit_tokens": None, "cache_miss_tokens": None})
-        assert (hit, miss) == (18_000, 420)
-        # Цепочка, где НИКТО не сообщил, остаётся «не измерено», а не нулём.
-        assert LLM._agg_cache(None, None, {}) == (None, None)
-        # И last_usage после сборки несёт оба поля.
-        llm._record_usage(1, 1)
-        assert "cache_hit_tokens" in llm.last_usage
-        assert "cache_miss_tokens" in llm.last_usage
+        monkeypatch.delenv("AGENT_AUTO_CONTINUE", raising=False)
+        monkeypatch.delenv("AGENT_MAX_CONTINUATIONS", raising=False)
+        llm = _scripted_openai_llm([
+            ("AAAA", 9_300, 5, "length",
+             {"prompt_cache_hit_tokens": 9_000, "prompt_cache_miss_tokens": 300}),
+            ("BBBB", 9_120, 4, "length",
+             {"prompt_cache_hit_tokens": 9_000, "prompt_cache_miss_tokens": 120}),
+            # Молчащий отрезок не обнуляет накопленное.
+            ("CCCC", 50, 3, "stop"),
+        ])
+        assert llm.complete(system="s", user="u") == "AAAABBBBCCCC"
+        assert llm.last_usage["cache_hit_tokens"] == 18_000
+        assert llm.last_usage["cache_miss_tokens"] == 420
 
     def test_record_usage_tolerates_bad_inputs(self):
         """Usage tracking must NEVER crash a real API call."""
@@ -504,11 +497,26 @@ class TestModelHelpers:
 # Provider client construction (no network — clients are lazy)
 # ============================================================
 
+def _decoy_every_key(monkeypatch):
+    """Give every provider's key variable its own value.
+
+    The SDKs fall back to their own variable when handed None, so only a set
+    neighbour variable shows a branch that reads the wrong one.
+    """
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN",
+                "DEEPSEEK_API_KEY", "LOCAL_LLM_API_KEY"):
+        monkeypatch.setenv(var, f"decoy-{var}")
+
+
 class TestBuildClient:
     def test_openai_client_built_with_key(self, monkeypatch):
+        """The OpenAI client carries OPENAI_API_KEY and the default endpoint."""
+        _decoy_every_key(monkeypatch)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         llm = LLM(provider="openai")
-        assert llm._client is not None
+        assert llm._client.api_key == "sk-test"
+        assert str(llm._client.base_url).startswith("https://api.openai.com/")
 
     def test_huggingface_client_built_with_token(self, monkeypatch):
         monkeypatch.setenv("HF_TOKEN", "hf-test")
@@ -518,9 +526,11 @@ class TestBuildClient:
         assert "huggingface" in str(getattr(llm._client, "base_url", ""))
 
     def test_anthropic_client_built_with_key(self, monkeypatch):
+        """The Anthropic client carries ANTHROPIC_API_KEY, not a neighbour's key."""
+        _decoy_every_key(monkeypatch)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         llm = LLM(provider="anthropic")
-        assert llm._client is not None
+        assert llm._client.api_key == "sk-ant-test"
 
 
 # ============================================================
@@ -811,9 +821,9 @@ class _ScriptedChoice:
 
 
 class _ScriptedOAIResponse:
-    def __init__(self, content, in_tok, out_tok, finish_reason):
+    def __init__(self, content, in_tok, out_tok, finish_reason, cache=None):
         self.choices = [_ScriptedChoice(content, finish_reason)]
-        self.usage = _Usage(prompt_tokens=in_tok, completion_tokens=out_tok)
+        self.usage = _Usage(prompt_tokens=in_tok, completion_tokens=out_tok, **(cache or {}))
 
 
 class _ScriptedCompletions:
@@ -823,8 +833,8 @@ class _ScriptedCompletions:
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        content, in_tok, out_tok, finish = self._script.pop(0)
-        return _ScriptedOAIResponse(content, in_tok, out_tok, finish)
+        content, in_tok, out_tok, finish, *cache = self._script.pop(0)
+        return _ScriptedOAIResponse(content, in_tok, out_tok, finish, *cache)
 
 
 class _ScriptedChat:

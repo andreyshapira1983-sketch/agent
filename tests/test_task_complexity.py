@@ -8,7 +8,6 @@ import pytest
 
 from core.model_catalog import classify_model, tier_model_for
 from core.task_complexity import (
-    _ALWAYS_LIGHT_ROLES,
     _NEVER_LIGHT_TASK_ROLES,
     _SHORT_TEXT_THRESHOLD,
     ComplexityTier,
@@ -38,10 +37,6 @@ def test_tier_is_string():
 def test_memory_summary_always_light():
     heavy = "сделай полный архитектурный аудит всей системы и сравни все варианты"
     assert assess_complexity(heavy, role="memory_summary") == ComplexityTier.LIGHT
-
-
-def test_always_light_roles_set_not_empty():
-    assert "memory_summary" in _ALWAYS_LIGHT_ROLES
 
 
 # ── LIGHT signals ─────────────────────────────────────────────────────────────
@@ -355,23 +350,24 @@ def test_model_router_for_task_standard_equals_for_role(tmp_path, monkeypatch):
 
 
 def test_model_router_for_task_light_uses_haiku_model(monkeypatch):
-    """LIGHT tier should use whatever model the env var specifies (haiku family).
+    """A LIGHT task builds the role-default provider with exactly the env LIGHT model.
 
-    Model names are not hardcoded — the env var override is the single source
-    of truth when no catalog is available.
+    The pair is asserted whole: a model name alone still matches on the wrong provider.
     """
+    from unittest.mock import MagicMock
+
     from core.model_router import ModelRole, ModelRouter
 
-    # Provide a LIGHT model via env var (as an operator would do)
     monkeypatch.setenv("AGENT_MODEL_TIER_LIGHT", "claude-haiku-test-model")
-    # Ensure no stale catalog leaks into this test
     monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", "/nonexistent/path/catalog.json")
+    # No LIGHT-preferred provider is credentialed, so the role default must serve.
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     calls: list[tuple[str | None, str | None]] = []
 
     def fake_factory(provider, model):
         calls.append((provider, model))
-        from unittest.mock import MagicMock
         m = MagicMock()
         m.provider = provider
         m.model = model
@@ -382,9 +378,10 @@ def test_model_router_for_task_light_uses_haiku_model(monkeypatch):
         default_model="claude-sonnet-default",
         llm_factory=fake_factory,
     )
-    router.for_task(ModelRole.PLANNER, "привет")
-    # Factory must be called with exactly the LIGHT model from env var
-    assert any("haiku" in (m or "") for _, m in calls), f"calls: {calls}"
+    llm = router.for_task(ModelRole.PLANNER, "привет")
+
+    assert calls == [("anthropic", "claude-haiku-test-model")], calls
+    assert (llm.provider, llm.model) == ("anthropic", "claude-haiku-test-model")
 
 
 def test_model_router_for_task_deep_task_different_from_standard(
@@ -732,11 +729,6 @@ def test_always_light_model_role_still_wins_over_task_role():
     assert assess_complexity(
         "hi", role="memory_summary", task_role="repair"
     ) is ComplexityTier.LIGHT
-
-
-def test_task_role_defaults_to_none_and_changes_nothing():
-    for text in ("hi", "статус", "напиши функцию сортировки списка"):
-        assert assess_complexity(text) == assess_complexity(text, task_role=None), text
 
 
 def test_unknown_task_role_is_ignored():

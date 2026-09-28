@@ -70,11 +70,10 @@ class TestContentHash:
     def test_deterministic(self):
         assert compute_content_hash("abc") == compute_content_hash("abc")
 
-    def test_unicode_stable(self):
-        a = compute_content_hash("Привет, мир!")
-        b = compute_content_hash("Привет, мир!")
-        assert a == b
-        assert len(a) == 64
+    def test_unicode_hashes_its_utf8_bytes(self):
+        """ASCII input cannot tell utf-8 from latin-1 or ascii with errors='replace'."""
+        text = "Привет, мир!"
+        assert compute_content_hash(text) == hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def test_different_inputs_different_hashes(self):
         assert compute_content_hash("a") != compute_content_hash("b")
@@ -543,16 +542,18 @@ class TestFactoryGenericFallback:
         assert ev.kind == "tool_output"
         assert "some_new_tool" in ev.obtained_via
 
-    def test_unknown_tool_with_unserialisable_none(self):
+    def test_unserialisable_output_becomes_a_placeholder_record(self):
+        """A raising __repr__ still leaves a tool_output record, so the chain keeps the call."""
         class Weird:
             def __repr__(self):
                 raise RuntimeError("boom")
         ev = evidence_from_tool_result(
             tool_name="new_tool", arguments={}, output=Weird(),
         )
-        # Either None or generic tool_output — both are acceptable
-        # as long as the factory does NOT raise.
-        assert ev is None or ev.kind == "tool_output"
+        assert ev is not None
+        assert ev.kind == "tool_output"
+        assert ev.obtained_via == "new_tool"
+        assert ev.excerpt == "<unserialisable tool output>"
 
 
 # ============================================================

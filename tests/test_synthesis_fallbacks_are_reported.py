@@ -35,6 +35,8 @@ from typing import Any
 import core.loop  # noqa: F401 — populates the prompt registry, see below
 from core.answer_format import SYSTEM_ANSWER, output_contract_requires_headers
 from core.loop_synthesis import AgentLoopSynthesis, SynthesisState
+from core.planner import PlannerOutput
+from core.task_complexity import ComplexityTier
 
 
 class _Log:
@@ -165,7 +167,8 @@ def test_a_healthy_registry_reports_nothing():
 def _state(**kw) -> SynthesisState:
     base: dict[str, Any] = {
         "goal": None, "user_question": "q", "file_hint": None, "artifacts": {},
-        "planner_out": None, "plan": None, "history": "", "persistent_block": "", "spend_block": "",
+        "planner_out": PlannerOutput(reasoning="", sources=[], raw_response=""),
+        "plan": None, "history": "", "persistent_block": "", "spend_block": "",
         "failure_history": [], "replan_exhausted": False,
         "cheap_path_active": True, "local_critique_active": False,
         "_task_synth_llm": "NORMAL-MODEL", "_cp": None,
@@ -177,39 +180,47 @@ def _state(**kw) -> SynthesisState:
 class _Router:
     def __init__(self, *, explode: bool) -> None:
         self.explode = explode
+        self.tiers: list[Any] = []
 
-    def for_task(self, *a, **kw):
+    def for_task(self, *a, force_tier=None, **kw):
+        self.tiers.append(force_tier)
         if self.explode:
             raise RuntimeError("no LIGHT tier available")
         return "CHEAP-MODEL"
 
 
-def _select_tier(agent: _Agent, st: SynthesisState):
-    """The tier branch alone — the ladder below it needs a live synthesiser."""
-    from core.model_router import ModelRole
-    from core.task_complexity import ComplexityTier
+class _NoTools:
+    def get(self, name):
+        raise KeyError(name)
 
-    llm = st._task_synth_llm
-    if st.cheap_path_active:
-        try:
-            llm = agent.model_router.for_task(
-                ModelRole.SYNTHESIZER, st.user_question,
-                force_tier=ComplexityTier.LIGHT,
-            )
-            agent.log.log("cheap_path_synth_model")
-        except Exception as exc:  # noqa: BLE001 - mirrors the handler under test
-            llm = st._task_synth_llm
-            agent._sensor_failed("cheap_path_model_tier", exc)
-    return llm
+
+def _synthesizer_model(agent: _Agent, st: SynthesisState) -> Any:
+    """Run the real `_run_synthesizer_ladder`; return the model handed to the synthesiser.
+
+    Only `_synthesize` is stubbed, so the tier branch under test is the shipped one.
+    """
+    handed: list[Any] = []
+
+    def synthesize(**kw):
+        handed.append(kw["llm"])
+        return "answer"
+
+    agent._synthesize = synthesize
+    agent.registry = _NoTools()
+    agent._run_synthesizer_ladder(st)
+    assert st.draft_answer == "answer", "the ladder degraded: the stub setup is incomplete"
+    return handed[0]
 
 
 def test_a_healthy_cheap_tier_logs_the_model_it_picked():
+    """The LIGHT-tier model is logged and is the one that actually synthesises."""
     agent = _Agent()
     agent.model_router = _Router(explode=False)
 
-    llm = _select_tier(agent, _state())
+    llm = _synthesizer_model(agent, _state())
 
     assert llm == "CHEAP-MODEL"
+    assert agent.model_router.tiers == [ComplexityTier.LIGHT]
     assert "cheap_path_synth_model" in agent.log.events
     assert agent.sensor_failures == []
 
@@ -223,7 +234,7 @@ def test_a_failed_cheap_tier_is_reported_and_still_answers():
     agent = _Agent()
     agent.model_router = _Router(explode=True)
 
-    llm = _select_tier(agent, _state())
+    llm = _synthesizer_model(agent, _state())
 
     assert llm == "NORMAL-MODEL", "falling back to the normal model must stay"
     assert "cheap_path_synth_model" not in agent.log.events
@@ -235,9 +246,10 @@ def test_a_turn_that_never_took_the_cheap_path_reports_nothing():
     agent = _Agent()
     agent.model_router = _Router(explode=True)
 
-    llm = _select_tier(agent, _state(cheap_path_active=False))
+    llm = _synthesizer_model(agent, _state(cheap_path_active=False))
 
     assert llm == "NORMAL-MODEL"
+    assert agent.model_router.tiers == [], "a normal turn must not consult the cheap tier"
     assert "cheap_path_synth_model" not in agent.log.events
     assert agent.sensor_failures == []
 

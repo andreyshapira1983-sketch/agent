@@ -116,20 +116,27 @@ def test_without_a_generator_in_the_workspace_the_old_canned_row_still_lands(tmp
     assert "| `core/a_helpers` | Extracted from `core/a` by autonomous self-build module split. |" in doc
 
 
-def test_an_unrenderable_tree_leaves_the_map_alone_for_the_guard_to_name(tmp_path):
-    """Groups that do not cover the new module: no invented row, no crash."""
+def test_an_unrenderable_tree_gets_the_canned_row_and_no_total(tmp_path):
+    """Groups that miss the source module: canned row only, no invented group, no total.
+
+    The generator refuses such a tree; any total written here would be a guess.
+    """
     from core.self_build_producer import _sync_anatomy_index
 
     ws = _sandbox(tmp_path)
+    (ws / "core" / "anatomy_groups.py").write_text(
+        _GROUPS.replace('        "a",\n', ""), encoding="utf-8")
     (ws / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text("# map\n", encoding="utf-8")
     build = {"files": [{"path": "core/a.py", "content": _A}, {"path": "core/a_helpers.py", "content": _A_HELPERS}]}
 
     _sync_anatomy_index(build, "core/a.py", _reader(ws), workspace=ws)
 
-    paths = [f["path"] for f in build["files"]]
-    # The canned fallback still runs when rendering fails, so a row is added —
-    # but never a lie about the total: the canned row is the pre-2026-09-04 behaviour.
-    assert "knowledge/generated/AGENT_ANATOMY.md" in paths
+    carried = {f["path"]: f["content"] for f in build["files"]}
+    assert "core/anatomy_groups.py" not in carried
+    assert carried["knowledge/generated/AGENT_ANATOMY.md"] == (
+        "# map\n\n"
+        "| `core/a_helpers` | Extracted from `core/a` by autonomous self-build module split. |\n"
+    )
 
 
 def test_the_live_generator_exposes_the_three_hooks():

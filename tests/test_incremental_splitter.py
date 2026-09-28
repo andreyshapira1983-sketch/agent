@@ -51,20 +51,20 @@ def test_refuses_unparseable_target(workspace: Path):
     assert "cannot parse" in plan.reason
 
 
-def test_no_split_when_everything_depends_on_module_state(workspace: Path):
+def test_module_state_moves_together_with_its_reader_and_writer(workspace: Path):
+    """STATE, read and write move as one group.
+
+    Moving read/write without STATE would leave them pointing at a name left behind.
+    """
     src = (
         "STATE = {}\n\n\n"
         "def read():\n    return STATE\n\n\n"
         "def write(k, v):\n    STATE[k] = v\n"
     )
-    # read/write depend on STATE; STATE is a lone constant -- nothing movable
-    # as a self-contained group without it, and a lone constant is refused.
     _write(workspace, "core/stateful.py", src)
     plan = plan_incremental_split(workspace, "core/stateful.py")
-    # Either the whole trio moves together (valid) or nothing does; both are
-    # safe. What is FORBIDDEN is a partial move that breaks references.
-    if plan.status == "planned":
-        assert set(plan.step.moved_names) >= {"STATE", "read", "write"}
+    assert plan.status == "planned", plan.reason
+    assert plan.step.moved_names == ["STATE", "read", "write"]
 
 
 # ── function mode ────────────────────────────────────────────────────────────
@@ -148,13 +148,17 @@ def test_function_split_shrinks_target(workspace: Path):
 
 
 def test_function_split_respects_line_budget(workspace: Path):
-    big_fn = "def big():\n" + "\n".join(f"    x{i} = {i}" for i in range(500)) + "\n"
-    small_fn = "def small():\n    return 1\n"
+    """The function over max_move_lines stays home; the small one still moves.
+
+    big() fits the default budget, so only max_move_lines keeps it out of the step.
+    """
+    big_fn = "def big():\n" + "\n".join(f"    x{i} = {i}" for i in range(120)) + "\n"
+    small_fn = "def small():\n" + "".join(f"    y{i} = {i}\n" for i in range(8)) + "    return y0\n"
     _write(workspace, "core/mix.py", big_fn + "\n\n" + small_fn)
     plan = plan_incremental_split(workspace, "core/mix.py", max_move_lines=50)
-    if plan.status == "planned":
-        assert plan.step.lines_moved <= 50
-        assert "big" not in plan.step.moved_names
+    assert plan.status == "planned", plan.reason
+    assert plan.step.moved_names == ["small"]
+    assert plan.step.lines_moved <= 50
 
 
 def test_function_split_skips_globals_users(workspace: Path):

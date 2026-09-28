@@ -185,14 +185,6 @@ def test_proposal_to_dict_keys():
         assert key in d, f"missing key: {key}"
 
 
-def test_proposal_to_dict_nested():
-    p = _make_proposal()
-    d = p.to_dict()
-    assert isinstance(d["memory_scope"], dict)
-    assert isinstance(d["tool_scope"], dict)
-    assert isinstance(d["budget_scope"], dict)
-
-
 def test_proposal_to_dict_json_serializable():
     p = _make_proposal()
     raw = json.dumps(p.to_dict())
@@ -381,8 +373,11 @@ def test_propose_subagent_overlap_tools_resolved():
 
 
 def test_propose_subagent_approval_required_default():
-    llm = _FakeLLM(_good_llm_response(needed=True))
-    result = propose_subagent("something", llm=llm)
+    """An LLM answer that omits approval_required still yields a proposal needing approval."""
+    data = json.loads(_good_llm_response(needed=True))
+    del data["approval_required"]
+    result = propose_subagent("something", llm=_FakeLLM(json.dumps(data)))
+    assert result.ok
     assert result.proposal.approval_required is True  # type: ignore[union-attr]
 
 

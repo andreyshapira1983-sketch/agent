@@ -31,11 +31,13 @@ def test_newer_beats_older(newer, older):
 # ── max() over real catalog data returns the correct model ────────────────────
 
 def test_max_openai_deep():
-    """o4-mini-2025-04-16 should beat o1-2024-12-17 and o3-mini-2025-01-31."""
+    """o4-mini-2025-04-16 beats o1, o3-mini and the same-date o3.
+
+    The major version ranks first in the key: 4 > 3 whatever the date or suffix.
+    """
     candidates = ["o1-2024-12-17", "o3-mini-2025-01-31", "o4-mini-2025-04-16", "o3-2025-04-16"]
     best = max(candidates, key=_model_recency_key)
-    # o4-mini and o3 both have 2025-04-16 — o4 > o3 lexicographically as fallback
-    assert best in {"o4-mini-2025-04-16", "o3-2025-04-16"}
+    assert best == "o4-mini-2025-04-16"
 
 
 def test_max_anthropic_deep():
@@ -69,11 +71,6 @@ def test_max_anthropic_standard():
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────
-
-def test_single_candidate():
-    candidates = ["gpt-4o-mini"]
-    assert max(candidates, key=_model_recency_key) == "gpt-4o-mini"
-
 
 def test_no_date_no_version_fallback():
     """Pure lexicographic fallback when no date or version in name."""

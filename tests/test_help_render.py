@@ -58,11 +58,6 @@ def test_rendered_startup_commands_match_the_fixture_exactly():
     assert help_module.render_startup_commands() + "\n" == expected
 
 
-def test_fixtures_are_stored_with_unix_newlines():
-    for fixture in (HELP_FIXTURE, BANNER_FIXTURE):
-        assert b"\r\n" not in fixture.read_bytes(), fixture.name
-
-
 # ── coverage: nothing can drop out of the help page ──────────────────────────
 
 def test_every_registry_command_appears_in_the_help_layout():

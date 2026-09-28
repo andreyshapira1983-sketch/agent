@@ -28,10 +28,6 @@ def _load_module():
     return mod
 
 
-def test_script_file_exists():
-    assert os.path.isfile(_SCRIPT)
-
-
 # ── the parity contract ──────────────────────────────────────────────────────
 
 def test_every_registry_command_is_documented():
@@ -102,12 +98,15 @@ def test_standalone_token_not_satisfied_by_substring():
 
 # ── drift is detectable in both directions ───────────────────────────────────
 
-def test_a_command_missing_from_the_document_is_detectable():
+def test_a_command_missing_from_the_document_is_detectable(monkeypatch):
+    """A one-row map leaves every other registry command undocumented, and main() goes red."""
     mod = _load_module()
-    registry = mod.registry_commands()
-    documented = mod.documented_commands("| `:clear` | x |\n")
-    assert registry - documented, "set math must flag undocumented commands"
-    assert ":clear" not in (registry - documented)
+    monkeypatch.setattr(mod, "_read", lambda _path: "| `:clear` | x |\n")
+    expected = sorted(mod.registry_commands() - {":clear"})
+    assert expected and ":clear" in mod.registry_commands()
+    assert mod.undocumented_commands() == expected
+    assert mod.unknown_documented_commands() == []
+    assert mod.main() == 1
 
 
 def test_a_documented_command_the_registry_lacks_is_detectable():
