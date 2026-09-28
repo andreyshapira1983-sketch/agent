@@ -257,7 +257,7 @@ the repository take exactly that and nothing else:
 | consumer | decision | partition over {0,1,2,3} |
 | --- | --- | --- |
 | `scripts/selfcheck.ps1:26` | `$ok = ($code -eq 0)` | `[[0], [1,2,3]]` |
-| `tests/characterization/test_main_public_surface.py:154` | `assert result.returncode == 2` | `[[0,1,3], [2]]` |
+| `tests/characterization/test_main_public_surface.py:134` | `assert result.returncode == 2` | `[[0,1,3], [2]]` |
 
 Same projection, and **neither partition refines the other** — one merges 2 with 1
 and 3, the other merges 0 with 1 and 3. A partition is therefore not determined by
