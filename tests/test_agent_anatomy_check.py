@@ -45,10 +45,6 @@ def _load_generator():
     return mod
 
 
-def test_script_file_exists():
-    assert os.path.isfile(_SCRIPT)
-
-
 def test_core_modules_excludes_init():
     mod = _load_module()
     names = mod._core_modules()
@@ -70,14 +66,23 @@ def test_doc_and_core_are_in_sync():
     assert mod.main() == 0
 
 
-def test_drift_is_detectable_via_set_math():
-    # Pure-logic proof that a missing module would be flagged, without editing
-    # any real file: the check is set difference between core/ and documented.
+def test_main_flags_a_core_module_missing_from_the_map(tmp_path, monkeypatch, capsys):
+    """A map that omits one core/ module makes main() exit 1 and name it.
+
+    The map is a planted copy, so no real file is edited.
+    """
     mod = _load_module()
-    actual = mod._core_modules()
-    documented = mod._documented_modules("core/loop only")
-    missing = actual - documented
-    assert "planner" in missing  # present in core/, absent from this fake doc
+    doc = tmp_path / "AGENT_ANATOMY.md"
+    listed = sorted(mod._core_modules() - {"planner"})
+    doc.write_text(" ".join(f"core/{name}" for name in listed), encoding="utf-8")
+    monkeypatch.setattr(mod, "DOC_PATH", str(doc))
+
+    assert mod.main() == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "MISSING from knowledge/generated/AGENT_ANATOMY.md (1):" in lines
+    assert "  - core/planner" in lines
+    assert "RESULT: OUT OF SYNC - update knowledge/generated/AGENT_ANATOMY.md." in lines
 
 
 # ── The generator, and the equality nobody was checking ──────────────────────

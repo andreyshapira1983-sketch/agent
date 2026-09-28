@@ -87,41 +87,25 @@ def _replay_episodes(store: EpisodicMemoryStore) -> list[EpisodeRecord]:
 # ─────────────────────────────── MIR-002 ────────────────────────────────────
 
 def test_mir002_1_ungrounded_quality1_episode_must_not_fast_path(workspace: Path):
-    """(1) An UNVERIFIED answer with quality=1.0 (empty evidence chain) must NOT
-    be replayed by the fast-path. On current code it is (gate = quality>=0.70)."""
+    """(1) An evidence-free answer is not replayed even when admitted and declared achieved.
+
+    Seeded as admitted so the quality gate, not the eligibility gate, must refuse it.
+    """
     loop, events, store = _make_loop(workspace)
     ungrounded = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Sydney.",
         tools_used=[], source_labels=[],
-        verified_chunks=0, unverified_chunks=0,  # -> quality 1.0, outcome success
+        verified_chunks=0, unverified_chunks=0,  # empty chain: nothing was measured
+        usage_eligible=True,
+        declared_completion="achieved",
     )
     store.save(ungrounded)
 
     loop.run(_Q)
 
     assert not _fast_path_fired(events), (
-        "fast-path replayed an UNVERIFIED (quality=1.0) answer — it must require "
-        "an explicit verification_status==verified"
-    )
-
-
-def test_mir002_2_verifier_error_episode_must_not_fast_path(workspace: Path):
-    """(2) An episode produced when the verifier itself threw (soft-fail:
-    verified=0/unverified=0/fully_unverified=False → quality 1.0) must NOT be
-    treated as verified and must NOT fast-path."""
-    loop, events, store = _make_loop(workspace)
-    verifier_errored = episode_from_agent_cycle(
-        goal="answer", question=_Q, answer="Sydney.",
-        tools_used=[], source_labels=[],
-        verified_chunks=0, unverified_chunks=0,  # the soft-fail shape (loop.py:1533)
-    )
-    store.save(verifier_errored)
-
-    loop.run(_Q)
-
-    assert not _fast_path_fired(events), (
-        "fast-path replayed an answer whose verification never ran (verifier "
-        "error) — verifier_error must not count as verified"
+        "fast-path replayed an answer with an empty evidence chain — an unmeasured "
+        "answer must not count as quality 1.0"
     )
 
 
@@ -182,14 +166,17 @@ def test_mir041_4_replay_must_not_be_recorded_verified(workspace: Path):
 
 
 def test_mir041_5_replay_episode_must_not_be_fast_path_candidate(workspace: Path):
-    """(5) A replay-banked episode must not itself become a fast-path source. A
-    record shaped like a replay (a `memory:<id>` source label, no tools) must be
-    rejected by the gate."""
+    """(5) A replay-shaped record (`memory:<id>` source) is refused even when it claims success.
+
+    Shaped as the MIR-041 defect banked replays (verified chunk, achieved), so the
+    memory-provenance rule of admission is the only gate left to refuse it.
+    """
     loop, events, store = _make_loop(workspace)
     replay_shaped = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Sydney.",
         tools_used=[], source_labels=["memory:ep_prev"],  # a prior replay
         verified_chunks=1, unverified_chunks=0,
+        declared_completion="achieved",  # usage_eligible left to admission
     )
     store.save(replay_shaped)
 
@@ -202,20 +189,24 @@ def test_mir041_5_replay_episode_must_not_be_fast_path_candidate(workspace: Path
 
 
 def test_mir041_6_repeated_asks_must_not_self_reinforce_verified_chain(workspace: Path):
-    """(6) Repeated near-identical asks must not grow a self-reinforcing chain of
-    verified-success episodes. Only the one genuinely-evidenced source may remain
-    a 'verified' record."""
-    loop, _events, store = _make_loop(workspace)
+    """(6) Repeated asks served from memory leave exactly one verified-success record.
+
+    The source is admitted as in test 4, so every ask really replays it.
+    """
+    loop, events, store = _make_loop(workspace)
     source = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
         tools_used=[], source_labels=["file:atlas.txt"],
         verified_chunks=3, unverified_chunks=0,
+        usage_eligible=True,
+        declared_completion="achieved",
     )
     store.save(source)
 
     for _ in range(3):
         loop.run(_Q)
 
+    assert events.count("episodic_fast_path") == 3, "every ask should replay the source"
     verified_success = [
         ep for ep in store.load()
         if ep.outcome == "success" and ep.verified_chunks >= 1

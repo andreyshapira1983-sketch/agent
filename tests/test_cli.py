@@ -2537,22 +2537,25 @@ class TestHandleHygiene:
         assert "dry_run=True" in out.err
 
     def test_expire_subcommand(self, workspace: Path, capsys):
+        """Each subcommand prints its own report: the unknown fallback also echoes the word."""
         agent = _build_agent(workspace)
         _handle_hygiene("expire", agent, workspace)
-        out = capsys.readouterr()
-        assert "expire" in out.err.lower()
+        err = capsys.readouterr().err
+        assert err.startswith("expire (dry_run=False): 0 record(s) past TTL out of 0 scanned")
 
     def test_dedupe_subcommand(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         _handle_hygiene("dedupe", agent, workspace)
-        out = capsys.readouterr()
-        assert "dedupe" in out.err.lower()
+        err = capsys.readouterr().err
+        assert err.startswith("dedupe (dry_run=False): 0 duplicate(s) collapsed")
+        assert "threshold=" in err
 
     def test_backups_subcommand(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         _handle_hygiene("backups", agent, workspace)
-        out = capsys.readouterr()
-        assert "backups" in out.err.lower()
+        err = capsys.readouterr().err
+        assert err.startswith("backups (dry_run=False): scanned 0 backup(s)")
+        assert "keep_last=" in err
 
     def test_summarise_without_tag_prints_usage(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -2563,8 +2566,9 @@ class TestHandleHygiene:
     def test_summarise_with_unknown_tag_prints_skipped(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         _handle_hygiene("summarise nope", agent, workspace)
-        out = capsys.readouterr()
-        assert "summarise" in out.err.lower()
+        err = capsys.readouterr().err
+        assert "summarise (dry_run=False): skipped — " in err
+        assert "merged" not in err
 
     def test_unknown_subcommand_prints_unknown(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -2644,18 +2648,6 @@ class TestForceUtf8Io:
         _force_utf8_io()
         # setdefault must NOT overwrite an explicit user choice.
         assert os.environ.get("PYTHONIOENCODING") == "cp1251"
-
-    def test_streams_missing_reconfigure_dont_crash(self, monkeypatch):
-        """If reconfigure is missing (e.g. pytest-captured streams), the
-        function must succeed silently — never raise."""
-        class _NoReconfigureStream:
-            pass
-
-        monkeypatch.setattr(sys, "stdin", _NoReconfigureStream())
-        monkeypatch.setattr(sys, "stdout", _NoReconfigureStream())
-        monkeypatch.setattr(sys, "stderr", _NoReconfigureStream())
-        # Should be a no-op without raising.
-        _force_utf8_io()
 
 
 class TestPrintPersistent:

@@ -9,13 +9,25 @@ Specifically tests:
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+import pytest
+
 from core.self_repair import (
     _DEFAULT_MIN_REPAIR_CONFIDENCE as MIN_REPAIR_CONFIDENCE,
 )
 from core.self_repair import (
     RepairProposal,
     RepairReport,
+    SelfRepairController,
     _extract_pass_count,
+)
+from tests.test_self_repair_controller_branches import (
+    _BASELINE_RED,
+    _FakeAgent,
+    _proposal,
+    _success_tool_outputs,
 )
 
 # ---------------------------------------------------------------------------
@@ -96,37 +108,55 @@ class TestRepairReportMeasuredConfidence:
 # Confidence arithmetic
 # ---------------------------------------------------------------------------
 
+def _post(passed: int, failed: int = 0) -> dict[str, Any]:
+    return {
+        "timed_out": False, "exit_code": 1 if failed else 0,
+        "passed": passed, "failed": failed, "errors": 0,
+    }
+
+
 class TestMeasuredConfidenceArithmetic:
     """Validate the measured_confidence = post / max(baseline, 1) formula."""
 
-    def test_full_recovery_gives_one(self):
-        baseline = 100
-        post = 100
-        assert post / max(baseline, 1) == 1.0
+    @pytest.mark.parametrize(
+        ("baseline_passed", "post", "measured", "status", "gated"),
+        [
+            pytest.param(100, _post(100), 1.0, "repaired", False,
+                         id="full_recovery_gives_one"),
+            pytest.param(100, _post(50, failed=50), 0.5, "rolled_back", True,
+                         id="regression_gives_less_than_one"),
+            pytest.param(0, _post(5), 5.0, "repaired", False,
+                         id="zero_baseline_uses_one"),
+            pytest.param(100, _post(70), 0.7, "repaired", False,
+                         id="measured_above_threshold_considered_ok"),
+            pytest.param(100, _post(50), 0.5, "rolled_back", True,
+                         id="measured_below_threshold_considered_failing"),
+        ],
+    )
+    def test_controller_run_measures_and_gates(
+        self, tmp_path: Path, baseline_passed: int, post: dict[str, Any],
+        measured: float, status: str, gated: bool,
+    ):
+        """run() reports post/max(baseline, 1) and rolls back below the threshold.
 
-    def test_regression_gives_less_than_one(self):
-        baseline = 100
-        post = 50
-        assert post / max(baseline, 1) == 0.5
+        The green-post 0.5 case is the one only this gate stops: tests that
+        vanished after the patch still exit 0.
+        """
+        outputs = _success_tool_outputs()
+        outputs["run_tests"] = {"outputs": [
+            {"output": {**_BASELINE_RED, "passed": baseline_passed}},
+            {"output": post},
+        ]}
+        agent = _FakeAgent(tool_outputs=outputs)
 
-    def test_zero_baseline_uses_one(self):
-        """When baseline has zero passing tests (edge case), use 1 as denominator."""
-        baseline = 0
-        post = 5
-        measured = post / max(baseline, 1)
-        assert measured == 5.0  # improvement over nothing
+        report = SelfRepairController(agent, workspace_root=tmp_path).run(_proposal())
+
+        assert report.measured_confidence == measured
+        assert report.status == status
+        gate = [s for s in report.steps if s.name == "measured_confidence_gate"]
+        assert [s.status for s in gate] == (["blocked"] if gated else [])
+        written = [p.id for p in agent.compensation_log]
+        assert agent.rolled_back_plan_ids == (written if status == "rolled_back" else [])
 
     def test_min_repair_confidence_threshold_is_60_percent(self):
         assert MIN_REPAIR_CONFIDENCE == 0.60
-
-    def test_measured_above_threshold_considered_ok(self):
-        baseline = 100
-        post = 70
-        measured = post / max(baseline, 1)  # 0.70
-        assert measured >= MIN_REPAIR_CONFIDENCE
-
-    def test_measured_below_threshold_considered_failing(self):
-        baseline = 100
-        post = 50
-        measured = post / max(baseline, 1)  # 0.50
-        assert measured < MIN_REPAIR_CONFIDENCE
