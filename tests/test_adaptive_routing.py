@@ -4,7 +4,7 @@ Verifies that:
 1. LLMPlanner.plan() uses the llm= override when supplied.
 2. AgentLoop._synthesize() uses the llm= override when supplied.
 3. AgentLoop.run() calls model_router.for_task() and logs adaptive_route.
-4. for_task() falls back gracefully when no tier model is found.
+4. for_task() prices a call by the resolved model's registry cost tier.
 5. assess_complexity() correctly classifies LIGHT / STANDARD / DEEP.
 """
 from __future__ import annotations
@@ -544,29 +544,7 @@ class TestRoutingFailureIsVisible:
         assert [e for e in events if e.get("type") == "adaptive_route"]
 
 
-# ── 4. for_task() fallback when no tier model found ──────────────────────────
-
-class TestForTaskFallback:
-    def test_falls_back_to_for_role_when_no_tier_model(self, tmp_path: Path):
-        """If tier_model_for() returns None, for_task() falls back to for_role()."""
-        fake_llm = FakeLLM()
-        router = ModelRouter.single(fake_llm)
-
-        with patch("core.model_catalog.tier_model_for", return_value=None):
-            result = router.for_task(ModelRole.PLANNER, "разработай с нуля архитектуру")
-
-        # Should return the same object as for_role() (no crash)
-        assert result is not None
-
-    def test_for_task_standard_tier_reuses_for_role(self, tmp_path: Path):
-        """STANDARD tier must call for_role() directly (fast path, no catalog)."""
-        fake_llm = FakeLLM()
-        router = ModelRouter.single(fake_llm)
-
-        # A plain question → STANDARD tier → for_role() path (no catalog query)
-        result = router.for_task(ModelRole.SYNTHESIZER, "объясни что такое GIL")
-        assert result is not None
-
+# ── 4. for_task() cost tier ──────────────────────────────────────────────────
 
 class TestForTaskCostTier:
     def test_for_task_records_registry_cost_tier_not_complexity_name(self, tmp_path: Path):

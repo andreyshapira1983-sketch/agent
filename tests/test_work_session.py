@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from core.approval import AutoApprover
+from core.autonomous_runtime_types import AutonomousRunReport, AutonomousTask, AutonomousTaskReport
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
@@ -20,6 +22,7 @@ from core.work_session import (
     WorkSessionConfig,
     WorkSessionCycleReport,
     WorkSessionResult,
+    _log,
     run_work_session,
 )
 from tests.conftest import FakeLLM
@@ -69,20 +72,6 @@ class TestWorkSessionConfig:
         assert cfg.max_cycles == 3
         assert cfg.report_every == 1
 
-    def test_custom_values(self):
-        cfg = WorkSessionConfig(
-            goal="learn sources",
-            dry_run=False,
-            minutes=30.0,
-            max_cycles=5,
-            report_every=2,
-        )
-        assert cfg.goal == "learn sources"
-        assert cfg.dry_run is False
-        assert cfg.minutes == 30.0
-        assert cfg.max_cycles == 5
-        assert cfg.report_every == 2
-
     def test_frozen(self):
         cfg = WorkSessionConfig()
         with pytest.raises((AttributeError, TypeError)):
@@ -121,10 +110,6 @@ class TestWorkSessionCycleReport:
         assert d["cycle"] == 1
         assert d["run_status"] == "completed"
 
-    def test_to_dict_is_json_serializable(self):
-        cr = WorkSessionCycleReport(cycle=2, run_status="stopped", tasks_done=0, tasks_failed=1, elapsed_s=1.23)
-        json.dumps(cr.to_dict())  # must not raise
-
     def test_user_summary_contains_cycle(self):
         cr = WorkSessionCycleReport(cycle=3, run_status="completed", tasks_done=1, tasks_failed=0, elapsed_s=0.1)
         s = cr.user_summary()
@@ -152,10 +137,6 @@ class TestWorkSessionResult:
         r = self._make()
         d = r.to_dict()
         assert set(d) >= {"status", "goal", "dry_run", "cycles_run", "stop_reason", "total_elapsed_s", "cycles"}
-
-    def test_to_dict_is_json_serializable(self):
-        r = self._make()
-        json.dumps(r.to_dict())  # must not raise
 
     def test_user_summary_contains_status(self):
         r = self._make(status="completed", cycles_run=3, total_elapsed_s=0.5)
@@ -257,11 +238,27 @@ class TestRunWorkSession:
         cycles = [cr.cycle for cr in result.cycle_reports]
         assert cycles == list(range(1, result.cycles_run + 1))
 
-    def test_total_elapsed_non_negative(self, workspace: Path):
-        agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=1, dry_run=True)
-        result = run_work_session(config, agent=agent, workspace=workspace)
-        assert result.total_elapsed_s >= 0.0
+    def test_total_elapsed_spans_all_cycles(
+        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """total_elapsed_s is the whole session's virtual time, not the last cycle's."""
+        from core import work_session as ws_mod
+
+        clock = _FakeClock()
+        monkeypatch.setattr(ws_mod, "time", clock)
+        real_run = ws_mod.AutonomousRuntime.run
+
+        def timed_run(self, cfg):
+            clock.now += 7.0
+            return real_run(self, cfg)
+
+        monkeypatch.setattr(ws_mod.AutonomousRuntime, "run", timed_run)
+        config = WorkSessionConfig(goal="test", max_cycles=3, minutes=60.0, dry_run=True)
+        result = run_work_session(config, agent=_agent(workspace), workspace=workspace)
+
+        assert result.cycles_run == 3
+        assert result.total_elapsed_s == pytest.approx(21.0)
+        assert [cr.elapsed_s for cr in result.cycle_reports] == pytest.approx([7.0, 7.0, 7.0])
 
     def test_single_cycle(self, workspace: Path):
         agent = _agent(workspace)
@@ -276,50 +273,58 @@ class TestRunWorkSession:
         result = run_work_session(config, agent=agent, workspace=workspace)
         assert result.goal == "custom goal"
 
-    def test_result_to_dict_is_json_serializable(self, workspace: Path):
+    def test_result_to_dict_round_trips_through_json(self, workspace: Path):
+        """A real session's to_dict survives JSON unchanged and lists every cycle."""
         agent = _agent(workspace)
         config = WorkSessionConfig(max_cycles=2, dry_run=True)
         result = run_work_session(config, agent=agent, workspace=workspace)
-        json.dumps(result.to_dict())  # must not raise
+        d = result.to_dict()
+        assert json.loads(json.dumps(d)) == d
+        assert d["cycles_run"] == 2
+        assert [c["cycle"] for c in d["cycles"]] == [1, 2]
 
-    def test_tasks_done_in_cycle_report(self, workspace: Path):
-        agent = _agent(workspace)
+    def test_tasks_done_in_cycle_report(self, workspace: Path, monkeypatch: pytest.MonkeyPatch):
+        """Only done and failed tasks are counted; skipped and inconclusive are neither."""
+        from core import work_session as ws_mod
+
+        def mixed_run(self, cfg):
+            statuses = [
+                ("status", "done"), ("learn", "skipped"), ("goal", "failed"),
+                ("tests", "inconclusive"), ("propose", "done"),
+            ]
+            tasks = [AutonomousTaskReport(AutonomousTask(k, k), s, "") for k, s in statuses]
+            return AutonomousRunReport(
+                status="completed", dry_run=True, goal=cfg.goal, tasks=tasks,
+                budget={}, circuit={}, approvals={},
+            )
+
+        monkeypatch.setattr(ws_mod.AutonomousRuntime, "run", mixed_run)
         config = WorkSessionConfig(max_cycles=1, dry_run=True)
-        result = run_work_session(config, agent=agent, workspace=workspace)
+        result = run_work_session(config, agent=_agent(workspace), workspace=workspace)
         cr = result.cycle_reports[0]
-        # status task always succeeds; goal task may also run when goal is set
-        assert cr.tasks_done >= 0
-        assert cr.tasks_failed >= 0
-        assert cr.tasks_done + cr.tasks_failed >= 0  # sanity: non-negative
+        assert (cr.tasks_done, cr.tasks_failed) == (2, 1)
 
-    def test_report_every_one_logs_each_cycle(self, workspace: Path):
-        """report_every=1 — a log event should be emitted for each cycle."""
+    @pytest.mark.parametrize(
+        ("max_cycles", "report_every", "reported_at"),
+        [(3, 1, [1, 2, 3]), (4, 2, [2, 4]), (2, 10, [])],
+        ids=["every_cycle", "every_second", "longer_than_session"],
+    )
+    def test_report_every_sets_progress_events(
+        self, workspace: Path, max_cycles: int, report_every: int, reported_at: list[int]
+    ):
+        """work_session_report is logged at exactly every report_every-th cycle."""
         agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=3, report_every=1, dry_run=True)
+        config = WorkSessionConfig(
+            max_cycles=max_cycles, report_every=report_every,
+            dry_run=True, stop_on_convergence=False,
+        )
         result = run_work_session(config, agent=agent, workspace=workspace)
-        # All 3 cycles completed
-        assert result.cycles_run == 3
+        records = [json.loads(ln) for ln in agent.log.path.read_text(encoding="utf-8").splitlines()]
+        at = [r["payload"]["at_cycle"] for r in records if r["event"] == "work_session_report"]
+        assert result.cycles_run == max_cycles
+        assert at == reported_at
 
-    def test_report_every_larger_than_cycles(self, workspace: Path):
-        """report_every=10 with max_cycles=2 — session completes normally."""
-        agent = _agent(workspace)
-        config = WorkSessionConfig(max_cycles=2, report_every=10, dry_run=True)
-        result = run_work_session(config, agent=agent, workspace=workspace)
-        assert result.cycles_run == 2
-        assert result.status == "completed"
-
-    def test_no_agent_log_attr_does_not_crash(self, workspace: Path):
-        """If agent has no .log attribute, run_work_session should still work."""
-        class MinimalAgent:
-            pass
-
-        agent = MinimalAgent()
-        config = WorkSessionConfig(max_cycles=1)
-        # AutonomousRuntime will fail when it tries to use agent internals —
-        # but the _log helper itself should not raise an AttributeError.
-        try:
-            run_work_session(config, agent=agent, workspace=workspace)
-        except AttributeError as exc:
-            pytest.fail(f"_log helper is not safe against a .log-less agent: {exc}")
-        except Exception:  # noqa: BLE001, S110 — reason stated above
-            pass  # AutonomousRuntime may fail for unrelated reasons; only _log safety is under test
+    def test_no_agent_log_attr_does_not_crash(self):
+        """_log skips an agent without a usable .log instead of raising."""
+        _log(object(), "work_session_start", {})
+        _log(SimpleNamespace(log=None), "work_session_start", {})

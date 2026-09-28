@@ -86,10 +86,6 @@ class TestAssumptionDefaults:
         assert a2.category == a.category
         assert a2.run_id == a.run_id
 
-    def test_explicit_verified_true(self):
-        a = Assumption(text="x", verified=True)
-        assert a.verified is True
-
     def test_explicit_verified_false(self):
         a = Assumption(text="x", verified=False)
         assert a.verified is False
@@ -115,11 +111,9 @@ class TestExtractFromQuestion:
         assert "English" in lang.text
 
     def test_mixed_no_language_assumption(self):
-        # When EN and RU are roughly equal, no language assumption
+        """Five Russian and five English words: neither side dominates, so no language."""
         result = extract_from_question("Show файл list проект файлы файлы файлы files files files")
-        lang_items = [a for a in result if a.category == "language"]
-        # Mixed — may or may not fire; we just want no crash and at most 1
-        assert len(lang_items) <= 1
+        assert [a for a in result if a.category == "language"] == []
 
     def test_short_text_no_language_assumption(self):
         result = extract_from_question("ok")
@@ -181,9 +175,8 @@ class TestExtractFromQuestion:
         for a in result:
             assert a.source == "question"
 
-    def test_returns_list_no_match(self):
-        result = extract_from_question("")
-        assert isinstance(result, list)
+    def test_empty_question_has_no_assumptions(self):
+        assert extract_from_question("") == []
 
     def test_no_mutation(self):
         q = "запусти python скрипт"
@@ -192,11 +185,6 @@ class TestExtractFromQuestion:
         # Results should be independent objects
         if r1 and r2:
             assert r1[0] is not r2[0]
-
-    def test_confidence_range(self):
-        result = extract_from_question("Покажи мне python скрипт и запусти файл")
-        for a in result:
-            assert 0.0 <= a.confidence <= 1.0
 
 
 # ============================================================
@@ -284,20 +272,10 @@ class TestExtractFromPlan:
         for a in result:
             assert a.source == "planner"
 
-    def test_confidence_range(self):
-        sources = [
-            _make_step("file_read", path="x.py"),
-            _make_step("web_search", query="q"),
-            _make_step("run_tests"),
-        ]
-        result = extract_from_plan(sources)
-        for a in result:
-            assert 0.0 <= a.confidence <= 1.0
-
-    def test_no_tool_key_safe(self):
-        sources = [{"tool": "", "arguments": {}}]
-        result = extract_from_plan(sources)
-        assert isinstance(result, list)
+    @pytest.mark.parametrize("step", [{"tool": "", "arguments": {}}, {"arguments": {}}])
+    def test_no_tool_key_safe(self, step):
+        """A step with an empty or missing tool name adds no assumptions."""
+        assert extract_from_plan([step]) == []
 
     def test_unknown_tool_no_assumptions(self):
         sources = [_make_step("unknown_custom_tool")]
@@ -310,11 +288,6 @@ class TestExtractFromPlan:
 # ============================================================
 
 class TestAssumptionRegistry:
-    def test_register_returns_assumption(self):
-        reg = AssumptionRegistry(run_id="r1")
-        a = reg.register("test text", "general", 0.8)
-        assert isinstance(a, Assumption)
-
     def test_register_run_id_inherited(self):
         reg = AssumptionRegistry(run_id="r42")
         a = reg.register("text", "language", 0.9, "question")
@@ -583,33 +556,9 @@ class TestAgentLoopAssumptionIntegration:
             assumption_store=store,
         )
 
-    def test_accepts_assumption_store_param(self, tmp_path):
-        agent = self._make_agent(tmp_path, with_store=True)
-        assert agent.assumption_store is not None
-
     def test_no_store_does_not_crash(self, tmp_path):
         agent = self._make_agent(tmp_path, with_store=False)
         assert agent.assumption_store is None
-
-    def test_last_assumptions_none_before_run(self, tmp_path):
-        agent = self._make_agent(tmp_path)
-        assert agent.last_assumptions is None
-
-    def test_last_assumptions_populated_after_run(self, tmp_path):
-        from core.planner import PlannerOutput
-
-        agent = self._make_agent(tmp_path)
-        # Patch planner to return empty plan
-        mock_plan = PlannerOutput(
-            reasoning="no tools needed",
-            sources=[],
-            raw_response="",
-            warnings=[],
-        )
-        with patch.object(agent.planner, "plan", return_value=mock_plan):
-            agent.run("Привет мир это тест проверки работы агента")
-        assert agent.last_assumptions is not None
-        assert isinstance(agent.last_assumptions, AssumptionRegistry)
 
     def test_question_assumptions_extracted(self, tmp_path):
         from core.planner import PlannerOutput
@@ -650,6 +599,7 @@ class TestAgentLoopAssumptionIntegration:
         assert "file_encoding" in cats
 
     def test_store_receives_saved_assumptions(self, tmp_path):
+        """At run end the store holds exactly the run's assumptions, the Russian one included."""
         from core.planner import PlannerOutput
 
         agent = self._make_agent(tmp_path)
@@ -661,12 +611,14 @@ class TestAgentLoopAssumptionIntegration:
         )
         with patch.object(agent.planner, "plan", return_value=mock_plan):
             agent.run("Покажи мне список файлов")
-        # Check JSONL file was written
-        if agent.last_assumptions and agent.last_assumptions.assumptions:
-            recent = agent.assumption_store.load_recent(50)
-            assert len(recent) > 0
+        saved = agent.assumption_store.load_recent(50)
+        assert any("Russian" in a.text for a in saved)
+        assert {a.id for a in saved} == {a.id for a in agent.last_assumptions.assumptions}
 
     def test_run_without_store_still_completes(self, tmp_path):
+        """Without a store the run still exposes its assumptions and logs no failed save."""
+        import json
+
         from core.planner import PlannerOutput
 
         agent = self._make_agent(tmp_path, with_store=False)
@@ -677,9 +629,13 @@ class TestAgentLoopAssumptionIntegration:
             warnings=[],
         )
         with patch.object(agent.planner, "plan", return_value=mock_plan):
-            answer = agent.run("Hello world test")
-        # Just needs to not raise
-        assert answer is not None
+            agent.run("Show me the list of files in the project please")
+        assert agent.last_assumptions is not None
+        assert any("English" in a.text for a in agent.last_assumptions.assumptions)
+        trace = agent.log.path.read_text(encoding="utf-8").splitlines()
+        events = [json.loads(line) for line in trace]
+        failed = [e["payload"]["sensor"] for e in events if e["event"] == "sensor_failed"]
+        assert "assumption_store_save" not in failed
 
     def test_last_assumptions_run_id_matches_trace(self, tmp_path):
         from core.planner import PlannerOutput

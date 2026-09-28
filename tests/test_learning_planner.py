@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -209,128 +210,96 @@ def test_staleness_deprioritises_recently_ingested(workspace: Path):
     assert "core/loop.py" in plan_without.source_paths
 
 
-def test_staleness_no_effect_when_registry_is_none(workspace: Path):
-    """Passing source_registry=None leaves scores unchanged."""
-    (workspace / "core").mkdir()
-    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+def _registry_reading(records: dict[str, float | str]) -> SimpleNamespace:
+    """Registry with only get_source: a number is hours since the read, a string is kept as is."""
 
-    plan = LearningPlanner().plan(workspace=workspace, limit=1, source_registry=None)
-    assert "core/loop.py" in plan.source_paths
+    def get_source(source_id: str) -> SimpleNamespace | None:
+        value = records.get(source_id.removeprefix("file:"))
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = (datetime.now(timezone.utc) - timedelta(hours=value)).isoformat()
+        return SimpleNamespace(last_read_at=value)
 
-
-def test_apply_staleness_returns_score_when_stale_hours_zero(workspace: Path):
-    """stale_hours <= 0 should disable the staleness adjustment entirely."""
-    (workspace / "core").mkdir()
-    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
-    (workspace / "README.md").write_text("ov", encoding="utf-8")
-
-    recent_ts = datetime.now(timezone.utc).isoformat()
-    fresh = MagicMock()
-    fresh.last_read_at = recent_ts
-    registry = MagicMock()
-    registry.get_source = lambda sid: fresh
-
-    plan = LearningPlanner().plan(
-        workspace=workspace, limit=2, source_registry=registry, stale_hours=0.0
-    )
-    # without staleness applied loop.py keeps full score; both selected
-    assert "core/loop.py" in plan.source_paths
+    return SimpleNamespace(get_source=get_source)
 
 
-def test_apply_staleness_skips_when_record_missing(workspace: Path):
-    """Registry returns None for a path → score unchanged."""
-    (workspace / "core").mkdir()
-    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
+@pytest.mark.parametrize(
+    ("records", "stale_hours"),
+    [
+        pytest.param({"README.md": 48}, 6.0, id="never-ingested"),
+        pytest.param({"core/loop.py": "", "README.md": 48}, 6.0, id="empty-last-read"),
+        pytest.param(
+            {"core/loop.py": "not-a-real-iso-timestamp", "README.md": 48}, 6.0,
+            id="unparseable-last-read",
+        ),
+        pytest.param({"core/loop.py": 48}, 6.0, id="read-before-the-window"),
+        pytest.param({"core/loop.py": -2}, 0.0, id="window-off-read-stamped-ahead"),
+    ],
+)
+def test_apply_staleness_keeps_score_without_a_recent_read(
+    workspace: Path, records: dict[str, float | str], stale_hours: float
+):
+    """core/loop.py (115) stays ahead of README.md (100); the -60 penalty would swap them.
 
-    registry = MagicMock()
-    registry.get_source = lambda sid: None
-    plan = LearningPlanner().plan(
-        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
-    )
-    assert "core/loop.py" in plan.source_paths
-
-
-def test_apply_staleness_skips_when_last_read_empty(workspace: Path):
-    (workspace / "core").mkdir()
-    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
-
-    record = MagicMock()
-    record.last_read_at = ""
-    registry = MagicMock()
-    registry.get_source = lambda sid: record
-    plan = LearningPlanner().plan(
-        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
-    )
-    assert "core/loop.py" in plan.source_paths
-
-
-def test_apply_staleness_skips_when_timestamp_unparseable(workspace: Path):
-    (workspace / "core").mkdir()
-    (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
-
-    record = MagicMock()
-    record.last_read_at = "not-a-real-iso-timestamp"
-    registry = MagicMock()
-    registry.get_source = lambda sid: record
-    plan = LearningPlanner().plan(
-        workspace=workspace, limit=1, source_registry=registry, stale_hours=6.0
-    )
-    assert "core/loop.py" in plan.source_paths
-
-
-def test_apply_staleness_keeps_score_when_record_older_than_window(workspace: Path):
-    """Files read longer ago than stale_hours are not deprioritised."""
+    README's record is a different no-penalty kind, so only loop.py can move.
+    """
     (workspace / "core").mkdir()
     (workspace / "core" / "loop.py").write_text("loop", encoding="utf-8")
     (workspace / "README.md").write_text("ov", encoding="utf-8")
 
-    from datetime import timedelta
-    old_ts = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-    record = MagicMock()
-    record.last_read_at = old_ts
-    registry = MagicMock()
-    registry.get_source = lambda sid: record
-
     plan = LearningPlanner().plan(
-        workspace=workspace, limit=2, source_registry=registry, stale_hours=6.0
+        workspace=workspace, limit=2, source_registry=_registry_reading(records),
+        stale_hours=stale_hours,
     )
-    # README still wins, but loop.py keeps original score (no -60 penalty applied)
-    assert "core/loop.py" in plan.source_paths
+    assert plan.source_paths == ("core/loop.py", "README.md")
 
 
 def test_goal_terms_memory_keyword_picks_memory_files(workspace: Path):
+    """The memory term must lift both files over core/loop.py, which ties them at 115 without it."""
     (workspace / "core").mkdir()
     (workspace / "core" / "memory_policy.py").write_text("m", encoding="utf-8")
     (workspace / "core" / "ingestion.py").write_text("i", encoding="utf-8")
+    (workspace / "core" / "loop.py").write_text("l", encoding="utf-8")
 
     plan = LearningPlanner().plan(workspace=workspace, goal="памят", limit=2)
-    assert "core/memory_policy.py" in plan.source_paths
-    assert "core/ingestion.py" in plan.source_paths
+    assert set(plan.source_paths) == {"core/memory_policy.py", "core/ingestion.py"}
 
 
 def test_goal_terms_role_keyword_picks_router(workspace: Path):
+    """The role term must lift role_router.py (70+50) over core/loop.py (70; 115 without it)."""
     (workspace / "core").mkdir()
     (workspace / "core" / "role_router.py").write_text("r", encoding="utf-8")
+    (workspace / "core" / "loop.py").write_text("l", encoding="utf-8")
 
     plan = LearningPlanner().plan(workspace=workspace, goal="role router", limit=1)
-    assert "core/role_router.py" in plan.source_paths
+    assert plan.source_paths == ("core/role_router.py",)
 
 
 def test_goal_terms_tool_keyword_picks_tools(workspace: Path):
+    """The tool term must lift tools/shell_exec.py (55+50) over core/loop.py (70; 115 without it)."""
     (workspace / "core").mkdir()
     (workspace / "tools").mkdir()
     (workspace / "tools" / "shell_exec.py").write_text("s", encoding="utf-8")
+    (workspace / "core" / "loop.py").write_text("l", encoding="utf-8")
 
     plan = LearningPlanner().plan(workspace=workspace, goal="инструмент", limit=1)
-    assert "tools/shell_exec.py" in plan.source_paths
+    assert plan.source_paths == ("tools/shell_exec.py",)
 
 
 def test_goal_terms_verifier_keyword_picks_verifier(workspace: Path):
+    """The verifier term must lift core/verifier.py over core/loop.py when the goal names a path.
+
+    A named path turns the confidence route off; that route picks verifier.py on its own.
+    """
     (workspace / "core").mkdir()
     (workspace / "core" / "verifier.py").write_text("v", encoding="utf-8")
+    (workspace / "core" / "loop.py").write_text("l", encoding="utf-8")
 
-    plan = LearningPlanner().plan(workspace=workspace, goal="вериф evidence", limit=1)
-    assert "core/verifier.py" in plan.source_paths
+    goal = "вериф gaps reported in notes.md"
+    assert is_confidence_evidence_diagnostic_question(goal) is False
+    plan = LearningPlanner().plan(workspace=workspace, goal=goal, limit=1)
+    assert plan.source_paths == ("core/verifier.py",)
 
 
 def test_runtime_directory_files_get_scored(workspace: Path):

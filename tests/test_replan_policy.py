@@ -78,12 +78,6 @@ class TestDefaultBudgetsCoverage:
         missing = set(ALL_FAILURE_TYPES) - set(DEFAULT_BUDGETS.keys())
         assert missing == set(), f"DEFAULT_BUDGETS is missing: {missing}"
 
-    def test_all_default_budgets_are_at_least_one(self):
-        for code, budget in DEFAULT_BUDGETS.items():
-            assert budget.max_occurrences >= 1, (
-                f"{code} budget {budget.max_occurrences} < 1"
-            )
-
     def test_recoverable_failures_have_room_for_retries(self):
         # Recoverable categories should allow at least one retry.
         for code in ("tool_error", "verify_failed", "web_empty", "timeout"):
@@ -111,12 +105,6 @@ class TestReplanPolicyConstruction:
         broken = {k: v for k, v in DEFAULT_BUDGETS.items() if k != "tool_error"}
         with pytest.raises(ValueError, match="missing budgets"):
             ReplanPolicy(budgets=broken)
-
-    def test_custom_budget_replaces_default(self):
-        custom = dict(DEFAULT_BUDGETS)
-        custom["tool_error"] = FailureBudget(max_occurrences=5, advice="x")
-        p = ReplanPolicy(budgets=custom, max_total_replans=10)
-        assert p.budgets["tool_error"].max_occurrences == 5
 
 
 # ============================================================

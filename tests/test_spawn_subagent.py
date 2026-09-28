@@ -36,7 +36,7 @@ def _make_mock_model_router() -> MagicMock:
     return mr
 
 
-def _make_parent_registry() -> ToolRegistry:
+def _make_parent_registry(extra: tuple[str, ...] = ()) -> ToolRegistry:
     from tools.base import Tool, ToolRegistry
 
     class _DummyTool(Tool):
@@ -56,6 +56,7 @@ def _make_parent_registry() -> ToolRegistry:
         "read_logs", "diff_file",
         "file_write",    # dangerous — should not leak into child
         "shell_exec",    # dangerous — should not leak into child
+        *extra,
     ]:
         reg.register(_DummyTool(tname))
     return reg
@@ -142,19 +143,19 @@ def test_build_child_registry_filters_unsafe_from_requested():
 
 
 def test_build_child_registry_spawn_subagent_never_included():
-    """Even a fake allowed_tools list with 'spawn_subagent' is silently dropped."""
+    """A parent that holds spawn_subagent never passes it to a child, requested or by default."""
     from core.subagent_runner import SubAgentRunner
     runner = SubAgentRunner(
         workspace_root=Path("."),
         policy=_make_mock_policy(),
         model_router=_make_mock_model_router(),
-        parent_registry=_make_parent_registry(),
+        parent_registry=_make_parent_registry(extra=("spawn_subagent",)),
         log_dir=Path("."),
     )
-    child_reg = runner._build_child_registry(["file_read", "spawn_subagent"])
-    names = {t.name for t in child_reg.list()}
-    assert "spawn_subagent" not in names
-    assert "file_read" in names
+    for allowed in (["file_read", "spawn_subagent"], None):
+        names = {t.name for t in runner._build_child_registry(allowed).list()}
+        assert "spawn_subagent" not in names, allowed
+        assert "file_read" in names, allowed
 
 
 # ──────────────────────────────────────────────────────────
@@ -194,21 +195,20 @@ def test_subagent_run_result_evidence_text_success():
 
 
 def test_subagent_run_result_evidence_text_error():
+    """An error result shows its error and hides whatever answer text it carries."""
     from core.subagent_runner import SubAgentRunResult
     r = SubAgentRunResult(
         contract_name="BrokenAgent",
         role="Breaker",
         objective="Break something",
-        answer="",
+        answer="half-written stale answer",
         trace_id="ghi789",
         status="error",
         error="RuntimeError: kaboom",
     )
     text = r.to_evidence_text()
-    assert "error" in text
-    assert "kaboom" in text
-    # answer should not appear in error-status output
-    assert "answer" not in text.lower() or "Y is great" not in text
+    assert "RuntimeError: kaboom" in text
+    assert "half-written stale answer" not in text
 
 
 def test_subagent_run_result_is_frozen():
@@ -343,10 +343,12 @@ def test_resolve_contract_name_uses_provided():
 
 
 def test_resolve_contract_name_slugifies_role():
+    """Role slug: non-ASCII, spaces, punctuation -> '_', edges stripped, empty -> 'SubAgent'."""
     from tools.spawn_subagent import SpawnSubagentTool
-    # Non-ASCII role → slug uses underscores for non-ASCII chars
-    slug = SpawnSubagentTool._resolve_contract_name(None, "WebResearcher")
-    assert slug == "WebResearcher"
+    resolve = SpawnSubagentTool._resolve_contract_name
+    assert resolve(None, " Web Researcher! ") == "Web_Researcher"
+    assert resolve(None, "Web исследователь 2") == "Web" + "_" * 15 + "2"
+    assert resolve(None, "Исследователь") == "SubAgent"
 
 
 def test_resolve_contract_name_too_long_falls_back():
@@ -590,17 +592,21 @@ def test_structural_confidence_hedging_reduces_score():
 
 
 def test_structural_confidence_numbers_boost_score():
-    from core.subagent_runner import _compute_structural_confidence
-    without_numbers = "The system experienced an issue with performance." * 10
-    with_numbers = "The system used 87% CPU and 3.2 GB RAM at timestamp 14:32." * 10
-    assert _compute_structural_confidence(with_numbers) >= _compute_structural_confidence(without_numbers)
+    """Same length, only the digits differ: numbers must raise the score."""
+    from core.subagent_runner import _compute_structural_confidence as score
+    without_numbers = "The system used most CPU and much RAM at midday today." * 10
+    with_numbers = "The system used 87% CPU and 3.2 GB RAM at 14:32 today." * 10
+    assert len(with_numbers) == len(without_numbers)
+    assert score(with_numbers) > score(without_numbers)
 
 
 def test_structural_confidence_url_is_specificity_signal():
-    from core.subagent_runner import _compute_structural_confidence
-    plain = "I found relevant information on the topic." * 10
-    with_url = "See https://example.com/paper for details. The finding is clear." * 10
-    assert _compute_structural_confidence(with_url) >= _compute_structural_confidence(plain)
+    """Same length, no digits, only the URL differs: the URL must raise the score."""
+    from core.subagent_runner import _compute_structural_confidence as score
+    plain = "See the paper on the project site for all details." * 10
+    with_url = "See https://example.org/paper for all the details." * 10
+    assert len(with_url) == len(plain)
+    assert score(with_url) > score(plain)
 
 
 def test_structural_confidence_result_in_range():
@@ -649,11 +655,15 @@ def test_estimate_complexity_standard_medium_no_kw():
 
 
 def test_estimate_complexity_complex_long_objective():
-    from core.subagent_runner import _estimate_complexity
+    """30 words with no research keyword is complex on length alone."""
+    from core.subagent_runner import _RESEARCH_KEYWORDS, _estimate_complexity
     long_obj = (
-        "Research the top five multi-agent LLM frameworks published in 2024 "
-        "and compare their performance on reasoning benchmarks including MMLU and MATH"
+        "Explain how the scheduler assigns priorities to incoming jobs, how it handles "
+        "retries after a timeout, and what happens to queued work when a worker "
+        "process restarts during a deploy"
     )
+    assert len(long_obj.split()) == 30
+    assert not any(kw in long_obj.lower() for kw in _RESEARCH_KEYWORDS)
     assert _estimate_complexity(long_obj) == "complex"
 
 
@@ -664,21 +674,6 @@ def test_estimate_complexity_complex_research_kw_and_long():
         "the most common design patterns used across the codebase"
     )
     assert _estimate_complexity(obj) == "complex"
-
-
-def test_estimate_complexity_returns_valid_tier():
-    from core.subagent_runner import _estimate_complexity
-    valid = {"trivial", "standard", "complex"}
-    samples = [
-        "hi",
-        "find the bug",
-        (
-            "Analyze and compare the performance of all registered LLM models "
-            "and produce a detailed benchmark report with accuracy and cost metrics"
-        ),
-    ]
-    for s in samples:
-        assert _estimate_complexity(s) in valid
 
 
 # ──────────────────────────────────────────────────────────
@@ -1037,27 +1032,33 @@ class TestSubagentInjectionScan:
 class TestRussianHedging:
     """Fix #6 — _compute_structural_confidence penalises Russian hedges."""
 
-    def test_russian_cannot_answer_lowers_score(self):
-        from core.subagent_runner import _compute_structural_confidence
+    @staticmethod
+    def _assert_phrase_lowers_score(hedged: str, phrase: str, neutral: str) -> None:
+        """The control differs only by an equal-length swap, so only the hedge can lower it."""
+        from core.subagent_runner import _compute_structural_confidence as score
 
-        hedged = "не могу найти информацию по данному запросу, попробуйте другой."
-        normal = "Результат: 42 пакета, скорость 100 мб/с, задержка 12 мс."
-        assert _compute_structural_confidence(hedged) < _compute_structural_confidence(normal)
+        control = hedged.replace(phrase, neutral)
+        assert phrase in hedged
+        assert len(control) == len(hedged)
+        assert score(hedged) < score(control)
+
+    def test_russian_cannot_answer_lowers_score(self):
+        self._assert_phrase_lowers_score(
+            "не могу найти информацию по данному запросу, попробуйте другой.",
+            "не могу", "я смогу",
+        )
 
     def test_russian_not_sure_lowers_score(self):
-        from core.subagent_runner import _compute_structural_confidence
-
-        hedged = "не уверен, возможно это какой-то новый фреймворк."
-        specific = "Фреймворк Django версии 5.1.3, документация на djangoproject.com."
-        assert _compute_structural_confidence(hedged) < _compute_structural_confidence(specific)
+        self._assert_phrase_lowers_score(
+            "не уверен, возможно это какой-то новый фреймворк.",
+            "не уверен", "он уверен",
+        )
 
     def test_russian_impossible_lowers_score(self):
-        from core.subagent_runner import _compute_structural_confidence
-
-        score = _compute_structural_confidence(
-            "невозможно выполнить данную задачу в рамках текущих ограничений."
+        self._assert_phrase_lowers_score(
+            "невозможно выполнить данную задачу в рамках текущих ограничений.",
+            "невозможно", "непременно",
         )
-        assert score < 0.5
 
     def test_russian_hedging_phrase_in_hedging_set(self):
         from core.subagent_runner import _HEDGING_PHRASES

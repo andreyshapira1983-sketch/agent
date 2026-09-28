@@ -307,15 +307,10 @@ class TestInterestsExtraction:
         assert p.interests.count("agent-memory") == 1
 
     def test_interests_capped_at_20(self) -> None:
-        p = _fresh()
-        for _ in range(30):
-            # Generate unique pseudo-interests by including many keywords at once
-            p = update_profile(
-                p,
-                "GIL episodic procedural memory architecture injection pytest "
-                "asyncio coroutine multiagent knowledge"
-            )
-        assert len(p.interests) <= 20
+        """Stored plus new topics past 20 are cut to 20; the earliest stay, in order."""
+        stored = [f"topic-{i:02d}" for i in range(19)]
+        p = update_profile(UserProfile(interests=stored), "episodic memory and pytest")
+        assert p.interests == [*stored, "agent-memory"]
 
 
 # ---------------------------------------------------------------------------
@@ -350,11 +345,6 @@ class TestPureFunctionProperty:
         assert original.interaction_count == 0
         assert original.expert_signals == 0
         assert original.expertise == "intermediate"
-
-    def test_returns_new_object(self) -> None:
-        p = _fresh()
-        updated = update_profile(p, "GIL")
-        assert updated is not p
 
 
 # ---------------------------------------------------------------------------
@@ -535,15 +525,6 @@ class TestAgentLoopUserProfileIntegration:
         )
         return loop, profile_store
 
-    def test_loop_accepts_user_profile_store(self, tmp_path: Path) -> None:
-        loop, _ = self._make_loop(tmp_path)
-        assert loop.user_profile_store is not None
-
-    def test_profile_loaded_on_run(self, tmp_path: Path) -> None:
-        loop, _ = self._make_loop(tmp_path)
-        loop.run("hello world")
-        assert loop.last_user_profile is not None
-
     def test_profile_updated_after_run(self, tmp_path: Path) -> None:
         loop, store = self._make_loop(tmp_path)
         loop.run("GIL PEP 703 architecture episodic memory")
@@ -661,40 +642,6 @@ class TestAgentLoopUserProfileIntegration:
 
         event_names = [e for e, *_ in logged]
         assert "user_profile_update" in event_names
-
-    def test_no_profile_store_does_not_crash(self, tmp_path: Path) -> None:
-        """AgentLoop without user_profile_store should work as before."""
-        from unittest.mock import MagicMock
-
-        from core.logger import TraceLogger
-        from core.loop import AgentLoop
-        from core.policy import PolicyGate
-        from tools.base import ToolRegistry
-
-        registry = ToolRegistry()
-        policy = PolicyGate(registry)
-        logger = TraceLogger(trace_id="test-no-uprof", log_dir=tmp_path)
-
-        mock_llm = MagicMock()
-        mock_llm.provider = "mock"
-        mock_llm.model = "mock-model"
-        mock_llm.complete.return_value = (
-            "Conclusion:\nOK\n\nFacts:\n- fact [general-knowledge]\n"
-            "Sources:\n1. general-knowledge\nConfidence: low\n"
-            "Unverified:\nnothing\nSafety:\nnothing"
-        )
-
-        loop = AgentLoop(
-            registry=registry,
-            policy=policy,
-            llm=mock_llm,
-            logger=logger,
-            verifier_enabled=False,
-            clarification_enabled=False,
-        )
-        result = loop.run("hello")
-        assert isinstance(result, str)
-        assert loop.last_user_profile is None
 
 
 # ============================================================

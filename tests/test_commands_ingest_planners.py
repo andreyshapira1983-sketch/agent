@@ -197,25 +197,37 @@ def test_source_review_plan_json_mode_carries_the_block(tmp_path, capsys):
 # ── the planners on grounded input ───────────────────────────────────────────
 
 def test_source_review_plan_uses_the_matched_sources(tmp_path, capsys):
+    """A read-first goal naming an ingested file is planned from that source.
+
+    The qualifier arms the read-first guard, so a broken match shows up as a block.
+    """
     agent = agent_with(registry_with(source(locator="core/parser.py"), claim()))
 
-    assert _handle_source_review_plan("review core/parser.py", agent, tmp_path) is True
+    assert _handle_source_review_plan("read core/parser.py first", agent, tmp_path) is True
 
-    err = capsys.readouterr().err
-    assert "core/parser.py" in err
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "=== source review plan ==="
+    assert "  - src-1 [document] claims=1" in lines
+    assert "    claim[extracted 0.90]: the parser drops empty input" in lines
     logged = agent.log.payload("operator_source_review_plan")
-    assert logged["registry"]["sources"] == 1
-    assert logged.get("kind") != "insufficient_source_evidence", "a grounded goal is not blocked"
+    assert logged["matched_source_ids"] == ["src-1"]
+    assert logged["missing_mentions"] == []
 
 
 def test_source_review_plan_without_mentions_shows_what_is_in_the_registry(tmp_path, capsys):
-    agent = agent_with(registry_with(source(), claim()))
+    """With no file named, every ingested source is listed with its sample claims."""
+    agent = agent_with(registry_with(
+        source(), source("src-2", title="Lexer notes", locator="docs/lexer.md"), claim()
+    ))
 
     assert _handle_source_review_plan("plan the next review", agent, tmp_path) is True
 
+    lines = capsys.readouterr().err.splitlines()
+    assert "  - src-1 [document] claims=1" in lines
+    assert "    claim[extracted 0.90]: the parser drops empty input" in lines
+    assert "  - src-2 [document] claims=0" in lines
     logged = agent.log.payload("operator_source_review_plan")
-    assert logged["registry"]["sources"] == 1
-    assert capsys.readouterr().err.strip()
+    assert logged["matched_source_ids"] == ["src-1", "src-2"]
 
 
 def test_source_review_plan_with_no_registry_at_all(tmp_path, capsys):
@@ -224,20 +236,25 @@ def test_source_review_plan_with_no_registry_at_all(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    "handler,event",
+    "handler,event,title",
     [
-        (_handle_implementation_plan, "operator_implementation_plan"),
-        (_handle_patch_proposal_plan, "operator_patch_proposal_plan"),
+        (_handle_implementation_plan, "operator_implementation_plan", "implementation plan"),
+        (_handle_patch_proposal_plan, "operator_patch_proposal_plan", "patch proposal plan"),
     ],
 )
-def test_the_two_plan_commands_render_and_log(handler, event, tmp_path, capsys):
+def test_the_two_plan_commands_render_and_log(handler, event, title, tmp_path, capsys):
+    """The rendered plan names the matched source and the file to change."""
     agent = agent_with(registry_with(source(locator="core/parser.py"), claim()))
 
-    assert handler("make the parser handle empty input", agent, tmp_path) is True
+    assert handler("make core/parser.py handle empty input", agent, tmp_path) is True
 
-    assert capsys.readouterr().err.strip()
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == f"=== {title} ==="
+    assert "  - src-1 [document] claims=1" in lines
+    assert "  - core/parser.py - inspect/change requested behavior" in lines
     logged = agent.log.payload(event)
-    assert logged["goal"] == "make the parser handle empty input"
+    assert logged["goal"] == "make core/parser.py handle empty input"
+    assert logged["source_evidence"]["matched_source_ids"] == ["src-1"]
 
 
 @pytest.mark.parametrize(

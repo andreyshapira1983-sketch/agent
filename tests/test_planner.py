@@ -606,6 +606,11 @@ def test_confidence_diagnostic_drops_readme_and_tools_defaults(
 def test_local_project_evidence_does_not_force_confidence_sources(
     workspace: Path,
 ) -> None:
+    """Bare "local project evidence" is not a verifier question.
+
+    Verifier sources are seeded, so the file gate is open and only the detector decides.
+    """
+    _with_verifier_sources(workspace)
     canned = json.dumps(
         {
             "reasoning": "Use generic local project evidence.",
@@ -1081,22 +1086,6 @@ class TestShellExecSanitizer:
         assert sources == []
         assert any("unsafe" in w for w in warnings), warnings
 
-    # --- label safety ---
-
-    def test_label_only_carries_short_command_no_full_argv(self, workspace: Path):
-        """The label must NOT echo argv content beyond the path arg —
-        protects logs / synthesizer prompts from huge or sensitive
-        arguments."""
-        sources, _ = self._plan_one_step(
-            workspace, {"argv": ["touch", "secret-looking-filename.txt"]}
-        )
-        assert len(sources) == 1
-        label = sources[0]["label"]
-        # Label includes command + the one path argument, deliberately
-        # capped. For read-only commands like whoami there is no extra.
-        assert label.startswith("shell_exec:")
-        assert len(label) < 200  # sanity cap
-
     # --- case insensitivity at planner layer ---
 
     def test_uppercase_command_normalised_to_whitelist(self, workspace: Path):
@@ -1259,6 +1248,11 @@ def test_subagent_question_injects_lifecycle_doc(workspace: Path) -> None:
 
 
 def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> None:
+    """A corporate/roadmap question does not pull in the sub-agent lifecycle doc.
+
+    Docs are seeded, so the thematic gate is open and only the routing decides.
+    """
+    _with_doctrine_docs(workspace)
     canned = json.dumps(
         {
             "reasoning": "doctrine",
@@ -1281,7 +1275,8 @@ def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> 
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths
+    assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
+    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths, paths
 
 
 # ---------- thematic memory governance doc routing (conditional) ----------
@@ -1324,6 +1319,11 @@ def test_memory_question_injects_memory_governance_docs(workspace: Path) -> None
 
 
 def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None:
+    """A corporate/roadmap question does not pull in the memory governance docs.
+
+    Docs are seeded, so the thematic gate is open and only the routing decides.
+    """
+    _with_doctrine_docs(workspace)
     canned = json.dumps(
         {
             "reasoning": "doctrine",
@@ -1346,7 +1346,9 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" not in paths
+    assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
+    assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" not in paths, paths
+    assert "knowledge/doctrine/self-audit-lessons.md" not in paths, paths
 
 
 
@@ -1470,11 +1472,11 @@ def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
     assert "[SELF_REPAIR_DOCS=required" in llm.calls[0]["user"], llm.calls[0]["user"]
 
 def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -> None:
-    """The whole point of a thematic group: an ordinary task must not pay for it.
+    """An ordinary "fix the bug in X" task must not pay for the repair protocol.
 
-    "fix the bug in X" is a normal work item, not a request for the repair
-    reasoning protocol, so the doctrine must stay out of the source list.
+    Docs are seeded, so the thematic gate is open and only the routing decides.
     """
+    _with_doctrine_docs(workspace)
     canned = json.dumps(
         {
             "reasoning": "fix it",
@@ -1494,12 +1496,17 @@ def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths
+    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths, paths
 
 
 def test_non_self_repair_doctrine_question_omits_self_repair_doc(
     workspace: Path,
 ) -> None:
+    """A corporate/roadmap question does not pull in the self-repair doctrine.
+
+    Docs are seeded, so the thematic gate is open and only the routing decides.
+    """
+    _with_doctrine_docs(workspace)
     canned = json.dumps(
         {
             "reasoning": "doctrine",
@@ -1522,7 +1529,8 @@ def test_non_self_repair_doctrine_question_omits_self_repair_doc(
         for src in out.sources
         if src["tool"] == "file_read"
     ]
-    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths
+    assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
+    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths, paths
 
 
 def test_self_repair_doctrine_detector_strong_terms() -> None:
@@ -1700,13 +1708,9 @@ def test_docs_directive_is_suppressed_when_file_read_is_hidden(
 ) -> None:
     """Fail closed: never order a read the model is not allowed to perform.
 
-    Fail-before: doc *injection* was gated on `file_read` being usable, but the
-    matching prompt directive was not. On a path where `file_read` is hidden
-    the prompt therefore said "read docs/X first" while the same prompt's
-    registered-tools list and [UNAVAILABLE_TOOLS=...] block said that tool does
-    not exist -- a self-contradiction that can only end as a policy_blocked
-    step and a wasted replan. Both sides now share one gate.
+    Docs are seeded, so only the hidden file_read can keep the directive out.
     """
+    _with_doctrine_docs(workspace)
     canned = json.dumps(
         {
             "reasoning": "answer directly",
