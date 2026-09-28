@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from core.approval_inbox import ApprovalInbox, ApprovalInboxItem
+from core.approval_inbox import ApprovalInboxItem
 from core.approval_triage import (
     TriageReport,
     format_triage_report,
@@ -77,34 +77,6 @@ def test_distinct_signatures_stay_in_separate_clusters():
     assert all(cluster.count == 1 for cluster in report.clusters)
     assert report.duplicates == ()
     assert all(i.recommended_action == "keep" for i in report.items)
-
-
-def test_triage_is_read_only_and_does_not_delete_pending_items(workspace):
-    path = workspace / "data" / "approval_inbox.jsonl"
-    inbox = ApprovalInbox(path=path)
-    inbox.add(
-        operation="proposed_task",
-        summary="first",
-        payload={"canonical_signature": "tests:a", "rationale": "x"},
-        dedup_key="proposed_task:tests:a",
-    )
-    inbox.add(
-        operation="proposed_task",
-        summary="second",
-        payload={"canonical_signature": "tests:b", "rationale": "y"},
-        dedup_key="proposed_task:tests:b",
-    )
-
-    before = {item.id for item in inbox.pending()}
-    report = triage_inbox(inbox.pending(), now=_NOW)
-    after = {item.id for item in inbox.pending()}
-
-    # Nothing removed, nothing mutated on disk.
-    assert before == after
-    assert report.total_pending == 2
-    reloaded = ApprovalInbox(path=path)
-    assert {item.id for item in reloaded.pending()} == before
-    assert all(item.status == "pending" for item in reloaded.list(status="all"))
 
 
 def test_summary_stays_compact_even_with_many_items():

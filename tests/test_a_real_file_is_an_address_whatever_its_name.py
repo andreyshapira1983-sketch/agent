@@ -12,7 +12,7 @@ History of the disease:
   The cure: looks_like_unfilled_path(path, base_dir=None) now checks
   whether the path actually resolves to an existing file under base_dir.
   A real file is an address, whatever its name. This test locks in the
-  nine-case behaviour table so the disease cannot regress.
+  behaviour table so the disease cannot regress.
 
   Root choice: we use Path(__file__).resolve().parents[1] instead of a
   conftest fixture. Rationale: this test is a pure unit test of the
@@ -31,14 +31,6 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 def test_existing_organ_is_not_placeholder():
     # 1. The guard's own module exists -> it is an address, not a placeholder.
     assert looks_like_unfilled_path("core/placeholder_text.py", base_dir=WORKSPACE_ROOT) is False
-
-
-def test_this_test_file_is_not_placeholder():
-    # 2. This very file exists -> it is an address, not a placeholder.
-    assert looks_like_unfilled_path(
-        "tests/test_a_real_file_is_an_address_whatever_its_name.py",
-        base_dir=WORKSPACE_ROOT,
-    ) is False
 
 
 def test_angle_bracket_insert_path_is_placeholder():

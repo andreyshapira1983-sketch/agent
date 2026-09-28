@@ -16,8 +16,6 @@ verdict=success`: счётчик успехов ЕДИНСТВЕННОЙ акт�
 """
 from __future__ import annotations
 
-import pytest
-
 from core.smart_memory import (
     EpisodeRecord,
     decide_usage_eligibility,
@@ -78,14 +76,6 @@ def test_the_two_gates_cannot_disagree() -> None:
         assert credits <= eligible, (
             f"эпизод кредитует, но использоваться не может: signals={signals}"
         )
-
-
-@pytest.mark.parametrize("signal", ["self_contradiction"])
-def test_the_disqualifying_signal_is_one_shared_name(signal: str) -> None:
-    """Один список на оба рубежа: разойтись они могут только вместе."""
-    from core.smart_memory import DISQUALIFYING_DEFECT_SIGNALS
-
-    assert signal in DISQUALIFYING_DEFECT_SIGNALS
 
 
 def test_an_unrelated_signal_does_not_block_credit() -> None:

@@ -131,9 +131,9 @@ def test_a_present_antecedent_is_not_questioned(tmp_path: Path) -> None:
 
 
 def test_a_task_clause_is_not_supplied_text() -> None:
-    """R5-включение вскрыло: критический глагол + хвост задачи резолвился в
-    user_text, и критика-без-объекта съедала содержательную задачу (без роли,
-    инструментов, памяти). Принесённый текст — многострочный или в кавычках."""
+    """Хвост формулировки задачи — не принесённый текст; многострочный или в кавычках — принесённый.
+
+    Критика-без-объекта съедала содержательную задачу (без роли, инструментов, памяти)."""
     from core.referent_resolver import ReferentResolver, is_local_critique_eligible
 
     r = ReferentResolver()
@@ -143,10 +143,10 @@ def test_a_task_clause_is_not_supplied_text() -> None:
                      "рефакторинга слоя памяти с обоснованием", **kw)
     assert not is_local_critique_eligible(task)
 
-    pasted = r.resolve(
-        "проанализируй этот текст:\nПервая строка.\nВторая строка выводов.",
-        **kw,
-    )
-    if pasted.status == "resolved" and pasted.primary is not None:
-        assert is_local_critique_eligible(pasted)
+    for brought in (
+        ("проанализируй этот текст:\nПервая строка принесённого отчёта о продажах.\n"
+         "Вторая строка выводов о падении спроса."),
+        'проанализируй этот текст:\n"Первая строка.\nВторая строка выводов."',
+    ):
+        assert is_local_critique_eligible(r.resolve(brought, **kw)), brought
 

@@ -16,9 +16,11 @@ import pytest
 
 import main as main_module
 
-# The complete public flag set at 9daa9bf (argparse adds -h/--help itself).
+# The complete public flag set (argparse adds -h/--help itself).
 EXPECTED_FLAGS = {
     "--ask",
+    "--history",
+    "--with-persistent",
     "--file",
     "--workspace",
     "--auto-approve",
@@ -26,6 +28,10 @@ EXPECTED_FLAGS = {
     "--reason",
     "--expect",
 }
+
+# A declaration opens its own line in the options block; help prose that names
+# another flag sits on deeper-indented continuation lines and does not match.
+_DECLARATION = re.compile(r"^  (?:-\w, )?(--[a-z][a-z-]+)", re.MULTILINE)
 
 
 def _help_text(monkeypatch: pytest.MonkeyPatch, capsys) -> str:
@@ -36,14 +42,10 @@ def _help_text(monkeypatch: pytest.MonkeyPatch, capsys) -> str:
     return capsys.readouterr().out
 
 
-def test_help_exits_zero_and_lists_exactly_seven_flags(monkeypatch, capsys):
-    text = _help_text(monkeypatch, capsys)
-    found = {m.group(0) for m in re.finditer(r"--[a-z][a-z-]+", text)}
-    # Restrict to option *declarations* — the help prose mentions no other flags
-    # at this commit, but filter defensively so prose additions do not break it.
-    declared = {flag for flag in found if flag in EXPECTED_FLAGS or flag == "--help"}
-    assert declared == EXPECTED_FLAGS | {"--help"}
-    assert found >= EXPECTED_FLAGS
+def test_help_exits_zero_and_lists_exactly_the_public_flags(monkeypatch, capsys):
+    """The options block declares every public flag and nothing else."""
+    options = _help_text(monkeypatch, capsys).split("options:", 1)[1]
+    assert set(_DECLARATION.findall(options)) == EXPECTED_FLAGS | {"--help"}
 
 
 def test_usage_line_shape(monkeypatch, capsys):

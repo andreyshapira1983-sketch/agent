@@ -31,8 +31,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 import agent_tick
 from agent_tick import UNATTENDED_MEMORY_PROFILE
 from app.bootstrap import build_agent
@@ -204,10 +202,3 @@ def test_the_unattended_envelope_is_narrower_than_the_interactive_one(
     assert interactive["episodic_replay"] == "serves_stored_answer"
     assert unattended["escalation_terminal"].startswith("refuse")
     assert interactive["escalation_terminal"].startswith("ask")
-
-
-@pytest.mark.parametrize("axis", _AUTHORITY_AXES)
-def test_each_guarded_axis_is_actually_observable(workspace: Path, axis: str) -> None:
-    """Boundary pin: a probe that silently stopped reporting an axis would make
-    every assertion above vacuous."""
-    assert axis in probe_authority(_unattended(workspace))

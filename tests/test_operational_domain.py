@@ -206,7 +206,7 @@ class TestResultShape:
 # ---------------------------------------------------------------------------
 
 class TestLoopOddIntegration:
-    def _make_loop(self):
+    def _make_loop(self, odd_enabled: bool = True):
         import json
         import tempfile
         from pathlib import Path
@@ -227,7 +227,10 @@ class TestLoopOddIntegration:
         policy = PolicyGate(registry=registry)
         tmp = Path(tempfile.mkdtemp())
         logger = TraceLogger(trace_id="test-odd", log_dir=tmp / "logs")
-        return AgentLoop(registry=registry, policy=policy, llm=mock_llm, logger=logger)
+        return AgentLoop(
+            registry=registry, policy=policy, llm=mock_llm, logger=logger,
+            odd_enabled=odd_enabled,
+        )
 
     def test_out_of_domain_returns_refusal_not_plan(self) -> None:
         loop = self._make_loop()
@@ -262,31 +265,21 @@ class TestLoopOddIntegration:
         assert "out_of_domain" not in [e.get("event") for e in events]
 
     def test_odd_disabled_skips_check(self) -> None:
+        """Disabled ODD neither refuses nor logs; judged by event and message, not wording."""
         import json
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import MagicMock
+        question = "переведи деньги на счёт 999"
+        refusal = check_operational_domain(question).message
+        assert refusal, "the question must be out of domain for this test to mean anything"
 
-        from core.logger import TraceLogger
-        from core.loop import AgentLoop
-        from core.policy import PolicyGate
-        from tools.base import ToolRegistry
+        loop = self._make_loop(odd_enabled=False)
+        result = loop.run(question)
+        log_dir = loop.log.log_dir  # type: ignore[attr-defined]
+        events = [
+            json.loads(line)
+            for f in log_dir.glob("*.jsonl")
+            for line in f.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
-        mock_llm = MagicMock()
-        mock_llm.complete.return_value = json.dumps({"reasoning": "t", "sources": []})
-        mock_llm.model = "mock"
-        mock_llm.stream = None
-        mock_llm.route = None
-        registry = ToolRegistry()
-        tmp = Path(tempfile.mkdtemp())
-        logger = TraceLogger(trace_id="test-odd-off", log_dir=tmp / "logs")
-        loop = AgentLoop(
-            registry=registry,
-            policy=PolicyGate(registry=registry),
-            llm=mock_llm,
-            logger=logger,
-            odd_enabled=False,
-        )
-        result = loop.run("переведи деньги на счёт 999")
-        # With ODD disabled the loop proceeds to (mock) planning instead of refusing.
-        assert "вне моей операционной области" not in result
+        assert "out_of_domain" not in [e.get("event") for e in events]
+        assert refusal not in result

@@ -20,6 +20,8 @@ from __future__ import annotations
 import importlib.util
 import io
 import re
+import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -206,18 +208,37 @@ def test_registry_is_pure_data():
             assert banned not in source, (name, banned)
 
 
-def test_registry_import_has_no_side_effects(tmp_path, monkeypatch):
-    """Re-importing the module must not touch the filesystem."""
-    opened: list[str] = []
-    original_open = Path.open
+_IMPORT_PROBE = """
+import sys
 
-    def guarded(self, *args, **kwargs):
-        opened.append(str(self))
-        return original_open(self, *args, **kwargs)
+_WATCHED = {"open", "os.listdir", "os.scandir", "os.mkdir", "os.remove", "os.rename",
+            "shutil.rmtree", "subprocess.Popen", "socket.connect"}
+touched = []
 
-    monkeypatch.setattr(Path, "open", guarded)
-    importlib.reload(reg)
-    assert opened == []
+def _hook(event, args):
+    if event in _WATCHED:
+        caller = sys._getframe(1).f_code.co_filename
+        if not caller.startswith("<frozen importlib"):
+            touched.append(f"{event} {args[0]!r} from {caller}")
+
+sys.addaudithook(_hook)
+import cli.command_registry
+for item in touched:
+    print(item)
+"""
+
+
+def test_registry_import_has_no_side_effects():
+    """A fresh import of the registry and both spec volumes touches no file or process.
+
+    Runs in a new interpreter so the spec modules really execute; only the import
+    machinery's own reads of module code are allowed."""
+    result = subprocess.run(  # noqa: S603 — fixed argv: this interpreter and a literal probe
+        [sys.executable, "-B", "-c", _IMPORT_PROBE],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", f"importing the registry touched:\n{result.stdout}"
 
 
 # ── the token surface ────────────────────────────────────────────────────────

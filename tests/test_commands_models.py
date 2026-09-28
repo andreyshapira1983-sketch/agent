@@ -14,7 +14,7 @@ What these tests hold onto:
   provider selectors, so `--json` alone cannot narrow a refresh to a provider
   named "json";
 * a failed refresh logs a structured record with a truncated message and the
-  exception type — never a key, never an env value;
+  exception type — never an env value;
 * `:model-usage` copes with a ledger that is switched off.
 """
 from __future__ import annotations
@@ -206,13 +206,18 @@ def test_refresh_models_without_flags_asks_for_every_provider(agent, capsys, mon
     assert seen["p"] is None, "no flags means every available provider"
 
 
-def test_refresh_models_reports_and_logs_a_failure_without_leaking(agent, capsys, monkeypatch):
+def test_refresh_models_logs_a_failure_as_type_and_message_head_only(agent, capsys, monkeypatch):
+    """A failed refresh logs providers, error type and the message head; no env key escapes.
+
+    The handler does not redact the exception's own text, so only env values are pinned."""
     import core.model_catalog as catalog_mod
 
-    secret = "sk-ant-SUPER-SECRET-" + "x" * 300
+    env_key = "sk-ant-FROM-ENV-must-never-appear"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", env_key)
+    message = "401 unauthorized for provider anthropic " + "x" * 300
 
     def _boom(*, providers):
-        raise RuntimeError(f"401 unauthorized for key {secret}")
+        raise RuntimeError(message)
 
     monkeypatch.setattr(catalog_mod, "refresh_catalog", _boom)
 
@@ -220,11 +225,14 @@ def test_refresh_models_reports_and_logs_a_failure_without_leaking(agent, capsys
 
     err = capsys.readouterr().err
     assert "refresh-models" in err and "401 unauthorized" in err
+    assert env_key not in err
 
-    logged = agent.log.payload("refresh_models_failed")
-    assert logged["error_type"] == "RuntimeError"
-    assert logged["providers"] == ["anthropic"]
-    assert len(logged["error"]) <= 200, "the logged message is truncated"
+    assert agent.log.payload("refresh_models_failed") == {
+        "providers": ["anthropic"],
+        "error_type": "RuntimeError",
+        "error": message[:200],
+    }
+    assert env_key not in json.dumps(agent.log.events, default=str)
 
 
 def test_refresh_models_logs_counts_and_tier_bests(agent, capsys, monkeypatch):

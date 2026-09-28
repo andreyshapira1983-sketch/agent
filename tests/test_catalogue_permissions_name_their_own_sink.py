@@ -33,7 +33,6 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import build_agent
-from core.loop_memory_write import KNOWN_DURABLE_SINKS
 
 
 @pytest.fixture(autouse=True)
@@ -51,11 +50,6 @@ def _permissions(workspace: Path, allowlist: frozenset[str]) -> tuple[bool, bool
         not agent._durable_learning_suppressed("knowledge"),
         not agent._durable_learning_suppressed("source_registry"),
     )
-
-
-def test_both_sink_names_are_ones_the_gate_recognises() -> None:
-    """Precondition: an unknown name is denied by rule 3, which would hide a swap."""
-    assert {"knowledge", "source_registry"} <= KNOWN_DURABLE_SINKS
 
 
 def test_an_allowlist_holding_only_knowledge_permits_only_knowledge(

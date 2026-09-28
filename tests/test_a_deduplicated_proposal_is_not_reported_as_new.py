@@ -28,19 +28,8 @@ def _add(inbox: ApprovalInbox, *, summary: str, content: str):
     )
 
 
-def test_a_collision_is_visible_to_the_caller(tmp_path) -> None:
-    """Вызывающий обязан МОЧЬ узнать, что его заявка схлопнулась."""
-    inbox = _inbox(tmp_path)
-    _add(inbox, summary="черновик A", content="СОДЕРЖИМОЕ А")
-
-    assert inbox.find_pending_by_dedup_key(_KEY) is not None, (
-        "узнать о столкновении нечем — вызывающему остаётся только верить, "
-        "что его заявка подана"
-    )
-
-
 def test_an_absent_key_reads_absent(tmp_path) -> None:
-    """Контроль: без него первый тест проходил бы и на функции, всегда что-то возвращающей."""
+    """Контроль: без него тест кампании проходил бы и на функции, всегда что-то возвращающей."""
     inbox = _inbox(tmp_path)
     assert inbox.find_pending_by_dedup_key("self_apply:docs/нет.md:x") is None
 

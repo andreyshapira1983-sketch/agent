@@ -39,13 +39,11 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
-from core.smart_memory import (
-    EpisodeRecord,
-    EpisodicMemoryStore,
-    decide_usage_eligibility,
-)
-from tests.conftest import write_legacy_episode
+from core.model_router import ModelRouter
+from core.smart_memory import EpisodeRecord, decide_usage_eligibility
+from tests.conftest import FakeLLM, FakePlanner, write_legacy_episode
 from tests.test_memory_core_wiring import _drive_one_cycle
+from tests.test_smart_memory import _declare_completion
 
 QUESTION = "how much is two plus two"
 
@@ -102,37 +100,47 @@ def test_admission_matrix(case: str, episode_kwargs: dict, expected: bool) -> No
     assert decide_usage_eligibility(_ep(**episode_kwargs)) is expected, case
 
 
-def test_policy_returns_a_bool_never_none() -> None:
-    """None means "never classified" and is reserved for legacy rows.
-
-    A policy decision is always explicit, so it must not manufacture the
-    legacy state for an episode it just judged.
-    """
-    for kwargs in ({"outcome": "success", "verified": 3}, {"outcome": "failed", "verified": 0}):
-        assert isinstance(decide_usage_eligibility(_ep(**kwargs)), bool)
-
-
 # ==========================================================================
 # Integration — the loop must actually consult the policy.
 # ==========================================================================
-def test_verified_cycle_banks_an_admitted_episode(tmp_path: Path) -> None:
-    """An evidenced run becomes reusable experience end to end."""
-    agent = build_agent(tmp_path, with_memory=True, approval_provider=None)
-    # Seeded as a legacy row on purpose: the point of this test is that the
-    # CYCLE decides, so the pre-existing row must carry no verdict to be
-    # confused with. `save()` would give it one — it is the admission boundary.
-    write_legacy_episode(
-        tmp_path / DEFAULT_EPISODIC_MEMORY_PATH, _ep(verified=4, unverified=0)
+_ATLAS_ANSWER = (
+    "Conclusion: The atlas has twelve maps [file:atlas.txt].\n"
+    "Facts:\n- The atlas has twelve maps [file:atlas.txt]\n"
+    "- The first map shows the northern coast [file:atlas.txt]\n"
+    "Sources:\n1. file:atlas.txt - atlas.txt\n"
+    "Confidence: high\n"
+)
+
+
+def test_verified_cycle_banks_an_admitted_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An evidenced run becomes reusable experience end to end.
+
+    Only `True` proves the loop asked the policy: a hard-coded quarantine
+    `False` is also "not None".
+    """
+    (tmp_path / "atlas.txt").write_text(
+        "The atlas has twelve maps. The first map shows the northern coast.\n",
+        encoding="utf-8",
     )
-    seeded = EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).load()[0]
+    agent = build_agent(tmp_path, with_memory=True, approval_provider=None)
+    agent.planner = FakePlanner(sources=[{
+        "tool": "file_read", "arguments": {"path": "atlas.txt"},
+        "label": "file:atlas.txt", "expected_outcome": "the atlas text",
+    }])
+    agent.llm = FakeLLM(responses=[_ATLAS_ANSWER] * 4)
+    agent.model_router = ModelRouter.single(agent.llm)
+    _declare_completion(monkeypatch)
 
-    assert seeded.usage_eligible is None, "hand-built seed is unclassified"
+    agent.run(user_question="how many maps does the atlas have", file_hint="atlas.txt")
 
-    # A real cycle must decide, not default.
-    _drive_one_cycle(agent, QUESTION)
-    banked = [e for e in agent.episodic_store.load() if e.id != "ep-policy"]
-    assert banked, "the cycle must bank an episode"
-    assert banked[0].usage_eligible is not None, (
+    banked = agent.episodic_store.load()
+    assert len(banked) == 1, "the cycle must bank one episode"
+    episode = banked[0]
+    assert (episode.outcome, episode.completion_state) == ("success", "achieved"), episode
+    assert episode.verified_chunks > 0, "fixture drifted: the citation no longer verifies"
+    assert episode.usage_eligible is True, (
         "the loop still defaults instead of consulting the admission policy"
     )
 

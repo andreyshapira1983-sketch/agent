@@ -67,3 +67,4 @@ def test_a_missing_file_is_still_a_fabrication() -> None:
     """Послабление узкое: выдуманный АДРЕС остаётся выдуманным адресом."""
     report = _verify(_FABRICATION)
     assert report.self_declared_chunks == 0, report.to_log_payload()
+    assert report.cited_but_unmatched_chunks == 1, report.to_log_payload()

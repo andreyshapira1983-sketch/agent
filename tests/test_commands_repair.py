@@ -258,14 +258,21 @@ def test_propose_repair_forwards_every_parsed_argument(tmp_path, capsys):
 # ── the fakes are held to the real contracts ─────────────────────────────────
 
 def test_report_contracts_match_the_fakes():
-    """If the real reports change shape, the fakes above stop being valid."""
+    """Real reports answer what FakeReport answers: `.proposal` and a no-argument `user_summary()`.
+
+    The handler prints the summary with and without a proposal, so both shapes are built."""
     from core.repair_proposal import ProposalGenerationReport
     from core.self_repair_models import RepairReport
 
-    assert callable(ProposalGenerationReport.user_summary)
-    assert "proposal" in ProposalGenerationReport.__dataclass_fields__
-    assert callable(RepairReport.user_summary)
+    proposal = RepairProposal(path="core/foo.py", proposed_content="y = 2\n")
+    generated = ProposalGenerationReport(status="proposed", proposal=proposal)
+    empty = ProposalGenerationReport(status="no_failing_tests")
+    applied = RepairReport(proposal=proposal, status="repaired")
 
-    fields = RepairProposal.__dataclass_fields__
-    for name in ("path", "proposed_content", "test_paths", "test_pattern", "reason"):
-        assert name in fields, f"cli/commands_repair.py constructs RepairProposal({name}=…)"
+    assert generated.proposal is proposal
+    assert empty.proposal is None
+    for report in (generated, empty, applied):
+        summary = report.user_summary()
+        assert isinstance(summary, str) and summary.strip(), type(report).__name__
+    assert "core/foo.py" in generated.user_summary()
+    assert "core/foo.py" in applied.user_summary()

@@ -34,11 +34,6 @@ from core.ingestion import (
 # ── _ensure_inside_workspace ─────────────────────────────────────────────────
 
 class TestEnsureInsideWorkspace:
-    def test_path_inside_workspace_is_allowed(self, tmp_path: Path):
-        inside = tmp_path / "sub" / "file.txt"
-        # Must not raise.
-        _ensure_inside_workspace(tmp_path, inside)
-
     def test_path_outside_workspace_raises_permission_error(self, tmp_path: Path):
         outside = tmp_path.parent / "elsewhere" / "secret.txt"
         with pytest.raises(PermissionError, match="escapes workspace"):

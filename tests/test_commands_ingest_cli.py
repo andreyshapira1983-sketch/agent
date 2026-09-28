@@ -17,6 +17,7 @@ usage error must never reach it at all.
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -133,13 +134,17 @@ def test_source_library_lists_groups_and_entries(capsys):
 
 
 def test_source_library_filters_by_group(capsys):
+    """A group argument lists exactly that group's sources, no more and no fewer."""
     assert _handle_source_library("--json") is True
     payload = json.loads(capsys.readouterr().err)
-    group = min(payload["groups"])
+    group = min(payload["groups"], key=lambda name: len(payload["groups"][name]))
+    members = set(payload["groups"][group])
+    assert members < {source["id"] for source in payload["sources"]}, "a real subset is needed"
 
     assert _handle_source_library(group) is True
     err = capsys.readouterr().err
     assert "=== source library ===" in err
+    assert set(re.findall(r"^  (\S+) \[", err, re.MULTILINE)) == members
 
 
 def test_source_library_refuses_two_group_arguments(capsys):

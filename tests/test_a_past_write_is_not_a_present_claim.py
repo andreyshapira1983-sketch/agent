@@ -74,8 +74,9 @@ def test_the_real_lie_is_still_caught_end_to_end() -> None:
 
 
 def test_a_turn_that_did_write_is_not_accused() -> None:
-    """Когда запись была, обвинения нет — это уже работало, и должно остаться."""
+    """Когда запись была, обвинения нет: только справка ℹ️ с числом записей из журнала."""
     head = "Я записал вывод в data/notes/x.md"
-    assert action_report_mismatch(head, ["file_write"]) is None or True
-    # Список исполненного непуст — ветка обвинения не срабатывает.
-    assert action_report_mismatch(head, ["file_write"]) != action_report_mismatch(head, [])
+    verdict = action_report_mismatch(head, ["file_write"])
+    assert verdict is not None and verdict.startswith("ℹ️"), verdict
+    assert "⚠️" not in verdict
+    assert "записей в этом ходе: 1 (file_write)" in verdict

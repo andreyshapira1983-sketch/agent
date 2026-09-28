@@ -28,10 +28,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from mutation_probe import (  # noqa: E402
-    _default_value_nodes,
-    enumerate_mutations,
-)
+from mutation_probe import enumerate_mutations  # noqa: E402
 
 
 def _descriptions(source: str) -> list[str]:
@@ -135,26 +132,6 @@ def test_a_default_is_skipped_but_a_real_constant_beside_it_is_not():
 
     assert "number 8 -> 9" not in descriptions, "the default should be skipped"
     assert "number 3 -> 4" in descriptions, "the comparison operand should not"
-
-
-def test_the_skip_set_is_built_from_the_tree_that_is_walked():
-    """The bug this nearly shipped with, pinned so it cannot return.
-
-    A first version parsed the source twice — once for the skip set, once for
-    the walk — and matched nodes by `id()`. The two parses produce different
-    objects, so the skip set referred to nodes the mutator never saw and did
-    nothing at all. An inert guard reporting success is the exact shape the
-    census kept finding; it deserved a test rather than a memory.
-    """
-    source = "def f(a: bool = False):\n    return a\n"
-    tree = ast.parse(source)
-
-    skip = _default_value_nodes(tree)
-
-    assert skip, "the default should have been collected"
-    assert any(id(node) in skip for node in ast.walk(tree)), (
-        "the skip set does not refer to nodes of the tree it was built from"
-    )
 
 
 # ---------------------------------------------------------------------------

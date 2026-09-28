@@ -46,29 +46,25 @@ def test_a_procedure_names_the_question_it_was_minted_from() -> None:
     )
 
 
-def test_the_origin_question_is_not_what_retrieval_scores() -> None:
-    """След должен быть НЕЗАВИСИМЫМ, иначе это эхо, а не свидетель.
+def test_the_origin_question_is_not_what_retrieval_scores(tmp_path) -> None:
+    """Подбор не видит `source_questions`: слова только оттуда процедуру не находят.
 
-    Обрезанный вопрос уже лежит в `steps[0]`, а его токены — в `trigger_tags`,
-    то есть внутри стога, по которому идёт подбор. Мерить качество подбора по
-    такому следу — мерить подбор им самим.
+    Иначе след — эхо стога подбора, и мерить подбор им значит мерить подбор им самим.
     """
-    base = ProcedureRecord(
-        name="workflow", workflow_key="tools:file_read",
-        trigger_tags=("file_read",), steps=("Run tool: file_read",),
-    )
-    with_origin = ProcedureRecord(
+    store = ProceduralMemoryStore(tmp_path / "procedural_memory.jsonl")
+    store.rewrite([ProcedureRecord(
         name="workflow", workflow_key="tools:file_read",
         trigger_tags=("file_read",), steps=("Run tool: file_read",),
         source_questions=(_QUESTION,),
-    )
-    haystack_of = lambda p: " ".join(  # noqa: E731
-        [p.name, " ".join(p.trigger_tags), " ".join(p.steps)]
-    )
+    )])
+    assert store.search_with_report("file_read").procedures, "процедура вообще не находится"
 
-    assert haystack_of(base) == haystack_of(with_origin), (
+    found = store.search_with_report(_QUESTION)
+
+    assert found.procedures == [], (
         "происхождение попало в стог подбора — независимого свидетеля не стало"
     )
+    assert found.rejected_by == {"no_overlap": 1}
 
 
 def test_the_origin_survives_a_round_trip_through_the_store(tmp_path) -> None:

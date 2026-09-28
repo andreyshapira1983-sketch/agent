@@ -185,29 +185,6 @@ def test_a_fixture_tree_named_like_the_program_is_not_a_pin():
     assert _pins_in(ast.parse(snippet), "synthetic.py") == []
 
 
-def test_reading_source_through_the_module_is_still_allowed():
-    """The rule is about coupling to a path, not about reading source at all.
-
-    Without this the rule reads as "never inspect source", which would be wrong:
-    some invariants live in the text and nowhere else — what a module may
-    import, whether a banned literal returned. Those checks are legitimate and
-    they travel with the object.
-    """
-    found = 0
-    for path in sorted(pathlib.Path("tests").rglob("test_*.py")):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "getsource"):
-                found += 1
-
-    assert found > 0, "the rule would be vacuous if nothing read source this way"
-
-
 def test_the_file_that_blocked_part_b_no_longer_pins_a_path():
     """Named, because it is the one that mattered.
 

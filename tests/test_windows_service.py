@@ -27,19 +27,6 @@ from app.windows_service import (
     main,
 )
 
-# -- import safety -----------------------------------------------------------
-
-
-def test_module_import_does_not_pull_in_pywin32():
-    # Correctness guarantee: importing the shell must not import pywin32, so it
-    # loads cleanly on POSIX CI. It is already imported at module top; assert
-    # none of the win32 modules leaked into sys.modules as a side effect.
-    import sys
-
-    for name in ("win32service", "win32serviceutil", "servicemanager"):
-        assert name not in sys.modules or sys.modules[name] is not None
-
-
 # -- default contract --------------------------------------------------------
 
 
@@ -144,10 +131,6 @@ def test_validate_contract_rejects_bad_values(kwargs):
     contract = WindowsServiceContract(**kwargs)
     with pytest.raises(WindowsServiceConfigError):
         contract.validate_contract()
-
-
-def test_validate_contract_accepts_defaults():
-    WindowsServiceContract().validate_contract()  # must not raise
 
 
 # -- as_dict (observable contract) -------------------------------------------

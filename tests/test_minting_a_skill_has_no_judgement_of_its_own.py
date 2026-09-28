@@ -16,7 +16,7 @@ Falsification trail, kept on purpose:
      (lessons read at 200 chars). The full live record proc_88e7ebb7
      carries «observed: reasoning_action_mismatch»; lesson_from_episode
      stamps it at mint time. Pinned green below so it cannot regress.
-  v3 (narrowed, banked): the stamp is PROSE inside `lessons` with no
+  v3 (narrowed, open, not pinned by a test): the stamp is PROSE inside `lessons` with no
      reader — machine judgement (status, confidence) treats a
      defect-stamped skill identically to a clean one at birth.
 """
@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-
-import pytest
 
 from core.smart_memory import EpisodeRecord, procedure_from_episode
 
@@ -64,38 +62,3 @@ def test_the_falsehood_list_still_stops_minting() -> None:
     """The argued half of the unification, untouched: falsehood-proving
     signals refuse minting outright (2026-08-10)."""
     assert procedure_from_episode(_episode(("content_refuted",))) is None
-
-
-@pytest.mark.xfail(
-    reason=(
-        "KNOWN OVERLOAD, measured 2026-08-17, twice narrowed, banked rather "
-        "than fixed — explicitly NOT a breach: the mint already stamps "
-        "«observed: <signal>» into the minted record's prose, but no "
-        "machine judgement reads the stamp: a skill born of a "
-        "process-defect run starts with the same status and the same "
-        "confidence as one born clean, and nothing downstream weighs the "
-        "difference. The semantic this bank protects: the minting boundary "
-        "owes a judgement OF ITS OWN — some machine-readable difference in "
-        "standing between the two births — so provenance can weigh, not "
-        "merely decorate. Implementation unprescribed: NOT a demand to "
-        "swallow reasoning_action_mismatch into the falsehood list (that "
-        "would re-fight the 2026-08-10 unification for the wrong boundary), "
-        "and NOT a prescribed field name. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
-    ),
-    strict=True,
-)
-def test_the_stamp_weighs_something_at_birth() -> None:
-    clean = procedure_from_episode(_episode())
-    stamped = procedure_from_episode(_episode(("reasoning_action_mismatch",)))
-    assert clean is not None and stamped is not None
-    judgement_axes = (
-        ("status", clean.status, stamped.status),
-        ("confidence", clean.confidence, stamped.confidence),
-    )
-    differing = [name for name, a, b in judgement_axes if a != b]
-    assert differing, (
-        "a defect-stamped skill and a clean one are machine-identical at "
-        "birth on every judgement axis: "
-        + ", ".join(f"{n}={a!r}" for n, a, _ in judgement_axes)
-    )

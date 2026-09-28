@@ -260,19 +260,3 @@ def test_question_mark_is_a_help_alias_outside_the_colon_namespace():
     assert '":help", "?"' in DISPATCH_SOURCE
     # `?` cannot appear in any `:token` set, so a registry must model it apart.
     assert "?" not in _dispatched()
-
-
-def test_help_page_carries_non_command_prose(tmp_path, capsys):
-    """Headings, the `empty line` note and shortcut prose are not commands."""
-    assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
-    text = capsys.readouterr().err
-    assert "Commands:" in text
-    assert "Conversational shortcuts:" in text
-    assert "empty line" in text
-    assert "flags:" in text
-    # The conversational shortcuts are prose, not tokens. (They were Russian at
-    # 9daa9bf and were translated to English; each phrase is verified to route to
-    # the same intent as the Russian original it replaced.)
-    shortcut = "Check the project and tell me what needs attention"
-    assert shortcut in text
-    assert not _STANDALONE_TOKEN.findall(shortcut)

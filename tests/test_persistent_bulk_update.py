@@ -178,16 +178,20 @@ def test_no_caller_loops_over_update_or_reaches_past_the_api():
     inventing a fourth workaround.
     """
     import ast
-    import pathlib
 
+    # Anchored on the imported package, not the cwd: from another directory a
+    # relative glob finds nothing and the scan passes vacuously.
+    core_dir = Path(pm.__file__).resolve().parent
     offenders: list[str] = []
-    for path in sorted(pathlib.Path("core").glob("*.py")):
+    store_calls = 0
+    for path in sorted(core_dir.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 receiver = ast.unparse(node.func.value)
                 if "persistent_store" not in receiver:
                     continue
+                store_calls += 1
                 if node.func.attr == "_rewrite":
                     offenders.append(f"{path.name}:{node.lineno} reaches _rewrite")
             if isinstance(node, (ast.For, ast.While)):
@@ -200,4 +204,5 @@ def test_no_caller_loops_over_update_or_reaches_past_the_api():
                             f"{path.name}:{inner.lineno} calls update() in a loop"
                         )
 
+    assert store_calls, f"no persistent_store call found under {core_dir}: the scan saw nothing"
     assert offenders == [], offenders

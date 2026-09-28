@@ -24,7 +24,6 @@ from core.checkpoint import (
     CheckpointLoader,
     CheckpointRecord,
     CheckpointWriter,
-    ResumeContext,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -173,11 +172,6 @@ class TestCheckpointLoader:
 # ── Round-trip ────────────────────────────────────────────────────────────────
 
 class TestRoundTrip:
-    def test_full_run_returns_resume_context(self, tmp_path):
-        _full_run(tmp_path, "rt1")
-        ctx = _loader(tmp_path).load("rt1")
-        assert isinstance(ctx, ResumeContext)
-
     def test_question_preserved(self, tmp_path):
         _full_run(tmp_path, "rt2")
         ctx = _loader(tmp_path).load("rt2")

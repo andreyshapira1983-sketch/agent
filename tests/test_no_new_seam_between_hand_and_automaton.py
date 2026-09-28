@@ -63,18 +63,19 @@ _KNOWN_SEAMS: dict[str, str] = {
 }
 
 
-def _sources(*globs: str) -> str:
+def _sources(root: Path, *globs: str) -> str:
     out = []
     for pattern in globs:
-        for path in sorted(ROOT.glob(pattern)):
+        for path in sorted(root.glob(pattern)):
             out.append(path.read_text(encoding="utf-8", errors="replace"))
     return "\n".join(out)
 
 
-def _seams() -> dict[str, str]:
+def _seams(root: Path = ROOT) -> dict[str, str]:
     """Механизмы записи, которые видит команда и не видит автомат."""
-    hand = _sources("cli/*.py")
+    hand = _sources(root, "cli/*.py")
     automaton = _sources(
+        root,
         "agent_tick.py", "core/autonomous_runtime*.py", "core/campaign*.py",
         "core/loop*.py", "core/drive*.py", "core/patch_route.py",
         "core/stuck_route.py", "core/self_build*.py", "core/defect_intake.py",
@@ -85,7 +86,7 @@ def _seams() -> dict[str, str]:
     # закрытым, не будучи им. Прибор, который прячет то, что ищет, — это ровно
     # та поломка, против которой он написан.
     found: dict[str, str] = {}
-    for path in sorted(ROOT.glob("core/*.py")) + sorted(ROOT.glob("tools/*.py")):
+    for path in sorted(root.glob("core/*.py")) + sorted(root.glob("tools/*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
@@ -98,7 +99,7 @@ def _seams() -> dict[str, str]:
                 continue
             called = re.compile(rf"\b{re.escape(name)}\s*\(")
             if called.search(hand) and not called.search(automaton):
-                rel = path.relative_to(ROOT).as_posix()
+                rel = path.relative_to(root).as_posix()
                 found[f"{rel}::{name}"] = (ast.get_docstring(node) or "").split("\n")[0][:80]
     return found
 
@@ -124,14 +125,40 @@ def test_the_known_list_does_not_rot() -> None:
         f"эти швы уже закрыты, убери их из _KNOWN_SEAMS: {stale}")
 
 
-def test_the_guard_can_actually_see_a_seam() -> None:
-    """Сторож проверяется на себе: он обязан находить настоящий разрыв.
+def test_the_guard_can_actually_see_a_seam(tmp_path: Path) -> None:
+    """Сторож на выдуманном дереве находит ровно настоящие швы — и только их.
 
-    Без этого тест мог бы молчать из-за опечатки в образце имени и годами
-    считаться зелёным — ровно тот случай, против которого он и написан.
+    Опечатка в образце, глобах или фильтре имён оставила бы его зелёным навсегда.
     """
-    hand = "run_state_store_drill(agent, workspace)"
-    called = re.compile(r"\brun_state_store_drill\s*\(")
+    tree = {
+        "cli/commands.py": (
+            "save_widget(w)\n"
+            "record_note (n)\n"
+            "await ingest_feed(f)\n"
+            "store_shared(x)\n"
+            "compute_total(y)\n"
+            "_save_private(z)\n"
+        ),
+        "core/widgets.py": (
+            'def save_widget(w):\n    """Пишет виджет."""\n'
+            "async def ingest_feed(f):\n    pass\n"
+            "def store_shared(x):\n    pass\n"
+            "def compute_total(y):\n    pass\n"
+            "def _save_private(z):\n    pass\n"
+            "def save_unused(u):\n    pass\n"
+        ),
+        "tools/notes.py": "def record_note(n):\n    pass\n",
+        "core/loop_step.py": "store_shared(x)\n",
+    }
+    for rel, text in tree.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
 
-    assert called.search(hand), "образец имени не ловит собственный вызов"
-    assert any(w in "run_state_store_drill" for w in _WRITING_NAMES)
+    seams = _seams(tmp_path)
+
+    assert set(seams) == {
+        "core/widgets.py::save_widget",
+        "core/widgets.py::ingest_feed",
+        "tools/notes.py::record_note",
+    }, seams
+    assert seams["core/widgets.py::save_widget"] == "Пишет виджет."

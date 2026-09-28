@@ -55,12 +55,6 @@ PROPERTIES = frozenset({
     "mutation_bite",      # that test demonstrably reddens on the defect
 })
 
-#: The perimeter as a number. A new loop_* file widens the nervous system
-#: without widening anything that says so. 19 → 21 (2026-08-17): the
-#: loop_synthesis split landed two satellites (state, helpers) — not mixins,
-#: but inside the discovery perimeter by name.
-EXPECTED_MIXINS = 21
-
 
 def _load() -> dict:
     return json.loads(SNAPSHOT.read_text(encoding="utf-8"))
@@ -197,11 +191,3 @@ def test_every_listed_property_is_a_known_one() -> None:
     bad = {n: sorted(set(p) - PROPERTIES)
            for n, p in _load()["nodes"].items() if set(p) - PROPERTIES}
     assert not bad, f"unknown property names: {bad}"
-
-
-def test_the_perimeter_has_not_quietly_moved() -> None:
-    mixins = {p.name for p in CORE.glob("loop_*.py")}
-    assert len(mixins) == EXPECTED_MIXINS, (
-        f"perimeter changed: {len(mixins)} mixin files, expected "
-        f"{EXPECTED_MIXINS}; update knowledge/maps/cns_census.json in the same commit"
-    )

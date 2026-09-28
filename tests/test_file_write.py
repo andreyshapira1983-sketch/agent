@@ -72,20 +72,23 @@ class TestOverwriteAndBackup:
         # Match the canonical timestamp segment placed after `.bak.`.
         assert re.search(r"\.bak\.\d{8}T\d{6}Z$", out["backup_path"])
 
-    def test_two_overwrites_produce_two_distinct_backups(self, workspace: Path):
+    def test_two_overwrites_produce_two_distinct_backups(self, workspace: Path, monkeypatch):
+        """Each overwrite keeps its own backup, so v0 survives the second write.
+
+        The clock ticks one second per call: the backup stamp has second resolution.
+        """
+        import time
+
+        real_gmtime, ticks = time.gmtime, iter(range(1_790_000_000, 1_790_000_100))
+        monkeypatch.setattr("tools.file_write.time.gmtime", lambda *_: real_gmtime(next(ticks)))
         (workspace / "z.txt").write_text("v0", encoding="utf-8")
         tool = FileWriteTool(workspace_root=workspace)
 
-        # Bypass the strftime second-resolution collision: the test only
-        # cares that BOTH writes succeed and BOTH leave a backup behind.
-        # Even if the timestamps collide, the second backup would clobber
-        # the first; that's acceptable for MVP-9 (we keep at least one).
         tool.run(path="z.txt", content="v1")
         tool.run(path="z.txt", content="v2")
 
-        backups = list(workspace.glob("z.txt.bak.*"))
-        assert len(backups) >= 1, "at least one backup must remain"
-        # The final file holds the latest content.
+        backups = sorted(workspace.glob("z.txt.bak.*"))
+        assert [b.read_text(encoding="utf-8") for b in backups] == ["v0", "v1"]
         assert (workspace / "z.txt").read_text(encoding="utf-8") == "v2"
 
 

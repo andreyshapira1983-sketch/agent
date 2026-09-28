@@ -103,12 +103,6 @@ def test_patch_check_carries_its_format():
     )
 
 
-def test_the_undocumented_list_names_a_reason() -> None:
-    """Список исключений без основания — это «так сложилось», а не решение."""
-    for name, reason in _DELIBERATELY_UNDOCUMENTED.items():
-        assert len(reason) > 30, f"{name}: основание слишком короткое"
-
-
 def test_the_undocumented_list_has_no_stale_names() -> None:
     """Инструмент, которого больше нет, не остаётся в списке исключений."""
     open_tools = _tools_open_on_the_unattended_path()
