@@ -84,6 +84,17 @@ Structured budgets live in [`config/budget_limits.json`](../config/budget_limits
 | `AGENT_API_MAX_QUESTION` | `8000` | Max characters for `question`. |
 | `AGENT_API_MAX_FILE_HINT` | `512` | Max characters for `file_hint`. |
 
+### Memory judge (Jev, TypeSafe System One)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AGENT_JEV_MEMORY` | off | `1` = when a new conclusion is written to semantic memory, Jev (`core/jev_judge.py`) judges which older similar conclusions it replaces (yes/no probability, threshold 0.5). Those get `superseded_by=<new id>` and reach the prompt with the marker `[superseded by <id>; the newer entry is current]`; they are never hidden or archived. Any Jev failure marks nothing and is journaled as `sensor_failed` (`jev_memory`). |
+| `TYPESAFE_API_KEY` | — | Bearer key for `api.typesafe.ai`. Without it Jev is never called, even with the flag on. Keep it in the workspace `.env`, never in the repository. |
+
+Egress: one host, `https://api.typesafe.ai/v1/systemone`, through the SSRF-guarded opener of
+`tools/network_safety.py` with an allow-list of that host only. Texts pass DLP redaction
+(`core/redaction.py`) before they are sent.
+
 ### Advanced / tuning
 
 These are read by the code; the authoritative default lives at the read site.

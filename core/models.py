@@ -157,12 +157,8 @@ class MemoryRecord(BaseModel):
     owner: str = "session"
     ttl_seconds: int | None = None
     created_at: datetime = Field(default_factory=_now)
-    # MIR-074 root fix: WHO asserted this. It always existed as a write-policy
-    # input but was never persisted, so every stored record lost its origin —
-    # and the MIR-046 independence rule then demoted EVERY memory citation to
-    # topic-only forever (the measured all-history zero of verified memory
-    # citations). `user-explicit` records are human assertions and may verify;
-    # agent-auto ones stay non-independent by doctrine.
+    # WHO asserted this (MIR-074): `user-explicit` records are human assertions and
+    # may verify; agent-auto ones stay non-independent by doctrine (MIR-046).
     source: str | None = None
 
     # --- importance tracking (for archive scoring) ---
@@ -181,6 +177,7 @@ class MemoryRecord(BaseModel):
     # True = record has been moved to the archive store; active store never
     # contains archived records.
     archived: bool = False
+    superseded_by: str | None = None
 
 
 # ---------- failure ----------

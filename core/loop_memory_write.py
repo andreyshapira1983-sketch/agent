@@ -357,6 +357,7 @@ class AgentLoopMemoryWrite:
             )
             archived = ([r.id for r in old if self.persistent_store.archive_record(r.id)]
                         if record is not None else [])
+            self._mark_replaced(record, existing, old)
         except Exception as exc:  # noqa: BLE001 — опыт уже записан; сбой памяти — в журнал
             self._sensor_failed("conclusion_memory", exc)
             return
@@ -370,6 +371,30 @@ class AgentLoopMemoryWrite:
             "consolidation": consolidation.operation if consolidation else "structural",
             "consolidation_reason": consolidation.reason if consolidation else "",
         })
+
+    def _mark_replaced(self, record: Any, existing: list[Any], old: list[Any]) -> None:
+        """Jev: прежние похожие выводы, которые заменил новый, получают его id — не прячутся."""
+        from core.jev_judge import THRESHOLD, jev_key, replacement_probabilities
+        from core.memory_consolidation import similar_conclusions
+
+        key = jev_key()
+        if record is None or key is None:
+            return
+        gone = {r.id for r in old} | {record.id}
+        try:
+            candidates = [r for r in similar_conclusions(str(record.content), existing)
+                          if r.id not in gone and not r.archived and r.superseded_by is None]
+            if not candidates:
+                return
+            p = replacement_probabilities(key, str(record.content), candidates)
+            marked = [r.model_copy(update={"superseded_by": record.id})
+                      for r in candidates if p[r.id] >= THRESHOLD]
+            self.persistent_store.update_many(marked)
+        except Exception as exc:  # noqa: BLE001 — Jev только помечает, вывод уже записан; сбой — в журнал
+            self._sensor_failed("jev_memory", exc)
+            return
+        self.log.log("jev_memory_marks", {
+            "record_id": record.id, "p": p, "marked": [r.id for r in marked]})
 
     def _consolidate_conclusion(self, content: str, episode: Any, existing: list[Any]) -> Any:
         """Решение Mem0 по новому выводу: ADD / UPDATE / DELETE / NOOP."""
