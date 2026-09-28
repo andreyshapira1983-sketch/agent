@@ -695,16 +695,12 @@ def _default_grounded_selector(
     """
     def _select() -> Any:
         try:
-            from core.backlog_selector import load_backlog, select_top
+            from core.backlog_selector import load_backlog, select_top, value_review_signal
 
-            reviews = None
-            try:
-                from core.value_review import ValueReviewLog
-
-                reviews = ValueReviewLog.for_workspace(workspace).list()
-            except Exception:  # noqa: BLE001 — reviews are an optional signal
-                reviews = None
-            candidates = load_backlog(workspace, value_reviews=reviews)
+            reviews, item_targets = value_review_signal(workspace)
+            candidates = load_backlog(
+                workspace, value_reviews=reviews, item_target_map=item_targets,
+            )
             # Cooldown (A): a target that was just critic-vetoed is temporarily
             # excluded so the run advances to the NEXT grounded candidate rather
             # than banging on the same wall. Matching is on the concrete path so
@@ -743,7 +739,8 @@ def _default_grounded_selector(
 
 
 def _researcher_gather(
-    file_reader: Callable[[str], str | None], target: str, diagnosis: str
+    file_reader: Callable[[str], str | None], target: str, diagnosis: str,
+    manager_data: dict[str, Any] | None = None,
 ) -> RoleOutput:
     """Read current file content (read-only) and assemble evidence."""
     current = file_reader(target)
@@ -754,6 +751,7 @@ def _researcher_gather(
         f"target={target}",
         f"exists={exists}",
         f"current_lines={line_count}",
+        f"backlog_target={(manager_data or {}).get('source_target_path') or target}",
     ]
     if diagnosis:
         evidence.append(f"diagnosis={diagnosis}")
@@ -1709,7 +1707,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
         read_sources.append("memory:self-build-lessons")
 
     # ── Researcher ──────────────────────────────────────────────────────────
-    researcher = _researcher_gather(reader, target, diagnosis)
+    researcher = _researcher_gather(reader, target, diagnosis, manager.data)
     roles.append(researcher)
     current_content = researcher.data["current_content"]
     evidence = list(researcher.data["evidence"])
