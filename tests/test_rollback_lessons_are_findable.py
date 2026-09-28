@@ -95,13 +95,16 @@ def test_a_successful_apply_is_tagged_too_but_is_not_a_failure_lesson():
 
 
 def test_an_apply_with_no_files_still_banks_an_episode():
+    """No files_changed: the episode is banked with no path tag and no files= detail."""
     episode = build_self_build_episode("self-apply-run", {
         "status": "blocked",
         "reason": "approval required",
     })
 
-    assert episode is not None
-    assert "self-build" in episode.tags
+    assert set(episode.tags) == {"self-build", "lesson", "self-apply-run", "blocked", "failed"}
+    assert "approval required" in episode.summary
+    assert "files=" not in episode.summary
+    assert episode.source_labels == ()
 
 
 def test_a_rollback_banked_before_the_fix_is_still_found():

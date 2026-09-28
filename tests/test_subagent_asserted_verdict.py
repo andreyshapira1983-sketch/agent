@@ -17,7 +17,7 @@ from core.verifier import (
 
 def _subagent_evidence(
     *, contract: str, external: int, kinds: str = "",
-    extra_excerpt: str = "",
+    extra_excerpt: str = "", source_id: str | None = None,
 ) -> Evidence:
     """Build an Evidence record that mimics what the parent loop caches
     after a `spawn_subagent` tool call (memory artefact)."""
@@ -30,7 +30,7 @@ def _subagent_evidence(
     )
     return make_evidence(
         kind="memory",
-        source_id=f"memory:working_turn_1_subagent_{contract}",
+        source_id=source_id or f"memory:working_turn_1_subagent_{contract}",
         obtained_via="working_memory",
         claim=f"Sub-agent {contract} report",
         excerpt=excerpt,
@@ -39,7 +39,10 @@ def _subagent_evidence(
 
 class TestDerivativeDetection:
     def test_marker_zero_external_is_derivative(self):
-        ev = _subagent_evidence(contract="A", external=0)
+        """The marker alone decides: the source id names no sub-agent."""
+        ev = _subagent_evidence(
+            contract="A", external=0, source_id="memory:working_turn_1_notes",
+        )
         assert _is_derivative_subagent_evidence(ev) is True
 
     def test_marker_with_external_is_still_derivative(self):

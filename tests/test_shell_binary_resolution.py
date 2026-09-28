@@ -63,20 +63,20 @@ def test_an_installed_binary_is_never_substituted(tool: ShellExecTool) -> None:
 def test_the_platform_equivalent_is_used_only_as_a_fallback(
     tool: ShellExecTool, monkeypatch
 ) -> None:
-    """With the requested binary absent, the swap is the right thing to do."""
-    real_which = shutil.which
+    """The equivalent runs only while the requested binary is absent.
 
-    def _missing_grep(name: str, *args, **kwargs):
-        return None if name == "grep" else real_which(name, *args, **kwargs)
+    Each OS has its own foreign name, so the fallback is exercised on every CI platform."""
+    requested, equivalent = ("grep", "findstr") if sys.platform == "win32" else ("findstr", "grep")
+    on_path = {requested, equivalent}
+    monkeypatch.setattr(
+        "tools.shell_exec.shutil.which",
+        lambda name, *_a, **_k: f"/bin/{name}" if name in on_path else None,
+    )
 
-    monkeypatch.setattr("tools.shell_exec.shutil.which", _missing_grep)
+    assert _resolve(tool, requested) == (requested, False)
 
-    name, substituted = _resolve(tool, "grep")
-
-    expected = "findstr" if sys.platform == "win32" else "grep"
-    if sys.platform == "win32":
-        assert name == expected
-        assert substituted is True
+    on_path.discard(requested)
+    assert _resolve(tool, requested) == (equivalent, True)
 
 
 def test_an_absent_pair_still_raises(tool: ShellExecTool, monkeypatch) -> None:

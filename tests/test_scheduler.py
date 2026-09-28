@@ -20,6 +20,7 @@ def test_scheduler_persists_schedule(workspace: Path):
 
 
 def test_due_returns_only_active_due_schedules(workspace: Path):
+    """Each filter alone excludes: a future active schedule and a paused one already due."""
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     store = SchedulerStore(workspace / "schedules.jsonl")
     due = store.add(
@@ -28,13 +29,19 @@ def test_due_returns_only_active_due_schedules(workspace: Path):
         every_minutes=10,
         start_at=now - timedelta(minutes=1),
     )
-    future = store.add(
+    store.add(
         name="future",
         goal="future goal",
         every_minutes=10,
         start_at=now + timedelta(minutes=1),
     )
-    store.pause(future.id)
+    paused = store.add(
+        name="paused",
+        goal="paused goal",
+        every_minutes=10,
+        start_at=now - timedelta(minutes=1),
+    )
+    store.pause(paused.id)
 
     due_now = store.due(now=now)
 

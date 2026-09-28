@@ -1,8 +1,8 @@
 """The lane's git front-end must refuse a remote verb, not merely lack a name.
 
 Found 2026-08-20 auditing the suite as an instrument. Four separate tests —
-test_safe_vcs.py:116, test_self_apply_lane.py:344,
-test_self_apply_approval_bridge.py:408, test_self_build_producer.py:292 —
+test_safe_vcs.py, test_self_apply_lane.py (both removed 28.09 as copies),
+test_self_apply_approval_bridge.py:409, test_self_build_producer.py:280 —
 assert the same thing: `not hasattr(SafeVCS, "push"/"fetch"/"pull"/"remote")`.
 Four copies of one claim are one witness, not four, and the claim they make is
 about NAMES. `SafeVCS` carries a general git executor (`_git`, with an

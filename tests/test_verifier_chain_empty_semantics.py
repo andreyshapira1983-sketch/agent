@@ -47,8 +47,8 @@ def test_a_user_turn_citation_is_user_asserted_never_verified():
 
 def test_a_plain_echo_without_citation_does_not_verify():
     """The injection alone is not a free pass: restating the question without
-    citing the user turn stays unverified, so MIR-028 is specifically about
-    `[user:current_turn]` citations, not about any echo."""
+    citing the user turn stays unverified, not even `user_asserted`, so MIR-028
+    is specifically about `[user:current_turn]` citations, not about any echo."""
     report = verify(
         answer=(
             "**Conclusion:**\nThe operator asked to compute seventeen times twenty-three.\n"
@@ -58,6 +58,9 @@ def test_a_plain_echo_without_citation_does_not_verify():
         user_question="Compute seventeen times twenty-three and give a numeric result.",
     )
     assert report.chain_was_empty is True
+    assert [c.verdict for c in report.chunks] == ["unverified", "unverified"]
+    assert report.unverified_chunks == 2
+    assert report.user_asserted_chunks == 0
     assert report.verified_chunks == 0
     assert report.fully_unverified is True
 

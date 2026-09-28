@@ -105,19 +105,25 @@ def test_pruning_does_not_shield_groundless_over_evidenced() -> None:
 # Consumer 3 — re-ask detection
 # ==========================================================================
 def test_reask_hint_is_not_less_likely_for_a_groundless_answer(tmp_path) -> None:
+    """At a bar only the lowered threshold clears, groundless fires like weak; good does not.
+
+    Similarity here is 2/3: below the 0.7 bar, above the lowered 0.6 one.
+    """
     stored = "how do I deploy the service to production"
     asked = "how do I deploy the service"
 
     def _fires(eid: str, verified: int, unverified: int) -> bool:
         store = EpisodicMemoryStore(tmp_path / f"{eid}.jsonl")
         store.save(_ep(eid, verified, unverified, question=stored))
-        hit, _ = store.find_most_similar(asked, threshold=0.85)
+        hit, _ = store.find_most_similar(asked, threshold=0.7)
         return hit is not None
 
-    groundless_fires = _fires("groundless", 0, 0)
-    weak_fires = _fires("weak", 1, 4)
-
-    assert groundless_fires >= weak_fires, (
+    assert not _fires("good", 9, 1), (
+        "control: a well-evidenced answer must not clear the bar, or the "
+        "checks below prove nothing about the lowered threshold"
+    )
+    assert _fires("weak", 1, 4), "a weakly-evidenced answer no longer lowers the bar"
+    assert _fires("groundless", 0, 0), (
         "a re-ask after a groundless answer was LESS likely to be noticed than "
         "one after a weakly-evidenced answer"
     )

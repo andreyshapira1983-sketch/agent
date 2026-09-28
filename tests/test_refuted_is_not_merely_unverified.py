@@ -26,7 +26,10 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from core.approval import AutoApprover
 from core.evidence import ProvenanceChain, make_evidence
@@ -35,7 +38,13 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop
 from core.memory import WorkingMemory
 from core.policy import PolicyGate
-from core.smart_memory import EpisodicMemoryStore
+from core.smart_memory import (
+    DISQUALIFYING_DEFECT_SIGNALS,
+    EpisodeRecord,
+    EpisodicMemoryStore,
+    decide_usage_eligibility,
+    procedure_credit_allowed,
+)
 from core.verifier import verify
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
@@ -220,12 +229,23 @@ def test_five_good_claims_do_not_dilute_one_lie(tmp_path: Path) -> None:
     )
 
 
-def test_the_disqualification_is_shared_law() -> None:
-    """Сигнал входит в общий список дисквалификации.
+@pytest.mark.parametrize(
+    "signal", sorted({"content_refuted", *DISQUALIFYING_DEFECT_SIGNALS}),
+)
+def test_the_disqualification_is_shared_law(signal: str) -> None:
+    """Каждый дисквалифицирующий сигнал закрывает оба рубежа: опыт и кредит.
 
-    `test_credit_and_eligibility_agree` параметризован этим множеством и
-    автоматически докажет согласие кредита с допуском для нового сигнала.
+    Тот же эпизод без сигнала проходит оба, значит отказ идёт от сигнала.
     """
-    from core.smart_memory import DISQUALIFYING_DEFECT_SIGNALS
-
-    assert "content_refuted" in DISQUALIFYING_DEFECT_SIGNALS
+    clean = EpisodeRecord(
+        goal="кто пишет уроки", question="кто пишет уроки", outcome="success",
+        summary="разбор", full_answer="ответ", completion_state="achieved",
+        verified_chunks=5, unverified_chunks=0, answer_quality_score=1.0,
+        tools_used=["file_read"], source_labels=["file:doc.txt"],
+    )
+    assert decide_usage_eligibility(clean) and procedure_credit_allowed(clean), (
+        "контроль: чистый эпизод обязан пройти оба рубежа"
+    )
+    bad = replace(clean, defect_signals=[signal])
+    assert not decide_usage_eligibility(bad), f"{signal}: эпизод допущен в опыт"
+    assert not procedure_credit_allowed(bad), f"{signal}: эпизод кредитует процедуру"

@@ -40,6 +40,8 @@ class TestUserBaselineMaterialised:
             answer="Some claim [user].",
             chain=chain,
         )
+        assert report.cited_but_unmatched_chunks == 1
+        assert report.user_asserted_chunks == 0
         assert report.verified_chunks == 0
 
     def test_baseline_does_not_mutate_caller_chain(self):

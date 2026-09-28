@@ -5,6 +5,7 @@ value-review ledger are backed by files under ``tmp_path`` only.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,15 @@ def _executed_producer_item(inbox: ApprovalInbox):
 
 def _ledger_path(tmp_path: Path) -> Path:
     return tmp_path / "data" / "value_reviews.jsonl"
+
+
+def _file_digests(root: Path) -> dict[str, str]:
+    """Content hash of every file under root; `.lock` sidecars belong to the state layer."""
+    return {
+        p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix != ".lock"
+    }
 
 
 # ── ledger unit ────────────────────────────────────────────────────────────────
@@ -217,15 +227,17 @@ def test_value_review_list_is_read_only(tmp_path, capsys):
 
 
 def test_only_expected_files_written_no_stray_side_effects(tmp_path):
+    """A recorded verdict changes exactly the ledger and the subagent registry."""
     inbox = _inbox(tmp_path)
     item = _executed_producer_item(inbox)
     agent = _FakeAgent(inbox)
+    before = _file_digests(tmp_path)
+
     _handle_value_review(f"{item.id} accepted", agent, tmp_path)
-    written = {p.name for p in (tmp_path / "data").glob("*.jsonl")}
-    assert "value_reviews.jsonl" in written
-    # no budget/config file was created or touched anywhere under the workspace
-    assert not (tmp_path / "config" / "budget_limits.json").exists()
-    assert list(tmp_path.rglob("budget_limits.json")) == []
+
+    after = _file_digests(tmp_path)
+    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+    assert changed == {"data/value_reviews.jsonl", "data/subagent_registry.json"}
 
 
 # ── TD-033: value review feeds the subagent registry (guarded) ──────────────────

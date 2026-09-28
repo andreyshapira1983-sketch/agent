@@ -93,13 +93,20 @@ def test_a_crashed_verifier_does_not_mint_a_procedure(tmp_path: Path) -> None:
 
 
 def test_a_crashed_verifier_does_not_raise_an_existing_procedure(tmp_path: Path) -> None:
+    """An applied procedure gets no credit from a crashed cycle.
+
+    Offered and executed as in the healthy control, so only the crash guard
+    stands between it and `success_count + 1`."""
     agent = _agent(tmp_path)
     before = _seed_procedure(agent)
+    agent._last_procedure_records = [before]
+    agent._executed_tools = ["file_read"]
 
     _bank(agent, verifier_failure=True)
 
     after = _procedures(agent)[0]
     assert after.success_count == before.success_count
+    assert after.failure_count == before.failure_count
     assert after.confidence == before.confidence
     assert after.status == before.status
 

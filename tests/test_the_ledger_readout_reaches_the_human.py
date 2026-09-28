@@ -31,9 +31,11 @@ def test_the_notice_comes_before_the_verification_tail() -> None:
     assert out.index(_NOTICE) < out.index("Проверка: подтверждено")
 
 
-def test_an_answer_without_a_notice_is_unchanged_in_shape() -> None:
+def test_an_answer_without_a_notice_is_unchanged_in_shape(monkeypatch) -> None:
+    """Без показания ответ собирается как прежде: вывод, факты — и ничего лишнего."""
+    monkeypatch.delenv("AGENT_HUMAN_CHAT", raising=False)
     plain = "Conclusion:\nВсё сделано.\nFacts:\n- раз"
-    assert "По журналу хода" not in format_human_response(plain)
+    assert format_human_response(plain) == "Всё сделано.\n\n• раз"
 
 
 def test_a_journal_write_counts_as_a_write() -> None:

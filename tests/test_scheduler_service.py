@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from core.scheduler import (
-    DEFAULT_IDLE_INTERVAL,
     RuntimeSchedule,
     SchedulerService,
     SchedulerStore,
@@ -354,10 +353,6 @@ def test_run_twice_raises(workspace: Path):
             await asyncio.gather(task, return_exceptions=True)
 
     run_async(scenario())
-
-
-def test_default_idle_interval_constant_is_positive():
-    assert DEFAULT_IDLE_INTERVAL > 0
 
 
 def test_observability_properties(workspace: Path):

@@ -31,6 +31,9 @@ what produced the live defect.
 """
 from __future__ import annotations
 
+import shutil
+import sys
+
 import pytest
 
 from tools.shell_exec import ShellExecTool, classify_shell_result
@@ -249,16 +252,34 @@ def test_a_multiplexer_falls_back_to_the_unknown_contract() -> None:
     assert _classify("git", 128)[0] == "failure"
 
 
-def test_the_executed_binary_decides_not_the_requested_name() -> None:
-    """`_platform_alias` swaps `grep`→`findstr` on Windows, so the exit code
-    observed follows the binary that actually ran. Classifying the requested
-    name would read one tool's code against another's contract."""
-    import sys as _sys
-    from pathlib import Path as _P
+def test_the_executed_binary_decides_not_the_requested_name(tmp_path, monkeypatch) -> None:
+    """A fallback binary is reported and classified under its own name, not the requested one.
 
-    tool = ShellExecTool(workspace_root=_P("."))
-    expected = "findstr" if _sys.platform == "win32" else "grep"
-    assert tool._platform_alias("grep") == expected
+    grep and findstr share a contract today, so only the classifier's argument shows a mix-up."""
+    requested, ran = ("grep", "findstr") if sys.platform == "win32" else ("findstr", "grep")
+    if shutil.which(ran) is None:
+        pytest.skip(f"no {ran} on PATH in this environment")
+    real_which = shutil.which
+    monkeypatch.setattr(
+        "tools.shell_exec.shutil.which",
+        lambda name, *a, **k: None if name == requested else real_which(name, *a, **k),
+    )
+    classified: list[str] = []
+
+    def _spy(command: str, **kwargs):
+        classified.append(command)
+        return classify_shell_result(command, **kwargs)
+
+    monkeypatch.setattr("tools.shell_exec.classify_shell_result", _spy)
+    (tmp_path / "f.txt").write_text("alpha\n", encoding="utf-8")
+
+    result = ShellExecTool(workspace_root=tmp_path).run([requested, "zzz", "f.txt"])
+
+    assert (result["executed_command"], result["binary_substituted"]) == (ran, True)
+    assert classified == [ran]
+    assert (result["exit_code"], result["execution_status"], result["answer_result"]) == (
+        1, "success", "negative",
+    )
 
 
 # ==========================================================================

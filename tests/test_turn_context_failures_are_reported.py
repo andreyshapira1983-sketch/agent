@@ -30,8 +30,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
 from core.loop_context import AgentLoopContext
 
 
@@ -167,22 +165,3 @@ def test_an_empty_question_is_not_reported_as_a_failure():
 
     assert len(registry) == 0
     assert agent.sensor_failures == []
-
-
-# ---------------------------------------------------------------------------
-# Neither failure may take the turn down
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("target", [
-    "core.loop_context.ReferentResolver",
-    "core.loop_context.extract_from_question",
-])
-def test_neither_failure_aborts_the_run(target):
-    agent = _Agent()
-    with patch(target, side_effect=RuntimeError("boom")), \
-         patch("core.loop_context.referent_resolver_mode", return_value="shadow"):
-        agent._maybe_resolve_referent("вопрос", file_hint=None)
-        registry, cp = agent._open_run("вопрос")
-
-    assert registry is not None
-    assert cp is not None

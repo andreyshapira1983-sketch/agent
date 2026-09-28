@@ -134,22 +134,24 @@ def test_the_router_asks_the_measurement_before_the_tier_map():
 
 
 def test_the_tier_map_still_answers_when_nothing_is_measured(monkeypatch):
-    """Пол на месте: без замеров решение прежнее, а не отсутствующее.
+    """Пол на месте: без замеров отвечает равный по уровню из карты, и причина это называет.
 
     Каталог — образец с OpenAI: 24.09 живой каталог установки стал только
     DeepSeek, и тест, читавший его, падал — правило от ключей не зависит."""
-    from core.model_outcomes import substitute_model
+    from core.model_outcomes import substitute_model, substitute_model_with_reason
 
     monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH",
                        str(Path(__file__).parent / "fixtures" / "model_catalog_two_providers.json"))
     monkeypatch.setenv("AGENT_MODEL_CATALOG_TTL_DAYS", "100000")
+    kwargs = {"role": "роль-которой-не-было", "provider": "openai",
+              "current_model": "claude-sonnet-5", "workspace": "/nonexistent"}
 
-    picked = substitute_model(
-        role="роль-которой-не-было", provider="openai",
-        current_model="claude-sonnet-5", workspace="/nonexistent",
-    )
+    picked, reason = substitute_model_with_reason(**kwargs)
 
-    assert picked, "без замеров не осталось даже прежнего правила"
+    # claude-sonnet-5 — уровень standard; у openai в образце это gpt-5.6-terra.
+    assert picked == "gpt-5.6-terra", f"пол выбрал не тот уровень: {picked!r}"
+    assert reason.startswith("floor:"), reason
+    assert substitute_model(**kwargs) == picked
 
 
 def test_a_measured_winner_that_the_world_no_longer_offers_is_dropped():

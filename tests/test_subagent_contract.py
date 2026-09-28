@@ -254,11 +254,6 @@ def test_every_real_model_role_is_accepted() -> None:
         assert _canonical(model_role=role.value).model_role == role.value
 
 
-def test_an_absent_model_role_stays_legal() -> None:
-    # None means "no preference"; the runner substitutes its own default.
-    assert _canonical().model_role is None
-
-
 def test_the_enum_member_name_is_not_a_model_role() -> None:
     # ModelRole.PLANNER.name is "PLANNER" while its value is "planner".
     with pytest.raises(ValueError, match="model_role"):

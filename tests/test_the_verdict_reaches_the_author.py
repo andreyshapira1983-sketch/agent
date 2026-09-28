@@ -79,10 +79,20 @@ def test_lifecycle_transitions_are_not_verdicts(tmp_path: Path) -> None:
     assert [r["verdict"] for r in rows] == ["approved"]
 
 
-def test_an_in_memory_inbox_does_not_crash(tmp_path: Path) -> None:
+def test_an_in_memory_inbox_keeps_the_verdict_and_writes_no_file(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """path=None: the denial lands on the item, and no outcome file appears, not even in cwd."""
+    monkeypatch.chdir(tmp_path)
     inbox = ApprovalInbox(path=None)
     item = inbox.add(operation="x", summary="s")
-    inbox.deny(item.id, reason="некуда писать")  # nowhere to write — must simply not raise
+
+    inbox.deny(item.id, reason="некуда писать")
+
+    got = inbox.get(item.id)
+    assert got is not None and got.status == "denied"
+    assert got.decision_reason == "некуда писать"
+    assert sorted(tmp_path.rglob("*")) == []
 
 
 # ── the reader: the charter selector sees the fate of past work ─────────────

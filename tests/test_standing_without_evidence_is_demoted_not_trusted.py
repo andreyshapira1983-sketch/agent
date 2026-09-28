@@ -84,12 +84,17 @@ def test_dry_run_reports_and_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_a_needs_review_procedure_is_not_served_to_the_planner(tmp_path: Path) -> None:
-    """Дверь, ради которой перевод статуса: подбор её уже отсекает."""
+    """Дверь, ради которой перевод статуса: подбор её уже отсекает.
+
+    Живой двойник — контроль: без него «не подана» проходила бы и на подборе,
+    который не подаёт ничего.
+    """
     pstore, _ = _stores(tmp_path, [
         _proc("gone", refs=("ep-a",), status="needs_review"),
+        _proc("twin", refs=("ep-b",)),
     ])
 
-    result = pstore.search_with_report("w-gone tools", limit=3)
+    result = pstore.search_with_report("w-gone w-twin tools", limit=3)
 
-    served = [p.id for p in getattr(result, "procedures", result[0] if isinstance(result, tuple) else [])]
-    assert "gone" not in served
+    assert [p.id for p in result.procedures] == ["twin"]
+    assert result.rejected_by == {"excluded_retired": 1}

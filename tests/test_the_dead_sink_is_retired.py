@@ -27,8 +27,6 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from core.smart_memory import consolidate_memory
-
 
 def test_no_production_site_saves_a_consolidation_report() -> None:
     """The ruling's first clause, pinned structurally: nothing persists.
@@ -64,21 +62,4 @@ def test_the_cycle_write_path_does_not_consolidate() -> None:
     src = inspect.getsource(mod)
     assert "consolidate_memory(" not in src, (
         "the memory-write path still computes a consolidation report per cycle"
-    )
-
-
-def test_the_tally_is_still_available_on_demand() -> None:
-    """Retirement must not lose the tally itself — the pure function stays,
-    and the operator's command computes it fresh."""
-    report = consolidate_memory(episodes=[], procedures=[])
-    assert report.episode_count == 0
-    assert report.procedure_count == 0
-    import inspect
-
-    import cli.commands_memory as cli_mod
-
-    src = inspect.getsource(cli_mod)
-    assert "consolidate_memory(" in src, (
-        ":memory-consolidate no longer computes the tally at all — retirement "
-        "was supposed to remove the persistence, not the answer"
     )

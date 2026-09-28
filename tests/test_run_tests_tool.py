@@ -63,10 +63,6 @@ class TestConstruction:
         with pytest.raises(ValueError):
             RunTestsTool(workspace_root=workspace, timeout_seconds=-1)
 
-    def test_default_timeout_matches_the_declared_constant(self, workspace: Path):
-        t = RunTestsTool(workspace_root=workspace)
-        assert t.timeout_seconds == DEFAULT_TIMEOUT_SECONDS == 900.0
-
     def test_risk_is_reversible(self, workspace: Path):
         t = RunTestsTool(workspace_root=workspace)
         assert t.risk == "reversible"
@@ -165,6 +161,17 @@ class TestSubprocessContract:
         captured = _patch_run(monkeypatch, stdout=b"")
         RunTestsTool(workspace_root=workspace, timeout_seconds=12.5).run()
         assert captured["kwargs"]["timeout"] == 12.5
+
+    def test_default_timeout_reaches_subprocess(self, workspace: Path, monkeypatch):
+        """No timeout given: pytest gets 900 s, or AGENT_TEST_TIMEOUT_SECONDS when it is set."""
+        captured = _patch_run(monkeypatch, stdout=b"")
+        monkeypatch.delenv("AGENT_TEST_TIMEOUT_SECONDS", raising=False)
+        RunTestsTool(workspace_root=workspace).run()
+        assert captured["kwargs"]["timeout"] == DEFAULT_TIMEOUT_SECONDS == 900.0
+
+        monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "42")
+        RunTestsTool(workspace_root=workspace).run()
+        assert captured["kwargs"]["timeout"] == 42.0
 
     def test_capture_output_true(self, workspace: Path, monkeypatch):
         captured = _patch_run(monkeypatch, stdout=b"")

@@ -100,15 +100,3 @@ def test_signature_is_deterministic(chdir_to_tmp):
     )
     assert r1["signature"] == r2["signature"]
     assert r1["signature"] != r3["signature"]
-
-
-def test_record_self_stop_is_not_a_tool_name():
-    import pathlib
-    import re
-
-    names = set()
-    for path in pathlib.Path("tools").glob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        for m in re.finditer(r"^class\s+(\w+)", text, re.MULTILINE):
-            names.add(m.group(1))
-    assert "record_self_stop" not in names

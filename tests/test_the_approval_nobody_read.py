@@ -8,6 +8,7 @@ from pathlib import Path
 
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
+from tests.test_autonomous_runtime import _agent
 
 _GOAL = "найди и почини свои дефекты"
 
@@ -95,12 +96,25 @@ def test_a_spent_approval_is_not_reused(tmp_path: Path):
     ) is None
 
 
-def test_the_key_that_asks_is_the_key_that_finds():
-    """Один ключ на цель. Разойдись они — заявка снова стала бы письмом в
-    никуда, и на этот раз молча.
-    """
-    key = AutonomousRuntime._effects_dedup_key(_GOAL)
+def test_the_key_that_asks_is_the_key_that_finds(tmp_path: Path):
+    """Заявку, которую завёл сам прогон, после «да» находит его же поиск.
 
-    assert key.startswith("autonomous_runtime.allow_effects:")
-    assert key == AutonomousRuntime._effects_dedup_key(_GOAL)
-    assert key != AutonomousRuntime._effects_dedup_key(_GOAL + " ещё")
+    Разойдись ключи — заявка снова стала бы письмом в никуда, и на этот раз молча.
+    """
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "data").mkdir()
+    inbox = _inbox(tmp_path)
+    runtime = AutonomousRuntime(
+        _agent(tmp_path, with_tests=False), workspace=tmp_path, approval_inbox=inbox,
+    )
+    config = AutonomousRuntimeConfig(goal=_GOAL, dry_run=False, limit=2, include_tests=False)
+
+    report = runtime.run(config)
+    assert report.status == "blocked"
+    [asked] = inbox.pending()
+    inbox.approve(asked.id)
+
+    found = runtime._granted_effects_approval(config)
+
+    assert found is not None
+    assert found.id == asked.id

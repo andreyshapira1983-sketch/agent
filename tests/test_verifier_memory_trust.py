@@ -7,10 +7,7 @@ Question M0 deferred: does a matched `[memory:<id>]` citation actually count as
 These tests exercise `core.verifier_core.verify` directly with a crafted
 provenance chain. Target (lifecycle) semantics: a citation resolving to an
 agent-auto / unverified memory record must NOT, by itself, count as independent
-verification. On CURRENT code it does (verdict `verified`, `verified_chunks += 1`
-purely because the citation resolves to a record in the chain), so the fail-before
-tests below FAIL — that is the point. The documentation tests PASS and pin the
-current behaviour so the fix has a baseline.
+verification. Since the MIR-046 fix it does not; these tests pin that.
 
 No production code is touched.
 """
@@ -88,13 +85,13 @@ def test_working_memory_artifact_citation_also_counts_verified():
     assert report.verified_chunks == 1  # documents current behaviour
 
 
-# ── fail-before: verifier does not distinguish trust class ───────────────────
+# ── the verifier distinguishes trust class ───────────────────────────────────
 
 def test_verifier_must_distinguish_userapproved_from_agentauto():
-    """(fail-before) A user-approved record and an agent-auto record, both cited,
-    receive the IDENTICAL `verified` verdict — the verifier does not consult the
-    record's trust/provenance. Target: agent-auto must not auto-verify like a
-    user-approved fact."""
+    """Cited side by side, the user-approved record verifies and the agent-auto one does not.
+
+    Both halves are pinned: demoting every memory record would also leave at
+    most one `verified`, and the agent-auto one stays topic-only, not fabricated."""
     chain = _chain(
         _mem("u1", "User-approved fact.", source="user-explicit"),
         _mem("a1", "Agent-auto claim.", source="agent-auto"),
@@ -105,8 +102,7 @@ def test_verifier_must_distinguish_userapproved_from_agentauto():
     )
     verdicts = report.to_log_payload()["verdicts"]
 
-    # CURRENT: both are "verified" (no trust distinction) → this assertion fails.
-    assert verdicts.count("verified") <= 1, (
-        f"verifier gave identical 'verified' to user-approved AND agent-auto "
-        f"records (verdicts={verdicts}) — it does not distinguish trust class"
+    assert verdicts == ["verified", "topic_supported_but_claim_unverified"], (
+        f"expected the user-explicit record trusted and the agent-auto one demoted "
+        f"to topic-only (verdicts={verdicts})"
     )
