@@ -195,12 +195,19 @@ class TestLoopClarificationIntegration:
         )
 
     def test_informational_passes_through(self) -> None:
+        """An informational question reaches planning and leaves no clarification trace."""
+        import json
         loop = self._make_loop()
-        # Informational questions must NOT trigger clarification.
-        # The loop will call the (mock) LLM planner and synthesizer.
-        result = loop.run("что такое питон?")
-        # As long as we don't get a clarification question the bypass worked.
-        assert "Уточни" not in result[:60] or "Conclusion:" in result
+        loop.run("что такое питон?")
+        events = [
+            json.loads(line).get("event")
+            for f in loop.log.log_dir.glob("*.jsonl")  # type: ignore[attr-defined]
+            for line in f.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert "clarification_request" not in events
+        assert "plan" in events, "the question never reached the planner"
+        assert loop.last_answer_was_clarification is False
 
     def test_clarification_event_logged(self) -> None:
         import json
@@ -255,8 +262,8 @@ class TestClarificationInputValidation:
         assert result.decision in ("proceed", "ask")
 
     def test_long_input_with_destructive_verb_truncated(self):
-        """A destructive verb near start of a 5000-char input is still caught."""
+        """A destructive verb at the start of a 6000-char input survives the 4096 cut."""
         text = "удали" + " слово" * 1000
         result = check_clarification(text)
-        # After truncation to 4096, destructive verb is present
-        assert result.decision in ("proceed", "ask")
+        assert result.decision == "ask"
+        assert [(f.kind, f.evidence) for f in result.findings] == [("missing_target", "удали")]

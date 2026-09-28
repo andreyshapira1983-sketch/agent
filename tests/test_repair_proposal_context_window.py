@@ -61,9 +61,11 @@ class _RecordingLLM:
                                    '"evidence": ["t"], "confidence": 0.9}') -> None:
         self.reply = reply
         self.prompts: list[str] = []
+        self.max_tokens: list[int | None] = []
 
     def complete(self, *, system: str, user: str, **kwargs):
         self.prompts.append(user)
+        self.max_tokens.append(kwargs.get("max_tokens"))
         return self.reply
 
 
@@ -332,9 +334,11 @@ def test_a_refusal_before_the_call_is_not_reported_as_an_empty_reply(tmp_path: P
 def test_the_output_budget_is_configurable_like_the_window(tmp_path: Path):
     """Both budgets belong to the instance, or only one of them is tunable."""
     llm = _RecordingLLM()
-    generator = _generator(llm, tmp_path, max_output_tokens=1234)
+    target = _write(tmp_path, "small.py", 2_000)
 
-    assert generator.max_output_tokens == 1234
+    _generator(llm, tmp_path, max_output_tokens=1234).generate(target_path=target)
+
+    assert llm.max_tokens == [1234], "the configured output budget never reached the model"
 
 
 # ── 4. the window must actually cover the codebase ───────────────────────────

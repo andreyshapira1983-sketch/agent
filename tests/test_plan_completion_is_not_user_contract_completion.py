@@ -84,13 +84,17 @@ def test_a_partial_contract_lowers_a_claim_of_achieved() -> None:
 
 
 def test_it_never_raises_a_worse_verdict() -> None:
-    """Односторонность: понижать можно, повышать нельзя."""
+    """Односторонность: частичное покрытие трогает только заявленное `achieved`.
+
+    Честно доложенный `blocked`/`failed` не превращается в `partially_achieved`.
+    """
     for declared in ("blocked", "failed", "partially_achieved"):
         verdict = assemble_completion_verdict(
             aborted_reason="", replan_exhausted=False, declared=declared,
             user_contract_partial=True,
         )
-        assert verdict.state != "achieved"
+        assert verdict.state == declared, (declared, verdict)
+        assert verdict.overridden_by is None, (declared, verdict)
 
 
 def test_full_coverage_leaves_the_verdict_alone() -> None:
@@ -110,8 +114,17 @@ def test_satisfied_still_means_what_it_meant() -> None:
     несёт отдельное поле, а не подмена смысла старого.
     """
     contract = derive_completion_contract(_MIXED)
+    written = {
+        "file_write:core/probe_demo.py": {
+            "tool": "file_write",
+            "output": {"path": "core/probe_demo.py"},
+            "issues": [],
+        }
+    }
     result = evaluate_completion_obligations(
-        question=_MIXED, answer=_ANSWER, contract=contract
+        question=_MIXED, answer=_ANSWER, artifacts=written, contract=contract
     )
-    assert isinstance(result.satisfied, bool)
     assert result.contract_coverage == "partial"
+    assert result.satisfied is True, (
+        "представимый долг выполнен, а частичное покрытие перевернуло `satisfied`"
+    )

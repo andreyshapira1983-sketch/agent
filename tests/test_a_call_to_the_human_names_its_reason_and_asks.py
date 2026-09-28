@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from core.state_integrity import read_state_jsonl_unlocked
 from tools.journal_append import VOICE_PATH, JournalAppendTool
 
 NIGHT = ("Уткнулся: цель «Объяснить наблюдение о себе: детекторы self_contradiction» "
@@ -32,6 +33,9 @@ def test_a_call_with_a_reason_and_a_question_goes_through(tmp_path) -> None:
 
 
 def test_a_requested_result_needs_no_question(tmp_path) -> None:
+    """Доклад о просимом результате ложится в журнал голоса и без вопроса."""
     tool = JournalAppendTool(workspace_root=tmp_path)
-    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result",
-                                      "text": "Сделал: 20 вакансий в experiments/job_search/."})
+    text = "Сделал: 20 вакансий в experiments/job_search/."
+    tool.run(path=VOICE_PATH, record={"author": "agent", "reason": "result", "text": text})
+    rows = read_state_jsonl_unlocked(tmp_path / VOICE_PATH)
+    assert [(row["reason"], row["text"]) for row in rows] == [("result", text)]

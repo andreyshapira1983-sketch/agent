@@ -558,13 +558,6 @@ def test_every_action_carries_evidence_and_unknowns():
         assert 0.0 <= action.confidence <= 1.0
 
 
-def test_selection_is_deterministic_for_same_signals():
-    kwargs = {"tests_health": "fail", "failed_tests": ("a",), "dry_run_streak": 8}
-    first = select_best_next_action(**kwargs)
-    second = select_best_next_action(**kwargs)
-    assert first.to_dict() == second.to_dict()
-
-
 def test_format_block_is_advisory_and_compact():
     action = select_best_next_action(tests_health="fail", failed_tests=("test_a",))
     text = format_best_next_action(action)
@@ -575,10 +568,23 @@ def test_format_block_is_advisory_and_compact():
     assert text.count("\n") < 20
 
 
-def test_to_dict_round_trips_shape():
-    action = select_best_next_action(tests_health="fail", failed_tests=("t",))
+def test_to_dict_logs_the_action_as_selected():
+    """The logged payload carries each field of the chosen action, provenance included."""
+    action = select_best_next_action(tests_health="fail", failed_tests=("t",), dry_run_streak=8)
+    expected = {
+        "action": "propose_minimal_test_repair",
+        "title": action.title,
+        "severity": "high",
+        "priority": action.priority,
+        "reason": action.reason,
+        "evidence": list(action.evidence),
+        "unknowns": list(action.unknowns),
+        "risk": action.risk,
+        "recommended_command": ":propose-repair",
+        "confidence": action.confidence,
+        "decided_by": "priority_table",
+        "grounds": "observed_state",
+        "candidates_considered": 2,
+    }
     data = action.to_dict()
-    assert data["action"] == "propose_minimal_test_repair"
-    assert isinstance(data["evidence"], list)
-    assert isinstance(data["unknowns"], list)
-    assert "recommended_command" in data
+    assert {key: data.get(key) for key in expected} == expected

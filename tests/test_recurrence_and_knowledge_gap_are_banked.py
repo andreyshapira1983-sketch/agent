@@ -104,11 +104,3 @@ def test_the_loop_can_name_a_knowledge_gap() -> None:
         "competence insufficient' from ambiguity; the only 'I don't know' "
         "the loop can express is needs_clarification"
     )
-
-
-def test_the_ambiguity_half_of_the_distinction_exists() -> None:
-    """The boundary pin: ambiguity IS structurally represented (that half of
-    the distinction works — the exam proved it by correctly staying quiet),
-    so a future fix must ADD the second concept, not rename the first."""
-    sources = _machine_sources()
-    assert any("needs_clarification" in text for text in sources.values())

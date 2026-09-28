@@ -6,6 +6,9 @@ verify_failed / ReplanTrigger path depends on it.
 """
 from __future__ import annotations
 
+import urllib.parse
+import urllib.request
+
 import pytest
 
 from tools.semantic_scholar_search import (
@@ -185,6 +188,30 @@ class TestWellFormed:
 # run() -- argument validation
 # ============================================================
 
+@pytest.fixture()
+def sent_limits(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The `limit` each API request carries; the API answers with no papers."""
+    limits: list[int] = []
+
+    class _EmptyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return b'{"data": []}'
+
+    def fake_urlopen(req, timeout=None):
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(req.full_url).query)
+        limits.append(int(query["limit"][0]))
+        return _EmptyResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return limits
+
+
 class TestRunArguments:
     def test_empty_query_raises_value_error(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -194,15 +221,16 @@ class TestRunArguments:
         with pytest.raises(ValueError, match="non-empty"):
             TOOL.run("   ")
 
-    def test_max_results_capped_at_max(self):
-        """max_results > MAX_RESULTS_CAP is silently clamped."""
-        # We can't call the real API, but we can verify the cap logic
-        # by inspecting that MAX_RESULTS_CAP is the hard ceiling.
-        assert MAX_RESULTS_CAP == 10
+    @pytest.mark.parametrize(("asked", "sent"), [(50, MAX_RESULTS_CAP), (-3, 1), (7, 7)])
+    def test_max_results_capped_at_max(self, sent_limits, asked, sent):
+        """The limit sent to the API is max_results clamped into 1..MAX_RESULTS_CAP."""
+        assert TOOL.run("quantum supremacy", max_results=asked) == []
+        assert sent_limits == [sent]
 
-    def test_default_max_results_respected(self):
-        custom = SemanticScholarSearchTool(default_max_results=3)
-        assert custom.default_max_results == 3
+    def test_default_max_results_respected(self, sent_limits):
+        """Without max_results the instance default, not the module one, is sent."""
+        SemanticScholarSearchTool(default_max_results=3).run("quantum supremacy")
+        assert sent_limits == [3]
 
 
 # ============================================================

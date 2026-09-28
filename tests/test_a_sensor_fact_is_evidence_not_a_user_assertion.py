@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
+from core.low_evidence_policy import evaluate_low_evidence_policy
 from core.model_router import ModelRole, ModelRoute, ModelRouter
 from core.model_usage import ModelUsageLedger
 from core.planner import LLMPlanner
@@ -83,11 +85,15 @@ def test_a_claim_read_off_the_roster_is_verified_and_the_answer_ships(tmp_path, 
 
 
 def test_the_head_of_a_suppressed_answer_is_journaled():
-    from core.low_evidence_policy import LowEvidencePolicyResult
-
-    result = LowEvidencePolicyResult(
-        triggered=True, answer="short", verified_chunks=0, total_chunks=15,
-        verified_ratio=0.0, unverified_total=0, reason="r", suppressed_chars=900,
-        suppressed_head="- planner: openai/gpt-5.6-sol …",
+    """The gate itself must hand the head of what it suppressed to the log payload."""
+    answer = "".join(
+        f"- role {i}: provider-{i}/model-{i} — env_pin [sensor:model_roster]\n" for i in range(15)
     )
-    assert result.to_log_payload()["suppressed_head"].startswith("- planner")
+    report = SimpleNamespace(total_chunks=15, verified_chunks=0, unverified_chunks=15, chunks=())
+    result = evaluate_low_evidence_policy(
+        answer=answer, report=report, question="Какая модель отвечает за какую роль?",
+    )
+    head = result.to_log_payload()["suppressed_head"]
+    assert result.triggered and len(answer) > 800
+    assert head == result.suppressed_head
+    assert head and answer.startswith(head), head

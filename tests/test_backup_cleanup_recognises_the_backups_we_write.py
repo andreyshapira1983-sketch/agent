@@ -1,46 +1,47 @@
-"""Два писателя копий, два формата, и уборка покрывает один из них.
+"""Два писателя копий, два формата — уборка узнаёт копии обоих.
 
-Замер, отвергнутые варианты и границы: H-51 в docs/audit/HISTORICAL_FAILURE_LEDGER.md.
+Замер, отвергнутые варианты и границы: H-51 в docs/audit/HISTORICAL_FAILURE_LEDGER.md,
+MIR-125 в docs/audit/MASTER_ISSUE_REGISTRY.md.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from core.backup_cleanup import BACKUP_NAME_RE
+from core.backup_cleanup import BACKUP_NAME_RE, cleanup_backups
 from core.state_integrity import backup_state_file
+from tools.file_write import FileWriteTool
+
+#: Позже любой метки, что писатель поставит сейчас: копия уже старше срока.
+_LATER = datetime.now(timezone.utc) + timedelta(days=1)
 
 
 def test_the_cleanup_matches_its_own_writer(tmp_path) -> None:
-    """`FileWriteTool` пишет `<файл>.bak.<метка>` — уборка это узнаёт."""
-    name = "notes.md.bak.20260825T120000Z"
+    """Копию, которую `FileWriteTool` оставил при перезаписи, уборка узнаёт и метёт.
 
-    match = BACKUP_NAME_RE.match(name)
-
-    assert match is not None, (
-        "уборка перестала узнавать формат FileWriteTool — писатель и читатель "
-        "разошлись, и механизм снова не сможет сработать"
-    )
-    assert match.group("target") == "notes.md"
-    assert match.group("ts") == "20260825T120000Z"
-
-
-def test_the_state_writer_uses_a_different_shape(tmp_path) -> None:
-    """Второй писатель кладёт метку ПЕРЕД `.bak`, и это осознанно разные формы.
-
-    Замер, а не догадка: имя строится здесь же, живым вызовом.
+    Имя строит живой писатель: разойдутся формы — копии копятся без срока.
     """
+    tool = FileWriteTool(workspace_root=tmp_path)
+    tool.run("notes.md", "первая версия\n")
+    backup = tool.run("notes.md", "вторая версия\n")["backup_path"]
+
+    report = cleanup_backups(tmp_path, keep_last=0, max_age_days=0, now=_LATER)
+
+    assert report.deleted == [backup], "уборка не узнала копию FileWriteTool"
+    assert (tmp_path / "notes.md").read_text(encoding="utf-8") == "вторая версия\n"
+
+
+def test_the_cleanup_matches_the_state_writer(tmp_path) -> None:
+    """`backup_state_file` ставит метку ПЕРЕД `.bak` — уборка узнаёт и эту форму."""
     store = tmp_path / "runtime_tasks.jsonl"
     store.write_text("строка\n", encoding="utf-8")
+    produced = backup_state_file(store)
 
-    produced = backup_state_file(store).name
+    report = cleanup_backups(tmp_path, keep_last=0, max_age_days=0, now=_LATER)
 
-    assert produced.endswith(".bak")
-    assert produced.startswith("runtime_tasks.jsonl.")
-    assert not BACKUP_NAME_RE.match(produced), (
-        "форматы двух писателей сошлись — тогда уборка начала бы сметать и "
-        "копии состояния, включая снятые человеком перед опасной правкой; "
-        "это отдельное решение, а не побочный эффект"
-    )
+    assert report.deleted == [produced.name], "уборка не узнала копию backup_state_file"
+    assert store.exists()
 
 
 @pytest.mark.parametrize("name", [

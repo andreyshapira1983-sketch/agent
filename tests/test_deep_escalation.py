@@ -5,7 +5,6 @@ from core.deep_escalation import (
     ACTIVE_REASONS,
     EXPECTED_OUTPUTS,
     RESERVED_REASONS,
-    DeepEscalationDecision,
     DeepEscalationRequest,
     OperatorEscalation,
     evaluate_deep_escalation,
@@ -122,12 +121,6 @@ class TestReservedSeparation:
 
 
 class TestDeterminismAndSerialisation:
-    def test_decision_is_deterministic(self) -> None:
-        req = _approved_request()
-        first = evaluate_deep_escalation(req)
-        second = evaluate_deep_escalation(req)
-        assert first.to_dict() == second.to_dict()
-
     def test_decision_to_dict_shape(self) -> None:
         decision = evaluate_deep_escalation(_approved_request())
         assert decision.to_dict() == {
@@ -149,7 +142,3 @@ class TestDeterminismAndSerialisation:
         assert esc.operator_approved is True
         assert esc.budget_ok is True
         assert esc.to_dict()["reason"] == "operator_explicitly_requested_opus"
-
-    def test_decision_is_a_frozen_dataclass(self) -> None:
-        decision = evaluate_deep_escalation(_approved_request())
-        assert isinstance(decision, DeepEscalationDecision)

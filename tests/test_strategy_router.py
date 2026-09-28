@@ -134,7 +134,7 @@ def test_local_strategies_covers_all_non_general_members() -> None:
 
 
 # ---------------------------------------------------------------------------
-# classify_operator_strategy never raises
+# Unroutable input never raises and falls back to general_question
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text", [
@@ -144,12 +144,10 @@ def test_local_strategies_covers_all_non_general_members() -> None:
     "\x00\xff",
     "A" * 10_000,
 ])
-def test_classify_never_raises(text: object) -> None:
-    try:
-        result = classify_operator_strategy(text)  # type: ignore[arg-type]
-    except Exception as exc:  # noqa: BLE001 — the test itself is the assertion
-        pytest.fail(f"classify_operator_strategy raised {type(exc).__name__}: {exc}")
-    assert isinstance(result, OperatorStrategy)
+def test_unroutable_input_falls_back_to_general_question(text: object) -> None:
+    """Non-strings and garbage go to the LLM planner, never to a local handler."""
+    result = classify_operator_strategy(text)  # type: ignore[arg-type]
+    assert result is OperatorStrategy.general_question
 
 
 # ---------------------------------------------------------------------------

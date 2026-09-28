@@ -28,12 +28,17 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CORE = ROOT / "core"
 MODEL = ROOT / "knowledge" / "maps" / "cns_model.json"
 
 _SEARCH_DIRS = ("core", "cli", "api", "app", "tools", "tests", "scripts")
+#: A read in tests/ or scripts/ checks a field, it does not use it.
+_PRODUCTION_DIRS = ("core", "cli", "api", "app", "tools")
+#: Filed by the model as outside_only, but its only readers are tests.
+_READ_ONLY_BY_TESTS = frozenset({"max_replan_attempts"})
 
 
 def _fields() -> set[str]:
@@ -74,19 +79,10 @@ def _uses(tree: ast.AST, fields: set[str]) -> tuple[set[str], set[str]]:
     return written, read
 
 
-def _classify() -> dict[str, list[str]]:
-    fields = _fields()
-    inner_w: set[str] = set()
-    inner_r: set[str] = set()
-    for path in sorted(CORE.glob("loop*.py")):
-        if path.name == "loop_init.py":
-            continue
-        w, r = _uses(ast.parse(path.read_text(encoding="utf-8")), fields)
-        inner_w |= w
-        inner_r |= r
-
+def _outer_reads(fields: set[str], dirs: tuple[str, ...]) -> set[str]:
+    """Field names reached on any object in `dirs`, loop*.py files excluded."""
     outer: set[str] = set()
-    for directory in _SEARCH_DIRS:
+    for directory in dirs:
         for path in (ROOT / directory).rglob("*.py"):
             if "__pycache__" in str(path) or path.name.startswith("loop"):
                 continue
@@ -103,7 +99,21 @@ def _classify() -> dict[str, list[str]]:
                         and isinstance(node.args[1], ast.Constant)
                         and node.args[1].value in fields):
                     outer.add(node.args[1].value)
+    return outer
 
+
+def _classify() -> dict[str, list[str]]:
+    fields = _fields()
+    inner_w: set[str] = set()
+    inner_r: set[str] = set()
+    for path in sorted(CORE.glob("loop*.py")):
+        if path.name == "loop_init.py":
+            continue
+        w, r = _uses(ast.parse(path.read_text(encoding="utf-8")), fields)
+        inner_w |= w
+        inner_r |= r
+
+    outer = _outer_reads(fields, _SEARCH_DIRS)
     untouched = fields - inner_w - inner_r
     return {
         "per_run": sorted(inner_w),
@@ -141,20 +151,30 @@ def test_no_field_became_dead_unnoticed() -> None:
     Two are known: `_CompensationPlanCls` and `_last_step_failure`. The second
     is worse than unused — `core/replan.py:97` still documents it as the slot
     every step failure passes through, while the real carrier is a module-level
-    thread-local. A third appearing must be seen, not absorbed.
+    thread-local. A third appearing must be seen, not absorbed — also when a
+    test still reads it, since a test read keeps nothing alive.
     """
     stated = set(_model_section()["by_lifetime"]["dead"]["fields"])
-    found = set(_classify()["dead"])
-    assert found == stated, (
-        f"dead fields changed: newly dead {sorted(found - stated)}, "
-        f"no longer dead {sorted(stated - found)}"
+    found = _classify()
+    assert set(found["dead"]) == stated, (
+        f"dead fields changed: newly dead {sorted(set(found['dead']) - stated)}, "
+        f"no longer dead {sorted(stated - set(found['dead']))}"
+    )
+    untouched = set(found["outside_only"]) | set(found["dead"])
+    dead_in_production = untouched - _outer_reads(_fields(), _PRODUCTION_DIRS)
+    expected = stated | _READ_ONLY_BY_TESTS
+    assert dead_in_production == expected, (
+        f"no production code reads {sorted(dead_in_production - expected)} any more; "
+        f"production reads again {sorted(expected - dead_in_production)}"
     )
 
 
 def test_ownership_is_not_claimed_for_any_field() -> None:
     """Protocol item 6: `self.X = ...` proves a site, never an owner."""
     section = _model_section()
-    assert section["owner"] == "UNPROVEN for all 63", (
+    root = section["_root"]
+    assert re.fullmatch(r"UNPROVEN for all \d+", section["owner"]), section["owner"]
+    assert "owner" in root["unproven"] and "owner" not in root["proven"], (
         "ownership was recorded without an experiment proving it; an "
         "assignment site is not an owner (operator's map, model error 4)"
     )

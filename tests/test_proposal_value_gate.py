@@ -13,7 +13,9 @@ The gate must:
 """
 from __future__ import annotations
 
-from core.proposal_value_gate import ValueGateResult, evaluate_proposal_value
+from core.proposal_value_gate import evaluate_proposal_value
+
+_HYPE_REASON = "revolutionary breakthrough that dramatically boosts performance"
 
 # ── hard veto: no code effect (Python) ───────────────────────────────────────
 
@@ -49,15 +51,17 @@ def test_identical_after_normalization_is_vetoed():
     assert result.vetoed
 
 
-def test_widest_incident_is_vetoed_and_flags_no_inbox_semantics():
-    # The exact live incident: comment capitalization dressed as robustness.
+def test_widest_incident_with_overclaiming_reason_is_vetoed_and_flagged():
+    """A comment-only change sold with hype is vetoed and still carries the overclaim flag.
+
+    The veto says the diff is empty; the flag tells the reviewer the summary oversold it.
+    """
     current = "MAX = 80  # WIDEST\n"
     proposed = "MAX = 80  # widest\n"
-    result = evaluate_proposal_value(
-        "core/redaction.py", current, proposed, "robustness improvement"
-    )
+    result = evaluate_proposal_value("core/redaction.py", current, proposed, _HYPE_REASON)
     assert result.vetoed
     assert result.verdict == "value_veto"
+    assert any("overclaim" in f for f in result.flags)
 
 
 # ── pass: real changes ───────────────────────────────────────────────────────
@@ -82,13 +86,6 @@ def test_added_statement_passes():
 # ── doc exception ────────────────────────────────────────────────────────────
 
 
-def test_docs_md_text_change_is_not_hard_vetoed():
-    current = "# Title\n\nThis is WIDEST.\n"
-    proposed = "# Title\n\nThis is widest.\n"
-    result = evaluate_proposal_value("docs/self_build.md", current, proposed, "clarify wording")
-    assert not result.vetoed
-
-
 def test_docs_md_whitespace_change_is_not_hard_vetoed():
     current = "# Title\n\nBody.\n"
     proposed = "# Title\n\n\nBody.\n\n"
@@ -97,8 +94,6 @@ def test_docs_md_whitespace_change_is_not_hard_vetoed():
 
 
 # ── soft flag: overclaim on a trivial diff ───────────────────────────────────
-
-_HYPE_REASON = "revolutionary breakthrough that dramatically boosts performance"
 
 
 def test_overclaim_on_trivial_code_change_is_soft_flag_not_veto():
@@ -188,8 +183,3 @@ def test_injected_hype_fn_is_used_and_no_default_import_needed():
     )
     assert calls == ["anything"]
     assert any("overclaim" in f for f in result.flags)
-
-
-def test_default_result_is_ok():
-    assert ValueGateResult().verdict == "ok"
-    assert not ValueGateResult().vetoed

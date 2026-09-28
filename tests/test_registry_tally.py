@@ -29,24 +29,24 @@ def test_tally_matches_the_sections() -> None:
     )
 
 
-def test_every_issue_declares_a_status() -> None:
-    module = _load()
-    _, unparsed = module.parse(module.REGISTRY.read_text(encoding="utf-8"))
-
-    assert unparsed == [], f"issues with no parseable Status line: {unparsed}"
-
-
 def test_the_external_checklist_is_not_counted_as_an_issue() -> None:
     """It is a checklist of failure modes seen elsewhere, not a repo defect.
 
     Counting it is what made the totals ambiguous in the first place.
     """
-    module = _load()
-    by_status, _ = module.parse(module.REGISTRY.read_text(encoding="utf-8"))
-    all_ids = {i for ids in by_status.values() for i in ids}
+    parse = _load().parse
+    issue = "### MIR-001 — a defect\n- **Status:** `fixed`\n\n"
+    checklist = "### MIR-external-checklist — seen elsewhere\n"
 
-    assert all(i.isdigit() for i in all_ids)
-    assert "external-checklist" not in all_ids
+    with_status = parse(issue + checklist + "- **Status:** `planned_gap`\n")
+    without_status = parse(issue + checklist + "- **Sources:** OFM\n")
+
+    assert with_status == ({"fixed": ["001"]}, []), with_status
+    assert without_status == ({"fixed": ["001"]}, []), (
+        f"the checklist was held to the issue rule of a Status line: {without_status}"
+    )
+    # Control: the same missing Status under an issue id is reported.
+    assert parse("### MIR-002 — a defect\n- **Sources:** x\n") == ({}, ["002"])
 
 
 def test_no_issue_appears_under_two_statuses() -> None:

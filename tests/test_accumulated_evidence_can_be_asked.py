@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from core.models import MemoryRecord
@@ -43,11 +44,13 @@ def test_receipts_answer_counts_and_a_trace_question(tmp_path: Path) -> None:
 
 
 def test_an_empty_ledger_is_an_honest_zero(tmp_path: Path) -> None:
+    """Единственное число в отчёте о пустом журнале — ноль: никаких счётов и строк."""
     ledger = ToolReceiptLedger(path=tmp_path / "data" / "tool_receipts.jsonl")
 
     report = summarise_receipts(ledger)
 
-    assert "0" in report
+    assert re.findall(r"\d+", report) == ["0"], report
+    assert len(report.splitlines()) == 1, report
 
 
 def test_the_archive_is_searchable_and_reading_changes_nothing(tmp_path: Path) -> None:

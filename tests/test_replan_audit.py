@@ -6,7 +6,7 @@ locks down one invariant; if any of these fail in CI, the contract is
 broken and a future user-visible bug is incoming.
 
 Specifically covered:
-  A. Taxonomy drift   — `ReplanCode` Literal ≡ `FailureType` values
+  A. Taxonomy drift   — `FailureType` ≡ `ALL_FAILURE_TYPES` ≡ budget keys
   B. Init contracts   — `max_replan_attempts` vs `replan_policy` resolution
   C. Classification   — web_empty / timeout false positives + negatives
   D. Canonicalisation — sorted-keys JSON used by BOTH sides matches
@@ -155,7 +155,7 @@ def _build_agent(
 
 
 # ============================================================
-# A — Taxonomy drift: ReplanCode Literal must match FailureType
+# A — Taxonomy drift: the tuple and the budgets must match FailureType
 # ============================================================
 
 class TestTaxonomyDrift:
@@ -168,16 +168,6 @@ class TestTaxonomyDrift:
 
     def _failuretype_values(self) -> set[str]:
         return set(typing.get_args(FailureType))
-
-    def test_replancode_and_failuretype_have_same_values(self):
-        rc = self._replancode_values()
-        ft = self._failuretype_values()
-        assert rc == ft, (
-            f"ReplanCode (core/loop.py) and FailureType (core/replan.py) "
-            f"have drifted. In ReplanCode only: {rc - ft}. "
-            f"In FailureType only: {ft - rc}. "
-            f"Add the missing literal value to BOTH so the taxonomies stay aligned."
-        )
 
     def test_all_failure_types_tuple_matches_failuretype_literal(self):
         """`ALL_FAILURE_TYPES` is an iteration order — must contain
@@ -465,34 +455,6 @@ class TestClassificationFalsePositives:
 class TestForbiddenCanonicalisation:
     """ReplanPolicy (producer) and LLMPlanner._validate_steps (consumer)
     BOTH canonicalise args with sorted JSON. They must agree byte-for-byte."""
-
-    def _canonical_in_planner(self, args: dict) -> str:
-        """Call the exact same code-path as the sanitiser. We import
-        json here directly because both sides do."""
-        return json.dumps(args, sort_keys=True, ensure_ascii=False)
-
-    def _canonical_in_policy(self, args: dict) -> str:
-        """The producer in core/replan.py uses identical kwargs."""
-        return json.dumps(args, sort_keys=True, ensure_ascii=False)
-
-    @pytest.mark.parametrize("args", [
-        {"a": 1, "b": 2},
-        {"b": 2, "a": 1},                       # reverse key order
-        {"q": "hi", "x": True, "n": None},     # mixed types
-        {"path": "файл.txt", "n": 5},          # non-ASCII
-        {"nested": {"b": 2, "a": 1}},           # nested dicts
-        {"list": [3, 1, 2]},                    # list values (NOT sorted, by design)
-        {},                                     # empty
-    ])
-    def test_canonical_form_identical_on_both_sides(self, args):
-        assert self._canonical_in_planner(args) == self._canonical_in_policy(args)
-
-    def test_nested_dict_keys_are_recursively_sorted(self):
-        """The forbidden gate's whole correctness rests on this:
-        nested key reordering MUST canonicalise the same way."""
-        a = {"outer": {"b": 1, "a": 2}}
-        b = {"outer": {"a": 2, "b": 1}}
-        assert self._canonical_in_planner(a) == self._canonical_in_planner(b)
 
     def test_forbidden_blocks_args_in_different_key_order(self, workspace: Path):
         """End-to-end: planner re-proposes the same logical action with

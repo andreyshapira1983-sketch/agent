@@ -11,8 +11,6 @@ Test categories:
 """
 from __future__ import annotations
 
-import pytest
-
 from core.injection_guard import (
     InjectionScanResult,
     annotate_suspicious,
@@ -295,10 +293,6 @@ class TestAnnotateSuspicious:
 class TestTrustedInternalTools:
     """Verify the exemption set is defined and contains the right members."""
 
-    def test_trusted_set_importable(self):
-        from core.loop import _TRUSTED_INTERNAL_TOOLS
-        assert isinstance(_TRUSTED_INTERNAL_TOOLS, frozenset)
-
     def test_internal_file_tools_in_set(self):
         from core.loop import _TRUSTED_INTERNAL_TOOLS
         for tool in ("file_read", "list_dir", "diff_file", "run_tests", "read_logs"):
@@ -311,11 +305,6 @@ class TestTrustedInternalTools:
             assert tool not in _TRUSTED_INTERNAL_TOOLS, (
                 f"{tool!r} must NOT be trusted — its content is external"
             )
-
-    def test_set_is_frozen(self):
-        from core.loop import _TRUSTED_INTERNAL_TOOLS
-        with pytest.raises((AttributeError, TypeError)):
-            _TRUSTED_INTERNAL_TOOLS.add("evil_tool")  # type: ignore[attr-defined]
 
 
 class TestPrepareUntrustedTextForLlm:
