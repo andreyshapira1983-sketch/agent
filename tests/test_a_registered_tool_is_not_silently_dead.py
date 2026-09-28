@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from importlib.util import find_spec
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -55,7 +56,7 @@ def _registered_tool_names() -> set[str]:
 
 def _sanitised_tool_names() -> set[str]:
     """Имена, у которых есть ветка `if tool_name == "..."` в санитайзере."""
-    source = (_REPO / "core" / "step_sanitizer.py").read_text(encoding="utf-8")
+    source = pathlib.Path(find_spec("core.step_sanitizer").origin).read_text(encoding="utf-8")
     tree = ast.parse(source)
     names: set[str] = set()
     for node in ast.walk(tree):

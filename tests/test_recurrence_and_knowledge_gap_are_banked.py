@@ -93,7 +93,8 @@ def test_recurrence_opens_a_machine_investigation() -> None:
         "formula (three similar successes must NOT mint an expert). The "
         "token 'knowledge_gap' here is a name-marker, not a design: whoever "
         "closes this renames freely — the distinction matters, not the word. "
-        "[until: 2026-09-30 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
+        "[re-measured 2026-09-28: still no knowledge-gap concept; "
+        "until: 2026-10-31 — перемерь закреплённую дыру; чини или пере-датируй явным коммитом]"
     ),
     strict=True,
 )

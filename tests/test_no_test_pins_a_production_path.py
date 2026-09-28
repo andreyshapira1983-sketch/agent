@@ -29,8 +29,8 @@ spelled `REPO_ROOT / "core" / "x.py"` or `Path(__file__).parent.parent / …`.
 It found 0 while an independent count found 34, and it had no negative
 control. The detector now walks the receiver's string constants and its
 anchor; a fixture-anchored path (`tmp_path / "core" / "foo.py"`) is a
-fixture, not the program. The 23 pins it found on that day are listed below
-as a RATCHET — new ones go red, the listed ones wait for their migration.
+fixture, not the program. The 23 pins it found that day were a RATCHET
+until their migration on 2026-09-28; any new pin goes red.
 """
 from __future__ import annotations
 
@@ -56,35 +56,8 @@ _FIXTURE_ANCHORS = frozenset({
     "cycle",
 })
 
-#: Known pins on 2026-09-03 — `file :: pinned path`. Ratchet, not amnesty:
-#: until: 2026-09-30 — migrate each to `Path(module.__file__)` /
-#: `inspect.getsource(module)` and delete its line; a new pin anywhere is red
-#: today.
-_KNOWN_PINS = frozenset({
-    "test_command_surface_snapshot.py::cli/command_dispatch.py",
-    "test_command_surface_snapshot.py::cli/intent_bridge.py",
-    "test_command_surface_snapshot.py::cli/app.py",
-    "test_command_surface_snapshot.py::cli/repl.py",
-    "test_main_patch_seams.py::cli/app.py",
-    "test_a_registered_tool_is_not_silently_dead.py::core/step_sanitizer.py",
-    "test_a_suppression_names_its_removal_condition.py::scripts/architecture_invariants.py",
-    "test_a_suppression_names_its_removal_condition.py::core/loop_step_execution.py",
-    "test_catalogue_permissions_name_their_own_sink.py::core/loop.py",
-    "test_command_registry.py::cli/app.py",
-    "test_command_registry.py::cli/command_dispatch.py",
-    "test_command_registry.py::cli",
-    "test_commands_map_check.py::cli/command_dispatch.py",
-    "test_help_render.py::cli/help.py",
-    "test_no_dead_copy_of_a_live_guard.py::tools/web_fetch.py",
-    "test_the_goal_reaches_the_hands.py::core/self_build_producer.py",
-    "test_the_goal_reaches_the_hands.py::core/best_next_action.py",
-    "test_the_lab_measures_the_runtime.py::app/bootstrap.py",
-    "test_the_mismatch_sensor_was_measured.py::app/bootstrap.py",
-    "test_the_mismatch_sensor_was_measured.py::core/reasoning_action_check.py",
-    "test_the_stagnation_signal_is_still_observational.py::core/loop_attempt.py",
-    "test_verification_summary.py::core/verifier_core.py",
-    "test_verify_replan_cap.py::core/loop_verify_replan.py",
-})
+#: Known pins: none — all 23 migrated to module-following reads on 2026-09-28.
+_KNOWN_PINS: frozenset[str] = frozenset()
 
 
 def _pinned_path(receiver: ast.AST) -> str:

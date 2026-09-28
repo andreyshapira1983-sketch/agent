@@ -59,6 +59,7 @@ in tests/test_the_goal_named_target_reaches_the_producer.py.
 from __future__ import annotations
 
 import ast
+from importlib.util import find_spec
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -100,7 +101,7 @@ def test_the_producer_is_actually_called_by_the_machine() -> None:
 
 def test_the_producer_can_be_told_which_target_to_take() -> None:
     """Boundary pin: the socket exists, so the gap is wiring, not API."""
-    src = (_REPO / "core" / "self_build_producer.py").read_text(encoding="utf-8")
+    src = Path(find_spec("core.self_build_producer").origin).read_text(encoding="utf-8")
     tree = ast.parse(src)
     params: set[str] = set()
     for node in ast.walk(tree):
@@ -133,7 +134,7 @@ def test_the_head_decision_can_name_a_target() -> None:
     Проверяется и структура, и поведение: поле без значения было бы той же
     потерей связи, только с графой.
     """
-    src = (_REPO / "core" / "best_next_action.py").read_text(encoding="utf-8")
+    src = Path(find_spec("core.best_next_action").origin).read_text(encoding="utf-8")
     tree = ast.parse(src)
     fields: set[str] = set()
     for node in ast.walk(tree):

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import re
+from importlib.util import find_spec
 from pathlib import Path
 
 import main as main_module
@@ -78,7 +79,7 @@ def _names_imported_from_main_at_call_time() -> set[str]:
 
 def _names_cli_app_resolves() -> set[str]:
     """Every name loaded in cli/app.py's body — where the startup wiring runs."""
-    tree = ast.parse((REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8"))
+    tree = ast.parse(Path(find_spec("cli.app").origin).read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):

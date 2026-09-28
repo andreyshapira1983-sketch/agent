@@ -28,6 +28,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+from importlib.util import find_spec
 from pathlib import Path
 
 from core.approval import AutoApprover
@@ -196,7 +197,7 @@ class TestVerdictVocabularyIsCovered:
         Two sources, so moving the literals into constants cannot empty the
         check: the scrape of verifier_core and the report's per-verdict counters.
         """
-        src = (_REPO_ROOT / "core" / "verifier_core.py").read_text(encoding="utf-8")
+        src = Path(find_spec("core.verifier_core").origin).read_text(encoding="utf-8")
         scraped = set(re.findall(r'verdict\s*=\s*"([a-z_]+)"', src))
         scraped |= set(re.findall(r'verdict="([a-z_]+)"', src))
         assert scraped, "скрейп verifier_core не нашёл ни одного вердикта — обнови шаблон"
