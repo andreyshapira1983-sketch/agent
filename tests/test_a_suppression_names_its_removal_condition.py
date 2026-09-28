@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import re
 from datetime import datetime, timezone
+from importlib.util import find_spec
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -86,7 +87,7 @@ def test_the_marker_check_is_per_marker_not_per_file() -> None:
 
 def test_the_orphan_allowlist_entries_declare_their_kind() -> None:
     """Каждая запись allowlist — либо until:, либо standing:, в самой записи."""
-    src = (_ROOT / "scripts" / "architecture_invariants.py").read_text(encoding="utf-8")
+    src = Path(find_spec("scripts.architecture_invariants").origin).read_text(encoding="utf-8")
     allowlist = None
     for node in ast.parse(src).body:
         target = getattr(node, "target", None) or (
@@ -104,7 +105,7 @@ def test_the_scan_exemption_block_declares_both_kinds() -> None:
     `read_logs` освобождён НАМЕРЕННО (аудит §5), но условие снятия жило в
     аудите, а не при затычке — никто бы его не перепроверил.
     """
-    src = (_ROOT / "core" / "loop_step_execution.py").read_text(encoding="utf-8")
+    src = Path(find_spec("core.loop_step_execution").origin).read_text(encoding="utf-8")
     head = src[: src.index("_INJECTION_SCAN_EXEMPT")]
     block = head[head.rfind("\n#") - 2000:] + src[src.index("_INJECTION_SCAN_EXEMPT"):
                                                   src.index("_INJECTION_SCAN_EXEMPT") + 500]

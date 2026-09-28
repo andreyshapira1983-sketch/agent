@@ -28,6 +28,7 @@ below states which one it holds.
 """
 from __future__ import annotations
 
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,7 @@ def test_each_derivation_in_the_loop_passes_its_own_sink_name() -> None:
     import ast
     from pathlib import Path as _Path
 
-    source = (_Path(__file__).resolve().parent.parent / "core" / "loop.py").read_text(
+    source = _Path(find_spec("core.loop").origin).read_text(
         encoding="utf-8")
     expected = {"may_knowledge": "knowledge",
                 "may_source_registry": "source_registry"}

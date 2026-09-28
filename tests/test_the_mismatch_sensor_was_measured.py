@@ -23,6 +23,7 @@ because a silently improved sensor makes every past reading unreadable.
 from __future__ import annotations
 
 import re
+from importlib.util import find_spec
 from pathlib import Path
 
 from core.reasoning_action_check import _TOOL_KEYWORDS
@@ -32,7 +33,7 @@ _REPO = Path(__file__).resolve().parents[1]
 
 def _registered_tools() -> set[str]:
     """Tool names the agent actually ships, read from its own registry."""
-    src = (_REPO / "app" / "bootstrap.py").read_text(encoding="utf-8")
+    src = Path(find_spec("app.bootstrap").origin).read_text(encoding="utf-8")
     classes = set(re.findall(r"registry\.register\((\w+)\(", src))
     names: set[str] = set()
     for path in _REPO.glob("tools/*.py"):
@@ -84,7 +85,7 @@ def test_the_file_read_keyword_still_carries_its_trailing_space() -> None:
 
 def test_the_measurement_is_recorded_where_the_code_lives() -> None:
     """A number in a chat log is not a record. The module must carry it."""
-    doc = (_REPO / "core" / "reasoning_action_check.py").read_text(encoding="utf-8")
+    doc = Path(find_spec("core.reasoning_action_check").origin).read_text(encoding="utf-8")
     head = doc[:doc.find('"""', 3)]
     assert "268" in head and "190" in head, (
         "the module docstring lost its measurement — restore it or re-measure"

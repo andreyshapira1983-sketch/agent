@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+from importlib.util import find_spec
 from pathlib import Path
 
 
@@ -19,11 +20,7 @@ def _is_exhaustion_assignment(node: ast.stmt) -> bool:
 
 
 def test_verify_replan_hard_cap_marks_replan_exhausted() -> None:
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "core"
-        / "loop_verify_replan.py"
-    ).read_text(encoding="utf-8")
+    source = Path(find_spec("core.loop_verify_replan").origin).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     hard_cap = next(

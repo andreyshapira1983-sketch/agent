@@ -5,6 +5,7 @@ Background: docs/CODE_NOTES.md, "The verdict was inferred, the lab was locked".
 from __future__ import annotations
 
 import sys
+from importlib.util import find_spec
 
 import pytest
 
@@ -89,7 +90,7 @@ def test_output_is_capped():
 def test_the_lab_is_wired_into_the_default_registry():
     import pathlib
 
-    src = (pathlib.Path("app") / "bootstrap.py").read_text(encoding="utf-8")
+    src = pathlib.Path(find_spec("app.bootstrap").origin).read_text(encoding="utf-8")
     assert "PythonProbeTool(" in src
 
 

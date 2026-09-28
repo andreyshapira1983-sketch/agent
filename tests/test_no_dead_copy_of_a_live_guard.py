@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from importlib.util import find_spec
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -62,7 +63,7 @@ def test_the_live_url_guard_is_still_wired() -> None:
     Без этого первый тест удовлетворялся бы удалением САМОЙ защиты вместо
     удаления её дубликата.
     """
-    src = (_REPO / "tools" / "web_fetch.py").read_text(encoding="utf-8")
+    src = pathlib.Path(find_spec("tools.web_fetch").origin).read_text(encoding="utf-8")
     tree = ast.parse(src)
     calls = [
         node for node in ast.walk(tree)

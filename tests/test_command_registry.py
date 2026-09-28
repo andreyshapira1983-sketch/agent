@@ -24,6 +24,7 @@ import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import FrozenInstanceError
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,11 +36,11 @@ from cli import command_registry as reg
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
 MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
-APP_SOURCE = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
+APP_SOURCE = Path(find_spec("cli.app").origin).read_text(encoding="utf-8")
 # The `head` dispatch chain moved to cli/command_dispatch.py (Phase 3); the
 # pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
 # still in main.py, so both sources are read here.
-DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
+DISPATCH_SOURCE = Path(find_spec("cli.command_dispatch").origin).read_text(encoding="utf-8")
 CMAP_SOURCE = (REPO_ROOT / "knowledge" / "maps" / "COMMANDS_MAP.md").read_text(encoding="utf-8")
 
 _CMD = r":[a-z0-9][a-z0-9-]*"
@@ -193,7 +194,7 @@ def test_registry_is_pure_data():
         ("command_specs.py", {"__future__", "dataclasses"}),
         ("command_specs_ops.py", {"__future__", "dataclasses", ".command_specs"}),
     ):
-        source = (REPO_ROOT / "cli" / name).read_text(encoding="utf-8")
+        source = Path(find_spec(f"cli.{name.removesuffix('.py')}").origin).read_text(encoding="utf-8")
         imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.MULTILINE)
         forbidden = [
             imp

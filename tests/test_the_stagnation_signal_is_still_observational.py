@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import inspect
 import pathlib
+from importlib.util import find_spec
 
 from core.termination_guard import TerminationGuard
 
@@ -58,8 +59,7 @@ def test_the_shadow_still_records_where_a_stop_would_have_been() -> None:
     Месяц её никто не читал, и ответ на вопрос «что стоила бы остановка»
     пролежал в журналах. Поле, в котором он живёт, обязано остаться.
     """
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "core" / "loop_attempt.py").read_text(encoding="utf-8")
+    src = pathlib.Path(find_spec("core.loop_attempt").origin).read_text(encoding="utf-8")
 
     assert "_stagnation_shadow" in src
     assert "artifacts_at_detection" in src, (

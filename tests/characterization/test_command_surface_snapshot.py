@@ -37,9 +37,9 @@ MAIN_SOURCE = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
 # The `head` dispatch chain moved to cli/command_dispatch.py (Phase 3); the
 # pre-load_dotenv() fast paths, the REPL block tokens and the intent bridge are
 # still in main.py, so both sources are read here.
-DISPATCH_SOURCE = (REPO_ROOT / "cli" / "command_dispatch.py").read_text(encoding="utf-8")
+DISPATCH_SOURCE = Path(dispatch_module.__file__).read_text(encoding="utf-8")
 # the operator-intent bridge moved to cli/intent_bridge.py (Phase 3 step 6)
-BRIDGE_SOURCE = (REPO_ROOT / "cli" / "intent_bridge.py").read_text(encoding="utf-8")
+BRIDGE_SOURCE = Path(importlib.util.find_spec("cli.intent_bridge").origin).read_text(encoding="utf-8")
 
 # Captured before any monkeypatch replaces the attribute (see the reader factory
 # in _startup_tokens, which must build the real class, not its own stand-in).
@@ -106,7 +106,7 @@ def _pre_dotenv_fast_paths() -> set[str]:
     """Commands matched with `head.lower() == …` before `load_dotenv()` runs."""
     # The startup sequence moved to cli/app.py with the rest of `main()`;
     # scanning main.py here would silently freeze an empty set.
-    app_source = (REPO_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
+    app_source = Path(app_module.__file__).read_text(encoding="utf-8")
     prefix = _pre_dotenv_source_prefix(app_source)
     return set(re.findall(r'head\.lower\(\)\s*==\s*"(:[a-z0-9-]+)"', prefix))
 
@@ -117,7 +117,7 @@ def _repl_control_tokens() -> set[str]:
     # stdin reader and the instruction-buffer collector there, so main.py no
     # longer contains any `q == ":…"` branch. Reading main.py here would make
     # this guard silently green.
-    repl_source = (REPO_ROOT / "cli" / "repl.py").read_text(encoding="utf-8")
+    repl_source = Path(repl_module.__file__).read_text(encoding="utf-8")
     tokens = set(re.findall(r'q\s*==\s*"(:[a-z0-9-]+)"', repl_source))
     tokens |= set(re.findall(r'marker\s*==\s*"(:[a-z0-9-]+)"', repl_source))
     tokens |= set(re.findall(r'\.lower\(\)\s*==\s*"(:end)"', repl_source))

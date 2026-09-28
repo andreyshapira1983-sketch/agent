@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from importlib.util import find_spec
 from pathlib import Path
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -127,9 +128,7 @@ def test_dispatch_parser_still_matches_the_live_registry():
     """The dispatch chain (now in cli/command_dispatch.py) and the registry must
     agree exactly."""
     mod = _load_module()
-    dispatch_source = Path(
-        os.path.join(_ROOT, "cli", "command_dispatch.py")
-    ).read_text(encoding="utf-8")
+    dispatch_source = Path(find_spec("cli.command_dispatch").origin).read_text(encoding="utf-8")
     assert mod.dispatched_commands(dispatch_source) == mod.registry_commands()
 
 
