@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import MODEL_DISCOVERY_TARGET
 from core.self_apply_bridge import SELF_APPLY_OPERATION, rehydrate_proposal
@@ -1597,3 +1599,51 @@ def test_the_report_names_what_the_run_read(workspace: Path):
         "the memory label must mean memory was actually read, or the guard "
         "it feeds will quarantine clean lessons"
     )
+
+
+def test_a_published_proposal_names_the_backlog_item_it_answers(workspace: Path):
+    """A review of the proposal must reach its backlog entry, not only the mapped file."""
+    _write_model_discovery_mapping_evidence(workspace)
+    inbox = ApprovalInbox(path=None)
+    candidate = _Candidate("TD-011 / TD-012", _TD_011_012_TITLE, "TECH_DEBT.md:1")
+    llm = FakeLLM([_builder_custom("NEW = 1\n", "preserve read-only discovery")])
+
+    report = _produce(
+        workspace,
+        llm=llm,
+        inbox=inbox,
+        grounded_selector=lambda: candidate,
+        file_reader=_reader({MODEL_DISCOVERY_TARGET: "OLD = 0\n"}),
+    )
+
+    assert report.status == "proposed"
+    evidence = inbox.list()[0].payload["evidence"]
+    assert f"target={MODEL_DISCOVERY_TARGET}" in evidence
+    assert "backlog_target=TD-011 / TD-012" in evidence
+
+
+@pytest.mark.parametrize("verdict", ["rejected_wrong_target", "rejected_low_value"])
+def test_a_target_the_operator_rejected_is_not_chosen_again(tmp_path: Path, verdict: str):
+    """A human «no» on a proposal moves its backlog entry off the top of the next choice."""
+    from core.self_build_producer import _default_grounded_selector
+    from core.value_review import ValueReviewLog
+
+    (tmp_path / "TECH_DEBT.md").write_text(
+        "TD-060 — Open A\nСтатус: Partial — not finished.\n\n"
+        "TD-061 — Open B\nСтатус: Partial — also not finished.\n",
+        encoding="utf-8",
+    )
+    assert _default_grounded_selector(tmp_path)().target_path == "TD-060"
+
+    inbox = ApprovalInbox(path=tmp_path / "data" / "approval_inbox.jsonl")
+    item = inbox.add(
+        operation=SELF_APPLY_OPERATION,
+        summary="self-apply proposal for core/redaction.py",
+        payload={
+            "origin": PRODUCER_ORIGIN,
+            "evidence": ["target=core/redaction.py", "backlog_target=TD-060"],
+        },
+    )
+    ValueReviewLog.for_workspace(tmp_path).append(item.id, verdict)
+
+    assert _default_grounded_selector(tmp_path)().target_path == "TD-061"

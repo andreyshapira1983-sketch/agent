@@ -9,8 +9,7 @@ append-only signal.
 Design constraints (capture-only PR):
 * Append-only ledger at ``data/value_reviews.jsonl`` (git-ignored, on disk only).
 * The effective verdict for an item is the *latest valid* review recorded.
-* The approval inbox is never mutated; the subagent registry scoring is not
-  touched here (that wiring is a deliberate follow-up).
+* The approval inbox is never mutated; registry scoring lives in the CLI (TD-033).
 * Notes are secret-redacted and length-truncated before they are persisted.
 """
 from __future__ import annotations

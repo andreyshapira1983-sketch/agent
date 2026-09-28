@@ -322,6 +322,27 @@ def load_backlog(
     )
 
 
+def value_review_signal(workspace: str | Path) -> tuple[list, dict[str, str]]:
+    """Human value reviews plus the backlog target each reviewed proposal answered."""
+    try:
+        from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
+        from core.value_review import ValueReviewLog
+
+        reviews = ValueReviewLog.for_workspace(workspace).list()
+        items = ApprovalInbox(path=Path(workspace) / DEFAULT_APPROVAL_INBOX_PATH).list()
+    except Exception:  # noqa: BLE001 — reviews are an optional signal
+        return [], {}
+    targets: dict[str, str] = {}
+    for item in items:
+        evidence = [str(e) for e in (item.payload or {}).get("evidence") or ()]
+        for prefix in ("backlog_target=", "target="):
+            found = next((e[len(prefix):] for e in evidence if e.startswith(prefix)), "")
+            if found:
+                targets[item.id] = found
+                break
+    return reviews, targets
+
+
 def select_top(candidates: list[BacklogCandidate]) -> BacklogCandidate | None:
     """The single highest-ranked candidate, or ``None`` for an empty backlog."""
     return candidates[0] if candidates else None
