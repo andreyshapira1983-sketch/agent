@@ -25,6 +25,7 @@ Contract under test:
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from pathlib import Path
@@ -161,11 +162,13 @@ class TestFivePoints:
         assert "journal.txt" in summary.evidence
 
     def test_no_matches_says_so_instead_of_listing_nothing(self):
+        """A chain with sources but no matched claim: say so, name no source."""
+        chain = ProvenanceChain(evidences=[_evidence("ev1", source_id="journal.txt")])
         summary = build_verification_summary(
-            _report((_chunk("unverified"),)),
-            chain=ProvenanceChain(),
+            _report((_chunk("unverified"),)), chain=chain
         )
-        assert summary.evidence.strip()
+        assert "совпадений утверждений с источниками цепочки нет" in summary.evidence
+        assert "journal.txt" not in summary.evidence
 
     def test_nothing_examined_yields_no_tail_but_an_honest_text(self):
         report = _report((), chain_was_empty=True, fully_unverified=True)
@@ -188,13 +191,21 @@ class TestFivePoints:
 
 class TestVerdictVocabularyIsCovered:
     def test_every_verdict_the_verifier_assigns_has_russian_wording(self):
-        """Self-maintaining coverage: a new verdict added to verifier_core
-        without wording here means the explanation would silently lie by
-        omission. Same scrape the INV-4 guard uses."""
+        """Every verdict the verifier can emit has wording for point 4.
+
+        Two sources, so moving the literals into constants cannot empty the
+        check: the scrape of verifier_core and the report's per-verdict counters.
+        """
         src = (_REPO_ROOT / "core" / "verifier_core.py").read_text(encoding="utf-8")
-        verdicts = set(re.findall(r'verdict\s*=\s*"([a-z_]+)"', src))
-        verdicts |= set(re.findall(r'verdict="([a-z_]+)"', src))
-        missing = sorted(v for v in verdicts if v not in _VERDICT_RU)
+        scraped = set(re.findall(r'verdict\s*=\s*"([a-z_]+)"', src))
+        scraped |= set(re.findall(r'verdict="([a-z_]+)"', src))
+        assert scraped, "скрейп verifier_core не нашёл ни одного вердикта — обнови шаблон"
+        counted = {
+            f.name.removesuffix("_chunks")
+            for f in dataclasses.fields(VerificationReport)
+            if f.name.endswith("_chunks") and f.name != "total_chunks"
+        }
+        missing = sorted(v for v in scraped | counted if v not in _VERDICT_RU)
         assert not missing, f"вердикты без русской формулировки: {missing}"
 
 

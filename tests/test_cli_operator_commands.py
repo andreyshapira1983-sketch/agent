@@ -121,11 +121,18 @@ def test_connector_plan_refuses_a_bad_limit(rest, capsys):
 
 
 def test_connector_plan_prints_a_summary_and_json(capsys):
+    """Both modes carry the plan for the goal without its flags, capped by --limit."""
     assert _handle_connector_plan("monitor python releases --limit 2") is True
-    assert capsys.readouterr().err.strip()
+    summary = capsys.readouterr().err
+    assert "goal='monitor python releases'" in summary
+    listed = [line.split()[0] for line in summary.splitlines() if " score=" in line]
+    assert listed[0] == "rss"
+    assert len(listed) == 2
 
-    assert _handle_connector_plan("monitor python releases --json") is True
-    assert isinstance(json.loads(capsys.readouterr().err), dict)
+    assert _handle_connector_plan("monitor python releases --json --limit 1") is True
+    plan = json.loads(capsys.readouterr().err)
+    assert plan["goal"] == "monitor python releases"
+    assert [item["connector"]["id"] for item in plan["recommendations"]] == ["rss"]
 
 
 # ── :architecture-audit ──────────────────────────────────────────────────────

@@ -162,7 +162,12 @@ def test_untraceable_model_candidate_returns_no_target(workspace: Path) -> None:
 
 
 def test_mapper_reads_only_and_creates_no_workspace_files(workspace: Path) -> None:
-    _write_model_discovery_evidence(workspace)
+    """Mapping a split:<rel> target leaves the workspace byte-for-byte unchanged.
+
+    split:<rel> is the abstract route that fires in production (oversized modules).
+    """
+    (workspace / "core").mkdir()
+    (workspace / "core" / "sample_mod.py").write_text("x = 1\n", encoding="utf-8")
     before = {
         path.relative_to(workspace).as_posix(): path.read_bytes()
         for path in workspace.rglob("*")
@@ -170,7 +175,12 @@ def test_mapper_reads_only_and_creates_no_workspace_files(workspace: Path) -> No
     }
 
     result = map_backlog_candidate(
-        _Candidate(),
+        _Candidate(
+            target_path="split:core/sample_mod.py",
+            problem_quote="core/sample_mod.py is oversized",
+            evidence_ref="core/sample_mod.py:1",
+            signal_source="oversized_module",
+        ),
         workspace=workspace,
         allowed_targets=("core/redaction.py",),
     )
@@ -181,6 +191,7 @@ def test_mapper_reads_only_and_creates_no_workspace_files(workspace: Path) -> No
         if path.is_file()
     }
     assert result.decision == "mapped"
+    assert result.target_path == "core/sample_mod.py"
     assert after == before
 
 

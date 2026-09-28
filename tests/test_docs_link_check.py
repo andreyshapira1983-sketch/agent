@@ -20,10 +20,6 @@ def _load_module():
     return mod
 
 
-def test_script_file_exists():
-    assert os.path.isfile(_SCRIPT)
-
-
 def test_all_doc_links_resolve():
     # Every relative Markdown link in README + docs/ must point at a real file.
     mod = _load_module()

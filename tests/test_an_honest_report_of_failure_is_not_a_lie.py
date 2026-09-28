@@ -61,18 +61,24 @@ def test_arithmetic_contradictions_stay_lies() -> None:
 
 
 def test_the_agents_own_failure_report_is_not_refuted() -> None:
-    """Живой случай того вечера, целиком.
+    """Живой случай того вечера: улика ворот одобрения есть, но слов доклада в ней нет.
 
-    Доклад о собственной неудаче с ссылкой, чья вырезка этих слов не несёт,
-    больше не получает `claim-refuted`: он остаётся неподтверждённым, и это
-    честная полярность.
+    Это нехватка подпорки: не `claim-refuted` и не выдуманная ссылка, а пометка.
     """
-    from core.evidence import ProvenanceChain
+    from core.evidence import ProvenanceChain, make_evidence
     from core.verifier import verify
 
+    chain = ProvenanceChain()
+    chain.add(make_evidence(
+        kind="runtime", source_id="runtime:approval_provider",
+        obtained_via="process_self_measurement",
+        claim="This run's approval_provider", excerpt="AutoApprover"))
     claim = ("Ворота одобрения вернули unavailable для file_write "
              "[runtime:approval_provider].")
-    report = verify(answer=claim, chain=ProvenanceChain(),
-                    expects_contract_headers=False)
+    report = verify(answer=claim, chain=chain, expects_contract_headers=False)
+
     assert report.refuted_chunks == 0, report.to_log_payload()
+    assert report.cited_but_unmatched_chunks == 0, report.to_log_payload()
+    assert report.topic_supported_but_claim_unverified_chunks == 1, report.to_log_payload()
     assert "[claim-refuted]" not in report.annotated_answer
+    assert "улика-без-этих-слов" in report.annotated_answer

@@ -105,18 +105,32 @@ def test_imagemagick_is_told_the_format() -> None:
     assert "png:in.png" in _cmd("image", "png", "jpg")
 
 
-def test_a_result_lands_in_converted_and_never_overwrites(tmp_path: Path) -> None:
+def test_a_result_lands_in_converted_and_a_rerun_keeps_it(tmp_path: Path, monkeypatch) -> None:
+    """Результат ложится в converted/ под своим штампом, и повторный запуск его не затирает.
+
+    Часы идут на секунду за вызов: штамп секундный.
+    """
+    import time
+
     (tmp_path / "inbox").mkdir()
     (tmp_path / "inbox" / "a.docx").write_bytes(b"x")
+    bodies = iter([b"%PDF-1", b"%PDF-2"])
 
     def fake(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
-        (cwd / "out" / "in.pdf").write_bytes(b"%PDF")
+        (cwd / "out" / "in.pdf").write_bytes(next(bodies))
         return 0, ""
 
+    real_strftime, ticks = time.strftime, iter(range(1_790_000_000, 1_790_000_100))
+    monkeypatch.setattr("tools.convert_file.time.strftime",
+                        lambda fmt, *_: real_strftime(fmt, time.gmtime(next(ticks))))
     tool = ConvertFileTool(workspace_root=tmp_path, runner=fake)
     first = tool.run(op="office", path="inbox/a.docx", to="pdf")["outputs"]
+    second = tool.run(op="office", path="inbox/a.docx", to="pdf")["outputs"]
+
     assert first and first[0].startswith("converted/a__office_") and first[0].endswith(".pdf")
-    assert (tmp_path / first[0]).read_bytes() == b"%PDF"
+    assert second and second != first
+    assert (tmp_path / first[0]).read_bytes() == b"%PDF-1"
+    assert (tmp_path / second[0]).read_bytes() == b"%PDF-2"
 
 
 # --- 3. настоящие программы в песочнице (сервер) ----------------------------

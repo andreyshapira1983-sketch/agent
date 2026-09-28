@@ -8,6 +8,7 @@ from pathlib import Path
 
 from core.causal_lesson import Observation
 from core.causal_store import CausalObservationStore
+from core.state_integrity import read_state_jsonl
 
 
 def _obs(signal: str = "citation_fabricated", episode: str = "ep_1") -> Observation:
@@ -61,14 +62,13 @@ def test_a_different_defect_is_a_different_record(tmp_path: Path):
 
 
 def test_it_stores_observations_only(tmp_path: Path):
-    """The store holds the bottom rung and nothing above it.
+    """A stored row is an observation only: no ladder state, no tags.
 
-    A record here is «стоит расследовать», never «доказано»: the tag `lesson`
-    is earned through `state_of`, and no write to this file may shortcut it.
+    The tag `lesson` is earned through `state_of`; no write to this file may shortcut it.
     """
     store = CausalObservationStore(tmp_path / "causal.jsonl")
     store.record(_obs())
 
-    raw = (tmp_path / "causal.jsonl").read_text(encoding="utf-8")
-    assert "lesson" not in raw
-    assert "GENERALIZED" not in raw
+    rows = read_state_jsonl(tmp_path / "causal.jsonl")
+    assert len(rows) == 1
+    assert not {"state", "status", "tags"} & set(rows[0]), rows[0]

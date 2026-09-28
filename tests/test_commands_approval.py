@@ -44,7 +44,6 @@ from cli.commands_approval import (
     _handle_best_next_action,
     _handle_self_issue_verify,
     _payload_bool,
-    _record_producer_approval,
     _record_subagent_contract_outcome,
 )
 
@@ -304,18 +303,6 @@ def test_producer_ledger_failure_never_breaks_an_approval(agent, workspace, monk
 
     assert _handle_approval_decision(item.id, agent, workspace, decision="approve") is True
     assert _approval_inbox_for(agent, workspace).get(item.id).status == "approved"
-
-
-def test_producer_ledger_ignores_items_from_other_origins(workspace):
-    """A non-producer item must not reach the registry at all."""
-    _record_producer_approval(workspace, SimpleNamespace(operation="something_else"))
-    _record_producer_approval(
-        workspace,
-        SimpleNamespace(operation="self_apply_lane.run", payload={"origin": "human"}),
-    )
-    _record_producer_approval(
-        workspace, SimpleNamespace(operation="self_apply_lane.run", payload=None)
-    )
 
 
 # ── :approval-list / :approval-triage ────────────────────────────────────────

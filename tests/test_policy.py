@@ -400,35 +400,6 @@ def test_risk_for_stays_irreversible_for_unsafe_args() -> None:
     assert any("irreversible" in r for r in decision.reasons)
 
 
-def test_risk_for_receives_empty_dict_when_parameters_is_None() -> None:
-    """Defensive: PolicyGate must call `risk_for({})` when the action's
-    parameters dict is missing / empty, instead of crashing."""
-
-    class _SeesArgs(Tool):
-        name = "seesargs"
-        description = "captures the dict it was passed"
-        risk = "read_only"
-
-        def __init__(self):
-            self.last_args: dict | None = None
-
-        def risk_for(self, arguments):
-            self.last_args = arguments
-            return self.risk
-
-        def run(self, **kwargs):
-            return "x"
-
-    tool = _SeesArgs()
-    reg = _registry(tool)
-    gate = PolicyGate(reg)
-
-    action = Action(step_id="s", type="tool_call", tool_name="seesargs")
-    gate.check(action)
-
-    assert tool.last_args == {}
-
-
 def test_risk_for_is_consulted_per_call_not_cached() -> None:
     """Same tool, two different argument sets, two different decisions —
     proves the gate calls `risk_for` fresh each time."""

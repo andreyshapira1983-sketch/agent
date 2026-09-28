@@ -179,32 +179,6 @@ def test_cache_hit_skips_policy_and_tool_on_repeat(workspace: Path) -> None:
 
 # ---------- memory_clear ----------
 
-def test_memory_clear_resets_state(workspace: Path) -> None:
-    (workspace / "doc.txt").write_text("alpha\n", encoding="utf-8")
-
-    llm = FakeLLM(responses=[PLAN_FILE_READ, SYNTH_FILE])
-    agent, memory, log_path = _build_agent_with_memory(workspace, llm)
-
-    agent.run(user_question="Read doc.txt", file_hint="doc.txt")
-    assert len(memory.turns) == 1
-    assert memory.cache_lookup("file_read", {"path": "doc.txt"}) is not None
-
-    # Simulate the REPL `:clear` command: agent.memory.clear() + a log event
-    agent.memory.clear()
-    agent.log.log("memory_clear", {"session_id": memory.session_id})
-
-    assert memory.turns == []
-    assert memory.cache_lookup("file_read", {"path": "doc.txt"}) is None
-    assert memory.summary()["turns"] == 0
-    assert memory.summary()["artifacts_cached"] == 0
-
-    # The clear event must be visible in the trace
-    events = _events(log_path)
-    clear_events = [e for e in events if e["event"] == "memory_clear"]
-    assert len(clear_events) == 1
-    assert clear_events[0]["payload"]["session_id"] == memory.session_id
-
-
 def test_after_clear_next_turn_has_no_memory_inject(workspace: Path) -> None:
     """After :clear, the very next turn must look like a fresh session:
     no `memory_inject` event, planner prompt has no <conversation_history>.

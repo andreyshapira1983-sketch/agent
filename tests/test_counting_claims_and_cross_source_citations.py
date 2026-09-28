@@ -170,7 +170,10 @@ def test_the_b1_lie_is_still_caught_by_the_entailment_judge() -> None:
 
 
 def test_a_correct_count_is_left_alone() -> None:
-    """ПРЕДОХРАНИТЕЛЬ R2: верный счёт — и цифрой, и словом — не трогается."""
+    """ПРЕДОХРАНИТЕЛЬ R2: верный счёт — и цифрой, и словом — не даёт сигнала.
+
+    R2 в тени и вердикт не меняет, поэтому судится её след в журнале.
+    """
     for lead in ("четыре полки", "4 полки"):
         answer = (
             f"Conclusion: Файл содержит {lead} (A1, B2, C4, D0). "
@@ -186,3 +189,4 @@ def test_a_correct_count_is_left_alone() -> None:
             user_question="какие полки",
         )
         assert report.refuted_chunks == 0, lead
+        assert report.to_log_payload()["shadow_count_mismatch"] == [], lead

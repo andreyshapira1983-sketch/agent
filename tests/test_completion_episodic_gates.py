@@ -23,6 +23,7 @@ commit, and one test pins that nothing moved.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,7 +38,6 @@ from core.smart_memory import (
     _compute_quality_score,
     decide_usage_eligibility,
     effective_completion,
-    is_usage_eligible,
 )
 
 QUESTION = "how do I deploy the service"
@@ -427,45 +427,32 @@ def test_reading_legacy_stays_none_no_reconstruction(tmp_path: Path) -> None:
 
 
 def test_no_legacy_episode_in_the_live_store_is_ever_admitted(tmp_path: Path) -> None:
-    """Legacy stays withheld — the invariant, not a snapshot.
+    """The live store's legacy rows, seeded: none reaches a prompt or is replayed.
 
-    This first asserted that EVERY live episode read `unknown`, which was true
-    the day it was written and false the moment the agent ran: new cycles bank
-    real completion states, as they should. A test that pins a snapshot of
-    mutable production data reports its own staleness as a regression.
-
-    What must hold forever is narrower: an episode carrying no verdict — a row
-    written before the axis existed — is never replayed, whatever else lands
-    in the store around it.
+    Written as raw JSON because `store.save` stamps the axis and the bit on the way in.
     """
-    live = Path("data/episodic_memory.jsonl")
-    if not live.exists():
-        # Checked BEFORE the store is built: constructing it mkdirs `data/`
-        # and `load()` takes the lock, which leaves `data/*.lock` behind in a
-        # clean clone — and that stray directory reads as a live workspace to
-        # `test_the_live_workspace_actually_carries_the_file`.
-        pytest.skip("no live store in this environment")
-    store = EpisodicMemoryStore(live)
-    episodes = store.load()
-    if not episodes:
-        pytest.skip("no live store in this environment")
+    common = {
+        "goal": "deploy", "question": QUESTION, "summary": "deployed the service",
+        "verified_chunks": 3, "unverified_chunks": 0,
+        "full_answer": "The service deploys with `make deploy`.",
+    }
+    rows = [
+        # Legacy lessons carry no eligibility bit.
+        {**common, "id": "legacy-lesson", "outcome": "failed", "tags": ["lesson"]},
+        # A legacy success kept the bit it was banked with, but no verdict.
+        {**common, "id": "legacy-success", "outcome": "success", "usage_eligible": True},
+    ]
+    path = tmp_path / DEFAULT_EPISODIC_MEMORY_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    agent = _agent(tmp_path)
+    legacy = EpisodicMemoryStore(path).load()
+    assert [ep.completion_state for ep in legacy] == [None, None]
 
-    legacy = [ep for ep in episodes if ep.completion_state is None]
-    assert all(effective_completion(ep) == "unknown" for ep in legacy)
-    assert not [ep for ep in legacy if _fast_path_pure(ep)]
-    # Modelled on what RETRIEVAL does, not on `decide_usage_eligibility`.
-    # The banking-time policy admits a lesson whatever its stored bit says;
-    # retrieval reads that bit, and a legacy row carries none. Asserting the
-    # policy here would fail on the 108 legacy lessons while the live agent
-    # admits none of them — the same conflation this suite exists to prevent.
-    def _retrieval_admits(ep) -> bool:
-        if "lesson" in ep.tags:
-            return is_usage_eligible(ep)
-        return effective_completion(ep) == "achieved" and is_usage_eligible(ep)
-
-    assert not [ep for ep in legacy if _retrieval_admits(ep)], (
+    assert _retrieved(agent) == [], (
         "an unclassified episode must not reach a prompt as the store fills"
     )
+    assert not [ep.id for ep in legacy if _replayed(agent, ep)]
 
 
 # ==========================================================================

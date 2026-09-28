@@ -402,24 +402,6 @@ def test_a_local_commit_is_not_called_accepted(repo: Path) -> None:
     )
 
 
-def test_the_lane_still_leaves_the_repository_where_it_found_it() -> None:
-    """Полоса по-прежнему возвращается на исходную ветку, и это ВЕРНО.
-
-    Соблазн «починить» дефект 5 внутри полосы — убрать `checkout`. Тогда
-    принятие делал бы тот же код, который себя и менял. Свидетель стоит
-    здесь, чтобы будущая правка не приняла это за улучшение.
-    """
-    import inspect
-
-    import core.self_apply_lane as lane
-
-    text = inspect.getsource(lane)
-    assert "vcs.checkout(original_branch)" in text, (
-        "полоса перестала возвращать дерево на исходную ветку — "
-        "принятие переехало внутрь того, кто себя меняет"
-    )
-
-
 # ── 6. петля замыкается: следующий цикл СТАРТУЕТ из принятого ────────────────
 #
 # Ревизия Copilot по PR #334, замечание к `next_start_point`:

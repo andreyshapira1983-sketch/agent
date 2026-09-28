@@ -4,6 +4,7 @@ Background: docs/CODE_NOTES.md, "A lesson carries the scope it was proven in".
 """
 from __future__ import annotations
 
+from core.causal_claim_store import distilled_lessons, save_claim
 from core.causal_lesson import (
     CausalClaim,
     Explanation,
@@ -76,12 +77,16 @@ def test_a_scoped_rule_that_held_is_a_lesson():
     assert "lesson" in claim_tags(scoped)
 
 
-def test_inside_its_scope_the_lesson_applies():
-    """The cases it was demonstrated on are exactly where it is proven."""
-    scoped = _claim()
+def test_inside_its_scope_the_lesson_applies(tmp_path):
+    """The planner's lesson card carries both cases the rule was proven on.
 
-    assert applies_to(scoped, case_ref="ep_1")
-    assert applies_to(scoped, case_ref="ep_2")
+    `LessonCard.cases` is what `lesson_applies` matches a question against.
+    """
+    save_claim(_claim(), workspace=tmp_path)
+
+    (card,) = distilled_lessons(tmp_path)
+
+    assert set(card.cases) == {"ep_1", "ep_2"}
 
 
 def test_outside_its_scope_it_is_extrapolation_not_proof():

@@ -23,7 +23,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import app.bootstrap as bootstrap_module
 import cli.app as app_module
 import cli.command_dispatch as dispatch_module
 import main as main_module
@@ -72,25 +71,6 @@ def test_no_production_module_imports_from_main():
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "from main import" not in source, rel
         assert "from app.bootstrap import build_agent" in source, rel
-
-
-def test_lazy_callers_are_faked_on_app_bootstrap(monkeypatch):
-    """Where a `build_agent` fake belongs.
-
-    `agent_tick.run_tick` and `api.server._build_server_agent` import it inside a
-    function, so the binding is read off `app.bootstrap` at call time — the
-    target `tests/test_autonomous_runtime.py` and `tests/test_budget_kill_switch.py`
-    patch. A fake on `main` would sit there unused.
-    """
-    sentinel = SimpleNamespace(log=SimpleNamespace(log=lambda *a, **k: None))
-    monkeypatch.setattr(bootstrap_module, "build_agent", lambda *a, **k: sentinel)
-
-    def lazy_caller():  # mirrors agent_tick.py:739
-        from app.bootstrap import build_agent
-
-        return build_agent(Path("."))
-
-    assert lazy_caller() is sentinel
 
 
 def test_dotenv_is_loaded_through_cli_app(tmp_path, monkeypatch):

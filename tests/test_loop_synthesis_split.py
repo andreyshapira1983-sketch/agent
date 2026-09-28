@@ -7,10 +7,8 @@
 
 Сверка та же, что в куске 1 (переезжает ЦЕЛЫЙ метод, а не срез тела): тело
 и сигнатура обязаны совпасть с историей символ в символ, класс обязан
-остаться единым для потребителя, а швы подмены — живыми. Последнее здесь не
-формальность: `tests/test_completion_marker.py` подменяет `_synthesize`
-через `core.loop.AgentLoop._synthesize`, и этот путь обязан пережить
-переезд в миксин.
+остаться единым для потребителя. Шов подмены `core.loop.AgentLoop._synthesize`
+держат его потребители — `tests/test_completion_marker.py` и соседи.
 """
 from __future__ import annotations
 
@@ -135,25 +133,6 @@ def test_the_agent_still_has_the_moved_method():
     for name in MOVED:
         assert callable(getattr(AgentLoop, name, None)), f"{name} потерялся"
         assert inspect.getmodule(getattr(AgentLoop, name)) is synthesis_mod
-
-
-def test_the_patch_seam_by_string_path_survives(monkeypatch):
-    """Шов подмены: `core.loop.AgentLoop._synthesize` обязан работать.
-
-    Ровно этим путём `tests/test_completion_marker.py` подменяет синтезатор
-    в трёх десятках проверок. Метод переехал в миксин, а атрибут по этому
-    имени должен и находиться, и подменяться, и восстанавливаться.
-    """
-    original = AgentLoop._synthesize
-
-    def _stub(self, *a, **kw):  # pragma: no cover — вызывается не здесь
-        return "stub"
-
-    monkeypatch.setattr("core.loop.AgentLoop._synthesize", _stub)
-    assert AgentLoop._synthesize is _stub
-    monkeypatch.undo()
-    assert AgentLoop._synthesize is original
-    assert inspect.getmodule(AgentLoop._synthesize) is synthesis_mod
 
 
 def test_the_split_actually_shrank_the_loop():

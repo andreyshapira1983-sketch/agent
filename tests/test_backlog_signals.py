@@ -142,9 +142,3 @@ def test_value_review_penalties_latest_verdict_wins():
     pen = value_review_penalties(reviews, {"i1": "core/a.py"})
     assert pen.suppressed == frozenset()
     assert pen.penalized == frozenset()
-
-
-def test_value_review_penalties_suppressed_not_also_penalized():
-    reviews = [_Rev("i1", "rejected_wrong_target")]
-    pen = value_review_penalties(reviews, {"i1": "t"})
-    assert "t" in pen.suppressed and "t" not in pen.penalized

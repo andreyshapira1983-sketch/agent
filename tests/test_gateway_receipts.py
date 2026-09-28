@@ -197,9 +197,13 @@ def test_self_apply_blocked_writes_receipt_no_lane(workspace: Path, outcome: str
     assert inbox.get(item_id).status == "approved"
 
 
-def test_self_apply_gateway_exception_fails_closed_receipt_best_effort(
+def test_self_apply_gateway_exception_fails_closed_with_an_error_receipt(
     workspace: Path,
 ) -> None:
+    """A raising gateway refuses the apply and leaves one error receipt for this proposal.
+
+    The receipt is the only durable record that the apply was attempted (MIR-077).
+    """
     inbox = ApprovalInbox(path=workspace / "data" / "approval_inbox.jsonl")
     item_id = _approved(inbox)
 
@@ -208,11 +212,12 @@ def test_self_apply_gateway_exception_fails_closed_receipt_best_effort(
 
     result = _run(inbox, item_id, workspace, _raising_lane, gateway=_BoomGateway())
 
-    # Fail-closed behavior is what matters; the error receipt is best-effort.
     assert result["status"] == "gateway_error"
     assert inbox.get(item_id).status == "approved"
-    err_rows = [r for r in _gateway_receipts(workspace) if r.status == "error"]
-    assert all(r.kind == "gateway" for r in err_rows)
+    rows = _gateway_receipts(workspace)
+    assert [(r.status, r.operation, r.refs.get("proposal_id")) for r in rows] == [
+        ("error", "gateway.deny", item_id)
+    ]
 
 
 # ── REPL / effectful tool path ───────────────────────────────────────────────

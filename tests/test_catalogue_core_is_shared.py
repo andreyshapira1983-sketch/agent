@@ -34,15 +34,18 @@ import ast
 import inspect
 import pathlib
 
+from core.evidence import ProvenanceChain, make_evidence
 from core.loop_evidence_chain import AgentLoopEvidenceChain, CatalogueResult
 
 
 class _Pipeline:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.chains: list = []
 
     def run(self, chain, **kw):
         self.calls.append(kw)
+        self.chains.append(chain)
 
         class _Result:
             registry = "REGISTRY"
@@ -80,14 +83,24 @@ class _Chain:
 # ---------------------------------------------------------------------------
 
 def test_it_returns_both_halves():
+    """The ranking covers this chain for this question, and the pipeline gets that ranking."""
     agent = _Agent()
+    chain = ProvenanceChain()
+    for kind, source in (("web_search_hit", "https://example.org/a"), ("file", "README.md")):
+        chain.add(make_evidence(kind=kind, source_id=source, obtained_via="test",
+                                claim="c", excerpt=f"text of {source}"))
 
     result = agent._catalogue_chain(
-        _Chain(), question="q", may_knowledge=True, may_source_registry=True,
+        chain, question="what does the README say",
+        may_knowledge=True, may_source_registry=True,
     )
 
     assert isinstance(result, CatalogueResult)
-    assert result.ranking is not None
+    assert result.ranking.question == "what does the README say"
+    assert [r.evidence_id for r in result.ranking.ranks] == [ev.id for ev in chain.evidences]
+    assert result.ranking.best.evidence_id == chain.evidences[1].id
+    assert agent.knowledge_pipeline.chains == [chain]
+    assert agent.knowledge_pipeline.calls[0]["ranking"] is result.ranking
     assert result.knowledge.registry == "REGISTRY"
 
 

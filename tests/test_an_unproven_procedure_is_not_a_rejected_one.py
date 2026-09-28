@@ -34,14 +34,20 @@ def test_a_proven_procedure_is_active() -> None:
     assert _procedure_status_for(5, conf, failure_count=0) == "active"
 
 
-@pytest.mark.parametrize(("sc", "fc"), [(1, 0), (1, 1), (2, 2)])
-def test_a_run_procedure_never_reads_as_a_newborn(sc: int, fc: int) -> None:
-    """Граница: послабление действует ТОЛЬКО при полном отсутствии опыта."""
-    conf = _smoothed_confidence(sc, fc)
-    status = _procedure_status_for(sc, conf, failure_count=fc)
+@pytest.mark.parametrize(("sc", "fc", "expected"), [
+    (1, 0, "candidate"),
+    (2, 0, "active"),
+    (1, 1, "needs_review"),
+    (2, 2, "needs_review"),
+])
+def test_a_run_procedure_is_judged_by_its_record(sc: int, fc: int, expected: str) -> None:
+    """После запусков статус задают уверенность и число успехов.
 
-    if conf < 0.6:
-        assert status == "needs_review"
+    Послабление «ноль опыта — кандидат» действует только при обоих нулевых счётчиках.
+    """
+    conf = _smoothed_confidence(sc, fc)
+
+    assert _procedure_status_for(sc, conf, failure_count=fc) == expected
 
 
 def test_the_repair_pass_uses_the_same_authority() -> None:

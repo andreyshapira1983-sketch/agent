@@ -65,8 +65,10 @@ def test_a_lesson_with_no_verified_chunks_is_still_admitted() -> None:
     assert decide_usage_eligibility(_lesson(verified_chunks=0)) is True
 
 
-def test_a_lesson_that_never_completed_is_still_admitted() -> None:
-    assert decide_usage_eligibility(_lesson(outcome="failed")) is True
+@pytest.mark.parametrize("completion", ["failed", "blocked", "unknown"])
+def test_a_lesson_that_never_completed_is_still_admitted(completion) -> None:
+    """Completion is one of the three axes the exemption waives, like outcome."""
+    assert decide_usage_eligibility(_lesson(completion_state=completion)) is True
 
 
 def test_an_ordinary_successful_episode_is_unaffected() -> None:

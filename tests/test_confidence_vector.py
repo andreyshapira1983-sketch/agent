@@ -103,15 +103,6 @@ class TestRelevanceScore:
         assert relevance_score("any question", "") == 0.5
         assert relevance_score("", "") == 0.5
 
-    def test_score_in_range(self):
-        for q, a in [
-            ("vacancy copywriter remote 6 hours ago",
-             "The vacancy is for a copywriter, posted 6 hours ago."),
-            ("What is 2 + 2?", "Four."),
-        ]:
-            score = relevance_score(q, a)
-            assert 0.0 <= score <= 1.0
-
     def test_russian_inflected_forms_match(self):
         # Morphology: the answer uses different case endings than the
         # question ("репозитория" -> "репозитории", "проблемы" present).

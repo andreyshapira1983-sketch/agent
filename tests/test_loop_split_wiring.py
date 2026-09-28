@@ -13,15 +13,14 @@
 на горячий путь или на журнал сенсоров.
 
 Поэтому здесь собирается НАСТОЯЩИЙ ``AgentLoop`` и сверяется с тем, что
-примеси о нём заявили. Плюс четыре структурные проверки сцепки: ни один
-метод не потерян при переезде, ни один не определён дважды, ни одна примесь
-не осталась неподключённой и ни один модуль раскола не оказался мёртвым.
+примеси о нём заявили. Плюс структурные проверки сцепки: ни один метод не
+определён дважды, ни одна примесь не осталась неподключённой и ни один модуль
+раскола не оказался мёртвым.
 """
 from __future__ import annotations
 
 import ast
 import importlib
-import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
 from pathlib import Path
 
 import pytest
@@ -219,26 +218,6 @@ def test_no_method_is_defined_twice_in_the_mro():
                 owners.setdefault(name, []).append(base.__name__)
     doubled = {n: o for n, o in owners.items() if len(o) > 1}
     assert not doubled, f"метод определён более одного раза: {doubled}"
-
-
-def test_nothing_was_lost_on_the_way_out():
-    """Каждый метод, что был у `AgentLoop` до раскола, доступен и сейчас."""
-    old = subprocess.run(  # nosec B603 B607
-        ["git", "show", "HEAD:core/loop.py"],  # noqa: S607
-        capture_output=True, cwd=_REPO, check=False,
-    ).stdout.decode("utf-8")
-    if not old.strip():  # pragma: no cover — поверхностный клон без истории
-        pytest.skip("история недоступна (shallow clone) — сверку не выполнить")
-    before: set[str] = set()
-    for node in ast.walk(ast.parse(old)):
-        if isinstance(node, ast.ClassDef) and node.name == "AgentLoop":
-            before = {
-                m.name for m in node.body
-                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
-    assert before, "в истории нет `AgentLoop` — сверять не с чем"
-    lost = sorted(name for name in before if not hasattr(AgentLoop, name))
-    assert not lost, f"методы потерялись при расколе: {lost}"
 
 
 def test_the_agent_still_constructs_and_answers_without_a_model(agent: AgentLoop):

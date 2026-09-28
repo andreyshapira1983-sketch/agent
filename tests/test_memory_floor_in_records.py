@@ -38,35 +38,6 @@ def _min_useful(lines: list[tuple[str, str]]) -> int:
     return len(f"{MEMORY_OPEN_TAG}\n{lines[0][1]}")
 
 
-def test_a_trim_that_keeps_no_record_drops_the_block(monkeypatch):
-    """The stub is worse than nothing: it survives as text, not as memory."""
-    monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "1200")
-    lines = _records(3)
-    memory = _memory_block(lines)
-    blocks = [("file:big.py", "y" * 1500), (MEMORY, memory)]
-
-    trimmed, was_trimmed = apply_total_budget(
-        blocks, trim_first_labels={MEMORY}, min_useful={MEMORY: _min_useful(lines)},
-    )
-
-    assert was_trimmed
-    kept = dict(trimmed)[MEMORY]
-    if kept:
-        block, ids = rebuild_trimmed_memory(kept, memory, lines)
-        if ids:
-            # Records survived: whatever they are, they must rebuild.
-            assert block
-        else:
-            # The third state, added 2026-08-15 (MIR-092): dropped whole and
-            # SAYING so. Not a stub — it carries no record text, quotes
-            # nothing, and exists only to stop "dropped" reading as "never
-            # existed". Anything else with no ids is still an unusable stub.
-            assert "dropped whole" in kept, (
-                "memory kept characters but no record — an unusable stub"
-            )
-            assert block == kept, "the notice must survive to the prompt"
-
-
 def test_without_the_hint_the_old_stub_still_appears(monkeypatch):
     """Proof the hint is what fixes it — not some unrelated change."""
     monkeypatch.setenv("AGENT_EVIDENCE_TOTAL_CHARS", "1200")

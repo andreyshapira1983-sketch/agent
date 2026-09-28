@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.architecture_audit import audit_architecture
+import pytest
+
 from core.backlog_selector import build_backlog, load_backlog
 from core.backlog_signals import (
     ARCHITECTURE_AUDIT_SOURCE,
@@ -150,25 +151,29 @@ def test_untraceable_audit_quote_is_dropped():
     assert backlog == []
 
 
-# ── end-to-end against the real repo ──────────────────────────────────────────
+# ── load_backlog wiring ───────────────────────────────────────────────────────
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+def test_load_backlog_surfaces_audit_gaps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A gap the audit reports reaches load_backlog, aimed at its first missing file."""
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "architecture_audit.py").write_text("", encoding="utf-8")
+    (tmp_path / "AGENT_DOCTRINE.md").write_text("doctrine", encoding="utf-8")
+    gap = _GAPS[0]  # evidence: AGENT_DOCTRINE.md (present here), README.md (missing)
 
+    class _Audit:
+        def to_dict(self):
+            return {"priority_gaps": [gap]}
 
-def test_load_backlog_surfaces_real_audit_gaps():
-    audit = audit_architecture(_REPO_ROOT)
-    backlog = load_backlog(_REPO_ROOT)
+    monkeypatch.setattr(
+        "core.architecture_audit.audit_architecture", lambda root: _Audit()
+    )
+
     audit_candidates = [
-        c for c in backlog if c.signal_source == ARCHITECTURE_AUDIT_SOURCE
+        c for c in load_backlog(tmp_path) if c.signal_source == ARCHITECTURE_AUDIT_SOURCE
     ]
-    if audit.priority_gaps:
-        # Every real priority gap the agent finds should surface as a candidate.
-        assert audit_candidates
-        gap_titles = {gap.title for gap in audit.priority_gaps}
-        assert {c.problem_quote for c in audit_candidates} <= gap_titles
-    else:  # pragma: no cover - repo currently has gaps
-        assert audit_candidates == []
+    assert [c.problem_quote for c in audit_candidates] == [gap["title"]]
+    assert audit_candidates[0].target_path == "README.md"
 
 
 def test_load_backlog_skips_audit_for_non_repo_workspace(tmp_path: Path):

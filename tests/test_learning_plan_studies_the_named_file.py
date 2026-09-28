@@ -107,7 +107,10 @@ def test_a_named_file_that_does_not_exist_changes_nothing(tmp_path: Path):
 
 
 def test_a_goal_naming_no_file_still_picks_the_usual_sources(tmp_path: Path):
-    """The operator's `:learn <topic>` path must keep working as before."""
+    """The operator's `:learn <topic>` path must keep working as before.
+
+    The topic lifts its file above the generic overview; no plain word counts as a named file.
+    """
     workspace = _workspace_with_files(tmp_path, [
         "core/memory.py",
         "core/architecture_audit.py",
@@ -120,7 +123,10 @@ def test_a_goal_naming_no_file_still_picks_the_usual_sources(tmp_path: Path):
         limit=3,
     )
 
-    assert plan.source_paths
+    picked = [p.replace("\\", "/") for p in plan.source_paths]
+    assert {"core/memory.py", "README.md"} <= set(picked)
+    assert picked.index("core/memory.py") < picked.index("README.md")
+    assert not [r for r in plan.reasons if "named by the goal" in r]
 
 
 def test_a_focus_area_written_as_a_module_is_resolved(tmp_path: Path):

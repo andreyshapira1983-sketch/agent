@@ -81,11 +81,15 @@ def test_a_low_relevance_answer_says_so_in_the_operator_tail() -> None:
 
 
 def test_an_on_topic_answer_is_not_warned_about() -> None:
-    """GUARD: a warning on every answer would be noise, not a signal."""
-    vector = compute_vector(report=_report(16, 16), disagreements=(),
+    """GUARD: a warning on every answer would be noise, not a signal.
+
+    14 of 16, as in the off-topic case: at 16 of 16 the warning is suppressed
+    whatever the relevance, and the guard would prove nothing.
+    """
+    vector = compute_vector(report=_report(14, 16), disagreements=(),
                             question=_ON_TOPIC_Q, answer=_ON_TOPIC_A)
-    summary = build_verification_summary(_report(16, 16), vector=vector)
-    assert "может отвечать не на заданный вопрос" not in summary.tail
+    summary = build_verification_summary(_report(14, 16), vector=vector)
+    assert "соответствие вопросу" not in summary.tail.lower(), summary.tail
 
 
 def test_the_summary_still_works_without_a_vector() -> None:

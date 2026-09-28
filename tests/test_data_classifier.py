@@ -72,9 +72,13 @@ class TestEdgeCases:
         r = classify("hello", source="web")
         assert r.source == "web"
 
-    def test_result_has_reasons(self):
+    def test_a_secret_result_names_the_rules_that_fired(self):
+        """The reasons are the scanner's findings, so an audit can tell which rule fired."""
         r = classify("API_KEY=foo123", source="file")
-        assert r.reasons, "every classification should carry at least one reason"
+        assert r.reasons == [
+            "matches secret pattern 'credential-assignment'",
+            "contains secret keyword 'api_key'",
+        ]
 
 
 class TestKeywordSecretsToggle:

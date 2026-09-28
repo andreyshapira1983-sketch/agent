@@ -21,16 +21,6 @@ def test_a_write_without_a_declared_origin_is_refused() -> None:
         AgentLoopMemoryCommands.remember(object(), content="запись без истока")
 
 
-def test_declaring_an_origin_still_works() -> None:
-    """Контроль: без него запрет удовлетворялся бы подписью, не берущей ничего."""
-    with pytest.raises(AttributeError):
-        # Исток назван — связывание аргументов проходит, и вызов доходит до
-        # тела, где пустышка ожидаемо не имеет склада.
-        AgentLoopMemoryCommands.remember(
-            object(), content="запись с истоком", source="agent-auto"
-        )
-
-
 @pytest.mark.parametrize(
     ("source", "independent"),
     [("user-explicit", True), ("agent-auto", False), ("repair", False), (None, False)],

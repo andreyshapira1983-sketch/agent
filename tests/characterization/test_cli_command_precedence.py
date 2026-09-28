@@ -158,22 +158,29 @@ def test_repl_unknown_command_reports_and_keeps_the_loop_alive(tmp_path, monkeyp
     assert calls == []
 
 
-def test_repl_quit_propagates_system_exit_zero(tmp_path, monkeypatch):
-    """`:quit` raises SystemExit from inside the dispatcher rather than
-    returning a value; extraction must keep that observable behavior."""
-    _patch(monkeypatch)
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", dispatch_module.handle_meta_command)
+def test_repl_quit_ends_the_session_before_the_next_line(tmp_path, monkeypatch):
+    """The real `:quit` exits 0 and no later line reaches dispatch or the router."""
+    real_meta = dispatch_module.handle_meta_command
+    calls = _patch(monkeypatch)
 
-    def quitting_meta(cmd, agent, workspace):
-        raise SystemExit(0)
+    def recording_meta(cmd, agent, workspace):
+        calls.append(f"meta:{cmd}")
+        return real_meta(cmd, agent, workspace)
 
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", quitting_meta)
-    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([":quit"]))
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", recording_meta)
+    monkeypatch.setattr(
+        app_module, "_StdinLineReader",
+        lambda **k: _scripted_reader([":quit", "what models are used", ":models"]),
+    )
     monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
 
-    with pytest.raises(SystemExit) as excinfo:
-        main_module.main()
-    assert excinfo.value.code == 0
+    try:
+        code = main_module.main()
+    except SystemExit as exc:
+        code = exc.code
+
+    assert code in (0, None)
+    assert calls == ["meta::quit"]
 
 
 def test_real_dispatcher_raises_system_exit_for_quit_and_exit(tmp_path):

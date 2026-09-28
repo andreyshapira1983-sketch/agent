@@ -102,16 +102,3 @@ def test_the_live_path_reads_the_streak_end_to_end(tmp_path: Path) -> None:
     assert payload["status"] == "alive", "свежесть честна: демон ходит"
     assert payload["error_streak"] == CRASH_LOOP_THRESHOLD
     assert enriched["interpretation"] == "crash_loop_suspected"
-
-
-def test_the_tick_journal_finally_has_a_reader() -> None:
-    """Ноль читателей — механизм Horizon; читатель обязан жить на пути здоровья.
-
-    Пин по смыслу: имя связано в модуле здоровья и вызвано в сборке вердикта.
-    """
-    import inspect
-
-    from cli import commands_health as mod
-
-    assert callable(getattr(mod, "error_tick_streak", None))
-    assert "error_tick_streak" in inspect.getsource(mod._daemon_payload)

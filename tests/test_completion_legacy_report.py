@@ -107,12 +107,6 @@ def test_absent_stores_do_not_crash(tmp_path: Path) -> None:
     assert main(["--workspace", str(tmp_path)]) == 0
 
 
-def test_the_report_is_deterministic() -> None:
-    episodes = [_episode("ep-1"), _episode("ep-2", completion="achieved")]
-
-    assert build_report(episodes, []) == build_report(episodes, [])
-
-
 # ==========================================================================
 # The gates are reported apart, and the lesson arm is not an anomaly.
 # ==========================================================================

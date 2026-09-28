@@ -103,13 +103,27 @@ def test_the_child_page_is_in_the_parent_chain_and_a_claim_on_it_is_verified(tmp
     assert verification["subagent_asserted_chunks"] == 0, verification
 
 
-def test_the_runner_result_carries_evidences_and_defaults_to_none():
-    from core.subagent_runner import SubAgentRunResult
+def test_the_runner_carries_only_external_evidences_with_the_childs_origin():
+    """Перенос берёт внешние улики ребёнка целиком и ставит на них штамп ребёнка.
 
-    fields = SubAgentRunResult.__dataclass_fields__
-    assert "external_evidences" in fields
-    r = SubAgentRunResult(contract_name="x", role="r", objective="o", answer="a", trace_id="t", status="success")
-    assert r.external_evidences == ()
-    ev = Evidence.from_dict({**make_evidence(kind="web_page", source_id="web_page:u", obtained_via="web_fetch",
-                                              claim="c", excerpt="e", confidence=0.7).to_dict(), "origin": "subagent:x:t"})
-    assert ev.origin == "subagent:x:t"
+    По штампу `subagent:<имя>:<трасса>` проверщик родителя сверяет утверждение со страницей.
+    """
+    from core.evidence import ProvenanceChain
+    from core.subagent_runner import _carry_external_evidences
+
+    chain = ProvenanceChain()
+    chain.add(make_evidence(kind="web_page", source_id=f"web_page:{PAGE_URL}", obtained_via="web_fetch",
+                            claim="fetched page", excerpt=PAGE_TEXT, confidence=0.75))
+    chain.add(make_evidence(kind="file", source_id="file:notes.md", obtained_via="file_read",
+                            claim="read file", excerpt="flight notes", confidence=0.7))
+    chain.add(make_evidence(kind="llm_claim", source_id="llm:child", obtained_via="llm",
+                            claim="guess", excerpt="Expedia is probably fine", confidence=0.3))
+
+    count, kinds, carried = _carry_external_evidences(chain, "ExpediaCheck", "trace_child")
+
+    assert (count, kinds) == (2, ("web_page", "file"))
+    assert [d["source_id"] for d in carried] == [f"web_page:{PAGE_URL}", "file:notes.md"]
+    assert {d["origin"] for d in carried} == {"subagent:ExpediaCheck:trace_child"}
+    assert {d["obtained_via"] for d in carried} == {"subagent:ExpediaCheck"}
+    page = Evidence.from_dict(carried[0])
+    assert (page.excerpt, page.origin) == (PAGE_TEXT, "subagent:ExpediaCheck:trace_child")
