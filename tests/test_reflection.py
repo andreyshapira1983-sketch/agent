@@ -420,13 +420,32 @@ def test_reflection_user_summary_contains_key_fields(tmp_path: Path):
 # ── 15. to_dict includes all keys ─────────────────────────────────────────────
 
 def test_reflection_report_to_dict_structure(tmp_path: Path):
-    engine = _make_engine(tmp_path, log_dir=tmp_path / "no_logs")
+    """to_dict carries the report's real counts and lessons.
+
+    Why: the runtime summary reads `lessons_count` from this dict.
+    """
+    log_dir = tmp_path / "logs"
+    events = [
+        _tool_call_event("tc1", "web_fetch", "run_a"),
+        _tool_error_event("tc1", "timeout", "run_a"),
+        _tool_call_event("tc2", "web_fetch", "run_b"),
+        _tool_error_event("tc2", "timeout", "run_b"),
+    ]
+    _write_log(log_dir, "runs", events)
+    lesson_payload = _lessons_json(
+        {"insight": "web_fetch times out", "action": "repair",
+         "focus_area": "tools/web_fetch.py", "confidence": 0.9},
+        {"insight": "timeouts cluster on one host", "action": "monitor",
+         "focus_area": "", "confidence": 0.6},
+    )
+    engine = _make_engine(tmp_path, log_dir=log_dir, responses=[lesson_payload])
     report = engine.reflect()
     d = report.to_dict()
 
-    for key in (
-        "logs_scanned", "events_scanned", "patterns_found",
-        "lessons_count", "lessons", "learning_plan",
-        "memory_records_saved", "warnings",
-    ):
-        assert key in d, f"missing key: {key}"
+    assert d["logs_scanned"] == 1
+    assert d["events_scanned"] == 4
+    assert [p["tool_name"] for p in d["patterns_found"]] == ["web_fetch"]
+    assert d["lessons_count"] == len(d["lessons"]) == 2
+    assert [lesson["action"] for lesson in d["lessons"]] == ["repair", "monitor"]
+    assert d["memory_records_saved"] == report.memory_records_saved > 0
+    assert d["warnings"] == report.warnings

@@ -269,12 +269,23 @@ def test_final_url_is_reported_after_redirect():
 
 
 def test_max_entries_capped():
-    out = RssFetchTool(opener=_opener(RSS)).run(
+    """Asking for more than the cap from a longer feed returns the first MAX_ENTRIES_CAP."""
+    items = "".join(
+        f"<item><title>Item {i}</title><link>https://example.com/{i}</link></item>"
+        for i in range(MAX_ENTRIES_CAP + 10)
+    )
+    feed = (
+        '<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title>'
+        f"{items}</channel></rss>"
+    ).encode()
+
+    out = RssFetchTool(opener=_opener(feed)).run(
         url="https://example.com/feed.xml",
         max_entries=MAX_ENTRIES_CAP + 100,
     )
 
-    assert len(out["entries"]) == 2
+    assert len(out["entries"]) == MAX_ENTRIES_CAP
+    assert out["entries"][0]["title"] == "Item 0"
 
 
 def test_validate_output():

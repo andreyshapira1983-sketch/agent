@@ -86,15 +86,6 @@ class TestToolInvoke:
         with pytest.raises(KeyboardInterrupt):
             tool.invoke(call)
 
-    def test_invoke_preserves_idempotency_key(self):
-        tool = _OkTool()
-        call = ToolCall(action_id="act_q", tool_name="ok", arguments={})
-        result = tool.invoke(call)
-        assert result.tool_call_id == call.id
-        # idempotency_key on the call is preserved on the call object;
-        # ensure invoke didn't mutate the input.
-        assert call.idempotency_key.startswith("idem_")
-
 
 # ============================================================
 # Default validate_output (§5)

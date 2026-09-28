@@ -82,11 +82,15 @@ def test_a_working_provider_reads_ok(workspace: Path) -> None:
     assert "openai ok" in _provider_health_line(workspace)
 
 
-def test_the_status_line_never_crashes(workspace: Path) -> None:
-    """Operator status must survive a broken store — the whole block is
-    wrapped, and this pins that the health line is no exception."""
-    path = workspace / "data" / "model_usage.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("not json\n", encoding="utf-8")
+def test_the_status_line_never_crashes(workspace: Path, monkeypatch) -> None:
+    """A ledger that raises yields a named «unavailable» line, not an exception.
 
-    assert isinstance(_provider_health_line(workspace), str)
+    Operator status must survive a broken store; a garbage line alone is
+    skipped by the ledger and never reaches the wrapper.
+    """
+    def _unreadable(self, *, limit: int) -> list[dict]:
+        raise OSError("store unreadable")
+
+    monkeypatch.setattr(ModelUsageLedger, "_recent_rows", _unreadable)
+
+    assert _provider_health_line(workspace) == "unavailable (OSError)"

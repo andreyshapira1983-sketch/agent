@@ -915,24 +915,23 @@ class TestWebCitationKindFallback:
         assert report.cited_but_unmatched_chunks == 0
 
     def test_web_citation_prefers_web_page_over_search_hit(self):
-        """When both web_page AND web_search_hit evidence exist, [web:url]
-        must match the web_page evidence (primary kind), not the search hit."""
+        """Both kinds name the URL: [web:url] must resolve to the fetched page, not the hit."""
         url = "https://example.com/autonomous-agents"
-        chain = _chain_with(
-            make_evidence(
-                kind="web_page",
-                source_id=f"web_page:{url}",
-                obtained_via="web_fetch",
-                claim="fetched page",
-                excerpt="page content",
-            ),
-            self._web_search_ev("autonomous agent"),
+        page = make_evidence(
+            kind="web_page",
+            source_id=f"web_page:{url}",
+            obtained_via="web_fetch",
+            claim="fetched page",
+            excerpt="page content",
         )
+        # The hit comes first in the chain and its source_id also contains the URL.
+        chain = _chain_with(self._web_search_ev(url), page)
         report = verify(
             answer=f"Details at the page [web:{url}].",
             chain=chain,
         )
         assert report.verified_chunks == 1
+        assert report.chunks[0].matched_evidence_ids == (page.id,)
         # Annotation uses citation prefix "web", not evidence kind "web_page".
         assert "[verified:web:" in report.annotated_answer
 

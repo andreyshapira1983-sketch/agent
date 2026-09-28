@@ -150,14 +150,30 @@ def test_heartbeat_keeps_a_running_task_out_of_recovery(workspace: Path):
     assert TaskQueueStore(path).load()[0].status == "running"
 
 
-def test_heartbeat_stops_when_the_task_finishes(workspace: Path):
+def test_heartbeat_stops_when_the_task_finishes(workspace: Path, monkeypatch):
+    """The first beat that finds the task finished ends the thread, uncounted.
+
+    The block waits up to five intervals, so a loop that keeps beating shows.
+    """
     queue = TaskQueueStore(workspace / "tasks.jsonl")
     task = queue.add(goal="short")
     queue.mark_running(task.id)
     queue.mark_done(task.id)
+    asked: list[str] = []
+    real_heartbeat = queue.heartbeat
 
-    with task_heartbeat(queue, task.id, interval_seconds=1.0):
-        pass
+    def _counting_heartbeat(task_id: str):
+        asked.append(task_id)
+        return real_heartbeat(task_id)
+
+    monkeypatch.setattr(queue, "heartbeat", _counting_heartbeat)
+
+    with task_heartbeat(queue, task.id, interval_seconds=1.0) as hb:
+        thread = hb._thread
+        thread.join(timeout=5.0)
+        assert not thread.is_alive(), f"still beating a finished task: {asked}"
+        assert asked == [task.id]
+        assert hb.beats == 0
 
     assert TaskQueueStore(workspace / "tasks.jsonl").load()[0].status == "done"
 

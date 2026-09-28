@@ -292,11 +292,25 @@ def test_no_push_or_network_methods_in_producer_and_vcs():
         assert not hasattr(SafeVCS, banned), banned
 
 
-def test_config_budget_limits_never_written(workspace: Path):
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm)
+def test_proposing_leaves_every_workspace_file_untouched(workspace: Path):
+    """A proposal only files an inbox item; no workspace byte changes.
+
+    The target and the budget config are seeded, so an applied patch or a raised limit shows."""
+    (workspace / "core").mkdir()
+    (workspace / _TARGET).write_text("OLD = 0\n", encoding="utf-8")
+    (workspace / "config").mkdir()
+    (workspace / "config" / "budget_limits.json").write_text('{"hour": 10}\n', encoding="utf-8")
+
+    def _tree() -> dict[str, bytes]:
+        return {
+            p.relative_to(workspace).as_posix(): p.read_bytes()
+            for p in workspace.rglob("*") if p.is_file()
+        }
+
+    before = _tree()
+    report = _produce(workspace, llm=FakeLLM([_manager_ok(), _builder_ok()]))
     assert report.status == "proposed"
-    assert not (workspace / "config" / "budget_limits.json").exists()
+    assert _tree() == before
 
 
 # ── value gate (TD-035): pre-publish no-effect veto + soft flags ──────────────

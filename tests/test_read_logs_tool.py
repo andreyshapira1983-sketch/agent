@@ -301,14 +301,17 @@ class TestValidateOutput:
         assert not ok
 
     def test_returned_greater_than_total_ok_when_filtered(self, workspace: Path):
-        """A filter could theoretically return everything; we only flag
-        the contradictory case when no filter was applied."""
+        """returned > total is flagged only without a filter; the same counts pass when filtered."""
+        tool = ReadLogsTool(workspace_root=workspace)
         out = self._ok()
-        out["events_returned"] = 1
+        out["events_returned"] = 5
         out["total_events"] = 1
         out["filtered"] = True
-        ok, _ = ReadLogsTool(workspace_root=workspace).validate_output(out)
-        assert ok
+        ok, issues = tool.validate_output(out)
+        assert ok, issues
+        out["filtered"] = False
+        ok, _ = tool.validate_output(out)
+        assert not ok
 
     def test_default_last_n_is_50(self):
         assert DEFAULT_LAST_N == 50

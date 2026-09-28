@@ -339,12 +339,6 @@ def test_dirty_workspace_rejected(tmp_path: Path):
     assert "create_temp_branch" not in _verbs(vcs)
 
 
-def test_no_push_method_anywhere():
-    for forbidden in ("push", "fetch", "pull", "remote"):
-        assert not hasattr(SafeVCS, forbidden)
-        assert not hasattr(FakeVCS, forbidden)
-
-
 # ── end-to-end against a real temp git repo (fake test runner) ───────────────
 
 

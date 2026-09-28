@@ -259,8 +259,8 @@ def test_generator_reports_tool_error_when_baseline_run_fails(workspace: Path, m
 
 
 def test_generator_uses_trace_id_diagnostic_logs_in_prompt(workspace: Path, monkeypatch):
-    # When a trace_id is supplied the generator pulls diagnostic logs and folds
-    # them into the LLM prompt; a valid proposal still comes back.
+    # The trace's log summary reaches the LLM prompt: the model is told what
+    # the failing run recorded, not only which tests failed.
     _seed(workspace)
     _fake_pytest(monkeypatch, passed=False)
     trace_id = new_trace_id()
@@ -277,9 +277,14 @@ def test_generator_uses_trace_id_diagnostic_logs_in_prompt(workspace: Path, monk
     )
 
     assert report.status == "proposed"
-    assert report.proposal is not None
-    assert report.diagnostic_logs is not None
-    assert llm.calls  # the single proposal prompt was built and sent
+    prompt = llm.calls[0]["user"]
+    payload, _ = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
+    assert payload["diagnostic_logs"] == {
+        "trace_id": trace_id,
+        "events_returned": 1,
+        "total_events": 1,
+        "filtered": True,
+    }
 
 
 def test_generator_rejects_invalid_constructor_args(workspace: Path):

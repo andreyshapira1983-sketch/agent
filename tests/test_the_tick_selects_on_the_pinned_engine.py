@@ -36,8 +36,20 @@ def test_an_ambient_pin_is_not_overridden(tmp_path: Path, monkeypatch) -> None:
     assert os.environ.get("AGENT_PLANNER_MODEL") == "gpt-5.6-terra"
 
 
-def test_a_missing_env_file_is_silent(tmp_path: Path) -> None:
-    agent_tick._ensure_env_loaded(tmp_path)  # must not raise
+def test_a_missing_env_file_loads_nothing_but_the_roster_home(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """No .env: no variable appears except the roster home the entry point owes (Д5)."""
+    monkeypatch.setenv("AGENT_REASONING_ROSTER", "")
+    monkeypatch.delenv("AGENT_REASONING_ROSTER")
+    before = dict(os.environ)
+
+    agent_tick._ensure_env_loaded(tmp_path)
+
+    after = dict(os.environ)
+    home = after.pop("AGENT_REASONING_ROSTER", None)
+    assert after == before, "a missing .env still changed the environment"
+    assert home == str(tmp_path / "data" / "reasoning_roster.jsonl")
 
 
 def test_the_charter_block_loads_env_before_building_the_router() -> None:

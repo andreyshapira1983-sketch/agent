@@ -112,17 +112,18 @@ def test_the_chosen_action_itself_is_unchanged() -> None:
     )
 
 
-@pytest.mark.parametrize("acknowledged,expected_min", [
-    (frozenset(), 2),
-    (frozenset({"review_inbox_backlog"}), 1),
+@pytest.mark.parametrize("acknowledged,expected", [
+    (frozenset(), 3),
+    (frozenset({"review_inbox_backlog"}), 2),
 ])
 def test_the_count_reflects_what_actually_competed(
-    acknowledged: frozenset, expected_min: int
+    acknowledged: frozenset, expected: int
 ) -> None:
     """Suppressed candidates leave the race, so they were not competitors. The
     count must describe the race that happened, not the one that might have."""
     action = select_best_next_action(
         heartbeat_missing=True, tests_health="fail", failed_tests=("t.py",),
+        inbox_pending=20,  # the advisory backlog candidate really enters the race
         acknowledged=acknowledged,
     )
-    assert action.candidates_considered >= expected_min
+    assert action.candidates_considered == expected

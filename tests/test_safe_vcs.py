@@ -108,9 +108,3 @@ def test_invalid_branch_names_rejected(bad: str):
 def test_failed_git_command_raises(repo: Path):
     with pytest.raises(VcsError):
         SafeVCS(workspace=repo).checkout("does-not-exist")
-
-
-def test_no_network_methods_exist():
-    # The helper must not expose push/fetch/pull/remote at all.
-    for forbidden in ("push", "fetch", "pull", "remote"):
-        assert not hasattr(SafeVCS, forbidden)

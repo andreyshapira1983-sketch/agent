@@ -128,14 +128,25 @@ def test_the_tick_actually_takes_the_snapshot(tmp_path, monkeypatch) -> None:
 
 
 def test_a_failing_snapshot_never_stops_the_tick(tmp_path, monkeypatch) -> None:
-    """Граница: страховка, способная остановить работу, хуже её отсутствия."""
-    import agent_tick
+    """Сбой снимка не роняет тик и оставляет строку в журнале тика.
 
-    def _explode(_ws):
+    Страховка, способная остановить работу, хуже её отсутствия; молча
+    проглоченный сбой — тоже: оператор не узнает, что копий нет.
+    """
+    import json
+
+    import agent_tick
+    from core.heartbeat_io import tick_log_path
+
+    def _explode(*_a, **_k):
         raise OSError("диск отказал")
 
-    monkeypatch.setattr(
-        "scripts.snapshot_state.take_snapshot", lambda *a, **k: _explode(None)
-    )
+    monkeypatch.setattr("scripts.snapshot_state.take_snapshot", _explode)
 
     agent_tick._take_daily_snapshot(tmp_path)  # не должно бросить
+
+    log = tick_log_path(tmp_path)
+    assert log.exists(), "сбой снимка проглочен молча — в журнале тика ни строки"
+    rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert [r["event"] for r in rows] == ["state_snapshot_failed"], rows
+    assert rows[0]["error"] == "OSError: диск отказал"

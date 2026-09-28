@@ -304,18 +304,20 @@ def test_repair_lesson_is_classified_not_left_unclassified(tmp_path: Path):
     assert episode.completion_state == "achieved"
 
 
-def test_successful_repair_without_memory_does_not_crash(tmp_path: Path):
-    # No episodic_store, no remember side effects expected — the lesson writer
-    # must never abort the repair report flow.
+def test_repair_without_an_episodic_store_still_saves_the_lesson(tmp_path: Path):
+    """No episodic_store: the lesson still reaches remember() and is logged as saved.
+
+    The writer swallows exceptions, so only the log shows a missing-store guard that crashed."""
     agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=False)
     controller = SelfRepairController(agent, workspace_root=tmp_path)
 
     report = controller.run(_proposal())
 
     assert report.status == "repaired"
-    # remember() still exists on the fake agent, so the lesson is recorded
-    # there, but no episodic_store save happened.
-    assert agent.episodic_saved == []
+    assert len(agent.remembered) == 1
+    events = agent.log.names()
+    assert "repair_lesson_saved" in events
+    assert "repair_lesson_save_failed" not in events
 
 
 def test_lesson_save_failure_is_logged_not_silent(tmp_path: Path):

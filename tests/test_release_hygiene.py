@@ -34,15 +34,28 @@ def test_release_manifest_excludes_local_secrets_and_dev_artifacts(tmp_path: Pat
     assert report["forbidden_included"] == []
 
 
-def test_release_manifest_flags_forbidden_if_exclusion_is_overridden(tmp_path: Path):
-    (tmp_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+def test_release_manifest_flags_forbidden_if_exclusion_is_overridden(
+    tmp_path: Path, monkeypatch
+):
+    """With .env dropped from the exclusions, the manifest includes it and reports not ok.
 
-    manifest = build_release_manifest(tmp_path, extra_exclude_files=())
+    Why: the forbidden check must stand on its own, not trust the exclusion list.
+    """
+    from core import release_hygiene
+
+    (tmp_path / "main.py").write_text("print('ok')\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    monkeypatch.setattr(
+        release_hygiene, "DEFAULT_RELEASE_EXCLUDE_FILES",
+        release_hygiene.DEFAULT_RELEASE_EXCLUDE_FILES - {".env"},
+    )
+
+    manifest = build_release_manifest(tmp_path)
     report = manifest.report().to_dict()
 
-    # The default policy excludes .env, so this remains safe.
-    assert report["ok"] is True
-    assert report["forbidden_included"] == []
+    assert ".env" in {path.relative_to(tmp_path).as_posix() for path in manifest.include_files}
+    assert report["forbidden_included"] == [".env"]
+    assert report["ok"] is False
 
 
 def test_release_hygiene_summary_mentions_forbidden_artifacts(tmp_path: Path):

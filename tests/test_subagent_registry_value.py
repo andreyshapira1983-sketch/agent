@@ -213,18 +213,18 @@ def test_value_rejected_counts_as_judged_evidence(tmp_path: Path) -> None:
 
 
 def test_confirmed_value_counts_as_judged_evidence(tmp_path: Path) -> None:
-    """confirmed_value is judged evidence too; enough accepted verdicts (all
-    positive) keep the recommendation at ``keep`` on high trust rather than
-    leaving it stuck below the evidence gate."""
+    """confirmed_value opens the evidence gate: 3 rejections + 2 accepts give "watch".
+
+    Uncounted, the three rejections alone stay below the gate and read "keep".
+    """
     reg = _reg(tmp_path)
     reg.roles["builder"].invocations = 8
-    reg.reconcile_value_reviews(
-        {f"ain_{i}": "accepted" for i in range(_MIN_JUDGED)}
-    )
+    verdicts = ["rejected_low_value"] * 3 + ["accepted"] * 2
+    assert len(verdicts) == _MIN_JUDGED
+    reg.reconcile_value_reviews({f"ain_{i}": v for i, v in enumerate(verdicts)})
     b = reg.roles["builder"]
-    # All-positive human signal: gate is open (enough evidence) and trust is high.
-    assert b.trust_score >= 0.70
-    assert b.recommendation == "keep"
+    assert b.trust_score == 0.4
+    assert b.recommendation == "watch"
 
 
 def test_single_rejection_does_not_force_pause_or_retire(tmp_path: Path) -> None:

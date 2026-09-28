@@ -1051,7 +1051,20 @@ class TestShellLabelUniqueness:
         b = _shell_label(["grep", prefix + "_OLD.md"])
         assert a != b, f"both rendered as {a!r} — the artifact map loses one"
 
-    def test_same_command_is_stable_across_calls(self):
-        assert self._label(["grep", "-rl", "x", "core"]) == self._label(
-            ["grep", "-rl", "x", "core"]
+    def test_same_command_is_stable_across_processes(self):
+        """Other runs read the journals, so the label must not follow the hash seed."""
+        argv = ["grep", "-rl", "x", "core"]
+        code = (
+            "from core.step_sanitizer import sanitize_step; "
+            f"print(sanitize_step('shell_exec', {{'argv': {argv!r}}}, None, 0, [])['label'])"
         )
+        labels = {
+            subprocess.run(  # nosec B603 — own interpreter, literal code  # noqa: S603
+                [sys.executable, "-c", code],
+                cwd=Path(__file__).resolve().parents[1],
+                env={**os.environ, "PYTHONHASHSEED": seed},
+                capture_output=True, text=True, check=True, timeout=120,
+            ).stdout.strip()
+            for seed in ("1", "2")
+        }
+        assert labels == {self._label(argv)}

@@ -5,7 +5,6 @@ import statistics
 import time
 
 from core.truth_hype_filter import (
-    TruthHypeOutcome,
     TruthHypeSignals,
     evaluate,
     is_hype,
@@ -73,8 +72,16 @@ class TestEdgeCases:
         assert evaluate(None).verdict == "substantive"  # type: ignore[arg-type]
 
     def test_long_input_is_truncated_safely(self):
-        out = evaluate("word " * 5000 + "revolutionary game-changing seamless")
-        assert isinstance(out, TruthHypeOutcome)
+        """Only the head is scanned: hype past the cut is ignored, hype before it counts."""
+        filler = "word " * 5000
+        past_cut = evaluate(filler + "revolutionary game-changing seamless")
+        assert past_cut.verdict == "substantive"
+        assert past_cut.signals.hype_terms == ()
+        assert past_cut.signals.word_count < 5000
+        before_cut = evaluate("revolutionary game-changing seamless " + filler)
+        assert set(before_cut.signals.hype_terms) == {
+            "revolutionary", "game-changing", "seamless",
+        }
 
     def test_is_hype_convenience(self):
         assert is_hype("unprecedented best-in-class ultimate seamless magical!") is True

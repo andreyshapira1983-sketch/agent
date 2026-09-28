@@ -161,6 +161,7 @@ def _needs(*programs: str):
 @needs_sandbox
 @_needs("tesseract")
 def test_ocr_reads_russian_text(tmp_path: Path) -> None:
+    pytest.importorskip("PIL")
     from PIL import Image, ImageDraw, ImageFont
     fonts = list(Path("/usr/share/fonts").rglob("DejaVuSans.ttf"))
     img = Image.new("RGB", (900, 160), "white")
@@ -175,7 +176,7 @@ def test_ocr_reads_russian_text(tmp_path: Path) -> None:
 @needs_sandbox
 @_needs("soffice")
 def test_office_turns_a_docx_into_a_pdf(tmp_path: Path) -> None:
-    import docx
+    docx = pytest.importorskip("docx")
     d = docx.Document()
     d.add_paragraph("Проверка конвертации")
     d.save(tmp_path / "report.docx")
@@ -206,7 +207,7 @@ def test_svg_becomes_a_png(tmp_path: Path) -> None:
 @needs_sandbox
 @_needs("pdftoppm", "soffice")
 def test_pdf_pages_become_images(tmp_path: Path) -> None:
-    import docx
+    docx = pytest.importorskip("docx")
     d = docx.Document()
     d.add_paragraph("Страница")
     d.save(tmp_path / "p.docx")
@@ -219,7 +220,7 @@ def test_pdf_pages_become_images(tmp_path: Path) -> None:
 @needs_sandbox
 @_needs("pdftotext", "soffice")
 def test_pdf_text_keeps_two_columns_on_one_line(tmp_path: Path) -> None:
-    import docx
+    docx = pytest.importorskip("docx")
     d = docx.Document()
     d.add_paragraph("LEFT" + " " * 40 + "RIGHT")
     d.save(tmp_path / "two_col.docx")

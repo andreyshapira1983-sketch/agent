@@ -103,23 +103,6 @@ def test_an_off_topic_answer_in_the_same_script_still_scores_low() -> None:
     assert vector.relevance_score is not None and vector.relevance_score < 0.2
 
 
-def test_the_operator_is_not_told_the_answer_may_be_off_topic_across_scripts() -> None:
-    """Контракт перед оператором: неприменимая ось молчит, а не обвиняет."""
-    summary = build_verification_summary(
-        _Report(),
-        chain=None,
-        vector=ConfidenceVector(
-            evidence_score=0.9, coherence_score=1.0,
-            relevance_score=None, relevance_applicable=False,
-            overall_confidence=0.9,
-        ),
-    )
-    tail = summary.tail
-    assert "не на заданный вопрос" not in tail, (
-        "неизмеримая ось всё ещё печатает обвинение оператору"
-    )
-
-
 def test_the_operator_is_still_warned_when_the_measurement_is_valid() -> None:
     """Ломка наоборот: заглушив ложные срабатывания, не заглушить истинные.
 

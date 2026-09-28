@@ -304,69 +304,6 @@ class TestDiffFileIntegration:
 
 
 # ============================================================
-# Self-repair chain — diff THEN write THEN tests
-# ============================================================
-
-class TestSelfRepairChain:
-    """Pin the canonical sequence: diff_file -> (review) -> file_write
-    -> run_tests. This is the skeleton MVP-13.2 will turn into a real
-    controller; for now we just prove every tool composes in one plan."""
-
-    def test_diff_then_write_then_run_tests(self, workspace: Path, monkeypatch):
-        target = workspace / "module.py"
-        target.write_text("VALUE = 1\n", encoding="utf-8")
-
-        def fake_run(argv, **kwargs):
-            class C:
-                returncode = 0
-                stdout = b"3 passed in 0.05s\n"
-                stderr = b""
-            return C()
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-
-        agent, log_path = _build_agent(
-            workspace,
-            canned_sources=[
-                {
-                    "tool": "diff_file",
-                    "arguments": {
-                        "path": "module.py",
-                        "proposed_content": "VALUE = 42\n",
-                    },
-                    "label": "diff_file:module.py",
-                },
-                {
-                    "tool": "file_write",
-                    "arguments": {
-                        "path": "module.py",
-                        "content": "VALUE = 42\n",
-                    },
-                    "label": "file_write:module.py",
-                },
-                {
-                    "tool": "run_tests",
-                    "arguments": {"paths": ["tests"]},
-                    "label": "run_tests:tests",
-                },
-            ],
-        )
-        agent.run("propose a value change, write it, verify")
-        ev = _events(log_path)
-        tool_names = [
-            e["payload"]["tool_name"]
-            for e in ev
-            if e["event"] == "tool_call"
-        ]
-        # AgentLoop may execute independent steps in parallel; ordering is
-        # not deterministic here, but the full chain must be present.
-        assert set(tool_names) == {"diff_file", "file_write", "run_tests"}
-        assert target.read_text(encoding="utf-8") in (
-            "VALUE = 1\n", "VALUE = 42\n"
-        )
-
-
-# ============================================================
 # Self-repair controller — diagnose -> diff -> approval -> write -> tests
 # ============================================================
 

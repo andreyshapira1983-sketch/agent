@@ -56,23 +56,58 @@ class TestProfilePromptBlockStyleOnly:
 
 
 class TestPlannerIgnoresProfile:
-    def test_planner_user_prompt_does_not_reference_profile(self):
-        # Static contract: the planner's prompt builder must never
-        # embed profile fields. We instantiate a real LLMPlanner with
-        # a minimal stub LLM/registry and inspect the produced prompt.
+    def test_planner_user_prompt_does_not_reference_profile(self, tmp_path):
+        """A loop run with a stored profile sends none of it to the planner's model call.
+
+        Why: the loop, not the prompt builder, decides what reaches the planner.
+        """
         from unittest.mock import MagicMock
 
-        from core.planner import LLMPlanner
+        from core.logger import TraceLogger
+        from core.loop import AgentLoop
+        from core.policy import PolicyGate
+        from core.user_profile import UserProfileStore
+        from tools.base import ToolRegistry
 
-        registry = MagicMock()
-        registry.list.return_value = []
-        planner = LLMPlanner(llm=MagicMock(), registry=registry)
-        prompt = planner._build_user_prompt(
-            question="Calculate the orbital period of Mercury.",
-            file_hint=None,
+        store = UserProfileStore(tmp_path / "profile.jsonl")
+        store.save(UserProfile(
+            expertise="expert", verbosity="brief", technical=True,
+            language="en", interests=["zymurgy"], interaction_count=7,
+        ))
+        registry = ToolRegistry()
+        llm = MagicMock()
+        llm.provider = "mock"
+        llm.model = "mock-model"
+        llm.complete.return_value = (
+            "Conclusion:\nOK\n\nFacts:\n- fact [general-knowledge]\n"
+            "Sources:\n1. general-knowledge\nConfidence: low\n"
+            "Unverified:\nnothing\nSafety:\nnothing"
         )
-        for needle in ("user_profile", "interests:", "expertise:", "verbosity:"):
-            assert needle not in prompt, f"planner prompt leaked {needle!r}"
+        loop = AgentLoop(
+            registry=registry, policy=PolicyGate(registry), llm=llm,
+            logger=TraceLogger(trace_id="test-p2-planner", log_dir=tmp_path),
+            user_profile_store=store,
+            verifier_enabled=False, clarification_enabled=False,
+        )
+        planner_calls: list = []
+        real_plan = loop.planner.plan
+
+        def _spy_plan(*args, **kwargs):
+            start = len(llm.complete.call_args_list)
+            try:
+                return real_plan(*args, **kwargs)
+            finally:
+                planner_calls.extend(llm.complete.call_args_list[start:])
+
+        loop.planner.plan = _spy_plan
+        loop.run("Calculate the orbital period of Mercury.")
+
+        assert loop.last_user_profile is not None
+        assert "zymurgy" in loop.last_user_profile.interests
+        assert planner_calls, "the planner made no model call, so nothing was checked"
+        sent = " || ".join(str(call) for call in planner_calls)
+        for needle in ("user_profile", "zymurgy", "interests:", "expertise:", "verbosity:"):
+            assert needle not in sent, f"planner prompt leaked {needle!r}"
 
     def test_planner_source_does_not_import_user_profile(self):
         # Source-level contract: core/planner.py must not import the

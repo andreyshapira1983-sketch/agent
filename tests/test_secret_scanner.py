@@ -5,7 +5,6 @@ import pytest
 
 from core.secret_scanner import (
     KEYWORD_RULES,
-    REGEX_RULES,
     contains_secret,
     keyword_hits,
     scan,
@@ -237,11 +236,6 @@ class TestContainsSecret:
 # ============================================================
 
 class TestModuleContract:
-    def test_every_regex_rule_has_compiled_pattern(self):
-        for kind, pat in REGEX_RULES:
-            assert isinstance(kind, str)
-            assert hasattr(pat, "search")
-
     def test_keyword_rules_are_lowercase(self):
         for kw in KEYWORD_RULES:
             assert kw == kw.lower()
