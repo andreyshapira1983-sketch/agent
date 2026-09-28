@@ -13,6 +13,8 @@ import pytest
 
 from tools import convert_file, web_fetch
 
+pytest.importorskip("pypdf")  # optional: requirements-optional.txt
+
 
 def _blank_pdf() -> bytes:
     from pypdf import PdfWriter

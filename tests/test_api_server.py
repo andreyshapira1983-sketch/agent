@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("fastapi")  # optional: requirements-optional.txt
+
 
 @pytest.fixture()
 def server(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

@@ -10,3 +10,5 @@ ddgs
 pytest
 coverage
 pytest-asyncio
+# tools/patch_check.py lints a patch with `python -m ruff`; without it the lint gate is blind.
+ruff

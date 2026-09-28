@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import datetime as dt
 
-import numpy as np
 import pytest
 
 import core.memory_embeddings as me
 from core.memory_policy import MemoryRetrievalPolicy
 from core.models import MemoryRecord
+
+np = pytest.importorskip("numpy")  # optional: requirements-optional.txt
 
 _CONCEPTS = {
     "install": ("пакет", "библиотек", "постав", "став"),

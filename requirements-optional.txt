@@ -1,0 +1,8 @@
+# Optional features and the tests that exercise them; NOT part of the hash-locked core set.
+# Install when you use the feature: pip install -r requirements-optional.txt
+numpy==2.5.3          # core/memory_embeddings.py (search by meaning)
+python-docx==1.2.0    # tools/convert_file.py office conversions
+pypdf==6.19.0         # tests that build PDFs for the OCR path
+pillow==12.3.0        # tests that build images for OCR/resize
+fastapi==0.141.1      # api/server.py
+uvicorn[standard]==0.54.0  # api/server.py
