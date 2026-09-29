@@ -133,6 +133,22 @@ _TEACH_RECOVERY = (
 )
 
 
+def _render_sections(paras: list[str], selected: set[int]) -> str:
+    """Selected paragraphs in document order plus gap notices; measured whole, since a cut section can read as another fact."""
+    parts: list[str] = []
+    prev = -1
+    for idx in sorted(selected):
+        if prev >= 0 and idx > prev + 1:
+            skipped = idx - prev - 1
+            parts.append(f"[... {skipped} section{'s' if skipped > 1 else ''} omitted ...]")
+        parts.append(paras[idx])
+        prev = idx
+    if prev < len(paras) - 1:
+        tail_skip = len(paras) - 1 - prev
+        parts.append(f"[... {tail_skip} section{'s' if tail_skip > 1 else ''} omitted at end ...]")
+    return "\n\n".join(parts)
+
+
 def extract_relevant(text: str, *, question: str, budget: int) -> str:
     """Return a question-relevant excerpt of *text* within *budget* chars.
 
@@ -175,34 +191,16 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
         return result + notice
 
     selected: set[int] = {0}
-    used = len(paras[0]) + 1  # +1 for separator
-
+    body = _render_sections(paras, selected)
     for _score, idx, para in sorted(scored, key=lambda t: (-t[0], t[1])):
-        if idx in selected:
+        if idx in selected or len(para) > budget:
             continue
-        cost = len(para) + 1
-        if used + cost > budget:
-            continue
-        selected.add(idx)
-        used += cost
+        trial = _render_sections(paras, selected | {idx})
+        if len(trial) <= budget:
+            selected.add(idx)
+            body = trial
 
-    ordered = sorted(selected)
-    parts: list[str] = []
-    prev   = -1
-    for idx in ordered:
-        if prev >= 0 and idx > prev + 1:
-            skipped = idx - prev - 1
-            parts.append(f"[... {skipped} section{'s' if skipped > 1 else ''} omitted ...]")
-        parts.append(paras[idx])
-        prev = idx
-
-    if ordered and ordered[-1] < len(paras) - 1:
-        tail_skip = len(paras) - 1 - ordered[-1]
-        parts.append(f"[... {tail_skip} section{'s' if tail_skip > 1 else ''} omitted at end ...]")
-
-    body = "\n\n".join(parts)
-    # Gap notices and separators can push body past budget.
-    if len(body) > budget:
+    if len(body) > budget:  # paragraph 0 alone does not fit
         body = body[:budget]
     notice = (
         f"\n...[INTENT-BUDGET: {len(body)} of {original_len} chars; "

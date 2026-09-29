@@ -121,6 +121,7 @@ class CompensationReport:
     workspace_root: str
     outcomes: list[CompensationOutcome] = field(default_factory=list)
     applied_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    skipped_reason: str | None = None
 
     def summary(self) -> dict:
         ok_count = sum(1 for o in self.outcomes if o.status == "ok")
@@ -145,6 +146,8 @@ class CompensationReport:
                 for o in self.outcomes
             ],
         }
+        if self.skipped_reason:
+            result["skipped_reason"] = self.skipped_reason
         # Compensation is best-effort, NOT transactional. A partial failure
         # leaves the workspace in an intermediate state — earlier actions
         # that succeeded are NOT automatically undone. Flag this explicitly
