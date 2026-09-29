@@ -125,21 +125,18 @@ def rollback(
     from core.compensation import CompensationReport, apply_compensation_plan
 
     if workspace_root is None:
-        report = CompensationReport(plan_id=plan_id or "", workspace_root="")
-        log.log(
-            "compensation_apply",
-            {**report.summary(), "skipped_reason": "no workspace_root supplied"},
+        report = CompensationReport(
+            plan_id=plan_id or "", workspace_root="", skipped_reason="no workspace_root supplied"
         )
+        log.log("compensation_apply", report.summary())
         return report
 
     if not compensation_log:
         report = CompensationReport(
-            plan_id=plan_id or "", workspace_root=str(Path(workspace_root).resolve())
+            plan_id=plan_id or "", workspace_root=str(Path(workspace_root).resolve()),
+            skipped_reason="no plans registered",
         )
-        log.log(
-            "compensation_apply",
-            {**report.summary(), "skipped_reason": "no plans registered"},
-        )
+        log.log("compensation_apply", report.summary())
         return report
 
     if plan_id is None:
@@ -151,12 +148,10 @@ def rollback(
                 break
         else:
             report = CompensationReport(
-                plan_id=plan_id, workspace_root=str(Path(workspace_root).resolve())
+                plan_id=plan_id, workspace_root=str(Path(workspace_root).resolve()),
+                skipped_reason=f"plan_id '{plan_id}' not found",
             )
-            log.log(
-                "compensation_apply",
-                {**report.summary(), "skipped_reason": f"plan_id '{plan_id}' not found"},
-            )
+            log.log("compensation_apply", report.summary())
             return report
 
     report = apply_compensation_plan(plan, Path(workspace_root))

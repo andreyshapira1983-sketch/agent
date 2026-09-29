@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path.cwd()))
 #: The line the loop prints when a turn is fully over (episodic + procedural
 #: memory written). Everything the operator reads comes before it or right
 #: after it; the REPL then waits for the next line of stdin.
-END_OF_TURN_MARKERS: tuple[str, ...] = ("procedural_memory_update", "[PROC]")
+END_OF_TURN_MARKERS: tuple[str, ...] = ("procedural_memory_update",)
 #: After the marker, the answer text is flushed; this short grace collects it.
 GRACE_AFTER_MARKER = 6.0
 TURN_TIMEOUT = 900

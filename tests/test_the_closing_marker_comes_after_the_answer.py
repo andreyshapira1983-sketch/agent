@@ -91,7 +91,5 @@ def test_the_drivers_wait_ends_on_the_loggers_console_after_the_answer(tmp_path:
     )
 
     assert why == "marker", f"the logger's console never showed a closing marker: {console[-3:]}"
-    # «[PROC]» also tags procedure_feedback, printed one line before
-    # procedural_memory_update, so the wait may end there; never before the answer.
     written = max(printed.index("respond"), printed.index("episodic_memory_write"))
     assert len(buf) > written, f"the turn ended before the answer and the episode, at {buf[-1]!r}"
