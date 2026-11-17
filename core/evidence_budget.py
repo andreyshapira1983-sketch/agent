@@ -258,6 +258,8 @@ def apply_total_budget(
 
     Blocks in *trim_first_labels* are spent first, so memory never outranks the file
     just read; *min_useful* maps a label to the size below which it is dropped whole.
+    The flag is False only when the blocks fit untouched; True also when every block
+    is at its floor and the total still exceeds the budget.
     """
     budget = _total_chars()
     total  = sum(len(c) for _, c in blocks)
@@ -340,7 +342,9 @@ def apply_total_budget(
         if sum(sizes) <= budget:
             break
 
-    return result, was_trimmed
+    # Все блоки на нижней границе, а сумма всё ещё больше бюджета: флаг не
+    # должен говорить «всё уместилось нетронутым» (проверка 16.11, мелкая).
+    return result, was_trimmed or sum(sizes) > budget
 
 
 # ── convenience: apply per-artifact limit ────────────────────────────────────

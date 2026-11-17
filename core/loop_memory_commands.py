@@ -96,8 +96,12 @@ class AgentLoopMemoryCommands:
         if self.memory_write_registry is not None and not supersedes:
             try:
                 recent_writes = self.memory_write_registry.recent()
-            except Exception:  # noqa: BLE001 — reason stated above
-                recent_writes = []  # Registry hiccup must never block a write.
+            except Exception as exc:  # noqa: BLE001 — a registry hiccup must never block a write
+                # ...but the echo gate is OFF for this write, and that is said
+                # (проверка 16.11, мелкая).
+                recent_writes = []
+                self.log.log("memory_echo_registry_read_failed",
+                             {"error": f"{type(exc).__name__}: {exc}"})
         decision = self.write_policy.decide(
             content=content,
             tags=tags,
@@ -121,6 +125,33 @@ class AgentLoopMemoryCommands:
             return decision, None
 
         safe_content, _secret_findings, pii_findings = redact_dlp_text(content.strip())
+        # Хранится редактированный текст, а политика сравнивала сырой — запись с
+        # PII никогда не узнавалась как дубль. Сверяем ту форму, что ляжет на
+        # диск (проверка 16.11, мелкая).
+        if safe_content.strip() != content.strip() and existing:
+            from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
+
+            match = find_duplicate(safe_content.strip(), existing, threshold=DEFAULT_DEDUP_THRESHOLD)
+            if match is not None:
+                rec, score = match
+                decision = MemoryWriteDecision(
+                    "reject",
+                    [(f"duplicate of {rec.id} (similarity={score:.2f} >= "
+                      f"{DEFAULT_DEDUP_THRESHOLD}, redacted form)")],
+                    policy_id=decision.policy_id,
+                )
+                self.log.log(
+                    "persistent_memory_write",
+                    {
+                        "decision": "reject",
+                        "reasons": decision.reasons,
+                        "policy_id": decision.policy_id,
+                        "source": source,
+                        "tag_count": len(tags),
+                        "content_chars": len(content or ""),
+                    },
+                )
+                return decision, None
         if pii_findings:
             self.log.log(
                 "sensitive_detected",
@@ -165,8 +196,12 @@ class AgentLoopMemoryCommands:
                         cycle_id=getattr(self.log, "trace_id", "") or "",
                     )
                 )
-            except Exception:  # noqa: BLE001, S110 — reason stated above
-                pass  # Echo-log write must never abort the memory write.
+            except Exception as exc:  # noqa: BLE001 — echo-log write must never abort the memory write
+                # ...но сбой пишется в журнал, а не глотается (проверка 16.11, мелкая).
+                self.log.log(
+                    "memory_echo_registry_append_failed",
+                    {"record_id": record.id, "error": f"{type(exc).__name__}: {exc}"},
+                )
         self.log.log(
             "persistent_memory_write",
             {

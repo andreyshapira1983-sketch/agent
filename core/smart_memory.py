@@ -86,9 +86,99 @@ def _smoothed_confidence(success_count: int, failure_count: int) -> float:
     return round(numerator / denominator, 3)
 
 
+_STANDING_RANK = {"needs_review": 0, "candidate": 1, "active": 2}
+
+
+def _repaired_status(stored: Any, success: int, failure: int, confidence: float) -> str:
+    """Status a counter repair may write: lower or keep, never raise
+    (проверка 17.11, средняя). `obsolete` is untouched; `needs_review` (maybe a
+    deliberate MIR-058 demotion) is freed only for the exact 1:1 tie the old
+    rule retired; an unknown status is capped at `candidate`."""
+    derived = _procedure_status_for(success, confidence, failure_count=failure)
+    if stored == "obsolete":
+        return stored
+    if stored == "needs_review":
+        return derived if (success, failure) == (1, 1) and derived == "candidate" else stored
+    cap = _STANDING_RANK.get(stored, _STANDING_RANK["candidate"])
+    return derived if _STANDING_RANK[derived] <= cap else (
+        stored if stored in _STANDING_RANK else "candidate"
+    )
+
+
 #: Резка живёт в `core/topic_tokens.py` вместе с весом слова: это одна работа —
 #: превратить текст в разрешающий сигнал. Имя оставлено прежним, его зовут из
 #: двух десятков мест этого файла.
+
+
+#: Date given to a stored row that carries none: "unknown, so old". Reading it
+#: as "now" made every such row look fresh at each read (проверка 16.11, п. 9).
+_UNKNOWN_TIME = "1970-01-01T00:00:00+00:00"
+
+#: How many contributing episode ids one procedure keeps (the newest). The
+#: episodic store holds 200 by default, so older ids point at nothing anyway
+#: (проверка 16.11, п. 10).
+_MAX_SOURCE_EPISODE_IDS = 200
+
+
+def _legacy_id(prefix: str, data: dict[str, Any]) -> str:
+    """Stable id for a stored row that has none: the same row reads the same id
+    every time, so idempotency checks recognise it (проверка 16.11, п. 9)."""
+    import hashlib
+    import json
+
+    digest = hashlib.sha256(
+        json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()[:32]
+    return f"{prefix}-legacy-{digest}"
+
+
+def _capped_episode_ids(ids: Iterable[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(ids))[-_MAX_SOURCE_EPISODE_IDS:]
+
+
+def _str_items(raw: Any) -> tuple[str, ...]:
+    """A stored list field as strings. A bare string is ONE item: iterating it
+    split «self_contradiction» into letters, and the disqualifying signal was
+    never seen (проверка 17.11, мелкая)."""
+    if raw is None or raw == "":
+        return ()
+    if isinstance(raw, (str, bytes)):
+        return (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw,)
+    if isinstance(raw, dict):
+        return tuple(str(k) for k in raw)
+    # A number where a list belongs is a broken row, not one item: raising
+    # keeps the row «unreadable», so rewrites preserve it instead of pruning it.
+    return tuple(str(x) for x in raw)
+
+
+def _stored_flag(raw: Any) -> bool | None:
+    """A flag read from disk by its meaning: `bool("false")` is True, which
+    turned a text "false" into permission (проверка 16.11, п. 12). Unknown → None."""
+    if raw is None or isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    text = str(raw).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no", ""}:
+        return False
+    return None
+
+
+def _stored_confidence(raw: Any, success: int, failure: int) -> float:
+    """Confidence read from disk: a real number in [0, 1] is kept as is — 0.0
+    included, which `or 0.5` used to turn into 0.5 — anything else (missing,
+    NaN, text) is recomputed from the counters (проверка 16.11, п. 11)."""
+    import math
+
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return _smoothed_confidence(success, failure)
+    if not math.isfinite(value) or raw is None:
+        return _smoothed_confidence(success, failure)
+    return max(0.0, min(1.0, value))
 
 
 def _stored_relevance(raw: Any) -> float | None:
@@ -99,7 +189,7 @@ def _stored_relevance(raw: Any) -> float | None:
     """
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return value if 0.0 <= value <= 1.0 else None
 
@@ -247,21 +337,17 @@ class EpisodeRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EpisodeRecord:
         return cls(
-            id=str(data.get("id") or new_id("ep")),
+            id=str(data.get("id") or _legacy_id("ep", data)),
             task_id=str(data.get("task_id") or ""),
             run_id=str(data.get("run_id") or ""),
             trace_id=str(data.get("trace_id") or ""),
             # `.get` WITHOUT a default: an absent key must stay None
             # (legacy_unclassified), never collapse into False (quarantined).
-            usage_eligible=(
-                None
-                if data.get("usage_eligible") is None
-                else bool(data["usage_eligible"])
-            ),
+            usage_eligible=_stored_flag(data.get("usage_eligible")),
             used_procedure_ids=(
                 None
                 if data.get("used_procedure_ids") is None
-                else tuple(str(x) for x in data["used_procedure_ids"])
+                else _str_items(data["used_procedure_ids"])
             ),
             # Read back as stored, never re-assembled. A legacy row carries no
             # key and stays None even when it holds an abort tag or
@@ -284,7 +370,7 @@ class EpisodeRecord:
             defect_signals=(
                 None
                 if data.get("defect_signals") is None
-                else tuple(str(x) for x in data["defect_signals"])
+                else _str_items(data["defect_signals"])
             ),
             completion_override=(
                 None
@@ -295,12 +381,12 @@ class EpisodeRecord:
             question=str(data.get("question") or ""),
             outcome=_episode_outcome(str(data.get("outcome") or "partial")),
             summary=str(data.get("summary") or ""),
-            tools_used=tuple(str(x) for x in data.get("tools_used") or ()),
-            source_labels=tuple(str(x) for x in data.get("source_labels") or ()),
+            tools_used=_str_items(data.get("tools_used")),
+            source_labels=_str_items(data.get("source_labels")),
             verified_chunks=max(0, int(data.get("verified_chunks") or 0)),
             unverified_chunks=max(0, int(data.get("unverified_chunks") or 0)),
             weak_chunks=max(0, int(data.get("weak_chunks") or 0)),
-            replan_exhausted=bool(data.get("replan_exhausted", False)),
+            replan_exhausted=bool(_stored_flag(data.get("replan_exhausted", False))),
             verification_subject=(
                 "rejected_draft" if data.get("verification_subject") == "rejected_draft"
                 else "answer"
@@ -313,9 +399,9 @@ class EpisodeRecord:
                     max(0, int(data.get("weak_chunks") or 0)),
                 )
             ),
-            tags=tuple(str(x) for x in data.get("tags") or ()),
+            tags=_str_items(data.get("tags")),
             full_answer=str(data.get("full_answer") or ""),
-            created_at=str(data.get("created_at") or _now_iso()),
+            created_at=str(data.get("created_at") or _UNKNOWN_TIME),
             relevance_score=_stored_relevance(data.get("relevance_score")),
         )
 
@@ -369,7 +455,7 @@ class ProcedureRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProcedureRecord:
         return cls(
-            id=str(data.get("id") or new_id("proc")),
+            id=str(data.get("id") or _legacy_id("proc", data)),
             name=str(data.get("name") or "workflow"),
             workflow_key=str(data.get("workflow_key") or ""),
             # Capped on the way IN as well as on the way out. A record written
@@ -378,20 +464,26 @@ class ProcedureRecord:
             # the record is injected into planner prompts — until some future
             # credited episode happened to rewrite it.
             trigger_tags=tuple(dict.fromkeys(
-                str(x) for x in data.get("trigger_tags") or ()
+                _str_items(data.get("trigger_tags"))
             ))[:_MAX_TRIGGER_TAGS],
-            steps=tuple(str(x) for x in data.get("steps") or ()),
-            lessons=_capped_lessons(str(x) for x in data.get("lessons") or ()),
-            source_episode_ids=tuple(str(x) for x in data.get("source_episode_ids") or ()),
+            steps=_str_items(data.get("steps")),
+            lessons=_capped_lessons(_str_items(data.get("lessons"))),
+            source_episode_ids=_capped_episode_ids(
+                str(x) for x in data.get("source_episode_ids") or ()
+            ),
             source_questions=_capped_source_questions(
                 str(x) for x in data.get("source_questions") or ()
             ),
             success_count=max(0, int(data.get("success_count") or 0)),
             failure_count=max(0, int(data.get("failure_count") or 0)),
-            confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.5))),
+            confidence=_stored_confidence(
+                data.get("confidence"),
+                max(0, int(data.get("success_count") or 0)),
+                max(0, int(data.get("failure_count") or 0)),
+            ),
             status=_procedure_status(str(data.get("status") or "active")),
-            created_at=str(data.get("created_at") or _now_iso()),
-            updated_at=str(data.get("updated_at") or _now_iso()),
+            created_at=str(data.get("created_at") or _UNKNOWN_TIME),
+            updated_at=str(data.get("updated_at") or data.get("created_at") or _UNKNOWN_TIME),
         )
 
     def with_outcome(self, episode: EpisodeRecord, verdict: str) -> ProcedureRecord:
@@ -401,9 +493,7 @@ class ProcedureRecord:
         confidence = _smoothed_confidence(success_count, failure_count)
         return replace(
             self,
-            source_episode_ids=tuple(
-                dict.fromkeys([*self.source_episode_ids, episode.id])
-            ),
+            source_episode_ids=_capped_episode_ids([*self.source_episode_ids, episode.id]),
             source_questions=_capped_source_questions(
                 [*self.source_questions, episode.question]
             ),
@@ -424,7 +514,7 @@ class ProcedureRecord:
         appended: an uncredited fold-in must repair an oversized older
         record rather than carry it forward untouched.
         """
-        episode_ids = tuple(dict.fromkeys([*self.source_episode_ids, episode.id]))
+        episode_ids = _capped_episode_ids([*self.source_episode_ids, episode.id])
         lesson = lesson_from_episode(episode)
         lessons = _capped_lessons(self.lessons)
         if lesson and procedure_credit_allowed(episode):
@@ -567,26 +657,35 @@ class EpisodicMemoryStore:
         rows = read_state_jsonl_unlocked(self.path)
         if len(rows) <= self.max_episodes:
             return 0
-        episodes: list[EpisodeRecord] = []
-        for row in rows:
+        # Pair each parsed episode with its ORIGINAL row: kept rows are written
+        # back as they were (unknown fields, stored id and date intact), and a
+        # row that cannot be parsed is kept untouched rather than silently
+        # deleted (проверка 16.11, п. 5). Only readable rows are evicted.
+        parsed: list[tuple[int, EpisodeRecord]] = []
+        # The row appended by this very call (always last) is never a
+        # candidate: with many unreadable rows the cut could otherwise evict
+        # the episode `save` is about to report as stored.
+        for index, row in enumerate(rows[:-1]):
             try:
-                episodes.append(EpisodeRecord.from_dict(row))
-            except (TypeError, ValueError):
+                parsed.append((index, EpisodeRecord.from_dict(row)))
+            except (TypeError, ValueError, OverflowError):
                 continue
-        protected = [e for e in episodes if self.PROTECTED_TAGS & set(e.tags)]
-        evictable = [e for e in episodes if not (self.PROTECTED_TAGS & set(e.tags))]
-        to_remove = len(episodes) - self.max_episodes
+        protected = [p for p in parsed if self.PROTECTED_TAGS & set(p[1].tags)]
+        evictable = [p for p in parsed if not (self.PROTECTED_TAGS & set(p[1].tags))]
+        to_remove = len(rows) - self.max_episodes
+        to_remove = min(to_remove, len(parsed))
         if to_remove <= 0:
             return 0
         # Sort by age ascending so oldest are removed first; protected only
         # after every evictable row is gone.
-        evictable.sort(key=lambda e: e.created_at)
-        protected.sort(key=lambda e: e.created_at)
+        evictable.sort(key=lambda p: p[1].created_at)
+        protected.sort(key=lambda p: p[1].created_at)
         from_protected = max(0, to_remove - len(evictable))
-        kept = evictable[to_remove:] + protected[from_protected:]
-        kept.sort(key=lambda e: e.created_at)
-        rewrite_state_jsonl_unlocked(self.path, [e.to_dict() for e in kept])
-        return to_remove
+        removed = {i for i, _ in evictable[:to_remove]} | {i for i, _ in protected[:from_protected]}
+        rewrite_state_jsonl_unlocked(
+            self.path, [row for i, row in enumerate(rows) if i not in removed]
+        )
+        return len(removed)
 
     def load(self) -> list[EpisodeRecord]:
         with state_file_lock(self.path):
@@ -595,7 +694,7 @@ class EpisodicMemoryStore:
         for row in rows:
             try:
                 out.append(EpisodeRecord.from_dict(row))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
         return out
 
@@ -635,12 +734,22 @@ class EpisodicMemoryStore:
             ep.created_at,
         )
 
-    def search_with_report(self, query: str, *, limit: int = 3) -> EpisodeSearchResult:
+    def search_with_report(
+        self,
+        query: str,
+        *,
+        limit: int = 3,
+        admit: Callable[[EpisodeRecord], str | None] | None = None,
+    ) -> EpisodeSearchResult:
         """`search`, plus why the rest of the store did not come back.
 
         A caller that only sees the survivors cannot report on the drops that
         happened in here — which is how `episodes_selected=0, rejected_by={}`
         stayed reachable on a store of 200 episodes.
+
+        `admit` returns a rejection reason or None. It runs BEFORE the limit,
+        so records the caller would refuse cannot take the slots of one it
+        would accept (проверка 16.11, п. 3).
         """
         episodes = self.load()
         q_tokens = _tokens(query)
@@ -651,6 +760,7 @@ class EpisodicMemoryStore:
             )
         scored: list[tuple[int, EpisodeRecord]] = []
         no_overlap = 0
+        refused: dict[str, int] = {}
         q_content = q_tokens - STOPWORDS
         for ep in episodes:
             haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
@@ -661,15 +771,25 @@ class EpisodicMemoryStore:
             # ELIGIBILITY requires at least one discriminating word — measured
             # 2026-08-22, filler alone retrieved 17 of 34 procedures, and a
             # launch and a deletion scored as one question.
-            if score and (q_content & hay_tokens):
-                scored.append((score, ep))
-            else:
+            if not (score and (q_content & hay_tokens)):
                 no_overlap += 1
+                continue
+            try:
+                reason = admit(ep) if admit is not None else None
+            except Exception:  # noqa: BLE001 — counted below, never silent
+                # One record the gate cannot judge is refused and counted; it
+                # must not abort retrieval for the whole turn.
+                reason = "admit_error"
+            if reason:
+                refused[reason] = refused.get(reason, 0) + 1
+                continue
+            scored.append((score, ep))
         scored.sort(key=lambda item: self._rank(*item), reverse=True)
         selected = [ep for _score, ep in scored[:limit]]
         rejected_by = {
             k: v for k, v in (
                 ("no_overlap", no_overlap),
+                *refused.items(),
                 ("over_limit", len(scored) - len(selected)),
             ) if v > 0
         }
@@ -689,7 +809,11 @@ class EpisodicMemoryStore:
         return matches[:limit]
 
     def find_most_similar(
-        self, query: str, *, threshold: float = 0.35
+        self,
+        query: str,
+        *,
+        threshold: float = 0.35,
+        admit: Callable[[EpisodeRecord], bool] | None = None,
     ) -> tuple[EpisodeRecord | None, float]:
         """Return the episode whose *question* has the highest Jaccard
         similarity to *query* and the similarity score. Returns ``(None,
@@ -699,6 +823,9 @@ class EpisodicMemoryStore:
         goal/summary/tags), so the signal is «did the user ask THIS before?»
         and not «is this topic familiar?». A candidate with a low
         ``answer_quality_score`` gets the threshold lowered by 0.10.
+
+        ``admit`` (True = accept) runs BEFORE the best is chosen, so a refused
+        winner cannot hide an admissible runner-up (проверка 16.11, средняя).
         """
         # MIR-024: the frame is not the question. Similarity is computed over
         # DISCRIMINATING words only — «Я хочу ЗАПУСТИТЬ АГЕНТА, что мне
@@ -719,7 +846,7 @@ class EpisodicMemoryStore:
             if not union:
                 continue
             score = len(q_tokens & ep_tokens) / len(union)
-            if score > best_score:
+            if score > best_score and (admit is None or admit(ep)):
                 best_score = score
                 best_ep = ep
         if best_ep is None:
@@ -779,13 +906,73 @@ class ProceduralMemoryStore:
         for row in rows:
             try:
                 out.append(ProcedureRecord.from_dict(row))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
         return out
 
     def rewrite(self, procedures: list[ProcedureRecord]) -> None:
+        """The given list becomes the READABLE set; each record is merged over its
+        original row (unknown keys kept), unreadable rows are kept untouched
+        (проверка 16.11, средняя).
+
+        Only when you own the whole store (tests, fresh files): a list loaded
+        earlier silently undoes every write made since — use `update_procedures`
+        for read-modify-write (проверка 17.11, средняя)."""
         with state_file_lock(self.path):
-            rewrite_state_jsonl_unlocked(self.path, [p.to_dict() for p in procedures])
+            self._replace_readable_unlocked(self._rows_unlocked(), procedures)
+
+    def update_procedures(
+        self, fn: Callable[[list[ProcedureRecord]], list[ProcedureRecord]]
+    ) -> list[ProcedureRecord]:
+        """Locked read-modify-write: `fn` gets the CURRENT readable list and returns
+        the new one; unreadable rows and unknown keys survive; the same objects
+        back = no write (проверка 17.11, средняя)."""
+        with state_file_lock(self.path):
+            rows = self._rows_unlocked()
+            current = [p for _row, p in rows if p is not None]
+            new = list(fn(list(current)))
+            if len(new) != len(current) or any(a is not b for a, b in zip(new, current, strict=True)):
+                self._replace_readable_unlocked(rows, new)
+            return new
+
+    def _replace_readable_unlocked(
+        self,
+        rows: list[tuple[dict[str, Any], ProcedureRecord | None]],
+        procedures: list[ProcedureRecord],
+    ) -> None:
+        """`procedures` over their original rows, then the unreadable rows as read."""
+        original: dict[str, dict[str, Any]] = {}
+        for row, proc in rows:
+            if proc is not None:
+                original.setdefault(proc.id, row)
+        payloads = [{**original.get(p.id, {}), **p.to_dict()} for p in procedures]
+        payloads.extend(row for row, proc in rows if proc is None)
+        rewrite_state_jsonl_unlocked(self.path, payloads)
+
+    def _rows_unlocked(self) -> list[tuple[dict[str, Any], ProcedureRecord | None]]:
+        """Every stored row with its parsed record, or None when it cannot be read."""
+        out: list[tuple[dict[str, Any], ProcedureRecord | None]] = []
+        for row in read_state_jsonl_unlocked(self.path):
+            try:
+                out.append((row, ProcedureRecord.from_dict(row)))
+            except (TypeError, ValueError, OverflowError):
+                out.append((row, None))
+        return out
+
+    def _write_rows_unlocked(
+        self,
+        rows: list[tuple[dict[str, Any], ProcedureRecord | None]],
+        changed: dict[str, ProcedureRecord],
+        added: list[ProcedureRecord] = (),  # type: ignore[assignment]
+    ) -> None:
+        """Rewrite: changed records over their original row (unknown keys kept),
+        every other row exactly as read, unreadable ones included (проверка 16.11, п. 5)."""
+        payloads = [
+            {**row, **changed[proc.id].to_dict()} if proc is not None and proc.id in changed else row
+            for row, proc in rows
+        ]
+        payloads.extend(p.to_dict() for p in added)
+        rewrite_state_jsonl_unlocked(self.path, payloads)
 
     def count(self) -> int:
         return len(self.load())
@@ -815,6 +1002,14 @@ class ProceduralMemoryStore:
             "credit_suppressed": credit_suppressed,
             "attribution": "unknown" if used is None else "recorded",
         }
+        # A credit withheld only for lack of a verified fact is named, so it
+        # does not read like a run that simply did not succeed.
+        if (
+            verdict == "none"
+            and episode.verified_chunks == 0
+            and procedure_credit_allowed(replace(episode, verified_chunks=1))
+        ):
+            report["credit_withheld"] = "no_verified_evidence"
         if not used:
             return report
         if report["verdict"] == "none":
@@ -822,15 +1017,9 @@ class ProceduralMemoryStore:
             return report
 
         with state_file_lock(self.path):
-            rows = read_state_jsonl_unlocked(self.path)
-            procs = []
-            for row in rows:
-                try:
-                    procs.append(ProcedureRecord.from_dict(row))
-                except (TypeError, ValueError):
-                    continue
-            by_id = {p.id: p for p in procs}
-            changed = False
+            rows = self._rows_unlocked()
+            by_id = {p.id: p for _row, p in rows if p is not None}
+            changed: dict[str, ProcedureRecord] = {}
             for pid in dict.fromkeys(used):        # collapse duplicates first
                 target = by_id.get(pid)
                 if target is None:
@@ -839,13 +1028,10 @@ class ProceduralMemoryStore:
                 if episode.id in target.source_episode_ids:
                     report["already_applied"] += 1
                     continue
-                by_id[pid] = target.with_outcome(episode, report["verdict"])
+                changed[pid] = target.with_outcome(episode, report["verdict"])
                 report["applied"] += 1
-                changed = True
             if changed:
-                rewrite_state_jsonl_unlocked(
-                    self.path, [by_id.get(p.id, p).to_dict() for p in procs]
-                )
+                self._write_rows_unlocked(rows, changed)
         return report
 
     def recompute_legacy_confidence(
@@ -855,112 +1041,130 @@ class ProceduralMemoryStore:
         (MIR-051).
 
         Touches **only** derived values: `confidence`, and `status` with it,
-        since status is exactly `confidence >= 0.6`. Leaving status stale
-        would just trade one broken invariant for another.
+        since status is decided by `_procedure_status_for` from the counters.
+        Leaving status stale would just trade one broken invariant for another;
+        a row whose confidence is right but whose status follows an older rule
+        is repaired too (проверка 16.11: a 1:1 tie retired under the old rule).
+        The repair only lowers or keeps standing — see `_repaired_status`
+        (проверка 17.11, средняя).
         """
+        # One lock for the read AND the write (проверка 16.11, п. 6).
         with state_file_lock(self.path):
             rows = read_state_jsonl_unlocked(self.path)
 
-        def _dist(values: list) -> dict:
-            out: dict = {}
-            for v in values:
-                key = str(round(float(v), 3)) if isinstance(v, (int, float)) else "invalid"
-                out[key] = out.get(key, 0) + 1
-            return out
+            def _dist(values: list) -> dict:
+                out: dict = {}
+                for v in values:
+                    key = str(round(float(v), 3)) if isinstance(v, (int, float)) else "invalid"
+                    out[key] = out.get(key, 0) + 1
+                return out
 
-        report = {
-            "scanned": len(rows),
-            "eligible": 0,
-            "corrected": 0,
-            "already_consistent": 0,
-            "invalid": 0,
-            "skipped": 0,
-            "before_distribution": _dist([r.get("confidence") for r in rows]),
-            "after_distribution": {},
-            "dry_run": bool(dry_run),
-            "limit_reached": False,
-        }
+            report = {
+                "scanned": len(rows),
+                "eligible": 0,
+                "corrected": 0,
+                "already_consistent": 0,
+                "invalid": 0,
+                "skipped": 0,
+                "before_distribution": _dist([r.get("confidence") for r in rows]),
+                "after_distribution": {},
+                "dry_run": bool(dry_run),
+                "limit_reached": False,
+            }
 
-        changed = False
-        for row in rows:
-            success = row.get("success_count")
-            failure = row.get("failure_count")
-            if (
-                not isinstance(success, int) or isinstance(success, bool)
-                or not isinstance(failure, int) or isinstance(failure, bool)
-                or success < 0 or failure < 0
-            ):
-                # Counters that cannot be trusted are reported, never guessed:
-                # a repaired confidence over invented history is not a repair.
-                report["invalid"] += 1
-                continue
+            changed = False
+            for row in rows:
+                success = row.get("success_count")
+                failure = row.get("failure_count")
+                if (
+                    not isinstance(success, int) or isinstance(success, bool)
+                    or not isinstance(failure, int) or isinstance(failure, bool)
+                    or success < 0 or failure < 0
+                ):
+                    # Counters that cannot be trusted are reported, never guessed:
+                    # a repaired confidence over invented history is not a repair.
+                    report["invalid"] += 1
+                    continue
 
-            expected = _smoothed_confidence(success, failure)
-            stored = row.get("confidence")
-            if isinstance(stored, (int, float)) and round(float(stored), 3) == expected:
-                report["already_consistent"] += 1
-                continue
+                expected = _smoothed_confidence(success, failure)
+                stored = row.get("confidence")
+                status = _repaired_status(row.get("status"), success, failure, expected)
+                if (
+                    isinstance(stored, (int, float))
+                    and round(float(stored), 3) == expected
+                    and row.get("status") == status
+                ):
+                    report["already_consistent"] += 1
+                    continue
+                if not row.get("id"):
+                    # Pin the legacy id before the row changes, or the content
+                    # hash would give it a different id after the rewrite.
+                    row["id"] = _legacy_id("proc", row)
 
-            report["eligible"] += 1
-            if limit is not None and report["corrected"] >= limit:
-                # Bounded and resumable: the remainder is picked up next run.
-                report["limit_reached"] = True
-                report["skipped"] += 1
-                continue
+                report["eligible"] += 1
+                if limit is not None and report["corrected"] >= limit:
+                    # Bounded and resumable: the remainder is picked up next run.
+                    report["limit_reached"] = True
+                    report["skipped"] += 1
+                    continue
 
-            report["corrected"] += 1
-            if not dry_run:
-                row["confidence"] = expected
-                # H-44: у поля была ТРЕТЬЯ власть — эта строка знала только
-                # `active`/`needs_review` и `candidate` не производила вовсе,
-                # поэтому проход по новорождённым переименовал бы их все.
-                row["status"] = _procedure_status_for(
-                    int(row.get("success_count") or 0),
-                    expected,
-                    failure_count=int(row.get("failure_count") or 0),
-                )
-                changed = True
+                report["corrected"] += 1
+                if not dry_run:
+                    row["confidence"] = expected
+                    # H-44: у поля была ТРЕТЬЯ власть — эта строка знала только
+                    # `active`/`needs_review` и `candidate` не производила вовсе,
+                    # поэтому проход по новорождённым переименовал бы их все.
+                    row["status"] = status
+                    changed = True
 
-        report["after_distribution"] = _dist(
-            [
-                _smoothed_confidence(r["success_count"], r["failure_count"])
-                if isinstance(r.get("success_count"), int)
-                and isinstance(r.get("failure_count"), int)
-                and r["success_count"] >= 0 and r["failure_count"] >= 0
-                else r.get("confidence")
-                for r in rows
-            ]
-        )
+            report["after_distribution"] = _dist(
+                [
+                    _smoothed_confidence(r["success_count"], r["failure_count"])
+                    if isinstance(r.get("success_count"), int)
+                    and isinstance(r.get("failure_count"), int)
+                    and r["success_count"] >= 0 and r["failure_count"] >= 0
+                    else r.get("confidence")
+                    for r in rows
+                ]
+            )
 
-        if changed and not dry_run:
-            with state_file_lock(self.path):
+            if changed and not dry_run:
                 rewrite_state_jsonl_unlocked(self.path, rows)
-        return report
+            return report
 
     def upsert_from_episode(self, episode: EpisodeRecord) -> tuple[ProcedureRecord | None, bool]:
         candidate = procedure_from_episode(episode)
         if candidate is None:
             return None, False
-        procedures = self.load()
-        out: list[ProcedureRecord] = []
-        updated: ProcedureRecord | None = None
-        created = True
-        for proc in procedures:
-            if proc.workflow_key == candidate.workflow_key:
-                # Merge provenance only — NO credit for a tool-set match.
-                # Promotion happens solely via `used_procedure_ids`.
-                updated = proc.merged_from_episode(episode)
-                out.append(updated)
-                created = False
-            else:
-                out.append(proc)
-        if updated is None:
-            # A brand-new candidate records its creating episode's PROVENANCE
-            # but earns no credit: it was not USED by the run that produced it
-            # (it did not exist yet), so its counters stay at birth (zero).
-            updated = candidate.merged_from_episode(episode)
-            out.append(updated)
-        self.rewrite(out)
+        # Read and write under ONE lock: two separate locks let a write made in
+        # between (a credit from feedback) be overwritten (проверка 16.11, п. 6).
+        with state_file_lock(self.path):
+            rows = self._rows_unlocked()
+            changed: dict[str, ProcedureRecord] = {}
+            updated: ProcedureRecord | None = None
+            for _row, proc in rows:
+                if proc is not None and proc.workflow_key == candidate.workflow_key:
+                    # Merge provenance only — NO credit for a tool-set match.
+                    # Promotion happens solely via `used_procedure_ids`.
+                    updated = proc.merged_from_episode(episode)
+                    changed[proc.id] = updated
+            created = updated is None
+            if updated is None and any(
+                proc is None and row.get("workflow_key") == candidate.workflow_key
+                for row, proc in rows
+            ):
+                # The workflow already has a row we cannot read. A fresh twin
+                # beside it would be a duplicate born on every run; leave the
+                # row for repair and report "not stored" (proc None).
+                return None, False
+            added: list[ProcedureRecord] = []
+            if updated is None:
+                # A brand-new candidate records its creating episode's PROVENANCE
+                # but earns no credit: it was not USED by the run that produced it
+                # (it did not exist yet), so its counters stay at birth (zero).
+                updated = candidate.merged_from_episode(episode)
+                added.append(updated)
+            self._write_rows_unlocked(rows, changed, added)
         return updated, created
 
     def search(self, query: str, *, limit: int = 3) -> list[ProcedureRecord]:
@@ -1034,7 +1238,7 @@ class MemoryConsolidationStore:
         for row in rows:
             try:
                 out.append(ConsolidationReport.from_dict(row))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
         return out
 
@@ -1052,10 +1256,17 @@ def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
     # оба рубежа, чтобы они не разошлись.
     if _answer_disqualified(episode):
         return False
+    # Эхо памяти (`memory:`) и ответ не по теме не поднимают метод — те же оси,
+    # что отказывают в допуске (проверка 16.11, средняя).
+    if _lesson_provenance_disqualified(episode):
+        return False
+    # Хотя бы один проверенный факт: без него «achieved» — только слово самого
+    # прогона, и метод поднимался бы на самопохвале (проверка 16.11, п. 2).
     return bool(
         effective_completion(episode) == "achieved"
         and episode.outcome == "success"
         and episode.tools_used
+        and episode.verified_chunks > 0
     )
 
 
@@ -1108,26 +1319,42 @@ def resolve_used_procedures(
     have actually executed — the plan is not evidence, so a run cancelled
     before reaching a procedure's steps does not debit it.
     """
-    ran: list[str] = []
-    seen: set[str] = set()
     executed = list(executed_tools)
+
+    def _completed_at(workflow: list[str]) -> int | None:
+        """Index where every step of the workflow had run AS MANY TIMES as the
+        workflow names it, or None. Mere membership let a run that called a
+        tool once count as applying a workflow that needs it twice
+        (проверка 16.11, п. 8). Order is NOT required: the key is built by
+        `episode_tools` (last round's plan first, earlier rounds after), so it
+        need not match the execution order of a multi-round run."""
+        need: dict[str, int] = {}
+        for tool in workflow:
+            need[tool] = need.get(tool, 0) + 1
+        for index, tool in enumerate(executed):
+            if tool in need:
+                need[tool] -= 1
+                if need[tool] == 0:
+                    del need[tool]
+                if not need:
+                    return index
+        return None
+
+    ran: list[tuple[int, str]] = []
+    seen: set[str] = set()
     for proc in selected:
         if proc.id in seen:
             continue
         workflow = [t for t in proc.workflow_key.removeprefix("tools:").split("->") if t]
         if not workflow:
             continue
-        if all(tool in executed for tool in workflow):
-            ran.append(proc.id)
+        done = _completed_at(workflow)
+        if done is not None:
+            ran.append((done, proc.id))
             seen.add(proc.id)
     # Order by the point each workflow completed, so the record reflects the
     # sequence of actual use rather than the order retrieval happened to return.
-    def _completion_index(pid: str) -> int:
-        proc = next(p for p in selected if p.id == pid)
-        wf = [t for t in proc.workflow_key.removeprefix("tools:").split("->") if t]
-        return max(len(executed) - 1 - executed[::-1].index(t) for t in wf)
-
-    return tuple(sorted(ran, key=_completion_index))
+    return tuple(pid for _done, pid in sorted(ran, key=lambda item: item[0]))
 
 
 def _checked_declaration(
@@ -1556,7 +1783,9 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
         answer_quality_score=(
             None if answer_withheld else _compute_quality_score(verified, unverified, weak)
         ),
-        relevance_score=relevance_score,
+        # Same check as on read: NaN or a value outside [0, 1] is "not
+        # measured", never a pass of the relevance gate (проверка 16.11, п. 13).
+        relevance_score=_stored_relevance(relevance_score),
         tags=tags,
         task_id=str(task_id or ""),
         run_id=str(run_id or ""),
@@ -1717,26 +1946,39 @@ def format_experience_context(
 ) -> str:
     if not episodes and not procedures:
         return ""
-    lines = ["<agent_experience_memory>"]
+    open_tag, close_tag = "<agent_experience_memory>", "</agent_experience_memory>"
+    # Stored text is data: angle brackets are swapped for look-alikes so a
+    # remembered answer cannot close the block and speak as an instruction.
+    # One entry = one line: a stored id with a newline started its own line
+    # inside the block (проверка 17.11, средняя).
+    def _safe(text: str) -> str:
+        return (
+            str(text).replace("<", "‹").replace(">", "›")
+            .replace("\r", " ").replace("\n", " ")
+        )
+
+    lines = []
     if procedures:
         lines.append("procedures:")
         for proc in procedures:
-            lines.append(
+            lines.append(_safe(
                 f"- [{proc.id}] {proc.name}; confidence={proc.confidence}; "
                 f"status={proc.status}; steps={' | '.join(proc.steps[:5])}"
-            )
+            ))
     if episodes:
         lines.append("episodes:")
         for ep in episodes:
-            lines.append(
+            lines.append(_safe(
                 f"- [{ep.id}] outcome={ep.outcome}; tools={','.join(ep.tools_used) or 'none'}; "
                 f"summary={ep.summary}"
-            )
-    lines.append("</agent_experience_memory>")
-    text = "\n".join(lines)
-    if len(text) > max_chars:
-        return text[: max_chars - 1].rstrip() + "..."
-    return text
+            ))
+    body = "\n".join(lines)
+    # Cut the BODY, never the closing tag: a block without its end leaves the
+    # model unable to tell where memory stops.
+    room = max_chars - len(open_tag) - len(close_tag) - 2
+    if len(body) > room:
+        body = body[: max(0, room - 3)].rstrip() + "..."
+    return f"{open_tag}\n{body}\n{close_tag}"
 
 
 def family_product_warnings(

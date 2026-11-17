@@ -88,7 +88,7 @@ def test_hygiene_episodic_subcommand_prunes(workspace: Path, capsys):
     _seed(store)
     agent = _agent(workspace, episodic_store=store)
 
-    assert _handle_hygiene("episodic", agent, workspace) is True
+    assert _handle_hygiene("episodic --apply", agent, workspace) is True
     out = capsys.readouterr().err
     assert "1 stale episode(s) pruned" in out
     assert "junk" in out
@@ -100,7 +100,7 @@ def test_hygiene_all_chain_includes_episodic(workspace: Path, capsys):
     _seed(store)
     agent = _agent(workspace, episodic_store=store)
 
-    assert _handle_hygiene("all", agent, workspace) is True
+    assert _handle_hygiene("all --apply", agent, workspace) is True
     out = capsys.readouterr().err
     assert "episodic : 1 stale episode(s) pruned" in out
     assert {e.id for e in store.load()} == {"good", "lesson", "recent"}

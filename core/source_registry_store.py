@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
@@ -40,11 +41,16 @@ class SourceRegistryStore:
             (existing sources plus every source in this registry, since the
             old code appended all sources before checking any claim);
           * duplicates WITHIN the incoming registry are collapsed the same
-            way the sequential appends collapsed them.
+            way the sequential appends collapsed them;
+          * a known claim whose status changed is appended again (the last
+            row wins on load), except that `suspect` is never lowered
+            (проверка 17.11, средняя).
         """
         with state_file_lock(self.path):
             existing_source_ids: set[str] = set()
-            file_claim_keys: list[tuple[str, str]] = []  # (claim_key, source_id)
+            # (claim_key, source_id, status) — status kept so a change of it
+            # is stored (проверка 17.11, средняя).
+            file_claim_keys: list[tuple[str, str, str]] = []
             for kind, payload in self._iter_records_unlocked():
                 if kind == "source":
                     try:
@@ -56,7 +62,7 @@ class SourceRegistryStore:
                         claim = ClaimRecord.from_dict(payload)
                     except (TypeError, ValueError):
                         continue
-                    file_claim_keys.append((_claim_key(claim), claim.source_id))
+                    file_claim_keys.append((_claim_key(claim), claim.source_id, claim.status))
 
             new_rows: list[dict] = []
             source_saved = 0
@@ -72,22 +78,24 @@ class SourceRegistryStore:
             # file (existing sources + all incoming sources are appended
             # before any claim in the legacy path).
             combined_source_ids = existing_source_ids | {s.id for s in registry.sources}
-            seen_claim_keys: set[str] = {
-                key for key, source_id in file_claim_keys
-                if source_id in combined_source_ids
-            }
+            # key -> stored status, the last row winning with `suspect`
+            # sticky, as in _load_claims_unlocked.
+            stored_status: dict[str, str] = {}
+            for key, source_id, status in file_claim_keys:
+                if source_id in combined_source_ids:
+                    stored_status[key] = _merged_status(stored_status.get(key), status)
 
             claim_saved = 0
             for claim in registry.claims:
                 key = _claim_key(claim)
-                if key in seen_claim_keys:
+                if key in stored_status and _merged_status(stored_status[key], claim.status) == stored_status[key]:
                     continue
                 new_rows.append({"kind": "claim", "payload": claim.to_dict()})
                 claim_saved += 1
                 # Only a claim whose source is known becomes visible to later
                 # dedup checks — matching _load_claims_unlocked's filter.
                 if claim.source_id in combined_source_ids:
-                    seen_claim_keys.add(key)
+                    stored_status[key] = _merged_status(stored_status.get(key), claim.status)
 
             if new_rows:
                 append_state_jsonl_unlocked(self.path, new_rows)
@@ -130,7 +138,11 @@ class SourceRegistryStore:
             except (TypeError, ValueError):
                 continue
             if claim.source_id in sources:
-                claims[_claim_key(claim)] = claim
+                key = _claim_key(claim)
+                prev = claims.get(key)
+                if prev is not None and prev.status == "suspect" and claim.status != "suspect":
+                    claim = replace(claim, status="suspect")
+                claims[key] = claim
         return list(claims.values())
 
     def load_registry(self) -> SourceRegistry:
@@ -166,6 +178,20 @@ class SourceRegistryStore:
             payload = row.get("payload")
             if isinstance(kind, str) and isinstance(payload, dict):
                 yield kind, payload
+
+
+#: Status strength: a later save may only RAISE it. A re-ingest that sees the
+#: claim with fewer witnesses (`extracted`) no longer erases a `verified`, and
+#: each claim can change at most four times, so the file cannot grow per save
+#: (проверка 17.11, вечер; `suspect` stays sticky as before).
+_STATUS_RANK = {"extracted": 0, "unverified": 1, "verified": 2, "conflicted": 3, "suspect": 4}
+
+
+def _merged_status(stored: str | None, incoming: str) -> str:
+    """Status after a save: the stronger of the stored and the incoming one."""
+    if stored is None:
+        return incoming
+    return max(stored, incoming, key=lambda s: _STATUS_RANK.get(s, 4))
 
 
 def _claim_key(claim: ClaimRecord) -> str:

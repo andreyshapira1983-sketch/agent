@@ -99,6 +99,7 @@
     "loop_memory_read.py::AgentLoopMemoryRead._code_checked": [],
     "loop_memory_read.py::AgentLoopMemoryRead._family_product_warnings": [],
     "loop_memory_read.py::AgentLoopMemoryRead._question_salience": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._fast_path_candidate": [],
     "loop_memory_read.py::AgentLoopMemoryRead._retrieve_experience_memory": [
       "discovery",
       "callers"
@@ -107,6 +108,9 @@
     "loop_memory_read.py::AgentLoopMemoryRead._workflow_block": [],
     "loop_memory_read.py::AgentLoopMemoryRead.memory_record_lines": [],
     "loop_memory_read.py::AgentLoopMemoryRead.smart_memory_summary": [],
+    "loop_memory_read.py::_experience_rejection": [],
+    "loop_memory_read.py::_with_family": [],
+    "loop_memory_read.py::_hint_field": [],
     "loop_memory_read.py::_family_appendix": [],
     "loop_memory_read.py::_merge_rejection_reasons": [],
     "loop_memory_write.py::AgentLoopMemoryWrite._consolidate_conclusion": [],

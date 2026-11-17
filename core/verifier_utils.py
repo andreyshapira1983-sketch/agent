@@ -590,8 +590,19 @@ def _semantic_nli_check(claim: str, excerpt: str, llm: Any, *, max_chars: int = 
         return False
 
 
+def _independent(ev: Evidence) -> bool:
+    """Same rule as every citation road (core.evidence.evidence_is_independent)."""
+    from core.evidence import evidence_is_independent
+
+    return evidence_is_independent(ev)
+
+
 def _find_semantic_support(claim: str, chain: ProvenanceChain, llm: Any) -> Evidence | None:
-    candidates = sorted(chain.evidences, key=lambda e: e.confidence, reverse=True)
+    # Uncited support may come only from INDEPENDENT evidence: the agent's own
+    # memory or files cannot verify a sentence just because the model agrees
+    # (проверка 17.11, №8).
+    candidates = sorted((e for e in chain.evidences if _independent(e)),
+                        key=lambda e: e.confidence, reverse=True)
     for ev in candidates:
         if not ev.excerpt:
             continue
@@ -602,7 +613,7 @@ def _find_semantic_support(claim: str, chain: ProvenanceChain, llm: Any) -> Evid
 
 def _find_structured_support(claim: str, chain: ProvenanceChain) -> Evidence | None:
     from core.structured_facts import claim_supported_by, extract_facts
-    candidates = [ev for ev in chain.evidences if ev.kind == "tool_output"]
+    candidates = [ev for ev in chain.evidences if ev.kind == "tool_output" and _independent(ev)]
     candidates.sort(key=lambda e: e.confidence, reverse=True)
     for ev in candidates:
         if not ev.excerpt:

@@ -45,6 +45,8 @@ def _episode(**over) -> EpisodeRecord:
         "completion_state": "achieved",
         "declared_completion": "achieved",
         "used_procedure_ids": (),  # the procedure was NOT applied
+        # Credit needs one verified fact since 2026-11-16 (self-praise gate).
+        "verified_chunks": 1,
     }
     base.update(over)
     return EpisodeRecord(**base)

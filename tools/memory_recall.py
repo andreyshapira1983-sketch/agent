@@ -7,17 +7,40 @@ STORE → RETRIEVE → USE cannot be sat: passive injection (`<long_term_memory>
 three records keyed on the question) is the loop's choice, not his.
 
 Walls: at most 5 records per call, active store only (the archive is a
-separate authority, MIR-138/156), substring match on content, newest first,
+separate authority, MIR-138/156), substring match on content, current
+before superseded (those are marked «замещено»), then newest first,
 every record wrapped with its provenance and the words LOW-TRUST — a memory
 is a claim he once made, not a fact about the world now. Read-only.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from tools.base import Tool
 
 MAX_RECORDS = 5
+
+
+def _superseded_by(record: Any) -> str | None:
+    """Id of the newer record that replaced this one, or None."""
+    value = getattr(record, "superseded_by", None)
+    return str(value) if value else None
+
+
+def _instant(record: Any) -> float:
+    """created_at as a UTC timestamp; naive = UTC, unreadable = oldest."""
+    value = getattr(record, "created_at", None)
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return float("-inf")
+    if not isinstance(value, datetime):
+        return float("-inf")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
 
 
 class MemoryRecallTool(Tool):
@@ -49,16 +72,24 @@ class MemoryRecallTool(Tool):
             return {"term": kwargs["term"], "records": [], "count": 0, "trust": "low",
                     "unavailable": f"{type(exc).__name__}: {str(exc)[:120]}"}
         hits = [r for r in records if needle in str(getattr(r, "content", "")).casefold()]
-        hits.sort(key=lambda r: str(getattr(r, "created_at", "")), reverse=True)
+        # Current records first, then newest by real time: замещённая запись
+        # выглядела текущей, а str(created_at) путал пояса (проверка 17.11, средняя).
+        hits.sort(key=lambda r: (_superseded_by(r) is None, _instant(r)), reverse=True)
         out = []
         for r in hits[:MAX_RECORDS]:
+            newer = _superseded_by(r)
+            trust = "LOW-TRUST: your own past conclusion; verify before use"
+            if newer is not None:
+                trust = (f"LOW-TRUST, замещено: {newer} — stale, the newer record is "
+                         "current; do not build on this one")
             out.append({
                 "id": getattr(r, "id", ""),
                 "kind": getattr(r, "type", ""),
                 "created_at": str(getattr(r, "created_at", ""))[:19],
                 "source": getattr(r, "source", None),
                 "content": str(getattr(r, "content", ""))[:400],
-                "trust": "LOW-TRUST: your own past conclusion; verify before use",
+                "superseded_by": newer,
+                "trust": trust,
             })
         return {
             "term": kwargs["term"], "records": out, "count": len(out),

@@ -166,8 +166,12 @@ class ClaimRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ClaimRecord:
         status = data.get("status", "extracted")
-        if status not in {"extracted", "verified", "conflicted", "unverified"}:
-            status = "extracted"
+        # The vocabulary is the type's own, `suspect` included: a hand-kept
+        # list without it turned a guard-flagged claim into an ordinary one on
+        # every reload (проверка 17.11, серьёзная №5). An unknown token is NOT
+        # promoted to `extracted` — it stays quarantined as `suspect`.
+        if status not in ClaimStatus.__args__:
+            status = "suspect"
         return cls(
             id=str(data.get("id") or new_id("claim")),
             source_id=str(data.get("source_id") or ""),
@@ -269,6 +273,20 @@ class SourceRegistry:
     def add_claim(self, claim: ClaimRecord) -> ClaimRecord:
         if claim.source_id not in self._sources:
             raise ValueError(f"claim source_id is not registered: {claim.source_id!r}")
+        existing = self._claims.get(claim.id)
+        if (
+            existing is not None
+            and existing is not claim
+            and "suspect" in (existing.status, claim.status)
+            and claim.status != "suspect"
+        ):
+            # Claim ids are content hashes (same sentence, same document), so
+            # two windows of one file collide here. A sentence the guard
+            # flagged in ANY window stays flagged: «last write wins» let a
+            # clean window launder the taint (проверка 16.11, вечер).
+            from dataclasses import replace
+
+            claim = replace(claim, status="suspect")
         self._claims[claim.id] = claim
         return claim
 

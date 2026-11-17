@@ -168,8 +168,10 @@ class AgentLoopResponseDeciders:
                         else:
                             _new_records.append(_rec)
                     if _updated:
-                        self.persistent_store.update_many(
-                            r for r in _new_records if r.id in _seen_rids
+                        # +1 on the CURRENT value, under the store's lock
+                        # (проверка 17.11, серьёзная №3).
+                        self.persistent_store.patch_many(
+                            {rid: {"causal_use": lambda n: (n or 0) + 1} for rid in _updated}
                         )
                         self.log.log(
                             "memory_causal_credit",

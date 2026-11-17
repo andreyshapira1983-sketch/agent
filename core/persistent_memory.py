@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 # Дверь записи самого агента (его словарь, его отказы) — в core/memory_door.py.
 # Имена реэкспортируются: инструмент memory_bank и тесты берут их отсюда.
@@ -30,6 +31,22 @@ from core.state_integrity import (
     rewrite_state_jsonl_unlocked,
     state_file_lock,
 )
+
+
+def record_is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
+    """The one TTL rule for the store AND hygiene: ttl<=0 is already expired;
+    a TTL reaching past the calendar never expires. `timedelta` overflowed on
+    a huge TTL (10**15 s, or a date near 9999) and one such row made `load()`
+    raise — the whole long-term memory went unavailable (проверка 17.11, №2)."""
+    if rec.ttl_seconds is None:
+        return False
+    try:
+        expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
+    except (OverflowError, ValueError):
+        return rec.ttl_seconds <= 0
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
+    return expires_at <= now
 
 
 class PersistentMemoryStore:
@@ -75,11 +92,61 @@ class PersistentMemoryStore:
                 else:
                     new_records.append(r)
             if updated:
-                rewrite_state_jsonl_unlocked(
-                    self.path,
-                    [r.model_dump(mode="json") for r in new_records],
-                )
+                self._rewrite_unlocked(new_records)
         return updated
+
+    def touch_access(self, ids: Iterable[str], at: _dt.datetime) -> int:
+        """Bump access stats on the CURRENT records, under one lock.
+
+        Replacing whole records from a copy read earlier (`update_many`) erased
+        any change written in between — a `superseded_by` came back as None
+        (проверка 16.11, серьёзная №11). Only the two access fields move here.
+        """
+        wanted = set(ids)
+        if not wanted:
+            return 0
+        with state_file_lock(self.path):
+            current = self._active_unlocked()
+            touched = 0
+            merged: list[MemoryRecord] = []
+            for rec in current:
+                if rec.id in wanted:
+                    rec = rec.model_copy(update={
+                        "access_count": rec.access_count + 1,
+                        "last_accessed_at": at,
+                    })
+                    touched += 1
+                merged.append(rec)
+            if touched:
+                self._rewrite_unlocked(merged)
+        return touched
+
+    def patch_many(self, changes: dict[str, dict[str, Any]]) -> int:
+        """Change NAMED FIELDS of the CURRENT records, read and written under one lock.
+
+        `changes` maps record id → {field: value or fn(current_value) -> value}.
+        Replacing whole records from a copy read earlier (`update_many`) undid
+        whatever was written in between — a quarantine tag, a `superseded_by`,
+        an access count (проверка 17.11, серьёзная №3). Returns how many landed.
+        """
+        if not changes:
+            return 0
+        with state_file_lock(self.path):
+            merged: list[MemoryRecord] = []
+            landed = 0
+            for rec in self._active_unlocked():
+                fields = changes.get(rec.id)
+                if fields:
+                    update = {
+                        name: (value(getattr(rec, name)) if callable(value) else value)
+                        for name, value in fields.items()
+                    }
+                    rec = rec.model_copy(update=update)
+                    landed += 1
+                merged.append(rec)
+            if landed:
+                self._rewrite_unlocked(merged)
+        return landed
 
     def update_many(self, records: Iterable[MemoryRecord]) -> int:
         """Replace several records in ONE rewrite. Returns how many landed."""
@@ -98,10 +165,7 @@ class PersistentMemoryStore:
                     merged.append(replacement)
                     landed += 1
             if landed:
-                rewrite_state_jsonl_unlocked(
-                    self.path,
-                    [r.model_dump(mode="json") for r in merged],
-                )
+                self._rewrite_unlocked(merged)
         return landed
 
     def archive_record(self, record_id: str) -> bool:
@@ -119,9 +183,7 @@ class PersistentMemoryStore:
                     self.archive_path, [target.model_dump(mode="json")],
                 )
             keep = [r for r in records if r.id != record_id]
-            rewrite_state_jsonl_unlocked(
-                self.path, [r.model_dump(mode="json") for r in keep],
-            )
+            self._rewrite_unlocked(keep)
         return True
 
     # ---------- reads ----------
@@ -136,9 +198,7 @@ class PersistentMemoryStore:
             live = [rec for rec in all_records if not self._is_expired(rec, now)]
             # Lazy eviction: rewrite store only when expired records are found
             if len(live) != len(all_records):
-                rewrite_state_jsonl_unlocked(
-                    self.path, [rec.model_dump(mode="json") for rec in live],
-                )
+                self._rewrite_unlocked(live)
         return live
 
     def _active_unlocked(self) -> list[MemoryRecord]:
@@ -162,12 +222,22 @@ class PersistentMemoryStore:
         rows the read path has already stopped returning — the store would
         keep answering "gone" while never actually letting go.
         """
-        if rec.ttl_seconds is None:
-            return False
-        expires_at = rec.created_at + _dt.timedelta(seconds=rec.ttl_seconds)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=_dt.timezone.utc)
-        return expires_at <= now
+        return record_is_expired(rec, now)
+
+    def _rewrite_unlocked(self, records: list[MemoryRecord]) -> None:
+        """Rewrite with `records`, keeping every stored row that does not
+        validate exactly as it was. A row from a newer version (say an unknown
+        `type`) used to vanish on the next rewrite of any other record, with
+        no quarantine and no log (проверка 16.11, серьёзная №10)."""
+        unreadable = []
+        for row in read_state_jsonl_unlocked(self.path) if self.path.exists() else []:
+            try:
+                MemoryRecord.model_validate(row)
+            except ValueError:
+                unreadable.append(row)
+        rewrite_state_jsonl_unlocked(
+            self.path, [r.model_dump(mode="json") for r in records] + unreadable,
+        )
 
     def _load_raw_unlocked(self) -> list[MemoryRecord]:
         """Same as `_load_raw`, but the caller already holds the file lock."""
@@ -233,9 +303,7 @@ class PersistentMemoryStore:
             keep = [r for r in records if r.id != record_id]
             if len(keep) == len(records):
                 return False
-            rewrite_state_jsonl_unlocked(
-                self.path, [r.model_dump(mode="json") for r in keep],
-            )
+            self._rewrite_unlocked(keep)
         return True
 
     def delete_all(self) -> int:
@@ -261,10 +329,7 @@ class PersistentMemoryStore:
 
     def _rewrite(self, records: list[MemoryRecord]) -> None:
         with state_file_lock(self.path):
-            rewrite_state_jsonl_unlocked(
-                self.path,
-                [record.model_dump(mode="json") for record in records],
-            )
+            self._rewrite_unlocked(records)
 
 
     def search_archive(self, term: str, *, limit: int = 10) -> list[MemoryRecord]:

@@ -33,6 +33,7 @@ Command surface (main.py)
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -302,6 +303,11 @@ def propose_subagent(
         temperature=0.0,
     )
 
+    if not isinstance(raw, str):
+        # Пустой ответ модели — ошибка модели, а не падение (проверка 16.11, средняя).
+        _emit(logger, "subagent_proposal_llm_error", {"goal": goal, "raw_preview": repr(raw)[:200]})
+        return SubagentProposalResult(status="llm_error", reason="LLM returned no text", raw_response="")
+
     data = extract_json_object(raw)
     if data is None:
         _emit(logger, "subagent_proposal_llm_error", {
@@ -413,12 +419,19 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
     if risk not in ("low", "medium", "high"):
         risk = "low"
 
-    read_tags = tuple(str(t) for t in (data.get("memory_read_tags") or []))
-    write_tags = tuple(str(t) for t in (data.get("memory_write_tags") or []))
+    # Правила области держит код, а не модель: одобрение только повышается,
+    # инструменты — только из списка чтения, частные метки не выдаются,
+    # бюджет не выше умолчаний (проверка 16.11, средняя).
+    read_tags = tuple(str(t) for t in (data.get("memory_read_tags") or [])
+                      if not _PRIVATE_TAG_RE.search(str(t)))
+    write_tags = tuple(str(t) for t in (data.get("memory_write_tags") or [])
+                       if not _PRIVATE_TAG_RE.search(str(t)))
     allowed = tuple(str(t) for t in (data.get("allowed_tools") or ["file_read"]))
-    forbidden = tuple(str(t) for t in (data.get("forbidden_tools") or []))
+    forbidden = tuple(dict.fromkeys(
+        [str(t) for t in (data.get("forbidden_tools") or [])] + list(_ALWAYS_FORBIDDEN)))
     # Resolve any overlap conservatively: overlap → stays forbidden
-    allowed = tuple(t for t in allowed if t not in set(forbidden))
+    safe = _read_only_tools()
+    allowed = tuple(t for t in dict.fromkeys(allowed) if t not in set(forbidden) and t in safe)
 
     return SubagentProposal(
         task_goal=goal,
@@ -428,23 +441,72 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
         memory_scope=MemoryScope(
             read_tags=read_tags,
             write_tags=write_tags,
-            write_requires_review=bool(data.get("write_requires_review", True)),
+            write_requires_review=True,
         ),
         tool_scope=ToolScope(
             allowed_tools=allowed,
             forbidden_tools=forbidden,
-            read_only=bool(data.get("read_only", True)),
+            read_only=True,
         ),
         budget_scope=BudgetScope(
-            max_model_calls=max(0, int(data.get("max_model_calls") or 3)),
-            max_web_fetches=max(0, int(data.get("max_web_fetches") or 5)),
-            max_file_writes=max(0, int(data.get("max_file_writes") or 0)),
-            max_cycles=max(1, int(data.get("max_cycles") or 1)),
+            max_model_calls=_budget(data, "max_model_calls"),
+            max_web_fetches=_budget(data, "max_web_fetches"),
+            max_file_writes=_budget(data, "max_file_writes"),
+            max_cycles=max(1, _budget(data, "max_cycles")),
         ),
         risk_level=risk,  # type: ignore[arg-type]
         expected_output=str(data.get("expected_output") or "subagent output"),
-        approval_required=bool(data.get("approval_required", True)),
+        approval_required=True,
     )
+
+
+_DEFAULT_BUDGET = BudgetScope()
+_ALWAYS_FORBIDDEN = ("shell_exec", "send_message", "send_proposal", "reply_to_client",
+                     "contact_client", "file_write")
+# Частная метка — по ЦЕЛЫМ словам метки, а не по кускам: «ключевые-факты»,
+# «key-findings», «tokenizer», «секретарь» — обычные метки (проверка 17.11, вечер).
+_PRIVATE_WORD_RE = re.compile(
+    r"private\w*|secrets?|secret\w*|credentials?|passw\w*|personal\w*|pii"
+    r"|приват\w*|личн\w*|секретн\w*|секреты?|парол\w*",
+)
+#: «key»/«token»/«ключ»/«токен» are private only next to an access word.
+_PAIRED_WORDS = frozenset({"key", "keys", "token", "tokens", "ключ", "ключи", "токен", "токены"})
+_ACCESS_WORDS = frozenset({"api", "access", "auth", "bearer", "refresh", "ssh", "secret", "private",
+                           "доступа", "доступ", "секретный", "секретные", "апи"})
+
+
+class _PrivateTag:
+    """`.search(tag)` → truthy when the tag names private data (whole words)."""
+
+    @staticmethod
+    def search(tag: str) -> bool:
+        words = [w for w in re.split(r"[^a-zа-яё0-9]+", str(tag).casefold()) if w]
+        if any(_PRIVATE_WORD_RE.fullmatch(w) for w in words):
+            return True
+        if "apikey" in words or "apikeys" in words:
+            return True
+        if len(words) == 1 and words[0] in _PAIRED_WORDS:
+            return True  # a bare «keys» / «токены» tag names the secrets themselves
+        return bool(set(words) & _PAIRED_WORDS and set(words) & _ACCESS_WORDS)
+
+
+_PRIVATE_TAG_RE = _PrivateTag()
+
+
+def _budget(data: dict[str, Any], name: str) -> int:
+    """Бюджет из ответа модели: нет — умолчание, явный 0 — 0, выше умолчания — умолчание."""
+    ceiling = getattr(_DEFAULT_BUDGET, name)
+    value = data.get(name)
+    if value is None:
+        return ceiling
+    return min(ceiling, max(0, int(value)))
+
+
+def _read_only_tools() -> frozenset[str]:
+    """Инструменты, которые раннер субагента считает безопасными (только чтение)."""
+    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
+
+    return _SAFE_SUBAGENT_TOOLS
 
 
 def _emit(logger: Any, event: str, payload: Any) -> None:
@@ -470,9 +532,13 @@ def project_memory(
 
     Замер, отвергнутые варианты и границы: MIR-156 в docs/audit/MASTER_ISSUE_REGISTRY.md.
     """
-    granted = {str(t).strip().casefold() for t in (read_tags or ()) if str(t).strip()}
+    asked = {str(t).strip().casefold() for t in (read_tags or ()) if str(t).strip()}
+    # Частные метки не выдаются и здесь: контракт мог прийти не через
+    # _parse_proposal (проверка 17.11, средняя).
+    granted = {t for t in asked if not _PRIVATE_TAG_RE.search(t)}
     audit: dict[str, Any] = {
         "granted_tags": sorted(granted),
+        "refused_tags": sorted(asked - granted),
         "records_seen": 0,
         "records_projected": 0,
         "truncated": False,
@@ -484,7 +550,9 @@ def project_memory(
     for record in records or ():
         audit["records_seen"] += 1
         tags = {str(t).strip().casefold() for t in (getattr(record, "tags", None) or ())}
-        if tags & granted:
+        # Запись с частной меткой не уходит, даже если рядом выданная
+        # (проверка 17.11, средняя).
+        if tags & granted and not any(_PRIVATE_TAG_RE.search(t) for t in tags):
             picked.append(record)
 
     lines: list[str] = []
@@ -492,7 +560,7 @@ def project_memory(
     for record in picked[:max_records]:
         content = getattr(record, "content", "")
         text = content if isinstance(content, str) else str(content)
-        entry = f"- [{getattr(record, 'id', '?')}] {text.strip()}"
+        entry = f"- [{_inert(getattr(record, 'id', '?'))}] {_inert(text)}"
         if used + len(entry) > max_chars:
             audit["truncated"] = True
             break
@@ -506,7 +574,7 @@ def project_memory(
         return "", audit
 
     header = (
-        "<granted_memory tags=\"" + ", ".join(sorted(granted)) + "\">" + "\n"
+        "<granted_memory tags=\"" + _inert(", ".join(sorted(granted))).replace('"', "'") + "\">" + "\n"
         + "Это ВСЯ память, к которой у тебя есть доступ. Другой у тебя нет."
     )
     tail = "</granted_memory>"
@@ -517,3 +585,10 @@ def project_memory(
             f"разрешённых записей]" + "\n" + tail
         )
     return "\n".join([header, *lines, tail]), audit
+
+
+def _inert(value: Any) -> str:
+    """Текст записи — данные: без угловых скобок и переводов строк он не
+    закроет блок <granted_memory> (проверка 16.11, средняя)."""
+    text = value if isinstance(value, str) else str(value)
+    return " ".join(text.replace("<", "‹").replace(">", "›").split())

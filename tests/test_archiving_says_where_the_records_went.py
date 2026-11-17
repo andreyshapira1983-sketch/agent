@@ -20,7 +20,7 @@ def test_the_archive_command_names_the_price(capsys, monkeypatch) -> None:
         def archive_persistent(self, **_kw):
             return _Report()
 
-    handled = mod._handle_hygiene("archive", _Agent(), pathlib.Path("."))
+    handled = mod._handle_hygiene("archive --apply", _Agent(), pathlib.Path("."))
     printed = capsys.readouterr().err
 
     assert handled

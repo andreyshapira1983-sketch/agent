@@ -387,9 +387,10 @@ class AgentLoopMemoryWrite:
             if not candidates:
                 return
             p = replacement_probabilities(key, str(record.content), candidates)
-            marked = [r.model_copy(update={"superseded_by": record.id})
-                      for r in candidates if p[r.id] >= THRESHOLD]
-            self.persistent_store.update_many(marked)
+            marked = [r for r in candidates if p[r.id] >= THRESHOLD]
+            # Only the one field, on the CURRENT record (проверка 17.11, №3).
+            self.persistent_store.patch_many(
+                {r.id: {"superseded_by": record.id} for r in marked})
         except Exception as exc:  # noqa: BLE001 — Jev только помечает, вывод уже записан; сбой — в журнал
             self._sensor_failed("jev_memory", exc)
             return
@@ -468,11 +469,13 @@ class AgentLoopMemoryWrite:
                 records, conflicted_claim_ids=conflicted_ids
             )
             if report["quarantined"]:
-                # One rewrite total: `update` rewrites the whole file per record.
-                self.persistent_store.update_many(
-                    record for record in updated
-                    if "conflicted" in (record.tags or [])
-                )
+                # One rewrite total, and only the tag is added to the CURRENT
+                # record — a stale whole copy reverted other fields (проверка 17.11, №3).
+                self.persistent_store.patch_many({
+                    record.id: {"tags": lambda tags: [*(tags or []), "conflicted"]
+                                if "conflicted" not in (tags or []) else list(tags)}
+                    for record in updated if "conflicted" in (record.tags or [])
+                })
             self.log.log("conflict_quarantine", {"claims": len(conflicted_ids), **report})
         except Exception as exc:  # noqa: BLE001
             self.log.log(

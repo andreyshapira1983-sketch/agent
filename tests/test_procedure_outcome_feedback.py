@@ -72,6 +72,8 @@ def _episode(
         completion_state=(completion or _COMPLETION_FOR.get(outcome)),  # type: ignore[arg-type]
         replan_exhausted=replan,
         used_procedure_ids=used, tags=tags,
+        # Credit needs one verified fact since 2026-11-16 (self-praise gate).
+        verified_chunks=1,
     )
 
 
@@ -223,7 +225,12 @@ def test_counters_confidence_and_status_move_together(tmp_path: Path) -> None:
 
     got = _by_id(store)["p"]
     assert got.confidence == _smoothed_confidence(got.success_count, got.failure_count)
-    assert got.status == ("active" if got.confidence >= 0.6 else "needs_review")
+    # One authority for the status (2026-11-16: a 1:1 tie stays `candidate`).
+    from core.smart_memory_helpers import _procedure_status_for
+
+    assert got.status == _procedure_status_for(
+        got.success_count, got.confidence, failure_count=got.failure_count
+    )
 
 
 def test_demotion_is_now_reachable(tmp_path: Path) -> None:

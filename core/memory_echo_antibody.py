@@ -271,13 +271,18 @@ class MemoryWriteRegistry:
         if not self.path.exists():
             return []
         events: list[MemoryWriteEvent] = []
-        with self.path.open("r", encoding="utf-8") as fh:
+        # Не-UTF-8 байты и строка-не-объект (`[1, 2]`, `"x"`) роняли весь
+        # load() (проверка 16.11, средняя): такие строки пропускаются.
+        with self.path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    events.append(MemoryWriteEvent.from_dict(json.loads(line)))
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        continue
+                    events.append(MemoryWriteEvent.from_dict(row))
                 except (ValueError, TypeError):
                     # A single corrupt line must never sink the run.
                     continue

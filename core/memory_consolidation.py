@@ -117,6 +117,8 @@ def needs_title(question: str) -> bool:
 
 def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Consolidation:
     """Спросить модель; любой сбой — ADD."""
+    # None или не-строка в вопросе роняли split (проверка 17.11, средняя).
+    question = question if isinstance(question, str) else ("" if question is None else str(question))
     long_q = needs_title(question)
     if llm is None or (not similar and not long_q):
         return Consolidation("ADD", reason="nothing similar stored")
@@ -143,7 +145,8 @@ def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Co
         return Consolidation("ADD", title=title, reason="unreadable model answer")
     target = data.get("target")
     ids = {r.id for r in similar}
-    if op != "ADD" and target not in ids:
+    # Список/словарь в target давал TypeError вместо ADD (проверка 17.11, средняя).
+    if op != "ADD" and (not isinstance(target, str) or target not in ids):
         return Consolidation("ADD", title=title, reason=f"{op} named no known record ({target!r})")
     merged = " ".join(str(data.get("merged") or "").split())[:MAX_MERGED_CHARS] or None
     if op == "UPDATE" and not merged:

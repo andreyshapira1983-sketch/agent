@@ -125,7 +125,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("cmd", ":schedule-list", ":schedule-list [status|all]", 34),
     ("cmd", ":schedule-disable", ":schedule-disable <id>", 34),
     ("cmd", ":schedule-tick", ":schedule-tick [--run]", 34),
-    ("cmd", ":hygiene", ":hygiene [subcmd] [--dry-run]", 34),
+    ("cmd", ":hygiene", ":hygiene [subcmd] [--apply]", 34),
     ("raw", "      backups    delete old .bak.<ts> files (keep last 3, >14d old)"),
     ("raw", "      expire     drop persistent records past their TTL"),
     ("raw", "      dedupe     collapse near-duplicate persistent records"),

@@ -10,6 +10,7 @@ Conclusions pass, raw code / duplicates / frozen sources / unmapped kinds do not
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -73,7 +74,11 @@ def memory_door_verdict(store, policy, text, kind, provenance):
     consent_tag = CONSENT_TAG_MAP.get(kind)
     if consent_tag is None:
         return None, f"unknown kind {kind!r}; the door accepts {ACCEPTED_KINDS_TEXT}"
-    tags = [kind, provenance, consent_tag]
+    # Provenance is free text from the caller, so it is NAMESPACED, never a
+    # bare tag: `provenance="sensitive-data-consent"` used to pass the PII gate
+    # and `"source-backed"` to dress an agent record as pipeline-verified
+    # (проверка 16.11, серьёзная №7).
+    tags = [kind, f"provenance:{provenance}", consent_tag]
     if provenance.lower().startswith("memory:"):
         # Authority change 2026-09-04: memory is not a source of memory — a
         # record whose only evidence is another record is the self-echo the
@@ -84,16 +89,22 @@ def memory_door_verdict(store, policy, text, kind, provenance):
     # door writes and `data/memory_writes.jsonl` was never fed by them.
     registry = _door_write_registry(store)
     recent = []
+    echo_off = ""
     if registry is not None:
         try:
             recent = registry.recent()
-        except Exception:  # noqa: BLE001 — a registry hiccup must never block the door
+        except Exception as exc:  # noqa: BLE001 — a registry hiccup must never block the door
+            # Дверь работает дальше, но выключенный фильтр эха больше не
+            # молчит: журнал, счётчик и текст отказа (проверка 16.11, средняя).
             recent = []
+            echo_off = _note_echo_gate_failure("recent", exc)
     decision = policy.decide(
         text, tags, source="agent-auto", existing=store.load(), recent_writes=recent,
     )
     if decision.decision != "save":
         why = "; ".join(str(r) for r in (getattr(decision, "reasons", None) or ())) or "write policy refused"
+        if echo_off:
+            why = f"{why}; {echo_off}"
         return None, f"write policy refused: {why}"
     record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
     store.save(record)
@@ -111,9 +122,25 @@ def memory_door_verdict(store, policy, text, kind, provenance):
             from core.memory_echo_antibody import make_event
 
             registry.append(make_event(text, tags=tags, record_type="semantic", source="agent-auto"))
-        except Exception:  # noqa: BLE001, S110 — the write stands; the echo log is best-effort
-            pass
+        except Exception as exc:  # noqa: BLE001 — the write stands; the echo log is best-effort
+            _note_echo_gate_failure("append", exc)
     return record.id, ""
+
+
+_LOG = logging.getLogger(__name__)
+
+#: Сколько раз журнал эха не прочитался/не дописался и последняя причина
+#: (проверка 16.11, средняя): раньше это глоталось, и фильтр эха был выключен молча.
+ECHO_GATE_FAILURES = {"count": 0, "last": ""}
+
+
+def _note_echo_gate_failure(step, exc):
+    """Count, log and describe an echo-log failure; returns the reason text."""
+    reason = f"echo gate off ({step} of memory_writes.jsonl failed: {type(exc).__name__}: {str(exc)[:120]})"
+    ECHO_GATE_FAILURES["count"] += 1
+    ECHO_GATE_FAILURES["last"] = reason
+    _LOG.warning("memory door: %s", reason)
+    return reason
 
 
 def _door_write_registry(store):

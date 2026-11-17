@@ -58,27 +58,19 @@ from .verifier_utils import (
 # evidence. Only an explicit human write qualifies: the operator asserting a
 # fact is a source, whereas the agent's own auto-written record is a copy of
 # something it already said.
-_INDEPENDENT_MEMORY_ORIGINS: frozenset[str] = frozenset({"user-explicit"})
 
 
 def _memory_citation_is_independent(ev: Evidence) -> bool:
     """May a citation resolving to this evidence count as `verified`?
 
-    Only memory evidence is questioned here; every other kind keeps its
-    existing treatment. Two memory shapes are deliberately distinguished:
-
-    - a **persistent record** (`obtained_via="memory"`) is judged on its
-      `origin`: a `user-explicit` record is a human assertion, while an
-      `agent-auto` or ingested one is not independent of the agent;
-    - a **working-memory artifact** (`obtained_via="working_memory"`) is a
-      cached tool observation — real output that was actually fetched — so it
-      keeps counting as evidence.
+    The rule lives in ONE place, `core.evidence.evidence_is_independent`, so
+    every road to `verified` (a citation, the union of two citations, an
+    uncited sentence matched by structure or by the model) asks the same
+    question (проверка 17.11, серьёзные №7–8).
     """
-    if ev.kind != "memory":
-        return True
-    if ev.obtained_via != "memory":
-        return True
-    return ev.origin in _INDEPENDENT_MEMORY_ORIGINS
+    from core.evidence import evidence_is_independent
+
+    return evidence_is_independent(ev)
 
 
 def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence | None:
@@ -356,7 +348,11 @@ def _union_judgement(
     не выдержало объединение — всё как раньше.
     """
     from dataclasses import replace
-    unique = list({ev.id: ev for ev in chunk_evs}.values())
+    # Only INDEPENDENT evidence joins the union: the merged record used to
+    # inherit the first item's origin, so `[file:a][tool:memory_recall]`
+    # verified a fact found only in the agent's own memory (проверка 17.11, №7).
+    unique = [ev for ev in {ev.id: ev for ev in chunk_evs}.values()
+              if _memory_citation_is_independent(ev)]
     if len(unique) < 2 or not cits:
         return False
     merged = replace(unique[0], excerpt="\n".join(ev.excerpt or "" for ev in unique))
@@ -473,7 +469,7 @@ def _judge_cited(
     if not any_matched and _union_judgement(chunk_text, cits, chunk_evs,
                                             stat_claim=stat_claim, stat_figures=stat_figures):
         any_matched, chunk_reason = True, None
-        matched_ids.extend(ev.id for ev in chunk_evs if ev.id not in matched_ids)
+        matched_ids.extend(e.id for e in chunk_evs if e.id not in matched_ids and _memory_citation_is_independent(e))
         annotated, topic_only_replacements = _promote_topic_only(annotated, topic_only_replacements), []
     # R3: литералы накрываются объединением улик (см. _union_clears_literal).
     chunk_reason = _union_clears_literal(chunk_reason, chunk_evs, chain)

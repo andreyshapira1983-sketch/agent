@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from core.ids import new_id
+from core.injection_guard import carries_suspicious_annotation
 
 # ---------------------------------------------------------------------------
 # Taxonomy
@@ -448,6 +449,74 @@ def looks_like_error_page(text: str) -> bool:
     return any(marker in lowered for marker in _ERROR_PAGE_MARKERS)
 
 
+#: Memory whose provenance makes it independent evidence: only a human's own
+#: assertion; the agent's auto-written record is a copy of what it already said.
+_INDEPENDENT_MEMORY_ORIGINS: frozenset[str] = frozenset({"user-explicit"})
+
+
+def evidence_is_independent(ev: Any) -> bool:
+    """May this evidence count as INDEPENDENT support (`verified`)? The one rule.
+
+    - the agent's own state/journals/drafts (`origin="agent-own"`) — never;
+    - the agent searching its memory (`memory_recall`) and persistent memory
+      records (`obtained_via="memory"`) — only when the origin is a human's;
+    - a working-memory artifact (a cached real tool observation) and every
+      other kind — yes.
+    Every verifier road asks THIS function (проверка 17.11): a rule kept per
+    road was bypassed by the roads it did not sit on.
+    """
+    if getattr(ev, "origin", None) == "agent-own":
+        return False
+    via = getattr(ev, "obtained_via", None)
+    if via == "memory_recall":
+        return getattr(ev, "origin", None) in _INDEPENDENT_MEMORY_ORIGINS
+    if getattr(ev, "kind", None) == "memory" and via == "memory":
+        return getattr(ev, "origin", None) in _INDEPENDENT_MEMORY_ORIGINS
+    return True
+
+
+def _memory_recall_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
+    """The agent reading its own memory: independent only if EVERY record is a human's.
+
+    It used to fall through to the generic `tool_output` at 0.70, which the
+    verifier counts as independent — the agent confirmed itself by having
+    remembered (проверка 16.11, серьёзная №2; дефект 30.09). Kind stays
+    `tool_output` so the habitual `[tool:memory_recall]` citation resolves;
+    `_memory_citation_is_independent` judges the origin (obtained_via).
+    """
+    if not isinstance(output, dict):
+        return None
+    records = [r for r in (output.get("records") or []) if isinstance(r, dict)]
+    if not records:
+        return None
+    human = all(r.get("source") == "user-explicit" for r in records)
+    return make_evidence(
+        kind="tool_output",
+        source_id="tool_output:memory_recall",
+        obtained_via="memory_recall",
+        claim=f"Own memory recalled for {args.get('term', '')!r} (low trust)",
+        excerpt="\n".join(str(r.get("content", "")) for r in records),
+        confidence=DEFAULT_CONFIDENCE["memory"],
+        origin="user-explicit" if human else "agent-auto",
+    )
+
+
+#: Workspace folders that hold what the agent wrote ITSELF (state, journals,
+#: drafts, generated docs). By folder only, relative to the workspace: a user's
+#: `build/server.log` or `dataset.jsonl` elsewhere stays ordinary evidence.
+_OWN_STATE_DIRS = ("data/", "logs/", "proposals/", "knowledge/generated/")
+
+
+def _is_own_state_path(path: str) -> bool:
+    bare = str(path or "").replace("\\", "/").strip()
+    while bare.startswith("./"):
+        bare = bare[2:]
+    for marker in ("/agent-main/", "/opt/agent/"):
+        if marker in bare:
+            bare = bare.split(marker, 1)[1]
+    return bare.lower().startswith(_OWN_STATE_DIRS)
+
+
 def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     """Evidence for a `file_read` result, whole file or a line window.
 
@@ -467,8 +536,15 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
 
     # Одна маскировка на выдержку и на полный текст: сверка не видит больше, чем выдержка.
     output = redact_text(output)[0]
+    # The agent's own state, journals and drafts (data/, logs/, proposals/, …)
+    # are a record of itself, not the world. The kind stays `file` so an honest
+    # `[file:data/…]` citation still resolves; the origin `agent-own` tells the
+    # verifier it is not INDEPENDENT support (проверка 16.11, серьёзная №3;
+    # дефект 30.09).
+    own = _is_own_state_path(path)
     return make_evidence(
         kind="file",
+        origin="agent-own" if own else None,
         source_id=f"file:{path}{window}",
         obtained_via="file_read",
         claim=f"Contents of workspace file {path}"
@@ -528,6 +604,52 @@ def _file_write_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
                          obtained_via="file_write", claim=receipt, excerpt=excerpt)
 
 
+def _flagged_string_evidence(tool_name: str, args: dict[str, Any], output: Any) -> Evidence | None:
+    """Улика из вывода, который сканер пометил и превратил в строку-обёртку.
+
+    У инструментов без конверта (`_UNTRUSTED_OUTPUT_FIELDS`) пометка делает
+    из словаря строку, и ветки ниже молча роняли улику. Теперь улика остаётся,
+    выдержка — вся обёртка с предупреждением: дальше её предложения идут как
+    `suspect` (проверка 16.11, средняя).
+    """
+    if not isinstance(output, str) or not carries_suspicious_annotation(output):
+        return None
+    if tool_name == "python_probe":
+        kind, source_id, conf, origin = "tool_output", "tool_output:python_probe", None, None
+    elif tool_name == "read_logs":
+        kind, source_id, conf, origin = "log_event", f"log_event:{args.get('trace_id', '')}:flagged", None, None
+    elif tool_name == "diff_file":
+        kind, source_id, conf, origin = "diff_preview", f"diff_preview:{args.get('path', '<unknown>')}", None, None
+    elif tool_name == "rss_fetch":
+        kind, source_id, conf, origin = "web_page", f"web_page:{args.get('url', '<unknown>')}", 0.68, None
+    # Те же kind/source_id, что у чистых веток, чтобы ссылки находили улику
+    # (проверка 17.11, средняя).
+    elif tool_name == "web_search":
+        kind, source_id, conf, origin = "web_search_hit", f"web_search:{args.get('query', '<unknown>')}", None, None
+    elif tool_name == "convert_file":
+        kind, source_id, conf, origin = "file", f"file:{str(args.get('path', 'unknown'))[:120]}", None, None
+    elif tool_name == "file_write":
+        path = str(args.get("path") or "")[:120]
+        if not path:
+            return None
+        kind, source_id, conf, origin = "tool_output", f"tool_output:file_write:{path}", None, None
+    elif tool_name == "memory_recall":
+        # Чьи записи — не узнать из обёртки; значит, не человека.
+        kind, source_id = "tool_output", "tool_output:memory_recall"
+        conf, origin = DEFAULT_CONFIDENCE["memory"], "agent-auto"
+    else:
+        return None
+    return make_evidence(
+        kind=kind,
+        source_id=source_id,
+        obtained_via=tool_name,
+        claim=f"Tool {tool_name} returned output flagged by the injection scanner",
+        excerpt=output,
+        confidence=conf,
+        origin=origin,
+    )
+
+
 def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
     *,
     tool_name: str,
@@ -544,6 +666,10 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         return None
 
     args = arguments or {}
+
+    flagged = _flagged_string_evidence(tool_name, args, output)
+    if flagged is not None:
+        return flagged
 
     # ---- python_probe (лаборатория) --------------------------------------
     if tool_name == "python_probe":
@@ -819,6 +945,9 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             claim=f"Workspace search under {args.get('path', '.')}",
             excerpt=_search_excerpt(output),
         )
+
+    if tool_name == "memory_recall":
+        return _memory_recall_evidence(args, output)
 
     # ---- unknown tool fallback -------------------------------------------
     # Emit a generic tool_output evidence so the chain doesn't lose track

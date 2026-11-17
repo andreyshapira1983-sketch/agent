@@ -132,6 +132,21 @@ def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) ->
             + report.get("archived", 0)
         )
         mode = "сухой прогон (только счёт)" if dry_run else "боевой проход"
+        # «Ничего не уничтожено» говорилось и после удалений навсегда
+        # (проверка 16.11, средняя): спячка обратима, удаление — нет.
+        deleted = sum(int(report.get(k, 0) or 0) for k in (
+            "expired", "deduped", "episodes_pruned",
+            "assumptions_duplicates_removed", "assumptions_over_cap_removed",
+            "backups_deleted",
+        ))
+        if deleted and dry_run:
+            fate = (f"спячка обратима; боевой проход удалил бы навсегда: {deleted} "
+                    "(истёкшие, дубли, эпизоды, посылки, копии), сейчас не удалено ничего")
+        elif deleted:
+            fate = (f"спячка обратима, но удалено навсегда: {deleted} "
+                    "(истёкшие, дубли, эпизоды, посылки, копии) — их не вернуть")
+        else:
+            fate = "спячка обратима, ничего не уничтожено"
         full_text = "\n".join((
             (
                 f"Проверял: {scanned} записей постоянной памяти, "
@@ -153,8 +168,7 @@ def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) ->
             ),
             (
                 "Непроверенным осталось: полезность оставшихся записей не "
-                "доказана и не опровергнута — спячка обратима, ничего не "
-                "уничтожено"
+                f"доказана и не опровергнута — {fate}"
             ),
             (
                 f"Уверенность: высокая в счёте, {mode}; классификация "
@@ -275,15 +289,19 @@ def prune_episodic(
     return pruned_ids
 
 
-def dedupe_episodic(*, log: Any, episodic_store: Any, dry_run: bool = False) -> list[str]:
-    """Keep one copy of each repeated episode."""
+def dedupe_episodic(
+    *, log: Any, episodic_store: Any, dry_run: bool = False, procedural_store: Any = None,
+) -> list[str]:
+    """Keep one copy of each repeated episode; anchors of procedure credit stay
+    (MIR-128, same set prune gets — проверка 16.11, средняя)."""
     if episodic_store is None:
         log.log("episodic_memory_dedupe",
                 {"dropped": 0, "dry_run": dry_run, "skipped_reason": "no store"})
         return []
     from core.episodic_hygiene import collapse_duplicate_episodes
 
-    dropped = collapse_duplicate_episodes(episodic_store, dry_run=dry_run)
+    keep = cited_episode_ids(procedural_store, episodic_store) if procedural_store is not None else frozenset()
+    dropped = collapse_duplicate_episodes(episodic_store, dry_run=dry_run, keep_ids=keep)
     log.log("episodic_memory_dedupe",
             {"dropped": len(dropped), "dry_run": dry_run, "ids": dropped})
     return dropped

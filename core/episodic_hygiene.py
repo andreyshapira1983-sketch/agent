@@ -41,7 +41,7 @@ def _parse_iso(iso: str) -> datetime | None:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     else:
         return dt
@@ -168,11 +168,13 @@ def prune_stale_episodes(
     with state_file_lock(store.path):
         rows = read_state_jsonl_unlocked(store.path)
         episodes: list[EpisodeRecord] = []
+        originals: list[dict] = []  # parallel to `episodes`
         unparsed: list[dict] = []
         for row in rows:
             try:
                 episodes.append(EpisodeRecord.from_dict(row))
-            except (TypeError, ValueError):
+                originals.append(row)
+            except (TypeError, ValueError, OverflowError):
                 unparsed.append(row)
         victims = select_for_pruning(
             episodes,
@@ -188,12 +190,13 @@ def prune_stale_episodes(
         victim_ids = {ep.id for ep in victims}
         if dry_run or not victim_ids:
             return [ep.id for ep in victims]
-        kept = [ep for ep in episodes if ep.id not in victim_ids]
-        kept.sort(key=lambda e: e.created_at)
-        # A row this reader cannot parse is not evidence of staleness: it is
-        # written back untouched, never dropped by the rewrite.
+        kept = [(ep, row) for ep, row in zip(episodes, originals, strict=True) if ep.id not in victim_ids]
+        kept.sort(key=lambda pair: pair[0].created_at)
+        # Kept rows go back as their ORIGINAL dicts (unknown keys intact), and a
+        # row this reader cannot parse is not evidence of staleness: it is
+        # written back untouched (проверка 16.11, средняя).
         rewrite_state_jsonl_unlocked(
-            store.path, [e.to_dict() for e in kept] + unparsed,
+            store.path, [row for _ep, row in kept] + unparsed,
         )
         return [ep.id for ep in victims]
 
@@ -238,33 +241,58 @@ def _duplicate_key(ep: EpisodeRecord) -> tuple[str, str, str, str]:
     )
 
 
-def select_duplicate_episodes(episodes: Sequence[EpisodeRecord]) -> list[str]:
-    """IDs of every episode but the newest of each identical group.
+def _copy_rank(pair: tuple[int, EpisodeRecord]) -> tuple:
+    """Which copy of a group survives: eligible, then more verified, then newest."""
+    index, ep = pair
+    return (ep.usage_eligible is True, ep.verified_chunks or 0, ep.created_at or "", index)
 
-    Protected episodes are never selected, matching `select_for_pruning`: a
-    lesson tagged by hand outranks this rule. An empty summary is not a key —
-    those records carry no lesson to collapse and are left to age out.
+
+def select_duplicate_episodes(
+    episodes: Sequence[EpisodeRecord],
+    *,
+    keep_ids: frozenset[str] = frozenset(),
+) -> list[str]:
+    """IDs of every episode but the best copy of each identical group.
+
+    The best copy is the eligible one, then the better verified, then the
+    newest: keeping the newest blindly dropped a verified anchor for a
+    quarantined twin (проверка 16.11, средняя). `keep_ids` (credit anchors,
+    MIR-128) are never selected. Protected episodes are never selected,
+    matching `select_for_pruning`: a lesson tagged by hand outranks this rule.
+    An empty summary is not a key — those records carry no lesson to collapse
+    and are left to age out.
     """
-    newest: dict[tuple[str, str, str, str], str] = {}
-    seen: dict[tuple[str, str, str, str], list[str]] = {}
-    for ep in episodes:
+    return [episodes[i].id for i in _victim_indices(episodes, keep_ids)]
+
+
+def _victim_indices(
+    episodes: Sequence[EpisodeRecord], keep_ids: frozenset[str],
+) -> list[int]:
+    """Positions of the copies to drop. By POSITION, not id: legacy rows share
+    a content-hash id, so «drop by id» either removed nothing or removed the
+    survivor too (проверка 17.11, мелкая)."""
+    seen: dict[tuple[str, str, str, str], list[tuple[int, EpisodeRecord]]] = {}
+    for index, ep in enumerate(episodes):
         if set(ep.tags or ()) & EpisodicMemoryStore.PROTECTED_TAGS:
             continue
         key = _duplicate_key(ep)
         if not key[2]:
             continue
-        seen.setdefault(key, []).append(ep.id)
-        newest[key] = ep.id
-    victims: list[str] = []
-    for key, ids in seen.items():
-        victims.extend(i for i in ids if i != newest[key])
-    return victims
+        seen.setdefault(key, []).append((index, ep))
+    victims: list[int] = []
+    for group in seen.values():
+        best = max(group, key=_copy_rank)[0]
+        victims.extend(i for i, ep in group if i != best and ep.id not in keep_ids)
+    return sorted(victims)
 
 
 def collapse_duplicate_episodes(
-    store: EpisodicMemoryStore, *, dry_run: bool = False,
+    store: EpisodicMemoryStore,
+    *,
+    dry_run: bool = False,
+    keep_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Keep one copy of each repeated episode. Returns the IDs dropped."""
+    """Keep one copy of each repeated episode (plus any `keep_ids`). Returns the IDs dropped."""
     from core.state_integrity import (
         read_state_jsonl_unlocked,
         rewrite_state_jsonl_unlocked,
@@ -273,17 +301,19 @@ def collapse_duplicate_episodes(
 
     with state_file_lock(store.path):
         rows = read_state_jsonl_unlocked(store.path)
-        episodes: list[EpisodeRecord] = []
-        for row in rows:
+        parsed: list[tuple[int, EpisodeRecord]] = []
+        for row_index, row in enumerate(rows):
             try:
-                episodes.append(EpisodeRecord.from_dict(row))
-            except (TypeError, ValueError):
+                parsed.append((row_index, EpisodeRecord.from_dict(row)))
+            except (TypeError, ValueError, OverflowError):
                 continue
-        victims = select_duplicate_episodes(episodes)
-        if victims and not dry_run:
-            dropped = set(victims)
+        episodes = [ep for _r, ep in parsed]
+        picked = _victim_indices(episodes, keep_ids)
+        victims = [episodes[i].id for i in picked]
+        if picked and not dry_run:
+            dropped_rows = {parsed[i][0] for i in picked}
             rewrite_state_jsonl_unlocked(
                 store.path,
-                [r for r in rows if r.get("id") not in dropped],
+                [r for n, r in enumerate(rows) if n not in dropped_rows],
             )
     return victims

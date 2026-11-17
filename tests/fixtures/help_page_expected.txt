@@ -104,7 +104,7 @@ Commands:
   :schedule-list [status|all]     list schedules
   :schedule-disable <id>          disable a runtime schedule without running it
   :schedule-tick [--run]          enqueue due schedule tasks, optionally run them
-  :hygiene [subcmd] [--dry-run]   memory hygiene; subcmd:
+  :hygiene [subcmd] [--apply]     memory hygiene; subcmd:
       backups    delete old .bak.<ts> files (keep last 3, >14d old)
       expire     drop persistent records past their TTL
       dedupe     collapse near-duplicate persistent records

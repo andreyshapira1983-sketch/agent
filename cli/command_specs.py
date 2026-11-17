@@ -110,7 +110,7 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         description="memory hygiene; subcmd:",
         category="Memory",
         handler_key="hygiene",
-        usage="[subcmd] [--dry-run]",
+        usage="[subcmd] [--apply]",
     ),
     # ── Sources, ingestion & knowledge ───────────────────────
     CommandSpec(

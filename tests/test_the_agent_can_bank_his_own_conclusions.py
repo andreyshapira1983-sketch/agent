@@ -21,7 +21,9 @@ def test_good_conclusion_is_banked(tmp_path):
     rec = next(r for r in records if r.id == mem_id)
     assert rec.source == "agent-auto"
     assert GOOD_KIND in rec.tags
-    assert GOOD_PROVENANCE in rec.tags
+    # Namespaced since 2026-11-16: a bare provenance tag let free text such as
+    # "sensitive-data-consent" act as a consent tag.
+    assert f"provenance:{GOOD_PROVENANCE}" in rec.tags
 
 
 def test_raw_code_is_rejected(tmp_path):

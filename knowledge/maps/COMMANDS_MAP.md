@@ -46,7 +46,7 @@ are also reachable one-shot via `--ask ":command args"`.
 | `:causal [гипотеза\|гипотеза]` | Show the causal ladder: what was observed, how often, and what the next rung is missing. With hypotheses, attach them to the most frequent observation and report what still blocks. Nothing is stored: a climb counts only when an intervention MEASURED something. |
 | `:memory-consolidate` | Consolidate episodic memory. |
 | `:audit [on\|off\|status]` | Read-only audit mode: freeze ALL durable memory writes (episodic, procedural, consolidation, user profile, and agent-auto persistent/semantic writes) for the session. Set before investigating memory so the audit cannot contaminate its own object. Operator `:remember` (user-explicit) still works. |
-| `:hygiene [subcmd] [--dry-run]` | Memory hygiene (dedup/expire/summarise). |
+| `:hygiene [subcmd] [--apply]` | Memory hygiene (dedup/expire/summarise). Dry run by default; `--apply` makes the changes. |
 
 ## Sources, ingestion & knowledge
 

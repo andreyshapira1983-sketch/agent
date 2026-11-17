@@ -149,7 +149,13 @@ class WorkingMemory:
         return f"{tool_name}::{payload}"
 
     def cache_lookup(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
-        return self.artifacts.get(self.cache_key(tool_name, arguments))
+        key = self.cache_key(tool_name, arguments)
+        with self._cache_lock:
+            entry = self.artifacts.get(key)
+            if entry is not None:
+                # LRU: чтение — тоже использование (проверка 16.11, мелкая).
+                self.artifacts[key] = self.artifacts.pop(key)
+            return entry
 
     def cache_store(
         self,
@@ -161,6 +167,9 @@ class WorkingMemory:
     ) -> None:
         key = self.cache_key(tool_name, arguments)
         with self._cache_lock:
+            # Обновлённая запись уходит в конец, иначе вытеснялась первой
+            # (проверка 16.11, мелкая: LRU вместо порядка первой вставки).
+            self.artifacts.pop(key, None)
             self.artifacts[key] = {
                 "tool": tool_name,
                 "arguments": arguments,
@@ -172,7 +181,7 @@ class WorkingMemory:
                 "turn_index": self._next_turn_index,  # belongs to the in-flight turn
                 "stored_at": _now().isoformat(),
             }
-            # Bounded artifact cache — evict oldest entries when over the cap.
+            # Bounded artifact cache — evict least recently used entries when over the cap.
             while len(self.artifacts) > self.max_artifacts:
                 oldest_key = next(iter(self.artifacts))
                 del self.artifacts[oldest_key]
@@ -197,7 +206,7 @@ class WorkingMemory:
     def clear(self) -> None:
         self.turns.clear()
         self.artifacts.clear()
-        self._next_turn_index = 1
+        # Счётчик ходов не сбрасывается: номера не повторяются (проверка 16.11, мелкая).
 
     # ---------- compaction (Anthropic 2025 context engineering) ----------
 

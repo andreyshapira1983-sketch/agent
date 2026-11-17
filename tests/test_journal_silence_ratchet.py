@@ -89,7 +89,13 @@ from except_audit import journal_silent_in, loop_layer_files  # noqa: E402
 #: 10 -> 8 (2026-09-25), two repairs: the reasoning/action check and the
 #: assumption extractor in `core/loop_attempt.py` report through
 #: `_sensor_failed` (tests/test_attempt_loop_sensor_silence.py).
-JOURNAL_SILENT_BASELINE = 8
+#: 8 -> 7 (2026-11-16), a repair: the re-ask hint in
+#: `core/loop_memory_read.py` reports `repeat_question_detection_failed`
+#: instead of `except Exception: pass` (tests/test_smart_memory_serious_1611.py).
+#: 7 -> 5 (2026-11-16, night), two repairs in `core/loop_memory_commands.py`:
+#: echo-registry read and append failures are journaled
+#: (`memory_echo_registry_read_failed` / `_append_failed`).
+JOURNAL_SILENT_BASELINE = 5
 
 _LAYER = Path("core")
 

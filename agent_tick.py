@@ -1153,10 +1153,16 @@ def _sweep_episodic_duplicates(workspace: Path, *, dry_run: bool = False) -> int
     """
     try:
         from core.episodic_hygiene import collapse_duplicate_episodes
-        from core.smart_memory import EpisodicMemoryStore
+        from core.memory_hygiene_commands import cited_episode_ids
+        from core.smart_memory import EpisodicMemoryStore, ProceduralMemoryStore
 
         store = EpisodicMemoryStore(path=workspace / DATA_DIR / "episodic_memory.jsonl")
-        dropped = collapse_duplicate_episodes(store, dry_run=dry_run)
+        # Anchors of procedure credit are never collapsed away (MIR-128;
+        # проверка 16.11, средняя).
+        procs = ProceduralMemoryStore(workspace / DATA_DIR / "procedural_memory.jsonl")
+        dropped = collapse_duplicate_episodes(
+            store, dry_run=dry_run, keep_ids=cited_episode_ids(procs, store),
+        )
         if dropped:
             _log_tick(workspace, {
                 "event": "episodic_duplicates_collapsed",

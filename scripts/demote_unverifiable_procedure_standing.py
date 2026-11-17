@@ -44,30 +44,45 @@ def select_and_demote(
 ) -> dict:
     """Отобрать и (при apply) перевести; отчёт в обоих режимах одинаков."""
     alive_ids = {ep.id for ep in estore.load()}
-    procedures = pstore.load()
-    demoted: list[str] = []
-    out = []
-    for proc in procedures:
-        unverifiable = (
+
+    def _unverifiable(proc) -> bool:
+        return bool(
             proc.status == "active"
             and (proc.success_count or proc.failure_count)
             and proc.source_episode_ids
             and not any(ref in alive_ids for ref in proc.source_episode_ids)
         )
-        if unverifiable:
-            demoted.append(proc.id)
-            out.append(replace(
-                proc, status="needs_review",
-                updated_at=datetime.now(timezone.utc).isoformat(),
-            ))
-        else:
+
+    if not apply:
+        procedures = pstore.load()
+        return {
+            "scanned": len(procedures),
+            "demoted": [p.id for p in procedures if _unverifiable(p)],
+            "applied": False,
+        }
+
+    # Отбор и запись под ОДНИМ замком хранилища: список, прочитанный раньше,
+    # стёр бы зачёт, начисленный в промежутке (проверка 17.11, средняя).
+    seen: dict = {"scanned": 0, "demoted": []}
+
+    def _demote(procedures: list) -> list:
+        seen["scanned"] = len(procedures)
+        out = []
+        for proc in procedures:
+            if _unverifiable(proc):
+                seen["demoted"].append(proc.id)
+                proc = replace(
+                    proc, status="needs_review",
+                    updated_at=datetime.now(timezone.utc).isoformat(),
+                )
             out.append(proc)
-    if apply and demoted:
-        pstore.rewrite(out)
+        return out
+
+    pstore.update_procedures(_demote)
     return {
-        "scanned": len(procedures),
-        "demoted": demoted,
-        "applied": bool(apply and demoted),
+        "scanned": seen["scanned"],
+        "demoted": seen["demoted"],
+        "applied": bool(seen["demoted"]),
     }
 
 

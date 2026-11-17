@@ -445,7 +445,7 @@ class _StubEpisodicStore:
     def __init__(self) -> None:
         self.consulted: list[str] = []
 
-    def search_with_report(self, question: str, limit: int = 6) -> Any:
+    def search_with_report(self, question: str, limit: int = 6, admit: Any = None) -> Any:
         self.consulted.append("search_with_report")
         return types.SimpleNamespace(episodes=[], rejected_by={})
 
@@ -453,7 +453,7 @@ class _StubEpisodicStore:
         self.consulted.append("search_by_tags")
         return []
 
-    def find_most_similar(self, question: str, threshold: float = 0.0):
+    def find_most_similar(self, question: str, threshold: float = 0.0, admit: Any = None):
         self.consulted.append("find_most_similar")
         return None, 0.0
 
@@ -474,6 +474,15 @@ class _StubPersistentStore:
 
     def update_many(self, updated) -> None:
         self.write_attempts += len(list(updated))
+
+    def patch_many(self, changes) -> int:
+        self.write_attempts += len(changes)
+        return len(changes)
+
+    def touch_access(self, ids, at) -> int:
+        ids = list(ids)
+        self.write_attempts += len(ids)
+        return len(ids)
 
 
 class _VerifierReached(Exception):

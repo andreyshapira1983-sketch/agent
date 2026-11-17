@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 from core.bilingual_terms import recall_language_diagnostics
@@ -17,15 +18,63 @@ from core.smart_memory import (
 )
 from core.topic_tokens import FLAT, TokenSalience, build_salience
 
+_FAMILY_MAX_LINES = 5
+_FAMILY_MAX_LINE_CHARS = 200
+_LESSON_FALLBACK_LIMIT = 5
+
+
+def _hint_field(text: Any, limit: int) -> str:
+    """Поле памяти в подсказке — данные: ‹ › вместо < >, одна строка (проверка 16.11, мелкая)."""
+    return (
+        str(text or "")[:limit]
+        .replace("<", "‹").replace(">", "›")
+        .replace("\r", " ").replace("\n", " ")
+    )
+
 
 def _family_appendix(family: list[str]) -> str:
-    """Приложение к блоку опыта: продуктовые исходы тех же прогонов (MIR-184)."""
+    """Приложение к блоку опыта: продуктовые исходы тех же прогонов (MIR-184).
+
+    Текст из памяти — данные: `<`/`>` заменены на ‹ ›, строк не больше пяти, каждая
+    обрезана — иначе запись закрывала блок и говорила как инструкция (проверка 16.11, средняя).
+    """
     if not family:
         return ""
+    lines = [
+        str(w)[:_FAMILY_MAX_LINE_CHARS].replace("<", "‹").replace(">", "›").replace("\n", " ")
+        for w in family[:_FAMILY_MAX_LINES]
+    ]
+    more = len(family) - len(lines)
     return (
         "\n⚠ Продуктовые исходы тех же прогонов (успех их не стирает):\n"
-        + "\n".join(f"- {w}" for w in family)
+        + "\n".join(f"- {w}" for w in lines)
+        + (f"\n(и ещё {more})" if more > 0 else "")
     )
+
+
+def _with_family(block: str, family: list[str]) -> str:
+    """Приложение семьи — ВНУТРИ блока опыта, перед закрывающим тегом (проверка 16.11, средняя)."""
+    appendix = _family_appendix(family)
+    close = "</agent_experience_memory>"
+    if appendix and block.endswith(close):
+        return block[: -len(close)].rstrip("\n") + appendix + "\n" + close
+    return block + appendix
+
+
+def _experience_rejection(ep: Any) -> str | None:
+    """Why an episode may not steer planning, or None when it may.
+
+    Only successful episodes (or curated `lesson`s) are reused, else failures
+    self-reinforce (CORE-05). The completion is rechecked: the stored bit
+    reflects the rule at banking time.
+    """
+    if not (ep.outcome == "success" or "lesson" in ep.tags):
+        return "outcome"
+    if "lesson" not in ep.tags and effective_completion(ep) != "achieved":
+        return "not_achieved"
+    if not is_usage_eligible(ep):
+        return "not_eligible"
+    return None
 
 
 def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
@@ -136,14 +185,10 @@ class AgentLoopMemoryRead:
             from datetime import datetime
             from datetime import timezone as _tz
             _now_dt = datetime.now(_tz.utc)
-            # One rewrite total: `update` rewrites the whole file per record.
-            self.persistent_store.update_many(
-                rec.model_copy(update={
-                    "access_count": rec.access_count + 1,
-                    "last_accessed_at": _now_dt,
-                })
-                for rec in selected
-            )
+            # One rewrite total, and only the access fields of the CURRENT
+            # records move: replacing whole records from this earlier copy
+            # erased a `superseded_by` written meanwhile (проверка 16.11, №11).
+            self.persistent_store.touch_access([rec.id for rec in selected], _now_dt)
 
         return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
 
@@ -207,39 +252,34 @@ class AgentLoopMemoryRead:
         readmitted = 0
         if self.episodic_store is not None:
             # With report: only the store knows why it dropped an episode.
-            found = self.episodic_store.search_with_report(question, limit=6)
+            # The gate runs INSIDE the search, before the limit: filtering after
+            # a top-6 cut let six refused near-matches hide an admissible
+            # seventh for good (проверка 16.11, п. 3).
+            found = self.episodic_store.search_with_report(
+                question, limit=3, admit=_experience_rejection
+            )
             rejected_by = _merge_rejection_reasons(rejected_by, found.rejected_by)
-            for ep in found.episodes:
-                if not (ep.outcome == "success" or "lesson" in ep.tags):
-                    rejected_by["outcome"] = rejected_by.get("outcome", 0) + 1
-                    continue
-                # Rechecked here: the stored bit reflects the rule at banking time.
-                if "lesson" not in ep.tags and effective_completion(ep) != "achieved":
-                    rejected_by["not_achieved"] = rejected_by.get("not_achieved", 0) + 1
-                    continue
-                if not is_usage_eligible(ep):
-                    rejected_by["not_eligible"] = rejected_by.get("not_eligible", 0) + 1
-                    continue
-                if len(episodes) >= 3:
-                    rejected_by["over_limit"] = rejected_by.get("over_limit", 0) + 1
-                    continue
-                episodes.append(ep)
+            episodes.extend(found.episodes)
         # Fallback: lessons about a file path named in the question surface even
         # when token overlap is low (e.g. ":repair core/foo.py").
-        if self.episodic_store is not None:
-            lessons = self.episodic_store.search_by_tags(["lesson"], limit=5)
-            q_lower = question.lower()
-            path_tokens = [
-                w.strip("\"',:;()")
-                for w in q_lower.split()
-                if "/" in w or w.endswith(".py")
-            ]
+        q_lower = question.lower()
+        path_tokens = [
+            w.strip("\"',:;()")
+            for w in q_lower.split()
+            if "/" in w or w.endswith(".py")
+        ]
+        if self.episodic_store is not None and path_tokens:
+            # Сначала фильтр по пути, потом предел 5: обрезка до фильтра прятала
+            # шестой по свежести урок о файле (проверка 16.11, мелкая).
+            lessons = [
+                lesson
+                for lesson in self.episodic_store.search_by_tags(["lesson"], limit=sys.maxsize)
+                if any(tok in lesson.summary.lower() for tok in path_tokens)
+            ][:_LESSON_FALLBACK_LIMIT]
             for lesson in lessons:
                 if (
                     is_usage_eligible(lesson)          # second door — same gate
                     and lesson not in episodes
-                    and path_tokens
-                    and any(tok in lesson.summary.lower() for tok in path_tokens)
                 ):
                     episodes.append(lesson)
                     # Already counted in some rejection reason; reconcile as
@@ -248,7 +288,7 @@ class AgentLoopMemoryRead:
         procedures, procedures_rejected_by = self._procedures_unless_workflow(question)
         block = self._code_checked(format_experience_context(episodes=episodes, procedures=procedures), "experience")
         family = self._family_product_warnings(episodes) if block else []
-        block += _family_appendix(family)
+        block = _with_family(block, family)
         self.log.log(
             "experience_memory_inject",
             {
@@ -274,22 +314,28 @@ class AgentLoopMemoryRead:
         if self.episodic_store is not None:
             try:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
-                    question, threshold=_REPEAT_THRESHOLD
-                )
+                    question, threshold=_REPEAT_THRESHOLD, admit=is_usage_eligible
+                )  # фильтр ДО выбора лучшего (проверка 16.11, средняя)
                 # Feeds the fast path (a stored answer returned verbatim), so an
                 # ineligible match is dropped here, before hints can use it too.
                 if repeat_ep is not None and not is_usage_eligible(repeat_ep):
                     repeat_ep, repeat_score = None, 0.0
                 # For the fast-path admission in run().
-                self._last_best_similar_episode = repeat_ep
-                self._last_best_similar_score = repeat_score
+                self._last_best_similar_episode, self._last_best_similar_score = AgentLoopMemoryRead._fast_path_candidate(
+                    self, question, repeat_ep, repeat_score, _REPEAT_THRESHOLD)
                 if repeat_ep is not None:
-                    quality_pct = int(repeat_ep.answer_quality_score * 100)
+                    # A lesson may be eligible with no measured evidence, so the
+                    # score can be None; `int(None * 100)` used to crash here and
+                    # the hint vanished silently (проверка 16.11, п. 1).
+                    score = repeat_ep.answer_quality_score
+                    quality_pct = None if score is None else int(score * 100)
                     quality_note = (
-                        f"previous answer quality: {quality_pct}% verified — "
+                        "previous answer quality: not measured (no evidence chunks)"
+                        if quality_pct is None
+                        else f"previous answer quality: {quality_pct}% verified — "
                         + ("HIGH" if quality_pct >= 70 else ("MEDIUM" if quality_pct >= 40 else "LOW"))
                     )
-                    if quality_pct >= 70:
+                    if quality_pct is not None and quality_pct >= 70:
                         conclusion = (
                             "The previous answer was HIGH quality. "
                             "The user may be re-testing, want more detail, or verifying consistency. "
@@ -306,10 +352,12 @@ class AgentLoopMemoryRead:
                         "WARNING: The user is asking a question that is very similar to a "
                         "previously answered one (Jaccard similarity "
                         f"{repeat_score:.2f} ≥ {_REPEAT_THRESHOLD}).\n"
-                        f"Past episode: {repeat_ep.id} | outcome={repeat_ep.outcome}\n"
+                        # id и outcome — тоже данные из памяти (проверка 17.11, средняя).
+                        f"Past episode: {_hint_field(repeat_ep.id, 120)}"
+                        f" | outcome={_hint_field(repeat_ep.outcome, 40)}\n"
                         f"Past answer quality: {quality_note}\n"
-                        f"Previous question: {repeat_ep.question[:200]}\n"
-                        f"Previous answer summary: {repeat_ep.summary[:300]}\n"
+                        f"Previous question: {_hint_field(repeat_ep.question, 200)}\n"
+                        f"Previous answer summary: {_hint_field(repeat_ep.summary, 300)}\n"
                         f"CONCLUSION: {conclusion}\n"
                         "Action: try a different strategy, use additional tools, go "
                         "deeper, or explicitly acknowledge what was missing before.\n"
@@ -327,12 +375,30 @@ class AgentLoopMemoryRead:
                         },
                     )
                     block = block + "\n\n" + hint if block else hint
-            except Exception:  # noqa: BLE001, S110 — reason stated below
-                # Re-ask detection must never abort the main loop.
-                pass
+            except Exception as exc:  # noqa: BLE001 — re-ask detection must never abort the main loop
+                # ...but a failure is journaled, not swallowed (проверка 16.11, п. 1).
+                self.log.log(
+                    "repeat_question_detection_failed",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
 
         text = self._workflow_block(question)
         return block + "\n\n" + text if block and text else (block or text)
+
+    def _fast_path_candidate(self, question: str, best: Any, score: float, threshold: float) -> tuple[Any, float]:
+        """The best match the fast path could actually REPLAY.
+
+        An eligible failed `lesson` is a good re-ask hint but used to hide a
+        replayable runner-up from the fast path (проверка 17.11, мелкая).
+        """
+        replayable = getattr(self, "_fast_path_allows_replay", None)
+        if best is None or not callable(replayable) or replayable(best, 1.0):
+            return best, score
+        alt, alt_score = self.episodic_store.find_most_similar(
+            question, threshold=threshold,
+            admit=lambda e: is_usage_eligible(e) and replayable(e, 1.0),
+        )
+        return (alt, alt_score) if alt is not None else (best, score)
 
     def _code_checked(self, block: str, source: str) -> str:
         """Ссылки памяти на код — сверены с кодом сейчас (core/code_citations.py)."""

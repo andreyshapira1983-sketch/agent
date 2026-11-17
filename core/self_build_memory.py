@@ -20,6 +20,8 @@ strictly best-effort: it never raises and never blocks the caller.
 """
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 
 # Сигналы неудач самоулучшения (сбор из эпизодов и логов, перенос в реестр
@@ -37,6 +39,12 @@ from core.self_improvement_signals import (  # noqa: F401
 )
 from core.veto_cause import veto_blames_the_target
 from core.writer_completion import COMPLETION_BY_OUTCOME
+
+logger = logging.getLogger(__name__)
+
+#: Сбои записи эпизода: глотались без следа, теперь счёт и причина
+#: (проверка 16.11, мелкая).
+STORE_FAILURES: dict[str, Any] = {"count": 0, "last": ""}
 
 #: The four pre-flight gates: they ask «may I start» and run before any
 #: pipeline work, so a run they refused produced NO experience. Such an
@@ -56,7 +64,14 @@ _GATE_WAIT_STATUSES: frozenset[str] = frozenset({
 _NO_WORK_STATUSES: frozenset[str] = frozenset({
     "no_grounded_target", "no_patch", "skipped", "no_llm", "idle", "none",
 })
-_DEDUP_STATUSES: frozenset[str] = _GATE_WAIT_STATUSES | _NO_WORK_STATUSES
+#: Отказы ворот до работы (остывание, повтор, противоречие, устаревшая
+#: заявка, нет проверенной заявки, нужно одобрение): опыта нет, урока нет;
+#: 5 одинаковых отказов давали 5 защищённых строк (проверка 16.11, средняя).
+_GATE_REFUSAL_STATUSES: frozenset[str] = frozenset({
+    "denied_cooldown", "denied_repeat", "conflict_block", "stale_proposal",
+    "needs_validated_proposal", "approval_required",
+})
+_DEDUP_STATUSES: frozenset[str] = _GATE_WAIT_STATUSES | _NO_WORK_STATUSES | _GATE_REFUSAL_STATUSES
 
 # Map each command status to a coarse episodic outcome the agent already
 # understands (success / partial / failed).
@@ -232,7 +247,11 @@ def record_self_build_episode(
                 if (old.goal, old.question, old.summary, old.outcome) == key:
                     return False
         store.save(episode)
-    except Exception:  # noqa: BLE001 — journaling must never break the caller
+    except Exception as exc:  # noqa: BLE001 — journaling must never break the caller
+        # Сбой виден: журнал и счётчик, вызывающий не падает (проверка 16.11, мелкая).
+        STORE_FAILURES["count"] += 1
+        STORE_FAILURES["last"] = f"{type(exc).__name__}: {exc}"[:300]
+        logger.warning("self-build episode not stored (%s): %s", kind, STORE_FAILURES["last"])
         return False
     return True
 
@@ -248,9 +267,16 @@ def _with_untagged_lessons(
             break
         if id(episode) in seen:
             continue
-        if target in str(getattr(episode, "summary", "") or ""):
+        if _names_path(str(getattr(episode, "summary", "") or ""), target):
             out.append(episode)
     return out
+
+
+def _names_path(text: str, target: str) -> bool:
+    """Текст называет путь целиком: «core/a.py» не находится в «tests/core/a.py.bak»
+    (проверка 16.11, мелкая)."""
+    pattern = r"(?<![\w./\\-])" + re.escape(target) + r"(?![\w/\\-]|\.\w)"
+    return re.search(pattern, text) is not None
 
 
 def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> list[str]:

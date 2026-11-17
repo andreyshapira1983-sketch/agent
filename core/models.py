@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .ids import new_id
 
@@ -178,6 +178,16 @@ class MemoryRecord(BaseModel):
     # contains archived records.
     archived: bool = False
     superseded_by: str | None = None
+
+    @field_validator("created_at", "last_accessed_at")
+    @classmethod
+    def _aware(cls, value: datetime | None) -> datetime | None:
+        """A stored time without a zone is read as UTC. One legacy naive
+        timestamp made every hygiene comparison raise TypeError and stopped
+        the whole cleanup pass (проверка 16.11, серьёзная №12)."""
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ---------- failure ----------

@@ -76,6 +76,7 @@ class AgentLoopHygiene:
     def dedupe_episodic(self, *, dry_run: bool = False) -> list[str]:
         return hygiene.dedupe_episodic(
             log=self.log, episodic_store=self.episodic_store, dry_run=dry_run,
+            procedural_store=getattr(self, "procedural_store", None),
         )
 
     def prune_episodic(
@@ -86,6 +87,11 @@ class AgentLoopHygiene:
         staleness_threshold: float = 1.5,
         dry_run: bool = False,
     ) -> list[str]:
+        # Anchors of procedure credit are never pruned, on the CLI path too
+        # (MIR-128; проверка 16.11, средняя).
+        procs = getattr(self, "procedural_store", None)
+        keep = (hygiene.cited_episode_ids(procs, self.episodic_store)
+                if procs is not None and self.episodic_store is not None else frozenset())
         return hygiene.prune_episodic(
             log=self.log,
             episodic_store=self.episodic_store,
@@ -93,6 +99,7 @@ class AgentLoopHygiene:
             min_quality=min_quality,
             staleness_threshold=staleness_threshold,
             dry_run=dry_run,
+            keep_ids=keep,
         )
 
     def summarise_persistent(

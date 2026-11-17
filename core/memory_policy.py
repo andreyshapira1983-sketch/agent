@@ -82,6 +82,35 @@ class MemoryWriteDecision:
     policy_id: str = "memory-write-mvp"
 
 
+#: Text that speaks to the MODEL about its instructions — the shape of an
+#: injection, not of a lesson. The guard's own «blocked» verdict was too broad
+#: for memory: «skip previous results», «validation disabled», «забудь прежние
+#: числа» are ordinary lessons and were refused (проверка 17.11, вечер).
+_INSTRUCTION_TARGET_RE = re.compile(
+    r"\b(?:ignore|disregard|forget|override|bypass)\b[^.\n]{0,40}?"
+    r"\b(?:instructions?|rules|system\s+prompt|guidelines|guardrails|policy)\b"
+    r"|\byou\s+are\s+now\s+(?:in\s+)?(?:an?\s+)?(?:admin|developer|god|dan|unrestricted|jailbr\w*)\b"
+    r"|(?:игнорируй|проигнорируй|забудь|отмени)\b[^.\n]{0,40}?"
+    r"(?:инструкци\w*|правил\w*|системн\w+\s+подсказк\w*|ограничени\w*)"
+    r"|\bты\s+теперь\s+(?:в\s+)?(?:режим\w*\s+)?(?:админ\w*|разработчик\w*|без\s+ограничений)",
+    re.IGNORECASE,
+)
+
+
+def _memory_injection(text: str) -> bool:
+    """Does this text try to steer the model (memory is injected into later prompts)?
+
+    Refused when it addresses the instructions themselves, or when the guard
+    finds two DIFFERENT blocked categories at once (e.g. override + exfil).
+    """
+    if _INSTRUCTION_TARGET_RE.search(text):
+        return True
+    from core.injection_guard import scan_for_injection
+
+    blocked = {f.category for f in scan_for_injection(text).findings if f.verdict == "blocked"}
+    return len(blocked) >= 2
+
+
 class MemoryWritePolicy:
     """Decides whether a candidate MemoryRecord may reach the persistent store."""
 
@@ -154,6 +183,14 @@ class MemoryWritePolicy:
         is_secret, secret_reasons = contains_secret(text)
         if is_secret:
             return MemoryWriteDecision("reject", secret_reasons)
+
+        # Injection: text the guard would BLOCK from a prompt never becomes a
+        # memory the agent wrote — memory is injected into later prompts. The
+        # one gate every agent write passes (door, summary, remember, pipeline);
+        # a human's own record is their call (проверка 17.11, серьёзная №4).
+        if (source or "").strip().lower() != "user-explicit" and _memory_injection(text):
+            return MemoryWriteDecision(
+                "reject", ["text addresses the model's instructions (prompt injection)"])
 
         has_pii, pii_reasons = contains_pii(text)
         if has_pii and SENSITIVE_DATA_CONSENT_TAG not in tags_set:
@@ -529,6 +566,19 @@ class MemoryRetrievalPolicy:
             note = _record_prompt_note(r)
             if len(text) > self.per_record_chars:
                 text = cut_keeping_provenance(text, self.per_record_chars)
-            tag_str = ",".join(r.tags) if r.tags else "-"
-            lines.append(f"- [{r.id} | tags: {tag_str}] {note}{text}")
+            tag_str = _one_prompt_line(",".join(r.tags)) if r.tags else "-"
+            lines.append(f"- [{r.id} | tags: {tag_str}] {_one_prompt_line(note + text)}")
         return "\n".join(lines)
+
+
+# Перевод строки в тексте записи рисовал в подсказке поддельную «- [mem_… | tags: …]»
+# строку (проверка 16.11, средняя): одна запись — одна строка, вложенный маркер обезврежен.
+_PROMPT_LINE_BREAK_RE = re.compile(r"\s*[\r\n\v\f\x1c-\x1e\x85  ]+\s*")
+#: Only what reads as a record START (`- [<id> |`, `- [mem_…`): a Markdown
+#: checklist «- [ ] todo» or «a - [b]» is ordinary content and stays as written.
+_PROMPT_RECORD_MARKER_RE = re.compile(r"-(\s*)\[(?=\s*(?:mem_|[\w.-]+\s*\|))")
+
+
+def _one_prompt_line(text: str) -> str:
+    """Record content as one prompt line, with no `- [` that reads as a record start."""
+    return _PROMPT_RECORD_MARKER_RE.sub(r"–\1[", _PROMPT_LINE_BREAK_RE.sub(" ", text))

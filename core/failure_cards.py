@@ -31,7 +31,10 @@ import ast
 import json
 import os
 import re
-from collections.abc import Iterable
+import threading
+import uuid
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -83,6 +86,7 @@ _LEARNABLE = frozenset({"unlearned", "retired"})
 #: Отказ защиты, а не поломка: запрет, лимит, «не замер, а действие».
 _GUARD_RE = re.compile(
     r"PermissionError|refus|отказ|not allowed|bypass|budget spent|запрещ|"
+    r"blocked by (?:the )?(?:injection|policy|guard|gate)|injection guard|"
     r"is an action, not a measurement|turns a measurement into an action",
     re.IGNORECASE)
 
@@ -90,6 +94,34 @@ _GUARD_RE = re.compile(
 def is_guard_refusal(text: str) -> bool:
     """Ошибка — отказ сторожа: урок из неё не рождается."""
     return bool(_GUARD_RE.search(text or ""))
+
+
+def _untrusted(*parts: Any) -> bool:
+    """Does any of these texts carry what the injection guard flags?
+
+    The tool call is journaled with its RAW output before the guard runs, so a
+    call whose output the guard blocked still looked like the successful
+    «fix», its output went into the lesson prompt, and the lesson reached the
+    planner (проверка 16.11, серьёзная №1; дыра 07.10 открылась снова).
+    Fail-closed: a scanner error counts as untrusted."""
+    try:
+        from core.injection_guard import scan_for_injection
+
+        for part in parts:
+            text = part if isinstance(part, str) else json.dumps(part, ensure_ascii=False, default=str)
+            # Only what the guard BLOCKS — the same bar the guard itself uses
+            # to withhold content. "suspicious" (an HTML comment, an emoji
+            # joiner, «override the default») would starve ordinary lessons.
+            # Bounded: the scanner is slow on huge text, and the lesson prompt
+            # sees at most the first few hundred characters anyway.
+            if scan_for_injection((text or "")[:_SCAN_CHARS]).verdict == "blocked":
+                return True
+    except Exception:  # noqa: BLE001 — fail-closed, reason above
+        return True
+    return False
+
+
+_SCAN_CHARS = 20_000
 
 
 def failure_text(tool: str, output: Any, error: str | None = None) -> str | None:
@@ -176,22 +208,12 @@ class CardStore:
 
     def __init__(self, workspace: Path | str) -> None:
         self.path = Path(workspace) / CARDS_RELPATH
-        self.cards: dict[str, Card] = {}
-        self.digested: dict[str, int] = {}
-        try:
-            lines = self.path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            lines = []
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            if "_digested" in row:
-                self.digested = {str(k): int(v) for k, v in row["_digested"].items()}
-            elif "sig" in row:
-                known = {k: row[k] for k in Card.__dataclass_fields__ if k in row}
-                self.cards[row["sig"]] = Card(**known)
+        self.cards, self.digested = _read_cards(self.path)
+        # Что было на диске при чтении: сохранение не воскрешает удалённое
+        # здесь и не затирает добавленное другим писателем (проверка 16.11, средняя).
+        self._loaded = set(self.cards)
+        # Сбои вопроса модели за этот разбор (проверка 16.11, мелкая).
+        self.lesson_errors: list[str] = []
 
     def find(self, tool: str, sig: str) -> Card | None:
         """Та же подпись, иначе самая близкая по словам (≥ 0.6) у того же инструмента."""
@@ -208,18 +230,124 @@ class CardStore:
         return best
 
     def save(self) -> None:
-        if len(self.cards) > MAX_CARDS:
-            rank = {"active": 2, "unlearned": 1, "retired": 0}
-            keep = sorted(self.cards.values(), key=lambda c: (rank.get(c.status, 0), c.seen, c.last_seen),
-                          reverse=True)[:MAX_CARDS]
-            self.cards = {c.sig: c for c in keep}
-        digested = dict(list(self.digested.items())[-_DIGESTED_KEEP:])
-        rows = [json.dumps({"_digested": digested})]
-        rows += [json.dumps(asdict(c), ensure_ascii=False) for c in self.cards.values()]
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(rows) + "\n", encoding="utf-8")
-        os.replace(tmp, self.path)
+        with _cards_lock(self.path):
+            # Карточки, которые другой писатель добавил после нашего чтения,
+            # сохраняются: раньше последний save затирал их (проверка 16.11, средняя).
+            disk_cards, disk_digested = _read_cards(self.path)
+            for sig, card in disk_cards.items():
+                if sig not in self.cards and sig not in self._loaded:
+                    self.cards[sig] = card
+            for trace, n in disk_digested.items():
+                self.digested[trace] = max(n, self.digested.get(trace, 0))
+            if len(self.cards) > MAX_CARDS:
+                # Отказ проверяющего и отказ сторожа не вытесняются первыми:
+                # иначе плохой урок выучивается снова (проверка 16.11, средняя).
+                rank = {"rejected": 3, "active": 2, "guard": 2, "unlearned": 1, "retired": 0}
+                keep = sorted(self.cards.values(),
+                              key=lambda c: (rank.get(c.status, 0), c.seen, str(c.last_seen)),
+                              reverse=True)[:MAX_CARDS]
+                self.cards = {c.sig: c for c in keep}
+            digested = dict(list(self.digested.items())[-_DIGESTED_KEEP:])
+            rows = [json.dumps({"_digested": digested})]
+            rows += [json.dumps(asdict(c), ensure_ascii=False) for c in self.cards.values()]
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _tmp_name(self.path)
+            tmp.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            os.replace(tmp, self.path)
+            self._loaded = set(self.cards)
+
+
+_INT_FIELDS = ("seen", "hits", "misses", "asked")
+
+
+def _read_cards(path: Path) -> tuple[dict[str, Card], dict[str, int]]:
+    """Карточки и «разобрано» с диска; битая строка пропускается, а не роняет
+    показ урока (проверка 16.11, средняя)."""
+    cards: dict[str, Card] = {}
+    digested: dict[str, int] = {}
+    try:
+        raw_lines = path.read_bytes().splitlines()
+    except OSError:
+        return cards, digested
+    for raw in raw_lines:
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        if "_digested" in row:
+            got = row["_digested"]
+            if isinstance(got, dict):
+                for k, v in got.items():
+                    try:
+                        digested[str(k)] = int(v)
+                    except (TypeError, ValueError):
+                        continue
+        elif isinstance(row.get("sig"), str):
+            card = _card_from_row(row)
+            if card is not None:
+                cards[card.sig] = card
+    return cards, digested
+
+
+_REQUIRED_STR = ("sig", "tool", "error")
+
+
+def _card_from_row(row: dict[str, Any]) -> Card | None:
+    """Карточка из строки с проверкой типа КАЖДОГО поля: чужой тип ронял показ,
+    учёбу и вытеснение (проверка 17.11, средняя). Нет строковых sig/tool/error —
+    строка пропускается; прочее чужое — к умолчанию."""
+    if not all(isinstance(row.get(k), str) for k in _REQUIRED_STR):
+        return None
+    known: dict[str, Any] = {k: row[k] for k in _REQUIRED_STR}
+    for name in Card.__dataclass_fields__:
+        if name in known or name not in row:
+            continue
+        value = row[name]
+        if name in _INT_FIELDS:
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                continue
+            try:
+                known[name] = int(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+        elif isinstance(value, str):
+            known[name] = value
+        # нестроковое значение строкового поля (и lesson) — умолчание
+    return Card(**known)
+
+
+_held = threading.local()
+
+
+def _lock_held(path: Path) -> bool:
+    return str(Path(path)) in getattr(_held, "paths", set())
+
+
+@contextmanager
+def _cards_lock(path: Path) -> Iterator[None]:
+    """Замок файла карточек; повторный вход в том же потоке не ждёт сам себя."""
+    from core.state_integrity import state_file_lock
+
+    key = str(Path(path))
+    paths = getattr(_held, "paths", None)
+    if paths is None:
+        paths = _held.paths = set()
+    if key in paths:
+        yield
+        return
+    with state_file_lock(path):
+        paths.add(key)
+        try:
+            yield
+        finally:
+            paths.discard(key)
+
+
+def _tmp_name(path: Path) -> Path:
+    """Свой временный файл у каждого писателя: общий .tmp делили два хода."""
+    return path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:12]}.tmp")
 
 
 # ── показ в момент ошибки ───────────────────────────────────────────────────
@@ -228,6 +356,10 @@ def note_for(workspace: Path | str, tool: str, text: str) -> str | None:
     """Строка «прошлый опыт» для этой ошибки или None."""
     card = CardStore(workspace).find(tool, signature(tool, text))
     if card is None or card.status != "active" or not card.lesson:
+        return None
+    if _untrusted(card.lesson):
+        # A lesson stored before this check may carry injected text: it is
+        # never shown to the planner (проверка 16.11, серьёзная №1).
         return None
     tally = f"встречалась {card.seen} раз"
     if card.hits + card.misses:
@@ -245,7 +377,15 @@ def witness_note(workspace: Path | str, text: str) -> str | None:
     m = _FAILED_TEST_RE.search(text or "")
     if m is None:
         return None
-    path = Path(workspace) / m.group(1)
+    # Только файлы внутри <workspace>/tests/: «tests/../..» читал чужой файл
+    # (проверка 16.11, мелкая).
+    try:
+        tests_dir = (Path(workspace) / "tests").resolve()
+        path = (Path(workspace) / m.group(1)).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not path.is_relative_to(tests_dir):
+        return None
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
@@ -370,8 +510,41 @@ def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: Any,
                       *, trace_id: str = "", max_new: int = MAX_NEW_PER_TURN) -> CardStore:
     """Разобрать ход: посчитать повторы, рассудить показанные карточки, выучить новые."""
-    store = CardStore(workspace)
     results = turn_results(events)
+    # Вопросы модели — без замка: замок на Windows ждёт ~10 с, а три вопроса
+    # дольше, и второй процесс падал. Ответы собираются на снимке, потом под
+    # замком файл читается заново, правится и пишется (проверка 16.11, мелкая).
+    lessons: dict[int, str | None] = {}
+    errors: list[str] = []
+
+    def ask(i: int, r: dict[str, Any], fixed: dict[str, Any]) -> tuple[bool, str | None]:
+        try:
+            lessons[i] = _ask_lesson(llm, r["tool"], r["fail"], r["args"], fixed["args"], fixed["output"])
+        except Exception as exc:  # noqa: BLE001 — урок необязателен; причина уходит в журнал хода
+            lessons[i] = None
+            errors.append(f"{type(exc).__name__}: {exc}"[:300])
+        return True, lessons[i]
+
+    if llm is not None:
+        _learn_pass(CardStore(workspace), results, ask, trace_id=trace_id, max_new=max_new)
+
+    def answered(i: int, r: dict[str, Any], fixed: dict[str, Any]) -> tuple[bool, str | None]:
+        return (i in lessons), lessons.get(i)
+
+    # Загрузка, правка и запись — под одним замком: тик и ход REPL теряли
+    # карточки друг друга (проверка 16.11, средняя).
+    with _cards_lock(Path(workspace) / CARDS_RELPATH):
+        store = CardStore(workspace)
+        _learn_pass(store, results, answered, trace_id=trace_id, max_new=max_new)
+        store.save()
+    store.lesson_errors = errors
+    return store
+
+
+def _learn_pass(store: CardStore, results: list[dict[str, Any]], lesson_for: Any,
+                *, trace_id: str, max_new: int) -> None:
+    """Один проход разбора по карточкам `store`; урок даёт `lesson_for(i, r, fixed)`
+    → (спрошено ли, урок)."""
     start = store.digested.get(trace_id, 0) if trace_id else 0
     asked = 0
     for i in range(start, len(results)):
@@ -396,20 +569,22 @@ def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: 
         card.seen += 1
         card.last_seen = r["ts"]
         fixed = next((x for x in later if not x["fail"]), None)
+        # Аргументы провалившегося вызова тоже идут в вопрос модели (проверка 17.11, средняя).
+        if fixed is not None and _untrusted(r["fail"], r["args"], fixed["args"], fixed["output"]):
+            # Flagged material never becomes a lesson, not even as context
+            # for the model that writes one.
+            fixed = None
         if (card.status in _LEARNABLE and not is_guard_refusal(r["fail"]) and fixed is not None
-                and card.asked < _MAX_ASKS and asked < max_new and llm is not None):
+                and card.asked < _MAX_ASKS and asked < max_new):
+            was_asked, lesson = lesson_for(i, r, fixed)
+            if not was_asked:
+                continue
             asked += 1
             card.asked += 1
-            try:
-                lesson = _ask_lesson(llm, r["tool"], r["fail"], r["args"], fixed["args"], fixed["output"])
-            except Exception:  # noqa: BLE001 — урок необязателен; ход не должен падать из-за него
-                lesson = None
-            if lesson:
+            if lesson and not _untrusted(lesson):
                 card.lesson, card.status, card.hits, card.misses = lesson, "active", 0, 0
     if trace_id:
         store.digested[trace_id] = len(results)
-    store.save()
-    return store
 
 
 def read_events(path: Path | str) -> list[dict[str, Any]]:
@@ -440,7 +615,10 @@ def learn_after_turn(loop: Any) -> None:
         from core.model_router import ModelRole
         router = getattr(loop, "model_router", None)
         llm = router.for_role(ModelRole.MEMORY_SUMMARY) if router is not None else None
-        learn_from_events(ws, read_events(path), llm,
-                          trace_id=str(getattr(log, "trace_id", "") or ""))
+        store = learn_from_events(ws, read_events(path), llm,
+                                  trace_id=str(getattr(log, "trace_id", "") or ""))
+        # Урок не спросился — ход живёт, но причина в журнале (проверка 16.11, мелкая).
+        for err in store.lesson_errors:
+            _log(loop, "failure_card_lesson_error", {"error": err})
     except Exception as exc:  # noqa: BLE001 — учёба не должна ронять ход; причина — в журнал
         _log(loop, "failure_cards_error", {"error": f"{type(exc).__name__}: {exc}"[:300]})

@@ -63,29 +63,65 @@ def _handle_rollback(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 
 def _parse_archive_args(args: list[str]) -> tuple[float | None, int | None]:
-    """Read `--threshold=<number>` and `--min-age=<days>`; ValueError on a bad number."""
+    """Read `--threshold=<number>` and `--min-age=<days>`; ValueError on a bad number or word."""
     threshold = None
     min_age_days = None
     for arg in args:
         if arg.startswith("--threshold="):
             threshold = float(arg.split("=", 1)[1])
-            if math.isnan(threshold):  # NaN compares false with every score
-                raise ValueError("threshold is not a number")
+            # inf/NaN/0 и >1 проходили, опечатка `--treshold` молча давала
+            # порог по умолчанию (проверка 16.11, средняя).
+            if not (math.isfinite(threshold) and 0 < threshold <= 1):
+                raise ValueError("threshold must be a finite number in (0, 1]")
         elif arg.startswith("--min-age="):
             min_age_days = int(arg.split("=", 1)[1])
+        else:
+            raise ValueError(f"unknown archive argument {arg!r}")
     return threshold, min_age_days
 
 
-def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Dispatch `:hygiene [subcmd] [args...] [--dry-run]`."""
+#: Флаги режима `:hygiene`. Без `--apply`/`--yes` любой проход — сухой
+#: (проверка 16.11, средняя): голый `:hygiene` удалял по-настоящему.
+_HYGIENE_MODE_FLAGS = frozenset({"--dry-run", "--apply", "--yes"})
+_HYGIENE_NO_ARG_SUBS = frozenset({"", "all", "expire", "dedupe", "backups", "episodic"})
+_HYGIENE_DRY_HINT = (
+    "(сухой прогон: ничего не изменено; чтобы выполнить по-настоящему, "
+    "повторите команду с --apply)"
+)
+
+
+def _hygiene_done(dry_run: bool) -> bool:
+    if dry_run:
+        print(_HYGIENE_DRY_HINT, file=sys.stderr)
+    return True
+
+
+def _hygiene_refuse(sub: str, words: list[str]) -> bool:
+    print(
+        f"(:hygiene {sub or 'all'}: unknown argument(s) {' '.join(words)} — nothing done; "
+        "mode flags: --dry-run (default) or --apply)",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:  # noqa: PLR0911 — flat: one refusal per bad flag, each a guard clause
+    """Dispatch `:hygiene [subcmd] [args...] [--dry-run | --apply]`; dry run unless --apply/--yes."""
     tokens = rest.split()
-    dry_run = False
-    if "--dry-run" in tokens:
-        dry_run = True
-        tokens = [t for t in tokens if t != "--dry-run"]
+    flags = {t for t in tokens if t in _HYGIENE_MODE_FLAGS}
+    tokens = [t for t in tokens if t not in _HYGIENE_MODE_FLAGS]
+    apply = bool(flags & {"--apply", "--yes"})
+    if apply and "--dry-run" in flags:
+        print("(:hygiene: --dry-run and --apply together — nothing done)", file=sys.stderr)
+        return True
+    dry_run = not apply
 
     sub = (tokens[0].lower() if tokens else "")
     rest_args = tokens[1:]
+    if sub.startswith("-"):
+        return _hygiene_refuse("", tokens)
+    if sub in _HYGIENE_NO_ARG_SUBS and rest_args:
+        return _hygiene_refuse(sub, rest_args)
 
     if sub in {"", "all"}:
         # Default order: expire (free TTL records) -> dedupe (collapse
@@ -107,7 +143,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"(scanned {bak.scanned})",
             file=sys.stderr,
         )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "expire":
         rep = agent.expire_persistent(dry_run=dry_run)
@@ -116,7 +152,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"out of {rep.scanned} scanned. ids={rep.expired}",
             file=sys.stderr,
         )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "dedupe":
         rep = agent.dedupe_persistent(dry_run=dry_run)
@@ -130,7 +166,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 f"  canonical={g.canonical_id} dups={g.duplicate_ids}",
                 file=sys.stderr,
             )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "backups":
         rep = agent.cleanup_backups(workspace, dry_run=dry_run)
@@ -140,7 +176,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"keep_last={rep.keep_last}, max_age_days={rep.max_age_days}",
             file=sys.stderr,
         )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "episodic":
         pruned = agent.prune_episodic(dry_run=dry_run)
@@ -149,15 +185,17 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             f"pruned. ids={pruned}",
             file=sys.stderr,
         )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "summarise":
         if not rest_args:
             print(
-                "Usage: :hygiene summarise <tag> [--dry-run]",
+                "Usage: :hygiene summarise <tag> [--dry-run | --apply]",
                 file=sys.stderr,
             )
             return True
+        if len(rest_args) > 1 or rest_args[0].startswith("-"):
+            return _hygiene_refuse(sub, rest_args)
         tag = rest_args[0]
         rep = agent.summarise_persistent(tag=tag, dry_run=dry_run)
         if rep.skipped_reason:
@@ -172,7 +210,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 f"into {rep.new_record_id}",
                 file=sys.stderr,
             )
-        return True
+        return _hygiene_done(dry_run)
 
     if sub == "archive":
         try:
@@ -205,7 +243,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
                 "пробуждение в активную память — отдельная власть (MIR-156)",
                 file=sys.stderr,
             )
-        return True
+        return _hygiene_done(dry_run)
 
     print(f"(unknown :hygiene subcommand: '{sub}')", file=sys.stderr)
     return True

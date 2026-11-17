@@ -178,11 +178,19 @@ class ClaimExtractor:
             if not self._accept_sentence(sentence):
                 continue
             confidence = rank.final_score if rank is not None else evidence.confidence
-            tainted = any(span in sentence or sentence in span
-                          for span in suspect_spans)
+            # Compared with hidden text removed and whitespace collapsed on
+            # BOTH sides: the spans come from the raw body, the sentences from
+            # the stripped one, and a hidden comment or zero-width character
+            # inside the sentence used to break the match and clear the taint
+            # (проверка 16.11, серьёзная №6).
+            flat = _flat(sentence)
+            tainted = any(
+                (fs := _flat(span)) and (fs in flat or flat in fs)
+                for span in suspect_spans
+            )
             status = "suspect" if tainted else _status_from_rank(rank)
             claims.append(ClaimRecord(
-                id=_claim_id(),
+                id=_claim_id(source.locator, sentence),
                 source_id=source.id,
                 text=sentence,
                 locator=source.locator,
@@ -337,6 +345,32 @@ _CODE_SUFFIXES = frozenset({
 _LOCATOR_DECORATION_RE = re.compile(r":\d+(?:-\d+)?$|#L\d+(?:-L?\d+)?$")
 
 
+def _document_key(locator: str) -> str:
+    """WHICH document a locator names, whatever way it is written.
+
+    `docs\\guide.md`, `./docs/guide.md:1-9` and `C:/…/agent-main/docs/guide.md`
+    are one document and must be one witness with one claim id; a web address
+    keeps its port (`:8080` vs `:9090` are two servers) (проверка 17.11, №6).
+    """
+    raw = (locator or "").strip()
+    if "://" in raw:
+        # Web: the path is case-sensitive and the port names the server; only
+        # a line anchor is decoration.
+        return re.sub(r"#L\d+(?:-L?\d+)?$", "", raw, flags=re.IGNORECASE)
+    text = raw.casefold().replace("\\", "/").removeprefix("file:")
+    # A line window is stripped only from a FILE path (`x.md:1-9`), never from
+    # an identifier like `pmid:123` — two papers are two witnesses.
+    if re.search(r"\.\w+(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$", text):
+        text = _bare_locator(text)
+    for marker in _OWN_ROOT_MARKERS:
+        if marker in text:
+            text = text.split(marker, 1)[1]
+            break
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def _bare_locator(locator: str) -> str:
     """Адрес без украшений: `core/x.py:284-292` -> `core/x.py`."""
     text = (locator or "").strip().casefold()
@@ -370,6 +404,10 @@ def _is_code_locator(locator: str) -> bool:
 _OWN_ARTIFACT_PREFIXES = ("proposals/", "data/", "logs/", "knowledge/generated/")
 #: Журнальные форматы — запись одного момента, не утверждение о мире.
 _OWN_ARTIFACT_SUFFIXES = (".jsonl", ".log")
+#: Корни установки агента: копия репозитория и установка в Ubuntu
+#: `/opt/agent/` — там адреса абсолютные (проверка 16.11, средняя).
+#: Произвольный `…/agent/` не корень: чужая папка не становится своей.
+_OWN_ROOT_MARKERS = ("/agent-main/", "/opt/agent/")
 
 
 def _is_own_artifact(locator: str) -> bool:
@@ -393,9 +431,14 @@ def _is_own_artifact(locator: str) -> bool:
     (`knowledge_library/`, `math_study/`) остаются в силе.
     """
     bare = _bare_locator(locator).replace("\\", "/")
-    marker = "/agent-main/"
-    if marker in bare:
-        bare = bare.split(marker, 1)[1]
+    if "://" in bare:
+        # A web address is never the agent's own file, whatever its path says
+        # (`https://github.com/x/agent-main/data/…`).
+        return False
+    for marker in _OWN_ROOT_MARKERS:
+        if marker in bare:
+            bare = bare.split(marker, 1)[1]
+            break
     while bare.startswith("./"):
         bare = bare[2:]
     return bare.startswith(_OWN_ARTIFACT_PREFIXES) or bare.endswith(_OWN_ARTIFACT_SUFFIXES)
@@ -419,6 +462,11 @@ class ConflictResolver:
                 continue
             if _is_dialogue_locator(source.locator):
                 continue
+            # A scanner-flagged claim neither creates a conflict nor is
+            # relabelled: a planted sentence must not quarantine a clean
+            # claim, and its taint must survive (проверка 17.11, средняя).
+            if claim.status == "suspect":
+                continue
             parsed = _subject_value(claim.text)
             if parsed is None:
                 continue
@@ -433,10 +481,24 @@ class ConflictResolver:
         # honest "усвоил и проверил" step: a fact is verified only when more
         # than one independent source attests it.
         corroborated: dict[str, tuple[str, ...]] = {}
+
+        def _origin(claim: ClaimRecord) -> str:
+            # Independence is by DOCUMENT, not by source id: two windows of one
+            # file (`docs/a.md:1-5` and `docs/a.md:1-6`) are one witness, and
+            # used to verify each other (проверка 16.11, серьёзная №5).
+            src = sources_by_id.get(claim.source_id)
+            return _document_key(src.locator) if src is not None else claim.source_id
+
+        def _witness(claim: ClaimRecord) -> bool:
+            # The agent's own files (data/, logs/, drafts) are not a second
+            # witness of anything (проверка 17.11, серьёзная №6).
+            src = sources_by_id.get(claim.source_id)
+            return claim.status != "suspect" and not (src is not None and _is_own_artifact(src.locator))
+
         for subject, pairs in grouped.items():
             values = _distinct_values(value for _claim, value in pairs)
             source_ids = sorted({claim.source_id for claim, _value in pairs})
-            if len(source_ids) < 2:
+            if len({_origin(claim) for claim, _value in pairs}) < 2:
                 continue
             if len(values) >= 2:
                 claim_ids = tuple(claim.id for claim, _value in pairs)
@@ -449,8 +511,14 @@ class ConflictResolver:
                 ))
             else:
                 # One agreed value from >=2 independent sources -> corroboration.
+                # A witness must be another DOCUMENT, and a scanner-flagged
+                # (`suspect`) claim corroborates nothing.
                 for claim, _value in pairs:
-                    others = tuple(s for s in source_ids if s != claim.source_id)
+                    mine = _origin(claim)
+                    others = tuple(sorted({
+                        other.source_id for other, _v in pairs
+                        if _origin(other) != mine and _witness(other)
+                    }))
                     if others:
                         corroborated[claim.id] = others
 
@@ -986,6 +1054,13 @@ def _is_meaningful_claim(text: str) -> bool:
     return bool(text and not any(lowered.startswith(prefix) for prefix in generic))
 
 
+def _flat(text: str) -> str:
+    """Hidden content removed, whitespace collapsed — the form taint is compared in."""
+    from core.injection_guard import strip_concealed
+
+    return " ".join(strip_concealed(text or "").split())
+
+
 def _suspicious_spans(excerpt: str) -> list[str]:
     """Sentences the injection guard actually pointed at.
 
@@ -1100,9 +1175,55 @@ def _normalise_value(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().casefold())
 
 
+#: Units that change the fact: «$5» is not «€5», «5%» is not «5». They stay
+#: tokens of their own (проверка 16.11, средняя).
+_VALUE_UNIT_CHARS = "$€£¥₽₪%"
+
+#: A tail word that narrows the shorter value: «all regions» vs «all regions
+#: except the EU» are two facts, not one clipped quote (проверка 16.11, средняя).
+_VALUE_QUALIFIERS = frozenset({
+    "except", "excluding", "excl", "only", "until", "till", "unless", "but",
+    "however", "before", "after", "without", "not", "no", "apart", "save",
+    "кроме", "исключая", "исключением", "только", "лишь", "до", "но", "однако",
+    "если", "без", "пока", "не", "после",
+})
+
+#: A tail word that changes the measure: unit, currency, scale or period.
+#: «up by 5» vs «up by 5%», «5 dollars» vs «5 dollars per month» are two
+#: facts (проверка 17.11, средняя).
+_VALUE_MEASURE_WORDS = frozenset({
+    "percent", "per", "pct", "bps", "points", "point",
+    "dollar", "dollars", "usd", "eur", "euro", "euros", "gbp", "pound", "pounds",
+    "yen", "jpy", "rub", "ruble", "rubles", "rouble", "roubles", "ils", "shekel", "shekels",
+    "cent", "cents",
+    "k", "m", "bn", "b", "mn", "thousand", "thousands", "million", "millions",
+    "billion", "billions", "trillion", "trillions",
+    "annually", "annual", "yearly", "monthly", "weekly", "daily", "hourly",
+    "year", "years", "month", "months", "week", "weeks", "day", "days", "hour", "hours",
+    "процент", "процента", "процентов", "руб", "рубль", "рубля", "рублей",
+    "долларов", "доллар", "доллара", "евро", "шекель", "шекеля", "шекелей",
+    "тыс", "млн", "млрд", "трлн",
+    "ежегодно", "ежемесячно", "еженедельно", "ежедневно",
+    "год", "года", "лет", "месяц", "месяца", "месяцев", "неделю", "недели", "день", "дня", "дней",
+    "час", "часа", "часов",
+})
+_VALUE_MEASURE_STEMS = ("тысяч", "миллион", "миллиард", "триллион")
+
+
+def _is_measure_token(token: str) -> bool:
+    return (
+        token in _VALUE_MEASURE_WORDS
+        or (len(token) == 1 and token in _VALUE_UNIT_CHARS)
+        or token.startswith(_VALUE_MEASURE_STEMS)
+    )
+
+
 def _value_tokens(value: str) -> list[str]:
-    """Word tokens for equivalence comparison, negation canonicalised."""
-    tokens = re.sub(r"[^\w\s-]", " ", value, flags=re.UNICODE).casefold().split()
+    """Word tokens for equivalence comparison, negation canonicalised,
+    currency and percent signs kept as tokens."""
+    units = re.escape(_VALUE_UNIT_CHARS)
+    spaced = re.sub(f"([{units}])", r" \1 ", value)
+    tokens = re.sub(rf"[^\w\s{units}-]", " ", spaced, flags=re.UNICODE).casefold().split()
     return ["not" if t in ("never", "никогда") else t for t in tokens]
 
 
@@ -1113,12 +1234,23 @@ def _values_equivalent(a: str, b: str) -> bool:
     token-prefix of the longer AND is at least three tokens long — long
     enough that «good» never glues to «good for nothing», while a clipped
     quotation of the same sentence still counts as the same statement.
+    A tail with a qualifier (except/only/until/кроме…) is a different fact:
+    a missed corroboration is cheaper than a false merge (проверка 16.11, средняя).
     """
     ta, tb = _value_tokens(a), _value_tokens(b)
     if ta == tb:
         return True
     short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
-    return len(short) >= 3 and long_[: len(short)] == short
+    if not short or long_[: len(short)] != short:
+        return False
+    tail = long_[len(short):]
+    # A tail carrying a unit/scale/period word or a qualifier changes the
+    # value («5» vs «5 billion», «all regions» vs «… except the EU»). A plain
+    # noun after a number does not («100» = «100 requests», «in 1991» = «in
+    # 1991 by Guido») — the digit alone was too eager (проверка 17.11, вечер).
+    if any(t in _VALUE_QUALIFIERS or _is_measure_token(t) for t in tail):
+        return False
+    return len(short) >= 3 or any(ch.isdigit() for ch in short[-1])
 
 
 def _distinct_values(values: Iterable[str]) -> list[str]:
@@ -1130,10 +1262,19 @@ def _distinct_values(values: Iterable[str]) -> list[str]:
     return reps
 
 
-def _claim_id() -> str:
-    from core.ids import new_id
+def _claim_id(locator: str = "", text: str = "") -> str:
+    """Stable id: the same sentence from the same document gets the same id
+    in every run. A fresh random id per run meant a record banked in run 1
+    could never be matched when run 2 found the contradiction, so quarantine
+    never fired (проверка 16.11, серьёзная №4; дефект 30.09)."""
+    if not text:
+        from core.ids import new_id
 
-    return new_id("claim")
+        return new_id("claim")
+    import hashlib
+
+    key = _document_key(locator) + "\n" + " ".join(text.casefold().split())
+    return "claim_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
 
 _GENERIC_CONFLICT_SUBJECTS = {

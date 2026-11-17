@@ -326,7 +326,9 @@ def test_the_suppression_is_reported_not_silent(tmp_path: Path) -> None:
 
     agent = _agent(tmp_path)
     _seed_procedure(agent)
-    _bank(agent, verifier_failure=True)
+    # One verified chunk: since 2026-11-16 a run with none earns no credit
+    # anyway, so only a run that WOULD be credited shows the suppression.
+    _bank(agent, verifier_failure=True, verified=1)
 
     events = [
         json.loads(line)

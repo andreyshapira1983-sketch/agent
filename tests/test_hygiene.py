@@ -423,12 +423,16 @@ class TestExpire:
         # The fresh one is still there.
         assert [r.id for r in store.records] == [fresh.id]
 
-    def test_zero_ttl_is_treated_as_no_ttl(self):
-        """ttl_seconds=0 means "no expiry policy", not "expire immediately"."""
+    def test_zero_ttl_agrees_with_the_store(self):
+        """ttl_seconds=0 is already expired — the store's own `load()` evicts it.
+
+        Until 2026-11-16 hygiene said «never expires» while the store dropped
+        the record on read: two rules for one field (проверка 16.11, мелкая).
+        """
         r = MemoryRecord(content="x", tags=["fact"], owner="user", ttl_seconds=0)
         store = _InMemoryStore([r])
         report = expire_memory(store, now=datetime(2099, 1, 1, tzinfo=timezone.utc))
-        assert report.expired == []
+        assert report.expired == [r.id]
 
     def test_dry_run_keeps_disk(self):
         now = datetime(2026, 1, 10, tzinfo=timezone.utc)

@@ -23,7 +23,50 @@ def _normalise(text: str) -> str:
     """Case-insensitive, whitespace-collapsed comparison key."""
     return _WS_RE.sub(" ", (text or "").strip().lower())
 
+_MARKER_RE = re.compile(r"\d+(?:[.,]\d+)?|[a-zа-яё]+(?:'[a-z]+)?")
+_NEGATIONS = frozenset({
+    "не", "нет", "ни", "без", "никогда", "нельзя", "невозможно",
+    "not", "no", "never", "without", "cannot", "nor", "none",
+})
+#: Ceiling for a pair that differs in negation or in a number: well under any
+#: dedup/echo threshold, so such a pair is never merged or refused.
+_MEANING_CHANGE_CEILING = 0.5
+
+
+def _meaning_markers(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Negation words and numbers — the tokens that flip or change a fact.
+
+    Counted WITH multiplicity: «не отвечает и база не отвечает» vs «…и база
+    отвечает» has the same SET of negations but one fewer, and as sets the
+    user's correction was refused again (проверка 17.11, серьёзная №1).
+    """
+    tokens = _MARKER_RE.findall(text)
+    negs = tuple(sorted(t for t in tokens if t in _NEGATIONS or t.endswith("n't")))
+    nums = tuple(sorted(t.replace(",", ".") for t in tokens if t[0].isdigit()))
+    return negs, nums
+
+
 def _similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
+    """Word-overlap similarity, capped when the two texts differ in a negation
+    or a number: «сервер отвечает» vs «сервер НЕ отвечает» scored 0.93 and the
+    user's correction was refused as a duplicate, then dedup kept the wrong
+    record (проверка 16.11, серьёзная №9). A changed fact is not a repeat."""
+    score = _raw_similarity(a, b, order_sensitive=order_sensitive)
+    if score > _MEANING_CHANGE_CEILING:
+        na, nb = _normalise(a), _normalise(b)
+        if na != nb:
+            negs_a, nums_a = _meaning_markers(na)
+            negs_b, nums_b = _meaning_markers(nb)
+            # A negation flips the fact for both consumers. A changed NUMBER
+            # is a correction only for the write gate: for the echo antibody
+            # (order_sensitive=False) «finished at 10:31» / «10:32» is exactly
+            # the counter loop it exists to catch.
+            if negs_a != negs_b or (order_sensitive and nums_a != nums_b):
+                return _MEANING_CHANGE_CEILING
+    return score
+
+
+def _raw_similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
     """Cheap Jaccard over word sets, then boosted by substring containment.
 
     `order_sensitive` разводит ДВУХ потребителей с противоположной ценой ошибки,
@@ -145,10 +188,11 @@ def deduplicate_memory(
 ) -> DedupReport:
     """Collapse near-duplicates already on disk.
 
-    The OLDEST record in every duplicate group is treated as canonical
-    (oldest = first to be deliberately remembered). Newer near-copies are
-    deleted. This makes dedup idempotent: a second run finds zero new
-    groups.
+    A supersession target (some record's `superseded_by`) is canonical and
+    never deleted; otherwise the OLDEST record in every duplicate group is
+    canonical (oldest = first to be deliberately remembered). Newer
+    near-copies are deleted. This makes dedup idempotent: a second run finds
+    zero new groups.
     """
     if not 0.0 < threshold <= 1.0:
         raise ValueError(f"threshold must be in (0, 1], got {threshold}")
@@ -159,9 +203,17 @@ def deduplicate_memory(
     if len(records) < 2:
         return report
 
-    # Stable sort by creation time, oldest first. Ties broken by id so
-    # the result is deterministic even when timestamps collide.
-    ordered = sorted(records, key=lambda r: (r.created_at, r.id))
+    # A record some `superseded_by` points to is current: it goes first as
+    # canonical and is never deleted, or the pointer dangles (проверка 17.11,
+    # средняя). Then a human's record over the agent's own near-copy, whatever
+    # their ages (проверка 16.11, №9); then oldest first, ties by id so the
+    # result is deterministic even when timestamps collide.
+    targets = {r.superseded_by for r in records if r.superseded_by}
+    ordered = sorted(
+        records,
+        key=lambda r: (0 if r.id in targets else 1,
+                       0 if r.source == "user-explicit" else 1, r.created_at, r.id),
+    )
 
     keep: list[MemoryRecord] = []
     canonical_for_dup: dict[str, MemoryRecord] = {}
@@ -169,7 +221,11 @@ def deduplicate_memory(
     for rec in ordered:
         text = rec.content if isinstance(rec.content, str) else str(rec.content)
         match = find_duplicate(text, keep, threshold=threshold)
-        if match is None:
+        # Never delete a supersession target, and never let a human's record be
+        # removed as a copy of the agent's own (проверка 17.11, средняя).
+        human_vs_agent = (match is not None and rec.source == "user-explicit"
+                          and match[0].source != "user-explicit")
+        if match is None or rec.id in targets or human_vs_agent:
             keep.append(rec)
         else:
             canonical_for_dup[rec.id] = match[0]
@@ -215,10 +271,14 @@ class ExpiryReport:
         }
 
 def _is_expired(record: MemoryRecord, now: datetime) -> bool:
-    if record.ttl_seconds is None or record.ttl_seconds <= 0:
-        return False
-    age = (now - record.created_at).total_seconds()
-    return age >= record.ttl_seconds
+    """Same rule as `PersistentMemoryStore._is_expired`: ttl<=0 is already expired.
+
+    Прежде гигиена считала ttl<=0 вечным, а хранилище — истёкшим
+    (проверка 16.11, мелкая).
+    """
+    from core.persistent_memory import record_is_expired
+
+    return record_is_expired(record, now)
 
 def expire_memory(
     store: _StoreProto,
@@ -317,8 +377,11 @@ def summarise_memory(
 
     records = store.load()
     matching = [r for r in records if tag_norm in {t.lower() for t in (r.tags or [])}]
-    # Already-summarised records are excluded.
-    matching = [r for r in matching if SUMMARY_TAG not in {t.lower() for t in (r.tags or [])}]
+    # Already-summarised records are excluded. So are a human's own records:
+    # merging them turned two `user-explicit` assertions into one agent
+    # paraphrase and lost their authority and causal credit (проверка 17.11, №4).
+    matching = [r for r in matching if SUMMARY_TAG not in {t.lower() for t in (r.tags or [])}
+                and r.source != "user-explicit"]
 
     report = SummaryReport(tag=tag, scanned=len(matching), dry_run=dry_run)
 
@@ -375,11 +438,32 @@ def summarise_memory(
         summary_text = summary_text[:800].rstrip() + "…"
 
     # Preserve the canonical tag + add the marker so summarised records
-    # are excluded from future summarisation passes.
-    new_tags = sorted({tag_norm, SUMMARY_TAG})
+    # are excluded from future summarisation passes. Protective categories
+    # the originals carried (decision, lesson, …) are kept, or the summary of
+    # protected records could be archived (проверка 16.11, №8).
+    kept_categories = {
+        t.lower() for r in selected for t in (r.tags or [])
+        if t.lower() in _TAG_WEIGHTS or t.lower() in _ARCHIVE_PROTECTED_TAGS
+    }
+    new_tags = sorted({tag_norm, SUMMARY_TAG, *kept_categories})
 
     selected_ids = sorted(r.id for r in selected)
     report.summarised_ids = selected_ids
+
+    # The summary is the MODEL's text: it goes through the same write policy
+    # as any agent write (secrets, PII, and — since 17.11 — injection). Writing it straight to the
+    # store was a path past the door (проверка 16.11, №8).
+    from core.memory_policy import MemoryWritePolicy
+
+    others = [r for r in records if r.id not in set(selected_ids)]
+    verdict = MemoryWritePolicy().decide(
+        summary_text, new_tags, source="agent-auto", existing=others,
+    )
+    if verdict.decision != "save":
+        why = "; ".join(str(x) for x in (getattr(verdict, "reasons", None) or ())) or "refused"
+        report.summarised_ids = []
+        report.skipped_reason = f"write policy refused the summary: {why}"
+        return report
 
     if dry_run:
         return report
@@ -390,6 +474,7 @@ def summarise_memory(
         content=summary_text,
         tags=new_tags,
         owner="self",
+        source="agent-auto",
     )
     store.drop_ids(selected_ids, add=[new_record])
     report.new_record_id = new_record.id

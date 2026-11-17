@@ -37,7 +37,10 @@ def test_a_proven_procedure_is_active() -> None:
 @pytest.mark.parametrize(("sc", "fc", "expected"), [
     (1, 0, "candidate"),
     (2, 0, "active"),
-    (1, 1, "needs_review"),
+    # 2026-11-16: a 1:1 tie is no verdict. Retired it could never be offered
+    # again, so it could never earn the win that would clear it.
+    (1, 1, "candidate"),
+    (1, 2, "needs_review"),
     (2, 2, "needs_review"),
 ])
 def test_a_run_procedure_is_judged_by_its_record(sc: int, fc: int, expected: str) -> None:

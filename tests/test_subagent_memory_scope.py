@@ -404,5 +404,6 @@ def test_propose_subagent_raw_response_preserved():
 def test_propose_subagent_budget_scope_from_llm():
     llm = _FakeLLM(_good_llm_response(needed=True))
     result = propose_subagent("monitor Upwork", llm=llm)
-    assert result.proposal.budget_scope.max_model_calls == 4  # type: ignore[union-attr]
-    assert result.proposal.budget_scope.max_web_fetches == 10  # type: ignore[union-attr]
+    # Модель просит 4/10; бюджет не выше умолчаний 3/5 (проверка 16.11, средняя).
+    assert result.proposal.budget_scope.max_model_calls == 3  # type: ignore[union-attr]
+    assert result.proposal.budget_scope.max_web_fetches == 5  # type: ignore[union-attr]

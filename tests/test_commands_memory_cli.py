@@ -90,7 +90,7 @@ def hygiene_agent():
 
 # ── :hygiene — the dry-run contract ──────────────────────────────────────────
 
-@pytest.mark.parametrize("rest,expected_dry", [("", False), ("--dry-run", True), ("all --dry-run", True)])
+@pytest.mark.parametrize("rest,expected_dry", [("--apply", False), ("", True), ("--dry-run", True), ("all --dry-run", True)])
 def test_bulk_hygiene_passes_the_same_dry_run_to_every_step(
     rest, expected_dry, hygiene_agent, tmp_path, capsys
 ):
@@ -155,7 +155,7 @@ def test_summarise_requires_a_tag(hygiene_agent, tmp_path, capsys):
 
 
 def test_summarise_merges_records_for_a_tag(hygiene_agent, tmp_path, capsys):
-    assert _handle_hygiene("summarise notes", hygiene_agent, tmp_path) is True
+    assert _handle_hygiene("summarise notes --apply", hygiene_agent, tmp_path) is True
 
     assert hygiene_agent.calls == [("summarise:notes", False)]
     assert "merged 2 record(s) tagged 'notes' into m9" in capsys.readouterr().err
@@ -171,7 +171,7 @@ def test_summarise_reports_a_skip_reason(hygiene_agent, tmp_path, capsys):
 
 
 def test_archive_parses_its_two_options(hygiene_agent, tmp_path, capsys):
-    assert _handle_hygiene("archive --threshold=0.25 --min-age=30", hygiene_agent, tmp_path) is True
+    assert _handle_hygiene("archive --threshold=0.25 --min-age=30 --apply", hygiene_agent, tmp_path) is True
 
     assert hygiene_agent.calls == [("archive:0.25:30", False)]
     err = capsys.readouterr().err
@@ -180,14 +180,14 @@ def test_archive_parses_its_two_options(hygiene_agent, tmp_path, capsys):
 
 
 def test_archive_without_options_uses_the_agent_defaults(hygiene_agent, tmp_path):
-    assert _handle_hygiene("archive", hygiene_agent, tmp_path) is True
+    assert _handle_hygiene("archive --apply", hygiene_agent, tmp_path) is True
     assert hygiene_agent.calls == [("archive:None:None", False)]
 
 
-def test_archive_ignores_an_argument_it_does_not_understand(hygiene_agent, tmp_path):
-    """An unrecognised word must not silently become a threshold."""
-    assert _handle_hygiene("archive --deep --threshold=0.5", hygiene_agent, tmp_path) is True
-    assert hygiene_agent.calls == [("archive:0.5:None", False)]
+def test_archive_refuses_an_argument_it_does_not_understand(hygiene_agent, tmp_path):
+    """An unrecognised word refuses the run (проверка 16.11, средняя: was silently ignored)."""
+    assert _handle_hygiene("archive --deep --threshold=0.5 --apply", hygiene_agent, tmp_path) is True
+    assert hygiene_agent.calls == []
 
 
 def test_unknown_subcommand_is_refused_not_treated_as_all(hygiene_agent, tmp_path, capsys):

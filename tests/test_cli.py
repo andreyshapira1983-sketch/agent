@@ -2548,20 +2548,20 @@ class TestHandleHygiene:
     def test_expire_subcommand(self, workspace: Path, capsys):
         """Each subcommand prints its own report: the unknown fallback also echoes the word."""
         agent = _build_agent(workspace)
-        _handle_hygiene("expire", agent, workspace)
+        _handle_hygiene("expire --apply", agent, workspace)
         err = capsys.readouterr().err
         assert err.startswith("expire (dry_run=False): 0 record(s) past TTL out of 0 scanned")
 
     def test_dedupe_subcommand(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
-        _handle_hygiene("dedupe", agent, workspace)
+        _handle_hygiene("dedupe --apply", agent, workspace)
         err = capsys.readouterr().err
         assert err.startswith("dedupe (dry_run=False): 0 duplicate(s) collapsed")
         assert "threshold=" in err
 
     def test_backups_subcommand(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
-        _handle_hygiene("backups", agent, workspace)
+        _handle_hygiene("backups --apply", agent, workspace)
         err = capsys.readouterr().err
         assert err.startswith("backups (dry_run=False): scanned 0 backup(s)")
         assert "keep_last=" in err
@@ -2574,7 +2574,7 @@ class TestHandleHygiene:
 
     def test_summarise_with_unknown_tag_prints_skipped(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
-        _handle_hygiene("summarise nope", agent, workspace)
+        _handle_hygiene("summarise nope --apply", agent, workspace)
         err = capsys.readouterr().err
         assert "summarise (dry_run=False): skipped — " in err
         assert "merged" not in err
