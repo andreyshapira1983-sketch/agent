@@ -430,7 +430,7 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
     forbidden = tuple(dict.fromkeys(
         [str(t) for t in (data.get("forbidden_tools") or [])] + list(_ALWAYS_FORBIDDEN)))
     # Resolve any overlap conservatively: overlap → stays forbidden
-    safe = _read_only_tools()
+    safe = _read_only_tools(holds_memory=bool(read_tags))
     allowed = tuple(t for t in dict.fromkeys(allowed) if t not in set(forbidden) and t in safe)
 
     return SubagentProposal(
@@ -502,11 +502,11 @@ def _budget(data: dict[str, Any], name: str) -> int:
     return min(ceiling, max(0, int(value)))
 
 
-def _read_only_tools() -> frozenset[str]:
-    """Инструменты, которые раннер субагента считает безопасными (только чтение)."""
-    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
+def _read_only_tools(*, holds_memory: bool = False) -> frozenset[str]:
+    """Инструменты раннера субагента; с выданной памятью — без уносящих наружу."""
+    from core.subagent_runner import subagent_tools
 
-    return _SAFE_SUBAGENT_TOOLS
+    return subagent_tools(holds_memory=holds_memory)
 
 
 def _emit(logger: Any, event: str, payload: Any) -> None:

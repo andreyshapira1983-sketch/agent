@@ -52,13 +52,10 @@ def _procedure_status_for(
     """
     if success_count == 0 and failure_count == 0:
         return "candidate"
-    # Retire on a clear record, not on a tie: one win and one loss gave 0.5 and
-    # `needs_review`, which retrieval never offers again, so the procedure could
-    # never earn the success that would clear it (проверка 16.11, п. 7). More
-    # losses than wins retires at once; low confidence retires after 3 runs.
-    if failure_count > success_count or (
-        confidence < 0.6 and success_count + failure_count >= 3
-    ):
+    # Retire only a losing record: retrieval never offers `needs_review` again,
+    # so a tie or a winning record (2:2, 3:2, 4:3) could never earn the success
+    # that clears it (проверки 16.11 п. 7 и 18.11). Ties stay `candidate`.
+    if failure_count > success_count:
         return "needs_review"
     if success_count < _PROMOTION_MIN_SUCCESSES or confidence < 0.6:
         return "candidate"

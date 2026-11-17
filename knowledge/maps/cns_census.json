@@ -199,7 +199,8 @@
     "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer": [],
     "loop_memory_read.py::AgentLoopMemoryRead._procedures_unless_workflow": [],
     "loop_memory_read.py::AgentLoopMemoryRead._workflows_for": [],
-    "loop_run_tail.py::AgentLoopRunTail._honor_requested_format": []
+    "loop_run_tail.py::AgentLoopRunTail._honor_requested_format": [],
+    "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake": []
   },
   "edges": [
     [
@@ -761,6 +762,38 @@
     [
       "loop_verify_replan.py::AgentLoopVerifyReplan._verify_and_settle_answer",
       "loop_verify_replan.py::AgentLoopVerifyReplan._terminal_verify_fallback_source"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_suppressed_reason"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.archive_persistent",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.compact_assumptions",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.dedupe_episodic",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.dedupe_persistent",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.expire_persistent",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.prune_episodic",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop_hygiene.py::AgentLoopHygiene.summarise_persistent",
+      "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
     ]
   ]
 }

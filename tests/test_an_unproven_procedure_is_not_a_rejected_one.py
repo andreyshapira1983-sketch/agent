@@ -41,7 +41,9 @@ def test_a_proven_procedure_is_active() -> None:
     # again, so it could never earn the win that would clear it.
     (1, 1, "candidate"),
     (1, 2, "needs_review"),
-    (2, 2, "needs_review"),
+    # 2026-11-18: any tie (and any winning record) stays offered; only a
+    # losing record retires.
+    (2, 2, "candidate"),
 ])
 def test_a_run_procedure_is_judged_by_its_record(sc: int, fc: int, expected: str) -> None:
     """После запусков статус задают уверенность и число успехов.

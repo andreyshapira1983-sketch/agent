@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from core.evidence import Evidence, ProvenanceChain
+from core.evidence import Evidence, ProvenanceChain, _is_own_state_path, _path_inside_agent
 from core.evidence_budget import carries_framework_notice
 from core.memory_policy import MemoryWriteDecision
 from core.models import MemoryRecord
@@ -362,13 +362,8 @@ def _document_key(locator: str) -> str:
     # an identifier like `pmid:123` — two papers are two witnesses.
     if re.search(r"\.\w+(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$", text):
         text = _bare_locator(text)
-    for marker in _OWN_ROOT_MARKERS:
-        if marker in text:
-            text = text.split(marker, 1)[1]
-            break
-    while text.startswith("./"):
-        text = text[2:]
-    return text
+    inside = _path_inside_agent(text)
+    return inside if inside and inside != "." else text
 
 
 def _bare_locator(locator: str) -> str:
@@ -401,13 +396,8 @@ def _is_code_locator(locator: str) -> bool:
 
 #: Места, где лежит то, что агент написал САМ: черновики правок, журналы и
 #: состояние, следы, документы, собранные скриптом из кода.
-_OWN_ARTIFACT_PREFIXES = ("proposals/", "data/", "logs/", "knowledge/generated/")
 #: Журнальные форматы — запись одного момента, не утверждение о мире.
 _OWN_ARTIFACT_SUFFIXES = (".jsonl", ".log")
-#: Корни установки агента: копия репозитория и установка в Ubuntu
-#: `/opt/agent/` — там адреса абсолютные (проверка 16.11, средняя).
-#: Произвольный `…/agent/` не корень: чужая папка не становится своей.
-_OWN_ROOT_MARKERS = ("/agent-main/", "/opt/agent/")
 
 
 def _is_own_artifact(locator: str) -> bool:
@@ -435,17 +425,18 @@ def _is_own_artifact(locator: str) -> bool:
         # A web address is never the agent's own file, whatever its path says
         # (`https://github.com/x/agent-main/data/…`).
         return False
-    for marker in _OWN_ROOT_MARKERS:
-        if marker in bare:
-            bare = bare.split(marker, 1)[1]
-            break
-    while bare.startswith("./"):
-        bare = bare[2:]
-    return bare.startswith(_OWN_ARTIFACT_PREFIXES) or bare.endswith(_OWN_ARTIFACT_SUFFIXES)
+    return _is_own_state_path(bare) or bare.endswith(_OWN_ARTIFACT_SUFFIXES)
+
+
+_WEAK_SOURCE_TYPES = frozenset({"forum", "unknown"})
+_REJECTED_CLAIM_STATUSES = frozenset({"unverified", "conflicted"})
 
 
 class ConflictResolver:
     """Detect obvious contradictory claims over the same subject."""
+
+    def __init__(self, *, policy: KnowledgeWritePolicy | None = None):
+        self.policy = policy or KnowledgeWritePolicy()  # its weakness rule judges witnesses
 
     def resolve(self, registry: SourceRegistry) -> tuple[SourceRegistry, ConflictReport]:
         grouped: dict[str, list[tuple[ClaimRecord, str]]] = {}
@@ -491,9 +482,11 @@ class ConflictResolver:
 
         def _witness(claim: ClaimRecord) -> bool:
             # The agent's own files (data/, logs/, drafts) are not a second
-            # witness of anything (проверка 17.11, серьёзная №6).
+            # witness (17.11, №6); nor is a source too weak to save (18.11).
             src = sources_by_id.get(claim.source_id)
-            return claim.status != "suspect" and not (src is not None and _is_own_artifact(src.locator))
+            if src is None or claim.status == "suspect" or claim.status in _REJECTED_CLAIM_STATUSES:
+                return False
+            return not _is_own_artifact(src.locator) and self.policy.weak_source_reason(src) is None
 
         for subject, pairs in grouped.items():
             values = _distinct_values(value for _claim, value in pairs)
@@ -514,6 +507,9 @@ class ConflictResolver:
                 # A witness must be another DOCUMENT, and a scanner-flagged
                 # (`suspect`) claim corroborates nothing.
                 for claim, _value in pairs:
+                    own_src = sources_by_id.get(claim.source_id)
+                    if own_src is None or self.policy.weak_source_reason(own_src) is not None:
+                        continue  # a source too weak to save is not promoted either (18.11)
                     mine = _origin(claim)
                     others = tuple(sorted({
                         other.source_id for other, _v in pairs
@@ -583,6 +579,14 @@ class KnowledgeWritePolicy:
         self.min_source_trust = min_source_trust
         self.max_chars = max_chars
 
+    def weak_source_reason(self, source: SourceRecord) -> str | None:
+        """Why the source is too weak to back a fact (to save it or to witness it), else None."""
+        if source.trust_level < self.min_source_trust:
+            return f"source trust {source.trust_level:.2f} < {self.min_source_trust:.2f}"
+        if source.type in _WEAK_SOURCE_TYPES:
+            return f"source type {source.type} is too weak"
+        return None
+
     def decide(  # noqa: PLR0911 — flat: depth 1, all 15 returns are guard clauses
         self,
         claim: ClaimRecord,
@@ -650,18 +654,16 @@ class KnowledgeWritePolicy:
                 (("claim was extracted from scanner-flagged content "
                   "(injection guard: suspicious) — quarantined, not knowledge"),),
             )
-        if claim.status in {"unverified", "conflicted"}:
+        if claim.status in _REJECTED_CLAIM_STATUSES:
             return KnowledgeWriteDecision("reject", (f"claim status is {claim.status}",))
         if claim.confidence < self.min_claim_confidence:
             return KnowledgeWriteDecision(
                 "reject",
                 (f"claim confidence {claim.confidence:.2f} < {self.min_claim_confidence:.2f}",),
             )
-        if source.trust_level < self.min_source_trust:
-            return KnowledgeWriteDecision(
-                "reject",
-                (f"source trust {source.trust_level:.2f} < {self.min_source_trust:.2f}",),
-            )
+        weak = self.weak_source_reason(source)
+        if weak:
+            return KnowledgeWriteDecision("reject", (weak,))
         if source.type in _NON_ASSERTING_SOURCE_TYPES:
             # Same doctrine the conflict resolver applies (MIR-054): a log
             # line, a test verdict, a tool dump or the agent's own memory is
@@ -676,8 +678,6 @@ class KnowledgeWritePolicy:
                 ((f"source type {source.type} does not assert facts "
                  f"(observation of one moment, not a standing claim)"),),
             )
-        if source.type in {"forum", "unknown"}:
-            return KnowledgeWriteDecision("reject", (f"source type {source.type} is too weak",))
         if source.type == "file" and _is_code_locator(source.locator):
             # Same rule the conflict resolver applies (MIR-054): programs do
             # not assert. `x = y` in a .py file is an assignment, an `assert`
@@ -728,8 +728,8 @@ class KnowledgePipeline:
         write_policy: KnowledgeWritePolicy | None = None,
     ):
         self.claim_extractor = claim_extractor or ClaimExtractor()
-        self.conflict_resolver = conflict_resolver or ConflictResolver()
         self.write_policy = write_policy or KnowledgeWritePolicy()
+        self.conflict_resolver = conflict_resolver or ConflictResolver(policy=self.write_policy)
 
     def build_registry(
         self,

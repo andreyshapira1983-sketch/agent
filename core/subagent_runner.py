@@ -67,6 +67,17 @@ _SAFE_SUBAGENT_TOOLS: frozenset[str] = frozenset({
     "current_time",
 })
 
+#: Tools that send caller-chosen text to an outside host. A subagent holding granted
+#: memory gets none, or the memory could leave in a URL query (проверка 18.11).
+_EGRESS_SUBAGENT_TOOLS: frozenset[str] = frozenset({
+    "web_fetch", "web_search", "rss_fetch", "semantic_scholar_search",
+})
+
+
+def subagent_tools(*, holds_memory: bool) -> frozenset[str]:
+    """Tools a subagent may hold: the safe set, minus egress when it holds memory."""
+    return _SAFE_SUBAGENT_TOOLS - _EGRESS_SUBAGENT_TOOLS if holds_memory else _SAFE_SUBAGENT_TOOLS
+
 # Hard ceiling on how many tool calls a single sub-agent may make.
 MAX_SUBAGENT_TOOL_CALLS = 3
 
@@ -322,7 +333,9 @@ class SubAgentRunner:
                 "memory write scope is not supported by SubAgentRunner: a "
                 "subagent may be granted reading, not writing"
             )
+        given_context = context
         context = self._with_granted_memory(context, memory_scope)
+        allowed = subagent_tools(holds_memory=context != given_context)
 
         if contract.budget_scope.max_iterations != 1:
             raise SubagentContractRefused(
@@ -345,7 +358,7 @@ class SubAgentRunner:
             role=contract.role,
             objective=contract.objective,
             context=context,
-            allowed_tools=list(contract.tool_scope.allowed_tools),
+            allowed_tools=[t for t in contract.tool_scope.allowed_tools if t in allowed],
             model_role=contract.model_role or "synthesizer",
         )
         # Keep compatibility with test doubles and third-party legacy runners

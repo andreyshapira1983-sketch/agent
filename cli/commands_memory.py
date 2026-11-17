@@ -115,6 +115,13 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:  # no
         print("(:hygiene: --dry-run and --apply together — nothing done)", file=sys.stderr)
         return True
     dry_run = not apply
+    # Тестовые двойники без метода — без тормоза; фасады цикла всё равно не удалят.
+    brake_of = getattr(agent, "_hygiene_apply_brake", None)
+    brake = brake_of() if apply and callable(brake_of) else None
+    if brake:
+        print(f"(:hygiene --apply refused: {brake} — nothing deleted; "
+              "a dry-run report is still allowed)", file=sys.stderr)
+        return True
 
     sub = (tokens[0].lower() if tokens else "")
     rest_args = tokens[1:]

@@ -212,6 +212,7 @@ class CardStore:
         # Что было на диске при чтении: сохранение не воскрешает удалённое
         # здесь и не затирает добавленное другим писателем (проверка 16.11, средняя).
         self._loaded = set(self.cards)
+        self._loaded_state = {k: _card_state(c) for k, c in self.cards.items()}
         # Сбои вопроса модели за этот разбор (проверка 16.11, мелкая).
         self.lesson_errors: list[str] = []
 
@@ -243,8 +244,11 @@ class CardStore:
                 # Отказ проверяющего и отказ сторожа не вытесняются первыми:
                 # иначе плохой урок выучивается снова (проверка 16.11, средняя).
                 rank = {"rejected": 3, "active": 2, "guard": 2, "unlearned": 1, "retired": 0}
+                # A card new or changed in this save is not evicted by it (18.11),
+                # but a reviewer's rejection still outranks it.
                 keep = sorted(self.cards.values(),
-                              key=lambda c: (rank.get(c.status, 0), c.seen, str(c.last_seen)),
+                              key=lambda c: (c.status == "rejected", self._fresh(c),
+                                             rank.get(c.status, 0), c.seen, str(c.last_seen)),
                               reverse=True)[:MAX_CARDS]
                 self.cards = {c.sig: c for c in keep}
             digested = dict(list(self.digested.items())[-_DIGESTED_KEEP:])
@@ -255,6 +259,14 @@ class CardStore:
             tmp.write_text("\n".join(rows) + "\n", encoding="utf-8")
             os.replace(tmp, self.path)
             self._loaded = set(self.cards)
+            self._loaded_state = {k: _card_state(c) for k, c in self.cards.items()}
+
+    def _fresh(self, card: Card) -> bool:
+        return self._loaded_state.get(card.sig) != _card_state(card)
+
+
+def _card_state(card: Card) -> tuple:
+    return (card.status, card.seen, str(card.last_seen), card.lesson)
 
 
 _INT_FIELDS = ("seen", "hits", "misses", "asked")

@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import posixpath
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from core.ids import new_id
@@ -505,16 +508,85 @@ def _memory_recall_evidence(args: dict[str, Any], output: Any) -> Evidence | Non
 #: drafts, generated docs). By folder only, relative to the workspace: a user's
 #: `build/server.log` or `dataset.jsonl` elsewhere stays ordinary evidence.
 _OWN_STATE_DIRS = ("data/", "logs/", "proposals/", "knowledge/generated/")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+#: Other installs of THIS repo (Ubuntu, unpacked archive); a foreign `…/agent/data/` is not ours.
+_INSTALL_ROOTS = ("/opt/agent",)
+_ARCHIVE_DIR = "/agent-main/"
+_ABSOLUTE_RE = re.compile(r"^(/|[a-z]:/)")
 
 
-def _is_own_state_path(path: str) -> bool:
-    bare = str(path or "").replace("\\", "/").strip()
-    while bare.startswith("./"):
-        bare = bare[2:]
-    for marker in ("/agent-main/", "/opt/agent/"):
-        if marker in bare:
-            bare = bare.split(marker, 1)[1]
-    return bare.lower().startswith(_OWN_STATE_DIRS)
+def _norm_path(path: Any) -> str:
+    """Slashes, `.` and `..` resolved, case folded: `DOCS\\..\\Data` -> `data`."""
+    text = str(path or "").strip().strip("'\"`").replace("\\", "/")
+    return posixpath.normpath(text).casefold() if text else ""
+
+
+def _agent_roots() -> list[str]:
+    roots = [_norm_path(_REPO_ROOT.as_posix()), *_INSTALL_ROOTS]
+    workspace = os.environ.get("AGENT_WORKSPACE")
+    if workspace:
+        roots.append(_norm_path(Path(workspace).resolve().as_posix()))
+    return roots
+
+
+def _path_inside_agent(path: Any) -> str | None:
+    """The path relative to the agent's root (relative = workspace), or None outside it."""
+    norm = _norm_path(path)
+    if not norm or norm == ".." or norm.startswith("../"):
+        return None
+    if not _ABSOLUTE_RE.match(norm):
+        return norm
+    for root in _agent_roots():
+        base = root.rstrip("/")
+        if norm == base:
+            return "."
+        if norm.startswith(base + "/"):
+            return norm[len(base) + 1:]
+    if _ARCHIVE_DIR in norm:
+        return norm.split(_ARCHIVE_DIR, 1)[1]
+    return None
+
+
+def _is_own_state_path(path: Any) -> bool:
+    """Does the path point into the agent's own state folders (data/, logs/, …)?"""
+    rel = _path_inside_agent(path)
+    return bool(rel) and any(rel == d.rstrip("/") or rel.startswith(d) for d in _OWN_STATE_DIRS)
+
+
+_SHELL_TOKEN_RE = re.compile(r"[\s;|&<>()=,]+")
+#: A word the shell expands (glob, variable, substitution) or the whole workspace
+#: may reach own state without naming it: `cat d*/x`, `grep -r foo .` (18.11).
+_SHELL_OPAQUE_RE = re.compile(r"[*?\[{$`]")
+_SHELL_WHOLE_TREE = frozenset({".", "./", "*"})
+
+
+def _shell_word_may_be_own(tok: str) -> bool:
+    word = tok.strip("'\"")
+    return word in _SHELL_WHOLE_TREE or bool(_SHELL_OPAQUE_RE.search(word)) or _is_own_state_path(word)
+
+
+def _shell_touches_own_state(*commands: Any) -> bool:
+    """Any word of the command line that names or may expand into own state (conservative)."""
+    for command in commands:
+        parts = command if isinstance(command, (list, tuple)) else [command]
+        for part in parts:
+            if any(_shell_word_may_be_own(tok) for tok in _SHELL_TOKEN_RE.split(str(part or "")) if tok):
+                return True
+    return False
+
+
+_HIT_PATH_RE = re.compile(r"^(?P<path>.+?):\d+:")
+
+
+def _search_touches_own_state(path: Any, output: str) -> bool:
+    """A search inside own state, or one whose hits/files come from own state."""
+    if _is_own_state_path(path):
+        return True
+    for line in output.splitlines():
+        match = _HIT_PATH_RE.match(line)
+        if _is_own_state_path(match.group("path") if match else line):
+            return True
+    return False
 
 
 def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
@@ -892,8 +964,11 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         first_arg = first_arg or "cmd"
         short_cmd = cmd_str[:60]
         source_id = f"shell_output:shell_exec:{first_arg}:{short_cmd}"
+        own = (_shell_touches_own_state(argv, args.get("command"), args.get("argv"), args.get("args"))
+               or _search_touches_own_state(None, excerpt))
         return make_evidence(
             kind="shell_output",
+            origin="agent-own" if own else None,
             source_id=source_id,
             obtained_via="shell_exec",
             claim=f"Ran `{cmd_str[:80]}`, exit_code={exit_code}",
@@ -927,6 +1002,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         path = str(args.get("path", "."))
         return make_evidence(
             kind="file",
+            origin="agent-own" if _is_own_state_path(path) else None,
             source_id=f"file:{path}",
             obtained_via="list_dir",
             claim=f"Directory listing of workspace path {path}",
@@ -938,8 +1014,10 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     if tool_name == "find_in_files":
         if not isinstance(output, str) or not output:
             return None
+        own = _search_touches_own_state(args.get("path", "."), output)
         return make_evidence(
             kind="tool_output",
+            origin="agent-own" if own else None,
             source_id="tool_output:find_in_files",
             obtained_via="find_in_files",
             claim=f"Workspace search under {args.get('path', '.')}",

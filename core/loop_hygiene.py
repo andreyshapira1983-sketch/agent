@@ -36,6 +36,11 @@ class AgentLoopHygiene:
             return "dry_run_brake"
         return "not_allowlisted"
 
+    def _hygiene_apply_brake(self) -> str | None:
+        """Аудит или прогон всухую: ручная уборка только считает (MIR-045)."""
+        reason = self._hygiene_suppressed_reason()
+        return reason if reason in {"audit_read_only", "dry_run_brake"} else None
+
     def run_maintenance_pass(self, *, dry_run: bool = True) -> dict:
         """Фасад: проход живёт в `core/memory_hygiene_commands`."""
         return hygiene.run_maintenance_pass(
@@ -55,12 +60,13 @@ class AgentLoopHygiene:
         return hygiene.compact_assumptions(
             log=self.log,
             assumption_store=getattr(self, "assumption_store", None),
-            dry_run=dry_run,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
         )
 
     def expire_persistent(self, *, dry_run: bool = False):
         return hygiene.expire_persistent(
-            log=self.log, persistent_store=self.persistent_store, dry_run=dry_run,
+            log=self.log, persistent_store=self.persistent_store,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
         )
 
     def dedupe_persistent(
@@ -70,12 +76,13 @@ class AgentLoopHygiene:
             log=self.log,
             persistent_store=self.persistent_store,
             threshold=threshold,
-            dry_run=dry_run,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
         )
 
     def dedupe_episodic(self, *, dry_run: bool = False) -> list[str]:
         return hygiene.dedupe_episodic(
-            log=self.log, episodic_store=self.episodic_store, dry_run=dry_run,
+            log=self.log, episodic_store=self.episodic_store,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
             procedural_store=getattr(self, "procedural_store", None),
         )
 
@@ -98,7 +105,7 @@ class AgentLoopHygiene:
             max_age_days=max_age_days,
             min_quality=min_quality,
             staleness_threshold=staleness_threshold,
-            dry_run=dry_run,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
             keep_ids=keep,
         )
 
@@ -111,7 +118,7 @@ class AgentLoopHygiene:
             persistent_store=self.persistent_store,
             model_router=self.model_router,
             max_records=max_records,
-            dry_run=dry_run,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
         )
 
     def archive_persistent(
@@ -126,5 +133,5 @@ class AgentLoopHygiene:
             persistent_store=self.persistent_store,
             threshold=threshold,
             min_age_days=min_age_days,
-            dry_run=dry_run,
+            dry_run=dry_run or bool(self._hygiene_apply_brake()),
         )
