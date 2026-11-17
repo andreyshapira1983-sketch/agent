@@ -9,6 +9,7 @@ import argparse
 def build_parser() -> argparse.ArgumentParser:
     """Return the CLI parser. Pure construction -- no parsing, no I/O."""
     parser = argparse.ArgumentParser(
+        prog="main.py",  # Python 3.14 otherwise derives the name from how the process was started
         description=(
             # ASCII only: the console this ships on is cp1251, and an em
             # dash here printed as a replacement char in the FIRST line of

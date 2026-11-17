@@ -518,17 +518,27 @@ class TestFactoryRssFetch:
         ) is None
 
 
-class TestFactoryFileWriteNoEvidence:
-    def test_file_write_never_emits_evidence(self):
-        """An action is not a source. The audit event already records
-        the write; we must not double-count it as a source of truth."""
+class TestFactoryFileWriteReceipt:
+    def test_file_write_emits_a_receipt_of_the_call(self):
+        """A done write witnesses itself: path, mode, bytes — a tool output, not a file read."""
         out = {"path": "x.txt", "mode": "create", "bytes_written": 5}
         ev = evidence_from_tool_result(
             tool_name="file_write",
             arguments={"path": "x.txt", "content": "hello"},
             output=out,
         )
-        assert ev is None
+        assert ev is not None
+        assert ev.kind == "tool_output"
+        assert ev.source_id == "tool_output:file_write:x.txt"
+        assert "bytes_written=5" in ev.excerpt
+
+    def test_failed_file_write_emits_nothing(self):
+        assert evidence_from_tool_result(
+            tool_name="file_write",
+            arguments={"path": "x.txt", "content": "hello"},
+            output=None,
+            status="error",
+        ) is None
 
 
 class TestFactoryGenericFallback:

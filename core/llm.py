@@ -754,7 +754,9 @@ class LLM:
         else:
             response = self._client.chat.completions.create(
                 model=model,
-                max_tokens=max_tokens,
+                # Пол для модели из реестра думающих — с первого запроса: иначе
+                # запрос с малым бюджетом заведомо пуст и оплачивается дважды.
+                max_tokens=self._effective_budget(max_tokens),
                 temperature=temperature,
                 messages=messages,
                 **(_deepseek_thinking_kwargs() if self.provider == "deepseek" else {}),

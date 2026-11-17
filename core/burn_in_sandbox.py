@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.protected_paths import path_key
+
 #: Жест запускающего процесс.
 SANDBOX_ENV_FLAG = "AGENT_BURN_IN_SANDBOX"
 
@@ -21,8 +23,8 @@ SANDBOX_MARKER = "config/burn_in_sandbox.json"
 #: Значения, считающиеся «включено»; всё прочее — выключено (fail-closed).
 _ON_VALUES: frozenset[str] = frozenset({"on", "1", "true", "yes"})
 
-#: Забор, который песочница не вправе двигать изнутри: каждый, кто решает о
-#: полномочии (ворота, одобрения, счётчик расхода, git-глаголы, сама полоса).
+#: Кто решает о полномочии песочницы: часть общего списка `core.protected_paths`
+#: (весь список полоса отклоняет как запретный класс), сличение — его `path_key`.
 _FENCE: frozenset[str] = frozenset({
     SANDBOX_MARKER,
     "core/burn_in_sandbox.py",
@@ -38,6 +40,8 @@ _FENCE: frozenset[str] = frozenset({
     "core/self_apply_lane.py",
     "scripts/install_daemon.ps1",
 })
+
+_FENCE_KEYS: frozenset[str | None] = frozenset(map(path_key, _FENCE))
 
 _DEFAULT_MAX_APPLIES_PER_DAY = 20
 
@@ -161,13 +165,6 @@ def load_sandbox_authority(
     )
 
 
-def _fence_prints(root: Path) -> frozenset[str]:
-    """Забор как разрешённые пути: `resolve()` снимает обход ссылкой, `normcase` — регистром."""
-    return frozenset(
-        os.path.normcase(str((root / rel).resolve())) for rel in _FENCE
-    )
-
-
 def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, str]:
     """Можно ли применить предложение в песочнице, и если нет — почему.
 
@@ -179,7 +176,6 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
     if not files:
         return False, "no files in the proposal"
     root = Path(workspace).resolve()
-    fence = _fence_prints(root)
     for change in files:
         raw = str(getattr(change, "path", "") or "")
         rel = _normalize_rel(raw)
@@ -188,10 +184,8 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
         target = (root / rel).resolve()
         if root != target and root not in target.parents:
             return False, f"{rel!r} resolves outside the sandbox workspace"
-        if os.path.normcase(str(target)) in fence:
-            return False, f"{rel!r} is the sandbox fence; it is not moved from inside"
-        # Класс проверяется и по резолвнутому пути: ссылка с невинным именем
-        # может вести в `.github/workflows/`, а `_write_file` пишет по резолву.
+        # Забор и класс проверяются и по резолвнутому пути: ссылка с невинным
+        # именем может вести за забор, а `_write_file` пишет по резолву.
         names = [rel]
         try:
             resolved_rel = target.relative_to(root).as_posix()
@@ -200,6 +194,8 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
         if resolved_rel != rel:
             names.append(resolved_rel)
         for name in names:
+            if path_key(name) in _FENCE_KEYS:
+                return False, f"{name!r} is the sandbox fence; it is not moved from inside"
             if _is_denied(name):
                 return False, f"{name!r} is a denied class (secrets, CI, infrastructure)"
         # Разрешённое полосой проверяется и здесь, иначе заявка занимает

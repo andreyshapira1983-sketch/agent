@@ -338,10 +338,9 @@ def runtime_evidence_pool() -> list[Evidence]:
     Built on demand and NOT folded into the provenance chain. The first
     attempt did fold it, and 21 tests said why that is wrong: the chain is
     counted and ordered, and its contracts are real — a failed step yields
-    no evidence, a `file_write` yields none, a zero-step plan yields an
-    EMPTY chain. Five always-present entries break every one of those, and
-    they also destroy `chain_was_empty`, which separates "the agent looked
-    and found nothing" from "the agent did not look".
+    no evidence, a zero-step plan yields an EMPTY chain. Five always-present
+    entries break both, and they also destroy `chain_was_empty`, which
+    separates "the agent looked and found nothing" from "did not look".
     """
     from core.evidence import make_evidence
     from core.run_context import current_run
@@ -506,20 +505,76 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
 def best_run_of_source(ev: Evidence, chain: ProvenanceChain, claim: str) -> Evidence:
     """Из прогонов ОДНОГО источника — тот, что называет литералы утверждения.
 
-    `match_citation` отдаёт первую улику с подходящим адресом. У инструмента
-    адрес один на все вызовы (`tool_output:python_probe`), и цитата садилась на
-    первый прогон: прогон драйвов 2026-09-19 — верное «a_f = 1.142e+26» из
-    второго запуска python_probe получило [claim-refuted], за вечер 12 из 15
-    опровержений были этим гейтом на выводах инструментов. Цитата называет
-    источник, каждый его прогон в этом ходе — этот источник. Улики с ДРУГИМ
-    адресом не участвуют: чужой текст значения не отмывает (MIR-060).
+    У инструмента адрес один на все вызовы, а `match_citation` отдаёт первый.
+    Улики с ДРУГИМ адресом не участвуют: чужой текст значения не отмывает (MIR-060).
     """
     from .verifier_absence import literals_absent_from_excerpt
 
-    runs = [e for e in chain.evidences if e.source_id == ev.source_id and e.kind == ev.kind]
+    runs = [claim_view(e, claim) for e in chain.evidences if e.source_id == ev.source_id and e.kind == ev.kind]
     if len(runs) < 2:
-        return ev
+        return claim_view(ev, claim)
     return min(runs, key=lambda e: len(literals_absent_from_excerpt(claim, e.excerpt or "", e.source_id or "")))
+
+
+#: Окно вокруг слова утверждения и потолок выдержки, собранной под утверждение.
+_VIEW_RADIUS = 300
+_VIEW_BUDGET = 2400
+_VIEW_MAX_HITS = 40
+_ANCHOR_RE = re.compile(r"\d+(?:[.,\-]\d+)*|[^\W\d_]{3,}")
+
+
+def _anchor_hits(claim: str, low: str) -> dict[str, list[int]]:
+    """Где в тексте стоят числа и слова утверждения (число — во всех своих написаниях)."""
+    hits: dict[str, list[int]] = {}
+    for anchor in {m.group(0).lower() for m in _ANCHOR_RE.finditer(_CITATION_RE.sub(" ", claim))}:
+        forms = _figure_variants(anchor) if anchor[0].isdigit() else {anchor}
+        found = sorted({m.start() for form in forms for m in re.finditer(re.escape(form), low)})
+        if found:
+            hits[anchor] = found[:_VIEW_MAX_HITS]
+    return hits
+
+
+def _best_windows(hits: dict[str, list[int]], size: int) -> list[tuple[int, int]]:
+    """Окна, вместе накрывающие больше всего РАЗНЫХ слов утверждения; редкое и числа весят больше."""
+    from bisect import bisect_left
+
+    weight = {a: (3.0 if a[0].isdigit() else 1.0) / len(pos) for a, pos in hits.items()}
+    span = 2 * _VIEW_RADIUS
+
+    def count(anchor: str, lo: int) -> int:
+        # Целиком: слово, разрезанное краем окна, в выдержке не стоит.
+        pos = hits[anchor]
+        return bisect_left(pos, lo + span - len(anchor) - 1) - bisect_left(pos, lo)
+
+    left = sorted(hits)
+    windows: set[tuple[int, int]] = set()
+    while left and len(windows) * span < _VIEW_BUDGET:
+        starts = sorted({max(0, p - _VIEW_RADIUS) for a in left for p in hits[a]})
+        # При равенстве — окно, где слов утверждения больше по счёту (плотное место, а не край).
+        lo = max(starts, key=lambda s: (sum(weight[a] for a in left if count(a, s)),
+                                        sum(count(a, s) for a in left)))
+        covered = [a for a in left if count(a, lo)]
+        if not covered:
+            break
+        windows.add((lo, min(size, lo + span)))
+        left = [a for a in left if a not in covered]
+    return sorted(windows)
+
+
+def claim_view(ev: Evidence, claim: str) -> Evidence:
+    """Улика с выдержкой из тех мест ВСЕГО текста источника, где стоят слова утверждения.
+
+    Текст дословный: чего нет в источнике, того нет и здесь (первые 800 знаков страницы — меню).
+    """
+    from dataclasses import replace
+
+    text = ev.source_text
+    if not text or text == ev.excerpt:
+        return ev
+    if len(text) <= _VIEW_BUDGET:
+        return replace(ev, excerpt=text + ("...[truncated]" if ev.excerpt.endswith("...[truncated]") else ""))
+    windows = _best_windows(_anchor_hits(claim, text.lower()), len(text)) or [(0, 2 * _VIEW_RADIUS)]
+    return replace(ev, excerpt="\n…\n".join(text[lo:hi] for lo, hi in windows) + "...[truncated]")
 
 
 def _semantic_nli_check(claim: str, excerpt: str, llm: Any, *, max_chars: int = _MAX_EXCERPT_FOR_NLI) -> bool:

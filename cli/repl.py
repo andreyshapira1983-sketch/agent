@@ -294,6 +294,28 @@ def _stdin_is_interactive() -> bool:
         return False
 
 
+def _run_handler(
+    agent: object, label: str, handler: Callable[..., object], *args: object, **kwargs: object,
+) -> object:
+    """Run one handler or the agent call; its crash is reported in one line, not raised.
+
+    Returns True (handled) on a crash so the text is not passed on to the agent.
+    KeyboardInterrupt and SystemExit are not Exception and pass through.
+    """
+    try:
+        return handler(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — one bad command must not end the session
+        print(f"(command failed: {label}: {type(exc).__name__}: {exc})", file=sys.stderr)
+        try:
+            agent.log.log(  # type: ignore[attr-defined]
+                "repl_command_error",
+                {"command": label, "error_type": type(exc).__name__, "error": str(exc)},
+            )
+        except Exception:  # noqa: BLE001, S110 — already reported on stderr above
+            pass  # nosec B110
+        return True
+
+
 # The order of the checks in the loop below is pinned by the characterization
 # suites; the collaborators are called through their MODULE so one
 # monkeypatch is seen from here and from cli/one_shot.py alike.
@@ -348,7 +370,10 @@ def run_repl(
             except (EOFError, KeyboardInterrupt):
                 print()
                 return 0
-            operator_task._handle_operator_task(block, agent, workspace)
+            _run_handler(
+                agent, ":operator-task",
+                operator_task._handle_operator_task, block, agent, workspace,
+            )
             continue
         # :task-begin … :task-end goes STRAIGHT to the agent, bypassing the
         # keyword router — the reliable way to send wording that a shortcut
@@ -372,24 +397,35 @@ def run_repl(
             if not buffered:
                 print("(instruction buffer empty — nothing sent)", file=sys.stderr)
                 continue
-            if intent_bridge._handle_local_operator_reply(buffered, agent):
+            if _run_handler(
+                agent, "operator reply",
+                intent_bridge._handle_local_operator_reply, buffered, agent,
+            ):
                 continue
-            _ask_the_agent(
-                agent, buffered,
+            _run_handler(
+                agent, "agent run", _ask_the_agent, agent, buffered,
                 rate_limiter=rate_limiter, workspace=workspace, file_hint=file_hint,
             )
             continue
         if q.startswith(":") or q == "?":
-            if command_dispatch.handle_meta_command(q, agent, workspace):
+            if _run_handler(
+                agent, q.split(maxsplit=1)[0],
+                command_dispatch.handle_meta_command, q, agent, workspace,
+            ):
                 continue
             print(f"(unknown command: {q})", file=sys.stderr)
             continue
-        if intent_bridge._handle_local_operator_reply(q, agent):
+        if _run_handler(
+            agent, "operator reply", intent_bridge._handle_local_operator_reply, q, agent,
+        ):
             continue
-        if intent_bridge.handle_conversational_operator_input(q, agent, workspace):
+        if _run_handler(
+            agent, "operator intent",
+            intent_bridge.handle_conversational_operator_input, q, agent, workspace,
+        ):
             continue
         # ── Rate-limit check, then the agent ─────────────────────────────────
-        _ask_the_agent(
-            agent, q,
+        _run_handler(
+            agent, "agent run", _ask_the_agent, agent, q,
             rate_limiter=rate_limiter, workspace=workspace, file_hint=file_hint,
         )

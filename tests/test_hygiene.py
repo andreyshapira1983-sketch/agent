@@ -270,9 +270,13 @@ class _InMemoryStore:
     def _load_raw(self) -> list[MemoryRecord]:
         return list(self.records)
 
-    def _rewrite(self, records: list[MemoryRecord]) -> None:
+    def drop_ids(self, ids, *, add=()) -> int:
         self.rewrites += 1
-        self.records = list(records)
+        before = len(self.records)
+        self.records = [r for r in self.records if r.id not in set(ids)]
+        dropped = before - len(self.records)
+        self.records += list(add)
+        return dropped
 
 
 def _rec(text: str, created_at: datetime | None = None, tags=None) -> MemoryRecord:

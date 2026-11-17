@@ -39,8 +39,8 @@ are also reachable one-shot via `--ask ":command args"`.
 | Command | Purpose |
 | ------- | ------- |
 | `:mem \| :memory` | Show working-memory summary + persistent records. |
-| `:remember [tags] <text>` | Save a fact/preference to persistent memory. |
-| `:forget [id\|all]` | Delete persistent record(s). |
+| `:remember [tags] <text>` | Save a fact/preference to persistent memory. Tags only in an explicit form: `[fact] text` or `tag1,tag2 text`; any other first word is part of the note. |
+| `:forget <id\|--all>` | Delete one persistent record by id, or all of them with `--all`. The argument is required: a bare `:forget` deletes nothing. |
 | `:clear \| :reset` | Clear working memory (persistent untouched). |
 | `:smart-memory \| :memory-status` | Show episodic/procedural memory summary. |
 | `:causal [гипотеза\|гипотеза]` | Show the causal ladder: what was observed, how often, and what the next rung is missing. With hypotheses, attach them to the most frequent observation and report what still blocks. Nothing is stored: a climb counts only when an intervention MEASURED something. |

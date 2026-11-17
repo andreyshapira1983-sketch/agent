@@ -65,19 +65,24 @@ def _ledger(args: argparse.Namespace) -> int:
     """Учёт прибыли: показать, или отметить вмешательство и минуты людей."""
     import json
 
-    from core.market_ledger import FILE_NAME, MarketLedger, summary
+    from core.market_ledger import FILE_NAME, LedgerUnreadable, MarketLedger, summary
 
     ledger = MarketLedger(args.workspace / "data" / "market" / FILE_NAME)
-    if args.mark:
-        fields = {k: v for k, v in (("claude_minutes", args.claude_minutes),
-                                    ("operator_minutes", args.operator_minutes)) if v is not None}
-        if args.intervention:
-            fields["claude_intervention"] = args.intervention == "yes"
-        ledger.mark(args.mark, **fields)
-    for line in ledger.lines().values():
+    try:
+        if args.mark:
+            fields = {k: v for k, v in (("claude_minutes", args.claude_minutes),
+                                        ("operator_minutes", args.operator_minutes)) if v is not None}
+            if args.intervention:
+                fields["claude_intervention"] = args.intervention == "yes"
+            ledger.mark(args.mark, **fields)
+        lines = ledger.lines()
+    except LedgerUnreadable as exc:
+        print(f"ОШИБКА: {exc}. Учёт не показан: файл повреждён, а не пуст.", file=sys.stderr)
+        return 1
+    for line in lines.values():
         print(f"{line.assignment_id} {line.status:<11} {line.escrow_amount} {line.escrow_token} "
               f"model ${line.model_usd} net {line.net()} claude={line.claude_intervention} | {line.title}")
-    print(json.dumps(summary(ledger.lines()), ensure_ascii=False))
+    print(json.dumps(summary(lines), ensure_ascii=False))
     return 0
 
 

@@ -11,6 +11,7 @@ smart-memory stores) plus
 from __future__ import annotations
 
 import json
+import math
 import sys
 from typing import TYPE_CHECKING
 
@@ -59,6 +60,20 @@ def _handle_rollback(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             file=sys.stderr,
         )
     return True
+
+
+def _parse_archive_args(args: list[str]) -> tuple[float | None, int | None]:
+    """Read `--threshold=<number>` and `--min-age=<days>`; ValueError on a bad number."""
+    threshold = None
+    min_age_days = None
+    for arg in args:
+        if arg.startswith("--threshold="):
+            threshold = float(arg.split("=", 1)[1])
+            if math.isnan(threshold):  # NaN compares false with every score
+                raise ValueError("threshold is not a number")
+        elif arg.startswith("--min-age="):
+            min_age_days = int(arg.split("=", 1)[1])
+    return threshold, min_age_days
 
 
 def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
@@ -160,13 +175,14 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         return True
 
     if sub == "archive":
-        threshold = None
-        min_age_days = None
-        for arg in rest_args:
-            if arg.startswith("--threshold="):
-                threshold = float(arg.split("=", 1)[1])
-            elif arg.startswith("--min-age="):
-                min_age_days = int(arg.split("=", 1)[1])
+        try:
+            threshold, min_age_days = _parse_archive_args(rest_args)
+        except ValueError:
+            print(
+                "Usage: :hygiene archive [--threshold=<number>] [--min-age=<days>] [--dry-run]",
+                file=sys.stderr,
+            )
+            return True
         rep = agent.archive_persistent(
             threshold=threshold, min_age_days=min_age_days, dry_run=dry_run
         )

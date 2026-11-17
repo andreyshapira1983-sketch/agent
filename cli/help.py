@@ -27,7 +27,7 @@ HELP_LAYOUT: tuple[tuple, ...] = (
     ("cmd", ":audit", ":audit [on|off|status]", 34),
     ("cmd", ":clear", ":clear", 34),
     ("cmd", ":remember", ":remember [tags] <text>", 34),
-    ("cmd", ":forget", ":forget [id|all]", 34),
+    ("cmd", ":forget", ":forget <id|--all>", 34),
     ("cmd", ":ingest-source", ":ingest-source <path> [flags]", 34),
     ("cmd", ":ingest-project", ":ingest-project [path] [flags]", 34),
     ("cmd", ":source-library", ":source-library [group|all]", 34),

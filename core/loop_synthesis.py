@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from core.answer_format import (
     LOCAL_CRITIQUE_SYSTEM_ADDENDUM,
     SYSTEM_ANSWER,
+    chat_contract,
     file_scope_notice,
     format_allowed_citations_block,
     output_contract_requires_headers,
@@ -182,15 +183,14 @@ class AgentLoopSynthesis:
         """
         try:
             from core.prompt_registry import get_prompt as _get_prompt
-            return _get_prompt("synthesizer.system")
+            return chat_contract(_get_prompt("synthesizer.system"))
         except Exception as exc:  # noqa: BLE001 — reason stated above
             # Reported through `_sensor_failed`, which journals it — the audit
             # in `scripts/except_audit.py` looks for a literal `.log(` call and
-            # does not recognise the layer's own reporting helper, so the
-            # comment carries the justification it asks for. Teaching the audit
-            # about `_sensor_failed` belongs to queue item A7, not here.
+            # does not recognise the layer's own reporting helper, so the comment
+            # carries the justification it asks for (the audit itself: item A7).
             self._sensor_failed("synthesis_contract_registry", exc)
-            return SYSTEM_ANSWER
+            return chat_contract(SYSTEM_ANSWER)
 
     def _runtime_self_prompt_block(self) -> str:
         """Блок фактов о себе, или пусто — сенсор не имеет права ронять ход."""

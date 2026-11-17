@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +38,21 @@ ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external
 #: Правка кода полосой самоприменения (core/self_apply_bridge.SELF_APPLY_OPERATION;
 #: строкой, чтобы ящик не тянул полосу при импорте).
 _SELF_APPLY_OPERATION = "self_apply_lane.run"
+logger = logging.getLogger(__name__)
+
 _VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
 _VALID_RISKS = {"read_only", "reversible", "irreversible", "external"}
+
+#: The only legal moves. A status missing from the keys is terminal: a verdict
+#: or an execution is a record, and a record that can be rewritten is not one.
+_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"approved", "denied", "aborted"}),
+    "approved": frozenset({"executed", "aborted"}),
+}
+
+
+class ApprovalTransitionError(ValueError):
+    """A status move the approval state machine does not allow."""
 
 # Canonical location of the approval inbox file, relative to the workspace root.
 # Single source of truth: agent_tick and the CLI health/approval commands import
@@ -178,10 +192,10 @@ class ApprovalInboxItem:
 
     @classmethod
     def from_dict(cls, data: dict) -> ApprovalInboxItem:
-        status = str(data.get("status") or "pending")
+        status = data.get("status", "pending")
         risk = str(data.get("risk") or "reversible")
-        if status not in _VALID_STATUSES:
-            raise ValueError(f"invalid approval status: {status}")
+        if not isinstance(status, str) or status not in _VALID_STATUSES:
+            raise ValueError(f"invalid approval status: {status!r}")
         if risk not in _VALID_RISKS:
             raise ValueError(f"invalid approval risk: {risk}")
         reasons = data.get("reasons") or ()
@@ -209,6 +223,8 @@ class ApprovalInboxItem:
 class ApprovalInbox:
     items: list[ApprovalInboxItem] = field(default_factory=list)
     path: Path | str | None = None
+    #: Rows of the file that are not a valid item: kept on disk, never actionable.
+    unreadable_rows: list[dict] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
         if self.path is not None:
@@ -460,11 +476,14 @@ class ApprovalInbox:
     ) -> ApprovalInboxItem:
         """One path for both verdicts, so the actor cannot be recorded on one
         and forgotten on the other."""
+        prior = self.get(item_id)
         item = self.set_status(
             item_id, status, decided_by=str(actor).strip() or "unattributed",
             decision_reason=str(reason or ""),
         )
-        self._record_outcome(item, status, reason)
+        # A repeated verdict changed nothing, so it is not a second outcome.
+        if prior is None or prior.status != item.status:
+            self._record_outcome(item, status, reason)
         return item
 
     def _record_outcome(
@@ -531,6 +550,15 @@ class ApprovalInbox:
         out: list[ApprovalInboxItem] = []
         for item in self.items:
             if item.id == item_id:
+                # A retry repeating a live status (rule_approved_apply re-approves
+                # its own request) changes nothing: the first signature stands.
+                if status == item.status and status in _ALLOWED_TRANSITIONS:
+                    return item
+                if status not in _ALLOWED_TRANSITIONS.get(item.status, frozenset()):
+                    raise ApprovalTransitionError(
+                        f"approval {item_id} is {item.status}; "
+                        f"it cannot become {status}"
+                    )
                 updated = replace(
                     item, status=status, updated_at=_now_iso(),
                     **({"decided_by": decided_by} if decided_by else {}),
@@ -618,18 +646,25 @@ class ApprovalInbox:
         if not path.exists():
             return list(self.items)
         items: list[ApprovalInboxItem] = []
+        unreadable: list[dict] = []
         for raw in read_state_jsonl(path):
             try:
                 items.append(ApprovalInboxItem.from_dict(raw))
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                unreadable.append(raw)
+                if raw not in self.unreadable_rows:
+                    logger.warning(
+                        "approval inbox row kept in %s but not actionable (%s): id=%s",
+                        path, exc, raw.get("id", "?"),
+                    )
+        self.unreadable_rows = unreadable
         return items
 
     def _save(self) -> None:
         if self.path is None:
             return
         path = Path(self.path)
-        rewrite_state_jsonl(path, [item.to_dict() for item in self.items])
+        rewrite_state_jsonl(path, [item.to_dict() for item in self.items] + self.unreadable_rows)
 
 
 def close_answered_effects_requests(inbox: ApprovalInbox, grant_id: str) -> list[str]:

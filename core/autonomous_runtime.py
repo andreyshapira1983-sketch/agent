@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 # same input. Stateless: derived from wall clock.
 _LEARN_ROOT_ROTATION: tuple[str, ...] = (".", "core", "tools", "tests", "scripts")
 _REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
+_PYTEST_EXIT_MEANING = {2: "interrupted", 3: "internal error", 4: "usage error", 5: "no tests collected"}
 
 # Tools that must NOT run during a goal task when the operator disabled tests
 # (include_tests=False, e.g. :work-session or :auto-run --no-tests). Gating the
@@ -632,11 +633,13 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             workspace=self.workspace,
         ):
             queue = self._build_queue(config)[: config.limit]
+            budget_stop = ""
             for task in queue:
                 allowed = circuit.check()
                 if not allowed.allowed:
                     break
                 if not self._reserve(budget, circuit, "cycles", task.kind):
+                    budget_stop = f"cycles budget exhausted before task: {task.kind}"
                     break
                 usage_before = self._usage_counters()
                 report = self._run_task(task, config, budget, circuit)
@@ -653,6 +656,8 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         circuit_decision = circuit.check()
         status: AutonomousRunStatus = "completed" if circuit_decision.allowed else "stopped"
         stop_reason = "" if circuit_decision.allowed else circuit_decision.reason
+        if status == "completed" and budget_stop:  # denial below the breaker threshold
+            status, stop_reason = "stopped", budget_stop
         report = AutonomousRunReport(
             status=status,
             dry_run=config.dry_run,
@@ -870,6 +875,11 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 f"inconclusive (timed_out={timed_out}, exit_code={exit_code}); "
                 f"passed={passed} failed_or_errors={failed}"
             )
+        elif exit_code != 0:
+            # Only exit code 0 is a pass; 5 (nothing collected) established nothing.
+            status = "inconclusive" if exit_code == 5 else "failed"
+            meaning = _PYTEST_EXIT_MEANING.get(exit_code, "tests failed")
+            summary = f"{meaning} (exit_code={exit_code}); passed={passed} failed_or_errors={failed}"
         else:
             status = "done" if failed == 0 else "failed"
             summary = f"passed={passed} failed_or_errors={failed}"
@@ -1235,8 +1245,8 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         """
         from core.best_next_action_helpers import _named_target
 
-        subject = _named_target(goal or "")
-        basis = f"subject:{subject.casefold()}" if subject else (goal or "")
+        subject = _named_target(core := (goal or "").split("\n\n", 1)[0])  # приписки кампании идут после пустой строки
+        basis = f"subject:{subject.casefold()}" if subject else core
         digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
         return f"autonomous_runtime.allow_effects:{digest}"
 

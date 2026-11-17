@@ -9,6 +9,7 @@ from core.clarification_gate import ASK_BACK_PREFIX as _ASK_BACK_PREFIX
 from core.degraded_route import NOTICE_PREFIX as _SUBSTITUTED_MODEL_PREFIX
 from core.evidence import Evidence, ProvenanceChain
 from core.file_request_intent import extract_path_mentions, normalize_path_mention
+from core.output_policy import REPLAN_WARNINGS
 from core.requested_format import is_tail_line as is_requested_tail_line
 
 # Отрисовка вывода инструментов для модели живёт в core/tool_output_render.py;
@@ -88,6 +89,9 @@ Conclusion:
   and describing it («the answer is three forecast lines») is not writing it.
   Every factual sentence in Conclusion MUST end with a source label in
   square brackets, using the same citation grammar as Facts.
+  When the user asks to NAME the source, also write its address (the URL or
+  file path, verbatim) in the Conclusion sentence itself: the bracket label
+  is machine markup and the reader may never see it.
 
 Facts:
   - Bullet list of supporting facts.
@@ -358,6 +362,89 @@ def _chat_plain(text: str) -> str:
     return text.strip()
 
 
+_CAVEAT_MARKER_RE = re.compile(r"^(?:[-•*–—]|\d+[.)])\s+")
+_TAIL_COUNT_RE = re.compile(
+    r"подтверждено \d+ из \d+ утверждений(?: \((\d+) — ответ сам[^)]*\))?; без подтверждения: (\d+)"
+)
+_NOTHING_WORDS = ("nothing", "ничего", "нет", "нет данных")
+_REPLAN_SPOKEN = (
+    "Перепроверить это ещё одной попыткой я не смог: попытки на этот вопрос закончились.",
+    "I could not re-check this with one more attempt: the attempts for this question ran out.",
+)
+
+
+def _every_claim_confirmed(tail_lines: list[str]) -> bool:
+    """По счёту проверки: без подтверждения осталось лишь то, что ответ сам назвал непроверенным."""
+    for line in tail_lines:
+        counts = _TAIL_COUNT_RE.search(line)
+        if counts and "отклонённый черновик" not in line:
+            return int(counts.group(2)) <= int(counts.group(1) or 0)
+    return False
+
+
+def _chat_caveats(lines: list[str], tail_lines: list[str]) -> list[str]:
+    """Оговорки человеку: одна фраза или список с одним маркером; служебная — словами и один раз."""
+    items: list[str] = []
+    spoken = ""
+    for raw in lines:
+        line = raw.strip()
+        for note, plain in zip(REPLAN_WARNINGS, _REPLAN_SPOKEN, strict=True):
+            if note in line:
+                spoken, line = plain, line.replace(note, "")
+        marked = _CAVEAT_MARKER_RE.match(line) is not None
+        text = _CAVEAT_MARKER_RE.sub("", line).strip(" ;")
+        if text.endswith(".;"):
+            text = text[:-1]
+        if not text or text.rstrip(".,!;:").lower() in _NOTHING_WORDS:
+            continue
+        if items and not marked:
+            items[-1] = f"{items[-1]} {text}"
+        else:
+            items.append(text)
+    items = list(dict.fromkeys(i if i[-1] in ".!?…" else f"{i}." for i in items))
+    if spoken and _every_claim_confirmed(tail_lines):
+        spoken = ""
+    if len(items) > 1:
+        block = "Чего я не проверил:\n" + "\n".join(f"— {i}" for i in items)
+        return [block, spoken] if spoken else [block]
+    said = " ".join(filter(None, [f"Чего я не проверил: {items[0]}" if items else "", spoken]))
+    return [said] if said else []
+
+
+CHAT_TAIL_ADDENDUM = """
+CHAT MODE — the Unverified section is said to a person at the end of the reply:
+- List ONLY what limits THIS answer: a part of the request you could not do or
+  could not confirm, a step that failed or was refused, a result you report
+  without having checked it yourself (e.g. a file written but not read back).
+- Do NOT list things the user did not ask about (what a value means, whether
+  it is still valid, whether a stated preference is permanent, what else the
+  file might imply).
+- Do NOT repeat the Conclusion. This overrides the hard rule about listing
+  unanswered parts: when the Conclusion itself says the request could not be
+  done and why (file not found, step refused), that part is already said.
+  Example: asked to retell a file that was not found — the Conclusion says it
+  was not found and nothing was read; Unverified: nothing.
+- If nothing of that kind remains, write the single word "nothing".
+- Otherwise write at most three "- " bullets, each one short plain sentence.
+"""
+
+
+def chat_contract(prompt: str) -> str:
+    """Договор синтеза для разговора: к общему договору добавлено правило хвоста."""
+    if os.environ.get("AGENT_HUMAN_CHAT") == "1" and output_contract_requires_headers(prompt):
+        return prompt + CHAT_TAIL_ADDENDUM
+    return prompt
+
+
+_CONTRACT_HEADERS = ("conclusion:", "facts:", "sources:", "confidence:", "unverified:", "safety:")
+
+
+def _undecorated_header(line: str) -> str:
+    """Заголовок раздела без полужирного: «**Conclusion:** текст» → «Conclusion: текст»."""
+    plain = line.replace("**", "").lstrip("# ")
+    return plain if plain.lower().startswith(_CONTRACT_HEADERS) else line
+
+
 def format_human_response(answer: str) -> str:
     """Convert the internal Output Contract format to clean human-readable
     text.
@@ -386,7 +473,8 @@ def format_human_response(answer: str) -> str:
 
     for raw in lines:
         stripped = raw.strip()
-        low = stripped.lower()
+        head = _undecorated_header(stripped)
+        low = head.lower()
 
         # Preserve fenced code in Facts verbatim, including indentation.
         if section == "facts" and (
@@ -400,7 +488,7 @@ def format_human_response(answer: str) -> str:
         # ── section detection ─────────────────────────────────────────────
         if low.startswith("conclusion:"):
             section = "conclusion"
-            rest = stripped[len("conclusion:"):].strip()
+            rest = head[len("conclusion:"):].strip()
             if rest:
                 conclusion_lines.append(rest)
             continue
@@ -409,7 +497,7 @@ def format_human_response(answer: str) -> str:
             continue
         if low.startswith("unverified:"):
             section = "unverified"
-            rest = stripped[len("unverified:"):].strip()
+            rest = head[len("unverified:"):].strip()
             rest_norm = rest.rstrip(".,!;:").lower()
             if rest and rest_norm not in ("nothing", "ничего", "нет", "нет данных"):
                 unverified_lines.append(rest)
@@ -497,8 +585,8 @@ def format_human_response(answer: str) -> str:
     if facts_block and (not chat or not conclusion or conclusion.endswith(":") or "```" in facts_block):
         parts.append(facts_block)
     if unverified_lines:
-        note = " ".join(unverified_lines)
-        parts.append(f"Чего я не проверил: {note}" if chat else f"⚠️ Не подтверждено: {note}")
+        parts.extend(_chat_caveats(unverified_lines, verification_tail_lines) if chat
+                     else [f"⚠️ Не подтверждено: {' '.join(unverified_lines)}"])
     if parts and ledger_lines:
         parts.extend(ledger_lines)
     if parts and verification_tail_lines:

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -1953,21 +1954,22 @@ def run_paced_campaign(
     # человека), после чего кампания умирала за четыре минуты, повторяя одно и
     # то же; с широкой целью тот же агент дал 21 полезный цикл из 21.
     def _call_run_campaign(**extra):
+        # Старая сигнатура без next_goal/opening_spend — прогон идёт без них.
+        # Отбор по сигнатуре, не по TypeError: ошибка изнутри кампании — не
+        # повод запускать её второй раз.
         try:
-            return run_campaign(
-                config, agent=agent, workspace=workspace,
-                approval_inbox=inbox, ledger=ledger, on_cycle=_on_cycle,
-                **extra,
-            )
-        except TypeError:
-            if not extra:
-                raise
-            # Старая сигнатура без next_goal — прогон продолжается без права
-            # смены цели, а не умирает из-за нового необязательного параметра.
-            return run_campaign(
-                config, agent=agent, workspace=workspace,
-                approval_inbox=inbox, ledger=ledger, on_cycle=_on_cycle,
-            )
+            params = inspect.signature(run_campaign).parameters
+        except (TypeError, ValueError):
+            params = None
+        if params is not None and not any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        ):
+            extra = {k: v for k, v in extra.items() if k in params}
+        return run_campaign(
+            config, agent=agent, workspace=workspace,
+            approval_inbox=inbox, ledger=ledger, on_cycle=_on_cycle,
+            **extra,
+        )
 
     try:
         result = _call_run_campaign(

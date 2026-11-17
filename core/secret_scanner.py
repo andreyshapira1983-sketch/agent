@@ -51,11 +51,11 @@ CREDENTIAL_KEY_NAMES: Final[str] = (
     r"auth[_-]?token|private[_-]?key|access[_-]?token"
 )
 
-# A dict key counts as credential-naming when it IS one of those names or ENDS
-# with one after a separator: `openai_api_key` and `db_password` are the same
-# secret wearing a prefix. `password_hint` is not — the suffix must be last.
+# A dict key counts as credential-naming when it ENDS with one of those names:
+# `openai_api_key`, `dbPassword` and `DBPASSWORD` are the same secret wearing a
+# prefix. `password_hint` is not — the suffix must be last.
 _CREDENTIAL_KEY_RE: Final[re.Pattern[str]] = re.compile(
-    rf"(?i)^(?:.*[_.\-])?(?:{CREDENTIAL_KEY_NAMES})$"
+    rf"(?i)(?:{CREDENTIAL_KEY_NAMES})$"
 )
 
 
@@ -65,7 +65,23 @@ def is_credential_key(name: str) -> bool:
     Used for values that carry no signal of their own: an opaque password
     matches no regex, so the key is the only evidence available.
     """
-    return isinstance(name, str) and bool(_CREDENTIAL_KEY_RE.match(name))
+    return isinstance(name, str) and bool(_CREDENTIAL_KEY_RE.search(name))
+
+
+#: PEM label of any private key: `RSA PRIVATE KEY`, `ENCRYPTED PRIVATE KEY`, …
+_PEM_LABEL: Final[str] = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?"
+_PEM_NL: Final[str] = r"(?:\r?\n|\\r\\n|\\n)"
+#: Without an END line: armor headers (`Version: …`), blank lines, base64 lines.
+_PEM_OPEN_BODY: Final[str] = (
+    rf"(?:{_PEM_NL}[ \t]*[A-Za-z][A-Za-z0-9-]*:[ \t][^\r\n\\]*)*"
+    rf"(?:{_PEM_NL}[ \t]*(?={_PEM_NL}))*"
+    rf"(?:{_PEM_NL}[ \t]*[A-Za-z0-9+/=]+[ \t]*(?=\r?\n|\\r|\\n|$))*"
+)
+
+#: A quoted value on one line, escapes allowed; then the `\"…\"` of JSON in a string.
+_QUOTED_VALUE: Final[str] = (
+    r"""(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\\"[^"\n]*"|\\'[^'\n]*')"""
+)
 
 
 # Regex rules: (kind, compiled pattern). `kind` ends up in the redaction
@@ -137,9 +153,12 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         r"[^:/?#\s@]+:[^@/?#\s]+@"
     )),
     ("bearer-token",       re.compile(r"Bearer\s+[A-Za-z0-9_.\-]{20,}")),
-    # PEM block start marker alone is enough — pasting only the header is
-    # already a leak. The END marker is optional in match.
-    ("private-key-block",  re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----")),
+    # The whole block, BEGIN to END; without an END line, the body lines after
+    # the header. A bare header is still a finding. Newlines real or escaped.
+    ("private-key-block",  re.compile(
+        rf"-----BEGIN {_PEM_LABEL}-----"
+        rf"(?:[\s\S]{{0,16000}}?-----END {_PEM_LABEL}-----|{_PEM_OPEN_BODY})"
+    )),
     # JWT: three base64url-encoded segments separated by dots.
     # The first segment starts with eyJ (base64 of '{"') which is distinctive
     # enough to avoid false positives on version strings or file paths.
@@ -154,8 +173,13 @@ REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
     )),
     # `KEY=VALUE` / `KEY: VALUE` shapes where KEY names a credential.
     # Matches the WHOLE assignment so the redactor can mask the value.
+    # No left edge: the name may be glued to a prefix (`dbPassword`). A quoted
+    # value is taken whole. A QUOTED key (`"password": "…"`, JSON, also escaped)
+    # needs a quoted value — `{"api_key": api_key}` is code passing a variable.
     ("credential-assignment", re.compile(
-        rf"(?i)\b({CREDENTIAL_KEY_NAMES})\s*[:=]\s*\S+"
+        rf"(?i)({CREDENTIAL_KEY_NAMES})"
+        rf"(?:\s*[:=]\s*(?P<value>{_QUOTED_VALUE}|\S+)"
+        rf"|\\?[\"']\s*[:=]\s*(?P<qvalue>{_QUOTED_VALUE}))"
     )),
 )
 
@@ -217,6 +241,9 @@ _CODE_KEYWORD_VALUES: Final[frozenset[str]] = frozenset({
     "return", "raise", "pass", "continue", "break", "none", "true", "false",
 })
 
+#: Flag values that clear a PREFIXED name only (`require_password: yes`).
+_FLAG_VALUES: Final[frozenset[str]] = frozenset({"yes", "no", "on", "off", "0", "1"})
+
 
 def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
     """True, когда за именем доступа стоит ССЫЛКА, а не значение секрета.
@@ -229,12 +256,14 @@ def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
     «password: hunter2» — обязано ловиться по-прежнему, поэтому пропускаются
     ТОЛЬКО явные ссылочные формы, а не «всё короткое».
     """
-    raw = match.group(0)
-    value = raw.split("=", 1)[-1] if "=" in raw else raw.split(":", 1)[-1]
-    value = value.strip().strip("\"'` \t,;")
+    value = match.group("value") or match.group("qvalue") or ""
+    value = value.strip().strip("\"'` \t,;\\")
     if not value:
         return True
     if value.split(None, 1)[0].lower() in _CODE_KEYWORD_VALUES:
+        return True
+    before = text[max(match.start() - 1, 0) : match.start()]
+    if value.lower() in _FLAG_VALUES and (before.isalnum() or before == "_"):
         return True
     if looks_like_secret_body(value):
         return False

@@ -8,7 +8,7 @@ from pathlib import Path
 
 _CORE = Path(__file__).resolve().parents[1] / "core"
 
-_BASELINE_PROSE_LINES = 18744
+_BASELINE_PROSE_LINES = 18827  # +83 (2026-11-10): починки около 90 мест за день; новый модуль core/protected_paths.py и пояснения к новым отказам.
 
 
 def _prose_lines(source: str) -> int:

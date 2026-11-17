@@ -10,6 +10,7 @@ approval prompt — UX cribbed from `git diff` / `patch`.
 
 Safety:
   - Paths must be ASCII and resolve INSIDE the workspace.
+  - Credential paths (`.env`, keys, `secrets/`) are refused, as in file_read.
   - File content is read with a hard byte cap; oversize files are
     refused outright (the planner can fetch a narrower slice via
     file_read if needed).
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.base import Risk, Tool, require_ascii_identifier
+from tools.file_read import _is_credential_path
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -105,11 +107,17 @@ class DiffFileTool(Tool):
         target = (self.workspace_root / path).resolve() \
             if not Path(path).is_absolute() else Path(path).resolve()
         try:
-            target.relative_to(self.workspace_root)
+            rel = target.relative_to(self.workspace_root)
         except ValueError:
             raise PermissionError(
                 f"path {path!r} resolves outside workspace"
             ) from None
+        # A diff against any proposed text returns the current file line by line.
+        if _is_credential_path(rel.as_posix()):
+            raise PermissionError(
+                f"refusing to diff a credential file: {path!r} — this path names "
+                "a credential store, and the agent's own tools do not fetch keys"
+            )
 
         # Read current content if the file exists.
         file_exists = target.is_file()

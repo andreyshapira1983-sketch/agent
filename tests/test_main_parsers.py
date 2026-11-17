@@ -57,9 +57,14 @@ class TestParseRemember:
         assert content == "the sky is blue"
 
     def test_known_single_tag(self):
-        tags, content = _parse_remember("preference dark mode please")
+        tags, content = _parse_remember("[preference] dark mode please")
         assert tags == ["preference"]
         assert content == "dark mode please"
+
+    def test_a_bare_reserved_word_is_part_of_the_note(self):
+        tags, content = _parse_remember("preference dark mode please")
+        assert tags == ["user-approved"]
+        assert content == "preference dark mode please"
 
     def test_comma_separated_tags(self):
         tags, content = _parse_remember("fact,decision shipped v2")
@@ -67,19 +72,18 @@ class TestParseRemember:
         assert content == "shipped v2"
 
     def test_non_ascii_tags_are_kept_as_typed(self):
-        """Contract changed 2026-08-07: a tag is a label, not an identifier.
+        """A tag is a label, not an identifier: any script is stored as written."""
+        tags, content = _parse_remember("факт,мнение тело заметки")
+        assert tags == ["факт", "мнение"]
+        assert content == "тело заметки"
 
-        The comma still starts tag parsing and still ends at the first
-        whitespace, so `мнение` here is content — but `факт` is now stored as
-        written instead of being dropped for `user-approved`, which used to
-        hand the write policy a consent the operator never gave.
-        """
+    def test_a_comma_followed_by_a_space_is_prose_not_a_tag_list(self):
         tags, content = _parse_remember("факт, мнение тело заметки")
-        assert tags == ["факт"]
-        assert content == "мнение тело заметки"
+        assert tags == ["user-approved"]
+        assert content == "факт, мнение тело заметки"
 
     def test_unicode_content_is_preserved(self):
-        tags, content = _parse_remember("insight пользователь любит краткость")
+        tags, content = _parse_remember("[insight] пользователь любит краткость")
         assert tags == ["insight"]
         assert content == "пользователь любит краткость"
 

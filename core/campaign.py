@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -446,24 +446,39 @@ def _ask_for_a_goal(
 
 
 def _wait_for_usd_limit(workspace: Any, ledger: Any, cycle: int, goal: str,
-                        now_fn: Any, sleep_fn: Any, pause: float) -> bool:
+                        now_fn: Any, sleep_fn: Any, pause: float) -> bool | str:
     """Предел $ в час (план субботы з): превышен — цикл пишет «жду» и спит.
 
-    Предел — `usd_per_hour` в config/budget_limits.json; нет его — False.
+    Предел — `usd_per_hour` в config/budget_limits.json; нет его — False; не читается — причина остановки.
     """
-    from core.usd_spend import usd_hour_limit, usd_last_hour
-    limit = usd_hour_limit(Path(workspace))
-    if limit is None:
-        return False
-    spent = usd_last_hour(Path(workspace))
-    if spent < limit:
-        return False
-    ledger.append(CampaignCycleRecord(
-        cycle=cycle, ts=now_fn().isoformat(), goal=goal, action="<usd_limit>",
-        action_title="waiting: hourly dollar limit reached", severity="low", priority=0,
-        risk="read_only", idle=True, llm_calls_spent=0, cost_units_spent=0, result="waiting",
-        reason=f"usd_hour_limit: spent ${spent:.2f} of ${limit:.2f} in the last hour",
-        work_done=False, usd_last_hour=spent))
+    from core.usd_spend import unpriced_note, usd_hour_limit, usd_since
+    since = _utc_now() - timedelta(hours=1)
+
+    def row(title: str, result: str, reason: str, spent: float | None) -> CampaignCycleRecord:
+        return CampaignCycleRecord(
+            cycle=cycle, ts=now_fn().isoformat(), goal=goal, action="<usd_limit>",
+            action_title=title, severity="low", priority=0, risk="read_only", idle=True,
+            llm_calls_spent=0, cost_units_spent=0, result=result, reason=reason,
+            work_done=False, usd_last_hour=spent)
+
+    try:
+        limit = usd_hour_limit(Path(workspace))
+        if limit is None:
+            return False
+        spent = usd_since(Path(workspace), since)
+        if spent < limit:
+            return False
+        note = unpriced_note(Path(workspace), since)
+    except ValueError as exc:
+        stop = f"hourly dollar limit cannot be checked: {exc}"
+        try:
+            ledger.append(row("stopped: hourly dollar limit cannot be checked", "stopped", stop, None))
+        except ValueError:
+            pass  # журнал сам считает расход за час и упал на том же чтении; причина едет в итог
+        return stop
+    ledger.append(row(
+        "waiting: hourly dollar limit reached", "waiting",
+        f"usd_hour_limit: spent ${spent:.2f} of ${limit:.2f} in the last hour{note}", spent))
     sleep_fn(max(pause, 60.0))
     return True
 
@@ -715,11 +730,11 @@ def run_campaign(
                 status = "stopped"
                 break
 
-        if _wait_for_usd_limit(workspace, ledger, cycle, current_goal, now_fn, sleep_fn,
-                               float(config.cycle_pause_seconds or 60)):
+        if (usd_stop := _wait_for_usd_limit(workspace, ledger, cycle, current_goal, now_fn,
+                                            sleep_fn, float(config.cycle_pause_seconds or 60))) is True:
             continue
-        if config.max_llm_calls and llm_calls_used >= config.max_llm_calls:
-            stop_reason = f"budget_exhausted:llm_calls={llm_calls_used}/{config.max_llm_calls}"
+        if usd_stop or (config.max_llm_calls and llm_calls_used >= config.max_llm_calls):
+            stop_reason = usd_stop or f"budget_exhausted:llm_calls={llm_calls_used}/{config.max_llm_calls}"
             status = "stopped"
             break
         if config.max_cost_units and cost_units_used >= config.max_cost_units:

@@ -420,8 +420,15 @@ def _handle_budget_kill_switch(rest: str, agent: AgentLoop, workspace: Path) -> 
 
     kill_switch = BudgetKillSwitch(path=default_path(workspace))
     if do_clear:
-        kill_switch.clear()
-        agent.log.log("budget_kill_switch_cleared", {"path": str(default_path(workspace))})
+        try:
+            kill_switch.clear()
+        except OSError as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            agent.log.log("budget_kill_switch_clear_failed",
+                          {"path": str(default_path(workspace)), "error": error})
+            print(f"budget kill-switch NOT cleared, it is still on: {error}", file=sys.stderr)
+        else:
+            agent.log.log("budget_kill_switch_cleared", {"path": str(default_path(workspace))})
 
     snapshot = _budget_ledger_snapshot(agent)
     state = kill_switch.status(snapshot)

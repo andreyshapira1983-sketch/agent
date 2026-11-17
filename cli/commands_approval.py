@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
+from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox, ApprovalTransitionError
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
 from core.subagent_contract import canonical_from_approval_payload
 from core.subagent_runner import SubagentContractRefused
@@ -510,7 +510,7 @@ def _handle_approval_decision(
             item = inbox.deny(item_id, reason=reason)
         else:
             raise ValueError(f"unknown approval decision: {decision}")
-    except KeyError as exc:
+    except (KeyError, ApprovalTransitionError) as exc:
         print(f"(approval {decision} failed: {exc})", file=sys.stderr)
         return True
     agent.log.log("approval_inbox_decision", item.to_dict())
@@ -551,7 +551,7 @@ def _handle_approval_abort(rest: str, agent: AgentLoop, workspace: Path) -> bool
     inbox = _approval_inbox_for(agent, workspace)
     try:
         item = inbox.abort(item_id)
-    except KeyError as exc:
+    except (KeyError, ApprovalTransitionError) as exc:
         print(f"(approval abort failed: {exc})", file=sys.stderr)
         return True
     agent.log.log("approval_inbox_decision", item.to_dict())
@@ -636,7 +636,7 @@ def _run_approved_subagent(
 
     try:
         spawn_tool = agent.registry.get("spawn_subagent")
-    except KeyError as exc:
+    except (KeyError, ApprovalTransitionError) as exc:
         print(f"(approval run failed: {exc})", file=sys.stderr)
         return True
     run_contract = getattr(spawn_tool, "run_contract", None)

@@ -100,10 +100,13 @@ class ScheduleTickReport:
     #: wire. The operator's question is "why is my agent doing nothing?", and
     #: `due_count=0` alone cannot tell an unconfigured daemon from a patient one.
     total_count: int
+    #: Rows in the file the reader could not parse; kept on disk, never run.
+    unparsed_count: int = 0
 
     def to_dict(self) -> dict:
         return {
             "total_count": self.total_count,
+            "unparsed_count": self.unparsed_count,
             "due_count": self.due_count,
             "enqueued_count": self.enqueued_count,
             "task_ids": list(self.task_ids),
@@ -111,10 +114,12 @@ class ScheduleTickReport:
         }
 
     def user_summary(self) -> str:
-        if self.total_count == 0:
+        if self.total_count == 0 and not self.unparsed_count:
             return "(scheduler tick: no schedules configured — nothing to run)"
+        unparsed = f"unparsed={self.unparsed_count}; " if self.unparsed_count else ""
         return (
             f"(scheduler tick: {self.total_count} schedule(s); "
+            f"{unparsed}"
             f"due={self.due_count}; "
             f"enqueued={self.enqueued_count}; tasks={list(self.task_ids)})"
         )
@@ -150,9 +155,9 @@ class SchedulerStore:
             learning_limit=learning_limit,
         )
         with exclusive_file_lock(self._lock_path):
-            schedules = self._load_unlocked()
+            schedules, unparsed = self._read_unlocked()
             schedules.append(schedule)
-            self._save_unlocked(schedules)
+            self._save_unlocked(schedules, unparsed)
         return schedule
 
     def load(self) -> list[RuntimeSchedule]:
@@ -160,15 +165,20 @@ class SchedulerStore:
             return self._load_unlocked()
 
     def _load_unlocked(self) -> list[RuntimeSchedule]:
+        return self._read_unlocked()[0]
+
+    def _read_unlocked(self) -> tuple[list[RuntimeSchedule], list[dict]]:
+        """Parsed schedules plus the raw rows that did not parse."""
         if not self.path.exists():
-            return []
+            return [], []
         schedules: list[RuntimeSchedule] = []
+        unparsed: list[dict] = []
         for raw in read_state_jsonl_unlocked(self.path):
             try:
                 schedules.append(RuntimeSchedule.from_dict(raw))
             except (TypeError, ValueError):
-                continue
-        return schedules
+                unparsed.append(raw)
+        return schedules, unparsed
 
     def list(self, *, status: ScheduleStatus | str | None = None) -> list[RuntimeSchedule]:
         schedules = self.load()
@@ -192,9 +202,15 @@ class SchedulerStore:
         now: datetime | None = None,
         limit: int | None = None,
     ) -> ScheduleTickReport:
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1 or None")
         now = (now or _now()).astimezone(timezone.utc)
         with exclusive_file_lock(self._lock_path):
-            schedules = self._load_unlocked()
+            schedules, unparsed = self._read_unlocked()
+            if unparsed:
+                logger.warning(
+                    "scheduler: %d unparseable row(s) in %s kept, not run", len(unparsed), self.path
+                )
             due_schedules = self._due_from(schedules, now=now, limit=limit)
             task_ids: list[str] = []
             updated_by_id: dict[str, RuntimeSchedule] = {}
@@ -216,10 +232,11 @@ class SchedulerStore:
                 )
 
             updated = [updated_by_id.get(schedule.id, schedule) for schedule in schedules]
-            self._save_unlocked(updated)
+            self._save_unlocked(updated, unparsed)
 
         return ScheduleTickReport(
             total_count=len(schedules),
+            unparsed_count=len(unparsed),
             due_count=len(due_schedules),
             enqueued_count=len(task_ids),
             task_ids=tuple(task_ids),
@@ -236,7 +253,8 @@ class SchedulerStore:
         return self._update_one(schedule_id, lambda s: s.with_updates(status="disabled"))
 
     def summary(self) -> dict:
-        schedules = self.load()
+        with exclusive_file_lock(self._lock_path):
+            schedules, unparsed = self._read_unlocked()
         counts: dict[str, int] = {}
         for schedule in schedules:
             counts[schedule.status] = counts.get(schedule.status, 0) + 1
@@ -244,12 +262,13 @@ class SchedulerStore:
             "path": str(self.path),
             "total": len(schedules),
             "statuses": counts,
-            "due": len(self.due()),
+            "due": len(self._due_from(schedules, now=_now().astimezone(timezone.utc))),
+            "unparsed": len(unparsed),
         }
 
     def _update_one(self, schedule_id: str, fn) -> RuntimeSchedule:
         with exclusive_file_lock(self._lock_path):
-            schedules = self._load_unlocked()
+            schedules, unparsed = self._read_unlocked()
             updated: RuntimeSchedule | None = None
             out: list[RuntimeSchedule] = []
             for schedule in schedules:
@@ -260,7 +279,7 @@ class SchedulerStore:
                     out.append(schedule)
             if updated is None:
                 raise KeyError(f"schedule not found: {schedule_id}")
-            self._save_unlocked(out)
+            self._save_unlocked(out, unparsed)
             return updated
 
     @property
@@ -281,8 +300,11 @@ class SchedulerStore:
         out.sort(key=lambda schedule: (_parse_iso(schedule.next_run_at), schedule.created_at))
         return out[:limit] if limit is not None else out
 
-    def _save_unlocked(self, schedules: list[RuntimeSchedule]) -> None:
-        rewrite_state_jsonl_unlocked(self.path, [schedule.to_dict() for schedule in schedules])
+    def _save_unlocked(self, schedules: list[RuntimeSchedule], unparsed: list[dict]) -> None:
+        """Rewrite the file; rows the reader could not parse go back as they were."""
+        rewrite_state_jsonl_unlocked(
+            self.path, [schedule.to_dict() for schedule in schedules] + unparsed
+        )
 
 
 # ── in-loop timer scheduler (plan item 2.1) ──────────────────────────────────
@@ -352,8 +374,9 @@ class SchedulerService:
     ) -> None:
         if idle_interval <= 0:
             raise ValueError("idle_interval must be positive")
-        if limit is not None and limit < 0:
-            raise ValueError("limit must be >= 0 or None")
+        # limit=0 enqueues nothing while the schedule stays due: the loop would never sleep.
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be >= 1 or None")
         self._store = store
         self._task_queue = task_queue
         self._now = now

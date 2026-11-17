@@ -442,13 +442,20 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
     # queue (which lists `executed` as "applied proposals") never asks a human
     # to grade a change the suite discarded.
     if report.status in TERMINAL_LANE_STATUSES:
-        if report.status == "committed_local":
-            inbox.mark_executed(item_id)
-        else:
-            inbox.abort(item_id)
+        try:
+            (inbox.mark_executed if report.status == "committed_local" else inbox.abort)(item_id)
+        except (KeyError, ValueError) as exc:  # item expired or vanished while the lane ran
+            _note_unconsumed_approval(result, item_id, exc)
         _record_lane_outcome(registry, item, report.status)
 
     return result
+
+
+def _note_unconsumed_approval(result: dict, item_id: str, exc: Exception) -> None:
+    """Put the inbox mismatch where the operator reads it: the log and `risks`."""
+    logger.warning("approval %s not consumed: %s", item_id, exc)
+    note = f"approval_not_consumed: lane ended {result.get('status')}, but {exc}"
+    result["risks"] = [*(result.get("risks") or ()), note]
 
 
 def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:

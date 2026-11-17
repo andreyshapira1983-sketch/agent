@@ -267,6 +267,9 @@ class ModelUsageLedger:
         logger: Any | None = None,
         budget_ledger: BudgetLedger | None = None,
     ) -> ModelUsageLedger:
+        from core.usd_spend import turn_usd_limit
+
+        turn_usd_limit()  # a negative AGENT_TURN_MAX_USD stops the start, like the limits below
         return cls(
             path=path,
             limits=ModelUsageLimits.from_env(),
@@ -370,6 +373,7 @@ class ModelUsageLedger:
                     f"run cost envelope would exhaust: {totals['cost_units']}+~"
                     f"{est_cost}/{ceiling} before {role}:{provider}/{model}"
                 )
+        self._assert_usd_hour(f"{role}:{provider}/{model}")
         if self.budget_ledger is not None:
             # Read-only pre-flight peeks against persistent windows first, so a
             # blocked estimate never records a phantom llm_call.
@@ -415,6 +419,19 @@ class ModelUsageLedger:
                     limit=decision.limit,
                     window=decision.window,
                 )
+
+    def _assert_usd_hour(self, call: str) -> None:
+        """Hourly dollar limit (`usd_per_hour`): one gate for chat, one-shot and campaign calls."""
+        if self.path is None:
+            return
+        from core.usd_spend import usd_hour_refusal
+
+        try:
+            refusal = usd_hour_refusal(self.path.parent.parent)
+        except ValueError as exc:
+            refusal = f"hourly dollar limit cannot be checked: {exc}"
+        if refusal:
+            raise ModelBudgetExceeded(f"{refusal} before {call}", counter="usd_per_hour")
 
     def log_start(
         self,

@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -80,8 +80,7 @@ DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "unknown":          0.10,
 }
 
-# Maximum excerpt length stored on disk / sent into prompts. Keeps audit
-# log entries bounded even when a tool returns megabytes of text.
+# Maximum excerpt length stored on disk / sent into prompts (bounds audit log entries).
 MAX_EXCERPT_CHARS = 800
 
 #: Граница между исходом опыта и его ВОПРОСОМ (кодом). Всё после маркера —
@@ -124,12 +123,10 @@ class Evidence:
     confidence: float        # in [0, 1]
     claim: str               # short human-readable claim this evidence supports
     excerpt: str             # first MAX_EXCERPT_CHARS chars of the source
-    # Provenance of the underlying record, when it has one. For memory
-    # evidence this is the persistent record's `source` — "user-explicit",
-    # "agent-auto", an ingested source type. It was previously only readable
-    # as prose inside `claim`, which meant the verifier could not consult it
-    # without parsing English. None for evidence that has no such notion.
+    # For memory: the record's `source` ("user-explicit", "agent-auto", …); else None.
     origin: str | None = None
+    # Весь прочитанный текст источника: только в памяти хода, для сверки утверждений.
+    source_text: str = field(default="", compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -245,6 +242,12 @@ def _search_excerpt(output: str) -> str:
             f"{QUESTION_CODE_MARKER}\n{output.strip()}")
 
 
+def _page_body(text: str) -> str:
+    """Текст страницы без шапки `[find …]`: в шапке слова запроса, а не страницы."""
+    head, sep, rest = text.partition("\n")
+    return rest if sep and head.startswith("[find ") and head.endswith("]") else text
+
+
 def _truncate(text: str, limit: int = MAX_EXCERPT_CHARS) -> str:
     if not isinstance(text, str):
         text = str(text)
@@ -263,12 +266,9 @@ def make_evidence(
     confidence: float | None = None,
     fetched_at: str | None = None,
     origin: str | None = None,
+    source_text: str = "",
 ) -> Evidence:
-    """Constructor that fills in id / hash / timestamp / baseline confidence.
-
-    Use this directly when you have raw inputs; use the factory below
-    when you have a (tool_name, output) pair from the loop.
-    """
+    """Constructor that fills in id / hash / timestamp / baseline confidence."""
     if kind not in DEFAULT_CONFIDENCE:
         raise ValueError(f"unknown evidence kind: {kind!r}")
     excerpt_trimmed = _truncate(excerpt)
@@ -286,6 +286,7 @@ def make_evidence(
         claim=claim,
         excerpt=excerpt_trimmed,
         origin=origin,
+        source_text=source_text,
     )
 
 
@@ -462,6 +463,10 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     start, end = args.get("start_line"), args.get("end_line")
     if isinstance(start, int) and isinstance(end, int):
         window = f":{start}-{end}"
+    from core.redaction import redact_text
+
+    # Одна маскировка на выдержку и на полный текст: сверка не видит больше, чем выдержка.
+    output = redact_text(output)[0]
     return make_evidence(
         kind="file",
         source_id=f"file:{path}{window}",
@@ -469,6 +474,7 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
         claim=f"Contents of workspace file {path}"
         + (f", lines {start}-{end}" if window else ""),
         excerpt=output,
+        source_text=output,
     )
 
 
@@ -496,6 +502,30 @@ def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     produced = str(outputs[0])
     return make_evidence(kind="file", source_id=source_id, obtained_via="convert_file",
                          claim=produced, excerpt=produced)
+
+
+def _file_write_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
+    """Улика о выполненной записи: путь, режим, байты и что было передано на запись."""
+    if not isinstance(output, dict):
+        return None
+    path = str(output.get("path") or args.get("path") or "")[:120]
+    written = output.get("bytes_written")
+    if not path or not isinstance(written, int):
+        return None
+    # Свидетель — прогон инструмента, не слова модели: без этой улики верному
+    # «файл создан» не на что сослаться, и черновик отзывался как выдумка.
+    receipt = f"file_write success path={path} mode={output.get('mode') or ''} bytes_written={written}"
+    if output.get("backup_path"):
+        receipt += f" backup_path={output['backup_path']}"
+    excerpt = receipt
+    content = args.get("content")
+    # Переданный текст называется, только если с ним сошёлся счёт байтов инструмента.
+    if isinstance(content, str) and len(content.encode("utf-8")) == written:
+        from core.redaction import redact_payload
+
+        excerpt += f"\ncontent passed to the tool (not re-read from disk):\n{redact_payload(content)}"
+    return make_evidence(kind="tool_output", source_id=f"tool_output:file_write:{path}",
+                         obtained_via="file_write", claim=receipt, excerpt=excerpt)
 
 
 def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 34 returns are guard clauses
@@ -554,6 +584,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             obtained_via="web_search",
             claim=f"Search for {query!r} returned {len(output)} hit(s)",
             excerpt="\n".join(lines),
+            source_text="\n".join(lines),
         )
 
     # ---- web_fetch (MVP-14.2) --------------------------------------------
@@ -564,16 +595,11 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         text = output.get("text", "")
         if not isinstance(text, str) or not text:
             return None
-        # H-01: тело — служебная заглушка, а не содержимое. Отсекается ЗДЕСЬ, у
-        # производителя: судить утверждение — работа цепочки гейтов
-        # верификатора, и второй судья над той же областью спорил бы с первым.
-        # Страница-ошибка не источник ни для какого утверждения, кем бы оно ни
-        # было, поэтому решение принадлежит границе фабрики улик.
+        # H-01: страница-ошибка не источник ни для какого утверждения; отсекается
+        # здесь, у производителя улик, а не вторым судьёй рядом с верификатором.
         if looks_like_error_page(text) and output.get("not_found") is not True:  # 404: verifier_absence
             return None
         ch = output.get("content_hash")
-        # Trust the tool's own hash when present — it covers more bytes
-        # than the truncated excerpt we'll store here.
         ev = make_evidence(
             kind="web_page",
             source_id=f"web_page:{url}",
@@ -581,15 +607,10 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             claim=f"Fetched page {url}",
             excerpt=text,
             fetched_at=output.get("fetched_at"),
+            source_text=_page_body(text),
         )
-        if isinstance(ch, str) and ch:
-            return Evidence(
-                id=ev.id, kind=ev.kind, source_id=ev.source_id,
-                obtained_via=ev.obtained_via, content_hash=ch,
-                fetched_at=ev.fetched_at, confidence=ev.confidence,
-                claim=ev.claim, excerpt=ev.excerpt,
-            )
-        return ev
+        # Хэш инструмента покрывает всю страницу, а не выдержку.
+        return replace(ev, content_hash=ch) if isinstance(ch, str) and ch else ev
 
     # ---- rss_fetch --------------------------------------------------------
     if tool_name == "rss_fetch":
@@ -770,12 +791,8 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         )
 
     # ---- file_write -------------------------------------------------------
-    # By design: a write is an action, not a source of truth. The audit
-    # event records it; evidence about file contents must come from a
-    # subsequent `file_read`. Return None here on purpose so the loop
-    # never gives a write-claim the same weight as a read-claim.
     if tool_name == "file_write":
-        return None
+        return _file_write_evidence(args, output)
 
     # ---- list_dir ---------------------------------------------------------
     if tool_name == "list_dir":

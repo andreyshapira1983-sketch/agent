@@ -208,7 +208,7 @@ class BudgetKillSwitch:
         a torn write or a stray byte released the brake it was meant to hold;
         a deny list that answers "allowed" for what it cannot parse is the
         failure the kill-switch literature names first. The operator clears it
-        with `:kill-switch clear`, as any latch.
+        with `:budget-kill-switch --clear`, as any latch.
         """
         try:
             raw = self.path.read_text(encoding="utf-8")
@@ -239,12 +239,10 @@ class BudgetKillSwitch:
         tmp.replace(self.path)  # atomic swap
 
     def clear(self) -> None:
-        """Operator reset — remove the latched state (no-op if absent)."""
+        """Operator reset — remove the latched state (no-op if absent); OSError if it stays."""
         try:
             self.path.unlink()
         except FileNotFoundError:
-            pass
-        except OSError:
             pass
 
     def status(

@@ -177,13 +177,17 @@ class SpawnSubagentTool(Tool):
         expected, how = predicted_sources(str(expect), expect_sources)
         status = str(getattr(result, "status", "") or "")
         sources = int(getattr(result, "external_evidence_count", 0) or 0)
+        try:
+            usd = usd_since(self.workspace_root, started) if started is not None else None
+        except ValueError:  # spend journal unreadable: the prediction row is still written
+            usd = None
         record(self.workspace_root, {
             "name": name, "role": role, "objective": objective[:400], "why": str(why)[:400],
             "expect": str(expect)[:400], "expected_sources": expected, "prediction": how,
             "status": status, "sources": sources,
             "answer_chars": len(str(getattr(result, "answer", "") or "")),
             "tool_calls": child_tool_calls(self.log_dir, str(getattr(result, "trace_id", ""))),
-            "usd": usd_since(self.workspace_root, started) if started is not None else None,
+            "usd": usd,
             "met": compare(expected, sources, status),
         })
 

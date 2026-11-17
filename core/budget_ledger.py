@@ -52,9 +52,13 @@ def _env_int(name: str, default: int = 0) -> int:
     if raw is None or not raw.strip():
         return default
     try:
-        return max(0, int(raw.strip()))
+        value = int(raw.strip())
     except ValueError as exc:
         raise ValueError(f"{name} must be a non-negative integer") from exc
+    if value < 0:
+        # 0 means "no limit", so clamping a negative would silently lift the limit.
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -178,20 +182,11 @@ class BudgetLedger:
         return loaded
 
     def _records_for_windows(self, now: datetime) -> list[BudgetLedgerRecord]:
-        """Records that can matter to any window — a BOUNDED tail read.
+        """Records that can matter to any window — a BOUNDED tail read (MIR-125).
 
-        MIR-125: `reserve()` used to call `load_records()`, re-reading the
-        entire append-only ledger, and MIR-116 wired a reservation into the
-        path of every model call — so the cost gate was O(file size) on a file
-        that only grows, in exactly the long-run scenario it was added for.
-
-        Windows are time-bounded, so only records newer than the longest
-        window's cutoff can count. The asymmetry that shapes this: reading too
-        much is merely slow, while reading too little UNDERCOUNTS usage and
-        lets the agent spend past its limit. So the tail read PROVES its
-        coverage — it doubles until the oldest record it has seen is older
-        than the cutoff, or until it has consumed the whole file — and any
-        read failure falls back to the full read rather than to a guess.
+        Reading too little undercounts usage, so the tail PROVES its coverage:
+        it doubles until its oldest record is older than the longest window's
+        cutoff or the whole file is read; a read failure means the full read.
         """
         if self.path is None or not self.path.exists():
             return list(self.records)
@@ -248,6 +243,8 @@ class BudgetLedger:
             raise ValueError("budget amount must be >= 1")
         now = now or _utc_now()
         records = self._records_for_windows(now)
+        # The enforced window with the least room left: (room, name, used, limit).
+        tightest: tuple[int, str | None, int, int] = (0, None, 0, 0)
         for window in self.windows:
             limit = window.limit_for(counter)
             if limit <= 0:
@@ -268,12 +265,17 @@ class BudgetLedger:
                 )
                 _log(self.logger, "budget_window_blocked", decision.to_dict())
                 return decision
+            if tightest[1] is None or limit - used - amount < tightest[0]:
+                tightest = (limit - used - amount, window.name, used + amount, limit)
         self.record(counter, amount=amount, reason=reason, scope=scope, now=now)
         decision = BudgetLedgerDecision(
             counter=counter,
             allowed=True,
             amount=amount,
             reason=reason,
+            window=tightest[1],
+            used=tightest[2],
+            limit=tightest[3],
         )
         _log(self.logger, "budget_window_reserved", decision.to_dict())
         return decision
@@ -441,15 +443,16 @@ def _budget_config_path(config_path: Path | None) -> Path | None:
 
 def _load_budget_config(config_path: Path | None) -> dict[str, Any]:
     if config_path is None or not config_path.exists():
-        # Отсутствие файла НЕ ошибка на этом слое: путь называют все
-        # вызывающие по умолчанию, поэтому «назван» не значит «оператор его
-        # завёл» — попытка различить их здесь покраснила 168 тестов, и
-        # правильно сделала. Ожидание «потолок настроен» принадлежит живому
-        # входу, и проверяется в `agent_tick._require_budget_config`
-        # (H-33 в docs/audit/HISTORICAL_FAILURE_LEDGER.md).
+        # Отсутствие файла здесь не ошибка: путь называют все вызывающие по
+        # умолчанию. «Потолок настроен» проверяет живой вход,
+        # `agent_tick._require_budget_config` (H-33).
         return {}
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
+        text = config_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"budget config is not readable: {config_path}") from exc
+    try:
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"budget config is not valid JSON: {config_path}") from exc
     if not isinstance(data, dict):
@@ -471,12 +474,16 @@ def _limits_from_config(
     for counter in DEFAULT_COUNTERS:
         if counter not in raw_limits:
             continue
+        message = f"budget config {window_name}.{counter} must be a non-negative integer"
+        raw = raw_limits[counter]
         try:
-            limits[counter] = max(0, int(raw_limits[counter]))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"budget config {window_name}.{counter} must be a non-negative integer"
-            ) from exc
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(message) from exc
+        # int() would turn true into 1 and 2.9 into 2: a limit nobody wrote.
+        if isinstance(raw, bool) or value < 0 or (isinstance(raw, float) and raw != value):
+            raise ValueError(message)
+        limits[counter] = value
     return limits
 
 

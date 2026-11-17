@@ -386,7 +386,7 @@ class TestParseRemember:
         assert content == "I prefer concise answers"
 
     def test_known_tag_picked_up(self):
-        tags, content = _parse_remember("preference I like Python")
+        tags, content = _parse_remember("[preference] I like Python")
         assert tags == ["preference"]
         assert content == "I like Python"
 
@@ -411,7 +411,7 @@ class TestParseRemember:
 
     def test_a_multi_line_note_keeps_its_lines(self):
         """The body is human text: its newlines and indentation survive."""
-        tags, content = _parse_remember("fact def f():\n    return 1\n\nsecond block")
+        tags, content = _parse_remember("[fact] def f():\n    return 1\n\nsecond block")
         assert tags == ["fact"]
         assert content == "def f():\n    return 1\n\nsecond block"
 
@@ -427,7 +427,7 @@ class TestParseRemember:
         assert content == "wibble wobble"
 
     def test_case_insensitive_tag_match(self):
-        tags, content = _parse_remember("PREFERENCE be terse")
+        tags, content = _parse_remember("[PREFERENCE] be terse")
         assert tags == ["preference"]
         assert content == "be terse"
 
@@ -935,10 +935,19 @@ class TestHandleMetaCommand:
             MemoryRecord(content="one", tags=["fact"], owner="user"),
             MemoryRecord(content="two", tags=["fact"], owner="user"),
         ])
-        handle_meta_command(":forget", agent, workspace)
+        handle_meta_command(":forget --all", agent, workspace)
         assert agent.list_persistent() == []
         out = capsys.readouterr()
         assert "deleted 2" in out.err
+
+    def test_forget_without_target_deletes_nothing(self, workspace: Path, capsys):
+        agent = _build_agent(workspace)
+        agent.persistent_store.save_many([
+            MemoryRecord(content="one", tags=["fact"], owner="user"),
+        ])
+        handle_meta_command(":forget", agent, workspace)
+        assert len(agent.list_persistent()) == 1
+        assert "nothing deleted" in capsys.readouterr().err
 
     def test_forget_by_id_succeeds(self, workspace: Path, capsys):
         agent = _build_agent(workspace)

@@ -1,13 +1,11 @@
 # Agent
 
-> **Architectural freeze, declared 2026-08-20.** Nothing new is built until the
-> architecture of autonomy is corrected: much of this agent's executive
-> decision-making — its task agenda, its roles, its utility ranking, what it
-> studies first — is written into the code rather than derived by the agent.
-> That is the blocking issue of the project, and all other development is
-> subordinate to it. The declaration, the verified sites, the permitted work
-> and the condition that lifts the freeze are in
-> [docs/audit/AUTONOMY_FREEZE.md](docs/audit/AUTONOMY_FREEZE.md).
+> **Archived. Development stopped on 2026-10-03.** The last commit of the
+> project itself is from 2026-09-29. The architectural freeze declared on
+> 2026-08-20 was lifted on 2026-09-24; its history is in
+> [docs/audit/AUTONOMY_FREEZE.md](docs/audit/AUTONOMY_FREEZE.md). The safety
+> claims below describe intent: the guards are pattern checks, not OS-level
+> isolation, and the sandbox works only on Linux under root.
 
 
 An autonomous, self-diagnosing research agent that answers with **verified
@@ -69,12 +67,14 @@ offered to the planner and earn promotion only through causally credited use.
 Everything effectful is closed by default and opens one gate at a time:
 
 * **Dry-run first.** The autonomous runtime simulates effects until a human
-  approves a *single-use, per-goal* grant through the approval inbox
-  (`:approval-list`, `:approval-approve`). Consumed grants are marked executed;
-  yesterday's "yes" never covers today's goal.
+  approves a grant through the approval inbox (`:approval-list`,
+  `:approval-approve`). A grant is either single-use for one goal, or a
+  standing grant with a daily run cap (`max_runs_per_day`). Consumed
+  single-use grants are marked executed.
 * **Policy by call, not by tool.** `file_write` to a new path is reversible;
   over an existing file it is irreversible and escalates to a human. The
-  unattended path additionally blocks network egress and subagent spawning.
+  unattended path additionally blocks subagent spawning and
+  `semantic_scholar_search`; `web_search` and `web_fetch` stay open there.
 * **VCS cannot push.** `core/safe_vcs.py` has no push/fetch/remote at all.
   The self-apply lane works on a temp branch, runs the full test suite, rolls
   back on red, and commits locally on green — merging stays human.
@@ -147,10 +147,10 @@ unattended within cycle/spend ceilings and stop themselves on idle or stall.
 
 | Where | What |
 |---|---|
-| `core/` | ~190 modules; grouped index in [knowledge/generated/AGENT_ANATOMY.md](knowledge/generated/AGENT_ANATOMY.md) |
+| `core/` | ~280 modules; grouped index in [knowledge/generated/AGENT_ANATOMY.md](knowledge/generated/AGENT_ANATOMY.md) |
 | `tools/` | the agent's tool surface (file I/O, shell allowlist, logs, tests, web) |
 | `cli/`, `app/` | REPL commands and runtime entry points |
-| `docs/INDEX.md` | documentation index; doctrine in [docs/AGENT_DOCTRINE.md](docs/AGENT_DOCTRINE.md) and [docs/COGNITIVE_CORE.md](docs/COGNITIVE_CORE.md) |
+| `docs/` | documentation; doctrine in [docs/AGENT_DOCTRINE.md](docs/AGENT_DOCTRINE.md) and [docs/COGNITIVE_CORE.md](docs/COGNITIVE_CORE.md) |
 | `docs/CODE_NOTES.md` | the book of *why*: every fix with its live measurement |
 | `data/` | memories, registries, ledgers, approval inbox (JSONL, integrity-hashed) |
 | `logs/` | per-session audit traces — the agent's own diagnostic surface |
@@ -161,7 +161,7 @@ unattended within cycle/spend ceilings and stop themselves on idle or stall.
 python -m pytest -q
 ```
 
-7,900+ tests, all green, plus ratchets that only tighten: file size, function
+11,000+ tests, plus ratchets that only tighten: file size, function
 length, lint debt, docs↔code conformance (every path in the docs must exist or
 be declared historical), and a census of the control-loop's nervous system.
 Growth past a ceiling must be banked with a written reason. Convention: code

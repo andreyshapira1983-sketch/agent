@@ -88,9 +88,12 @@ class CircuitBreaker:
         return CircuitDecision(True, "closed", "closed")
 
     def record_budget_denial(self, reason: str) -> CircuitDecision:
-        if self.state in ("open", "half-open"):
-            return CircuitDecision(False, self.state, self.opened_reason)
+        if self.state == "open":
+            return CircuitDecision(False, "open", self.opened_reason)
         self.budget_denials += 1
+        if self.state == "half-open":
+            # A denied probe is a failed probe: left half-open, check() allows forever.
+            return self._open(f"half-open probe denied by budget: {reason}")
         if self.budget_denials >= self.config.max_budget_denials:
             return self._open(f"budget denial threshold reached: {reason}")
         return CircuitDecision(True, "closed", "closed")

@@ -276,7 +276,7 @@ def measure(root: Path | str, *, window_days: int = WINDOW_DAYS, now: datetime |
 
 
 def market_accepted(root: Path | str) -> int:
-    """Заказы площадки, принятые покупателем (core/market_ledger.py)."""
+    """Заказы площадки, принятые покупателем; нечитаемый учёт — `LedgerUnreadable`, не ноль."""
     from core.market_ledger import FILE_NAME, MarketLedger
 
     lines = MarketLedger(Path(root) / "data" / "market" / FILE_NAME).lines()

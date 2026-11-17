@@ -8,7 +8,7 @@ Tool-level branches of the factory are already covered by
   * the `evidence_collected` JSONL event mirrors the chain;
   * memory-injected records become `kind=memory` evidence;
   * a 0-step plan still produces (an empty) chain — no crash;
-  * file_write produces no evidence (it's an action, not a source).
+  * file_write leaves a receipt of the call (tool_output), not a `file` evidence.
 """
 from __future__ import annotations
 
@@ -130,11 +130,11 @@ class TestSingleStepEvidence:
 
 
 # ============================================================
-# file_write is an action, not a source
+# file_write leaves a receipt of the call, never a `file` evidence
 # ============================================================
 
-class TestFileWriteNoEvidence:
-    def test_write_produces_no_evidence_in_chain(self, workspace: Path):
+class TestFileWriteReceiptEvidence:
+    def test_write_leaves_one_receipt_in_chain(self, workspace: Path):
         agent, _ = _build_agent(
             workspace,
             canned_sources=[{
@@ -146,8 +146,10 @@ class TestFileWriteNoEvidence:
         agent.run("save a file")
         # Write succeeded (file exists on disk) ...
         assert (workspace / "new.txt").exists()
-        # ... but Evidence chain stays empty — a write is not a source.
-        assert len(agent.last_provenance) == 0
+        # ... and the chain holds the receipt of that call, not a file read.
+        assert agent.last_provenance.by_kind("file") == []
+        receipts = agent.last_provenance.by_kind("tool_output")
+        assert [ev.source_id for ev in receipts] == ["tool_output:file_write:new.txt"]
 
 
 # ============================================================

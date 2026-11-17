@@ -135,7 +135,7 @@ class _StoreProto(Protocol):
 
     def load(self) -> list[MemoryRecord]: ...
     def _load_raw(self) -> list[MemoryRecord]: ...
-    def _rewrite(self, records: list[MemoryRecord]) -> None: ...
+    def drop_ids(self, ids: Sequence[str], *, add: Sequence[MemoryRecord] = ()) -> int: ...
 
 def deduplicate_memory(
     store: _StoreProto,
@@ -197,7 +197,7 @@ def deduplicate_memory(
 
     report.deleted.sort()
     if not dry_run:
-        store._rewrite(keep)
+        store.drop_ids(report.deleted)
     return report
 
 @dataclass
@@ -237,16 +237,13 @@ def expire_memory(
     records = store._load_raw()
     report = ExpiryReport(scanned=len(records), dry_run=dry_run)
 
-    keep: list[MemoryRecord] = []
     for rec in records:
         if _is_expired(rec, now):
             report.expired.append(rec.id)
-        else:
-            keep.append(rec)
 
     report.expired.sort()
     if report.expired and not dry_run:
-        store._rewrite(keep)
+        store.drop_ids(report.expired)
     return report
 
 @dataclass
@@ -387,17 +384,14 @@ def summarise_memory(
     if dry_run:
         return report
 
-    # Build the kept list: every non-selected record + the new summary.
-    selected_id_set = set(selected_ids)
+    # The originals leave and the summary lands in one locked rewrite.
     new_record = MemoryRecord(
         type="semantic",
         content=summary_text,
         tags=new_tags,
         owner="self",
     )
-    keep = [r for r in records if r.id not in selected_id_set]
-    keep.append(new_record)
-    store._rewrite(keep)
+    store.drop_ids(selected_ids, add=[new_record])
     report.new_record_id = new_record.id
     return report
 

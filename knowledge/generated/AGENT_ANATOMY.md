@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 283 modules across 12 groups._
+_Total: 284 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -255,6 +255,7 @@ _Autonomous loop, scheduling, budgets, state durability._
 | `core/budget_ledger` | Persistent budget windows for long-running autonomous work. |
 | `core/budget_kill_switch` | Persistent budget kill-switch for autonomous / daemon execution (TD-022). |
 | `core/control_files` | Тормоза агента — файлы, которые меняет только оператор. |
+| `core/protected_paths` | Что самоправка агента не трогает никогда: один список и одно сличение путей. |
 | `core/code_citations` | Ссылка памяти на код сверяется с кодом в момент чтения. |
 | `core/wake_events` | Что будит спящую кампанию: перемена мира, а не ход часов. |
 | `core/subagent_predictions` | Предсказание помощника против факта — сверка при его завершении. |

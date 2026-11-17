@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,8 +37,10 @@ from typing import Any, Protocol
 from core.budget_kill_switch import BudgetKillSwitch, default_path
 from core.conflict_episode import ConflictEpisodeStore, episodes_from_outcome
 from core.conflict_episode import default_path as episode_store_path
+from core.file_lock import exclusive_file_lock
 from core.instruction_conflict_gate import Directive, InstructionConflictOutcome
 from core.instruction_conflict_gate import evaluate as evaluate_instruction_conflict
+from core.protected_paths import PROTECTED_FILES, is_protected
 from core.safe_vcs import SafeVCS, VcsError
 from core.self_build_supervisor import (
     hour_budget_headroom,
@@ -47,25 +51,10 @@ from core.self_repair_utils import _tests_passed as _tests_ok
 # Directories whose ``*.py`` files may be auto-applied in this lane.
 _ALLOWED_CODE_DIRS = ("core", "cli", "tools", "tests")
 
-#: Что самоправка агента не трогает никогда — одно множество для обоих путей
-#: (эта полоса и core/patch_route.py).
-PROTECTED_CORE: frozenset[str] = frozenset({
-    "core/root_principles.py", "core/governance.py", "core/injection_guard.py",
-    "tools/python_probe.py", "tools/convert_file.py",
-    "tests/test_capability_baseline.py", "tests/capability_tasks.py",
-    "scripts/capability_baseline.py", "scripts/check_function_length_baseline.py",
-    "scripts/check_ceo_file_baseline.py", "tests/test_ruff_config.py",
-    # Код самих тормозов и ворот одобрения — слово оператора 2026-09-25:
-    # полоса не вправе даже ПРЕДЛАГАТЬ их правку (раньше могла положить её на
-    # ветку для его глаза). Выключатель и лимиты расхода, список тормозов,
-    # ворота и ящик одобрений, оба пути самоправки.
-    "core/budget_kill_switch.py", "core/budget_governor.py", "core/budget_ledger.py",
-    "core/usd_spend.py", "core/control_files.py", "core/policy.py", "core/approval.py",
-    "core/approval_inbox.py", "core/actuation_gateway.py", "core/self_apply_lane.py",
-    "core/self_apply_bridge.py", "core/patch_route.py",
-    # Правило «воспроизведено до правки» — судья самоправки (сведение, 25.09).
-    "core/self_repair_utils.py",
-})
+#: Что самоправка агента не трогает никогда — один список на все её пути
+#: (core/protected_paths.py). Полоса не вправе даже ПРЕДЛАГАТЬ правку этих
+#: файлов (слово оператора 2026-09-25).
+PROTECTED_CORE: frozenset[str] = PROTECTED_FILES
 
 # Explicit denylist — checked *before* the allowlist so a sensitive path can
 # never slip through even if it also happens to look allowlisted (e.g. a
@@ -222,6 +211,8 @@ def _normalize_rel(path: str) -> str | None:
 
 
 def _is_denied(rel: str) -> bool:
+    if is_protected(rel):
+        return True
     lower = rel.lower()
     name = lower.rsplit("/", 1)[-1]
     if lower in {d.lower() for d in _DENY_EXACT}:
@@ -517,6 +508,56 @@ def _write_file(workspace: Path, rel: str, content: str) -> None:
     target.write_text(content, encoding="utf-8")
 
 
+def _lane_lock_path(workspace: Path) -> Path:
+    """Файл замка полосы для этого дерева; лежит вне дерева, чтобы не пачкать его."""
+    root = os.path.normcase(str(Path(workspace).resolve()))
+    digest = hashlib.sha256(root.encode("utf-8")).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f"self_apply_lane_{digest}.lock"
+
+
+def _snapshot_own(workspace: Path, rels: list[str]) -> dict[str, bytes | None]:
+    """Содержимое файлов правки до записи; None — файла не было."""
+    out: dict[str, bytes | None] = {}
+    for rel in rels:
+        path = Path(workspace) / rel
+        out[rel] = path.read_bytes() if path.is_file() else None
+    return out
+
+
+def _restore_own(workspace: Path, before: dict[str, bytes | None]) -> None:
+    for rel, content in before.items():
+        path = Path(workspace) / rel
+        if content is None:
+            path.unlink(missing_ok=True)
+        elif path.parent.is_dir():
+            path.write_bytes(content)
+
+
+def _foreign_changes(vcs: Any, workspace: Path, own: set[str]) -> bool:
+    """Есть ли в дереве правки, которых полоса не делала; не узнать — значит есть."""
+    reader = getattr(vcs, "status_porcelain", None)
+    if reader is None:
+        return False
+    try:
+        lines = reader().splitlines()
+    except VcsError:
+        return True
+    for line in lines:
+        entry = line[3:].strip().strip('"')
+        if not entry:
+            continue
+        if not entry.endswith("/"):
+            if entry not in own:
+                return True
+            continue
+        # Неотслеженный каталог git показывает одной строкой: смотрим внутрь.
+        for path in (Path(workspace) / entry).rglob("*"):
+            rel = path.relative_to(workspace).as_posix()
+            if path.is_file() and "__pycache__" not in path.parts and rel not in own:
+                return True
+    return False
+
+
 def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -557,7 +598,42 @@ def _record_conflict_episodes(
         )
 
 
-def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are guard clauses
+def run_self_apply_lane(
+    proposal: SelfApplyProposal,
+    *,
+    workspace: Path,
+    vcs: SafeVCS,
+    test_runner: TestRunner,
+    budget_snapshot: dict | None = None,
+    approvals_pending: int = 0,
+    kill_switch: BudgetKillSwitch | None = None,
+    branch_prefix: str = "self-apply",
+    now_iso: str | None = None,
+) -> SelfApplyReport:
+    """Run the lane under its per-workspace lock: two runs never share the live tree."""
+    lock = exclusive_file_lock(_lane_lock_path(Path(workspace)))
+    try:
+        lock.__enter__()
+    except OSError as exc:
+        return SelfApplyReport(
+            status="error",
+            reason=f"self-apply lane lock is not available: {exc}",
+            next_human_action=(
+                "Another self-apply run may hold the lane; wait for it to finish, "
+                "then retry."
+            ),
+        )
+    try:
+        return _run_self_apply_lane_locked(
+            proposal, workspace=workspace, vcs=vcs, test_runner=test_runner,
+            budget_snapshot=budget_snapshot, approvals_pending=approvals_pending,
+            kill_switch=kill_switch, branch_prefix=branch_prefix, now_iso=now_iso,
+        )
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _run_self_apply_lane_locked(  # noqa: PLR0911 — flat: depth 2, all 15 returns are guard clauses
     proposal: SelfApplyProposal,
     *,
     workspace: Path,
@@ -689,13 +765,22 @@ def run_self_apply_lane(  # noqa: PLR0911 — flat: depth 2, all 15 returns are 
     # ДО применения патча. Позже «до» уже негде взять: на диске новое.
     judge_risks = judge_change_risks(proposal.files, workspace=Path(workspace))
 
+    own_before = _snapshot_own(Path(workspace), files_changed)
+
     def _rollback() -> str:
         try:
+            # `reset --hard` и `clean -fd` стёрли бы и чужую правку, сделанную,
+            # пока шли тесты: при ней полоса возвращает только свои файлы.
+            if _foreign_changes(vcs, Path(workspace), set(files_changed)):
+                _restore_own(Path(workspace), own_before)
+                vcs.checkout(original_branch)
+                vcs.delete_branch(branch)
+                return "kept_foreign_changes"
             vcs.reset_hard()
             vcs.clean_untracked()
             vcs.checkout(original_branch)
             vcs.delete_branch(branch)
-        except VcsError:
+        except (VcsError, OSError):
             return "failed"
         return "restored"
 

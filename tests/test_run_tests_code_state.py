@@ -17,6 +17,7 @@ test_model_router_for_task_standard_equals_for_role». Верификатор п
 """
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404
 from pathlib import Path
 
@@ -35,7 +36,11 @@ def test_the_state_names_the_commit_and_branch(git_repo: Path):
 
 def test_edits_after_indexing_are_counted(git_repo: Path):
     """Правки поверх зафиксированного кода — признак «проверяли не то»."""
-    (git_repo / "b.py").write_text("x = 1\n", encoding="utf-8")
+    edited = git_repo / "b.py"
+    edited.write_text("x = 1\n", encoding="utf-8")
+    # On a fast disk the edit lands in the same clock tick as the index; date it clearly later.
+    later = (git_repo / ".git" / "index").stat().st_mtime + 2
+    os.utime(edited, (later, later))
 
     assert describe_code_state(git_repo)["files_newer_than_index"] == 1
 

@@ -42,6 +42,7 @@ from core.builder_reply_diagnosis import why_builder_reply_failed
 from core.injection_guard import prepare_untrusted_text_for_llm
 from core.plan_parsing import extract_json_object
 from core.proposal_value_gate import evaluate_proposal_value
+from core.protected_paths import is_protected
 from core.redaction import prepare_text_for_llm_boundary
 from core.self_apply_bridge import (
     DEFAULT_ROLLBACK,
@@ -320,15 +321,12 @@ def _why_json_failed(build: dict[str, Any]) -> str:
 
 
 def _is_critical(rel: str) -> bool:
+    # Общий список «самоправка не трогает», затем местный.
     lower = rel.replace("\\", "/").strip().lower()
-    for deny in CRITICAL_DENY:
-        d = deny.lower()
-        if d.endswith("/"):
-            if lower.startswith(d):
-                return True
-        elif lower == d:
-            return True
-    return False
+    return is_protected(rel) or any(
+        lower.startswith(d) if d.endswith("/") else lower == d
+        for d in (deny.lower() for deny in CRITICAL_DENY)
+    )
 
 
 def _is_self_build_target_allowed(target: str) -> bool:

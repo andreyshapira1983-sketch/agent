@@ -136,6 +136,16 @@ _OWNED_STATE: dict[str, str] = {
 }
 
 
+def _registered_name(target: Path, data_dir: Path) -> str:
+    """Имя журнала по тому файлу, куда запись ляжет на деле, а не по написанию пути."""
+    name = "data/" + target.relative_to(data_dir).as_posix()
+    # Регистр складывается всегда: на Windows `Approval_Inbox` — тот же файл.
+    for known in (*_OWNED_STATE, *_KNOWN_JOURNALS):
+        if known.casefold() == name.casefold():
+            return known
+    return name
+
+
 def _refuse_owned_state(path: str) -> None:
     owner = _OWNED_STATE.get(path)
     if owner is not None:
@@ -436,6 +446,8 @@ class JournalAppendTool(Tool):
         """
         if not path.startswith("data/") or not path.endswith(".jsonl"):
             raise ValueError(f"path must live under data/ and end in .jsonl: {path}")
+        if ":" in path:  # поток NTFS (`x.jsonl:y.jsonl`) — запись в чужой файл под другим именем
+            raise ValueError(f"path must not contain ':': {path}")
         root = Path(self._workspace_root).resolve()
         target = (root / path).resolve()
         data_dir = (root / "data").resolve()
@@ -453,17 +465,20 @@ class JournalAppendTool(Tool):
         if not isinstance(record, dict):
             raise TypeError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
-        _refuse_owned_state(str(path))
-        record = _stamp_voice_record(str(path), record)
-        _refuse_unreasoned_voice(str(path), record)
-        _refuse_over_voice_budget(str(path), target)
-        _refuse_repeated_voice(str(path), target, record)
-        contract = _KNOWN_JOURNALS.get(str(path))
+        # Все правила ниже сверяются с именем настоящего файла: `data/./x.jsonl`
+        # и `data/y/../x.jsonl` — тот же журнал, что `data/x.jsonl`.
+        name = _registered_name(target, (Path(self._workspace_root).resolve() / "data").resolve())
+        _refuse_owned_state(name)
+        record = _stamp_voice_record(name, record)
+        _refuse_unreasoned_voice(name, record)
+        _refuse_over_voice_budget(name, target)
+        _refuse_repeated_voice(name, target, record)
+        contract = _KNOWN_JOURNALS.get(name)
         _refuse_placeholders(record)
-        _refuse_hollow_decision(str(path), record, Path(self._workspace_root))
+        _refuse_hollow_decision(name, record, Path(self._workspace_root))
         _refuse_naive_stamps(record)
         if contract:
-            _refuse_broken_shape(str(path), record, contract)
+            _refuse_broken_shape(name, record, contract)
         with state_file_lock(target):
             append_state_jsonl_unlocked(target, [record])
         result = {"path": path, "appended": True}

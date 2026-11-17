@@ -39,10 +39,27 @@ def literals_absent_from_excerpt(
     body = _CITATION_TOKEN_RE.sub(" ", claim)
     # Имя собственного источника чужим литералом не считается.
     known = salient_literals(excerpt) | salient_literals(source_id or "")
+    haystack = f"{excerpt}\n{source_id}".lower()
     return {
         lit for lit in salient_literals(body)
-        if lit not in known and not any(lit in k or k in lit for k in known)
+        if not _literal_covered(lit, known, haystack)
     }
+
+
+_VERSION_RE = re.compile(r"\d+(?:\.\d+){2,}")
+
+
+def _literal_covered(lit: str, known: set[str], haystack: str) -> bool:
+    """Есть ли литерал в улике; версия — только целиком («3.15.2» не внутри «3.15.20»)."""
+    if _VERSION_RE.fullmatch(lit):
+        return re.search(rf"(?<![\d.]){re.escape(lit)}(?!\w|\.\d)", haystack) is not None
+    return lit in known or any(lit in k or k in lit for k in known)
+
+
+def excerpt_is_cut(excerpt: str) -> bool:
+    """Обрезана ли выдержка: бюджетом (R8) или при создании улики (evidence._truncate)."""
+    return ("[INTENT-BUDGET:" in excerpt or "[TOTAL-BUDGET:" in excerpt
+            or excerpt.rstrip().endswith("...[truncated]"))
 
 
 def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
@@ -51,11 +68,6 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
         return None
     # Утверждение об отсутствии судит пятый гейт по обратному правилу.
     if asserts_absence(chunk_text):
-        return None
-    # Усечённая улика не доказывает отсутствия: литерал мог быть в отрезанной части (R8).
-    excerpt_raw = ev.excerpt or ""
-    if ("[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw
-            or excerpt_raw.rstrip().endswith("...[truncated]")):  # R8b: срез при создании, evidence.py:_truncate
         return None
     absent = literals_absent_from_excerpt(
         chunk_text, ev.excerpt or "", ev.source_id or ""
@@ -74,6 +86,10 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     # Число, которого улика не печатала, — тоже ложь, а не нехватка подпорки.
     if not foreign:
         foreign = [lit for lit in absent if any(ch.isdigit() for ch in lit)]
+    # Усечённая улика (R8) отсутствия не доказывает, но и подтвердить литерал
+    # за срезом не может: нехватка подпорки, не ложь и не «подтверждено».
+    if excerpt_is_cut(ev.excerpt or ""):
+        foreign = []
     return ClaimReason(
         code="cited_literal_absent" if foreign else "cited_support_missing",
         expected=", ".join(sorted(absent)[:3]),
@@ -140,10 +156,8 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     if prefix not in _PROSE_PREFIXES:
         return None
     excerpt_raw = ev.excerpt or ""
-    # R8: общее слово могло быть в отрезанной части.
-    if ("[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw
-            or excerpt_raw.rstrip().endswith("...[truncated]")):
-        return None
+    # Усечённая улика судится по видимой части: общее слово могло быть за
+    # срезом, но гейт лишь понижает, а «подтверждено» вслепую — хуже.
     if not excerpt_raw.strip():
         return None
     # Требование числа снято (проба); разноязычие и мета-утверждения отсекаются ниже.
@@ -254,9 +268,6 @@ def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | 
     excerpt_raw = ev.excerpt or ""
     if not excerpt_raw.strip():
         return None
-    if ("[INTENT-BUDGET:" in excerpt_raw or "[TOTAL-BUDGET:" in excerpt_raw
-            or excerpt_raw.rstrip().endswith("...[truncated]")):
-        return None
     body = _CITATION_TOKEN_RE.sub(" ", chunk_text)
     if _APPROXIMATION_RE.search(body):
         return None
@@ -285,6 +296,16 @@ def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | 
             return None
         from .verifier_models import ClaimReason
 
+        # За срезом могло стоять предложение с названным числом: усечённая
+        # улика не обвиняет, а только не подтверждает.
+        if excerpt_is_cut(excerpt_raw):
+            return ClaimReason(
+                code="cited_support_missing",
+                expected=", ".join(sorted(known)[:3]) or "(в предложении нет чисел)",
+                actual=", ".join(sorted(missing)[:3]),
+                explanation="в видимой части усечённой улики стоит другое число",
+                computed_from=ev.source_id or "",
+            )
         return ClaimReason(
             code="restated_number_changed",
             expected=", ".join(sorted(known)[:3]) or "(в предложении нет чисел)",

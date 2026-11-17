@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from core.control_files import CONTROL_RELPATHS
+from core.protected_paths import is_protected, path_key
 
 DAILY_CAP = 5
 #: Пометка дефекта, который правкой кода не закрывается (среда, доступ, деньги):
@@ -38,7 +39,8 @@ LOG_RELPATH = "data/self_repair_log.jsonl"
 _PATCH_RE = re.compile(r"proposals/selffix/[\w.\-]+/edits\.txt")
 #: Куда самопочинка не входит: деньги и бюджет, ключи и редактирование
 #: секретов, выход наружу, политика и одобрения, сам путь применения и этот
-#: модуль, сборка агента.
+#: модуль, сборка агента. Это префиксы имён СВЕРХ общего списка
+#: core/protected_paths.py: путь без человека уже, чем полоса с одобрением.
 _FORBIDDEN = (
     "core/approval", "core/policy", "core/secret", "core/redaction", "core/dlp",
     "core/budget", "core/standing_grant", "core/self_apply", "core/patch_route",
@@ -50,6 +52,7 @@ _FORBIDDEN = (
     # Правило свидетеля «упал до правки» (red_before_fix): судья самой самоправки.
     "core/self_repair_utils",
 )
+_FORBIDDEN_KEYS = tuple(p.casefold() for p in _FORBIDDEN)
 
 
 def _now() -> datetime:
@@ -249,9 +252,9 @@ def weakened_judges(root: Path, contents: dict[str, str]) -> list[str]:
 
 
 def _forbidden(paths: list[str]) -> list[str]:
-    from core.self_apply_lane import PROTECTED_CORE
-
-    return [p for p in paths if p.startswith(_FORBIDDEN) or p.replace("\\", "/") in PROTECTED_CORE]
+    """Пути правки, запретные для самопочинки; сличается приведённый путь, а не написание."""
+    return [p for p in paths
+            if is_protected(p) or (path_key(p) or "").startswith(_FORBIDDEN_KEYS)]
 
 
 def _merge(root: Path, branch: str) -> str:

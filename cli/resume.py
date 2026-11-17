@@ -10,7 +10,8 @@ Four outcomes, in the order the checks run:
 5. otherwise the previous cycle did not finish -> restore the question and re-run.
 
 Check 3 runs *before* check 4, so a paused last phase wins over a cached answer.
-An explicit ``--ask`` / ``--file`` always wins over a restored value.
+An explicit ``--ask`` / ``--file`` wins over a restored value; with a cached
+answer (outcome 4) they are ignored, and a stderr notice says so.
 
 Extracted from ``main()``. Unlike the earlier extraction steps this one could not
 be a verbatim move -- the code lived *inside* ``main()``, so it became a function
@@ -130,6 +131,12 @@ def resolve_resume(
             f"(phase={_ctx.last_phase}, artifacts={list(_ctx.artifacts)})",
             file=sys.stderr,
         )
+        if ask or file_hint:
+            print(
+                "[resume] --ask/--file ignored: this trace already has a saved answer. "
+                "Run without --resume to ask a new question.",
+                file=sys.stderr,
+            )
         print("\n" + format_human_response(_ctx.answer) + "\n")
         return ResumeDecision(exit_code=0)
     else:

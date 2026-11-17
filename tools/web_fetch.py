@@ -146,15 +146,72 @@ PDF_OCR_MAX_PAGES = 10
 #: Подмена — только в тестах (на Windows песочницы нет).
 _ocr_runner = None
 
-# Tag tags we strip when there's no embedded text we want to keep.
-_SCRIPT_STYLE_RE = re.compile(
-    r"<(script|style|noscript|template|svg)\b[^>]*>.*?</\1\s*>",
-    re.IGNORECASE | re.DOTALL,
-)
-_TAG_RE = re.compile(r"<[^>]+>")
+# Blocks we strip together with their content.
+_BLOCK_NAMES = ("script", "style", "noscript", "template", "svg")
+_BLOCK_OPEN_RE = re.compile(r"<(" + "|".join(_BLOCK_NAMES) + r")\b", re.IGNORECASE)
+_BLOCK_CLOSE_RES = {
+    name: re.compile(rf"</{name}\s*>", re.IGNORECASE) for name in _BLOCK_NAMES
+}
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 _BLANKLINES_RE = re.compile(r"\n{3,}")
 _SPACE_ONLY_LINES_RE = re.compile(r"\n[ \t]+(?=\n)")
+
+
+def _strip_blocks(text: str) -> str:
+    """Replace each script/style/... block, content included, with a space.
+
+    One forward pass: an opener with no closer is remembered per tag name, so
+    a page of unclosed tags is not rescanned to the end from every opener.
+    """
+    out: list[str] = []
+    pos = 0
+    no_closer: set[str] = set()
+    search_from = 0
+    open_end = -1
+    while len(no_closer) < len(_BLOCK_NAMES):
+        opener = _BLOCK_OPEN_RE.search(text, search_from)
+        if opener is None:
+            break
+        if open_end < opener.end():
+            open_end = text.find(">", opener.end())
+        if open_end < 0:
+            break
+        name = opener.group(1).lower()
+        closer = None if name in no_closer else _BLOCK_CLOSE_RES[name].search(text, open_end + 1)
+        if closer is None:
+            no_closer.add(name)
+            search_from = opener.end()
+            continue
+        out.append(text[pos:opener.start()])
+        out.append(" ")
+        pos = search_from = closer.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _strip_tags(text: str) -> str:
+    """Replace each `<...>` tag with a space; a `<` with no `>` after it stays."""
+    out: list[str] = []
+    pos = 0
+    while True:
+        lt = text.find("<", pos)
+        gt = text.find(">", lt + 1) if lt >= 0 else -1
+        if gt < 0:
+            break
+        if gt == lt + 1:  # "<>" is not a tag
+            out.append(text[pos:gt])
+            pos = gt
+            continue
+        out.append(text[pos:lt])
+        out.append(" ")
+        pos = gt + 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _strip_blocks_and_tags(text: str) -> str:
+    """Markup removal of `_strip_html`: blocks with content, then bare tags."""
+    return _strip_tags(_strip_blocks(text))
 
 
 # ---------------------------------------------------------------------------
@@ -548,10 +605,9 @@ class WebFetchTool(Tool):
     @staticmethod
     def _strip_html(text: str) -> str:
         """Cheap, dependency-free HTML→text. Good enough for evidence."""
-        # Remove script/style blocks (including their content).
-        cleaned = _SCRIPT_STYLE_RE.sub(" ", text)
-        # Replace remaining tags with a space so adjacent words don't merge.
-        cleaned = _TAG_RE.sub(" ", cleaned)
+        # Remove script/style blocks (including their content), then replace
+        # remaining tags with a space so adjacent words don't merge.
+        cleaned = _strip_blocks_and_tags(text)
         # Decode the most common entities.
         cleaned = (
             cleaned.replace("&amp;", "&")

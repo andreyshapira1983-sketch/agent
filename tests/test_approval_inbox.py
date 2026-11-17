@@ -71,6 +71,7 @@ def test_approval_inbox_abort_and_executed_statuses(workspace):
     executed = inbox.add(operation="execute-me", summary="Execute me")
 
     assert inbox.abort(aborted.id).status == "aborted"
+    inbox.approve(executed.id)
     assert inbox.mark_executed(executed.id).status == "executed"
 
     reloaded = ApprovalInbox(path=path)

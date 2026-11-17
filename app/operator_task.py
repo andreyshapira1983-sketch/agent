@@ -369,6 +369,13 @@ def _format_operator_task_report(payload: dict) -> str:
     return "\n".join(lines)
 
 
+#: Sections 1-4 come from fixed text keyed by file names; no model reads the task.
+_PROGRAMMING_REPORT_BASIS = (
+    "note: sections 1-4 are a fixed checklist template keyed by file names only; "
+    "they are not derived from the task text or from file contents."
+)
+
+
 def _format_operator_programming_task_report(payload: dict) -> str:
     lines = [
         "=== operator task report ===",
@@ -394,6 +401,7 @@ def _format_operator_programming_task_report(payload: dict) -> str:
             f"  - {item.get('path')}: {item.get('reason')}"
             for item in rejected
         )
+    lines.append(_PROGRAMMING_REPORT_BASIS)
     lines.append("1. functions/files to inspect/change:")
     lines.extend(f"  - {item}" for item in payload.get("functions_files_to_inspect_change", []))
     lines.append("2. tests to add:")

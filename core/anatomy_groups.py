@@ -87,7 +87,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "autonomous_runtime", "market_client", "market_worker", "market_ledger", "work_usefulness", "autonomous_runtime_proposals", "autonomous_runtime_types", "scheduler", "campaign", "campaign_io", "goal_progress", "campaign_ledger", "drives", "drive_goal",
         "campaign_types", "campaign_verdict", "judge_queue", "goal_content_judge", "work_session", "task_queue", "record_fields", "task_lifecycle",
         "checkpoint", "circuit_breaker", "termination_guard", "step_repetition",
-        "rate_limiter", "budget_governor", "budget_ledger", "budget_kill_switch", "control_files", "code_citations", "wake_events", "subagent_predictions", "pressure_gate",
+        "rate_limiter", "budget_governor", "budget_ledger", "budget_kill_switch", "control_files", "protected_paths", "code_citations", "wake_events", "subagent_predictions", "pressure_gate",
         "spend_report", "usd_spend",
         "mentor_channel",
         "run_context", "state_integrity", "state_store_drill", "file_lock",

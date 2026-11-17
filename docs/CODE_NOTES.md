@@ -567,8 +567,12 @@ Three straight self-inspection runs kept refuting TRUE claims (`mir-003`,
 `disqualifying_defect_signals`…) whose literals live past the excerpt cut.
 The cut at CREATION (`evidence.py:_truncate`, MAX_EXCERPT_CHARS=800) appends
 `...[truncated]` — a third marker the R8 guard did not know. One line: the
-absence gate now also stands aside for `...[truncated]` tails. Refuted counts
+absence gate now also knows `...[truncated]` tails. Refuted counts
 across the three runs: 7 → 5 → 3 → expected 0-1 of this family.
+Since 2026-11-10 the gates no longer stand aside on a cut excerpt (creation cap
+or budget tail): a claim whose literal or number lies past the cut is lowered
+to `topic_supported_but_claim_unverified` — neither verified nor refuted
+(`core/verifier_absence.py:excerpt_is_cut`, witness `tests/test_fix1110_trust_truncated_evidence.py`).
 
 ## R9 addendum: the boundary vocabulary learns the operator's fourth run (2026-08-13, trace 51596f82)
 

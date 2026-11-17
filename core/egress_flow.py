@@ -76,8 +76,11 @@ class EgressLedger:
         if tool_name not in EGRESS_TOOLS:
             return None
         parts = urlsplit(str((arguments or {}).get("url") or ""))
-        host = (parts.hostname or "").lower()
-        if not host or host in self.user or host in self.search_hosts or host not in self.read_hosts:
+        host = (parts.hostname or "").lower().rstrip(".")
+        if not host or host in self.user or host in self.search_hosts:
+            return None
+        # Поддомен названного сервера — тот же хозяин: сверка по границе точки.
+        if not any(host == seen or host.endswith("." + seen) for seen in self.read_hosts):
             return None
         link = unquote(f"{host}{parts.path}" + (f"?{parts.query}" if parts.query else "")).lower()
         if any(link in text for text in self.read):

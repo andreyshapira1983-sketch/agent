@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -52,6 +53,7 @@ from core.compensation import CompensationAction, CompensationPlan
 from core.control_files import control_file_hit, refuse_message
 from core.redaction import redact_text
 from tools.base import Risk, Tool, require_ascii_identifier
+from tools.file_read import _is_credential_path
 
 # Commands whose output is informational only: calling them mutates neither
 # the filesystem nor the environment. Exit-code semantics are per command
@@ -169,6 +171,39 @@ _PKG_NAME_RE = re.compile(
 )
 
 
+#: Флаги чтения `uv pip`: только вид вывода. Всё, что принимает путь или адрес
+#: (`--python`, `--target`, `--prefix`, `--index-url`, `--config-file`,
+#: `--directory`), и всё, что ходит в сеть (`--outdated`), сюда не входит.
+_UV_PIP_READ_FLAGS: dict[str, frozenset[str]] = {
+    "list": frozenset({"--editable", "-e", "--exclude-editable", "--format", "--strict"}),
+    "show": frozenset({"--files", "-f", "--strict"}),
+    "freeze": frozenset({"--exclude-editable", "--strict"}),
+    "tree": frozenset({"--depth", "-d", "--prune", "--package", "--no-dedupe",
+                       "--invert", "--strict", "--show-version-specifiers"}),
+}
+#: Значение флага чтения: слово или число, без пути и адреса.
+_UV_FLAG_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_uv_read_argv(sub: str, rest: list[str]) -> None:
+    """Чтение `uv pip`: флаги из списка, остальное — имена без путей."""
+    allowed = _UV_PIP_READ_FLAGS[sub]
+    for token in (a.strip() for a in rest):
+        if token.startswith("-"):
+            flag, eq, value = token.partition("=")
+            if flag not in allowed or (eq and not _UV_FLAG_VALUE_RE.match(value)):
+                raise PermissionError(
+                    f"shell_exec 'uv pip {sub}' does not take '{token}' "
+                    f"(allowed flags: {', '.join(sorted(allowed))}): a flag "
+                    "could point the read at another environment, file or server"
+                )
+        elif not _PKG_NAME_RE.match(token):
+            raise PermissionError(
+                f"shell_exec 'uv pip {sub}' takes names only, got '{token}': "
+                "an address or a path is not a name"
+            )
+
+
 def _validate_uv_argv(argv: list[str]) -> None:
     """Пропускает только `uv pip install <имена>` и чтение `uv pip list/show`.
 
@@ -190,6 +225,7 @@ def _validate_uv_argv(argv: list[str]) -> None:
             f"(allowed: install, {', '.join(sorted(_UV_PIP_READ))})"
         )
     if sub not in _UV_PIP_WRITE:
+        _validate_uv_read_argv(sub, argv[3:])
         return
     names = [a.strip() for a in argv[3:] if a.strip()]
     if not names:
@@ -254,6 +290,124 @@ LISTING_ONLY_SUBCOMMANDS: dict[str, frozenset[str]] = {
                          "--show-current", "-r", "--remotes", "--color", "--no-color"}),
     "tag": frozenset({"--list", "-l", "-n", "--color", "--no-color", "--sort"}),
 }
+
+
+# `reflog expire/delete/drop` destroy history under a read-only verb, so the
+# subcommand is allow-listed; `git reflog <ref>` must be spelled `show <ref>`.
+_REFLOG_READ_SUBCOMMANDS: frozenset[str] = frozenset({"show", "list", "exists"})
+
+# Options that make a read-only git verb write a file (`--output`, also by
+# unique prefix) or compare files outside the repository (`--no-index`).
+_GIT_FORBIDDEN_OPTIONS: frozenset[str] = frozenset({"--no-index"})
+
+# Long options whose value is text to match or a format, never a path.
+_TEXT_VALUED_OPTIONS: frozenset[str] = frozenset({
+    "--grep", "--author", "--committer", "--format", "--pretty", "--date",
+    "--since", "--until", "--after", "--before", "--regexp",
+})
+
+# Commands whose arguments name files to READ. The first bare word of a search
+# is its pattern, not a path.
+_SEARCH_COMMANDS: frozenset[str] = frozenset({"grep", "findstr"})
+_SLASH_SWITCH_COMMANDS: frozenset[str] = frozenset({"findstr", "where"})
+_SLASH_SWITCH_RE = re.compile(r"^/(?:[A-Za-z]|OFF|OFFLINE)(?::(.*))?$", re.IGNORECASE)
+
+# findstr also takes its switches glued together: `/spin`.
+_SLASH_CLUSTER_RE = re.compile(r"^/[A-Za-z]+$")
+# grep short flags whose NEXT word is a count or a mode, not a pattern or a path.
+_GREP_VALUE_FLAGS = "ABCmdD"
+# Commands that take no argument at all: `hostname <name>` renames the machine.
+_BARE_ONLY_COMMANDS: frozenset[str] = frozenset({"hostname"})
+
+# git short options whose ATTACHED value names a file to read (`-O<orderfile>`).
+_GIT_SHORT_PATH_OPTIONS: dict[str, tuple[str, ...]] = {
+    "blame": ("-O", "-S"),
+    "ls-files": ("-O", "-X"),
+}
+# Repository config must not start a program under a read-only verb.
+_GIT_SAFE_CONFIG: tuple[str, ...] = (
+    "-c", "core.fsmonitor=false", "-c", "safe.bareRepository=explicit",
+)
+_GIT_NO_DRIVER_OPTIONS: dict[str, tuple[str, ...]] = {
+    "diff": ("--no-ext-diff", "--no-textconv"),
+    "log": ("--no-ext-diff", "--no-textconv"),
+    "show": ("--no-ext-diff", "--no-textconv"),
+    "blame": ("--no-textconv",),
+}
+
+_WIN_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
+
+
+def _split_grep_cluster(token: str) -> tuple[str, str]:
+    """Flag letters of a short cluster and the value glued to its -e / -f."""
+    for i, ch in enumerate(token[1:], 1):
+        if ch in "ef":
+            return token[1:i + 1], token[i + 1:]
+    return token[1:], ""
+
+
+def _mask_matches(mask: str, path: Path) -> bool:
+    """True when a Windows file mask may select `path` (errs towards yes)."""
+    if "~" in mask:
+        return True
+    body = "".join(
+        ".*" if ch == "*" else ".?" if ch == "?" else re.escape(ch)
+        for ch in mask.rstrip(".")
+    )
+    names = [path.name]
+    if sys.platform == "win32":
+        # A mask is matched against the 8.3 alias too.
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(520)
+        if ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, 520):
+            names.append(Path(buf.value).name)
+    return any(re.fullmatch(body, name, re.IGNORECASE) for name in names)
+
+
+def _is_link(entry: os.DirEntry[str]) -> bool:
+    """A symlink, or a Windows junction, which `is_symlink` does not report."""
+    if entry.is_symlink():
+        return True
+    attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _resolves_inside(path: str, root: Path) -> bool:
+    """True when `path` resolves into `root`, or cannot be resolved."""
+    try:
+        Path(path).resolve().relative_to(root)
+    except ValueError:
+        return False
+    except (OSError, RuntimeError):
+        return True
+    return True
+
+
+def trusted_which(name: str, workspace_root: Path) -> str | None:
+    """Full path of `name` on PATH; the working folder and the workspace are not searched."""
+    hit = shutil.which(name)
+    if hit is None:
+        return None
+    if Path(hit).anchor and not _resolves_inside(hit, workspace_root):
+        return hit
+    # shutil.which on Windows looks in the current folder first, and PATH can
+    # name the workspace: a file the agent wrote must not become the program.
+    names = [name]
+    if sys.platform == "win32":
+        exts = [
+            e for e in (os.environ.get("PATHEXT") or _WIN_DEFAULT_PATHEXT).split(os.pathsep) if e
+        ]
+        if not any(name.lower().endswith(e.lower()) for e in exts):
+            names = [name + e for e in exts]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry) or _resolves_inside(entry, workspace_root):
+            continue
+        for candidate in names:
+            full = os.path.join(entry, candidate)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                return full
+    return None
 
 
 # Subcommands that record work the agent has already done. Without them the
@@ -348,7 +502,10 @@ class ShellExecTool(Tool):
         "['git','commit','-m','<message>'] with nothing else — no --amend, "
         "no --no-verify. Committing is refused on main/master, so create the "
         "agent/ branch first. Push, pull, fetch, reset, rebase and merge stay "
-        "out. Shell metacharacters, absolute paths, and any command outside "
+        "out. A search never reads credential files: a mask or a recursive "
+        "search that would reach one is refused — narrow the folder or use "
+        "find_in_files; grep takes -r, not -R. "
+        "Shell metacharacters, absolute paths, and any command outside "
         "the tiny built-in whitelist are rejected before dispatch."
     )
     # Static fallback — overridden per-argv by `risk_for`.
@@ -405,12 +562,21 @@ class ShellExecTool(Tool):
         if cmd_norm in _REVERSIBLE_COMMANDS:
             # `uv pip list/show` ничего не меняет; `uv pip install` обратим.
             sub = argv[2].strip().lower() if len(argv) > 2 and isinstance(argv[2], str) else ""
-            return "read_only" if sub in _UV_PIP_READ else "reversible"
+            return self._read_only_if_valid(argv) if sub in _UV_PIP_READ else "reversible"
         if cmd_norm in READ_ONLY_COMMANDS:
-            return "read_only"
+            return self._read_only_if_valid(argv)
         if cmd_norm in MUTATING_COMMANDS:
             return "irreversible"
         return "external"
+
+    def _read_only_if_valid(self, argv: list[Any]) -> Risk:
+        """`read_only` only for an argv that `run` would accept."""
+        try:
+            self._validate_argv(argv)
+        except (PermissionError, ValueError, OSError):
+            # The gate must not record "allow" for what execution refuses.
+            return "external"
+        return "read_only"
 
     # ------------------------------------------------------------------
     # Validation
@@ -453,6 +619,10 @@ class ShellExecTool(Tool):
         if cmd in _REVERSIBLE_COMMANDS:
             _validate_uv_argv(argv)
             return cmd, list(argv)
+        if cmd in _BARE_ONLY_COMMANDS and len(argv) != 1:
+            raise PermissionError(
+                f"shell_exec '{cmd}' takes no arguments: only the bare form reads"
+            )
 
         # Subcommand whitelist (e.g. git log/diff/status only).
         sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
@@ -488,6 +658,14 @@ class ShellExecTool(Tool):
                     f"shell_exec '{cmd} {argv[1]}' — subcommand not in "
                     f"whitelist {sorted(sub_allowed | write_allowed)}"
                 )
+            else:
+                self._validate_read_subcommand(cmd, sub, argv)
+                self._refuse_outside_reads(cmd, argv[2:])
+                for token in argv[2:]:
+                    if len(token) > 2 and token[:2] in _GIT_SHORT_PATH_OPTIONS.get(sub, ("-O",)):
+                        self._confine(token[2:])
+        elif cmd in READ_ONLY_COMMANDS:
+            self._refuse_outside_reads(cmd, argv[1:])
 
         # Mutating commands: validate path arguments now.
         if cmd in MUTATING_COMMANDS:
@@ -501,6 +679,187 @@ class ShellExecTool(Tool):
 
         return cmd, argv
 
+    @staticmethod
+    def _validate_read_subcommand(cmd: str, sub: str, argv: list[str]) -> None:
+        """A read-only verb stays read-only whatever its options say."""
+        rest = [a.strip() for a in argv[2:]]
+        for token in rest:
+            name = token.split("=", 1)[0]
+            if (
+                name in _GIT_FORBIDDEN_OPTIONS
+                or name.startswith("--out")
+                or (len(name) > 2 and "--output".startswith(name))
+            ):
+                raise PermissionError(
+                    f"shell_exec '{cmd} {sub}' refuses '{token}': the option "
+                    "writes a file or reads outside the repository, and this "
+                    "verb is allowed for reading the repository only"
+                )
+        if sub == "reflog" and not (rest and rest[0].lower() in _REFLOG_READ_SUBCOMMANDS):
+            for token in rest:
+                if not token.startswith("-") and not token.isdigit():
+                    raise PermissionError(
+                        f"shell_exec '{cmd} reflog' reads only: '{token}' is not "
+                        f"one of {sorted(_REFLOG_READ_SUBCOMMANDS)} — expiring or "
+                        "deleting reflog entries destroys history; to read a "
+                        "ref's log use ['git','reflog','show','<ref>']"
+                    )
+
+    def _refuse_outside_reads(self, cmd: str, args: list[str]) -> None:
+        """Every path a read-only command names must lie inside the workspace."""
+        search = cmd in _SEARCH_COMMANDS
+        pattern_pending = search
+        skip_next = recursive = False
+        base = ""
+        paths: list[str] = []
+        for token in args:
+            if skip_next:
+                skip_next = False
+                continue
+            if search and _SLASH_CLUSTER_RE.match(token) and "s" in token.lower():
+                recursive = True
+            switch = _SLASH_SWITCH_RE.match(token) if cmd in _SLASH_SWITCH_COMMANDS else None
+            if switch is not None:
+                letter, value = token[1].lower(), switch.group(1)
+                if cmd != "findstr" or value is None:
+                    continue
+                if letter == "f":
+                    raise PermissionError(
+                        f"shell_exec 'findstr' refuses '{token}': a file LIST "
+                        "can name files outside the workspace"
+                    )
+                if letter in "gd":
+                    self._confine_read(value)
+                if letter == "d":
+                    base = value
+                if letter in "cg":
+                    pattern_pending = False
+                continue
+            if token.startswith("-") and token not in ("-", "--"):
+                flag, eq, value = token.partition("=")
+                if not search:
+                    if eq and flag.startswith("--") and flag not in _TEXT_VALUED_OPTIONS:
+                        self._confine(value)
+                    continue
+                takes_pattern, skip_next, deep = self._search_option(token, flag, eq, value)
+                pattern_pending = pattern_pending and not takes_pattern
+                recursive = recursive or deep
+                continue
+            if pattern_pending:
+                pattern_pending = False
+                continue
+            if search and "*" not in token and "?" not in token:
+                self._confine_read(token)
+            else:
+                self._confine(token)
+            paths.append(token)
+        if search:
+            self._refuse_secret_search(paths, recursive, base)
+
+    def _search_option(
+        self, token: str, flag: str, eq: str, value: str
+    ) -> tuple[bool, bool, bool]:
+        """One grep option: `(supplies the pattern, takes the next word, recurses)`."""
+        if flag.startswith("--"):
+            if len(flag) > 3 and "--dereference-recursive".startswith(flag):
+                raise PermissionError(
+                    f"shell_exec refuses '{token}': it follows every link met while "
+                    "descending, and a link can lead outside the workspace; use -r"
+                )
+            deep = len(flag) > 2 and (
+                "--recursive".startswith(flag) or "--directories".startswith(flag)
+            )
+            if flag == "--regexp":
+                return True, not eq, deep
+            if len(flag) > 4 and "--file".startswith(flag):
+                if eq:
+                    self._confine_read(value)
+                return True, False, deep
+            if eq and flag not in _TEXT_VALUED_OPTIONS:
+                self._confine(value)
+            return False, False, deep
+        letters, attached = _split_grep_cluster(token)
+        if "R" in letters:
+            raise PermissionError(
+                f"shell_exec refuses '{token}': -R follows every link met while "
+                "descending, and a link can lead outside the workspace; use -r"
+            )
+        deep = bool(set(letters) & set("rd"))
+        if letters.endswith("e"):
+            return True, not attached, deep
+        if letters.endswith("f"):
+            if attached:
+                self._confine_read(attached)
+            return True, False, deep
+        return False, token[-1] in _GREP_VALUE_FLAGS, deep
+
+    def _confine_read(self, path_str: str) -> Path:
+        """A file a search reads: inside the workspace and not a credential store."""
+        target = self._confine(path_str)
+        if _is_credential_path(target.relative_to(self.workspace_root).as_posix()):
+            raise PermissionError(
+                f"shell_exec refuses to search the credential file '{path_str}': "
+                "the agent's own tools do not fetch keys"
+            )
+        return target
+
+    def _refuse_secret_search(self, paths: list[str], recursive: bool, base: str) -> None:
+        """A mask or a recursion must not sweep up what a named path may not read."""
+        starts = {self.workspace_root, self._confine(base) if base else self.workspace_root}
+        for token in paths or (["."] if recursive else []):
+            wild = "*" in token or "?" in token
+            head, _, name = token.replace("\\", "/").rpartition("/")
+            for start in starts:
+                if not wild and (start / token).is_dir():
+                    if recursive:
+                        self._scan_search_tree(start / token, None, deep=True)
+                elif wild or recursive:
+                    # findstr /S looks for the NAME in every folder below.
+                    self._scan_search_tree(start / head, name, deep=recursive)
+
+    def _scan_search_tree(self, root: Path, mask: str | None, *, deep: bool) -> None:
+        """Refuse when the files a search would open hold a credential or lie outside."""
+        root = root.resolve()
+        if not _resolves_inside(str(root), self.workspace_root):
+            raise PermissionError(f"shell_exec search folder '{root.name}' escapes workspace")
+        seen = {root}
+        stack = [root]
+        while stack:
+            try:
+                entries = list(os.scandir(stack.pop()))
+            except OSError:
+                continue
+            for entry in entries:
+                path = Path(entry.path)
+                selected = mask is None or _mask_matches(mask, path)
+                if _is_link(entry):
+                    path = path.resolve()
+                    if not _resolves_inside(str(path), self.workspace_root):
+                        # findstr walks through links; grep -r does not.
+                        if sys.platform == "win32" and (selected or (deep and path.is_dir())):
+                            raise PermissionError(
+                                f"shell_exec refuses this search: '{entry.name}' is a "
+                                "link leading outside the workspace; search a narrower "
+                                "folder or use find_in_files"
+                            )
+                        continue
+                if path.is_dir():
+                    if deep and path not in seen:
+                        seen.add(path)
+                        stack.append(path)
+                    continue
+                rel = path.relative_to(self.workspace_root).as_posix()
+                if selected and _is_credential_path(rel):
+                    raise PermissionError(
+                        "shell_exec refuses this search: it would read the credential "
+                        f"file '{rel}'; search a narrower folder or mask, or use "
+                        "find_in_files, which skips credential files"
+                    )
+
+    def _which(self, name: str) -> str | None:
+        """Full path of `name` on PATH; see `trusted_which`."""
+        return trusted_which(name, self.workspace_root)
+
     def _current_branch(self) -> str:
         """The checked-out branch name, or "" when it cannot be read.
 
@@ -509,9 +868,12 @@ class ShellExecTool(Tool):
         answer is treated as "unknown" by the caller, which then refuses: a
         guard that cannot see the branch must not assume a safe one.
         """
+        git = self._which("git")
+        if git is None:
+            return ""
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607 — fixed argv; the branch read is the guard's own
+            result = subprocess.run(  # noqa: S603 — fixed argv; the branch read is the guard's own
+                [git, *_GIT_SAFE_CONFIG, "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=self.workspace_root,
                 capture_output=True,
                 text=True,
@@ -608,6 +970,21 @@ class ShellExecTool(Tool):
             )
 
     def _validate_path_in_workspace(self, path_str: str) -> Path:
+        """A path to WRITE: confined to the workspace and not a control file."""
+        candidate = self._confine(path_str)
+        if ".git" in (p.lower() for p in candidate.relative_to(self.workspace_root).parts):
+            raise PermissionError(
+                f"shell_exec refuses to write under .git: '{path_str}' — git runs "
+                "the programs its own folder names"
+            )
+        # `touch` пустого выключателя или лимитов — та же запись тормоза
+        # (core/control_files.py): запрет до одобрения.
+        guarded = control_file_hit(self.workspace_root, candidate)
+        if guarded:
+            raise PermissionError(refuse_message(guarded))
+        return candidate
+
+    def _confine(self, path_str: str) -> Path:
         """Reject absolute / `..` / drive-letter paths; resolve into workspace."""
         if not path_str:
             raise PermissionError("shell_exec path argument cannot be empty")
@@ -626,18 +1003,13 @@ class ShellExecTool(Tool):
                 f"shell_exec rejects '..' traversal in '{path_str}'"
             )
 
-        candidate = (self.workspace_root / path_str).resolve()
         try:
+            candidate = (self.workspace_root / path_str).resolve()
             candidate.relative_to(self.workspace_root)
-        except ValueError as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             raise PermissionError(
                 f"shell_exec path '{path_str}' escapes workspace"
             ) from exc
-        # `touch` пустого выключателя или лимитов — та же запись тормоза
-        # (core/control_files.py): запрет до одобрения.
-        guarded = control_file_hit(self.workspace_root, candidate)
-        if guarded:
-            raise PermissionError(refuse_message(guarded))
         return candidate
 
     # ------------------------------------------------------------------
@@ -731,8 +1103,9 @@ class ShellExecTool(Tool):
             # «установлено» на пакет, которого не увидит. Подставляется здесь,
             # а не просится у планировщика: путь к своему окружению не та
             # вещь, которую стоит угадывать.
-            if len(argv) > 2 and argv[2].strip().lower() in _UV_PIP_WRITE:
-                argv = [*argv[:3], "--python", sys.executable, *argv[3:]]
+            # Чтение — тоже: иначе `list` показывает окружение, которое нашёл uv.
+            if len(argv) > 2:
+                argv =[*argv[:3], "--python", sys.executable, *argv[3:]]
             return self._run_subprocess(cmd, argv, plan)
         if cmd in READ_ONLY_COMMANDS:
             return self._run_subprocess(cmd, argv, plan)
@@ -750,7 +1123,7 @@ class ShellExecTool(Tool):
         # `where` is Windows-only; map it to `which` on POSIX (and vice
         # versa) so tests are portable.
         real_cmd, substituted = self._resolve_binary(cmd)
-        exe = shutil.which(real_cmd)
+        exe = self._which(real_cmd)
         if exe is None:
             raise FileNotFoundError(
                 f"shell_exec cannot find executable '{real_cmd}' on PATH"
@@ -762,10 +1135,15 @@ class ShellExecTool(Tool):
         run_argv = [
             exe,
             *self._normalise_argv_for(
-                list(argv), substituted=substituted, real_cmd=real_cmd
+                self._git_hardened(list(argv)) if real_cmd == "git" else list(argv),
+                substituted=substituted, real_cmd=real_cmd,
             )[1:],
         ]
         env = self._safe_env()
+        if real_cmd in _FAMILY_GREP and sys.platform == "win32":
+            # The MSYS runtime expands * and {a,b} in EVERY argument, the
+            # pattern included, into file names validation never saw.
+            env.update(MSYS="noglob", CYGWIN="noglob")
         started = time.monotonic()
         stdout_bytes, stderr_bytes, exit_code, timed_out = _run_with_tree_kill(
             run_argv, cwd=self.workspace_root, env=env, timeout=self.timeout_seconds,
@@ -853,12 +1231,18 @@ class ShellExecTool(Tool):
     # ------------------------------------------------------------------
     def _resolve_binary(self, cmd: str) -> tuple[str, bool]:
         """Pick the binary to run: `(name, substituted)`."""
-        if shutil.which(cmd) is not None:
+        if self._which(cmd) is not None:
             return cmd, False
         alias = self._platform_alias(cmd)
-        if alias != cmd and shutil.which(alias) is not None:
+        if alias != cmd and self._which(alias) is not None:
             return alias, True
         return cmd, False
+
+    @staticmethod
+    def _git_hardened(argv: list[str]) -> list[str]:
+        """Add the options that stop git starting programs named in repository config."""
+        extra = _GIT_NO_DRIVER_OPTIONS.get(argv[1].strip().lower(), ())
+        return [argv[0], *_GIT_SAFE_CONFIG, argv[1], *extra, *argv[2:]]
 
     @staticmethod
     def _normalise_argv_for(
@@ -914,7 +1298,12 @@ class ShellExecTool(Tool):
 
     def _safe_env(self) -> dict[str, str]:
         """Minimal env: PATH, (Windows) SystemRoot, and the home lookup."""
-        env = {"PATH": os.environ.get("PATH", "")}
+        # A folder the agent can write to must not supply programs to a child.
+        env = {"PATH": os.pathsep.join(
+            entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+            if entry and os.path.isabs(entry)
+            and not _resolves_inside(entry, self.workspace_root)
+        )}
         if sys.platform == "win32":
             # SystemRoot is REQUIRED for many Windows .exe to even start.
             sr = os.environ.get("SystemRoot")  # noqa: SIM112 — Windows-only variable; this is the spelling the OS documents

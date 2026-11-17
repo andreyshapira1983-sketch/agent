@@ -6,7 +6,7 @@ Commands:
   :audit [on|off|status]          read-only audit mode: freeze all durable memory writes
   :clear                          wipe working memory only
   :remember [tags] <text>         save to persistent memory (Write Policy gated)
-  :forget [id|all]                delete persistent record(s)
+  :forget <id|--all>              delete persistent record(s)
   :ingest-source <path> [flags]   ingest one UTF-8 text/code file into Source Registry
   :ingest-project [path] [flags]  ingest project text/code files (default limit 80)
   :source-library [group|all]     list curated online source families

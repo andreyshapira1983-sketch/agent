@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from core.file_lock import exclusive_file_lock
+from core.protected_paths import PROTECTED_FILES, PROTECTED_TREES, path_key
 
 __all__ = [
     "SUPERVISOR_FENCE",
@@ -32,32 +33,15 @@ __all__ = [
     "offer_verified_commit",
 ]
 
-#: Забор принимающего: забор песочницы плюс сам принимающий, иначе одно принятое
-#: изменение этого файла отменило бы все прочие правила.
-SUPERVISOR_FENCE: frozenset[str] = frozenset({
-    "core/burn_in_supervisor.py",
-    "scripts/burn_in_supervisor.py",
-    "scripts/autonomous_repair.py",
-    "core/burn_in_sandbox.py",
-    "core/self_apply_lane.py",
-    "core/self_apply_bridge.py",
-    "core/policy.py",
-    "core/rule_approved_apply.py",
-    "core/autonomous_runtime.py",
-    "core/approval_inbox.py",
-    "core/actuation_gateway.py",
-    "core/safe_vcs.py",
-    # Память опыта: коммит со своим указателем головы назначил бы себе старт сам.
-    # Полоса делает `git add -A`, поэтому эти имена ещё и в `.gitignore`.
-    "state/burn_in_head.json",
-    "state/burn_in_offers.jsonl",
-    "state/burn_in_adoptions.jsonl",
-    "config/burn_in_sandbox.json",
-    "scripts/install_daemon.ps1",
-})
+#: Забор принимающего — общий список core/protected_paths.py: в нём забор
+#: песочницы, сам принимающий (иначе одно принятое изменение этого файла
+#: отменило бы все прочие правила) и память опыта. Полоса делает `git add -A`,
+#: поэтому имена памяти опыта ещё и в `.gitignore`.
+SUPERVISOR_FENCE: frozenset[str] = PROTECTED_FILES
 
 #: Заповедные деревья: сверка по префиксу. `.github/` — это судья (батарея и
 #: указания ревизору), а кандидат не вправе переписывать своего судью.
+#: Деревья общего списка (`PROTECTED_TREES`) сверяются вместе с этими.
 SUPERVISOR_FENCED_TREES: frozenset[str] = frozenset({
     ".github/",
 })
@@ -310,12 +294,23 @@ def _fence_key(path: str) -> str:
     Регистр складывается всегда, а не через `normcase` (на POSIX тождество):
     лишний отказ дешевле кода за забором.
     """
-    return str(path).replace("\\", "/").strip().strip('"').casefold()
+    return path_key(path) or str(path).replace("\\", "/").strip().strip('"').casefold()
 
 
 def _in_fenced_tree(key: str) -> bool:
     """Лежит ли приведённый путь внутри заповедного дерева."""
-    return any(key.startswith(t.casefold()) for t in SUPERVISOR_FENCED_TREES)
+    trees = (*SUPERVISOR_FENCED_TREES, *PROTECTED_TREES)
+    return any((key + "/").startswith(t.casefold()) for t in trees)
+
+
+def _default_guard() -> frozenset[str]:
+    return frozenset(_fence_key(p) for p in SUPERVISOR_FENCE)
+
+
+def _crosses_fence(path: str, guard: frozenset[str]) -> bool:
+    """Трогает ли путь кандидата забор: файл из списка или заповедное дерево."""
+    key = _fence_key(path)
+    return key in guard or _in_fenced_tree(key)
 
 
 def adopt_offer(
@@ -343,7 +338,7 @@ def _adopt_offer_locked(
     battery: Callable[[Path], tuple[bool, str]],
     fence: Any = None,
 ) -> AdoptionVerdict:
-    guard = frozenset(_fence_key(p) for p in (fence if fence is not None else SUPERVISOR_FENCE))
+    guard = frozenset(_fence_key(p) for p in fence) if fence is not None else _default_guard()
     previous = experiment_head(repo)
 
     def refuse(reason: str, **checks: Any) -> AdoptionVerdict:
@@ -377,10 +372,7 @@ def _adopt_offer_locked(
     touched = _changed_paths(repo, previous, sha)
     if not touched:
         return refuse("кандидат ничего не меняет", changed=touched)
-    crossed = sorted(
-        p for p in touched
-        if _fence_key(p) in guard or _in_fenced_tree(_fence_key(p))
-    )
+    crossed = sorted(p for p in touched if _crosses_fence(p, guard))
     if crossed:
         return refuse(f"кандидат трогает забор: {', '.join(crossed)}",
                       changed=touched, crossed=crossed)

@@ -168,11 +168,12 @@ def prune_stale_episodes(
     with state_file_lock(store.path):
         rows = read_state_jsonl_unlocked(store.path)
         episodes: list[EpisodeRecord] = []
+        unparsed: list[dict] = []
         for row in rows:
             try:
                 episodes.append(EpisodeRecord.from_dict(row))
             except (TypeError, ValueError):
-                continue
+                unparsed.append(row)
         victims = select_for_pruning(
             episodes,
             max_age_days=max_age_days,
@@ -189,7 +190,11 @@ def prune_stale_episodes(
             return [ep.id for ep in victims]
         kept = [ep for ep in episodes if ep.id not in victim_ids]
         kept.sort(key=lambda e: e.created_at)
-        rewrite_state_jsonl_unlocked(store.path, [e.to_dict() for e in kept])
+        # A row this reader cannot parse is not evidence of staleness: it is
+        # written back untouched, never dropped by the rewrite.
+        rewrite_state_jsonl_unlocked(
+            store.path, [e.to_dict() for e in kept] + unparsed,
+        )
         return [ep.id for ep in victims]
 
 

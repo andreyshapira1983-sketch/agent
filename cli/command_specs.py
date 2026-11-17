@@ -102,7 +102,7 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         description="delete persistent record(s)",
         category="Memory",
         handler_key="forget",
-        usage="[id|all]",
+        usage="<id|--all>",
         in_startup_summary=True,
     ),
     CommandSpec(

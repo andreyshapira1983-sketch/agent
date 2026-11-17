@@ -456,10 +456,12 @@ def _build_short_answer(
     Contract section order. We rebuild from scratch — never paraphrase
     the LLM's prose — so the truncation is visibly mechanical."""
     notice = _insufficient_data_notice(locale)
+    stub = _conclusion_stub(len(verified_claim_texts) - dialogue_count, locale, dialogue_count)
+    if verified_claim_texts:
+        # Двоеточие в конце: разговорный показ печатает Facts только после него.
+        stub += " Оставлено:" if locale == "ru" else " Kept:"
     parts = [
-        _conclusion_stub(
-            len(verified_claim_texts) - dialogue_count, locale, dialogue_count
-        ),
+        stub,
         _facts_block(verified_claim_texts, locale),
         *([_code_proposal_block(code_blocks, locale)] if code_blocks else []),
         "Sources: only verified claims listed above (if any)",

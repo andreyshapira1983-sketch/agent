@@ -98,7 +98,10 @@ class CampaignLedger:
             from dataclasses import replace
 
             from core.usd_spend import usd_last_hour
-            record = replace(record, usd_last_hour=usd_last_hour(self.path.parent.parent))
+            try:
+                record = replace(record, usd_last_hour=usd_last_hour(self.path.parent.parent))
+            except ValueError:  # spend journal unreadable: the row is still written, the dollars stay unknown
+                pass
         self.records.append(record)
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,13 +113,13 @@ def load_ledger_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
+    # Bytes split on "\n" only: U+2028 in a value is no line end, a cut character costs one line.
+    for raw in path.read_bytes().split(b"\n"):
+        if not raw.strip():
             continue
         try:
-            row = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+            row = json.loads(raw.decode("utf-8"))
+        except ValueError:
             continue
         if isinstance(row, dict):
             rows.append(row)

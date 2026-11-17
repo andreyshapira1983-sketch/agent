@@ -63,6 +63,12 @@ class FileWriteTool(Tool):
             raise PermissionError(
                 f"Path escapes workspace: {candidate}"
             ) from exc
+        # git запускает программы, названные в его папке (хуки, фильтры, config).
+        if ".git" in (p.lower() for p in candidate.relative_to(self.workspace_root).parts):
+            raise PermissionError(
+                f"refusing to write under .git: {raw_path!r} — the repository's "
+                "own folder is not the agent's to edit"
+            )
         # Тормоза — только оператору, и одобрение этого не снимает
         # (core/control_files.py). Отказ здесь делает и risk_for
         # «irreversible», и run() — PermissionError до любой записи.

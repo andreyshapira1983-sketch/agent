@@ -293,10 +293,14 @@ class SourceRankingReport:
 def is_realtime_question(question: str) -> bool:
     """Return True when a question asks for current/fresh data."""
     lowered = (question or "").casefold()
-    repo_local = _is_repo_local(lowered)
+    return _has_realtime_term(lowered, skip_ambiguous=_is_repo_local(lowered))
+
+
+def _has_realtime_term(lowered: str, *, skip_ambiguous: bool) -> bool:
+    """Есть ли слово свежести; `skip_ambiguous` оставляет только предметы (цена, курс, погода)."""
 
     def _ignored(term: str) -> bool:
-        return repo_local and term in _AMBIGUOUS_REALTIME_TERMS
+        return skip_ambiguous and term in _AMBIGUOUS_REALTIME_TERMS
 
     if any(
         term in lowered
@@ -349,7 +353,11 @@ def rank_evidence(
     realtime = is_realtime_question(question) if realtime_required is None else realtime_required
     tier, tier_reasons = _source_tier(evidence)
     fresh, fresh_reasons = _freshness_status(evidence, realtime_required=realtime, now=now)
-    support, support_reasons = _support_level(evidence, tier=tier, realtime_required=realtime)
+    # «Последняя версия X» — не котировка: только что открытая страница и есть живой источник.
+    page_is_live = (fresh == "fresh" and evidence.kind == "web_page" and bool(question)
+                    and not _has_realtime_term((question or "").casefold(), skip_ambiguous=True))
+    support, support_reasons = _support_level(
+        evidence, tier=tier, realtime_required=realtime and not page_is_live)
 
     tier_score = _TIER_SCORES[tier]
     freshness_score = _FRESHNESS_SCORES[fresh]

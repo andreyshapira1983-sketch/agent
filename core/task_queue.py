@@ -247,9 +247,10 @@ class TaskQueueStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._on_task_added = on_task_added
-        #: Rows the last read could not parse. Zero is the normal case; anything
-        #: else means queued work disappeared and somebody must look at the file.
+        #: Rows the last read could not parse: queued work that will not run until
+        #: somebody fixes the file. The save under the same lock writes them back.
         self.last_unreadable_rows = 0
+        self._unparsed_rows: list[dict] = []
 
     def add(
         self,
@@ -383,28 +384,26 @@ class TaskQueueStore:
 
     def _load_unlocked(self) -> list[RuntimeTask]:
         if not self.path.exists():
-            # The counter describes THIS read, so the no-file path has to clear
-            # it too. Left alone, a queue that was rotated away would keep
-            # reporting the dropped rows of the read before it — a number about
-            # data that is no longer there, which is the very failure this
-            # counter exists to make visible.
+            # The counter describes THIS read: a rotated-away queue must not
+            # keep reporting (or writing back) the rows of the read before it.
             self.last_unreadable_rows = 0
+            self._unparsed_rows = []
             return []
         tasks: list[RuntimeTask] = []
-        unreadable = 0
+        unparsed: list[dict] = []
         for raw in read_state_jsonl_unlocked(self.path):
             try:
                 tasks.append(RuntimeTask.from_dict(raw))
             except (TypeError, ValueError) as exc:
                 # Skipping stays — one bad row must not sink the queue. Silence
-                # does not: this is a task nobody will ever run again.
-                unreadable += 1
-                fields = raw if isinstance(raw, dict) else {}
+                # does not: this is a task nobody will run until the row is fixed.
+                unparsed.append(raw)
                 logger.warning(
-                    "runtime task row dropped (%s): id=%s kind=%s",
-                    exc, fields.get("id", "?"), fields.get("kind", "?"),
+                    "runtime task row kept, not run (%s): id=%s kind=%s",
+                    exc, raw.get("id", "?"), raw.get("kind", "?"),
                 )
-        self.last_unreadable_rows = unreadable
+        self.last_unreadable_rows = len(unparsed)
+        self._unparsed_rows = unparsed
         return tasks
 
     def list(self, *, status: RuntimeTaskStatus | str | None = None) -> list[RuntimeTask]:
@@ -799,4 +798,6 @@ class TaskQueueStore:
         return self.path.with_suffix(self.path.suffix + ".lock")
 
     def _save_unlocked(self, tasks: list[RuntimeTask]) -> None:
-        rewrite_state_jsonl_unlocked(self.path, [task.to_dict() for task in tasks])
+        rewrite_state_jsonl_unlocked(
+            self.path, [task.to_dict() for task in tasks] + self._unparsed_rows
+        )

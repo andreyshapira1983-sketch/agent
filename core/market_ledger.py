@@ -18,10 +18,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+import logging
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from core.state_integrity import backup_state_file
+
+logger = logging.getLogger(__name__)
 
 FEE_RATE = 0.05
 FILE_NAME = "ledger.json"
@@ -43,12 +48,32 @@ class OrderLine:
     claude_minutes: float | None = None
     operator_minutes: float | None = None
     accepted_at: str | None = None
+    #: Поля строки, которых этот код не знает; при записи возвращаются как были.
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def net(self) -> float | None:
         """Чистая прибыль; до `accepted` оплаты нет — считать нечего."""
         if self.status != "accepted" or self.escrow_amount is None:
             return None
         return round(self.escrow_amount * (1 - FEE_RATE) - self.model_usd - self.other_usd, 4)
+
+
+class LedgerUnreadable(ValueError):
+    """Файл учёта есть, но не читается как учёт."""
+
+
+_KNOWN = frozenset(f.name for f in fields(OrderLine)) - {"extra"}
+
+
+def _line_from(aid: str, row: dict[str, Any]) -> OrderLine:
+    known = {k: v for k, v in row.items() if k in _KNOWN}
+    extra = {k: v for k, v in row.items() if k not in _KNOWN}
+    return OrderLine(**{"assignment_id": aid, "job_id": "", **known}, extra=extra)
+
+
+def _row_of(line: OrderLine) -> dict[str, Any]:
+    row = asdict(line)
+    return {**row.pop("extra"), **row}
 
 
 def _amount(raw: Any) -> float | None:
@@ -63,16 +88,36 @@ class MarketLedger:
         self.path = Path(path)
 
     def lines(self) -> dict[str, OrderLine]:
+        """Заказы по id назначения; нечитаемый файл — `LedgerUnreadable`, а не пустой учёт."""
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return {}
-        return {aid: OrderLine(**row) for aid, row in raw.items()}
+        except (OSError, ValueError) as exc:
+            raise LedgerUnreadable(f"market ledger {self.path} is unreadable: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise LedgerUnreadable(f"market ledger {self.path} is unreadable: not a json object")
+        for aid, row in raw.items():
+            if not isinstance(row, dict):
+                raise LedgerUnreadable(f"market ledger {self.path} is unreadable: row {aid!r} is not an object")
+        return {aid: _line_from(aid, row) for aid, row in raw.items()}
+
+    def _lines_or_empty(self) -> dict[str, OrderLine]:
+        try:
+            return self.lines()
+        except LedgerUnreadable as exc:
+            logger.warning("%s; treated as empty", exc)
+            return {}
 
     def _save(self, lines: dict[str, OrderLine]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lines()
+        except LedgerUnreadable as exc:
+            copy = backup_state_file(self.path)
+            logger.warning("%s; damaged copy kept at %s before the rewrite", exc, copy)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({k: asdict(v) for k, v in lines.items()}, ensure_ascii=False, indent=1),
+        tmp.write_text(json.dumps({k: _row_of(v) for k, v in lines.items()}, ensure_ascii=False, indent=1),
                        encoding="utf-8")
         tmp.replace(self.path)
 
@@ -90,7 +135,7 @@ class MarketLedger:
 
     def add_run(self, row: dict[str, Any], seconds: float, model_usd: float | None) -> None:
         """Один запуск агента на заказ (первая работа, доработка, ответ в переписке)."""
-        lines = self.lines()
+        lines = self._lines_or_empty()
         line = self._line(lines, row)
         line.runs += 1
         line.work_seconds = round(line.work_seconds + seconds, 1)
@@ -100,7 +145,7 @@ class MarketLedger:
     def observe(self, row: dict[str, Any]) -> None:
         """Статус и оплата из опроса — только для заказов, которые мы работали."""
         aid = str((row.get("assignment") or {}).get("assignmentId"))
-        lines = self.lines()
+        lines = self._lines_or_empty()
         if aid in lines:
             self._line(lines, row)
             self._save(lines)

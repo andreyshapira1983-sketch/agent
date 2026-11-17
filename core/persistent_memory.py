@@ -128,18 +128,17 @@ class PersistentMemoryStore:
 
     def load(self) -> list[MemoryRecord]:
         """Full file scan — returns only LIVE (non-expired) records."""
-        all_records = self._load_raw()
         now = _dt.datetime.now(_dt.timezone.utc)
-        live: list[MemoryRecord] = []
-        expired_found = False
-        for rec in all_records:
-            if self._is_expired(rec, now):
-                expired_found = True
-                continue
-            live.append(rec)
-        # Lazy eviction: rewrite store only when expired records are found
-        if expired_found:
-            self._rewrite(live)
+        # One lock over read and eviction rewrite, for the same reason as
+        # `update`: an append landing between them would be overwritten.
+        with state_file_lock(self.path):
+            all_records = self._load_raw_unlocked()
+            live = [rec for rec in all_records if not self._is_expired(rec, now)]
+            # Lazy eviction: rewrite store only when expired records are found
+            if len(live) != len(all_records):
+                rewrite_state_jsonl_unlocked(
+                    self.path, [rec.model_dump(mode="json") for rec in live],
+                )
         return live
 
     def _active_unlocked(self) -> list[MemoryRecord]:
@@ -240,11 +239,23 @@ class PersistentMemoryStore:
         return True
 
     def delete_all(self) -> int:
-        n = self.count()
         with state_file_lock(self.path):
+            n = len(self._active_unlocked())
             if self.path.exists():
                 self.path.unlink()
         return n
+
+    def drop_ids(self, ids: Iterable[str], *, add: Iterable[MemoryRecord] = ()) -> int:
+        """Remove rows by id and append `add` in one locked rewrite; returns how many were removed."""
+        gone = set(ids)
+        extra = [record.model_dump(mode="json") for record in add]
+        with state_file_lock(self.path):
+            # Raw rows: one saved meanwhile or one that does not validate goes back as read.
+            rows = read_state_jsonl_unlocked(self.path)
+            keep = [row for row in rows if row.get("id") not in gone]
+            if len(keep) != len(rows) or extra:
+                rewrite_state_jsonl_unlocked(self.path, keep + extra)
+        return len(rows) - len(keep)
 
     # ---------- helpers ----------
 

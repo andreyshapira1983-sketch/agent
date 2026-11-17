@@ -16,40 +16,38 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "approve"}
 
 
+#: Tags that switch the memory write policy; matched by name, so stored lower-case.
+_RESERVED_TAGS = frozenset({
+    "preference", "fact", "decision", "insight", "user-approved", "project",
+})
+
+
 def _parse_remember(rest: str) -> tuple[list[str], str]:
     """Parse `:remember [tag,tag] text...` into (tags, content).
 
-    ASCII-only identifier policy applies to TAGS (they are identifiers).
-    `content` may contain any unicode (it's human text).
+    Tags are taken only from an explicit form: a bracketed first token
+    (`[fact] text`, `[a,b] text`) or a bare comma list with no empty and no
+    all-digit part (`a,b text`). Everything else is content and is stored
+    whole: `project Alpha is due`, `Hello, world`, `1,5 litres`.
     """
     rest = rest.strip()
     if not rest:
         return [], ""
-    # Split on the first WHITESPACE, not the first space. A `<<<` block whose
-    # text starts with ':' is dispatched as a command, so this receives newlines,
-    # and partitioning on " " swallowed the first word of the note into the tag
-    # list — where the ASCII filter then dropped it, silently shortening what the
-    # operator asked to remember.
+    # First WHITESPACE, not first space: a `<<<` block arrives with newlines.
     parts = rest.split(maxsplit=1)
     head = parts[0]
     tail = parts[1] if len(parts) > 1 else ""
-    tag_candidates = {
-        "preference", "fact", "decision", "insight",
-        "user-approved", "project",
-    }
-    if "," in head or head.lower() in tag_candidates:
-        # A tag is a LABEL, not an identifier: it never becomes a path, an argv
-        # entry or a URL, and it is stored in JSONL written with
-        # ensure_ascii=False. So it is kept exactly as typed, in any script.
-        # Only the reserved words — the ones that switch the write policy — are
-        # canonicalised to lower case, because the policy matches them by name.
-        # Before 2026-08-07 a non-ASCII tag was dropped in silence and replaced
-        # with `user-approved`, turning a label into a consent the operator
-        # never gave.
-        raw_tags = [t.strip() for t in head.split(",") if t.strip()]
-        tags = [t.lower() if t.lower() in tag_candidates else t for t in raw_tags]
-        return tags, tail.strip()
-    return ["user-approved"], rest
+    bracketed = len(head) > 2 and head[0] == "[" and head[-1] == "]"
+    head_parts = (head[1:-1] if bracketed else head).split(",")
+    # A comma followed by whitespace (or a decimal comma) is punctuation.
+    if not all(part and not part.isdigit() for part in head_parts) or (
+        len(head_parts) < 2 and not bracketed
+    ):
+        return ["user-approved"], rest
+    # A tag is a label, kept as typed in any script; only the reserved words
+    # are lower-cased, because the write policy matches them by name.
+    tags = [t.lower() if t.lower() in _RESERVED_TAGS else t for t in head_parts]
+    return tags, tail.strip()
 
 
 def _resolve_workspace_text_file(workspace: Path, raw_path: str, *, role: str) -> Path:

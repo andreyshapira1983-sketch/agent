@@ -21,14 +21,16 @@ Safety model:
     workspace.
 
 Risk:
-  Reversible. Tests SHOULD be read-only in a healthy project, but the
-  tool runs arbitrary Python code and conftest.py fixtures can have
-  side effects. Mapping to `reversible` forces a Policy Gate review
-  without making every test invocation require explicit human approval
-  (read_only would let the agent run untrusted code unsupervised).
+  Reversible while the code is what git HEAD holds: the Policy Gate allows
+  the run with an audit record. The tool runs arbitrary Python code, so a
+  run that would execute code nobody committed — a file that is untracked
+  or changed since HEAD, or a git-ignored test target — is `irreversible`
+  and waits for human approval (`risk_for`). Without git or outside a
+  repository there is no baseline and the class stays `reversible`.
 """
 from __future__ import annotations
 
+import posixpath
 import re
 import subprocess
 import sys
@@ -86,6 +88,36 @@ _COVERAGE_LINE_RE = re.compile(
 )
 
 
+#: Files whose change alters what a pytest run executes: code and pytest config.
+_CODE_SUFFIXES = (".py", ".pth", ".ini", ".cfg", ".toml")
+#: Folders pytest does not descend into by default (`norecursedirs`).
+_UNCOLLECTED_DIRS = frozenset({"__pycache__", "node_modules", "venv"})
+_GIT_TIMEOUT_SECONDS = 10.0
+
+
+def _is_code(git_path: str) -> bool:
+    """True for a path, as git prints it, that names code or pytest config."""
+    return git_path.strip().strip('"').lower().endswith(_CODE_SUFFIXES)
+
+
+def _collected(file_path: str, targets: list[str]) -> bool:
+    """True when pytest, given `targets`, would collect or load `file_path`."""
+    file_path = file_path.strip().strip('"')
+    for target in targets:
+        if target == ".":
+            inner = file_path
+        elif file_path == target:
+            return True
+        elif file_path.startswith(target + "/"):
+            inner = file_path[len(target) + 1:]
+        else:
+            continue
+        folders = inner.split("/")[:-1]
+        if not any(d.startswith(".") or d in _UNCOLLECTED_DIRS for d in folders):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Tool
 # ---------------------------------------------------------------------------
@@ -99,8 +131,9 @@ class RunTestsTool(Tool):
         "Returns a structured summary including pass/fail counts, "
         "names of failed tests, exit code, and a tail of stdout. "
         "Use this to verify code changes before applying them. "
-        "Risk: reversible (subprocess executes Python code under the "
-        "workspace; requires approval)."
+        "Risk: reversible while the workspace code is what git HEAD holds; "
+        "a run that would execute new or changed code (untracked, modified "
+        "or git-ignored test targets) requires approval."
     )
     risk: Risk = "reversible"
 
@@ -128,12 +161,60 @@ class RunTestsTool(Tool):
         self.python_executable = python_executable or sys.executable
 
     # ------------------------------------------------------------------
-    # risk_for: always reversible. No dynamic downgrade — running tests
-    # always involves subprocess and arbitrary user-test code.
+    # risk_for: reversible only while the code is what git HEAD holds.
     # ------------------------------------------------------------------
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
-        return "reversible"
+        """`irreversible` (approval) when the run would execute new or changed code."""
+        paths = arguments.get("paths") if isinstance(arguments, dict) else None
+        try:
+            unreviewed = self._runs_unreviewed_code(paths)
+        except Exception:  # noqa: BLE001 — a gate that cannot tell asks
+            unreviewed = True
+        return "irreversible" if unreviewed else "reversible"
+
+    def _runs_unreviewed_code(self, paths: Any) -> bool:
+        """True when git reports code that is untracked, changed or ignored-but-targeted.
+
+        Without git or outside a repository there is no baseline to compare
+        with, and the class stays `reversible`.
+        """
+        from tools.shell_exec import trusted_which
+
+        git = trusted_which("git", self.workspace_root)
+        if git is None:
+            return False
+        changed = self._git_lines(git, "status", "--porcelain", "--untracked-files=all", "--", ".")
+        if changed is None:
+            return False
+        if any(_is_code(line[3:]) for line in changed):
+            return True
+        targets = ["tests"] if paths is None else [
+            posixpath.normpath(p.replace("\\", "/")) for p in paths if isinstance(p, str) and p
+        ]
+        if not targets:
+            return False
+        # A target git ignores is invisible to `status` yet runs all the same.
+        ignored = self._git_lines(
+            git, "ls-files", "--others", "--ignored", "--exclude-standard", "--", *targets
+        )
+        if ignored is None:
+            return True
+        return any(_is_code(line) and _collected(line, targets) for line in ignored)
+
+    def _git_lines(self, git: str, *args: str) -> list[str] | None:
+        """Output lines of one read-only git call; None when there is no repository."""
+        from core.bounded_subprocess import run_with_tree_kill
+
+        env = {**self._build_env(), "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"}
+        stdout, stderr, exit_code, timed_out = run_with_tree_kill(
+            [git, *args], cwd=self.workspace_root, env=env, timeout=_GIT_TIMEOUT_SECONDS,
+        )
+        if timed_out or exit_code != 0:
+            if not timed_out and b"not a git repository" in stderr.lower():
+                return None
+            raise RuntimeError(f"git {args[0]} gave no answer (exit {exit_code})")
+        return stdout.decode("utf-8", errors="replace").splitlines()
 
     # ------------------------------------------------------------------
     # run

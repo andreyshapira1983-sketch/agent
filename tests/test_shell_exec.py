@@ -111,7 +111,9 @@ class TestRiskFor:
     def test_read_only_commands(self, workspace: Path):
         tool = self._tool(workspace)
         for cmd in READ_ONLY_COMMANDS:
-            assert tool.risk_for({"argv": [cmd]}) == "read_only", cmd
+            # A bare `git` is refused by validation, so it is no longer a read.
+            argv = [cmd, "status"] if cmd == "git" else [cmd]
+            assert tool.risk_for({"argv": argv}) == "read_only", cmd
 
     def test_mutating_commands(self, workspace: Path):
         tool = self._tool(workspace)

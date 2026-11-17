@@ -274,14 +274,14 @@ def _turn_spend(loop: Any) -> tuple[float, float | None]:
     from datetime import datetime, timezone
 
     from core.run_context import current_run
-    from core.usd_spend import turn_usd_limit, usd_since
+    from core.usd_spend import turn_usd_limit
 
     cap, run = turn_usd_limit(), current_run()
     root_of = getattr(loop, "_file_read_workspace_root", None)
     root = root_of() if callable(root_of) else None
     if cap is None or run is None or run.started_at <= 0 or root is None:
         return 0.0, None
-    return usd_since(root, datetime.fromtimestamp(run.started_at, tz=timezone.utc)), cap
+    return _usd_since_or_cap(root, datetime.fromtimestamp(run.started_at, tz=timezone.utc), cap), cap
 
 
 def charged_attempts(loop: Any, attempt: int, failure_history: Sequence[Any]) -> int:
@@ -452,3 +452,13 @@ def continue_after_observation(
         "observation_chars": len(block),
     })
     return True
+
+
+def _usd_since_or_cap(root: Any, since: Any, cap: float) -> float:
+    """Доллары хода; журнал расхода не читается — предел считается исчерпанным, а не ноль."""
+    from core.usd_spend import usd_since
+
+    try:
+        return usd_since(root, since)
+    except ValueError:
+        return cap

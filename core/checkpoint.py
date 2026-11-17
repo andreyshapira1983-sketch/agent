@@ -34,6 +34,7 @@ the full cycle runs again — safer than partial-answer injection.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -41,6 +42,9 @@ from pathlib import Path
 from typing import Any
 
 from core.ids import new_id
+from core.state_integrity import backup_state_file
+
+logger = logging.getLogger(__name__)
 
 # ── public phase constants ──────────────────────────────────────────────────
 
@@ -134,9 +138,37 @@ class CheckpointWriter:
             raise ValueError(f"Unknown checkpoint phase: {phase!r}")
         rec = CheckpointRecord(phase=phase, trace_id=self._trace_id, data=data)
         line = json.dumps(rec.to_dict(), ensure_ascii=False, default=str)
+        self._start_fresh_line()
         with self._path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
         return rec
+
+    def _start_fresh_line(self) -> None:
+        """Make the next append start on its own line; a cut-short tail is copied aside and removed."""
+        try:
+            with self._path.open("rb") as fh:
+                if fh.seek(0, 2) == 0:
+                    return
+                fh.seek(-1, 2)
+                if fh.read(1) == b"\n":
+                    return
+                fh.seek(0)
+                data = fh.read()
+        except FileNotFoundError:
+            return
+        tail = data.rpartition(b"\n")[2]
+        try:
+            lost_only_newline = isinstance(json.loads(tail.decode("utf-8")), dict)
+        except ValueError:
+            lost_only_newline = False
+        if lost_only_newline:
+            with self._path.open("ab") as fh:
+                fh.write(b"\n")
+            return
+        copy = backup_state_file(self._path)
+        logger.warning("checkpoint %s ended in a cut-short record; copy kept at %s", self._path, copy)
+        with self._path.open("r+b") as fh:
+            fh.truncate(len(data) - len(tail))
 
     # Convenience helpers — typed wrappers so callers don't pass raw dicts.
 
@@ -177,21 +209,30 @@ class CheckpointLoader:
         Failure modes that return ``None`` (safe fallback = full re-run):
         - file not found
         - no OBSERVE record (can't reconstruct question)
-        - JSON decode error on any line (corrupted file)
+        - undecodable line anywhere but the end (corrupted file)
+
+        An undecodable LAST line is a write cut short; it is skipped.
         """
         path = self._path_for(trace_id)
         if not path.exists():
             return None
 
+        # Bytes, not text: a cut inside a multi-byte character must cost one line, not the read.
+        raw_lines = [raw for raw in path.read_bytes().splitlines() if raw.strip()]
         records: list[CheckpointRecord] = []
-        try:
-            for raw in path.read_text(encoding="utf-8").splitlines():
-                raw = raw.strip()
-                if not raw:
-                    continue
-                records.append(CheckpointRecord.from_dict(json.loads(raw)))
-        except (json.JSONDecodeError, KeyError):
-            return None
+        for index, raw in enumerate(raw_lines):
+            try:
+                row = json.loads(raw.decode("utf-8"))
+            except ValueError:  # JSONDecodeError and UnicodeDecodeError
+                row = None
+            if not isinstance(row, dict):
+                if index == len(raw_lines) - 1:
+                    break
+                return None
+            try:
+                records.append(CheckpointRecord.from_dict(row))
+            except KeyError:
+                return None
 
         if not records:
             return None

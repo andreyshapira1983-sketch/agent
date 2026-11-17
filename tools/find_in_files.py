@@ -65,6 +65,13 @@ class FindInFilesTool(Tool):
                 continue
             if _is_credential_path(rel.as_posix()):
                 continue
+            # Ссылка или junction по дороге: читается то, на что она указывает.
+            try:
+                real = path.resolve().relative_to(self.workspace_root)
+            except (ValueError, OSError):
+                continue
+            if _is_credential_path(real.as_posix()):
+                continue
             if fnmatch.fnmatch(path.name.lower(), pattern):
                 out.append(path)
         return out

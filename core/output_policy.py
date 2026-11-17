@@ -118,16 +118,16 @@ def _stale_realtime_warning(question: str) -> str:
     )
 
 
+REPLAN_WARNINGS: tuple[str, str] = (
+    ("Часть проверки была остановлена из-за исчерпания replan-бюджета; "
+     "некоторые данные могли остаться неподтверждёнными."),
+    ("Part of verification stopped because the replan budget was exhausted; "
+     "some data may remain unconfirmed."),
+)
+
+
 def _replan_warning(question: str) -> str:
-    if looks_russian(question):
-        return (
-            "Часть проверки была остановлена из-за исчерпания replan-бюджета; "
-            "некоторые данные могли остаться неподтверждёнными."
-        )
-    return (
-        "Part of verification stopped because the replan budget was exhausted; "
-        "some data may remain unconfirmed."
-    )
+    return REPLAN_WARNINGS[0 if looks_russian(question) else 1]
 
 
 def _downgrade_realtime_verified_tags(answer: str) -> tuple[str, int]:

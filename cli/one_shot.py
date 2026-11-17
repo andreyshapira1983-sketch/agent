@@ -16,9 +16,10 @@ One question in, one answer out, then exit. The contract frozen by
 * ``stream=False``, because the ``format_human_response`` print below is the
   sole output.
 
-Every exit here is ``0``, including the unknown-command one -- the exit ``2``
-cases (bad file hint, bad ``--resume``) are decided by the caller before this
-runs.
+Every exit here is ``0``, including the unknown-command one -- except a
+``:command`` whose handler raises, which is reported in one line and exits ``1``.
+The exit ``2`` cases (bad file hint, bad ``--resume``) are decided by the caller
+before this runs.
 
 **How the collaborators are reached, and why it matters for tests.** A
 ``monkeypatch.setattr`` is observed only where the *call site* resolves the
@@ -129,7 +130,13 @@ def run_one_shot(
     # --max-cost-units 0' is misread as a budget query by the classifier.
     ask_head = ask.lstrip()
     if ask_head.startswith(":") or ask_head == "?":
-        if command_dispatch.handle_meta_command(ask_head, agent, workspace):
+        try:
+            handled = command_dispatch.handle_meta_command(ask_head, agent, workspace)
+        except Exception as exc:  # noqa: BLE001 — one line and a failing exit code, not a traceback
+            label = ask_head.split(maxsplit=1)[0]
+            print(f"(command failed: {label}: {type(exc).__name__}: {exc})", file=sys.stderr)
+            return 1
+        if handled:
             return 0
         print(f"(unknown command: {ask_head})", file=sys.stderr)
         return 0

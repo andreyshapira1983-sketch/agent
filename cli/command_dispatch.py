@@ -214,7 +214,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
                 "Usage: :remember [tag1,tag2] <text>\n"
                 "Examples:\n"
                 "  :remember I prefer Python over JavaScript\n"
-                "  :remember preference,fact I prefer concise Russian answers",
+                "  :remember [fact] the sky is blue\n  :remember preference,fact I prefer concise Russian answers",
                 file=sys.stderr,
             )
             return True
@@ -227,7 +227,15 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
 
     if head == ":forget":
         target = rest.strip()
-        if not target or target.lower() == "all":
+        if not target:
+            # Wiping everything is irreversible, so it is never the default.
+            print(
+                "(nothing deleted — :forget needs a target)\n"
+                "Usage: :forget <record_id>   delete one persistent record\n"
+                "       :forget --all         delete ALL persistent records",
+                file=sys.stderr,
+            )
+        elif target.lower() in {"--all", "all"}:
             n = agent.forget(record_id=None)
             print(f"(deleted {n} persistent records)", file=sys.stderr)
         else:

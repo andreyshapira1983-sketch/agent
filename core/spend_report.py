@@ -132,8 +132,6 @@ def load_spend_rows(workspace: Path | str) -> tuple[list[dict], list[dict]]:
     """Живые строки журналов для зеркала. Сбой чтения — пустота, не падение:
     отсутствующая или битая лента не вправе ронять ни команду, ни планирование,
     а пустой отчёт честно показывает пустоту."""
-    import json as _json
-
     root = Path(workspace)
     try:
         from core.state_integrity import read_state_jsonl
@@ -141,13 +139,11 @@ def load_spend_rows(workspace: Path | str) -> tuple[list[dict], list[dict]]:
         usage = list(read_state_jsonl(root / "data" / "model_usage.jsonl"))
     except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
         usage = []
-    ledger: list[dict] = []
     try:
-        for raw in (root / "data" / "campaign_ledger.jsonl").read_text(
-            encoding="utf-8"
-        ).splitlines():
-            if raw.strip():
-                ledger.append(_json.loads(raw))
+        # Читатель самой ленты: оборванная строка стоит одной строки, а не всей ленты.
+        from core.campaign_ledger import load_ledger_rows
+
+        ledger = load_ledger_rows(root / "data" / "campaign_ledger.jsonl")
     except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
         ledger = []
     return usage, ledger
