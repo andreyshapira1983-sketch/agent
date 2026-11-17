@@ -69,7 +69,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "learned_conclusion", "self_knowledge", "memory_consolidation", "memory_embeddings", "cache_freshness",
         "replay_freshness", "jev_judge",
         "ingestion", "ingestion_reports", "ingestion_utils",
-        "structured_facts", "evidence", "evidence_classes", "evidence_budget",
+        "structured_facts", "evidence", "evidence_classes", "evidence_budget", "arithmetic_check",
         "conflict_review", "conflict_episode",
         "source_registry", "source_registry_store", "source_library", "source_ranker", "unit_score",
         "read_sources_registry",

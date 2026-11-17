@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from core.arithmetic_check import arithmetic_receipt
 from core.failure_cards import learn_after_turn
 from core.replay_freshness import input_digests, read_files
 from core.run_context import current_run
@@ -132,6 +133,15 @@ class AgentLoopMemoryWrite:
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой в журнал
             self._sensor_failed("causal_observation", exc)
 
+    def _computed_receipt(self, question: str, answer: str, tools_used: list[str], chunks: int) -> list[str]:
+        """A tool-free answer with no evidence chunks at all (a replay has one) whose number is computed."""
+        try:
+            confirmed = not tools_used and not chunks and arithmetic_receipt(question, answer)
+        except Exception as exc:  # noqa: BLE001 — a check that breaks confirms nothing; banking goes on
+            self.log.log("arithmetic_check_failed", {"error": f"{type(exc).__name__}: {exc}"[:200]})
+            confirmed = False
+        return ["computed:arithmetic"] if confirmed else []
+
     def _with_input_digests(self, episode: Any, run: Any) -> Any:
         """Hashes of the files behind the answer, for the replay gate (core/replay_freshness.py)."""
         if not read_files(episode):
@@ -179,17 +189,17 @@ class AgentLoopMemoryWrite:
             and self.consolidation_store is None
         ):
             return
-        run = current_run()
-        # A `TypeError` here is a call-signature defect, not a memory fault, so
-        # it propagates; logging it would silently bank nothing.
+        run, receipt = current_run(), self._computed_receipt(
+            question, answer, tools_used, verified_chunks + unverified_chunks + weak_chunks)
+        # A `TypeError` is a call-signature defect, not a memory fault: it propagates.
         try:
             episode = episode_from_agent_cycle(
                 goal=goal_description,
                 question=question,
                 answer=answer,
                 tools_used=tools_used,
-                source_labels=source_labels,
-                verified_chunks=verified_chunks,
+                source_labels=[*source_labels, *receipt],
+                verified_chunks=verified_chunks + len(receipt),
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
                 # Тот же вектор, что печатает предупреждение оператору.

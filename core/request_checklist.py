@@ -274,6 +274,13 @@ def judge_contract_checklist(loop: Any, request: str, answer: str, contract: Any
     checklist = getattr(contract, "checklist", None)
     if checklist is None or not checklist.items:
         return False
-    verdict = check_answer(getattr(loop, "llm", None), request, checklist, answer)
+    from core.answer_format import format_human_response
+
+    # The text the human sees: the sections «391» hid behind failed «one number» (17.11).
+    try:
+        shown = format_human_response(answer)
+    except Exception:  # noqa: BLE001 — no human view: judge the raw answer as before
+        shown = answer
+    verdict = check_answer(getattr(loop, "llm", None), request, checklist, shown)
     loop.log.log("checklist_verdict", verdict.to_log_payload())
     return bool(verdict.unmet)

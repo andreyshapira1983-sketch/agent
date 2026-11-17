@@ -203,7 +203,8 @@
     "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake": [],
     "loop_gates.py::AgentLoopGates._noted_replay": [],
     "loop_memory_read.py::AgentLoopMemoryRead._stale_replay_inputs": [],
-    "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests": []
+    "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._computed_receipt": []
   },
   "edges": [
     [
@@ -813,6 +814,10 @@
     [
       "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests",
       "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._computed_receipt"
     ]
   ]
 }

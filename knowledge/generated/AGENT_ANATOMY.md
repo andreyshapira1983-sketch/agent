@@ -10,7 +10,7 @@ Kept in sync with the codebase by `scripts/agent_anatomy_check.py`
 (read-only drift check, TD-029). Regenerate with
 `python scripts/gen_anatomy.py` whenever a module is added or removed.
 
-_Total: 285 modules across 12 groups._
+_Total: 286 modules across 12 groups._
 
 ## Interface & Interaction (§1)
 
@@ -191,6 +191,7 @@ _Working/persistent memory, hygiene, ingestion, evidence._
 | `core/evidence` | Evidence + Provenance model: LLM — не источник истины; каждое утверждение ответа привязывается к типизированной записи Evidence. |
 | `core/evidence_classes` | Evidence classes — *what kind* of support a claim actually needs (issue #119). |
 | `core/evidence_budget` | Evidence Budget — caps context sent to the synthesizer LLM. |
+| `core/arithmetic_check` | An evidence-free arithmetic answer checked by computing the question's expression (operator, 2026-11-17). |
 | `core/conflict_review` | Operator-facing conflict review for the Source Registry. |
 | `core/conflict_episode` | Procedural memory for instruction conflicts: инструкция → конфликт → решение. |
 | `core/source_registry` | Source Registry and extracted claims. |
