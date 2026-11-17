@@ -18,7 +18,7 @@ from core.file_request_intent import (
 )
 from core.ids import new_id
 from core.replan import ReplanTrigger
-from core.replay_freshness import tools_allow_replay
+from core.replay_freshness import only_hashed_files, tools_allow_replay
 from core.request_checklist import attach_checklist
 from core.run_context import identity_provenance, run_scope
 
@@ -173,6 +173,8 @@ class AgentLoop(
 
     # Minimum quality for serving a stored answer instead of running a cycle.
     _REPLAY_MIN_QUALITY = 0.70
+    # Operator 17.11: lower for an answer whose every file is hash-checked unchanged.
+    _REPLAY_MIN_QUALITY_HASHED = 0.60
     # Jaccard overlap below which the stored question is not the same ask.
     _REPLAY_MIN_SIMILARITY = 0.85
 
@@ -195,7 +197,8 @@ class AgentLoop(
         score = getattr(episode, "answer_quality_score", None)
         if score is None:
             return False
-        return score >= AgentLoop._REPLAY_MIN_QUALITY
+        floor = AgentLoop._REPLAY_MIN_QUALITY_HASHED if only_hashed_files(episode) else AgentLoop._REPLAY_MIN_QUALITY
+        return score >= floor
 
     def _run_inner(
         self,

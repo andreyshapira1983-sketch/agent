@@ -190,6 +190,37 @@ def test_a_latest_search_does_not_hide_an_older_good_answer(tmp_path):
     assert _served(tmp_path, latest, seeded=(older,)) is not None
 
 
+def _scored(ep, verified, unverified):
+    return dataclasses.replace(ep, verified_chunks=verified, unverified_chunks=unverified,
+                               answer_quality_score=_compute_quality_score(verified, unverified, 0))
+
+
+def test_a_hash_checked_file_answer_replays_at_two_of_three(tmp_path):
+    """Operator 17.11: lower floor (0.60) for answers whose every file is hash-checked."""
+    _notes(tmp_path)
+    ep = _scored(_banked(tmp_path), 2, 1)          # 0.667, the live «Код склада» answer
+    assert AgentLoop._quality_allows_replay(ep) is True
+    assert _served(tmp_path, ep) is not None
+
+
+def test_the_lower_floor_still_refuses_half(tmp_path):
+    _notes(tmp_path)
+    assert AgentLoop._quality_allows_replay(_scored(_banked(tmp_path), 1, 1)) is False   # 0.50
+
+
+@pytest.mark.parametrize("kw", [
+    {"tools": (), "labels": ()},                                          # no file at all
+    {"tools": ("file_read", "web_fetch"), "labels": ("file:notes.txt", "web_fetch:https://a")},  # web mixed in
+])
+def test_the_lower_floor_needs_hashed_files_only(tmp_path, kw):
+    _notes(tmp_path)
+    assert AgentLoop._quality_allows_replay(_scored(_banked(tmp_path, **kw), 2, 1)) is False
+
+
+def test_an_unhashed_file_answer_keeps_the_old_floor():
+    assert AgentLoop._quality_allows_replay(_scored(_episode(), 2, 1)) is False   # no digests
+
+
 # 4 -- the note
 def test_note_lands_inside_the_conclusion():
     noted = with_replay_note(ANSWER, "из памяти")

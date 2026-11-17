@@ -47,6 +47,14 @@ def tools_allow_replay(episode: Any, now: datetime | None = None) -> bool:
     return not (tools & FILE_TOOLS) or bool(read_files(episode))
 
 
+def only_hashed_files(episode: Any) -> bool:
+    """The answer rests on files alone, each with a stored hash, and on no web source."""
+    files = read_files(episode)
+    hashed = {d.split("\t", 1)[0] for d in getattr(episode, "input_digests", ()) or () if "\t" in d}
+    tools = set(getattr(episode, "tools_used", ()) or ())
+    return bool(files) and set(files) <= hashed and not tools & WEB_TOOLS
+
+
 def _inside(root: Path, rel: str) -> Path | None:
     base = Path(root).resolve()
     path = (base / rel).resolve()
