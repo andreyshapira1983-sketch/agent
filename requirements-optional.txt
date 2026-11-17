@@ -2,7 +2,7 @@
 # Install when you use the feature: pip install -r requirements-optional.txt
 numpy==2.5.3          # core/memory_embeddings.py (search by meaning)
 python-docx==1.2.0    # tools/convert_file.py office conversions
-pypdf==6.19.0         # tests that build PDFs for the OCR path
-pillow==12.3.0        # tests that build images for OCR/resize
+pypdf==6.21.4         # tests that build PDFs for the OCR path; 6.21.4 closes 18 advisories open on 6.19.0 (2026-11-17)
+pillow==13.0.0        # tests that build images for OCR/resize; 13.0.0 closes 43 advisories open on 12.3.0, 5 critical (2026-11-17)
 fastapi==0.141.1      # api/server.py
 uvicorn[standard]==0.54.0  # api/server.py

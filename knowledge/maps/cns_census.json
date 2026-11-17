@@ -45,6 +45,7 @@
     "loop_context.py::AgentLoopContext._self_defects": [],
     "loop_context.py::AgentLoopContext._spend_mirror": [],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._catalogue_chain": [],
+    "loop_evidence_chain.py::AgentLoopEvidenceChain._mark_own_cached_evidence": [],
     "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain": [
       "discovery",
       "callers",
@@ -220,6 +221,14 @@
     [
       "loop.py::AgentLoop._run_inner",
       "loop_evidence_chain.py::AgentLoopEvidenceChain._fold_evidence_chain"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._mark_own_cached_evidence"
+    ],
+    [
+      "loop_evidence_chain.py::AgentLoopEvidenceChain._mark_own_cached_evidence",
+      "loop_sensor.py::AgentLoopSensor._sensor_failed"
     ],
     [
       "loop.py::AgentLoop._run_inner",

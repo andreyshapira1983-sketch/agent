@@ -210,17 +210,6 @@ class AgentLoopEvidenceChain:
                     # Sanitise label for use in source_id: replace `:` with
                     # `_` so it doesn't confuse the citation prefix parser.
                     _sid_label = _label.replace(":", "_")
-                    # A cached result is as independent as the call that made
-                    # it, no more: a cached `memory_recall` or a read of the
-                    # agent's own data/ stays non-independent (проверка 17.11).
-                    from core.evidence import evidence_from_tool_result, evidence_is_independent
-
-                    _orig = evidence_from_tool_result(
-                        tool_name=str(_art.get("tool") or ""),
-                        arguments=dict(_art.get("arguments") or {}),
-                        output=_output,
-                    )
-                    _own = _orig is not None and not evidence_is_independent(_orig)
                     chain.add(make_evidence(
                         kind="memory",
                         source_id=f"memory:working_turn_{_tidx}_{_sid_label}",
@@ -228,7 +217,6 @@ class AgentLoopEvidenceChain:
                         claim=f"Cached tool output from turn {_tidx}: {_label}",
                         excerpt=str(_output)[:500],
                         confidence=0.85,
-                        origin="agent-own" if _own else None,
                     ))
                 except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                     self._sensor_failed("working_memory_evidence", exc)
@@ -273,6 +261,42 @@ class AgentLoopEvidenceChain:
         # Store the chain on the agent so tests / future Verifier code
         # can consult it after `run()` returns.
         self.last_provenance = chain
+
+    def _mark_own_cached_evidence(self, chain: ProvenanceChain) -> None:
+        """A cached result is as independent as the call that made it, no more.
+
+        A cached `memory_recall` or a read of the agent's own data/ became
+        «working memory» evidence that counted as independent proof. Kept apart
+        from `_fold_evidence_chain`, whose body is pinned verbatim to the split
+        (tests/test_loop_evidence_chain_split.py) (проверка 17.11).
+        """
+        from dataclasses import replace
+
+        from core.evidence import evidence_from_tool_result, evidence_is_independent
+
+        memory = getattr(self, "memory", None)
+        if memory is None:
+            return
+        own_labels: set[str] = set()
+        for art in list(memory.artifacts.values()):
+            try:
+                orig = evidence_from_tool_result(
+                    tool_name=str(art.get("tool") or ""),
+                    arguments=dict(art.get("arguments") or {}),
+                    output=art.get("output"),
+                )
+            except Exception as exc:  # noqa: BLE001 — a sensor: logged, the turn goes on
+                self._sensor_failed("working_memory_origin", exc)
+                continue
+            if orig is not None and not evidence_is_independent(orig):
+                own_labels.add(f"memory:working_turn_{int(art.get('turn_index', 0))}_"
+                               f"{str(art.get('label', '')).replace(':', '_')}")
+        if own_labels:
+            chain.evidences[:] = [
+                replace(ev, origin="agent-own")
+                if ev.obtained_via == "working_memory" and ev.source_id in own_labels else ev
+                for ev in chain.evidences
+            ]
 
     def _rank_and_catalog_evidence(
         self,

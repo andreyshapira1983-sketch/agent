@@ -144,6 +144,28 @@ def test_cached_memory_recall_stays_non_independent(tmp_path: Path) -> None:
     assert not evidence_is_independent(orig)
 
 
+def test_working_memory_copy_of_own_memory_is_marked_own() -> None:
+    from types import SimpleNamespace
+
+    from core.loop_evidence_chain import AgentLoopEvidenceChain
+    from core.memory import WorkingMemory
+
+    wm = WorkingMemory()
+    wm.cache_store("memory_recall", {"term": "gateway"},
+                   {"records": [{"id": "m", "source": "agent-auto", "content": "port 8443"}]},
+                   label="recall gateway")
+    wm.cache_store("file_read", {"path": "docs/a.md"}, "port 8443\n", label="docs a")
+    chain = ProvenanceChain()
+    for art in wm.artifacts.values():
+        sid = f"memory:working_turn_{int(art['turn_index'])}_{art['label'].replace(':', '_')}"
+        chain.add(make_evidence(kind="memory", source_id=sid, obtained_via="working_memory",
+                                claim="c", excerpt=str(art["output"])[:500], confidence=0.85))
+    host = SimpleNamespace(memory=wm, _sensor_failed=lambda *a: None)
+    AgentLoopEvidenceChain._mark_own_cached_evidence(host, chain)
+    verdicts = {ev.source_id.rsplit("_", 1)[-1]: evidence_is_independent(ev) for ev in chain.evidences}
+    assert verdicts == {"recall gateway": False, "docs a": True}
+
+
 # 7 -- the union of two citations admits only independent evidence
 def test_union_does_not_borrow_independence() -> None:
     from core.verifier_core import _union_judgement

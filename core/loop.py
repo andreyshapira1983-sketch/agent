@@ -369,6 +369,7 @@ class AgentLoop(
         self._fold_subagent_evidence(chain)
         self._fold_sensor_evidence(chain, spend_block)
         self._fold_evidence_chain(chain, persistent_block=persistent_block)
+        self._mark_own_cached_evidence(chain)
 
         # Первое значение — теневой вердикт: едет в событие ниже, здесь ничего не решает.
         (
