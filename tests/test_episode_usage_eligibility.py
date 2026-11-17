@@ -176,4 +176,4 @@ def test_fast_path_still_replays_an_eligible_episode(tmp_path: Path) -> None:
     _seed(tmp_path, cached)
 
     answer = _drive_one_cycle(_interactive(tmp_path), QUESTION)
-    assert answer == cached.full_answer
+    assert answer.startswith(cached.full_answer) and "из памяти" in answer  # note line, 17.11

@@ -36,6 +36,16 @@ _LINE_CHARS = 240
 _OWN_RUNTIME_DIRS = frozenset({"logs", "data"})
 
 
+def _hit_text(line: str, matcher: re.Pattern[str]) -> str:
+    """A long line cut AROUND its first match: the head alone hid «green» at char 330 (17.11)."""
+    if len(line) <= _LINE_CHARS:
+        return line
+    m = matcher.search(line)
+    start = 0 if m is None else max(0, min(m.start() - _LINE_CHARS // 3, len(line) - _LINE_CHARS))
+    end = start + _LINE_CHARS
+    return ("…" if start else "") + line[start:end] + ("…" if end < len(line) else "")
+
+
 class FindInFilesTool(Tool):
     name = "find_in_files"
     description = (
@@ -133,7 +143,7 @@ class FindInFilesTool(Tool):
                     occurrences += found
                     found_here = True
                     if len(hits) < limit:
-                        hits.append(f"{rel}:{n}: {line.strip()[:_LINE_CHARS]}")
+                        hits.append(f"{rel}:{n}: {_hit_text(line.strip(), matcher)}")
             matched_files += found_here
         if not total:
             return f"no matches for {query!r} in {searched} text files {where}"

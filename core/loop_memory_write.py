@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from core.failure_cards import learn_after_turn
+from core.replay_freshness import input_digests, read_files
 from core.run_context import current_run
 from core.smart_memory import (
     admit_for_storage,
@@ -43,6 +45,7 @@ class AgentLoopMemoryWrite:
         write_policy: Any
         # Из `loop_sensor`.
         _sensor_failed: Any
+        _file_read_workspace_root: Any
         # Из `loop_verification`.
         last_confidence_vector: Any
         # None — хранилище не заведено.
@@ -128,6 +131,14 @@ class AgentLoopMemoryWrite:
             self.log.log("causal_observation", payload)
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой в журнал
             self._sensor_failed("causal_observation", exc)
+
+    def _with_input_digests(self, episode: Any, run: Any) -> Any:
+        """Hashes of the files behind the answer, for the replay gate (core/replay_freshness.py)."""
+        if not read_files(episode):
+            return episode
+        root = self._file_read_workspace_root() if hasattr(self, "_file_read_workspace_root") else None
+        started = float(getattr(run, "started_at", 0.0) or 0.0) if run else 0.0
+        return replace(episode, input_digests=input_digests(episode, root, started))
 
     def _record_experience_memory(
         self,
@@ -217,7 +228,7 @@ class AgentLoopMemoryWrite:
             return
         try:
             # Called here too so the write event reports the verdict that landed.
-            episode = admit_for_storage(episode)
+            episode = admit_for_storage(self._with_input_digests(episode, run))
             if self.episodic_store is not None and may_episode:
                 # save_once: a run reaching this site twice banks one episode.
                 written = self.episodic_store.save_once(episode)

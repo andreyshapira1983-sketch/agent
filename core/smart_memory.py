@@ -275,6 +275,9 @@ class EpisodeRecord:
     # operational outcome without erasing the self-assessment, so both survive
     # and the disagreement between them is readable as its own fact.
     completion_override: str | None = None
+    #: `path<TAB>sha256` of each file behind the answer, taken at banking; the
+    #: replay gate serves the answer only while every hash still matches (17.11).
+    input_digests: tuple[str, ...] = ()
     id: str = field(default_factory=lambda: new_id("ep"))
     created_at: str = field(default_factory=_now_iso)
     verification_subject: Literal["answer", "rejected_draft"] = "answer"
@@ -332,6 +335,7 @@ class EpisodeRecord:
             # (замер 2026-09-21: 200 приговоров, 0 оснований).
             **({} if self.relevance_score is None
                else {"relevance_score": self.relevance_score}),
+            **({} if not self.input_digests else {"input_digests": list(self.input_digests)}),
         }
 
     @classmethod
@@ -403,6 +407,7 @@ class EpisodeRecord:
             full_answer=str(data.get("full_answer") or ""),
             created_at=str(data.get("created_at") or _UNKNOWN_TIME),
             relevance_score=_stored_relevance(data.get("relevance_score")),
+            input_digests=_str_items(data.get("input_digests")),
         )
 
 

@@ -79,8 +79,8 @@ def test_the_promise_of_a_fresh_session_is_kept(monkeypatch, tmp_path) -> None:
     assert calls[0]["with_persistent"] is False
 
 
-def test_memory_prompts_but_does_not_replay_the_answer(monkeypatch, tmp_path) -> None:
-    """Прошлый ответ не подменяет новую работу: память подсказывает, не заменяет."""
+def test_a_repeated_question_may_be_answered_from_memory(monkeypatch, tmp_path) -> None:
+    """Operator, 2026-11-17: memory holds answers; an unchanged repeat is served from it."""
     calls = _build_calls(monkeypatch, tmp_path)
     assert main_module.main() == 0
-    assert calls[0].get("episodic_replay") is False, calls[0]
+    assert calls[0].get("episodic_replay") is True, calls[0]

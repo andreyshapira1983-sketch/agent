@@ -106,9 +106,8 @@ def run_one_shot(
     # Замороженный контракт (`tests/characterization/test_cli_one_shot_policy.py`)
     # проверяет ровно эти две и об опыте не говорит ничего.
     #
-    # episodic_replay=False нарочно: память должна ПОДСКАЗЫВАТЬ, а не
-    # подменять работу готовым ответом из прошлого. Разговор ведут ради
-    # нового измерения, а не ради пересказа старого.
+    # episodic_replay=True (operator, 2026-11-17): memory exists to hold answers;
+    # an unchanged repeat is served from it (gate: core/replay_freshness.py).
     # Разговор, а не поток команд (оператор, 2026-09-20 и снова 2026-09-21).
     # Мостик зовёт `--ask` новым процессом на каждую реплику, и агент видел
     # каждое сообщение с чистого листа: не помнил, что сам нашёл час назад
@@ -121,7 +120,7 @@ def run_one_shot(
         with_memory=bool(history),
         with_persistent=with_persistent,
         with_experience=True,
-        episodic_replay=False,
+        episodic_replay=True,
         approval_provider=approval_provider,
     )
     _load_history(agent, history)

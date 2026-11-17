@@ -939,7 +939,7 @@ def test_fast_path_used_when_cached_episode_had_no_tools(workspace: Path) -> Non
 
     events = _events(log_path)
     assert [e for e in events if e["event"] == "episodic_fast_path"]
-    assert answer == "Paris is the capital of France."
+    assert answer.startswith("Paris is the capital of France.") and "из памяти" in answer  # note line, 17.11
     assert not [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
 
 

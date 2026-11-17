@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from core.bilingual_terms import recall_language_diagnostics
 from core.evidence_budget import MEMORY_CLOSE_TAG, MEMORY_OPEN_TAG
+from core.replay_freshness import READ_TOOLS, stale_inputs
 from core.smart_memory import (
     PROCEDURE_STATUSES,
     effective_completion,
@@ -392,13 +393,31 @@ class AgentLoopMemoryRead:
         replayable runner-up from the fast path (проверка 17.11, мелкая).
         """
         replayable = getattr(self, "_fast_path_allows_replay", None)
-        if best is None or not callable(replayable) or replayable(best, 1.0):
+        if best is None or not callable(replayable):
             return best, score
+
+        def servable(e: Any) -> bool:  # replayable AND its read files unchanged (17.11)
+            return replayable(e, 1.0) and not AgentLoopMemoryRead._stale_replay_inputs(self, e)
+
+        if servable(best):
+            return best, score
+        # The latest same ask acted, or its files changed: redo the work, never fall
+        # back to an older answer that skips the action (hunter, 17.11).
+        stale = AgentLoopMemoryRead._stale_replay_inputs(self, best)
+        if set(getattr(best, "tools_used", ()) or ()) - READ_TOOLS or stale:
+            if stale:
+                self.log.log("episodic_fast_path_stale", {"episode_id": best.id, "changed_files": stale})
+            return None, 0.0
         alt, alt_score = self.episodic_store.find_most_similar(
             question, threshold=threshold,
-            admit=lambda e: is_usage_eligible(e) and replayable(e, 1.0),
+            admit=lambda e: is_usage_eligible(e) and servable(e),
         )
         return (alt, alt_score) if alt is not None else (best, score)
+
+    def _stale_replay_inputs(self, episode: Any) -> list[str]:
+        """Read files behind a stored answer that changed since; no workspace means none can be checked."""
+        root = self._file_read_workspace_root() if hasattr(self, "_file_read_workspace_root") else None
+        return stale_inputs(episode, root)
 
     def _code_checked(self, block: str, source: str) -> str:
         """Ссылки памяти на код — сверены с кодом сейчас (core/code_citations.py)."""

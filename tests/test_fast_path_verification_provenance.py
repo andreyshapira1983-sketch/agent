@@ -144,7 +144,7 @@ def test_mir041_4_replay_must_not_be_recorded_verified(workspace: Path):
     loop, _events, store = _make_loop(workspace)
     source = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["file:atlas.txt"],
+        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
         verified_chunks=3, unverified_chunks=0,  # a genuinely-evidenced answer
         # Eligibility (2c) and completion (MIR-057) both fail-close on
         # unclassified episodes, so the seed must be explicitly admitted for
@@ -196,7 +196,7 @@ def test_mir041_6_repeated_asks_must_not_self_reinforce_verified_chain(workspace
     loop, events, store = _make_loop(workspace)
     source = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["file:atlas.txt"],
+        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
         verified_chunks=3, unverified_chunks=0,
         usage_eligible=True,
         declared_completion="achieved",
@@ -230,7 +230,7 @@ def test_mir_protective_7_genuinely_verified_episode_may_fast_path(workspace: Pa
     loop, events, store = _make_loop(workspace)
     verified = episode_from_agent_cycle(
         goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["file:atlas.txt"],
+        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
         verified_chunks=3, unverified_chunks=0,
         # Seeding updated exactly as this docstring instructs. The eligibility
         # field (2c) and the completion axis (MIR-057) both fail-close on

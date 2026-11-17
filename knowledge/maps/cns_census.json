@@ -200,7 +200,10 @@
     "loop_memory_read.py::AgentLoopMemoryRead._procedures_unless_workflow": [],
     "loop_memory_read.py::AgentLoopMemoryRead._workflows_for": [],
     "loop_run_tail.py::AgentLoopRunTail._honor_requested_format": [],
-    "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake": []
+    "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake": [],
+    "loop_gates.py::AgentLoopGates._noted_replay": [],
+    "loop_memory_read.py::AgentLoopMemoryRead._stale_replay_inputs": [],
+    "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests": []
   },
   "edges": [
     [
@@ -794,6 +797,22 @@
     [
       "loop_hygiene.py::AgentLoopHygiene.summarise_persistent",
       "loop_hygiene.py::AgentLoopHygiene._hygiene_apply_brake"
+    ],
+    [
+      "loop.py::AgentLoop._run_inner",
+      "loop_gates.py::AgentLoopGates._noted_replay"
+    ],
+    [
+      "loop_memory_read.py::AgentLoopMemoryRead._stale_replay_inputs",
+      "loop.py::AgentLoop._file_read_workspace_root"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._record_experience_memory",
+      "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests"
+    ],
+    [
+      "loop_memory_write.py::AgentLoopMemoryWrite._with_input_digests",
+      "loop.py::AgentLoop._file_read_workspace_root"
     ]
   ]
 }

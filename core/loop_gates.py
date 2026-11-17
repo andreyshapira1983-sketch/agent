@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from core.replay_freshness import replay_note, with_replay_note
+
 if TYPE_CHECKING:  # pragma: no cover — только для подписи
     from core.clarification_policy import ClarificationResult
     from core.operational_domain import DomainResult
@@ -196,10 +198,9 @@ class AgentLoopGates:
         #   - file_hint is set (the answer is tied to a specific file)
         #   - question starts with ':' (operator command)
         #   - full_answer is empty (episode from before this feature)
-        #   - the cached episode used tools — its answer depends on the state of
-        #     the environment (files, installed packages, command output) which
-        #     may have changed since; only purely reasoned answers (no tools)
-        #     are safe to replay verbatim.
+        #   - the cached episode acted, or read something that changed since
+        #     (core/replay_freshness.py, checked when the candidate is chosen in
+        #     loop_memory_read; operator 17.11)
         #   - local_critique_active (must critique current referent, not replay)
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
@@ -254,6 +255,11 @@ class AgentLoopGates:
             self._stream_on_token = None
             return _fp_ep.full_answer
         return None
+
+    def _noted_replay(self, answer: str) -> str:
+        """The served stored answer, with one line saying it came from memory (operator 17.11)."""
+        episode = self._last_best_similar_episode
+        return with_replay_note(answer, replay_note(episode)) if episode is not None else answer
 
     def _multi_file_refusal(
         self,

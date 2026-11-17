@@ -18,6 +18,7 @@ from core.file_request_intent import (
 )
 from core.ids import new_id
 from core.replan import ReplanTrigger
+from core.replay_freshness import tools_allow_replay
 from core.request_checklist import attach_checklist
 from core.run_context import identity_provenance, run_scope
 
@@ -184,7 +185,8 @@ class AgentLoop(
             and effective_completion(episode) == "achieved"
             and AgentLoop._quality_allows_replay(episode)
             and getattr(episode, "full_answer", "")
-            and not getattr(episode, "tools_used", ())
+            # Reads only, and checkable ones (operator 17.11): core/replay_freshness.py.
+            and tools_allow_replay(episode)
         )
 
     @staticmethod
@@ -274,7 +276,7 @@ class AgentLoop(
             local_critique_active=local_critique_active,
         )
         if _decided is not None:
-            return _decided
+            return self._noted_replay(_decided)
 
         # Planner sees long-term memory so it can skip redundant tool calls. Role
         # stays out of `history`: `<conversation_history>` is only real prior dialogue.

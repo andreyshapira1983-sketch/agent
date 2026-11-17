@@ -280,7 +280,8 @@ def test_autonomous_profile_reads_but_never_replays(tmp_path: Path) -> None:
     # Without this the test below could pass for the wrong reason (e.g. the
     # episode not being replay-eligible at all).
     interactive_answer = _drive_one_cycle(_interactive(tmp_path), question)
-    assert interactive_answer == cached.full_answer, (
+    # A replay now ends with one «from memory» line (operator 17.11).
+    assert interactive_answer.startswith(cached.full_answer) and "из памяти" in interactive_answer, (
         "precondition failed: the episode is not actually fast-path eligible"
     )
 
@@ -291,7 +292,7 @@ def test_autonomous_profile_reads_but_never_replays(tmp_path: Path) -> None:
         "the unattended agent should still be able to READ this episode"
     )
     answer = _drive_one_cycle(autonomous, question)
-    assert answer != cached.full_answer, (
+    assert not answer.startswith(cached.full_answer) and "из памяти" not in answer, (
         "the unattended agent replayed a stored answer: episodic_replay=False "
         "must keep the fast path from firing"
     )
