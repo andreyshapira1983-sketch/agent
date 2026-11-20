@@ -446,6 +446,121 @@ def test_a_detour_in_front_of_a_link_still_removes_only_the_link(tmp_path) -> No
         assert not os.path.lexists(ws / "L")
 
 
+def _delete(*paths: str) -> CompensationPlan:
+    return _plan(*(CompensationAction(kind="delete_path_if_created", path=p) for p in paths))
+
+
+def test_a_two_step_plan_cannot_cut_a_protected_chain_and_then_delete_its_home(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "store").mkdir(parents=True)
+    (ws / "store" / "live.txt").write_text("keep", encoding="utf-8")
+    (ws / "links").mkdir()
+    _symlink(ws / "links" / "mid", ws / "store")
+    _symlink(ws / "data", ws / "links" / "mid")
+
+    report = apply_compensation_plan(_delete("store", "links"), ws)  # LIFO: 'links' first, then 'store'
+
+    assert [o.status for o in report.outcomes] == ["error", "error"], report.summary()
+    assert (ws / "data" / "live.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_a_link_inside_a_protected_link_target_is_not_cut(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "releases" / "v2" / "data").mkdir(parents=True)
+    (ws / "releases" / "v2" / "data" / "live.txt").write_text("keep", encoding="utf-8")
+    _symlink(ws / "current", ws / "releases" / "v2")
+    _symlink(ws / "data", ws / "current" / "data")
+
+    report = apply_compensation_plan(_delete("releases", "current"), ws)
+
+    assert [o.status for o in report.outcomes] == ["error", "error"], report.summary()
+    assert (ws / "data" / "live.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_a_two_step_plan_cannot_reach_git_data_behind_a_chain(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "gitstore").mkdir(parents=True)
+    (ws / "gitstore" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (ws / "links").mkdir()
+    _symlink(ws / "links" / "gl", ws / "gitstore")
+    _symlink(ws / ".git", ws / "links" / "gl")
+
+    report = apply_compensation_plan(_delete("gitstore", "links"), ws)
+
+    assert [o.status for o in report.outcomes] == ["error", "error"], report.summary()
+    assert (ws / "gitstore" / "HEAD").exists()
+
+
+def test_git_data_behind_a_linked_gitdir_file_is_protected(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "repo").mkdir(parents=True)
+    (ws / "repo" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (ws / "meta").mkdir()
+    (ws / "meta" / "gitfile").write_text("gitdir: ../repo\n", encoding="utf-8")
+    _symlink(ws / ".git", ws / "meta" / "gitfile")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="repo"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "repo" / "HEAD").exists()
+
+
+def test_git_data_behind_a_link_inside_git_is_protected(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / ".git").mkdir(parents=True)
+    (ws / "objstore").mkdir()
+    (ws / "objstore" / "pack.idx").write_text("x", encoding="utf-8")
+    _symlink(ws / ".git" / "objects", ws / "objstore")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="objstore"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "objstore" / "pack.idx").exists()
+
+
+def test_a_control_file_in_another_case_is_never_removed(tmp_path) -> None:
+    ws = _workspace(tmp_path)
+    (ws / ".env").write_text("SECRET=1\n", encoding="utf-8")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path=".ENV"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / ".env").read_text(encoding="utf-8") == "SECRET=1\n"
+
+
+def test_file_write_refuses_to_overwrite_a_hard_linked_file(tmp_path) -> None:
+    from tools.file_write import FileWriteTool
+
+    ws = _workspace(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("keep", encoding="utf-8")
+    try:
+        os.link(outside / "secret.txt", ws / "doc.txt")
+    except OSError as exc:
+        pytest.skip(f"no hard links here: {exc}")
+
+    with pytest.raises(PermissionError):
+        FileWriteTool(workspace_root=ws).run(path="doc.txt", content="planted")
+
+    assert (outside / "secret.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_write_tools_refuse_the_git_data_a_gitdir_file_points_to(tmp_path) -> None:
+    from tools.file_write import FileWriteTool
+    from tools.shell_exec import ShellExecTool
+
+    ws = _workspace(tmp_path)
+    (ws / "store" / "repo" / "hooks").mkdir(parents=True)
+    (ws / ".git").write_text("gitdir: store/repo\n", encoding="utf-8")
+
+    with pytest.raises(PermissionError):
+        FileWriteTool(workspace_root=ws).run(path="store/repo/hooks/pre-commit", content="echo planted")
+    with pytest.raises(PermissionError):
+        ShellExecTool(workspace_root=ws).run(["touch", "store/repo/hooks/post-commit"])
+    assert list((ws / "store" / "repo" / "hooks").iterdir()) == []
+
+
 def test_two_overwrites_in_one_second_keep_the_original_backup(tmp_path, monkeypatch) -> None:
     import time
 

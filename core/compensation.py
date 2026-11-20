@@ -177,7 +177,7 @@ def apply_compensation_plan(
     return report
 
 
-#: Roots that rollback NEVER removes; work under them stays undoable (except under .git, see _touches_git).
+#: Roots that rollback NEVER removes; work under them stays undoable (except git data, see _guarded).
 _PROTECTED_ROOTS: frozenset[str] = frozenset({
     ".git", "data", "logs", "config", "core", "tools", "cli", "app", "api",
     "tests", "scripts", "docs",
@@ -243,38 +243,82 @@ def _overlaps(target: Path, home: Path, workspace_root: Path, *, inside_too: boo
     return False
 
 
-def _link_chain(path: Path, limit: int = 40) -> list[Path]:
-    """Every link entry met on the way from `path` to its final target, `path` included when it is a link."""
-    hops: list[Path] = []
-    current = path
+def _walk_links(start: Path, limit: int = 100) -> tuple[list[Path], Path]:
+    """Resolve `start` component by component, as the OS does: every link entry passed on the way, and where it ends."""
+    parts = list(start.parts)
+    current = Path(parts.pop(0))
+    links: list[Path] = []
     for _ in range(limit):
-        if not _is_link(current):
+        if not parts:
             break
-        hops.append(current)
-        nxt = os.readlink(current).removeprefix("\\\\?\\")
-        nxt_path = Path(nxt) if os.path.isabs(nxt) else current.parent / nxt
-        current = Path(os.path.realpath(nxt_path.parent)) / nxt_path.name
-    return hops
+        part = parts.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            current = current.parent
+            continue
+        nxt = current / part
+        if _is_link(nxt):
+            links.append(nxt)
+            raw = os.readlink(nxt).removeprefix("\\\\?\\")
+            raw_parts = list(Path(raw).parts)
+            if os.path.isabs(raw):
+                current = Path(raw_parts.pop(0))
+            parts = raw_parts + parts
+            continue
+        current = nxt
+    return links, current
 
 
-def _git_home(workspace_root: Path) -> Path | None:
-    """Where the workspace's git data really lives when .git is a link or a 'gitdir:' file, else None."""
-    git = workspace_root / ".git"
-    if _is_link(git):
-        return git.resolve()
+def _gitdir_target(path: Path) -> Path | None:
+    """The path a 'gitdir: <path>' file points to, else None."""
     try:
-        if git.is_file():
-            first = git.read_text(encoding="utf-8", errors="replace").strip().splitlines()[:1]
-            if first and first[0].startswith("gitdir:"):
-                pointed = first[0][len("gitdir:"):].strip()
-                return (Path(pointed) if os.path.isabs(pointed) else workspace_root / pointed).resolve()
+        if not path.is_file():
+            return None
+        first = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[:1]
     except _ABSENT:
         return None
+    if not first or not first[0].startswith("gitdir:"):
+        return None
+    pointed = first[0][len("gitdir:"):].strip()
+    return Path(pointed) if os.path.isabs(pointed) else path.parent / pointed
+
+
+def _guarded(workspace_root: Path) -> list[tuple[str, Path, bool]]:
+    """(root name, entry, inside_too) for every link a protected root or the git data depends on, and where each ends."""
+    out: list[tuple[str, Path, bool]] = []
+    for name in sorted(_PROTECTED_ROOTS):
+        start = workspace_root / name
+        if not os.path.lexists(start):
+            continue
+        is_git = name == ".git"
+        pending = [start]
+        for _ in range(8):  # .git -> gitdir file -> git dir, plus links inside the git dir
+            if not pending:
+                break
+            links, home = _walk_links(pending.pop(0))
+            out += [(name, link, False) for link in links]
+            out.append((name, home, is_git))
+            if not is_git:
+                continue
+            pointed = _gitdir_target(home)
+            if pointed is not None:
+                pending.append(pointed)
+            elif home.is_dir():
+                pending += [Path(e.path) for e in os.scandir(home) if _is_link(Path(e.path))]
+    return out
+
+
+def _guard_hit(workspace_root: Path, target: Path) -> str | None:
+    """The protected root whose data or link chain removing or overwriting `target` would destroy, else None."""
+    for name, entry, inside in _guarded(workspace_root):
+        if _overlaps(target, entry, workspace_root, inside_too=inside):
+            return name
     return None
 
 
 def _touches_git(workspace_root: Path, rel: str | None, located: Path | None) -> bool:
-    """True when the plan path or its real location is .git, inside it, or holds the real git data; no tool writes there."""
+    """True when the plan path or its real location is named .git or lies inside the workspace's .git."""
     if rel and any(_norm_part(p) == ".git" for p in Path(rel).parts):
         return True
     if located is None:
@@ -284,10 +328,17 @@ def _touches_git(workspace_root: Path, rel: str | None, located: Path | None) ->
             return True
     except ValueError:
         return False
-    if _overlaps(located, workspace_root / ".git", workspace_root, inside_too=True):
+    return _overlaps(located, workspace_root / ".git", workspace_root, inside_too=True)
+
+
+def touches_git(workspace_root: Path, path: Path) -> bool:
+    """True when writing `path` would write into the repository's data (by name, identity, a linked .git or a gitdir file); for write tools."""
+    ws = Path(workspace_root).resolve()
+    resolved = Path(path).resolve()
+    if _touches_git(ws, None, resolved):
         return True
-    home = _git_home(workspace_root)
-    return home is not None and _overlaps(located, home, workspace_root, inside_too=True)
+    return any(name == ".git" and _overlaps(resolved, entry, ws, inside_too=inside)
+               for name, entry, inside in _guarded(ws))
 
 
 def _protected_name(workspace_root: Path, entry: Path) -> str | None:
@@ -301,7 +352,7 @@ def _protected_name(workspace_root: Path, entry: Path) -> str | None:
 
 
 def _protected_root(workspace_root: Path, target: Path) -> str | None:
-    """The protected root that removing the resolved `target` would destroy: the root itself, or its real home behind a link."""
+    """The protected root that removing the resolved `target` would destroy: the root itself, or what it depends on behind links."""
     ws = Path(workspace_root).resolve()
     try:
         target = target.resolve()
@@ -312,29 +363,7 @@ def _protected_root(workspace_root: Path, target: Path) -> str | None:
         hit = _protected_name(ws, target)
         if hit is not None:
             return hit
-    for name in sorted(_PROTECTED_ROOTS):
-        root = ws / name
-        if not os.path.lexists(root):
-            continue
-        try:
-            real = root.resolve()
-        except (OSError, RuntimeError):  # a looping or unreadable root cannot be verified: refuse rather than guess
-            return name
-        if _overlaps(target, real, ws, inside_too=False):
-            return name
-    return None
-
-
-def _guarded_link(workspace_root: Path, own: Path) -> str | None:
-    """Name of the protected root whose link chain passes through `own` (cutting it would leave the root dangling), else None."""
-    for name in sorted(_PROTECTED_ROOTS):
-        try:
-            chain = _link_chain(workspace_root / name)
-        except OSError:
-            continue
-        if any(hop == own or _same_entry(hop, own) for hop in chain):
-            return name
-    return None
+    return _guard_hit(ws, target)
 
 
 def _control_file(workspace_root: Path, path: Path) -> str | None:
@@ -361,9 +390,9 @@ def _remove_link(action: CompensationAction, workspace_root: Path, own: Path) ->
         hit = _protected_name(workspace_root, own)
         if hit is not None:
             return _error(action, f"refusing to remove protected root {hit!r} (a link)")
-    hit = _guarded_link(workspace_root, own)
+    hit = _guard_hit(workspace_root, own)
     if hit is not None:
-        return _error(action, f"refusing to cut the link chain of protected root {hit!r}")
+        return _error(action, f"refusing to cut a link that protected root {hit!r} depends on")
     if _control_file(workspace_root, own) is not None:
         return _error(action, "refusing to remove an operator-only control file")
     try:

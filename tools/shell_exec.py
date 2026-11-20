@@ -49,7 +49,7 @@ from core.bounded_subprocess import (
     kill_process_tree,
     run_with_tree_kill,
 )
-from core.compensation import CompensationAction, CompensationPlan
+from core.compensation import CompensationAction, CompensationPlan, touches_git
 from core.control_files import control_file_hit, refuse_message
 from core.redaction import redact_text
 from tools.base import Risk, Tool, require_ascii_identifier
@@ -972,7 +972,7 @@ class ShellExecTool(Tool):
     def _validate_path_in_workspace(self, path_str: str) -> Path:
         """A path to WRITE: confined to the workspace and not a control file."""
         candidate = self._confine(path_str)
-        if ".git" in (p.lower() for p in candidate.relative_to(self.workspace_root).parts):
+        if touches_git(self.workspace_root, candidate):
             raise PermissionError(
                 f"shell_exec refuses to write under .git: '{path_str}' — git runs "
                 "the programs its own folder names"

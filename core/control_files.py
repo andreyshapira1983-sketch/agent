@@ -1,6 +1,7 @@
 """Agent brakes: files only the operator changes; write tools refuse them before approval and no approval lifts it."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 #: Paths relative to the workspace root, plus their sibling .tmp files (atomic writes go through `<path>.tmp` and replace).
@@ -16,14 +17,29 @@ CONTROL_RELPATHS: tuple[str, ...] = (
 
 
 def control_file_hit(workspace_root: Path, target: Path) -> str | None:
-    """Which brake a write to `target` hits, or None; compared by resolved path so `./x//y` and symlinks are caught."""
+    """Which brake a write to `target` hits, or None; by resolved path, folded relative path and identity (case-insensitive mounts, 8.3 names)."""
     root = Path(workspace_root).resolve()
     resolved = Path(target).resolve()
+    try:
+        folded = tuple(p.casefold() for p in resolved.relative_to(root).parts)
+    except ValueError:
+        folded = ()
     for rel in CONTROL_RELPATHS:
         guarded = (root / rel).resolve()
-        if resolved == guarded or resolved == guarded.with_name(guarded.name + ".tmp"):
+        for candidate in (guarded, guarded.with_name(guarded.name + ".tmp")):
+            if resolved == candidate or _same_file(resolved, candidate):
+                return rel
+        rel_folded = tuple(p.casefold() for p in Path(rel).parts)
+        if folded in (rel_folded, (*rel_folded[:-1], rel_folded[-1] + ".tmp")):
             return rel
     return None
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
 
 
 def refuse_message(rel: str) -> str:

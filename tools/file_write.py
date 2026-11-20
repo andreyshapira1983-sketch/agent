@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from core.compensation import CompensationAction, CompensationPlan
+from core.compensation import CompensationAction, CompensationPlan, touches_git
 from core.control_files import control_file_hit, refuse_message
 from core.secret_scanner import contains_secret
 from tools.base import Risk, Tool, require_ascii_identifier
@@ -83,7 +83,7 @@ class FileWriteTool(Tool):
                 f"Path escapes workspace: {candidate}"
             ) from exc
         # git запускает программы, названные в его папке (хуки, фильтры, config).
-        if ".git" in (p.lower() for p in candidate.relative_to(self.workspace_root).parts):
+        if touches_git(self.workspace_root, candidate):
             raise PermissionError(
                 f"refusing to write under .git: {raw_path!r} — the repository's "
                 "own folder is not the agent's to edit"
@@ -189,6 +189,8 @@ class FileWriteTool(Tool):
         mode: Literal["create", "overwrite"]
         backup_rel: str | None = None
         target_existed_before = target.exists()
+        if target_existed_before and target.stat().st_nlink > 1:
+            raise PermissionError(f"refusing to overwrite {path!r}: it is hard-linked, the same bytes live elsewhere too")
         if target_existed_before:
             # Backup first so the previous content is recoverable even if
             # the write that follows is interrupted (power loss, etc.).
