@@ -1,8 +1,4 @@
-"""Явное полномочие песочницы: самопочинка изолированной копии без человека.
-
-Включается только двумя жестами вместе: ``AGENT_BURN_IN_SANDBOX=on`` и метка
-``config/burn_in_sandbox.json`` с абсолютным путём этой копии; при любом сомнении — None.
-"""
+"""Explicit sandbox authority: unattended self-repair of an isolated copy, enabled only by an env flag plus a marker file."""
 from __future__ import annotations
 
 import json
@@ -14,17 +10,16 @@ from typing import Any
 
 from core.protected_paths import path_key
 
-#: Жест запускающего процесс.
+#: Env flag set by the process launcher.
 SANDBOX_ENV_FLAG = "AGENT_BURN_IN_SANDBOX"
 
-#: Жест готовившего копию. Путь repo-relative, как всё в полосе.
+#: Marker file prepared with the copy (repo-relative path).
 SANDBOX_MARKER = "config/burn_in_sandbox.json"
 
-#: Значения, считающиеся «включено»; всё прочее — выключено (fail-closed).
+#: Values meaning "on"; anything else is off (fail-closed).
 _ON_VALUES: frozenset[str] = frozenset({"on", "1", "true", "yes"})
 
-#: Кто решает о полномочии песочницы: часть общего списка `core.protected_paths`
-#: (весь список полоса отклоняет как запретный класс), сличение — его `path_key`.
+#: Files that decide sandbox authority; part of core.protected_paths, compared by its path_key.
 _FENCE: frozenset[str] = frozenset({
     SANDBOX_MARKER,
     "core/burn_in_sandbox.py",
@@ -45,14 +40,13 @@ _FENCE_KEYS: frozenset[str | None] = frozenset(map(path_key, _FENCE))
 
 _DEFAULT_MAX_APPLIES_PER_DAY = 20
 
-#: Стоки памяти, которые открывает полномочие, и только они: без обобщения опыта
-#: долгий прогон повторяет те же ошибки. Властные стоки не открываются никогда.
+#: The only memory sinks the authority opens; authority-bearing sinks are never opened.
 SANDBOX_DURABLE_SINKS: frozenset[str] = frozenset({"procedure", "knowledge"})
 
 
 @dataclass(frozen=True)
 class SandboxAuthority:
-    """Включённое полномочие; префикс `id` показывает в журнале расхода, чем разрешено изменение."""
+    """Enabled authority; the id prefix marks in the spend journal what allowed a change."""
 
     id: str
     workspace: str
@@ -61,7 +55,7 @@ class SandboxAuthority:
     reason: str
 
     def is_live(self, now: datetime | None = None) -> bool:
-        """Не истёк ли срок прямо сейчас; нечитаемая отметка — «истёк»."""
+        """True while unexpired; an unreadable timestamp counts as expired."""
         raw = str(self.expires_at or "").strip()
         if not raw:
             return False
@@ -89,11 +83,7 @@ def _flag_is_on(env: Any) -> bool:
 
 
 def _same_place(declared: str, workspace: Path) -> bool:
-    """Называет ли метка именно эту копию абсолютным путём.
-
-    Относительный путь (`"."`) переносим: метка включила бы полномочие в любом
-    дереве, куда её скопировали.
-    """
+    """True when the marker names this copy by absolute path; a relative path would be portable to any tree."""
     try:
         if not Path(declared).is_absolute():
             return False
@@ -103,11 +93,7 @@ def _same_place(declared: str, workspace: Path) -> bool:
 
 
 def _others_can_write(path: Path) -> bool:
-    """Открыта ли метка на запись всем (как StrictModes в OpenSSH).
-
-    Запись группой не отклоняется: при маске 0002 это отклонило бы каждую
-    свежую метку. На Windows проверки нет.
-    """
+    """True when the marker is world-writable (like OpenSSH StrictModes); group-write is allowed, Windows is not checked."""
     if os.name != "posix":
         return False
     try:
@@ -119,7 +105,7 @@ def _others_can_write(path: Path) -> bool:
 def load_sandbox_authority(
     workspace: Any, *, env: Any = None, now: datetime | None = None
 ) -> SandboxAuthority | None:
-    """Полномочие песочницы, или None при любом сомнении (fail-closed, ничего не чинит)."""
+    """Return the sandbox authority, or None on any doubt (fail-closed, repairs nothing)."""
     if not _flag_is_on(env):
         return None
     root = Path(workspace or ".")
@@ -148,7 +134,7 @@ def load_sandbox_authority(
         return None
     reason = str(raw.get("reason") or "").strip()
     if not reason:
-        # Полномочие без названного повода нельзя ни проверить, ни отозвать.
+        # An authority with no stated reason can be neither verified nor revoked.
         return None
     try:
         cap = int(raw.get("max_applies_per_day", _DEFAULT_MAX_APPLIES_PER_DAY))
@@ -166,10 +152,7 @@ def load_sandbox_authority(
 
 
 def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, str]:
-    """Можно ли применить предложение в песочнице, и если нет — почему.
-
-    Шире производственного вердикта только классом файла: код и тесты внутри копии разрешены.
-    """
+    """Return (ok, reason) for applying a proposal in the sandbox; wider than production only in file class."""
     from core.self_apply_lane import _is_allowed, _is_denied, _normalize_rel
 
     files = tuple(getattr(proposal, "files", ()) or ())
@@ -184,8 +167,7 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
         target = (root / rel).resolve()
         if root != target and root not in target.parents:
             return False, f"{rel!r} resolves outside the sandbox workspace"
-        # Забор и класс проверяются и по резолвнутому пути: ссылка с невинным
-        # именем может вести за забор, а `_write_file` пишет по резолву.
+        # Fence and class are also checked on the resolved path: a symlink can point past the fence.
         names = [rel]
         try:
             resolved_rel = target.relative_to(root).as_posix()
@@ -198,8 +180,7 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
                 return False, f"{name!r} is the sandbox fence; it is not moved from inside"
             if _is_denied(name):
                 return False, f"{name!r} is a denied class (secrets, CI, infrastructure)"
-        # Разрешённое полосой проверяется и здесь, иначе заявка занимает
-        # единицу потолка и затем отвергается полосой.
+        # Also check the lane allowlist, else a request takes a ceiling unit and the lane rejects it.
         for name in names:
             if not _is_allowed(name):
                 return False, (
@@ -209,18 +190,14 @@ def sandbox_execution_verdict(proposal: Any, *, workspace: Any) -> tuple[bool, s
 
 
 def sandbox_applies_today(workspace: Any, authority: SandboxAuthority) -> int:
-    """Сколько применений песочница уже израсходовала сегодня (UTC)."""
+    """Applies the sandbox has used today (UTC)."""
     from core.autonomous_runtime import standing_runs_today
 
     return standing_runs_today(workspace, authority.id)
 
 
 def reserve_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> bool:
-    """Занять одну единицу дневного потолка песочницы, или отказать.
-
-    Журнал и атомарный примитив общие с постоянным грантом; срок сверяется и
-    здесь, потому что слив заявок длится минуты.
-    """
+    """Take one unit of the daily ceiling or refuse; shares the journal and atomic primitive with the standing grant."""
     from core.autonomous_runtime import reserve_standing_grant_use
 
     if not authority.is_live():
@@ -231,11 +208,7 @@ def reserve_sandbox_apply(workspace: Any, authority: SandboxAuthority) -> bool:
 
 
 class TermedSinks(frozenset):
-    """Список стоков, в котором расширение носит срок полномочия с собой.
-
-    `durable_writes` привязан к агенту на всю жизнь, поэтому срок живёт в самом
-    списке; базовые стоки сроку не подчинены.
-    """
+    """Sink set whose granted extension carries its own expiry; base sinks are not time-limited."""
 
     __slots__ = ("_deadline", "_granted")
 
@@ -257,14 +230,14 @@ class TermedSinks(frozenset):
 
 
 def memory_profile_for(base: dict, workspace: Any, *, env: Any = None) -> dict:
-    """Безнадзорный профиль памяти: копия базового или с `SANDBOX_DURABLE_SINKS` на срок."""
+    """Unattended memory profile: a copy of base, plus SANDBOX_DURABLE_SINKS for the authority's term."""
     profile = dict(base)
     authority = load_sandbox_authority(workspace, env=env)
     if authority is None:
         return profile
     try:
         deadline = datetime.fromisoformat(authority.expires_at)
-    except ValueError:  # pragma: no cover — полномочие уже разобрало эту строку
+    except ValueError:  # pragma: no cover — the authority already parsed this string
         return profile
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)

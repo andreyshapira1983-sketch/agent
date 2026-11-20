@@ -1,20 +1,6 @@
-"""Учёт прибыли по каждому заказу Agent Market (решение оператора 2026-09-25).
-
-Прибыль = оплата − комиссия площадки − стоимость модели − прочие расходы.
-Отдельными колонками — вмешался ли Claude и сколько минут ушло у Claude и у
-оператора: работа за $1, которую полчаса исправляли люди, ещё не масштабируемая
-экономика. Переход к следующему этапу автономии — по этим цифрам, а не по
-ощущению (память оператора market-earning-pipeline).
-
-Откуда числа:
-- оплата — `escrowAmount`/`escrowToken` назначения (openapi.json, схема
-  JobAssignment); деньги наши после статуса `accepted` (reference/agent-api.md,
-  «Statuses»), выплата — владельцу, ключ агента кошелька не видит;
-- комиссия — 5 %, как показано на странице агента 25.09;
-- модель — журнал вызовов `data/model_usage.jsonl` по времени работы
-  (core/usd_spend.py);
-- вмешательство и минуты людей — отмечаются руками (`mark`), машина их не знает.
-"""
+"""Per-order profit ledger for Agent Market: payment minus platform fee, model cost and other costs, plus manual intervention and minutes columns."""
+# Payment: escrowAmount/escrowToken of the assignment; fee 5%; model cost from data/model_usage.jsonl by work time (core/usd_spend.py);
+# intervention and human minutes are set by hand (mark).
 from __future__ import annotations
 
 import json
@@ -48,18 +34,18 @@ class OrderLine:
     claude_minutes: float | None = None
     operator_minutes: float | None = None
     accepted_at: str | None = None
-    #: Поля строки, которых этот код не знает; при записи возвращаются как были.
+    #: Row fields this code does not know; written back unchanged.
     extra: dict[str, Any] = field(default_factory=dict)
 
     def net(self) -> float | None:
-        """Чистая прибыль; до `accepted` оплаты нет — считать нечего."""
+        """Net profit; before `accepted` there is no payment, so nothing to count."""
         if self.status != "accepted" or self.escrow_amount is None:
             return None
         return round(self.escrow_amount * (1 - FEE_RATE) - self.model_usd - self.other_usd, 4)
 
 
 class LedgerUnreadable(ValueError):
-    """Файл учёта есть, но не читается как учёт."""
+    """The ledger file exists but does not read as a ledger."""
 
 
 _KNOWN = frozenset(f.name for f in fields(OrderLine)) - {"extra"}
@@ -88,7 +74,7 @@ class MarketLedger:
         self.path = Path(path)
 
     def lines(self) -> dict[str, OrderLine]:
-        """Заказы по id назначения; нечитаемый файл — `LedgerUnreadable`, а не пустой учёт."""
+        """Orders by assignment id; an unreadable file raises LedgerUnreadable, not an empty ledger."""
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -134,7 +120,7 @@ class MarketLedger:
         return line
 
     def add_run(self, row: dict[str, Any], seconds: float, model_usd: float | None) -> None:
-        """Один запуск агента на заказ (первая работа, доработка, ответ в переписке)."""
+        """One agent run on an order (first work, rework, reply in correspondence)."""
         lines = self._lines_or_empty()
         line = self._line(lines, row)
         line.runs += 1
@@ -143,7 +129,7 @@ class MarketLedger:
         self._save(lines)
 
     def observe(self, row: dict[str, Any]) -> None:
-        """Статус и оплата из опроса — только для заказов, которые мы работали."""
+        """Status and payment from a poll, only for orders we worked on."""
         aid = str((row.get("assignment") or {}).get("assignmentId"))
         lines = self._lines_or_empty()
         if aid in lines:
@@ -151,7 +137,7 @@ class MarketLedger:
             self._save(lines)
 
     def mark(self, assignment_id: str, **fields: Any) -> OrderLine:
-        """Ручные колонки: claude_intervention, claude_minutes, operator_minutes, other_usd."""
+        """Manual columns: claude_intervention, claude_minutes, operator_minutes, other_usd."""
         allowed = {"claude_intervention", "claude_minutes", "operator_minutes", "other_usd"}
         unknown = set(fields) - allowed
         if unknown:
@@ -166,7 +152,7 @@ class MarketLedger:
 
 
 def summary(lines: dict[str, OrderLine]) -> dict[str, Any]:
-    """Цифры для перехода между этапами: сколько, чем кончилось, сколько людей."""
+    """Figures for stage transitions: how many orders, how they ended, how many people were involved."""
     rows = list(lines.values())
     accepted = [r for r in rows if r.status == "accepted"]
     marked = [r for r in rows if r.claude_intervention is not None]

@@ -1,4 +1,4 @@
-"""Which stored answers may be served again without a model call (operator, 2026-11-17)."""
+"""Decide which stored answers may be served again without a model call."""
 from __future__ import annotations
 
 import hashlib
@@ -80,7 +80,7 @@ def input_digests(episode: Any, root: Path | None, run_started: float) -> tuple[
     for rel in read_files(episode):
         path = _inside(root, rel)
         try:
-            # Changed after the run began: the answer may describe the old text (hunter, 17.11).
+            # changed after the run began: the answer may describe the old text
             if path is None or not run_started or path.stat().st_mtime > run_started:
                 continue
         except OSError:

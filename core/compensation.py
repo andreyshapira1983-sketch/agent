@@ -1,24 +1,4 @@
-"""Compensation System (§5 Undo) — first introduced for MVP-11 shell_exec.
-
-1. BEFORE a tool mutates state, it must build a CompensationPlan describing
-what to do to undo the change. 2. AFTER the mutation succeeds, the tool
-surfaces the plan as part of its structured output. 3. The AgentLoop
-captures the plan (audit log + in-memory registry). 4. The user (or a future
-automatic re-planner) can call `rollback` to apply the plan in reverse.
-
-Compensation is **not** a transaction system. It is a best-effort, audit-
-trailed undo. It exists because some tools (shell_exec, file_write) are
-irreversible by nature, and the agent must be able to undo what it did when
-a subsequent step fails or a human asks "actually, undo that".
-
-Supported action kinds (deliberately small):
-
-- `delete_path_if_created` — remove a file/directory that was NOT present
-before the tool ran (i.e. the tool itself created it) -
-`restore_from_backup` — copy a backup file back over a target, then remove
-the backup (used by file_write overwrites) - `noop` — placeholder for read-
-only operations that still want an audit trail entry
-"""
+"""Compensation (undo) plans for mutating tools: best-effort, audit-trailed rollback via delete_path_if_created, restore_from_backup, noop."""
 from __future__ import annotations
 
 import shutil
@@ -148,10 +128,7 @@ class CompensationReport:
         }
         if self.skipped_reason:
             result["skipped_reason"] = self.skipped_reason
-        # Compensation is best-effort, NOT transactional. A partial failure
-        # leaves the workspace in an intermediate state — earlier actions
-        # that succeeded are NOT automatically undone. Flag this explicitly
-        # so callers never silently treat a mixed result as a clean rollback.
+        # Best-effort, not transactional: earlier successful actions are not undone, so flag a mixed result explicitly.
         if error_count > 0:
             result["warning"] = (
                 "compensation is best-effort and non-transactional: "
@@ -162,13 +139,7 @@ class CompensationReport:
 
 
 def _resolve_inside(workspace_root: Path, rel: str | None) -> Path | None:
-    """Return absolute path resolved inside workspace, or None on escape.
-
-    Sandbox floor: any path that escapes the workspace (absolute on a
-    different drive, `..` traversal, symlink-out) is rejected — even
-    during ROLLBACK. A compensation plan can never delete arbitrary
-    files even if its `path` was maliciously crafted.
-    """
+    """Return absolute path resolved inside workspace, or None on escape (absolute, `..`, symlink-out), even during rollback."""
     if rel is None:
         return None
     workspace_root = Path(workspace_root).resolve()
@@ -184,13 +155,7 @@ def apply_compensation_plan(
     plan: CompensationPlan,
     workspace_root: Path,
 ) -> CompensationReport:
-    """Apply the plan's actions in REVERSE order (LIFO). Best-effort.
-
-    Each action is wrapped in its own try/except: one failed action
-    never aborts the rest of the plan. The report records the precise
-    outcome of every action — including 'noop' for idempotent cases
-    where the target was already in the desired state.
-    """
+    """Apply the plan's actions in REVERSE order (LIFO), best-effort: each action has its own try/except and the report records every outcome."""
     workspace_root = Path(workspace_root).resolve()
     report = CompensationReport(
         plan_id=plan.id,
@@ -210,11 +175,7 @@ def apply_compensation_plan(
     return report
 
 
-#: Корни, которые откат не сносит НИКОГДА. Замер 2026-08-24: единственным
-#: стражем было «путь не выходит за рабочее место», а всё ценное лежит ВНУТРИ
-#: него — заявка с путём `data`, `logs` или `.git` проходила со статусом `ok` и
-#: сносила состояние, улики и всю историю коммитов. Запрещены именно КОРНИ:
-#: работа под ними остаётся откатываемой, иначе откат перестал бы работать.
+#: Roots that rollback NEVER removes; work under them stays undoable.
 _PROTECTED_ROOTS: frozenset[str] = frozenset({
     ".git", "data", "logs", "config", "core", "tools", "cli", "app", "api",
     "tests", "scripts", "docs",
@@ -222,7 +183,7 @@ _PROTECTED_ROOTS: frozenset[str] = frozenset({
 
 
 def _protected_root(workspace_root: Path, target: Path) -> str | None:
-    """Имя защищённого корня, если цель — он сам. Иначе None."""
+    """Name of the protected root if the target is that root itself, else None."""
     try:
         rel = target.resolve().relative_to(Path(workspace_root).resolve())
     except (ValueError, OSError):
@@ -254,10 +215,7 @@ def _apply_action(action: CompensationAction, workspace_root: Path) -> Compensat
                 action, status="noop", detail="path already absent"
             )
         if target.is_dir():
-            # rmtree is fine — the path is ours: everything above is refused by
-            # `_protected_root`, so what remains was created by a tool inside a
-            # working area. Until 2026-08-24 that sentence was a comment and
-            # nothing more (H-36).
+            # Safe to rmtree: everything above is refused by `_protected_root`.
             shutil.rmtree(target)
         else:
             target.unlink()

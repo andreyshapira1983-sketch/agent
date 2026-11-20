@@ -1,10 +1,4 @@
-"""Parsing of the planner LLM's raw output (§3 Cognitive Core: Planning).
-
-Fence stripping, DLP-redacted previews for diagnostics, and the tolerant
-JSON extraction that turns raw model text into a plan dict plus a parse
-diagnostics record. Pure text processing: no LLM call, no planner state.
-Moved verbatim (de-static + dedent only) from core/planner.py.
-"""
+"""Parses the planner LLM's raw output: fence stripping, DLP-redacted previews and tolerant JSON extraction into a plan dict plus a parse-diagnostics record. Pure text processing."""
 from __future__ import annotations
 
 import json
@@ -14,9 +8,7 @@ from typing import Any
 
 
 def _strip_markdown_fence(text: str) -> str | None:
-    """Return the body of a ```` ``` ````/```` ```json ```` block, else
-    ``None``.
-    """
+    """Body of a fenced code block (plain or json), else ``None``."""
     if not text.startswith("```"):
         return None
     body = text[3:]
@@ -29,8 +21,7 @@ def _strip_markdown_fence(text: str) -> str | None:
 
 
 
-# Max characters of raw planner output echoed into diagnostics. Keeps trace
-# logs bounded and, combined with DLP redaction, avoids leaking full secrets.
+# Max characters of raw planner output echoed into diagnostics: bounds trace logs and, with DLP redaction, limits secret leakage.
 _RAW_PREVIEW_LIMIT = 200
 
 def _sanitized_preview(raw: str, limit: int = _RAW_PREVIEW_LIMIT) -> str:
@@ -60,9 +51,8 @@ def parse_json(
     warnings: list[str] = []
     text = raw.strip()
 
-    # Structured diagnostics (TD-003). Always populated so callers can show
-    # *why* parsing succeeded or failed without re-deriving it. `stage` names
-    # where parsing ended, `fallback` names which recovery path was used.
+    # Structured diagnostics, always populated so callers can show why parsing succeeded or failed;
+    # `stage` names where parsing ended, `fallback` the recovery path used.
     diagnostics: dict[str, Any] = {
         "stage": "start",
         "reason": "",
@@ -72,14 +62,9 @@ def parse_json(
         "raw_length": len(raw),
     }
 
-    # Empty output is NOT a parse failure. Reporting `json_decode_error`
-    # for zero characters sends every reader — human or agent — looking for
-    # malformed JSON that was never emitted. The real event is that the
-    # model returned nothing at all (observed with OpenAI reasoning models
-    # whose whole `max_completion_tokens` budget is consumed by internal
-    # reasoning, leaving no visible content while the API still reports
-    # success). Name it precisely so the remedy — raise the budget, not fix
-    # the JSON — is obvious from the log.
+    # Empty output is NOT a parse failure: reporting `json_decode_error` for zero characters sends readers hunting
+    # for malformed JSON never emitted. The model returned nothing (seen with reasoning models whose whole token
+    # budget goes to internal reasoning); name it so the remedy, raising the budget, is obvious from the log.
     if not text:
         warnings.append("empty_model_output")
         diagnostics["stage"] = "empty_output"
@@ -150,9 +135,8 @@ def parse_json(
 
 _ANYWHERE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
-# After this many unbalanced-brace restarts the scanner gives up: each restart
-# rescans the remaining text, so unbounded restarts on a wall of stray '{'
-# would be quadratic in the reply length. Real replies carry a handful.
+# After this many unbalanced-brace restarts the scanner gives up: each restart rescans the tail, so unbounded
+# restarts on a wall of stray '{' would be quadratic. Real replies carry a handful.
 _SCAN_RESTART_CAP = 32
 
 
@@ -194,13 +178,8 @@ def embedded_json_objects(text: str) -> Iterator[str]:
                     closed_at = pos
                     break
         if closed_at < 0:
-            # Unbalanced at THIS start — but an object opened later can still
-            # be balanced ('{unclosed {"a": 1}'), so restart from the next
-            # '{'. The old "nothing further can close either" return was
-            # wrong and hid such objects (Codacy AI finding on PR #247).
-            # Each restart rescans the tail, so a wall of unclosed braces
-            # would cost O(n²); the cap keeps the worst case bounded while
-            # real replies (a handful of stray braces) are unaffected.
+            # Unbalanced at THIS start, but an object opened later can still be balanced ('{unclosed {"a": 1}'), so restart
+            # from the next '{'. Restarts are capped (see above) to bound the O(n^2) worst case.
             restarts += 1
             if restarts > _SCAN_RESTART_CAP:
                 return
@@ -218,10 +197,10 @@ _HEX = frozenset("0123456789abcdefABCDEF")
 
 
 def escape_stray_backslashes(text: str) -> str:
-    """Удвоить одиночные `\\`, за которыми стоит неэкранируемый символ.
+    """Double a lone backslash that precedes a character JSON does not accept as an escape.
 
-    Правильные пары (`\\n`, `\\"`, `\\\\`, `\\uABCD`) не трогаются: пара
-    съедается целиком, поэтому её второй символ не примут за новый слэш.
+        Valid pairs (newline, quote, backslash, unicode escapes) are left alone: a pair is consumed whole,
+        so its second character is not mistaken for a new backslash.
     """
     out: list[str] = []
     i = 0
@@ -247,18 +226,10 @@ def escape_stray_backslashes(text: str) -> str:
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Best-effort: the JSON object inside a raw LLM reply, or ``None``.
 
-    The one shared answer to "the model was asked for JSON and wrapped it in
-    prose/fences anyway". Tolerances, strongest last, first hit wins:
-
-      1. a reply that IS the object (after stripping a leading fence);
-      2. an object inside a fence anywhere in the text;
-      3. the first-``{`` .. last-``}`` substring;
-      4. every balanced ``{...}`` span, left to right (string-aware).
-
-    Replaces three weaker per-module copies (subagent_memory_scope,
-    self_build_producer; repair_proposal keeps its domain envelope but shares
-    ``embedded_json_objects``). No diagnostics: callers that need to explain a
-    failure (the planner) use ``parse_json`` instead.
+        Tolerances, strongest last, first hit wins: (1) the reply IS the object (after stripping a leading fence);
+        (2) an object inside a fence anywhere in the text; (3) the first-``{`` .. last-``}`` substring;
+        (4) every balanced ``{...}`` span, left to right (string-aware).
+        No diagnostics: callers that need to explain a failure (the planner) use ``parse_json`` instead.
     """
     if not isinstance(text, str) or not text.strip():
         return None
@@ -273,8 +244,8 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     start, end = t.find("{"), t.rfind("}")
     if start != -1 and end > start:
         candidates.append(t[start : end + 1])
-    # dict.fromkeys: когда ответ ЕСТЬ объект, кандидаты совпадают, и без этого
-    # один и тот же текст разбирался бы (и чинился) по нескольку раз.
+    # dict.fromkeys: when the reply IS the object the candidates coincide, and without it the same text would be
+    # parsed (and repaired) several times.
     scanned = list(dict.fromkeys([*candidates, *embedded_json_objects(t)]))
     for candidate in scanned:
         try:
@@ -283,11 +254,8 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
             continue
         if isinstance(obj, dict):
             return obj
-    # Последний рубеж: одиночный '\' перед символом, который JSON не признаёт
-    # экранированием. Модель пишет так, продолжая строку кода. Живой тик
-    # 2026-08-04: из-за ОДНОГО такого слэша пропал ответ на 46 057 символов
-    # и 183 единицы бюджета. Здоровых ответов это не касается — сюда доходят
-    # только те, что уже не разобрались.
+    # Last resort: a lone backslash before a character JSON does not accept as an escape (models write this when
+    # continuing a line of code). Healthy replies never reach here; only those that already failed to parse.
     for candidate in scanned:
         repaired = escape_stray_backslashes(candidate)
         if repaired == candidate:

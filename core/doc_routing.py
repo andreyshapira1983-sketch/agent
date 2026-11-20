@@ -5,11 +5,7 @@ from typing import Any
 
 
 def _keeps_step_references(fn: Any) -> Any:
-    """Перестановка шагов плана переносит и номера в ссылках {{step:N.output}}.
-
-    2026-09-21: вставленное в начало чтение доктрины сдвинуло шаги, ссылка
-    записи осталась прежней, и в предложение агента записалась доктрина.
-    """
+    """Reordering plan steps also renumbers the {{step:N.output}} references."""
     import functools
 
     from core.step_references import renumber_step_references
@@ -142,45 +138,17 @@ DOCTRINE_CORPORATE_DOC_PATHS = (
     "knowledge/doctrine/ROADMAP.md",
     "knowledge/maps/COMMANDS_MAP.md",
 )
-# Thematic (conditional) doc group. Unlike the corporate manifest above, this is
-# NOT injected on every doctrine question — only when the question is actually
-# about sub-agents / delegation / team execution / role trust / quarantine /
-# pause / retire / lifecycle. Keeping it out of the universal manifest stops the
-# central agent from reading a growing pile of files on unrelated architecture
-# questions. SUBAGENT_LIFECYCLE.md is the normative sub-agent lifecycle contract.
+# Conditional doc group for sub-agent questions (delegation, role trust, quarantine, lifecycle); kept out of the universal manifest so unrelated questions do not read it. SUBAGENT_LIFECYCLE.md is the normative contract.
 _SUBAGENT_GOVERNANCE_DOC_PATHS = (
     "knowledge/doctrine/SUBAGENT_LIFECYCLE.md",
 )
-# Thematic (conditional) doc group for memory / durable-learning questions,
-# same discipline as the sub-agent group above: never in the universal
-# manifest, so unrelated architecture turns do not pay for it.
-#
-# Until this existed the agent could not read its own memory problem history
-# (MEMORY_FIX_PLAN B.3), which is failure mode OFM-015 — a record written and
-# never read changes nothing.
-#
-# Membership is deliberately small: only documents whose rules hold in the
-# code today. (The superseded MEMORY_FIX_PLAN was deleted 2026-09-24.)
+# Conditional doc group for memory / durable-learning questions; never in the universal manifest. Membership is small: only documents whose rules hold in the code today.
 _MEMORY_GOVERNANCE_DOC_PATHS = (
-    # A memory-map document under the deleted `docs/audit/` tree stood first
-    # here until 2026-08-07. Nothing noticed it was gone: the router injects a
-    # file_read per path without checking, so every memory question opened with
-    # a step that raised FileNotFoundError and a third of this doctrine never
-    # arrived. Its replacement is to be built by walking the code, not by
-    # restoring a document written from static reading alone.
+    # Do not list a path that no longer exists: the router injects a file_read per path without checking, and a missing file raises FileNotFoundError.
     "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md",
     "knowledge/doctrine/self-audit-lessons.md",
 )
-# Thematic (conditional) doc group for self-diagnosis / self-repair reasoning:
-# how to prove a defect, separate symptom from cause, refuse guess-based data
-# recovery, migrate stored records safely, and bank a lesson only after the
-# verdict closes. Same discipline as the two groups above — deliberately NOT in
-# the universal corporate manifest, because an ordinary "fix this bug" turn must
-# not pay for a reasoning protocol it is not going to use.
-#
-# knowledge/doctrine/self-audit-lessons.md is deliberately NOT duplicated here: it is the
-# historical record of defect classes already found and already belongs to the
-# memory group. This group carries the protocol, not the history.
+# Conditional doc group for self-diagnosis / self-repair reasoning (protocol, not history; the lessons file already belongs to the memory group); kept out of the universal manifest.
 _SELF_REPAIR_DOCTRINE_DOC_PATHS = (
     "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md",
 )
@@ -213,10 +181,7 @@ _IMPLEMENTATION_DETAIL_TERMS = (
     "баг",
 )
 CONFIDENCE_EVIDENCE_DIAGNOSTIC_TERMS = (
-    # Operator *wording*, not module names. The `confidence` / `low_confidence_gate`
-    # entries are the pre-2026-07-27 vocabulary, kept so a question phrased the old
-    # way still routes here. The live module is `core/evidence_support.py` and the
-    # live journal event is `evidence_support`.
+    # Operator wording, not module names; `confidence` / `low_confidence_gate` are the old vocabulary kept so old phrasing still routes here (live module: core/evidence_support.py).
     "confidence",
     "low-confidence",
     "low confidence",
@@ -244,11 +209,7 @@ CONFIDENCE_EVIDENCE_SOURCE_PATHS = (
     "tests/test_evidence_support.py",
     "tests/test_confidence_vector.py",
 )
-# The low-signal defaults a drafted plan falls back to when it has no real
-# evidence source. _is_low_signal_confidence_source reads THIS tuple — it must
-# never re-encode the values by hand (audit finding Д-2: the function carried
-# its own "readme.md"/"tools" literals while this tuple had zero readers, so
-# editing it changed nothing).
+# Low-signal defaults a drafted plan falls back to without a real evidence source; _is_low_signal_confidence_source must read this tuple, not re-encode the values.
 _CONFIDENCE_LOW_SIGNAL_DEFAULT_PATHS = (
     "README.md",
     "tools/",
@@ -307,12 +268,7 @@ def is_doctrine_corporate_question(question: str) -> bool:
     return len(topic_hits) >= 2 and has_context
 
 
-# Sub-agent governance is a THEMATIC sub-topic. A single strong term (subagent,
-# delegation, team executor, …) is enough; weaker action terms (quarantine,
-# retire, pause, trust boundary, lifecycle) only count when paired with an
-# agent/role context word, so ordinary uses ("pause the build", "retire this
-# feature flag") do not drag in the sub-agent doc. Deliberately two-tier to
-# avoid the over-broadening that plain substring matching causes.
+# Two-tier: one strong term is enough; weaker action terms count only with an agent/role context word ("pause the build" must not pull in the sub-agent doc).
 _SUBAGENT_DOC_STRONG_TERMS = (
     "subagent",
     "sub-agent",
@@ -360,11 +316,7 @@ def _is_subagent_governance_question(question: str) -> bool:
     return has_context and has_action
 
 
-# Two-tier, same shape as the sub-agent detector above and for the same reason:
-# plain substring matching on "memory" would fire on "not enough memory",
-# "memorable", and every turn that merely mentions remembering something.
-# Broadening one of these lists has regressed the planner before, so each
-# carries paired negative tests.
+# Two-tier like the sub-agent detector: plain substring "memory" would fire on "not enough memory"; each list has paired negative tests.
 _MEMORY_DOC_STRONG_TERMS = (
     "episodic",
     "эпизодическ",
@@ -411,9 +363,7 @@ _MEMORY_DOC_ACTION_TERMS = (
     "trust",
     "довери",
     "learn",
-    # both stems: "обучение/обученный" and "обучается/обучаться". Only ever
-    # consulted together with a memory context word, so the wider stem cannot
-    # fire on an unrelated training question.
+    # Both stems ("обучение/обученный", "обучается/обучаться"); used only with a memory context word.
     "обучен",
     "обуча",
     "governance",
@@ -429,13 +379,7 @@ def _is_memory_governance_question(question: str) -> bool:
     return has_context and has_action
 
 
-# Two-tier, same shape and same reason as the two detectors above. The stakes
-# here are the inverse of "too narrow": a bare "fix the bug in core/loop.py" is
-# an ordinary task and must NOT drag in a reasoning protocol. So the strong list
-# holds only vocabulary that is unambiguously about the *repair protocol itself*
-# (root cause, fail-before, backfill, regression guard, idempotence), while
-# ordinary repair words ("fix", "bug", "migration", "self-build") are context
-# only and need an action word to fire. Each list carries paired negative tests.
+# Two-tier: the strong list holds only vocabulary about the repair protocol itself; ordinary repair words need an action word, so "fix the bug in core/loop.py" stays an ordinary task.
 _SELF_REPAIR_DOC_STRONG_TERMS = (
     "self-repair",
     "self repair",
@@ -522,9 +466,7 @@ def _is_self_repair_doctrine_question(question: str) -> bool:
     lowered = (question or "").casefold()
     if any(term in lowered for term in _SELF_REPAIR_DOC_STRONG_TERMS):
         return True
-    # Задача над названными файлами — не вопрос о протоколе починки. 2026-09-21:
-    # «исправь proposals/…final.md на месте … резервная копия» совпало по
-    # «исправ» + «резервн», и в план правки текста вставилось чтение доктрины.
+    # A task over named files is not a question about the repair protocol ("исправь x.md ... резервная копия" matched "исправ" + "резервн").
     from core.file_request_intent import extract_path_mentions
     if extract_path_mentions(question or ""):
         return False
@@ -534,14 +476,7 @@ def _is_self_repair_doctrine_question(question: str) -> bool:
 
 
 def confidence_sources_present(root: Any) -> bool:
-    """Есть ли в рабочей папке файлы, которые маршрут верификатора велит читать.
-
-    Замер 2026-09-19 (опыт с библиотекой книг): вопрос «чья цитата стоит
-    рядом вторым эпиграфом» совпал со словом «цитат», и планировщик вставлял в
-    каждую попытку чтение core/verifier.py и трёх тестов — в папке с книгами их
-    нет. Вне собственного репозитория маршрут молчит; корень неизвестен —
-    прежнее поведение.
-    """
+    """Whether the workspace has the files the verifier route says to read; outside the own repository the route stays silent, an unknown root keeps the old behaviour."""
     if root is None:
         return True
     from pathlib import Path
@@ -550,15 +485,7 @@ def confidence_sources_present(root: Any) -> bool:
 
 
 def doctrine_docs_present(root: Any) -> bool:
-    """Есть ли в рабочей папке хоть один документ, которые велят читать маршруты
-    доктрины, субагентов, памяти и самоисправления.
-
-    Замер 2026-09-19 (рабочий экзамен): «берёшься ли ты… без чужих паролей и
-    денег» совпало с маршрутом самоисправления; планировщик пять раз читал
-    knowledge/doctrine/… в папке заказа, где этих документов нет, попытки
-    кончились, и к готовому ответу приклеился вопрос «Что именно нужно
-    построить?». Тот же класс, что `confidence_sources_present`.
-    """
+    """Whether the workspace has at least one document the doctrine, sub-agent, memory and self-repair routes tell to read."""
     if root is None:
         return True
     from pathlib import Path
@@ -570,8 +497,7 @@ def doctrine_docs_present(root: Any) -> bool:
 
 def is_confidence_evidence_diagnostic_question(question: str) -> bool:
     lowered = (question or "").casefold()
-    # Задача над названными файлами — не вопрос о диагностике цитат и проверки
-    # (правка агента claude_0924, проверена им 23.09; влита по слову оператора 24.09).
+    # A task over named files is not a question about citation diagnostics.
     from core.file_request_intent import extract_path_mentions
     if extract_path_mentions(question or ""):
         return False
@@ -591,16 +517,7 @@ def _norm_source_path(path: str) -> str:
 
 
 def _file_read_source_spec(path: str, why: str) -> dict[str, Any]:
-    """Шаг чтения, который дописывает ПРАВИЛО маршрутизации, а не модель.
-
-    Довод обязателен и называет правило. Замер 2026-09-23 по 898 срабатываниям
-    датчика «шаг без довода» (core/reasoning_action_check.check_by_rationale):
-    в 799 обвинён только file_read, в 515 планах без довода ровно 4 шага — это
-    чтения доктрины, дописанные сюда (5 документов, один модель обычно называет
-    сама). У шагов модели довод был, у дописанных кодом — нет, и датчик неделями
-    обвинял агента в действиях, которых он не выбирал. Шаг, поставленный
-    правилом, обоснован этим правилом; сказать это — правда, а не смягчение.
-    """
+    """Read step appended by a routing RULE, not by the model; the rationale names the rule so the reasoning check does not blame the agent for steps it did not choose."""
     return {
         "tool": "file_read",
         "arguments": {"path": path},
@@ -742,16 +659,7 @@ def _ensure_thematic_docs_first(
     lead_paths: tuple[str, ...],
     warning_prefix: str,
 ) -> list[dict[str, Any]]:
-    """Place one thematic doc group ahead of code, behind higher-priority
-    groups.
-
-    Single implementation for every conditionally routed doc group. Each
-    group differs only in *which* docs it owns (`target_paths`), which
-    groups outrank it (`lead_paths`), and how the injection is reported
-    (`warning_prefix`); the ordering and de-duplication rule itself is an
-    invariant and lives here once, so a new group cannot re-introduce a
-    fixed bug by copying the shape.
-    """
+    """Place one thematic doc group ahead of code, behind higher-priority groups; the single implementation of the ordering and de-duplication rule for all conditional groups."""
     target_norms = {_norm_source_path(path) for path in target_paths}
     lead_norms = {_norm_source_path(path) for path in lead_paths}
 

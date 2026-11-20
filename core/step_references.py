@@ -1,38 +1,4 @@
-"""Наблюдённое значение доезжает из шага A в аргументы шага B.
-
-Замер 2026-08-31/09-01, повторён четырежды на разных задачах: плана «прочитай
-файл и запиши прочитанное» не существует. Аргументы всех шагов фиксируются в
-момент планирования, до единого исполнения, поэтому в `file_write` уезжала
-строка вроде ``<content read from .agent_drafts/...>`` — сторож заглушек её
-честно отвергал, а агент оставался с выводом «перенос данных возможен только
-когда содержимое целиком лежит в самом плане».
-
-Цена этой дыры видна не в одном сломанном шаге, а в поведении: не имея права
-опереться на прочитанное, модель ВЫНУЖДЕНА сочинять — схему записи, сигнатуру
-функции, содержимое файла. Часть того, что выглядело как «выдумывает вместо
-того, чтобы посмотреть», была невозможностью посмотреть и записать в одном
-плане.
-
-Контракт ссылки, намеренно узкий:
-
-    {{step:<id или order>.output}}
-
-* подставляется ТОЛЬКО вывод уже исполненного шага — никаких вычислений,
-  срезов и выражений: это транспорт, а не язык;
-* ссылка разрешается перед исполнением шага-получателя, и только если шаг-
-  источник уже дал результат; неразрешённая ссылка не «дорисовывается»
-  правдоподобным текстом, а остаётся ошибкой с названной причиной;
-* значение подставляется как есть; когда ссылка занимает весь аргумент,
-  сохраняется исходный ТИП значения (список остаётся списком), потому что
-  превращение результата в строку — это уже догадка о том, что нужно;
-* форма ссылки в ПРОЗЕ — ссылкой не является. Замер 2026-09-05 (экзамен,
-  ход 22): в objective субагента стояло «ссылок вида {{step:N.output}}»,
-  резолвер принял «N» за шаг, и шаг, которому нужно было лишь РАССКАЗАТЬ о
-  синтаксисе, провалился целиком. Когда известны шаги плана, ссылкой
-  считается номер, идентификатор `step_…` и всё, что план или измерение
-  называют шагом; остальное — текст и остаётся текстом. Висячая ссылка на
-  номер (`{{step:9.output}}` без девятого шага) по-прежнему ошибка.
-"""
+"""Carries an observed value from step A into the arguments of step B via `{{step:<id or order>.output}}`: only the output of an already executed step, no computation or slicing; resolved before the recipient runs; an unresolved reference stays a named error; a whole-argument reference keeps the value's TYPE; a reference form in PROSE is not a reference when plan steps are known (a dangling number still is an error)."""
 from __future__ import annotations
 
 import re
@@ -40,39 +6,23 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-#: {{step:<ref>.output}} — единственная разрешённая форма.
+#: {{step:<ref>.output}} is the only permitted form.
 _REFERENCE_RE = re.compile(
     r"\{\{\s*step:(?P<ref>[A-Za-z0-9_\-]+)\.output\s*\}\}"
 )
 
-#: {{step:<ref>.output.<поле>}} / {{step:<ref>.output[0]}} — ссылка с путём
-#: внутрь вывода. Замер 2026-09-05 (экзамен, ход 34): планировщик написал
-#: `{{step:1.output.live_trace_id}}`, форма не совпала с контрактом и уехала
-#: в `read_logs` буквальной строкой; инструмент ответил PermissionError про
-#: небезопасное имя файла, и агент два хода объяснял не ту ошибку. Такая
-#: форма — ссылка, которую нельзя разрешить, а не текст: она распознаётся и
-#: остаётся ошибкой с названным правилом.
+#: {{step:<ref>.output.<field>}} / {{step:<ref>.output[0]}}: a path into the output; recognised and refused as an error with a named rule, not passed as a literal string to the tool.
 _FIELD_PATH_RE = re.compile(
     r"\{\{\s*step:(?P<ref>[A-Za-z0-9_\-]+)\.output(?P<path>[.\[][^{}]*?)\s*\}\}"
 )
 
 
 class UnresolvedStepReference(ValueError):
-    """Ссылка на шаг, результата которого нет.
-
-    Отдельный тип, потому что это НЕ ошибка инструмента: шаг-получатель
-    вообще не должен исполняться, и причина обязана дойти до журнала целой —
-    иначе на его месте появится очередная правдоподобная выдумка.
-    """
+    """Reference to a step with no result; a separate type because it is NOT a tool error: the recipient must not run at all and the reason must reach the journal whole."""
 
 
 def has_step_reference(value: Any) -> bool:
-    """Есть ли в аргументах хоть одна ссылка на другой шаг.
-
-    Ссылка с путём внутрь вывода (`.output.<поле>`) тоже считается: такой
-    шаг должен дойти до резолвера и провалиться там с названным правилом,
-    а не исполниться с буквальной строкой в аргументах.
-    """
+    """Whether the arguments hold any reference to another step; a reference with a path (`.output.<field>`) counts, so it fails in the resolver with a named rule."""
     if isinstance(value, str):
         return bool(_REFERENCE_RE.search(value) or _FIELD_PATH_RE.search(value))
     if isinstance(value, dict):
@@ -83,7 +33,7 @@ def has_step_reference(value: Any) -> bool:
 
 
 def referenced_steps(value: Any) -> tuple[str, ...]:
-    """Все шаги, на которые ссылаются аргументы, в порядке появления."""
+    """All steps referenced by the arguments, in order of appearance."""
     found: list[str] = []
 
     def _walk(node: Any) -> None:
@@ -106,18 +56,14 @@ def referenced_steps(value: Any) -> tuple[str, ...]:
 def _is_reference(
     ref: str, outputs: dict[str, Any], plan_steps: Collection[str] | None,
 ) -> bool:
-    """Ссылка это или проза, упоминающая форму ссылки (см. докстринг модуля).
-
-    Без `plan_steps` (вызовы, не знающие плана) каждая форма — ссылка: это
-    старое поведение, и оно остаётся строгим.
-    """
+    """Reference or prose mentioning the reference form (see module docstring); without `plan_steps` every form is a reference (strict old behaviour)."""
     if plan_steps is None or ref in outputs or ref in plan_steps:
         return True
     return ref.isdigit() or ref.startswith("step_")
 
 
 def _reject_field_path(text: str) -> None:
-    """Ссылка вида `{{step:N.output.<поле>}}` — ошибка с названным правилом."""
+    """A `{{step:N.output.<field>}}` reference is an error with a named rule."""
     match = _FIELD_PATH_RE.search(text)
     if match is None:
         return
@@ -129,18 +75,14 @@ def _reject_field_path(text: str) -> None:
     )
 
 
-#: Вывод этих инструментов никогда не бывает содержимым файла: поиск, список,
-#: веб-страница. Подставить его в content записи — записать чужое вместо своего.
+#: Output of these tools is never file content (search, listing, web page); putting it into a write's content writes foreign text instead of your own.
 _NEVER_FILE_CONTENT = frozenset({
     "list_dir", "find_in_files", "web_fetch", "web_search",
     "semantic_scholar_search", "rss_fetch", "read_logs",
 })
-#: Окно file_read со start_line/end_line — вид для глаз с номерами строк
-#: («[x.py lines 340-430 of 1122]\n340: …»), а не содержимое файла.
+#: A file_read window with start_line/end_line is a view with line numbers, not file content.
 _NUMBERED_WINDOW_RE = re.compile(r"\[[^\]\n]+ lines \d+-\d+ of \d+\]\n")
-#: Код другого вида — не копия: модуль .py, прочитанный в patch.md (22.09
-#: 09:48). Текст и данные между собой копируются законно: «скопируй src.txt в
-#: report.json» — просьба человека (tests/test_a_read_is_not_the_end_of_the_turn.py).
+#: Code of another kind is not a copy (a .py module read into patch.md); text and data copy legitimately ("copy src.txt to report.json").
 _CODE_SUFFIXES = frozenset({
     ".py", ".js", ".ts", ".tsx", ".jsx", ".sh", ".ps1", ".bat", ".cmd",
     ".c", ".h", ".cpp", ".rs", ".go", ".java", ".rb", ".php", ".sql",
@@ -148,7 +90,7 @@ _CODE_SUFFIXES = frozenset({
 
 
 def _code_kind_changes(source_suffix: str, target_suffix: str) -> bool:
-    """Код переезжает в файл другого вида (или в код — не код): это не копия."""
+    """Code moves into a file of another kind (or code into non-code): not a copy."""
     return source_suffix != target_suffix and (
         source_suffix in _CODE_SUFFIXES or target_suffix in _CODE_SUFFIXES)
 
@@ -159,21 +101,7 @@ def reject_content_reference(
     sources: dict[str, tuple[str, str]],
     outputs: dict[str, Any],
 ) -> None:
-    """Прочитанное вместо собственного текста в content записи — ошибка.
-
-    Замысел и имя — агента (разговор 2026-09-22): за день пять его записей
-    легли не его текстом, а выводом чтения в том же плане — skill.py получил
-    окно книги с номерами строк, patch.md дважды получил текст модуля, и одну
-    попытку описать правку съела сама поломка. Подсказка планировщику учила
-    ровно этому (пример «file_read → file_write content={{step:1.output}}»).
-
-    Законное остаётся: вывод команды (python_probe, shell_exec) в файл и
-    копия ЦЕЛОГО файла в файл того же вида — ради этого ссылки и делались
-    (замер 2026-08-31, перенос черновика). Отвергается прочитанное, которое
-    содержимым файла не является: вывод поиска, списка, веб-страницы; окно
-    строк с номерами; целый файл другого вида (.py → .md — не копия).
-    `sources` — ссылка шага → (инструмент, путь), `outputs` — его вывод.
-    """
+    """Reading in place of own text in a write's `content` is an error. Legitimate: command output (python_probe, shell_exec) into a file and a copy of a WHOLE file into a file of the same kind. Rejected: search/list/web-page output, a line-numbered window, a whole file of another kind. `sources` maps reference -> (tool, path), `outputs` is its output."""
     if tool != "file_write":
         return
     content = arguments.get("content")
@@ -201,16 +129,7 @@ def reject_content_reference(
 
 
 def _delivered(ref: str, output: Any) -> Any:
-    """Что везёт ссылка: результат шага, а у команды — её stdout.
-
-    Замер 2026-09-19 (внешний экзамен): лаборатория верно посчитала сумму, а
-    `file_write(content={{step:1.output}})` получил словарь {code, stdout,
-    exit_code, …} и упал «content must be a string, got dict»; попытки сгорали,
-    и в файле оставалась старая сумма. У команды (shell_exec, python_probe)
-    результат — это её вывод. Упавшая, прерванная или обрезанная команда
-    результатом не является: ссылка не разрешается и называет причину, иначе
-    в файл молча ушла бы пустая строка или обрывок.
-    """
+    """What a reference carries: the step result, for a command its stdout; a failed, interrupted or truncated command is no result, so the reference is not resolved and names the reason."""
     if not (isinstance(output, dict) and "stdout" in output and "exit_code" in output):
         return output
     reason = (
@@ -230,10 +149,7 @@ def _delivered(ref: str, output: Any) -> Any:
     return output.get("stdout")
 
 
-#: Аргументы, где вклеенный внутрь вывод становится адресом. След
-#: trace_965c1af5… (ночь 20→21.09): в `math_study/library/txt/{{step:3.output}}`
-#: подставился весь вывод шага — кусок чужого файла, десяток имён через перевод
-#: строки — и file_read искал такой «файл». Адрес — одно имя.
+#: Arguments where pasted output becomes an address; an address is one name (a whole step output pasted into a path made file_read look for a multi-name "file").
 _ADDRESS_KEYS = frozenset({"path", "url"})
 
 
@@ -256,8 +172,7 @@ def _resolve_string(
     _reject_field_path(text)
     match = _REFERENCE_RE.fullmatch(text.strip())
     if match is not None and _is_reference(match.group("ref"), outputs, plan_steps):
-        # Ссылка занимает весь аргумент: возвращаем значение КАК ЕСТЬ, чтобы
-        # список остался списком, а число числом.
+        # A reference that fills the whole argument returns the value AS IS, so a list stays a list and a number a number.
         ref = match.group("ref")
         if ref not in outputs:
             raise UnresolvedStepReference(
@@ -265,10 +180,7 @@ def _resolve_string(
                 f"known steps are {sorted(outputs)}"
             )
         value = _delivered(ref, outputs[ref])
-        # Ссылка целиком сохраняет тип значения — его судит инструмент. Кроме
-        # url: там список выдачи поиска — не адрес (замер 2026-09-23, «нашёл ->
-        # открыл»), и отказ обязан назвать, что сделать сначала. Правило не
-        # шире основания: для path поведение прежнее.
+        # A whole-argument reference keeps the value type, which the tool judges; except url, where a search result list is not an address and the refusal must say what to do first. The rule is no wider than its ground: path behaves as before.
         return _one_line(ref, value) if whole_is_one_name else value
 
     def _substitute(m: re.Match[str]) -> str:
@@ -292,14 +204,7 @@ def resolve_step_references(
     *,
     plan_steps: Collection[str] | None = None,
 ) -> Any:
-    """Подставить результаты шагов в аргументы.
-
-    `outputs` — отображение «идентификатор или порядковый номер шага ->
-    его вывод». Значения не копируются и не преобразуются: транспорт обязан
-    доставить ровно то, что было измерено. `plan_steps` — идентификаторы и
-    номера ВСЕХ шагов плана; с ними форма ссылки, не называющая ни шага, ни
-    номера, читается как проза и не трогается.
-    """
+    """Substitute step results into arguments; `outputs` maps step id or number -> its output, delivered exactly as measured. `plan_steps` lists the ids and numbers of ALL plan steps; with them a form that names no step or number reads as prose and is left alone."""
     if isinstance(value, str):
         return _resolve_string(value, outputs, plan_steps)
     if isinstance(value, dict):
@@ -321,18 +226,7 @@ def resolve_step_references(
 def renumber_step_references(
     before: list[dict[str, Any]], after: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Переписать `{{step:N.output}}` под новый порядок шагов.
-
-    2026-09-21, живой разговор: агент спланировал «прочитать final (1),
-    прочитать дополнение (2), записать final = {{step:1.output}} …». Маршрутизатор
-    документов (`core/doc_routing._ensure_*_docs_first`) после планировщика
-    ВСТАВИЛ в начало чтение доктрины самопочинки — шаги сдвинулись, ссылка
-    осталась, и в предложение агента записалась доктрина. Номер ссылки — это
-    место шага в плане ПЛАНИРОВЩИКА; при перестановке он обязан ехать за шагом.
-
-    Шаги сопоставляются по тождеству объекта. Ссылка на шаг, которого больше
-    нет, не трогается — разрешение ссылки откажет вслух.
-    """
+    """Rewrite `{{step:N.output}}` to the new step order: the reference number is the step's place in the PLANNER's plan, so when steps are reordered it must follow the step. Steps match by object identity; a reference to a step that is gone is left alone and fails aloud on resolution."""
     old_to_new: dict[str, str] = {}
     positions = {id(src): i for i, src in enumerate(after, start=1)}
     for old, src in enumerate(before, start=1):

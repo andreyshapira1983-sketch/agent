@@ -1,4 +1,4 @@
-"""Jev (TypeSafe System One): вероятность, что новый вывод заменяет каждый из прежних похожих."""
+"""Jev (TypeSafe System One): probability that a new finding replaces each earlier similar one."""
 from __future__ import annotations
 
 import json
@@ -65,7 +65,7 @@ def replacement_probabilities(
     key: str, new_text: str, candidates: Sequence[Any], *,
     transport: Transport | None = None, sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, float]:
-    """{id прежнего: p «новый его заменяет»}; 429/529 — повтор с паузой, прочий сбой — JevError."""
+    """{id of earlier: p that the new one replaces it}; 429/529 retried with a pause, any other failure raises JevError."""
     if not candidates:
         return {}
     ids = {f"q{i}": record.id for i, record in enumerate(candidates)}

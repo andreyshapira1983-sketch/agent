@@ -1,16 +1,4 @@
-"""Referent resolution for local critique / show-only turns (plan critique
-PR1).
-
-Important invariants (critique v2) ---------------------------------- * The
-current user message is **not** world-fact evidence. When it is selected as
-material, it is exposed only as ``analysis_target_excerpt`` (data channel).
-* ``user_explicit`` is **not** added here; this module never writes an
-evidence chain and never auto-verifies claims. * Persistent memory is never
-a silent primary for local critique. * No auto ``file_read`` / planner
-bypass — a trusted file hint yields ``needs_tool`` so a later stage can
-decide how to read it. * Conflict between multiple high-scoring candidates →
-``ambiguous``, never a random cached artifact.
-"""
+"""Referent resolution for local critique / show-only turns: the user message is data (``analysis_target_excerpt``), never world-fact evidence; no evidence chain is written, no auto file_read, conflicts become ``ambiguous``."""
 from __future__ import annotations
 
 import os
@@ -24,7 +12,7 @@ from typing import Any, Literal
 from core.proof_demand import demands_demonstration
 from core.word_overlap import jaccard as _jaccard
 
-# Shadow / rollout flag — loop wiring (PR2+) must default this to False.
+# Rollout flag: loop wiring must default this to False.
 FEATURE_FLAG = "referent_resolver_v1"
 FEATURE_FLAG_DEFAULT = False
 _ENV_MODE = "AGENT_REFERENT_RESOLVER"
@@ -40,7 +28,7 @@ def referent_resolver_mode() -> str:
     return "on"
 
 
-# Kinds that can be critiqued without a tool read (PR2). file_hint / path → PR4.
+# Kinds that can be critiqued without a tool read; file_hint / path need a tool.
 LOCAL_CRITIQUE_KINDS: frozenset[str] = frozenset(
     {"user_text", "artifact", "prior_turn", "explicit_quote"}
 )
@@ -101,27 +89,14 @@ _LATER_EFFECT_RE = re.compile(
 
 
 def demands_cross_time_proof(text: str) -> bool:
-    """True when the directive asks to prove a relation between the agent's
-    own past (lesson / episode / repair) and a later action — a temporal
-    join no local-only path can supply. See CODE_NOTES «Referent resolver»."""
+    """True when the directive asks to prove a relation between the agent's own past (lesson / episode / repair) and a later action: a temporal join no local-only path can supply."""
     t = text or ""
     return bool(_SELF_HISTORY_RE.search(t) and _LATER_EFFECT_RE.search(t))
 
 _PATH_RE = re.compile(
     r"(?ix)"
-    # Leading guard: a match may not begin right after a word character, a
-    # dot, a dash or a slash. Two reasons, one change.
-    #
-    # Speed: without it the engine could start inside a run of separators, so
-    # n of them offered n starting positions and each rescanned the rest —
-    # 7.9 s on a 36 KB question, and the question is whatever the user pasted.
-    #
-    # Accuracy: it also stops `https://example.com/paper.pdf` from being read
-    # as the path `/example.com/paper.pdf`. Re-scanning 478 files of this
-    # repository, everything the guard removes is of that kind — a host cut
-    # out of a URL, or a `d:\n` sliced out of an f-string — and it removes no
-    # real path. Windows paths still match: `.\main.py`, `core\sub\mod.py` and
-    # `C:\x\y.json` are unchanged, which is why `\\` is not in the guard.
+    # Leading guard: a match may not begin right after a word character, dot, dash or slash. This avoids quadratic rescans over runs of separators
+    # in pasted text and stops `https://example.com/paper.pdf` from reading as the path `/example.com/paper.pdf`. Windows paths still match, so `\\` is not in the guard.
     r"(?<![\w.\-/])"
     r"("
     r"[A-Za-z]:\\[^\s\"']+"  # Windows path
@@ -148,11 +123,7 @@ def is_show_only_directive(text: str) -> bool:
 
 
 def is_local_critique_eligible(decision: ReferentDecision) -> bool:
-    """Whether PR2 should take the local-critique / show-only path.
-
-    Requires ``resolved`` primary in :data:`LOCAL_CRITIQUE_KINDS`, a non-empty
-    analysis target, and a critique / show-only directive.
-    """
+    """Whether to take the local-critique / show-only path: ``resolved`` primary in :data:`LOCAL_CRITIQUE_KINDS`, a non-empty analysis target and a critique / show-only directive."""
     if decision.status != "resolved" or decision.primary is None:
         return False
     if decision.primary.kind not in LOCAL_CRITIQUE_KINDS:
@@ -160,37 +131,23 @@ def is_local_critique_eligible(decision: ReferentDecision) -> bool:
     target = (decision.analysis_target_excerpt or "").strip()
     if not target:
         return False
-    # R5 (2026-08-13, включение default-on вскрыло): «текст пользователя» —
-    # это ПРИНЕСЁННЫЙ текст (многострочный или в кавычках), а не хвост самой
-    # формулировки задачи. «Проанализируй архитектуру проекта…» резолвился в
-    # user_text из собственного дополнения, и критика-без-объекта съедала
-    # содержательную задачу: без роли, без инструментов, без памяти.
-    # Маркеры принесённости: перевод строки, кавычки или двоеточие-презентация
-    # («Вот фрагмент: …» переживает срез директив и несёт двоеточие).
+    # 'User text' means BROUGHT text (multi-line, quoted or after a presenting colon), not the tail of the task wording itself;
+    # otherwise a substantive task is swallowed by critique-without-object.
     if decision.primary.kind == "user_text" and "\n" not in target and not any(
         q in target for q in ('"', "«", "“", "'", ":")
     ):
         return False
-    # R7 (2026-09-05, work order 1 «flights TLV→BER»): a SHORT quoted span
-    # inside a LONG directive is a term of the order, not a brought text to
-    # criticise. «…первая — «изначально показанная»…» (21 chars in 770) was
-    # resolved as the analysis target: the planner was skipped, no tool ran,
-    # the synthesizer answered the 21 characters with four invented citations
-    # and the answer was withheld. A brought quote is either long or stands
-    # on its own; a term is short and drowned in its directive.
+    # A SHORT quoted span inside a LONG directive is a term of the order, not a brought text to criticise; a brought quote is long or stands on its own.
     if decision.primary.kind == "explicit_quote":
         directive_len = len((decision.directive_excerpt or "").strip())
         if len(target) < 40 and directive_len > 10 * len(target):
             return False
-    # R6 (2026-08-17, operator exam run_59b740111): a cross-time proof demand
-    # (own past -> later action) must reach the evidence-producing planner;
-    # the quote path took it with tools=[] and nano invented four citations.
+    # A cross-time proof demand (own past -> later action) must reach the evidence-producing planner; the quote path runs without tools.
     if demands_cross_time_proof(decision.directive_excerpt or "") or (
         demands_cross_time_proof(target)
     ):
         return False
-    # Та же семья (2026-09-25): «Умеешь …? Покажи.» — просьба показать делом;
-    # путь критики без инструментов показать не может (core/proof_demand.py).
+    # Same family: 'can you ...? Show me.' asks for a demonstration, which the tool-less critique path cannot give (core/proof_demand.py).
     if demands_demonstration(decision.directive_excerpt or ""):
         return False
     return is_critique_directive(decision.directive_excerpt or "")

@@ -1,23 +1,4 @@
-"""Задача от драйва: что сейчас важно — решает внутреннее состояние, что делать — модель.
-
-Шаг 2 эндогенной активации (оператор, 2026-09-19). Шаг 1 (`core/drives.py`)
-меряет драйвы из журналов. Здесь из них рождается ОДНА задача:
-
-* `idle_time` — будильник, не содержание: он говорит «пора», но не «что»;
-* содержание берётся у самого сильного из остальных драйвов, умноженного на
-  вес ПРИВЫКАНИЯ. Первый живой замер: сильнее всех были `uncertainty` (его
-  необъяснённые детекторы) и `unfinished_obligations` (правки, навсегда
-  заблокированные уроками отката) — драйвы, которые действием не гасятся.
-  «Бери самый сильный» вернул бы его в ту же петлю. Поэтому: если после
-  задачи драйв не упал, его вес уменьшается вдвое; со временем вес
-  восстанавливается. Так уступают место драйвы, которые работа удовлетворяет;
-* задачу предлагает модель — по потребности, описи того, что у агента есть,
-  и его последним задачам с исходами; ОДНУ, короткую, проверяемую. Перед
-  выдачей её проверяют детектор неоднозначности контракта и страж повтора.
-
-    python -m core.drive_goal            # выбрать драйв и предложить задачу
-    python -m core.drive_goal --dry      # только выбор драйва, без модели
-"""
+"""Task from a drive: internal state decides what matters, the model decides what to do (`python -m core.drive_goal [--dry]`)."""
 from __future__ import annotations
 
 import json
@@ -31,26 +12,14 @@ from core.drives import DOMAINS, _rows, _similarity, compute_drives, open_obliga
 
 STATE_RELPATH = Path("data") / "drive_state.json"
 DECISIONS_RELPATH = Path("data") / "drive_decisions.jsonl"
-#: Порог — на значение С УЧЁТОМ привыкания. Замер 2026-09-19 (20 мин «цель
-#: первой»): порог стоял на сыром значении 0.2, предметные драйвы дорастают до
-#: него ~40 мин (tau 3 ч), а `uncertainty` (0.89, растёт от собственных
-#: детекторов) оставался единственным над порогом — 12 из 14 задач «разобрать
-#: наблюдение о детекторах» при его весе 0.1. Приевшееся 0.09 не должно
-#: выигрывать у растущего предмета 0.17.
+# Threshold is on the value WITH habituation: a habituated 0.09 must not beat a growing subject at
+# 0.17.
 MIN_CONTENT = 0.05
 _NOT_CONTENT = frozenset({"idle_time", "economic_opportunity"})
-#: Доля выборов, в которых предметная область берётся случайно, а не по силе
-#: драйва. Forestier, Mollard, Oudeyer, «Intrinsically Motivated Goal Exploration
-#: Processes with Automatic Curriculum Learning» (JMLR 2022): «с вероятностью 20%
-#: берётся случайное пространство целей, с вероятностью 80% — пропорционально
-#: прогрессу». Ночь 24→25.09: без этой доли все четыре предмета стояли на 0.00
-#: («было 3 из 4, стало 3 из 4» — прогресса нет), и кампания часами объясняла
-#: наблюдения о себе. Плато на среднем успехе — не «освоено»; случайная доля
-#: возвращает туда попытки, из которых прогресс и считается.
-#: Доля та же, ритм ровный: каждый EXPLORE_EVERY-й выбор — область по кругу,
-#: дольше всех не бывавшая в таком выборе. Случайная монета у Forestier — способ
-#: получить долю; ровный ритм даёт её же, воспроизводим по журналу и не делает
-#: проверки случайными.
+# Share of choices where the subject area is taken at random instead of by drive strength
+# (Forestier, Mollard, Oudeyer, JMLR 2022: 20% random goal space, 80% by progress).
+# Steady rhythm instead of a coin: every EXPLORE_EVERY-th choice takes the area that has been in
+# such a choice longest ago; reproducible from the journal.
 EXPLORE_SHARE = 0.2
 EXPLORE_EVERY = round(1 / EXPLORE_SHARE)
 _REPEAT_SIMILARITY = 0.6
@@ -58,14 +27,14 @@ _REPEAT_SIMILARITY = 0.6
 
 @dataclass
 class DriveGoal:
-    """Отчёт выбора: кампания принимает объект с `goal` и `success_check`."""
+    """Choice report: the campaign accepts an object with `goal` and `success_check`."""
 
     status: str  # "proposed" | "declined"
     goal: str = ""
     success_check: str = ""
     drive: str = ""
     reason: str = ""
-    #: Действие, которым эта цель делается (пусто — заход агента на цель).
+    # Action by which this goal is done (empty: an agent pass on the goal).
     action: str = ""
 
 
@@ -86,15 +55,14 @@ def _save_state(root: Path, state: dict[str, Any]) -> None:
 
 def choose_drive(drives: dict[str, dict[str, Any]], state: dict[str, Any],
                  now: datetime) -> tuple[str | None, dict[str, Any]]:
-    """Драйв для содержания задачи с учётом привыкания; state обновляется на месте.
+    """Drive for the task content with habituation; state is updated in place.
 
-    Каждый EXPLORE_EVERY-й выбор — предметная область по кругу (у неё в drives
-    ставится mode="random"); остальные — самый сильный драйв.
+    Every EXPLORE_EVERY-th choice is the subject area in turn (mode="random" in drives); the rest take the strongest drive.
     """
     weights: dict[str, float] = state["weights"]
     last = state.get("last")
-    # Случайный выбор ничего не говорит о привыкании к области: его «не упало»
-    # не должно резать ей вес в обычном выборе.
+    # A random choice says nothing about habituation to the area: its "did not fall" must not cut
+    # its weight in an ordinary choice.
     if last and last.get("random"):
         state["last"] = None
         last = None
@@ -137,7 +105,7 @@ def _library_sample(root: Path, drive: str, limit: int = 25) -> list[str]:
 
 
 def _recent_tasks(root: Path, limit: int = 10) -> list[str]:
-    """Последние цели с лучшим исходом по каждой."""
+    """Latest goals with the best outcome for each."""
     best: dict[str, str] = {}
     order: list[str] = []
     rank = {"completed": 3, "failed": 1, "empty": 1}
@@ -158,14 +126,11 @@ _DOMAIN_RU = {"math": "математике", "physics": "физике", "cs": "
 
 
 def need_text(drive: str, info: dict[str, Any], root: Path) -> str:
-    """Потребность человеческими словами и её конкретный материал — без имён переменных.
+    """A need in human words and its concrete material, without variable names.
 
-    Первый живой проход шага 2: модели показали «uncertainty = 0.70», и она
-    предложила «найди в логах, когда драйв uncertainty снижался» — снова задачу
-    про собственный механизм. Имя переменной — это провод, а не потребность.
+    A variable name is wiring, not a need.
     """
-    # Интерес области — прогресс или новизна (core/drives.py, 24.09), не часы:
-    # «ты давно не решал» звал к освоенному и к невыходящему одинаково.
+    # Area interest is progress or novelty (core/drives.py), not hours.
     if drive.startswith("competence_") and drive != "competence_world":
         area = _DOMAIN_RU.get(drive.removeprefix("competence_"), drive)
         if info.get("mode") == "explore":
@@ -191,7 +156,7 @@ def need_text(drive: str, info: dict[str, Any], root: Path) -> str:
             from core.causal_climb_action import unexplained_observations
 
             items = [str(o.observed_mismatch)[:200] for o in unexplained_observations(root)][:5]
-        except Exception:  # noqa: BLE001 — без лестницы — без списка
+        except Exception:  # noqa: BLE001 — without the ladder, no list
             items = []
         return ("Есть вещи, которые ты наблюдал и не можешь объяснить:\n" + "\n".join(f"- {i}" for i in items)
                 + "\nЗадача: разобрать ОДНУ из них до проверяемого вывода или честного «данных нет».")
@@ -245,18 +210,14 @@ def _ask(llm: Any, drive: str, info: dict[str, Any], root: Path, feedback: str =
     return data if isinstance(data, dict) and str(data.get("goal") or "").strip() else None
 
 
-#: Конспекты предметных задач (data/ исключена из git — дерево не пачкается).
+# Notes of subject tasks (data/ is excluded from git, so the tree stays clean).
 NOTES_DIR = "data/notes"
 
 
 def _with_notes(goal: str, check: str, drive: str, now: datetime) -> tuple[str, str]:
-    """Предметная задача заканчивается конспектом, и проверка смотрит на него.
+    """A subject task ends with a note, and the check looks at it.
 
-    Кампания 2026-09-22: _problem требует, чтобы файлы критерия уже были на
-    диске, — значит, критерий называл входную книгу; судья цели (0630e28)
-    честно не засчитывает след старше начала цели. Вместе: «прочитай раздел
-    книги» не засчитывалась НИКОГДА, даже выполненная, а прочитанное
-    пропадало в журнале. Конспект — новый след работы и накопленное знание.
+    _problem requires the criterion files to exist already, and the goal judge does not count a trace older than the goal start, so "read a book section" was never counted. The note is a new trace of work and accumulated knowledge.
     """
     from core.note_contract import criterion
 
@@ -264,12 +225,12 @@ def _with_notes(goal: str, check: str, drive: str, now: datetime) -> tuple[str, 
     goal = (f"{goal} Итог запиши файлом {note}: источник (путь в рабочей папке или ссылка), "
             "дословная цитата строкой с «>», и проверка с числом (расчёт или python_probe). "
             "Пустые скобки-заглушки не годятся — конспект пишется после чтения.")
-    # Критерий задаёт КОД, а не модель: пока проверку пишет исполнитель, он
-    # найдёт лазейку (книга вместо работы, шаблон вместо конспекта).
+    # The criterion is set by CODE, not by the model: a model that writes the check finds a
+    # loophole.
     return goal, criterion(note)
 
 
-#: Начало хвоста, который `_with_notes` приклеивает к каждой цели.
+# Start of the tail that `_with_notes` appends to every goal.
 _NOTE_TAIL = " Итог запиши файлом "
 _QUOTED = re.compile(r"'([^']{12,})'|«([^»]{12,})»|\"([^\"]{12,})\"")
 
@@ -283,7 +244,7 @@ def _quoted(text: str) -> set[str]:
 
 
 def repeats_recent_goal(goal: str, root: Path, limit: int = 20) -> bool:
-    """Та же задача, что недавняя: по словам без хвоста конспекта или по той же цитате (68 повторов 26.09)."""
+    """Same task as a recent one: by words without the note tail or by the same quote."""
     subject = _goal_subject(goal)
     quotes = _quoted(subject)
     recent: list[str] = []
@@ -298,15 +259,9 @@ def repeats_recent_goal(goal: str, root: Path, limit: int = 20) -> bool:
 
 
 def _problem(goal: str, root: Path, success_check: str = "") -> str:
-    """Почему задачу нельзя выдать, или пусто.
+    """Why the task cannot be issued, or empty.
 
-    Критерий успеха исполнитель сверяет с диском (core/success_check.py):
-    каждый названный в нём файл обязан существовать. Живой проход шага 3:
-    модель написала «цитата из Judson_AbstractAlgebra.txt (например, Theorem
-    9.x)» — голое имя без пути и заглушка; теорему агент нашёл верно, а
-    исход записан как «следа нет», и драйв математики наказан за сделанную
-    работу. Задачи здесь — чтение и расчёт, новых файлов они не создают,
-    поэтому критерий сверяется тем же проверяющим ДО выдачи.
+    The executor checks the success criterion against disk (core/success_check.py): every named file must exist. These tasks create no new files, so the same checker verifies the criterion BEFORE issuing (a bare name without a path and a placeholder are rejected).
     """
     from core.completion_contract import derive_completion_contract
     from core.success_check import observe_success_check
@@ -326,18 +281,15 @@ def _problem(goal: str, root: Path, success_check: str = "") -> str:
 
 
 def _observation_goal(root: Path) -> DriveGoal | None:
-    """Непонятное разбирает штатный подъём (`explain_causal_observation`), не проза.
+    """The unclear is handled by the standard `explain_causal_observation` lift, not prose.
 
-    Суточный прогон 2026-09-19/20: модель сама придумывала, где искать, лезла в
-    data/charter_decisions.jsonl (детекторов там нет) и 230 раз отвечала
-    «данных нет». Прозаический разбор не закрывает наблюдение ничем: закрывает
-    его только заявка с конкурирующими объяснениями, а её пишет это действие.
+    A prose analysis closes no observation; only a request with competing explanations does, and this action writes it.
     """
     try:
         from core.causal_climb_action import unexplained_observations
 
         naked = unexplained_observations(root)
-    except Exception:  # noqa: BLE001 — без лестницы драйв просто молчит
+    except Exception:  # noqa: BLE001 — without the ladder the drive is simply silent
         return None
     if not naked:
         return None
@@ -353,13 +305,9 @@ def _observation_goal(root: Path) -> DriveGoal | None:
 
 
 def _engineering_goal(root: Path) -> DriveGoal | None:
-    """Правку своего кода предлагает штатное действие, а не проза о нём.
+    """Own-code edits are proposed by the standard action, not prose about it.
 
-    Замер 2026-09-19/20: после включения драйвов агент читал свой код в 133
-    задачах из 198 и не подал НИ ОДНОЙ заявки на правку. Путь к изменению кода
-    лежал в меню, а режим «цель первой» меню обходит; задачи от драйвов по
-    построению только читают. Здесь цель называет свободный модуль и своё
-    действие — `propose_engineering_task`, всё та же полоса и те же ворота.
+    Drive tasks only read by construction, and the goal-first mode bypasses the menu. Here the goal names a free module and its own action `propose_engineering_task`, through the same lane and gates.
     """
     from core.drives import self_improvement_proofs
 
@@ -367,11 +315,8 @@ def _engineering_goal(root: Path) -> DriveGoal | None:
     if not targets:
         return None
     target, _lines, proof = targets[0]
-    # Цель называет ДОКАЗАТЕЛЬСТВО и действие, которое из него следует, а не
-    # толщину файла; успех — след правки в коде, а не появление бумажки.
-    # До 2026-09-21: «Разбить свой модуль X (N строк)… в X_helpers.py» и
-    # «в data/approval_inbox.jsonl появилась новая заявка» — критерий мерил
-    # бумажку и не отличал сделанное от несделанного (core/success_check.py).
+    # The goal names the EVIDENCE and the action that follows from it, not file size; success is a
+    # code-edit trace, not a paper appearing.
     gone = " ".join(f"undefined:{name}@{target}" for name in proof.names[:3])
     if proof.kind == "dup":
         goal = (f"Свести повтор в модуле {target}: {proof.describe(target)}. Оставить одну "
@@ -399,14 +344,14 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     drive, state = choose_drive(drives, state, now)
     report = DriveGoal(status="declined", reason="ни один драйв не выше порога содержания")
     if drive == "stuck_need":
-        # Уткнулся — спроси: интернет, потом партнёр (core/stuck_route.py).
+        # Stuck: ask, internet first, then a partner (core/stuck_route.py).
         from core.stuck_route import stuck_goal
 
         report = stuck_goal(root) or report
         if report.status == "proposed":
             state["last"] = {"drive": drive, "value": drives[drive]["value"], "ts": now.isoformat()}
     elif drive in ("uncertainty", "self_improvement_need"):
-        # Самоулучшение — сначала открытый дефект реестра правкой (core/patch_route.py).
+        # Self-improvement: first an open registry defect by an edit (core/patch_route.py).
         from core.patch_route import defect_goal
 
         made = (_observation_goal(root) if drive == "uncertainty"
@@ -419,7 +364,7 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
         for _ in range(max(1, attempts)):
             try:
                 data = _ask(llm, drive, drives[drive], root, feedback)
-            except Exception as exc:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
+            except Exception as exc:  # noqa: BLE001 — a model refusal is a choice refusal, not a crash
                 report = DriveGoal("declined", "", "", drive, f"вызов модели не удался: {type(exc).__name__}")
                 break
             if data is None:
@@ -446,12 +391,10 @@ def propose_drive_goal(llm: Any, workspace: Path | str, now: datetime | None = N
     return report
 
 
-if __name__ == "__main__":  # pragma: no cover — ручной осмотр
+if __name__ == "__main__":  # pragma: no cover — manual inspection
     import sys
 
-    # Ядро не зависит от точки входа (INV-1): прежний осмотр импортировал
-    # `agent_tick` и ломал инвариант слоёв (внесено 2026-09-19 вместе с шагом 2,
-    # найдено полным прогоном 2026-09-20). Роутер собирается здесь же.
+    # The core does not depend on the entry point (INV-1): the router is assembled here.
     from dotenv import load_dotenv
 
     from core.model_router import ModelRouter

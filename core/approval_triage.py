@@ -1,12 +1,4 @@
-"""Read-only triage for the approval inbox.
-
-This module turns that pile into a *managed* surface. It is intentionally
-**pure and read-only**:
-
-* it never mutates an :class:`~core.approval_inbox.ApprovalInbox`; * it
-never deletes or executes anything; * it only computes a recommendation per
-item plus cluster/duplicate views.
-"""
+"""Pure, read-only triage of the approval inbox: a recommendation per item plus cluster and duplicate views."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -16,16 +8,13 @@ from typing import Literal
 
 from core.approval_inbox import ApprovalInboxItem
 
-# The three recommendations the operator sees. Deliberately small: anything
-# that is not a clear structural duplicate either stays (``keep``) or is
-# escalated for a human look (``needs_review``). We never recommend a blind
-# delete.
+# Recommendations are deliberately few; a blind delete is never recommended.
 RecommendedAction = Literal["dismiss_duplicate", "keep", "needs_review"]
 
-# Risk levels that always warrant a human look before any dismissal.
+# Risk levels that always warrant a human look before dismissal.
 _DANGEROUS_RISKS: frozenset[str] = frozenset({"irreversible", "external"})
 
-# Default: a pending proposal untouched for three days is "stale".
+# A pending proposal untouched for three days is stale.
 _DEFAULT_STALE_AFTER_HOURS: int = 72
 
 
@@ -42,20 +31,7 @@ def _parse_iso(ts: str | None) -> datetime | None:
 
 
 def _signature_of(item: ApprovalInboxItem) -> str:
-    """Stable cluster key for a proposed_task item.
-
-    Resolution order:
-
-    1. the canonical signature the runtime stamped into the payload;
-    2. the dedup_key;
-    3. for ``proposed_task`` items written by *older* ticks that predate the
-       signature field, derive one on the fly from ``kind`` + ``description``
-       using the runtime's own algorithm. Without this, every signature-less
-       proposal collapses onto the bare operation name (``proposed_task``) and
-       21 distinct tasks masquerade as one giant duplicate cluster — the exact
-       over-clustering that would recommend dismissing legitimate work;
-    4. finally, the operation name, so non-proposal items still cluster.
-    """
+    """Stable cluster key for a proposed_task item: payload signature, then dedup_key, then a signature derived from kind + description (older items lack one; without it distinct tasks collapse into one duplicate cluster), then the operation name."""
     payload = item.payload or {}
     sig = payload.get("canonical_signature")
     if isinstance(sig, str) and sig.strip():
@@ -67,8 +43,7 @@ def _signature_of(item: ApprovalInboxItem) -> str:
         kind = str(payload.get("kind") or "other")
         description = str(payload.get("description") or item.summary or "")
         if description.strip():
-            # Lazy import: keeps this module light and avoids an import cycle
-            # with the heavy autonomous_runtime module at load time.
+            # Lazy import: avoids an import cycle with autonomous_runtime.
             from core.autonomous_runtime_proposals import _proposal_canonical_signature
 
             return _proposal_canonical_signature(kind, description)
@@ -76,11 +51,7 @@ def _signature_of(item: ApprovalInboxItem) -> str:
 
 
 def _label_of(signature: str) -> str:
-    """Human-readable cluster label derived deterministically from the key.
-
-    ``tests:claim:registry:source`` -> ``claim registry source``. Coarse on
-    purpose so the operator can scan clusters at a glance.
-    """
+    """Human-readable cluster label derived from the key, e.g. ``tests:claim:registry:source`` -> ``claim registry source``."""
     parts = [p for p in signature.split(":") if p]
     if len(parts) <= 1:
         return signature
@@ -88,11 +59,7 @@ def _label_of(signature: str) -> str:
 
 
 def _is_low_value(item: ApprovalInboxItem) -> bool:
-    """A proposal with no justification at all is low-value noise.
-
-    Empty reasons *and* empty rationale: nobody said why it matters. We do not
-    judge content quality — only the absence of any stated rationale.
-    """
+    """A proposal with neither reasons nor rationale is low-value noise; content quality is not judged."""
     if item.reasons:
         return False
     payload = item.payload or {}
@@ -180,20 +147,7 @@ def triage_inbox(
     now: datetime | None = None,
     stale_after_hours: int = _DEFAULT_STALE_AFTER_HOURS,
 ) -> TriageReport:
-    """Compute a read-only triage view of the pending approval items.
-
-    Pure: ``items`` is read but never mutated, and nothing is written back to
-    any inbox. The caller is responsible for passing pending items (typically
-    ``inbox.pending()``); non-pending items are ignored defensively.
-
-    Precedence for ``recommended_action`` (first match wins):
-
-    1. dangerous risk -> ``needs_review``
-    2. structural duplicate (same signature, not the oldest) -> ``dismiss_duplicate``
-    3. stale (older than ``stale_after_hours``) -> ``needs_review``
-    4. low-value (no stated rationale) -> ``needs_review``
-    5. otherwise -> ``keep``
-    """
+    """Compute a read-only triage view of pending items; recommended_action precedence: dangerous -> needs_review, duplicate -> dismiss_duplicate, stale -> needs_review, low-value -> needs_review, else keep."""
     if now is None:
         now = datetime.now(timezone.utc)
     elif now.tzinfo is None:
@@ -201,13 +155,11 @@ def triage_inbox(
 
     pending = [item for item in items if item.status == "pending"]
 
-    # Group by canonical signature, preserving first-seen order per cluster.
     grouped: dict[str, list[ApprovalInboxItem]] = {}
     for item in pending:
         grouped.setdefault(_signature_of(item), []).append(item)
 
-    # Within each cluster, the oldest (by created_at) is the original we keep;
-    # the rest are structural duplicates. Ties fall back to id for determinism.
+    # The oldest item per cluster (ties by id) is the original; the rest are duplicates.
     duplicate_ids: set[str] = set()
     for members in grouped.values():
         if len(members) < 2:
@@ -303,7 +255,7 @@ def triage_inbox(
 
 
 def format_triage_report(report: TriageReport, *, max_clusters: int = 8) -> str:
-    """Render a compact, operator-facing text block. Read-only presentation."""
+    """Render a compact operator-facing text block (read-only)."""
     lines: list[str] = []
     lines.append(f"approval inbox triage: {report.compact_summary()}")
 

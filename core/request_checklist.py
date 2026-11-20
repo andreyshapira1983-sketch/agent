@@ -1,54 +1,7 @@
-"""Чек-лист поручения: требования человека как вопросы «да/нет».
+"""Request checklist: the human's requirements as yes/no questions (TICK / RLCF style), checked against the finished answer.
 
-Зачем, замер 2026-09-23: договор выполненности (`core/completion_contract.py`)
-проверяет ровно три вещи — файл создан, файл изменён, тесты зелёные. Всё, чем
-живёт обычная (и платная) задача, — «не больше 8 предложений», «минимум три
-источника», «не меняй код», «строка VERDICT в конце» — не проверялось вовсе.
-Живой случай того же дня: поручение требовало в конце короткий ответ
-оператору не длиннее 8 предложений, ответ его не дал, а ход считался
-выполненным.
-
-Как это делают в литературе (оба источника прочитаны):
-
-- TICK (Cook et al., «TICKing All the Boxes: Generated Checklists Improve LLM
-  Evaluation and Generation», arXiv 2410.03608): модель раскладывает поручение
-  на вопросы «да/нет», по одному на каждое требование; «да» значит «выполнено»;
-  покрываются явные требования и подразумеваемые важные для такой задачи;
-  вопрос так же конкретен, как требование («3 предложения» -> «ответ в 3
-  предложения?»). Качество — доля «да» (Pass Rate). Та же модель может и
-  составлять, и отвечать.
-- RLCF (Viswanathan et al., «Checklists Are Better Than Reward Models For
-  Aligning Language Models», NeurIPS 2025, arXiv 2507.18624): у пункта вес
-  важности 0–100; пункт проверяется программой ТОЛЬКО если программа проверяет
-  его точно — «никогда не приближай», иначе отвечает судья-модель; ко всем
-  спискам добавляется общее требование «отвечает прямо на запрос, без лишнего»,
-  иначе проверку учатся обходить.
-
-Наши отличия, названные прямо: программу, написанную моделью, мы не исполняем —
-точные проверки взяты из короткого белого списка (подстрока есть / подстроки
-нет). Подсчёт предложений, язык и прочее уходят судье: на ответе с
-перечнями, сокращениями и служебным хвостом это не точная проверка, а
-приближение, которое RLCF запрещает.
-
-Дальше — моё инженерное решение по замеру, не литература. Чек-лист «как в
-TICK» на 16 живых парах чата 24.09 дал важное «нет» в 14, и большинство — ложные:
-подразумеваемые требования (извинись, пообещай, разговорный тон), пересланная
-вакансия или пост, принятые за поручение, разбор прошлого ответа, принятый за
-список требований, и разброс судьи на одном и том же ответе (2 из 3). Поэтому:
-только явные указания об ЭТОМ ответе; у пункта дословная цитата из поручения,
-и программа проверяет, что она там есть; судья может воздержаться (N/A) на
-вопрос не о тексте ответа; важное «нет» спрашивается второй раз и засчитывается
-при совпадении; общий пункт RLCF — ниже порога. После правок на 18 прогонах
-(15 пар): ложных «нет» 0; настоящие пойманы в #538 (метки FACT/INFERENCE,
-итог ≤8 предложений), #544, #546. Цена: пустой список ~1 с, полный 3–8 с.
-
-Сторож односторонний, как все в `assemble_completion_verdict`: невыполненный
-важный пункт может понизить «выполнено» до «выполнено частично», но ничего не
-повышает. Сбой модели, пустой или неразборчивый ответ — пустой чек-лист и
-никакого сигнала: отсутствие проверки не становится обвинением.
-
-Включено по умолчанию (решение оператора 24.09: «включи, пусть работает»).
-AGENT_REQUEST_CHECKLIST=0 в .env — аварийный выключатель, не способ включать.
+Only explicit instructions about THIS answer; each item carries a verbatim quote from the request that a program verifies; exact checks come from a short whitelist (substring present / absent), the rest goes to a judge model that may abstain (N/A); an important "no" is asked a second time and counts only if repeated. One-sided guard like everything in `assemble_completion_verdict`: it may lower "done" to "done partly", never raise it; a model failure or unparseable reply gives an empty checklist and no signal.
+On by default; AGENT_REQUEST_CHECKLIST=0 in .env is an emergency off switch.
 """
 from __future__ import annotations
 
@@ -58,11 +11,9 @@ from typing import Any
 
 ENV = "AGENT_REQUEST_CHECKLIST"
 MAX_ITEMS = 12
-#: Пункт с такой важностью и выше, отвеченный «нет», понижает вердикт.
+#: An item with this importance or higher answered "no" lowers the verdict.
 IMPORTANT = 50
-#: Общее требование RLCF — добавляется к каждому списку. Вес ниже порога: на
-#: живых парах 24.09 судья отвечал на него «нет» в 6 ответах из 16, и половина —
-#: вкусовщина; пусть пишется в журнал, а понижать вердикт не может.
+#: The general RLCF requirement, added to every list; weight below the threshold: the judge said "no" to it in 6 of 16 answers and half were taste, so it is logged but cannot lower the verdict.
 UNIVERSAL = "Does the response directly address the request, without long off-topic content?"
 UNIVERSAL_IMPORTANCE = 40
 _PROGRAM_RULES = ("must_include", "must_not_include")
@@ -121,8 +72,8 @@ class Checklist:
 @dataclass(frozen=True)
 class ItemVerdict:
     item: ChecklistItem
-    answer: str          # yes | no | unknown
-    how: str             # program | judge
+    answer: str  # yes | no | unknown
+    how: str  # program | judge
     why: str = ""
 
 
@@ -134,7 +85,7 @@ class ChecklistVerdict:
 
     @property
     def pass_rate(self) -> float | None:
-        """Доля «да», взвешенная важностью (TICK Pass Rate с весами RLCF)."""
+        """Share of "yes" weighted by importance (TICK Pass Rate with RLCF weights)."""
         known = [v for v in self.verdicts if v.answer in ("yes", "no")]
         total = sum(v.item.importance for v in known)
         if not total:
@@ -158,13 +109,13 @@ def _json(raw: Any) -> dict[str, Any]:
 
 
 def build_checklist(llm: Any, request: str) -> Checklist:
-    """Составить чек-лист ДО работы. Любой сбой — пустой список с причиной."""
+    """Build the checklist BEFORE the work; any failure gives an empty list with a reason."""
     text = " ".join((request or "").split())
     if llm is None or not text:
         return Checklist(reason="no model or empty request")
     try:
         raw = llm.complete(BUILD_SYSTEM, f"REQUEST:\n{text[:6000]}", max_tokens=1200, temperature=0.0)
-    except Exception as exc:  # noqa: BLE001 — без чек-листа ход идёт, как прежде
+    except Exception as exc:  # noqa: BLE001 — without a checklist the turn goes as before
         return Checklist(reason=f"model call failed: {type(exc).__name__}")
     items: list[ChecklistItem] = []
     dropped = 0
@@ -191,12 +142,7 @@ def build_checklist(llm: Any, request: str) -> Checklist:
 
 
 def _quoted_from(quote: Any, request: str) -> bool:
-    """Пункт держится, только если его цитата дословно стоит в поручении.
-
-    Точная проверка, которую делает программа, а не модель: пункт без опоры в
-    тексте человека — выдуманное требование, его «нет» было бы обвинением ни
-    за что. Пробелы и регистр не в счёт; цитата короче 3 знаков — не цитата.
-    """
+    """An item holds only if its quote stands verbatim in the request: a program check, not the model's; whitespace and case ignored, a quote under 3 chars is not a quote."""
     words = " ".join(str(quote or "").split()).casefold()
     return len(words) >= 3 and words in " ".join(request.split()).casefold()
 
@@ -209,7 +155,7 @@ def _program(item: ChecklistItem, answer: str) -> str:
 
 
 def check_answer(llm: Any, request: str, checklist: Checklist, answer: str) -> ChecklistVerdict:
-    """Ответить на чек-лист по готовому ответу: точное — программой, остальное — судьёй."""
+    """Answer the checklist from a finished answer: exact items by program, the rest by the judge."""
     if not checklist.items:
         return ChecklistVerdict(reason=checklist.reason or "empty checklist")
     verdicts: dict[int, ItemVerdict] = {}
@@ -220,9 +166,7 @@ def check_answer(llm: Any, request: str, checklist: Checklist, answer: str) -> C
         else:
             judged.append((n, item))
     first, reason = _judge(llm, request, answer, judged)
-    # Второй взгляд на важное «нет»: замер 24.09 (#542) — один и тот же ответ
-    # судья при temperature 0 признавал то выполненным, то нет (2 из 3). «Нет»,
-    # которое понижает вердикт, засчитывается, только если судья повторил его.
+    # Second look at an important "no": the judge at temperature 0 flipped on the same answer (2 of 3), so a "no" that lowers the verdict counts only if repeated.
     doubtful = [(n, item) for n, item in judged
                 if first.get(n, ("", ""))[0] == "no" and item.importance >= IMPORTANT]
     second = _judge(llm, request, answer, doubtful)[0] if doubtful else {}
@@ -238,13 +182,13 @@ def check_answer(llm: Any, request: str, checklist: Checklist, answer: str) -> C
 
 def _judge(llm: Any, request: str, answer: str,
            judged: list[tuple[int, ChecklistItem]]) -> tuple[dict[int, tuple[str, str]], str]:
-    """Один вызов судьи: номер пункта -> (yes | no | unknown, почему). Сбой — пусто."""
+    """One judge call: item number -> (yes | no | unknown, why). Failure gives empty."""
     listing = "\n".join(f"{n}. {item.question}" for n, item in judged)
     user = (f"REQUEST:\n{' '.join((request or '').split())[:6000]}\n\n"
             f"RESPONSE:\n{(answer or '')[:12000]}\n\nQUESTIONS:\n{listing}")
     try:
         raw = llm.complete(JUDGE_SYSTEM, user, max_tokens=1500, temperature=0.0)
-    except Exception as exc:  # noqa: BLE001 — судья упал: «не знаю», не «нет»
+    except Exception as exc:  # noqa: BLE001 — the judge failed: "unknown", not "no"
         return {}, f"judge failed: {type(exc).__name__}"
     out: dict[int, tuple[str, str]] = {}
     for a in _json(raw).get("answers") or []:
@@ -255,10 +199,9 @@ def _judge(llm: Any, request: str, answer: str,
 
 
 def attach_checklist(loop: Any, contract: Any, request: str) -> Any:
-    """Составить чек-лист ДО работы и положить его в договор хода; выключено — договор как был.
+    """Build the checklist BEFORE the work and put it in the turn's contract; off leaves the contract as it was.
 
-    Журнал `request_checklist` пишется до первого инструмента, как и сам
-    договор: критерий не может быть подогнан под работу, которую он судит.
+    The `request_checklist` journal entry is written before the first tool, like the contract itself, so the criterion cannot be fitted to the work.
     """
     if not enabled():
         return contract
@@ -270,13 +213,13 @@ def attach_checklist(loop: Any, contract: Any, request: str) -> Any:
 
 
 def judge_contract_checklist(loop: Any, request: str, answer: str, contract: Any) -> bool:
-    """Проверить ответ по чек-листу договора; True — важный пункт не выполнен."""
+    """Check the answer against the contract's checklist; True means an important item was not met."""
     checklist = getattr(contract, "checklist", None)
     if checklist is None or not checklist.items:
         return False
     from core.answer_format import format_human_response
 
-    # The text the human sees: the sections «391» hid behind failed «one number» (17.11).
+    # The text the human sees (the sections hidden behind a failed "one number").
     try:
         shown = format_human_response(answer)
     except Exception:  # noqa: BLE001 — no human view: judge the raw answer as before

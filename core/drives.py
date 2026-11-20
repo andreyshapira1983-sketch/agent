@@ -1,28 +1,8 @@
-"""Внутренние драйвы — физиология вокруг модели, считаемая из журналов.
+"""Internal drives: physiology around the model, computed from on-disk logs (measurement only).
 
-Суточный прогон 2026-09-19 показал: будильник у агента был (кампания будит его
-каждые 30 с), но просыпался он всякий раз в том же состоянии — внутри ничего
-не копилось, и выбор цели шёл к ближайшему: к собственным детекторам. Человек
-встаёт не из-за строки «цель», а потому что в нём постоянно меняются
-эндогенные величины — голод, давление сна, скука, незавершённость (оператор,
-2026-09-19).
+Each drive is a number 0..1 with an explanation, derived from the campaign log, drive decisions, approval inbox and observation ladder. Interest is driven by events and progress, not hours: an area's interest is absolute learning progress (change in success share between recent and previous attempts; MAGELLAN, Oudeyer); mastered or never-succeeding areas give none, barely tried ones a small constant "try it" interest. Self-improvement counts tasked defects and proven edits, weighted by whether repairs succeed. Only `idle_time` still depends on hours.
 
-Этот модуль — ТОЛЬКО измерение. Каждый драйв считается из того, что уже лежит
-на диске: журнала кампании, решений драйвов, ящика одобрений, лестницы
-наблюдений. Модель ничего не выдумывает; значение — число 0..1 с объяснением.
-
-Интерес — от событий и прогресса, а не от часов (слово оператора 24.09). До того
-предметный драйв рос формулой `1 - exp(-часов / tau)`: три часа без математики —
-«хочется математики», даже освоенной или раз за разом проваливаемой, а список
-предметов был расписанием. Теперь, по литературе (MAGELLAN, ICML 2025; Oudeyer —
-learning progress; OMNI): интерес области — ПРОГРЕСС в учёбе, модуль разницы
-доли удач в последних попытках и в предыдущих; освоенное и невыходящее интереса
-не дают, почти не пробованное даёт небольшой постоянный интерес «попробовать».
-Самоулучшение — дефекты с названной задачей и доказанные правки, умноженные на
-то, выходит ли починка (замер 24.09: 69 попыток, 1% удач — беговая дорожка).
-От часов остался только сигнал простоя `idle_time`, и содержания он не даёт.
-
-    python -m core.drives            # текущие драйвы этой рабочей папки
+    python -m core.drives            # current drives of this workspace
 """
 from __future__ import annotations
 
@@ -33,34 +13,31 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-#: Области знания и признак эпизода в ней — ПОЛНЫЙ путь папки: «cs/txt»
-#: сидит внутри «physics/txt», и подстрока засчитывала физику информатике.
+#: Knowledge areas and an episode's mark in one are the FULL folder path: "cs/txt" sits inside "physics/txt", and a substring credited physics to computer science.
 DOMAINS: dict[str, tuple[str, ...]] = {
     "math": ("math_study/",),
     "physics": ("knowledge_library/physics/",),
     "cs": ("knowledge_library/cs/",),
 }
 
-#: Время (часы), за которое сигнал простоя поднимается до ~0.63. Единственные
-#: часы среди драйвов: простой — сигнал, а не содержание (`_NOT_CONTENT`).
+#: Hours for the idle signal to rise to ~0.63; the only clock among the drives (idle is a signal, not content: `_NOT_CONTENT`).
 TAU_HOURS = {"idle_time": 0.5}
-#: Прогресс судится по стольким последним попыткам драйва (пополам: было/стало).
+#: Progress is judged over this many last attempts of a drive (halved: was/became).
 LP_WINDOW = 8
-#: Меньше стольких попыток — прогресса не видно; интерес — «попробовать».
+#: Fewer attempts: progress not visible; interest = "try it".
 LP_MIN_ATTEMPTS = 4
-#: Интерес к почти не пробованной области; убывает с каждой попыткой.
+#: Interest in a barely tried area; decays per attempt.
 EXPLORE_VALUE = 0.3
-#: Старше стольких дней попытка забыта: давно заброшенная область снова новая.
+#: An attempt older than this many days is forgotten: a long-abandoned area is new again.
 ATTEMPT_HORIZON_DAYS = 7
 _WORK_RESULTS = frozenset({"completed"})
-#: Поломка — действие было, а результата нет. Простой («нечего делать») и пропуск
-#: повтора — не поломка: это `idle_time`, иначе один факт считался бы дважды.
+#: A breakdown: action taken but no result. Idle ("nothing to do") and a skipped repeat are not breakdowns: that is `idle_time`, or one fact would count twice.
 _BROKEN_RESULTS = frozenset({"failed", "empty"})
 _WORD = re.compile(r"[a-zа-яё0-9_]{3,}", re.IGNORECASE)
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    """Строки jsonl; обёртка целостности (`payload`) снимается."""
+    """jsonl rows; the integrity wrapper (`payload`) is removed."""
     out: list[dict[str, Any]] = []
     try:
         text = path.read_text(encoding="utf-8")
@@ -100,7 +77,7 @@ def _ago(since: datetime | None, now: datetime) -> str:
 
 
 def _similarity(goals: list[str]) -> float:
-    """Средняя попарная схожесть последних целей (Жаккар по словам)."""
+    """Mean pairwise similarity of recent goals (word Jaccard)."""
     sets = [set(_WORD.findall(g.lower())) for g in goals if g]
     sets = [s for s in sets if s]
     pairs = [(a, b) for i, a in enumerate(sets) for b in sets[i + 1:]]
@@ -109,19 +86,12 @@ def _similarity(goals: list[str]) -> float:
     return sum(len(a & b) / len(a | b) for a, b in pairs) / len(pairs)
 
 
-#: Заявки о правах самого прогона: сдвинуть их может только человек.
+#: Requests for the run's own rights: only a human can move them.
 _HUMAN_ONLY_OPERATIONS = frozenset({"autonomous_runtime.allow_effects", "autonomous_runtime.standing_grant"})
 
 
 def open_obligations(root: Path) -> list[dict[str, Any]]:
-    """Ожидающие заявки, которые агент САМ может сдвинуть.
-
-    Живой проход шага 3 (2026-09-19): все четыре «незавершённых дела» были
-    заперты — три разбиения модулей закрыты уроками отката (полоса их больше
-    не возьмёт), четвёртое — просьба о правах, ждущая человека. Драйв звал к
-    ним, агент упирался в approval_wait, и гасило это одно привыкание. Дело,
-    которое агент не может сдвинуть, — не его незавершённое дело.
-    """
+    """Pending requests the agent itself can move; a thing it cannot move is not its unfinished business."""
     from core.self_build_rules import blocking_lesson
 
     out = []
@@ -136,30 +106,19 @@ def open_obligations(root: Path) -> list[dict[str, Any]]:
     return out
 
 
-#: Материал «улучшить себя» — собственный модуль с доказательством правки,
-#: который сейчас никто не ждёт в ящике и по которому нет урока отката. Замер
-#: 2026-09-19/20: после включения драйвов агент читал свой код в 133 задачах из
-#: 198 и не подал ни одной заявки на правку — задачи от драйвов только читали.
+#: Material for "improve self": an own module with proof of an edit that nobody is waiting on in the inbox and that has no rollback lesson.
 _OWN_CODE_DIRS = ("core", "tools")
 _SELF_CHANGE_OPS = frozenset({"self_apply_lane.run"})
 
 
 def self_improvement_targets(root: Path, limit: int = 5) -> list[tuple[str, int]]:
-    """Свои модули, по которым правку можно предложить ПРЯМО СЕЙЧАС — только с
-    доказательством, сильные первыми (подробности: `self_improvement_proofs`)."""
+    """Own modules with a proven edit proposable RIGHT NOW, strongest first (see `self_improvement_proofs`)."""
     return [(rel, lines) for rel, lines, _proof in self_improvement_proofs(root, limit)]
 
 
 def _paused_targets(root: Path) -> frozenset[str]:
-    """Файлы на паузе у рук: недавно отклонённые человеком и отказанные
-    раскольщиком без изменений. 2026-09-21: цель кампании трижды подряд
-    выбирала core/scheduler.py, а руки его не брали (target_denied_recently),
-    и цикл уходил в простой — голова не видела паузы рук.
-    """
-    # Ящик читается сырыми строками (`_rows`), а не объектом ApprovalInbox: тот
-    # при открытии «чинит» строки без обёртки целостности, а читатель цели
-    # ничего переписывать не вправе (полный прогон 2026-09-21 поймал это на
-    # соседнем замере last_self_change).
+    """Files paused for the hands: recently denied by a human or refused by the splitter unchanged."""
+    # Read the inbox as raw rows (`_rows`), not via ApprovalInbox, which "repairs" rows without the integrity wrapper on open; a reader must not rewrite.
     from core.approval_inbox import _DENIAL_MEMORY_HOURS, _payload_targets, _within_hours
     from core.self_apply_bridge import SELF_APPLY_OPERATION
     from core.splitter_refusals import refused_unchanged
@@ -173,31 +132,15 @@ def _paused_targets(root: Path) -> frozenset[str]:
 
 
 def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, Any]]:
-    """Свои модули с ДОКАЗАТЕЛЬСТВОМ, что их надо переделать, и само доказательство.
+    """Own modules with PROOF they should be reworked, and the proof.
 
-    До 2026-09-21 цель выбиралась по числу строк — самый толстый файл первым.
-    Шесть файлов в пределах 180 строк друг от друга: разрежешь первый, корона
-    переедет на второй, финиша нет по построению; 139 из 141 самостоятельных
-    целей были «прочитать себя» или «разбить себя». Требование оператора:
-    прежде чем резать — доказать; размер доказательством не является.
-    Доказательства — `core/split_proof.py`; без него модуль не цель, даже самый
-    большой. Порядок: вид доказательства, его вес, размер — последним.
-
-    Отсеиваются занятые: то, что уже ждёт человека в ящике, и то, что закрыто
-    уроком отката, — предлагать их значит снова упереться в approval_wait.
-    Критический орган (CRITICAL_DENY) отсеивается по правилу САМОГО
-    производителя заявок: живой запуск 2026-09-20 выбрал крупнейший модуль
-    core/self_build_producer.py и получил «grounded target is critical» —
-    материал драйва обязан совпадать с тем, что полоса вообще берёт.
+    Size is not proof: proofs come from `core/split_proof.py`, ordered by kind, weight, then size. Modules already waiting for a human or closed by a rollback lesson are skipped, and CRITICAL_DENY modules are excluded by the proposal producer's own rule.
     """
     from core.self_build_producer import _is_critical
     from core.self_build_rules import blocking_lesson
     from core.split_proof import index_workspace, proof_for, rank_key
 
-    # Производитель заявок молчит, пока в ящике есть НЕРЕШЁННАЯ заявка полосы —
-    # одна за раз, и решает её человек (`_has_pending_self_build_proposal`).
-    # Пока так, материала нет ни по одному модулю: иначе драйв зовёт в запертую
-    # дверь и цикл кончается пустым исходом (живой запуск 2026-09-20).
+    # The producer stays silent while an UNDECIDED lane proposal sits in the inbox (one at a time, `_has_pending_self_build_proposal`), so no module is offered meanwhile.
     if any(r.get("operation") in _SELF_CHANGE_OPS and r.get("status") == "pending"
            for r in _rows(root / "data" / "approval_inbox.jsonl")):
         return []
@@ -217,26 +160,20 @@ def self_improvement_proofs(root: Path, limit: int = 5) -> list[tuple[str, int, 
 
 
 def _tasked_defect_count(root: Path) -> int:
-    """Сколько открытых дефектов реестра можно чинить: у них названа задача.
-
-    Дефект без задачи правкой не закрывается (core/patch_route.py его и не
-    берёт) — звать к нему значило крутить пустой цикл.
-    """
+    """Open registry defects that can be repaired: a task is named (core/patch_route.py skips defects without one)."""
     try:
         from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
 
         return sum(1 for i in SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH).unresolved()
                    if str(i.suggested_next_action or "").strip())
-    except Exception:  # noqa: BLE001 — нечитаемый реестр = ноль поводов, остальное считается
+    except Exception:  # noqa: BLE001 — an unreadable registry = zero reasons, the rest is computed
         return 0
 
 
 def drive_outcomes(root: Path, now: datetime) -> dict[str, list[bool]]:
-    """Исходы целей по драйву, по порядку: True — судья кампании засчитал цель.
+    """Goal outcomes per drive, in order: True = the campaign judge accepted the goal.
 
-    Решение драйва (data/drive_decisions.jsonl) связывается с первым исходом той
-    же цели в журнале кампании; попытки старше ATTEMPT_HORIZON_DAYS и позже
-    `now` не считаются (второе — чтобы замер можно было переиграть в прошлом).
+    A drive decision (data/drive_decisions.jsonl) is matched to the first outcome of the same goal in the campaign log; attempts older than ATTEMPT_HORIZON_DAYS or later than `now` are ignored.
     """
     ledger: dict[str, list[tuple[datetime, str]]] = {}
     for r in _rows(root / "data" / "campaign_ledger.jsonl"):
@@ -256,30 +193,22 @@ def drive_outcomes(root: Path, now: datetime) -> dict[str, list[bool]]:
     return out
 
 
-#: Драйвы-события: повод — факт на диске, и выход их целей судит их вес.
+#: Event drives: the reason is a fact on disk, and the outcome of their goals judges their weight.
 _EVENT_DRIVES = ("stuck_need", "maintenance_need", "uncertainty", "unfinished_obligations",
                  "novelty_need")
 
 
 def _learnable(outcomes: list[bool]) -> float:
-    """Выходит ли цель драйва: доля удач по Лапласу; меньше LP_MIN_ATTEMPTS — 1.0.
-
-    MAGELLAN: невыучиваемую сейчас цель не брать. Без истории судить не о чем,
-    и вес не трогается.
-    """
+    """Whether the drive's goal is learnable: Laplace success share; 1.0 below LP_MIN_ATTEMPTS (no history, weight untouched)."""
     if len(outcomes) < LP_MIN_ATTEMPTS:
         return 1.0
     return (sum(outcomes) + 1) / (len(outcomes) + 2)
 
 
 def learning_interest(outcomes: list[bool]) -> tuple[float, str, str]:
-    """Интерес к области по прогрессу: (значение, режим, объяснение без чисел-проводов).
+    """Interest in an area by progress: (value, mode, explanation).
 
-    Прогресс в учёбе — модуль разницы доли удач «стало» и «было» в последних
-    LP_WINDOW попытках (absolute learning progress, Oudeyer; MAGELLAN). Освоенное
-    (всё выходит) и невыходящее (ничего не выходит) дают ноль; меняющееся —
-    интерес. Попыток меньше LP_MIN_ATTEMPTS — прогресса не видно: небольшой
-    интерес «попробовать», убывающий с каждой попыткой.
+    Absolute learning progress over the last LP_WINDOW attempts; mastered and never-succeeding areas give zero; with fewer than LP_MIN_ATTEMPTS a small "try it" interest that decays per attempt.
     """
     recent = outcomes[-LP_WINDOW:]
     n = len(recent)
@@ -295,7 +224,7 @@ def learning_interest(outcomes: list[bool]) -> tuple[float, str, str]:
 
 
 def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[str, dict[str, Any]]:
-    """Все драйвы: {имя: {"value": 0..1, "why": строка}}. Только чтение диска."""
+    """All drives: {name: {"value": 0..1, "why": str}}. Reads disk only."""
     root = Path(workspace)
     now = now or datetime.now(timezone.utc)
     ledger = _rows(root / "data" / "campaign_ledger.jsonl")
@@ -327,11 +256,7 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
                                         "why": f"незавершённых дел, которые можно сдвинуть: {len(pending)}"}
 
     targets = self_improvement_proofs(root)
-    # Повод чинить себя — событие: дефект с названной задачей или доказанная
-    # правка (2026-09-22: вес был ноль при семи открытых дефектах). Не время с
-    # последней правки. И поводу веришь настолько, насколько починка выходит:
-    # замер 24.09 — 69 попыток самоулучшения, 1% удач, последние 8 пустые;
-    # это не учёба, а беговая дорожка (MAGELLAN: невыучиваемую цель не брать).
+    # The reason to repair itself is an event (a tasked defect or a proven edit), not time since the last edit, and is trusted as far as repairs succeed.
     tasked = _tasked_defect_count(root)
     material = tasked + len(targets)
     repairs = outcomes.get("self_improvement_need", [])[-LP_WINDOW:]
@@ -356,14 +281,12 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
         from core.causal_climb_action import unexplained_observations
 
         unexplained = len(unexplained_observations(root))
-    except Exception:  # noqa: BLE001 — нет лестницы — нет и этой величины, остальное считается
+    except Exception:  # noqa: BLE001 — no ladder, no such value; the rest is computed
         unexplained = 0
     drives["uncertainty"] = {"value": 1.0 - math.exp(-unexplained / 5),
                              "why": f"необъяснённых наблюдений: {unexplained}"}
 
-    # Уткнулся — спроси: интернет и партнёр (слово оператора 2026-09-22:
-    # «он забывает, что у него есть интернет и партнёр»). Совет в подсказке
-    # механизмом не был: сам он заговорил первым 3 раза за всё время.
+    # Stuck: ask (internet and a partner); a hint alone was not a mechanism.
     from core.stuck_route import stuck_evidence
 
     stuck = len(stuck_evidence(root))
@@ -372,10 +295,7 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
         "why": (f"признаков застревания: {stuck}" if stuck else "застревания не видно"),
     }
 
-    # Повод-событие без выхода — тоже беговая дорожка. Живые данные 24.09 после
-    # правки выше: сверху встало «застревание» (0.78), а 8 его последних целей
-    # пустые, 32% удач за всё время. Одно правило на все драйвы-события: вес
-    # умножается на то, выходят ли их цели; без истории вес не трогается.
+    # An event drive without results is also a treadmill: one rule for all event drives, the weight is multiplied by how often their goals succeed; no history leaves it untouched.
     for name in _EVENT_DRIVES:
         if name in drives:
             done = outcomes.get(name, [])[-LP_WINDOW:]
@@ -384,21 +304,19 @@ def compute_drives(workspace: Path | str, now: datetime | None = None) -> dict[s
                 drives[name]["value"] *= factor
                 drives[name]["why"] += f"; выходит: {sum(done)} из {len(done)}"
 
-    # Слово оператора 2026-09-25: источник есть (Agent Market, core/market_worker.py),
-    # но заказы берутся только его «да» на каждый (этап 1) и не раньше, чем агент
-    # готов, — драйв, тянущий к заработку сам, этому противоречил бы.
+    # A market source exists (core/market_worker.py) but orders need the operator's yes each time, so a self-driven earning drive would contradict that.
     drives["economic_opportunity"] = {"value": 0.0,
                                       "why": "площадка подключена, но заказ — только по слову оператора; ноль по его решению"}
     return drives
 
 
 def strongest(drives: dict[str, dict[str, Any]], threshold: float = 0.5) -> tuple[str, float] | None:
-    """Самый сильный драйв выше порога, или None — будить нечего."""
+    """Strongest drive above the threshold, or None (nothing to wake for)."""
     name, info = max(drives.items(), key=lambda kv: kv[1]["value"])
     return (name, info["value"]) if info["value"] >= threshold else None
 
 
-if __name__ == "__main__":  # pragma: no cover — ручной осмотр
+if __name__ == "__main__":  # pragma: no cover — manual inspection
     import sys
 
     ws = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")

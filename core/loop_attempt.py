@@ -1,29 +1,4 @@
-"""Цикл попыток: план → исполнение → вердикт → перепланирование.
-
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Десятый кусок раскола `core/loop.py`.
-
-ЭТОТ КУСОК ОТЛИЧАЕТСЯ ОТ ПРЕДЫДУЩИХ ДЕВЯТИ. Те переезжали дословно, символ в
-символ. Здесь так не вышло: цикл держится за 22 run-локали `_run_inner`, а
-`ruff.toml` этого же репозитория ставит `max-args = 12`. Список параметров на
-22 позиции — не решение, а тот же клубок, переложенный в подпись.
-
-Поэтому состояние прогона названо ЯВНО — `AttemptState` ниже. Он не структура
-для красоты: это перечень того, что цикл попыток на самом деле носит с собой,
-до сих пор существовавший только в виде россыпи локальных имён посреди
-двухтысячестрочного метода. Что из этого вход, что рабочее, а что уезжает
-наружу — теперь написано, а не выводится чтением.
-
-Перенос при этом остался ПРОВЕРЯЕМЫМ: тело цикла получено из истории одной
-объявленной подстановкой `имя -> st.имя` по 22 полям, и
-`tests/test_loop_attempt_split.py` применяет ту же подстановку к историческому
-коду и требует совпадения AST. Это ровно та же сила, что у дословной сверки в
-кусках 1–9, только преобразование названо.
-
-Класс подмешивается в ``AgentLoop``; состояние агента по-прежнему живёт на
-композированном цикле, а `AttemptState` — состояние ОДНОГО прогона.
-"""
+"""Attempt loop: plan, execute, verdict, replan; the tenth piece of the core/loop.py split, mixed into AgentLoop."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -56,15 +31,8 @@ from core.task_complexity import can_skip_planner
 
 @dataclass
 class AttemptState:
-    """То, что цикл попыток носит с собой за один прогон.
+    """What the attempt loop carries within one run; field names equal the former `_run_inner` locals so the mechanical substitution `name -> st.name` stays verifiable by tests/test_loop_attempt_split.py."""
 
-    Имена полей совпадают с прежними локальными именами `_run_inner` — это
-    условие проверяемости переноса: подстановка `имя -> st.имя` механическая,
-    и тест сверяет её с историей. Переименовывать поля можно, но тогда
-    подстановка в тесте обязана переименоваться вместе с ними.
-    """
-
-    # ── Вход: за цикл не меняется ────────────────────────────────────────
     user_question: str
     file_hint: str | None
     goal: Goal
@@ -78,38 +46,23 @@ class AttemptState:
     _run_assumptions: Any
     _cp: Any
 
-    # ── Рабочее: живёт между попытками ───────────────────────────────────
-    #: MVP-12: совет и запреты, доставшиеся от `policy.decide()` прошлой
-    #: попытки. Пусто на первой, наполняется на каждом перепланировании.
+    # Working state between attempts: advice and bans from the previous attempt's policy.decide(); empty on the first.
     advice_for_planner: str = ""
     forbidden_actions: tuple[tuple[str, str], ...] = ()
     attempt: int = 0
 
-    # ── Выход: это читают ПОСЛЕ цикла ────────────────────────────────────
     artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: MVP-14.1 — типизированная цепочка улик, растёт параллельно артефактам.
+    #: Typed evidence chain; grows alongside the artifacts.
     chain: ProvenanceChain = field(default_factory=ProvenanceChain)
     planner_out: PlannerOutput | None = None
     plan: Plan | None = None
     replan_exhausted: bool = False
-    #: Дешёвый путь: поднимается только веткой пропуска планировщика на
-    #: тривиальном ходе без инструментов. Ниже по коду он урезает контекст
-    #: синтезатора, форсирует дешёвый ярус модели и пропускает конвейер знаний.
+    #: Cheap path: raised only by the planner-skip branch on a trivial no-tool turn; trims synthesizer context, forces the cheap model tier and skips the knowledge pipeline.
     cheap_path_active: bool = False
-    #: Тень S2: ставится при обнаружении застоя, читается в конце прогона —
-    #: «во что обошлась бы ранняя остановка». Ничего не останавливает.
+    #: Shadow S2: set on stagnation, read at run end (what an early stop would have cost); stops nothing.
     _stagnation_shadow: dict[str, Any] | None = None
 
-    #: Поля, ради которых вызывающий вообще смотрит в состояние после цикла.
-    #: Объявлено, а не оставлено комментарием, потому что молчаливая потеря
-    #: выхода — самый тихий способ сломать этот перенос: цикл отработает,
-    #: результат ляжет в `st`, и никто его не заберёт. Тест требует, чтобы
-    #: `_run_inner` распаковывал РОВНО этот набор, и чтобы каждое имя в нём
-    #: цикл действительно писал.
-    #:
-    #: Остальное делится на вход (за цикл не меняется) и рабочее состояние
-    #: между попытками — `advice_for_planner` и `forbidden_actions` приходят
-    #: от `policy.decide()` прошлой попытки и наружу не едут.
+    #: Fields the caller reads after the loop. Declared so a silent loss of output cannot happen; the test requires `_run_inner` to unpack exactly this set and the loop to write every name. Everything else is input or working state and does not leave.
     OUTPUTS: ClassVar[frozenset[str]] = frozenset({
         "artifacts",
         "chain",
@@ -123,12 +76,7 @@ class AttemptState:
 
 
 class AgentLoopAttempt:
-    """Ограниченный цикл перепланирования вокруг плана и его исполнения.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """Bounded replanning loop around the plan and its execution; the members are host-contract declarations (no assignments, so nothing is created or shadowed at runtime)."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -137,34 +85,23 @@ class AgentLoopAttempt:
         _current_attempt: int
         _termination_guard: Any
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as CALLABLE attributes: a stub function with an empty body is read by analyzers as a function without return (false E1111).
         _execute_steps_parallel: Any
         _sensor_failed: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a sibling mixin via the MRO; the cross-module link must be written down.
         _defect_signals: Any
         _executed_tools: Any
         cheap_path_enabled: Any
         last_referent_decision: Any
 
     def _run_attempt_loop(self, st: AttemptState) -> None:
-        """Крутить попытки, пока не выйдет ответ или не кончится бюджет.
-
-        Ничего не возвращает: всё, что цикл наработал, лежит в `st` —
-        артефакты, цепочка улик, последний план и вердикт о том, исчерпано ли
-        перепланирование. Вызывающий читает поля оттуда.
-        """
+        """Run attempts until an answer comes out or the budget ends; returns nothing, everything the loop produced lies in `st`."""
         while True:
             st.attempt += 1
             self._current_attempt = st.attempt
 
-            # Emit a structured `replan_attempt` event for every loop
-            # iteration AFTER the first — makes it trivial for tests
-            # (and humans) to see how many attempts ran and which advice
-            # the planner saw on each.
+            # Structured `replan_attempt` event for every iteration after the first.
             if st.attempt > 1:
                 self.log.log(
                     "replan_attempt",
@@ -195,9 +132,7 @@ class AgentLoopAttempt:
                     warnings=st.forced_warnings,
                 )
             else:
-                # ── Local-critique path (PR2) ─────────────────────────────
-                # Resolved referent + critique/show-only → skip planner tools
-                # and synthesise from analysis_target (not memory/GK).
+                # Local-critique path: resolved referent + critique/show-only skips planner tools and synthesises from analysis_target.
                 if (
                     st.local_critique_active
                     and st.attempt == 1
@@ -229,13 +164,7 @@ class AgentLoopAttempt:
                             ),
                         },
                     )
-                # ── Cheap-path gate ───────────────────────────────────────
-                # Trivial, no-tool input (config-flag echoes, greetings, one
-                # line "what is X") never needs a tool: the planner would only
-                # spend a full LLM call to return an empty plan. Skip that call
-                # and let the normal empty-plan flow synthesise the answer.
-                # Gated to the first attempt with no failure/replan context so
-                # replans always get the real planner.
+                # Cheap-path gate: trivial no-tool input never needs a tool; skip the planner call on the first attempt with no failure/replan context.
                 elif (
                     self.cheap_path_enabled
                     and st.attempt == 1
@@ -266,14 +195,7 @@ class AgentLoopAttempt:
                     )
                     st.cheap_path_active = True
                 else:
-                    # Планировщик зовётся всегда: кэш планов удалён по вердикту
-                    # оператора 2026-08-08. Замер (C08): собственный инвалидатор
-                    # (mtime эпизодного хранилища в ключе) делал кэш недостижимым
-                    # в любом профиле с банковкой эпизодов — 0 попаданий на двух
-                    # прогонах одного вопроса; наблюдателей у компонента не было
-                    # (M49/M50 зелёные). Кэширование планов, если понадобится, —
-                    # новая фича с новым контрактом и fail-before тестами, а не
-                    # починка того ключа.
+                    # The planner is always called: the plan cache was removed (its invalidator made it unreachable, 0 hits); caching would be a new feature with its own contract.
                     try:
                         st.planner_out = self.planner.plan(
                             question=st.user_question,
@@ -293,9 +215,7 @@ class AgentLoopAttempt:
                             plan=st.plan,
                             blocked=exc,
                         )
-                        # The other exit (MIR-026 audit): the checkpoint is
-                        # saved and the exception leaves, so settle before it
-                        # does — `pending` would read as «never started».
+                        # The other exit: settle the run objects before the exception leaves, or `pending` would read as never started.
                         self._settle_run_objects(st, "failed")
                         raise
                 st.planner_out = force_file_hint_read_when_explicit(
@@ -314,13 +234,7 @@ class AgentLoopAttempt:
                     "replan_context_chars": len(failure_context),
                 },
             )
-            # Fix #2: surface planner hallucinations as a dedicated event.
-            # When the LLM invents a tool name that is not in the registry,
-            # _validate_steps drops the step silently.  If every step was
-            # dropped (plan_empty_after_drop=True) the loop will proceed to
-            # synthesise from general knowledge — making the answer look
-            # confident when the actual plan failed.  This event lets
-            # operators detect the failure mode without parsing warning strings.
+            # Surface planner hallucinations as an event: when every step was dropped (plan_empty_after_drop) the loop would synthesise a confident answer from general knowledge.
             if st.planner_out.dropped_tools:
                 self.log.log(
                     "plan_tool_drop",
@@ -331,12 +245,9 @@ class AgentLoopAttempt:
                     },
                 )
 
-            # MAST FM-2.6 — reasoning ↔ action consistency check.
+            # MAST FM-2.6: reasoning-action consistency check.
             try:
-                # Довод шага — у шага. Словарная проверка по общей прозе
-                # срабатывала на 54% ходов (замер 2026-09-20) и обвиняла по
-                # форме своей таблицы; планировщик пишет `rationale` к каждому
-                # шагу, и с 2026-09-20 он доезжает сюда (core/planner.py).
+                # The rationale belongs to the step; the vocabulary check over general prose fired on 54% of turns, so the planner's per-step `rationale` is used (core/planner.py).
                 _sources = list(st.planner_out.sources)
                 _with_rationale = sum(1 for s in _sources if s.get("rationale"))
                 _ra_mode = "rationale" if _with_rationale else "keywords"
@@ -351,19 +262,14 @@ class AgentLoopAttempt:
                         "reasoning_action_mismatch",
                         {
                             **_ra_report.to_log_payload(),
-                            # Чем судили и сколько шагов пришли со своим
-                            # доводом: без этого поля нельзя отличить
-                            # структурную проверку от запасной словарной.
+                            # What judged and how many steps came with a rationale: distinguishes the structural check from the fallback vocabulary one.
                             "mode": _ra_mode,
                             "steps_with_rationale": _with_rationale,
                             "steps_total": len(_sources),
                             "attempt": st.attempt,
                         },
                     )
-                    # Banked with the episode as well as logged. Still decides
-                    # nothing — S4's ruling keeps this an observer — but the
-                    # journal is per-run and disappears from the agent's own
-                    # memory, which is where a repeated fault has to be visible.
+                    # Banked with the episode as well as logged; still an observer, but the per-run journal vanishes from the agent's own memory.
                     self._defect_signals.append("reasoning_action_mismatch")
             except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
                 self._sensor_failed("reasoning_action_check", exc)
@@ -372,7 +278,7 @@ class AgentLoopAttempt:
             self.log.log("plan", st.plan, steps=len(st.plan.steps), attempt=st.attempt)
             st._cp.save_plan(attempt=st.attempt, step_ids=[s.id for s in st.plan.steps])
 
-            # Layer 5 — extract plan-level assumptions on the first attempt only.
+            # Layer 5: extract plan-level assumptions on the first attempt only.
             if st.attempt == 1:
                 try:
                     _plan_assumptions = extract_from_plan(
@@ -396,15 +302,7 @@ class AgentLoopAttempt:
             attempt_failures: list[ReplanTrigger] = []
             attempt_chain = ProvenanceChain()
 
-            # Planner JSON parse failure: empty `sources` here is NOT an
-            # intentional general-knowledge plan, it's a contract break.
-            # Without this gate the loop would fall through to the
-            # `if not plan.steps or attempt_artifacts: break` branch
-            # below and the synthesizer would happily produce a long
-            # confident answer from zero evidence. Treat it as a real
-            # failure so `replan_policy.decide()` either gets us a clean
-            # JSON retry or trips `replan_exhausted` and the synthesizer
-            # writes the honest "I could not plan" reply.
+            # Planner JSON parse failure: empty `sources` is a contract break, not an intentional general-knowledge plan; treat it as a failure so replan_policy.decide() retries or trips `replan_exhausted`.
             plan_parse_failed = (
                 "plan_parse_failed" in (st.planner_out.warnings or ())
             )
@@ -416,7 +314,7 @@ class AgentLoopAttempt:
                         "attempt": st.attempt,
                         "warnings": list(st.planner_out.warnings),
                         "raw_chars": len(st.planner_out.raw_response),
-                        # Sanitised, length-capped preview (no full secrets).
+                        # Sanitised, length-capped preview.
                         "raw_preview": _parse_diag.get("raw_preview")
                         or st.planner_out.raw_response[:240],
                         "diagnostics": _parse_diag,
@@ -436,9 +334,7 @@ class AgentLoopAttempt:
                     )
                 )
 
-            # A sanitiser-dropped step is a plan failure and is recorded as one
-            # (exam 2026-09-05, turns 35–36: the reason lived only in the
-            # `planner` event). Declared in test_loop_attempt_split.py.
+            # A sanitiser-dropped step is a plan failure and is recorded as one; declared in test_loop_attempt_split.py.
             attempt_failures.extend(dropped_step_triggers(st.planner_out.warnings, attempt=st.attempt))
 
             for step, outcome, trigger in self._execute_steps_parallel(steps_to_run(self, st, attempt_artifacts)):
@@ -453,9 +349,7 @@ class AgentLoopAttempt:
                     "output": outcome["output"],
                     "issues": outcome["issues"],
                 }
-                # MVP-14.1 — typed evidence. The output is already
-                # redacted (see _execute_step), so the excerpt that
-                # ends up on disk in the chain is safe.
+                # Typed evidence; the output is already redacted, so the excerpt in the chain is safe.
                 ev = evidence_from_tool_result(
                     tool_name=outcome["tool"],
                     arguments=outcome.get("arguments"),
@@ -472,20 +366,7 @@ class AgentLoopAttempt:
                     status="done",
                 )
 
-            # Success: either a 0-step plan (general-knowledge / history-only
-            # answer is intentional) or at least one artifact came through.
-            # `plan_parse_failed` is NOT success — empty `sources` came from
-            # a JSON parse failure, not from the planner choosing zero tools.
-            # Record what failed BEFORE deciding whether the attempt as a whole
-            # succeeded. Until 2026-08-14 this line sat below the success
-            # `break`, so an attempt where one step failed and another produced
-            # an artifact discarded its triggers entirely — they lived only in
-            # the journal. Measured live: `file_read README.md` raised
-            # FileNotFoundError beside a step that worked, and the agent asked
-            # whether the file exists could only answer "cannot be determined".
-            # Banked as a KNOWN GAP on 2026-08-09 by
-            # tests/test_partial_attempt_failure_reporting.py, which named this
-            # exact `break`. One list, one place, both outcomes.
+            # Success: a 0-step plan, or at least one artifact; `plan_parse_failed` is not success. Record what failed BEFORE deciding success, so an attempt with one failed and one working step keeps its triggers.
             st.failure_history.extend(attempt_failures)
 
             if (not st.plan.steps and not plan_parse_failed) or attempt_artifacts:
@@ -496,8 +377,7 @@ class AgentLoopAttempt:
                     continue
                 break
 
-            # MAST FM-1.5 — stagnation check: same failure signature twice
-            # in a row means the loop is looping. Observational only.
+            # MAST FM-1.5: same failure signature twice in a row means looping; observational only.
             try:
                 _stag = self._termination_guard.observe_attempt(
                     attempt=st.attempt,
@@ -506,10 +386,7 @@ class AgentLoopAttempt:
                 )
                 if _stag is not None:
                     self.log.log("stagnation_detected", _stag.to_log_payload())
-                    # Shadow accounting (operator ruling 2026-07-27): record
-                    # WHERE a stop would have happened, so the run can report at
-                    # the end what stopping would have cost or saved. Nothing is
-                    # stopped.
+                    # Shadow accounting: record where a stop would have happened; nothing is stopped.
                     st._stagnation_shadow = {
                         "attempt": st.attempt,
                         "artifacts_at_detection": sorted(attempt_artifacts.keys()),
@@ -525,8 +402,7 @@ class AgentLoopAttempt:
             )
 
             if decision.action == "continue":
-                # Log `replan` ONLY when we are going to try again.
-                # Pairs neatly with `replan_attempt` (next iteration).
+                # Log `replan` only when another attempt will follow.
                 self.log.log(
                     "replan",
                     {
@@ -550,10 +426,7 @@ class AgentLoopAttempt:
                 st.forbidden_actions = decision.forbidden_actions
                 continue
 
-            # Policy said stop. Emit a structured exhaustion event AND
-            # an `error` event (kept for backward-compat with existing
-            # consumers that grep on `code=replan_exhausted`). The
-            # synthesizer takes over with an honest explanation.
+            # Policy said stop: emit an exhaustion event and an `error` event (kept for consumers grepping `code=replan_exhausted`); the synthesizer explains honestly.
             st.replan_exhausted = True
             err = ErrorObject(
                 source="loop",
@@ -588,23 +461,11 @@ class AgentLoopAttempt:
             )
             break
 
-        # MIR-026: the in-run Goal/Plan are LOG objects, and they used to be
-        # born `pending` / `in_progress` and die that way — a reader of the
-        # journal could not tell a finished run from an abandoned one by its
-        # own objects.
+        # The in-run Goal/Plan are log objects; they must be settled so a journal reader can tell a finished run from an abandoned one.
         self._settle_run_objects(st, "failed" if st.replan_exhausted else "done")
 
     def _settle_run_objects(self, st: AttemptState, status: str) -> None:
-        """Write the verdict onto the in-run log objects and journal it.
-
-        Called from BOTH exits. The audit of this repair
-        (`CLOSURE_AUDIT_2026-08-22.md in git history`) applied the field's rule for
-        settle-on-exit — «a status written at one exit lies about the other
-        paths» — and found one: a budget interruption re-raises past the normal
-        end, leaving the objects `pending`, which in this vocabulary means
-        «never started» rather than «interrupted». That is the least honest
-        value available for a run that did work and was cut off.
-        """
+        """Write the verdict onto the in-run log objects and journal it; called from BOTH exits (a budget interruption re-raises past the normal end and would leave `pending`, meaning never started)."""
         st.goal.status = status  # type: ignore[assignment]
         if st.plan is not None:
             st.plan.status = status  # type: ignore[assignment]

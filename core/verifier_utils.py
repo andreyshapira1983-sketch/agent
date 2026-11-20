@@ -35,35 +35,20 @@ def _normalise_figure(fig: str) -> str:
     return s.replace("\u2013", "-").replace("\u2014", "-")
 
 
-#: Знаки валюты, приклеенные к числу. Замер 2026-09-23: число утверждения
-#: извлекается вместе с ними («$0,171»), а инструменты печатают сумму словом
-#: («usd 0.171»), поэтому дословного совпадения не бывает НИКОГДА — и каждое
-#: денежное утверждение получало `[claim-figure-unverified]`.
+#: Currency signs glued to a number. A claim's figure is extracted with them ("$0,171") while tools print the amount as a word ("usd 0.171"), so a verbatim match never happened.
 _CURRENCY_GLUE = "$€£₽¥"
 _UNIT_WORD_RE = re.compile(r"(?:usd|eur|gbp|долл\w*|руб\w*|rub)\.?$")
 
 
 def _figure_variants(fig: str) -> set[str]:
-    """Написания ОДНОГО И ТОГО ЖЕ числа, которые сверка обязана принять.
+    """Spellings of the SAME number that verification must accept.
 
-    Разбирается ровно две беды, обе замеренные 2026-09-23 на шести стёртых
-    ответах (пять из шести — экономическая работа):
-
-    1. **Знак валюты приклеен.** «$0,171» против «usd 0.171» в выводе опыта.
-    2. **Десятичная запятая.** Агент отвечает по-русски и пишет «0,171»,
-       а инструменты печатают в C-локали «0.171».
-
-    Запятая может быть и разделителем тысяч («1,500» по-английски — это 1500),
-    и решать, что именно она значит, здесь НЕ нужно: принимаются оба чтения,
-    и с точкой и без разделителя. Сверка от этого не слабеет — она принимает
-    больше НАПИСАНИЙ того же числа, но ни одного ДРУГОГО числа.
-    """
+        Two cases: a glued currency sign ("$0,171" vs "usd 0.171") and a decimal comma ("0,171" vs "0.171"). A comma may also be a thousands separator ("1,500"), so both readings are accepted, with a dot and without a separator. More SPELLINGS of the same number, never another number."""
     base = _normalise_figure(fig)
     if not base:
         return set()
     out = {base, base.lstrip(_CURRENCY_GLUE)}
-    # Единица словом («руб», «usd») — как приклеенный знак: в улике число часто
-    # без неё («Доставка 1 500»). Принимается то же число, не другое (24.09).
+    # A unit as a word ("руб", "usd") acts like a glued sign: evidence often has the number without it. The same number is accepted, not another.
     unitless = _UNIT_WORD_RE.sub("", base)
     if unitless and unitless != base and any(ch.isdigit() for ch in unitless):
         out.add(unitless)
@@ -77,21 +62,9 @@ def _figure_variants(fig: str) -> set[str]:
 
 
 def extract_statistical_figures(text: str) -> list[str]:
-    """Числа, которые УТВЕРЖДАЕТ кусок. Адрес цитаты сюда не входит.
+    """Numbers the chunk CLAIMS. The citation address is not included.
 
-    Маркер цитаты снимается перед разбором. До 2026-08-23 он оставался, и
-    цифры из пути адреса становились числами утверждения: для
-    «…20 миллисекунд. [web:…/p/10]» извлекалось ['20', '10'], лишнего числа в
-    источнике не было, и верно процитированный кусок понижался до
-    `topic_supported_but_claim_unverified`. Односимвольные хвосты проходили
-    лишь потому, что не дотягивали до `_STAT_FIGURE_MIN_LEN` — то есть беда
-    росла с длиной идентификатора, а настоящие адреса полны цифр: даты
-    `/2026/08/23/`, номера статей, страницы.
-
-    Найдено при замере дискриминации верификатора парами (MIR-141): доля
-    принятия ВАЛИДНЫХ ответов держалась ровно на 80 %, и эта ровность выдала
-    систематическую причину.
-    """
+        The citation marker is stripped before parsing; otherwise digits from the address path (dates, article numbers) became claim numbers and a correct citation was demoted to `topic_supported_but_claim_unverified`."""
     if not text:
         return []
     text = _CITATION_RE.sub(" ", text)
@@ -116,10 +89,7 @@ def is_statistical_claim(text: str) -> bool:
     return bool(text and _STAT_TRIGGER_RE.search(text))
 
 
-#: Допуск для ПРИБЛИЖЁННОГО числа: «около 20» при 19.8 в улике — верно, а
-#: буквального «20» там нет. Освобождать приближения целиком было бы пропуском
-#: («около 20» при 500 обязано ловиться), поэтому вместо освобождения —
-#: считаемый допуск.
+#: Tolerance for an APPROXIMATE number: "about 20" with 19.8 in evidence is right though a literal "20" is absent. Exempting approximations entirely would let "about 20" pass at 500, so a computed tolerance is used.
 _APPROXIMATION_TOLERANCE = 0.1
 
 
@@ -134,7 +104,7 @@ def _numbers_in(text: str) -> list[float]:
 
 
 def _approximately_supported(excerpt: str, figure: str) -> bool:
-    """Есть ли в улике число в пределах допуска от заявленного."""
+    """Whether the evidence has a number within tolerance of the claimed one."""
     claimed = _numbers_in(figure)
     if not claimed:
         return False
@@ -148,11 +118,7 @@ def _approximately_supported(excerpt: str, figure: str) -> bool:
 
 
 def _found_whole(variant: str, excerpt_norm: str) -> bool:
-    """Число в улике целиком, а не кусок другого: «2500» не внутри «12500».
-
-    24.09: подстрока без границ принимала «2 500 руб.» по улике «12 500» (и
-    раньше — «500» внутри «1500»). Граница — не цифра вплотную слева/справа.
-    """
+    """The number in evidence as a whole, not part of another: "2500" not inside "12500". The boundary is a non-digit directly left/right."""
     lead = r"(?<!\d)" if variant[:1].isdigit() else ""
     tail = r"(?!\d)" if variant[-1:].isdigit() else ""
     return re.search(lead + re.escape(variant) + tail, excerpt_norm) is not None
@@ -187,9 +153,7 @@ def is_structural_chunk(text: str) -> bool:
     if not text or not text.strip():
         return True
     stripped = text.strip()
-    # Кодовый забор — предложение, не утверждение: вне арифметики улик
-    # (2026-08-29, серия «учимся программировать себя»). Проза о коде
-    # остаётся заявлением и проверяется как раньше.
+    # A code fence is a sentence, not a claim: outside the arithmetic of evidence. Prose about code stays a claim and is checked as before.
     if stripped.startswith("```"):
         return True
     if _output_contract_header_name(stripped) is not None:
@@ -228,18 +192,14 @@ def _merge_citation_only_chunks(chunks: list[str]) -> list[str]:
     return merged
 
 
-#: Кодовый забор целиком, лениво и без катастрофы: ``` … ``` через (?s).
+#: A whole code fence, lazy and non-catastrophic: ``` ... ``` via (?s).
 _FENCE_BLOCK_RE = re.compile(r"(?s)(```.*?```)")
 
 
 def split_into_chunks(answer: str) -> list[str]:
-    """Проза режется на предложения; кодовый забор — атомарный кусок.
+    """Prose is cut into sentences; a code fence is one atomic chunk.
 
-    До 2026-08-29 `\\n+` в резаке шинковал рождённый код на псевдо-заявления,
-    и стена улик душила творчество (живое удушение run_e4d9a8e8: агент
-    спроектировал свой первый тест — страж спрятал 27 «утверждений»). Код —
-    предложение, не заявление о мире; его судья — тесты.
-    """
+        Code is a sentence, not a claim about the world; its judge is tests."""
     if not answer or not answer.strip():
         return []
     chunks: list[str] = []
@@ -346,8 +306,7 @@ def runtime_evidence_pool() -> list[Evidence]:
     from core.run_context import current_run
     from core.runtime_self import process_facts, shown_facts
 
-    # Плюс всё, что блок `<runtime_self>` показал модели В ЭТОМ прогоне:
-    # подсказка разрешает цитировать каждое его поле (`core/runtime_self.py`).
+    # Plus everything the `<runtime_self>` block showed the model IN THIS run: the hint allows citing every field of it (`core/runtime_self.py`).
     run_id = str(getattr(current_run(), "run_id", "") or "")
     facts = {**shown_facts(run_id), **process_facts()}
     return [
@@ -363,45 +322,26 @@ def runtime_evidence_pool() -> list[Evidence]:
 
 
 def truth_excerpt(text: str) -> str:
-    """Выдержка БЕЗ вопроса опыта: всё после маркера — код, который ход написал сам.
+    """Excerpt WITHOUT the experience question: everything after the marker is code the turn wrote itself.
 
-    Разделение внесено 2026-09-20: без кода гейт литералов считал имена
-    собственных переменных выдуманными, а с кодом внутри общей выдержки
-    вопрос опыта снова подтверждал бы его ответ (docs/CODE_NOTES.md, «The
-    experiment's question refuted its answer»).
-    """
+        Split so the literal gate does not count the turn's own variable names as invented, and so the experience question inside a shared excerpt does not confirm its own answer."""
     from core.evidence import QUESTION_CODE_MARKER
 
     return str(text or "").split(QUESTION_CODE_MARKER, 1)[0]
 
 
 def _search_output_evidence(chain: ProvenanceChain) -> list:
-    """Выдача `find_in_files` — тоже улика о названных в ней файлах.
+    """A `find_in_files` result is also evidence about the files named in it.
 
-    Образец взят у соседа: в `match_citation` для ссылки `web` к кандидатам
-    так же добавляются попадания `web_search_hit`.
-
-    Живой случай 2026-09-21: агента попросили найти свои поломки. Он нашёл,
-    сослался как положено — `[file:core/x.py:871]`, — и ОДИННАДЦАТЬ из
-    двадцати двух утверждений вырезали как выдуманные цитаты. Причина: он
-    ИСКАЛ по файлам, а не открывал их, а поиск кладёт всю выдачу в одну
-    улику `tool_output:find_in_files`, которая для ссылки вида `file:` даже
-    не попадала в кандидаты. Мы требуем ссылок с файлом и строкой — и
-    наказывали за них, если строку нашли поиском. Поиск он звал 3099 раз
-    против 3508 чтений: половина работы была нецитируемой по построению.
-    """
+        Same pattern as `match_citation` adding `web_search_hit` for `web` citations. A search lists all hits in one `tool_output:find_in_files` evidence, which a `file:` citation did not reach, so correct citations of lines found by search were cut as invented."""
     return [ev for ev in chain.by_kind("tool_output")  # type: ignore[arg-type]
             if getattr(ev, "obtained_via", "") == "find_in_files"]
 
 
 def _search_names_file(evidences: list, cited_body: str):
-    """Улика поиска, в чьей выдаче назван ЭТОТ файл, или None.
+    """The search evidence whose output names THIS file, or None.
 
-    Выдача поиска перечисляет попадания как «путь:строка: текст», значит
-    путь, встретившийся в ней, — свидетельство об этом файле. Сверяется сам
-    путь, а не подстрока: иначе ссылка на `core/x.py` цеплялась бы за
-    упоминание `core/xyz.py`.
-    """
+        Search output lists hits as "path:line: text"; the path itself is compared, not a substring (`core/x.py` must not match `core/xyz.py`)."""
     cited = str(cited_body).split(":", 1)[0].strip().replace("\\", "/").lower()
     if not cited:
         return None
@@ -413,16 +353,9 @@ def _search_names_file(evidences: list, cited_body: str):
 
 
 def _candidates_for(citation: Citation, chain: ProvenanceChain) -> list:
-    """Улики, среди которых ищется эта ссылка.
+    """Evidence among which this citation is looked up.
 
-    `runtime` — measured, not gathered: the process reading its own
-    interpreter, version, pid and cwd. Its own execution is the proof, and
-    until 2026-08-14 there was no channel through which it could be offered.
-
-    `web` добирает попадания поиска в интернете, `file` — выдачу поиска по
-    файлам: и то и другое свидетельства о предмете ссылки, добытые иначе,
-    чем прямым открытием.
-    """
+        `runtime` is measured, not gathered: the process reading its own interpreter, version, pid and cwd. `web` adds internet search hits and `file` adds file-search output: both are evidence about the citation's subject obtained other than by direct opening."""
     candidates = list(chain.by_kind(citation.expected_kind))  # type: ignore[arg-type]
     extra: list = []
     if citation.prefix == "runtime":
@@ -503,11 +436,9 @@ def match_citation(citation: Citation, chain: ProvenanceChain) -> Evidence | Non
 
 
 def best_run_of_source(ev: Evidence, chain: ProvenanceChain, claim: str) -> Evidence:
-    """Из прогонов ОДНОГО источника — тот, что называет литералы утверждения.
+    """Of the runs of ONE source, the one that names the claim's literals.
 
-    У инструмента адрес один на все вызовы, а `match_citation` отдаёт первый.
-    Улики с ДРУГИМ адресом не участвуют: чужой текст значения не отмывает (MIR-060).
-    """
+        A tool has one address for all calls and `match_citation` returns the first. Evidence with ANOTHER address is excluded: foreign text does not launder a value."""
     from .verifier_absence import literals_absent_from_excerpt
 
     runs = [claim_view(e, claim) for e in chain.evidences if e.source_id == ev.source_id and e.kind == ev.kind]
@@ -516,7 +447,7 @@ def best_run_of_source(ev: Evidence, chain: ProvenanceChain, claim: str) -> Evid
     return min(runs, key=lambda e: len(literals_absent_from_excerpt(claim, e.excerpt or "", e.source_id or "")))
 
 
-#: Окно вокруг слова утверждения и потолок выдержки, собранной под утверждение.
+#: Window around a claim word and the ceiling of the excerpt assembled for a claim.
 _VIEW_RADIUS = 300
 _VIEW_BUDGET = 2400
 _VIEW_MAX_HITS = 40
@@ -524,7 +455,7 @@ _ANCHOR_RE = re.compile(r"\d+(?:[.,\-]\d+)*|[^\W\d_]{3,}")
 
 
 def _anchor_hits(claim: str, low: str) -> dict[str, list[int]]:
-    """Где в тексте стоят числа и слова утверждения (число — во всех своих написаниях)."""
+    """Where the claim's numbers and words stand in the text (a number in all its spellings)."""
     hits: dict[str, list[int]] = {}
     for anchor in {m.group(0).lower() for m in _ANCHOR_RE.finditer(_CITATION_RE.sub(" ", claim))}:
         forms = _figure_variants(anchor) if anchor[0].isdigit() else {anchor}
@@ -535,14 +466,14 @@ def _anchor_hits(claim: str, low: str) -> dict[str, list[int]]:
 
 
 def _best_windows(hits: dict[str, list[int]], size: int) -> list[tuple[int, int]]:
-    """Окна, вместе накрывающие больше всего РАЗНЫХ слов утверждения; редкое и числа весят больше."""
+    """Windows jointly covering the most DISTINCT claim words; rare words and numbers weigh more."""
     from bisect import bisect_left
 
     weight = {a: (3.0 if a[0].isdigit() else 1.0) / len(pos) for a, pos in hits.items()}
     span = 2 * _VIEW_RADIUS
 
     def count(anchor: str, lo: int) -> int:
-        # Целиком: слово, разрезанное краем окна, в выдержке не стоит.
+        # Whole words only: a word cut by the window edge is not in the excerpt.
         pos = hits[anchor]
         return bisect_left(pos, lo + span - len(anchor) - 1) - bisect_left(pos, lo)
 
@@ -550,7 +481,7 @@ def _best_windows(hits: dict[str, list[int]], size: int) -> list[tuple[int, int]
     windows: set[tuple[int, int]] = set()
     while left and len(windows) * span < _VIEW_BUDGET:
         starts = sorted({max(0, p - _VIEW_RADIUS) for a in left for p in hits[a]})
-        # При равенстве — окно, где слов утверждения больше по счёту (плотное место, а не край).
+        # On a tie, the window with more claim words by count (a dense spot, not an edge).
         lo = max(starts, key=lambda s: (sum(weight[a] for a in left if count(a, s)),
                                         sum(count(a, s) for a in left)))
         covered = [a for a in left if count(a, lo)]
@@ -562,10 +493,9 @@ def _best_windows(hits: dict[str, list[int]], size: int) -> list[tuple[int, int]
 
 
 def claim_view(ev: Evidence, claim: str) -> Evidence:
-    """Улика с выдержкой из тех мест ВСЕГО текста источника, где стоят слова утверждения.
+    """Evidence with an excerpt from the places in the WHOLE source text where claim words stand.
 
-    Текст дословный: чего нет в источнике, того нет и здесь (первые 800 знаков страницы — меню).
-    """
+        The text is verbatim: what is not in the source is not here (the first 800 chars of a page are menu)."""
     from dataclasses import replace
 
     text = ev.source_text
@@ -598,9 +528,7 @@ def _independent(ev: Evidence) -> bool:
 
 
 def _find_semantic_support(claim: str, chain: ProvenanceChain, llm: Any) -> Evidence | None:
-    # Uncited support may come only from INDEPENDENT evidence: the agent's own
-    # memory or files cannot verify a sentence just because the model agrees
-    # (проверка 17.11, №8).
+    # Uncited support may come only from INDEPENDENT evidence: the agent's own memory or files cannot verify a sentence just because the model agrees.
     candidates = sorted((e for e in chain.evidences if _independent(e)),
                         key=lambda e: e.confidence, reverse=True)
     for ev in candidates:
@@ -660,26 +588,19 @@ _COUNT_WORDS: dict[str, int] = {
 }
 
 
-#: Пункт, который предложение само же отвергло, — не перечислен, а исключён.
+#: An item the sentence itself rejected is excluded, not enumerated.
 _ENUM_EXCLUDED_RE = re.compile(
     r"не\s+подход|не\s+подошл|не\s+входит|исключ|not\s+match|excluded",
     re.IGNORECASE,
 )
-#: Пункт, который целиком — слово-связка, а не член перечисления: «(например,
-#: яблоко, груша)» перечисляет два плода, а не три. Замер 2026-09-23: в живом
-#: ответе «(например, планировщик говорит…, а верификатор…)» связка ушла в счёт.
+#: An item that is entirely a connective word, not a list member: "(for example, apple, pear)" lists two fruits, not three.
 _DISCOURSE_ONLY_RE = re.compile(
     r"^(?:например|в\s+частности|то\s+есть|скажем|в\s+том\s+числе|а\s+именно|"
     r"e\.g\.?|i\.e\.?|for\s+example|for\s+instance|namely)$",
     re.IGNORECASE,
 )
-#: Группа цифр внутри дроби: «0.6», «0,6», «1.5». Десятичное число — один
-#: токен (так режут числа токенизаторы, начиная с Penn Treebank); его дробная
-#: часть счётом не бывает.
-#: Перечень, который сам объявил себя неполным: «(Tong, Carroll, Preskill и
-#: др.)» не может опровергнуть «41 файл». Замер 2026-09-24 по 441 живому
-#: ответу: клеймо claim-refuted стояло на «лежит 41 текстовый файл с лекциями
-#: (Tong, Carroll, Srednicki, Preskill и др.)» — верном утверждении.
+#: Digit group inside a fraction ("0.6", "0,6", "1.5"): a decimal is one token, its fractional part is never a count.
+#: A list that declares itself incomplete ("... and others") cannot refute "41 files".
 _PARTIAL_LIST_RE = re.compile(
     r"(?:\bи\s+(?:др|пр)\.?|\bи\s+т\.?\s*(?:д|п)\.?|\bи\s+так\s+далее|\bи\s+прочие|"
     r"\betc\.?|\band\s+so\s+on|\band\s+others|…|\.\.\.)\s*$",
@@ -689,11 +610,7 @@ _DECIMAL_PART_BEFORE_RE = re.compile(r"\d[.,]$")
 _DECIMAL_PART_AFTER_RE = re.compile(r"^[.,]\d")
 
 
-#: Число, за которым идёт месяц или год, или перед которым стоит тире
-#: диапазона, — ДАТА, а не заявленный счёт. Рабочий заказ 1, проход 2
-#: (2026-09-05): «…на 15–25 сентября 2026 (1 взрослый, эконом, только ручная
-#: кладь)…» дал count_mismatch expected=25 actual=3 — верный вывод «источники
-#: заблокированы» был опровергнут датой вылета.
+#: A number followed by a month or year, or preceded by a range dash, is a DATE, not a claimed count.
 _DATE_LIKE_NUMBER_RE = re.compile(
     r"(?:[–—-]\s*)?\b(\d{1,2})\s+(?:"
     r"январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|"
@@ -714,38 +631,28 @@ def _number_is_a_date(text: str, m: Any) -> bool:
     return bool(re.search(r"[–—-]\s*$", before))
 
 
-#: Скобка-пояснение («по данным поиска — …», «из них …», «всего …») — не
-#: перечень предметов. 2026-09-21: «встречается 5 раз … (по данным поиска — 10
-#: совпадений, из них 5 строк с X и 5 с Y)» — скобка прочитана как перечень из
-#: двух, и ВЕРНОЕ «5 и 5» получило клеймо лжи. Перечень с количествами
-#: («rotor-33: 5 шт., gasket-9: 0 шт.») остаётся перечнем.
+#: A clarifying parenthesis ("according to the search - ...", "of which ...", "total ...") is not an item list. A list with quantities ("rotor-33: 5 pcs, gasket-9: 0 pcs") stays a list.
 _ITEM_CARRIES_A_COUNT_RE = re.compile(
     r"(?i)^(?:по\s+данным|согласно|всего|итого|according|in\s+total)|\bиз\s+них\b|\bof\s+which\b")
 
 
-#: Скобка относится к БЛИЖАЙШЕМУ числу перед ней. Замер 2026-09-22 по всем
-#: ответам мостика: 4 срабатывания, все 4 ложные — «4 константы, 2
-#: dataclass-модели (SplitStep, SplitPlan)» сверялось с «4»; «строка 58
-#: определяет … (…)» приняло номер строки за счёт; «шесть записей, из них три
-#: … (одна medium, две без значения)» — разбивку по количествам за перечень;
-#: «три случая (вставка `Edit[i, j−1]+1`, …)» резало пункты по запятым ВНУТРИ
-#: кода и насчитало шесть.
+#: A parenthesis belongs to the NEAREST number before it; splitting items on commas INSIDE code or mistaking a line number or a breakdown for a count gave false refutations.
 _PAREN_RE = re.compile(r"\(([^()]{2,200})\)")
 _COUNT_TOKEN_RE = re.compile(
     r"\b(\d{1,2})\b|\b(" + "|".join(_COUNT_WORDS) + r")\b", re.IGNORECASE)
 _NOUN_THEN_GAP_RE = re.compile(r"\s+[\wЀ-ӿ-]+[^().\n]{0,60}$")
-#: Число-адрес (строка, пункт, шаг, глава), а не количество.
+#: Address number (line, item, step, chapter), not a quantity.
 _ADDRESS_BEFORE_RE = re.compile(
     r"(?i)(?:строк\w*|line|lines|стр\.|пункт\w*|№|#|§|глав\w*|раздел\w*|"
     r"chapter|section|step|шаг\w*)\s*$")
-#: Пункт, который начинается с количества, — разбивка, а не предмет перечня.
+#: An item that starts with a quantity is a breakdown, not an item of the list.
 _ITEM_STARTS_WITH_A_COUNT_RE = re.compile(
     r"(?i)^(?:\d+|" + "|".join(_COUNT_WORDS) + r")\b")
 _OPENERS, _CLOSERS = "([{«", ")]}»"
 
 
 def _top_level_items(inner: str) -> list[str]:
-    """Пункты скобки: деление по `,`/`;` только вне кода, скобок и кавычек."""
+    """Parenthesis items: split on `,`/`;` only outside code, brackets and quotes."""
     items, buf, depth, in_code = [], [], 0, False
     for ch in inner:
         if ch == "`":
@@ -764,7 +671,7 @@ def _top_level_items(inner: str) -> list[str]:
 
 
 def _is_decimal_part(text: str, token: re.Match[str]) -> bool:
-    """Группа цифр — часть десятичного числа («0.6», «0,6»), а не счёт."""
+    """A digit group that is part of a decimal number ("0.6", "0,6"), not a count."""
     if not token.group(1):
         return False
     return bool(_DECIMAL_PART_BEFORE_RE.search(text[:token.start()])
@@ -772,17 +679,12 @@ def _is_decimal_part(text: str, token: re.Match[str]) -> bool:
 
 
 def _claimed_count_before(text: str, paren_start: int) -> int:
-    """Счёт, к которому относится скобка: ближайшее число перед ней, за
-    которым идёт существительное; 0 — такого нет (дата, адрес, не счёт)."""
+    """The count a parenthesis refers to: the nearest number before it followed by a noun; 0 means none (date, address, not a count)."""
     lead_from = max(0, paren_start - 120)
-    # Точка режет предложение, но не дробь: замер 2026-09-23 — в «падает на
-    # 0.6 за каждое противоречие (…)» точка разрезала 0.6, и шестёрка стала
-    # «обещанными шестью пунктами»; ИСТИННОЕ утверждение ушло человеку с
-    # клеймом claim-refuted.
+    # A period cuts a sentence but not a fraction (a cut "0.6" turned its six into a promised count).
     lead = re.split(r"(?<!\d)\.|\.(?!\d)|[\n()]", text[lead_from:paren_start])[-1]
     offset = paren_start - len(lead)
-    # Ближайшее число, за которым идёт существительное: в «три позиции с qty
-    # меньше 6 (…)» шестёрка — порог сравнения, счёт — «три».
+    # Nearest number followed by a noun: in "three items with qty less than 6 (...)" six is a comparison threshold, the count is "three".
     token = next((t for t in reversed(list(_COUNT_TOKEN_RE.finditer(lead)))
                   if _NOUN_THEN_GAP_RE.match(lead[t.end():])
                   and not _is_decimal_part(lead, t)), None)
@@ -797,9 +699,7 @@ def _claimed_count_before(text: str, paren_start: int) -> int:
 
 
 def enumeration_count_reason(text: str) -> Any:
-    """R2: заявленный счёт против СОБСТВЕННОГО перечисления того же
-    предложения.
-    """
+    """R2: the claimed count against the sentence's OWN enumeration."""
     from .verifier_models import ClaimReason
 
     text = text or ""
@@ -836,10 +736,8 @@ def literal_covered_by_union(
     evidences: list[Any],
     chain_source_ids: list[str] | None = None,
 ) -> bool:
-    """R3: литерал накрыт ОБЪЕДИНЕНИЕМ процитированных улик (текст + адрес)."""
-    # `expected` — склейка до трёх литералов через ", " (см. absent_literal_
-    # reason): живой прогон a5813910 показал, что поиск склейки как одной
-    # подстроки не находил НИЧЕГО, и объединение не снимало ни одного иска.
+    """R3: the literal is covered by the UNION of cited evidence (text + address)."""
+    # `expected` is a join of up to three literals with ", " (see absent_literal_reason): searching the join as one substring found nothing.
     needles = [n.strip().lower() for n in (expected or "").split(",") if n.strip()]
     if not needles:
         return False
@@ -848,9 +746,6 @@ def literal_covered_by_union(
         + "\n" + (getattr(ev, "source_id", "") or "").lower()
         for ev in evidences or []
     ]
-    # Живой 0d88ba79: кусок цитировал ОДИН файл, называя другие, прочитанные
-    # тем же ходом. Литерал, совпадающий с АДРЕСОМ улики цепи, не выдуман —
-    # его референт открывался. Только адреса, не тексты: содержимое чужой
-    # улики отмывало бы значения обратно (MIR-060).
+    # A chunk cited ONE file while naming others read in the same turn. A literal equal to the ADDRESS of a chain's evidence is not invented, its referent was opened. Addresses only, not texts: foreign content would launder values.
     haystacks.extend((sid or "").lower() for sid in chain_source_ids or [])
     return all(any(n in h for h in haystacks) for n in needles)

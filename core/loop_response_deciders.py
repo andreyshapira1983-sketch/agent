@@ -1,7 +1,6 @@
-"""Черновик ответа и решатели над ним — миксин ``AgentLoop`` между синтезом и композицией.
+"""Answer draft and its deciders: an ``AgentLoop`` mixin between synthesis and composition.
 
-Каждый решатель либо переписывает утверждения (``set_body``), либо навешивает
-заметку (``add_notice``); склейка одна — ``render()`` у вызывающего.
+Each decider either rewrites claims (``set_body``) or attaches a notice (``add_notice``); the caller joins them with ``render()``.
 """
 from __future__ import annotations
 
@@ -42,9 +41,9 @@ class EnforcementFallbackUnavailable(RuntimeError):
 
 
 class AgentLoopResponseDeciders:
-    """Сборка черновика ответа: кто и что вправе о нём сказать."""
+    """Answer-draft assembly: who may say what about it."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         persistent_store: Any
         clarification_gate_enabled: Any
@@ -55,10 +54,11 @@ class AgentLoopResponseDeciders:
         last_confidence_vector: Any
         last_evidence_support: Any
         last_role_context: Any
-        # Сюда кладётся `self_contradiction` — дорога от принятия ответа к допуску в обучение.
+        # `self_contradiction` goes here: the road from answer acceptance to admission into
+        # learning.
         _defect_signals: Any
 
-        # Атрибуты, а не заглушки-функции: иначе каждый вызов ложно помечается E1111.
+        # Attributes, not stub functions: otherwise every call is falsely flagged E1111.
         _durable_learning_suppressed: Any
         _sensor_failed: Any
         _file_read_workspace_root: Any
@@ -81,8 +81,8 @@ class AgentLoopResponseDeciders:
             signals = getattr(self, "_defect_signals", None)
             if signals is not None:
                 signals.append("answer_enforcement_failed")
-        except Exception:  # noqa: BLE001, S110 — последний рубеж вокруг записи
-            pass  # nosec B110 — безопасный отказ важнее записи о нём
+        except Exception:  # noqa: BLE001, S110 — last line of defence around the write
+            pass  # nosec B110 — a safe refusal matters more than a record of it
         try:
             return ResponseDraft(body=ENFORCEMENT_FAILURE_ANSWER, answer_withheld=True)
         except Exception as build_exc:
@@ -92,10 +92,9 @@ class AgentLoopResponseDeciders:
             ) from build_exc
 
     def _disclose_substituted_model(self, draft: Any) -> None:
-        """Сказать в ОТВЕТЕ, если его написал запасной поставщик.
+        """State IN the answer if a fallback provider wrote it.
 
-        Маршрут читается из леджера расходов — второй источник той же правды мог бы
-        разойтись. См. docs/CODE_NOTES.md, «The answer was not written by the model you chose».
+        The route is read from the spend ledger (a second source of the same truth could diverge). See docs/CODE_NOTES.md, "The answer was not written by the model you chose".
         """
         try:
             ledger = getattr(getattr(self, "model_router", None), "usage_ledger", None)
@@ -116,8 +115,8 @@ class AgentLoopResponseDeciders:
                 author="degraded_route", channel="append", text=notice,
             )
         except (AttributeError, TypeError, ValueError) as exc:
-            # Узко: кривая запись леджера или черновик без `add_notice`. Ответ
-            # не роняем, но о провале пишем в журнал.
+            # Narrow: a malformed ledger record or a draft without `add_notice`. The answer is not
+            # dropped, but the failure is journaled.
             self.log.log("model_substitution_disclosure_failed", {
                 "error_type": type(exc).__name__, "error": str(exc)[:300],
             })
@@ -169,7 +168,6 @@ class AgentLoopResponseDeciders:
                             _new_records.append(_rec)
                     if _updated:
                         # +1 on the CURRENT value, under the store's lock
-                        # (проверка 17.11, серьёзная №3).
                         self.persistent_store.patch_many(
                             {rid: {"causal_use": lambda n: (n or 0) + 1} for rid in _updated}
                         )
@@ -191,17 +189,17 @@ class AgentLoopResponseDeciders:
                     pass
 
     def _headline_check(self, draft: ResponseDraft) -> None:
-        """Доклад о действиях, свежесть и заголовок против фактов ответа — видно, но не карантин.
+        """Report on actions, freshness and headline against the answer's facts: visible, not quarantine.
 
-        Сигнал о заголовке наблюдающий (нет в DISQUALIFYING_DEFECT_SIGNALS).
+        The headline signal is observing (not in DISQUALIFYING_DEFECT_SIGNALS).
         """
-        # Доклад о записи сверяется с тем, что цикл реально выполнил.
+        # A report about a write is checked against what the loop actually executed.
         ledger = action_report_mismatch(draft.body, list(getattr(self, "_executed_tools", []) or []))
         if ledger:
             self._defect_signals.append("action_report_mismatch")
             self.log.log("action_report_mismatch", {"notice": ledger})
             draft.add_notice(author="action_ledger", channel="append", text=ledger)
-        # Порождено ли названное в выводе этим ходом (core/turn_provenance.py).
+        # Whether what the output names was generated by this turn (core/turn_provenance.py).
         run = current_run()
         root_of = getattr(self, "_file_read_workspace_root", None)
         stale = older_than_turn(_report_head(draft.body or ""), root_of() if callable(root_of) else None,
@@ -258,7 +256,7 @@ class AgentLoopResponseDeciders:
             )
             # Enforcement judges CLAIMS, so it gets the body alone — notices are not claims.
             _stage = "apply_enforcement"
-            # Recorded failed attempts (429, blocked, empty) back an honest «could not confirm».
+            # Recorded failed attempts (429, blocked, empty) back an honest "could not confirm".
             from core.low_evidence_policy import count_blocked_attempts
 
             _enf = apply_answer_enforcement(
@@ -280,22 +278,22 @@ class AgentLoopResponseDeciders:
                     _enf.low_evidence_payload or _enf.to_log_payload(),
                 )
             _stage = "bank_contradiction"
-            # `decide_usage_eligibility` по сигналу не пускает ответ в опыт. Ставится по
-            # НАХОДКЕ, а не по исходу: исход могло забрать более сильное действие.
+            # `decide_usage_eligibility` keeps the answer out of experience on the signal. Set by
+            # the FINDING, not the outcome: a stronger action may have taken the outcome.
             if getattr(_enf, "contradictions", ()):
                 self._defect_signals.append("self_contradiction")
-            # R4: фабрикация цитат — тот же класс ложности, судья другой.
+            # R4: citation fabrication is the same class of falsity, with a different judge.
             if _enf.outcome == "citation_integrity":
                 self._defect_signals.append("citation_fabricated")
                 draft.answer_withheld = True
-            elif _enf.outcome == "citation_excised":  # ответ ушёл, выдуманное снято
+            elif _enf.outcome == "citation_excised":  # answer went out, the invented part removed
                 self._defect_signals.append("citation_excised")
             _stage = "set_body"
             if _enf.applied:
                 draft.set_body(_enf.answer, by="answer_enforcement")
             _stage = "headline_check"
             self._headline_check(draft)
-        except Exception as _enf_exc:  # noqa: BLE001 — отчёт в помощнике ниже
+        except Exception as _enf_exc:  # noqa: BLE001 — reported in the helper below
             draft = self._safe_answer_after_enforcement_failure(
                 stage=_stage, exc=_enf_exc,
             )
@@ -305,7 +303,7 @@ class AgentLoopResponseDeciders:
     def _add_verification_summary(self, draft: ResponseDraft, user_question: str = "") -> None:
         """Name the verified text after enforcement has decided what survived."""
         # MIR-069: the tail rides the notice ledger so a later body rewrite cannot delete it.
-        # Светская реплика хвоста не несёт — отчёт о надёжности беседы бессмыслен.
+        # Small talk carries no tail: a reliability report on a chat is meaningless.
         from core.conversation_contract import classify_register
         from core.social_turn import is_marked_social
         if user_question and (classify_register(user_question) == "small_talk"
@@ -353,11 +351,11 @@ class AgentLoopResponseDeciders:
         replan_exhausted: bool,
         local_critique_active: bool,
         verifier_failure: bool,
-        # Параметром, не полем: состоянию с «completion» в имени нельзя переживать ход.
+        # A parameter, not a field: state with "completion" in its name must not outlive the turn.
         completion_contract: Any = None,
         failure_history: Any = (),
     ) -> ResponseDraft:
-        """Черновик ответа после всех решателей, до композиции (``render()`` — у вызывающего)."""
+        """Answer draft after all deciders, before composition (``render()`` is the caller's)."""
         draft = ResponseDraft(body=answer)
 
         self._credit_memory_records_used_in_the_answer()
@@ -418,7 +416,7 @@ class AgentLoopResponseDeciders:
             self.log.log("output_policy", policy_result.to_log_payload())
 
         # B-1 Clarification Gate: when STUCK (replan exhausted), ASK narrowing questions first.
-        # Застрял на собственном черновике (ссылки, арифметика) — рамку человек не прояснит.
+        # Stuck on its own draft (references, arithmetic): a human cannot clarify the frame.
         from core.clarification_gate import frame_questions_help
         failure_codes = [getattr(t, "code", "") for t in failure_history or ()]
         frame_clear = completion_contract is not None and not getattr(completion_contract, "ambiguities", None) \
@@ -438,7 +436,7 @@ class AgentLoopResponseDeciders:
                     text=_clarify.prompt(),
                 ):
                     self.log.log("clarification_gate", _clarify.to_dict())
-            except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
+            except Exception as exc:  # noqa: BLE001 — an observing sensor: failure is journaled, the turn does not break
                 self._sensor_failed("clarification_gate", exc)
 
         draft = self._enforce_answer_safety(

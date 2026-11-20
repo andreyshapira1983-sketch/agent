@@ -1,15 +1,4 @@
-"""Зеркало трат: что агент потратил и что за это получил.
-
-Орган НЕ говорит «экономь» — он кладёт перед читателем (оператором и самим
-агентом) пары «потратил → получил» из его же журналов. Вывод должен родиться у
-читателя; записанный нами вывод был бы нашим, а не его.
-
-Дисциплина из тридцатилетнего дайджеста (Snell 2024, запись 7): каждая денежная
-строка несёт знаменатель — «на 100 единиц», «единиц на завершение», — потому
-что отчёт голых сумм учит «тратить больше = становиться лучше».
-
-Замер и границы: MIR-177.
-"""
+"""Spend mirror: pairs of "spent -> got" from the agent's own journals, shown without conclusions; every money row carries a denominator."""
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -20,7 +9,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ModelSpend:
-    """Одна модель на одной роли: сколько стоила и что вернула."""
+    """One model in one role: what it cost and what it returned."""
 
     role: str
     provider: str
@@ -31,8 +20,7 @@ class ModelSpend:
 
     @property
     def ok_per_100_units(self) -> float:
-        """Успешные вызовы на сотню единиц. 0 при нулевом расходе: бесплатное
-        не награждается бесконечностью — его не с чем сравнивать."""
+        """Successful calls per hundred units; 0 at zero spend (free is not rewarded with infinity)."""
         if self.cost_units <= 0:
             return 0.0
         return round(100.0 * self.ok_calls / self.cost_units, 1)
@@ -40,7 +28,7 @@ class ModelSpend:
 
 @dataclass(frozen=True)
 class ActionSpend:
-    """Одно действие кампании: цена его завершений."""
+    """One campaign action: the cost of its completions."""
 
     action: str
     cycles: int
@@ -49,15 +37,14 @@ class ActionSpend:
 
     @property
     def units_per_completed(self) -> float | None:
-        """Единиц на одно завершение; None, когда завершений не было —
-        неопределённость не выдаётся ни за ноль, ни за бесконечность."""
+        """Units per completion; None when there were none (uncertainty is neither zero nor infinity)."""
         if self.completed <= 0:
             return None
         return round(self.cost_units / self.completed, 1)
 
 
 def model_spend(rows: Iterable[Mapping[str, Any]]) -> list[ModelSpend]:
-    """Свод по (роль, провайдер, модель) из строк журнала использования."""
+    """Rollup by (role, provider, model) from usage-journal rows."""
     acc: dict[tuple[str, str, str], list[int]] = {}
     for row in rows:
         key = (
@@ -67,9 +54,7 @@ def model_spend(rows: Iterable[Mapping[str, Any]]) -> list[ModelSpend]:
         )
         calls, ok, units = acc.setdefault(key, [0, 0, 0])
         acc[key][0] = calls + 1
-        # Словарь ПРОИЗВОДИТЕЛЯ: журнал пишет success/error (замерено на 1392
-        # живых строках: 997/395). Первая версия считала выдуманное «ok» и
-        # показала 0 успехов у всех моделей — зеркало врало с первого вдоха.
+        # The producer's vocabulary: the journal writes success/error, not "ok".
         acc[key][1] = ok + (1 if str(row.get("status") or "") == "success" else 0)
         acc[key][2] = units + int(row.get("cost_units") or 0)
     table = [
@@ -82,7 +67,7 @@ def model_spend(rows: Iterable[Mapping[str, Any]]) -> list[ModelSpend]:
 
 
 def action_spend(rows: Iterable[Mapping[str, Any]]) -> list[ActionSpend]:
-    """Свод по действию из строк ленты кампаний."""
+    """Rollup by action from campaign-feed rows."""
     acc: dict[str, list[int]] = {}
     for row in rows:
         action = str(row.get("action") or "?")
@@ -106,7 +91,7 @@ def spend_report_lines(
     ledger_rows: Iterable[Mapping[str, Any]],
     top: int = 6,
 ) -> list[str]:
-    """Строки зеркала для человека и для подсказок. Пусто — значит пусто."""
+    """Mirror lines for a human and for prompts; empty means empty."""
     lines: list[str] = []
     models = [t for t in model_spend(usage_rows) if t.cost_units > 0][:top]
     if models:
@@ -129,22 +114,20 @@ def spend_report_lines(
 
 
 def load_spend_rows(workspace: Path | str) -> tuple[list[dict], list[dict]]:
-    """Живые строки журналов для зеркала. Сбой чтения — пустота, не падение:
-    отсутствующая или битая лента не вправе ронять ни команду, ни планирование,
-    а пустой отчёт честно показывает пустоту."""
+    """Live journal rows for the mirror; a read failure yields empty, never a crash (a broken feed must not break the command or planning)."""
     root = Path(workspace)
     try:
         from core.state_integrity import read_state_jsonl
 
         usage = list(read_state_jsonl(root / "data" / "model_usage.jsonl"))
-    except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
+    except Exception:  # noqa: BLE001 — reason named in the docstring
         usage = []
     try:
-        # Читатель самой ленты: оборванная строка стоит одной строки, а не всей ленты.
+        # Per-row reader: a torn line costs one line, not the whole feed.
         from core.campaign_ledger import load_ledger_rows
 
         ledger = load_ledger_rows(root / "data" / "campaign_ledger.jsonl")
-    except Exception:  # noqa: BLE001 — причина молчания названа в докстроке
+    except Exception:  # noqa: BLE001 — reason named in the docstring
         ledger = []
     return usage, ledger
 
@@ -155,13 +138,7 @@ def spend_mirror_block(
     ledger_rows: Iterable[Mapping[str, Any]],
     max_chars: int = 700,
 ) -> str:
-    """Блок зеркала для подсказки планировщику. Пусто — значит нет блока.
-
-    Заголовок объявляет: это ДАННЫЕ, не указание. Вывод из пар «потратил →
-    получил» должен родиться у читателя — записанный нами был бы нашим.
-    Ограничен по знакам: подсказка стоит денег, и зеркало трат не смеет само
-    стать тратой.
-    """
+    """Mirror block for the planner prompt; empty means no block. The header says these are DATA, not instructions; length-capped because the prompt costs money."""
     lines = spend_report_lines(
         usage_rows=usage_rows, ledger_rows=ledger_rows, top=4,
     )

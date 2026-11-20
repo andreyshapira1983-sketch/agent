@@ -1,36 +1,15 @@
-"""MVP-18.1  Autonomous Subagent Proposal Contract.
+"""Autonomous subagent proposal contract.
 
-The agent autonomously determines when a subagent is needed and produces a
-``SubagentProposal`` that explicitly describes *what* the subagent may read,
-write, use, and spend — before any execution takes place.
-
-This file satisfies the architecture_audit ``subagent_memory_scope`` check:
-  evidence : core/subagent_memory_scope.py  (this file)
-  tests    : tests/test_subagent_memory_scope.py
-
-Design principles
------------------
-1. NO real subagent execution here.  This is the proposal layer only.
-2. Every proposal has ``approval_required=True`` by default.
-3. The agent, not the human, creates the proposal from a goal/event.
-4. Memory, tool, and budget scopes are fully explicit — nothing is implicit.
-5. ``needs_delegation()`` is a fast rule-based pre-check (no LLM).
-6. ``propose_subagent()`` calls the LLM for structured JSON and falls back
-   gracefully if the LLM returns invalid output.
-
-Typical flow
-------------
-goal / event
-  → needs_delegation(goal)              # fast keyword heuristic
-  → propose_subagent(goal, llm=...)     # LLM → SubagentProposal
-  → approval_inbox.add(...)             # human reviews
-  → after approval: dry-run / real run  # future layer
-
-Command surface (main.py)
--------------------------
-  :subagent-proposal <goal> [--submit]
-      --submit  also adds the proposal to the approval inbox
-"""
+    The agent decides when a subagent is needed and produces a
+    ``SubagentProposal`` stating what it may read, write, use and spend, before any
+    execution. This is the proposal layer only: no real subagent runs, every
+    proposal has ``approval_required=True`` by default, memory/tool/budget scopes
+    are fully explicit, ``needs_delegation()`` is a rule-based pre-check (no LLM)
+    and ``propose_subagent()`` calls the LLM, falling back on invalid output.
+    Flow: needs_delegation -> propose_subagent -> approval_inbox -> (later) run.
+    Command: ``:subagent-proposal <goal> [--submit]`` (--submit adds it to the inbox).
+    Evidence for the architecture_audit ``subagent_memory_scope`` check; tests in
+    tests/test_subagent_memory_scope.py."""
 from __future__ import annotations
 
 import re
@@ -244,11 +223,9 @@ _DELEGATION_KEYWORDS: tuple[str, ...] = (
 
 
 def needs_delegation(goal: str) -> bool:
-    """Lightweight rule-based pre-check.  No LLM call.
+    """Lightweight rule-based pre-check, no LLM call.
 
-    Returns True when the goal *likely* needs a dedicated subagent.
-    The LLM in propose_subagent() makes the authoritative decision.
-    """
+        Returns True when the goal *likely* needs a subagent; the LLM in propose_subagent() decides."""
     if not isinstance(goal, str):
         return False
     g = goal.casefold()
@@ -258,9 +235,7 @@ def needs_delegation(goal: str) -> bool:
 def make_default_proposal(goal: str) -> SubagentProposal:
     """Build a conservative default proposal without any LLM call.
 
-    Used as a test fixture and as the fallback when the LLM fails.
-    All scopes are read-only / minimal by default.
-    """
+        Test fixture and fallback when the LLM fails; all scopes read-only / minimal."""
     return SubagentProposal(
         task_goal=goal,
         why_needed="Task requires dedicated execution scope separate from the main agent.",
@@ -304,7 +279,7 @@ def propose_subagent(
     )
 
     if not isinstance(raw, str):
-        # Пустой ответ модели — ошибка модели, а не падение (проверка 16.11, средняя).
+        # An empty model reply is a model error, not a crash.
         _emit(logger, "subagent_proposal_llm_error", {"goal": goal, "raw_preview": repr(raw)[:200]})
         return SubagentProposalResult(status="llm_error", reason="LLM returned no text", raw_response="")
 
@@ -337,10 +312,7 @@ def propose_subagent(
     try:
         proposal = _parse_proposal(goal, data)
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # Journaled, despite what the audit scanner says: `_emit` forwards to
-        # `logger.log`, and the scanner matches call NAMES, so it cannot see
-        # through an emitter. Widening it to accept any `_emit` would be the
-        # wrong trade — a false "journaled" hides a real silence.
+        # Journaled, despite what the audit scanner says: `_emit` forwards to `logger.log` and the scanner matches call NAMES. Widening it to accept any `_emit` would let a false "journaled" hide a real silence.
         _emit(logger, "subagent_proposal_parse_error", {
             "goal": goal,
             "error": str(exc),
@@ -405,7 +377,7 @@ If a dedicated subagent IS needed:
 }
 """
 
-# §3.x — register this prompt with the global Prompt Registry
+# register this prompt with the global Prompt Registry
 try:
     from core.prompt_registry import register_prompt as _rp
     _rp("subagent_scope.system", _SYSTEM_PROMPT, module="core.subagent_memory_scope",
@@ -419,9 +391,7 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
     if risk not in ("low", "medium", "high"):
         risk = "low"
 
-    # Правила области держит код, а не модель: одобрение только повышается,
-    # инструменты — только из списка чтения, частные метки не выдаются,
-    # бюджет не выше умолчаний (проверка 16.11, средняя).
+    # Scope rules are held by code, not the model: approval only rises, tools only from the read list, private tags are not granted, budget not above defaults.
     read_tags = tuple(str(t) for t in (data.get("memory_read_tags") or [])
                       if not _PRIVATE_TAG_RE.search(str(t)))
     write_tags = tuple(str(t) for t in (data.get("memory_write_tags") or [])
@@ -463,13 +433,12 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
 _DEFAULT_BUDGET = BudgetScope()
 _ALWAYS_FORBIDDEN = ("shell_exec", "send_message", "send_proposal", "reply_to_client",
                      "contact_client", "file_write")
-# Частная метка — по ЦЕЛЫМ словам метки, а не по кускам: «ключевые-факты»,
-# «key-findings», «tokenizer», «секретарь» — обычные метки (проверка 17.11, вечер).
+# A private tag is judged by WHOLE words of the tag, not pieces: "key-findings", "tokenizer", "secretary" are ordinary tags.
 _PRIVATE_WORD_RE = re.compile(
     r"private\w*|secrets?|secret\w*|credentials?|passw\w*|personal\w*|pii"
     r"|приват\w*|личн\w*|секретн\w*|секреты?|парол\w*",
 )
-#: «key»/«token»/«ключ»/«токен» are private only next to an access word.
+#: "key"/"token" (and Russian equivalents) are private only next to an access word.
 _PAIRED_WORDS = frozenset({"key", "keys", "token", "tokens", "ключ", "ключи", "токен", "токены"})
 _ACCESS_WORDS = frozenset({"api", "access", "auth", "bearer", "refresh", "ssh", "secret", "private",
                            "доступа", "доступ", "секретный", "секретные", "апи"})
@@ -494,7 +463,7 @@ _PRIVATE_TAG_RE = _PrivateTag()
 
 
 def _budget(data: dict[str, Any], name: str) -> int:
-    """Бюджет из ответа модели: нет — умолчание, явный 0 — 0, выше умолчания — умолчание."""
+    """Budget from the model reply: absent means the default, an explicit 0 is 0, above the default means the default."""
     ceiling = getattr(_DEFAULT_BUDGET, name)
     value = data.get(name)
     if value is None:
@@ -503,7 +472,7 @@ def _budget(data: dict[str, Any], name: str) -> int:
 
 
 def _read_only_tools(*, holds_memory: bool = False) -> frozenset[str]:
-    """Инструменты раннера субагента; с выданной памятью — без уносящих наружу."""
+    """Subagent runner tools; with granted memory, without those that carry data out."""
     from core.subagent_runner import subagent_tools
 
     return subagent_tools(holds_memory=holds_memory)
@@ -514,9 +483,7 @@ def _emit(logger: Any, event: str, payload: Any) -> None:
         logger.log(event, payload)
 
 
-#: Потолки проекции. Память субагенту передаётся ТЕКСТОМ, а не складом: склад
-#: пришлось бы урезать обещанием («он не позовёт лишний метод»), а текст режет
-#: физически — того, чего нет в строке, ребёнок прочитать не может.
+#: Projection limits. Memory goes to the subagent as TEXT, not as a store: a store would need a promise ("it will not call another method"), while text is cut physically.
 PROJECTION_MAX_RECORDS = 20
 PROJECTION_MAX_CHARS = 4000
 
@@ -528,13 +495,9 @@ def project_memory(
     max_records: int = PROJECTION_MAX_RECORDS,
     max_chars: int = PROJECTION_MAX_CHARS,
 ) -> tuple[str, dict[str, Any]]:
-    """Проекция памяти под задачу: только записи с разрешёнными метками.
-
-    Замер, отвергнутые варианты и границы: MIR-156 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    """
+    """Memory projection for a task: only records with allowed tags."""
     asked = {str(t).strip().casefold() for t in (read_tags or ()) if str(t).strip()}
-    # Частные метки не выдаются и здесь: контракт мог прийти не через
-    # _parse_proposal (проверка 17.11, средняя).
+    # Private tags are not granted here either: the contract may not have come through _parse_proposal.
     granted = {t for t in asked if not _PRIVATE_TAG_RE.search(t)}
     audit: dict[str, Any] = {
         "granted_tags": sorted(granted),
@@ -550,8 +513,7 @@ def project_memory(
     for record in records or ():
         audit["records_seen"] += 1
         tags = {str(t).strip().casefold() for t in (getattr(record, "tags", None) or ())}
-        # Запись с частной меткой не уходит, даже если рядом выданная
-        # (проверка 17.11, средняя).
+        # A record with a private tag is not sent even if a granted one is next to it.
         if tags & granted and not any(_PRIVATE_TAG_RE.search(t) for t in tags):
             picked.append(record)
 
@@ -579,7 +541,7 @@ def project_memory(
     )
     tail = "</granted_memory>"
     if audit["truncated"]:
-        # Умолчание об урезании читалось бы как «это вся выданная память».
+        # A default for truncation would read as "this is all the granted memory".
         tail = (
             f"[показаны первые {audit['records_projected']} из {len(picked)} "
             f"разрешённых записей]" + "\n" + tail
@@ -588,7 +550,6 @@ def project_memory(
 
 
 def _inert(value: Any) -> str:
-    """Текст записи — данные: без угловых скобок и переводов строк он не
-    закроет блок <granted_memory> (проверка 16.11, средняя)."""
+    """Record text is data: without angle brackets and newlines it cannot close the <granted_memory> block."""
     text = value if isinstance(value, str) else str(value)
     return " ".join(text.replace("<", "‹").replace(">", "›").split())

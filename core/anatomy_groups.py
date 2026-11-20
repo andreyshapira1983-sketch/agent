@@ -1,21 +1,4 @@
-"""Таблица групп карты анатомии — ДАННЫЕ, вынесенные в core намеренно.
-
-Первый одобренный раскол (2026-08-27) откатился анатомическими сторожами:
-новый core-модуль требует строки группировки, а таблица жила в
-`scripts/gen_anatomy.py` — каталоге, который полоса самоприменения трогать не
-вправе. Сторож требовал строку, денилист запрещал её добавить, и каждый
-инкрементальный раскол был обречён на откат (MIR-180).
-
-Здесь таблица лежит там, куда полоса ВПРАВЕ предлагать правки, поэтому
-предложение расщепителя несёт и новый модуль, и его группировку одним пакетом.
-Правило наследования детерминированное: новый модуль встаёт в группу своего
-исходника — семантику расщепитель знать не может, происхождение знает точно.
-
-Файл обязан оставаться ЧИСТЫМ ЛИТЕРАЛОМ без импортов: скрипты читают его
-`ast.literal_eval`-разбором, не исполняя, — их правило «не импортировать код
-агента» сохраняется. Потребители: scripts/gen_anatomy.py и предложение
-расщепителя (`_sync_anatomy_groups` в core/anatomy_sync.py).
-"""
+"""Data table of anatomy-map groups, kept in core on purpose so new core modules can register without touching scripts/."""
 
 GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [
@@ -37,7 +20,6 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "loop", "loop_step_execution", "loop_sensor",
         "step_references",
         "loop_knowledge", "loop_memory_commands", "loop_repair", "loop_hygiene",
-        # B1: реализация уехала из двух примесей сюда; `agent` остался фасадом.
         "repair_commands", "memory_hygiene_commands",
         "loop_memory_read", "loop_memory_write",
         "loop_response_deciders", "loop_synthesis",

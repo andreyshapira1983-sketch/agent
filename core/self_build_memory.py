@@ -1,33 +1,14 @@
-"""Record self-build / self-apply attempt outcomes into episodic memory.
-
-The agent must remember what it tried and — crucially — WHY an attempt failed, so
-lessons accumulate in its long-term (episodic) memory instead of every failure
-requiring a human to re-investigate from scratch. Without this, a rolled-back
-self-apply leaves no trace the agent can recall later ("splitting core/campaign.py
-failed because the new module was not registered in the anatomy index").
-
-Every self-build touch-point journals here — the manual ``:self-build-produce`` /
-``:self-apply-run`` operator commands AND the autonomous runtime when it proposes
-a split on its own tick:
-
-* ``self-build-produce`` — what the head decided (proposed / critic_veto /
-  value_veto / no_patch) and the precise reason / veto list;
-* ``self-apply-run`` — whether the apply committed or rolled back, and why
-  (e.g. "targeted tests failed").
-
-Episodes are tagged ``lesson`` so the episodic store never evicts them. This is
-strictly best-effort: it never raises and never blocks the caller.
-"""
+"""Record self-build / self-apply attempt outcomes into episodic memory (best-effort, never raises)."""
 from __future__ import annotations
 
 import logging
 import re
 from typing import Any
 
-# Сигналы неудач самоулучшения (сбор из эпизодов и логов, перенос в реестр
-# проблем, выбор действия в простое) — в core/self_improvement_signals.py.
-# Имена реэкспортируются: CLI, кампания, agent_tick и тесты берут их отсюда
-# (и подменяют здесь же — CLI читает их отсюда в момент вызова).
+# Self-improvement failure signals (collection from episodes and logs, transfer to the problem
+# registry, idle action choice) live in core/self_improvement_signals.py.
+# Names are re-exported: CLI, campaign, agent_tick and tests take them from here (and patch them
+# here).
 from core.self_improvement_signals import (  # noqa: F401
     _UNRELIABLE_DETECTOR_SIGNALS,
     _detector_failure_text,
@@ -42,8 +23,7 @@ from core.writer_completion import COMPLETION_BY_OUTCOME
 
 logger = logging.getLogger(__name__)
 
-#: Сбои записи эпизода: глотались без следа, теперь счёт и причина
-#: (проверка 16.11, мелкая).
+# Episode write failures: counted with a reason instead of being swallowed.
 STORE_FAILURES: dict[str, Any] = {"count": 0, "last": ""}
 
 #: The four pre-flight gates: they ask «may I start» and run before any
@@ -57,16 +37,13 @@ _GATE_WAIT_STATUSES: frozenset[str] = frozenset({
     "budget_kill_switch", "budget_wait", "approval_wait", "dirty_tree_wait",
 })
 
-#: Пустой ход производителя: цели не нашлось, править нечего. Замер
-#: 2026-09-22: 275 таких записей из 300 в опыте — они вытеснили ВСЮ настоящую
-#: работу (сегодня ноль эпизодов с книгами и ноль успехов), и драйвы
-#: компетентности вечно показывали «успешной задачи ни разу».
+# Empty producer turn: no goal found, nothing to edit. Such records crowded out all real work in
+# memory and competence drives showed "no successful task ever".
 _NO_WORK_STATUSES: frozenset[str] = frozenset({
     "no_grounded_target", "no_patch", "skipped", "no_llm", "idle", "none",
 })
-#: Отказы ворот до работы (остывание, повтор, противоречие, устаревшая
-#: заявка, нет проверенной заявки, нужно одобрение): опыта нет, урока нет;
-#: 5 одинаковых отказов давали 5 защищённых строк (проверка 16.11, средняя).
+# Gate refusals before work (cooldown, repeat, contradiction, stale request, no verified request,
+# approval needed): no experience, no lesson; identical refusals gave identical protected rows.
 _GATE_REFUSAL_STATUSES: frozenset[str] = frozenset({
     "denied_cooldown", "denied_repeat", "conflict_block", "stale_proposal",
     "needs_validated_proposal", "approval_required",
@@ -92,17 +69,11 @@ _OUTCOME_BY_STATUS: dict[str, str] = {
     "error": "failed",
 }
 
-# The completion axis is settled HERE, at banking, exactly as the cycle settles
-# it (`core/smart_memory.py:1341`), and never recomputed afterwards (MIR-057).
-# Leaving it unset was not neutral: `admit_for_storage` grants a `lesson`-tagged
-# record `usage_eligible=True` (the MIR-042 fix, so these lessons stop being
-# invisible), and retrieval then replays it while it carries no verdict at all —
-# the one thing `test_no_legacy_episode_in_the_live_store_is_ever_admitted`
-# forbids. `outcome` already answers the question, so there is nothing to infer.
-#
-# The table itself lives in `core/writer_completion.py`: the backfill of rows
-# banked before this fix must replay *this* rule, and a shared domain table is
-# what keeps the two from drifting into separate opinions.
+# The completion axis is settled HERE, at banking, as the cycle settles it
+# (`core/smart_memory.py:1341`), never recomputed afterwards.
+# Leaving it unset was not neutral: `admit_for_storage` grants a `lesson`-tagged record
+# `usage_eligible=True`, and retrieval would replay it with no verdict at all.
+# The table lives in `core/writer_completion.py` so the backfill of old rows replays this same rule.
 _COMPLETION_BY_OUTCOME = COMPLETION_BY_OUTCOME
 
 
@@ -162,13 +133,9 @@ def build_self_build_episode(
         if veto:
             summary += " | veto: " + "; ".join(str(v) for v in veto)
 
-    # `lesson` is what confers eligibility, eviction protection and retrieval
-    # priority (MIR-115) — a pre-flight refusal earns none of that.
-    # Пустой ход — тоже не урок: 2026-09-23 замер показал 287 таких записей из
-    # 300, и все с меткой «урок», то есть под защитой от вытеснения. Штатная
-    # чистка дублей их не трогала (0 из 287), опыт врал «успехов ни разу», а
-    # драйв компетентности вечно перебивал самопочинку. Метка урока — за
-    # сделанную работу; за её отсутствие она не выдаётся.
+    # `lesson` confers eligibility, eviction protection and retrieval priority: a pre-flight refusal
+    # earns none of that.
+    # An empty turn is not a lesson either: the lesson mark is for work done, not for its absence.
     tags = (["self-build", kind, status, outcome]
             if status in _DEDUP_STATUSES
             else ["self-build", "lesson", kind, status, outcome])
@@ -181,20 +148,14 @@ def build_self_build_episode(
         tags.append("veto_judgement" if blames_target else "veto_pipeline")
     if target:
         tags.append(target)
-    # An apply result names `files_changed`, never `target_path`, so the episode
-    # used to carry no path at all and `recent_self_build_lessons(agent, file)`
-    # — which needs the path tag — found nothing. Measured on the live store:
-    # two of three rollbacks were the same file, the same test and the same
-    # assertion, because the first lesson was invisible to the second attempt.
+    # An apply result names `files_changed`, never `target_path`, so the episode carried no path and
+    # `recent_self_build_lessons(agent, file)`, which needs the path tag, found nothing.
     for path in _touched_paths(result):
         tags.append(path)
 
-    # MIR-121's write side: record what the run READ. Until 2026-08-22 every
-    # lesson this writer minted carried no source_labels at all, so «no
-    # web-derived lesson was found» was a statement about the instrument, not
-    # the store — and `_lesson_provenance_disqualified` filtered a `memory:`
-    # label nothing ever wrote. The producer reports its reads in `sources`;
-    # older callers fall back to the target and the files an apply changed.
+    # Write side of source tracking: record what the run READ in `source_labels`; the producer
+    # reports its reads in `sources`, older callers fall back to the target and the files an apply
+    # changed.
     sources = [str(s) for s in (result.get("sources") or []) if str(s).strip()]
     if not sources:
         if target:
@@ -208,8 +169,8 @@ def build_self_build_episode(
         summary=summary[:2000],
         tags=tuple(dict.fromkeys(t for t in tags if t)),  # dedup, keep order
         source_labels=tuple(dict.fromkeys(sources)),
-        # Семейная связка тика (MIR-184): отказ продукта обязан быть сшиваем
-        # с эпизодом-успехом того же прогона, иначе он структурно неслышим.
+        # Family link of the tick: a product refusal must be stitchable with the success episode of
+        # the same run, otherwise it is structurally unheard.
         trace_id=str(trace_id or ""),
         completion_state=_COMPLETION_BY_OUTCOME.get(  # type: ignore[arg-type]
             outcome, "unknown"
@@ -233,14 +194,9 @@ def record_self_build_episode(
         episode = build_self_build_episode(kind, result, trace_id=trace_id)
         if episode is None:
             return False
-        # MIR-090's writer half: a producer that hits the same gate twice must
-        # not bank a second identical episode — the unattended tick retried one
-        # blocked gate 32 times on 2026-08-16 and banked all 32. Keyed on
-        # CONTENT, not the status label (label-keyed dedup destroys real
-        # records: ten distinct answers under one question, measured in
-        # MEMORY_CONSOLIDATION_MEASUREMENT.md in git history). Gate waits only —
-        # an identical genuine veto tomorrow may mean "still failing", and
-        # judging that is the hygiene collapser's job, not the writer's.
+        # A producer that hits the same gate twice must not bank a second identical episode.
+        # Keyed on CONTENT, not the status label (label-keyed dedup destroys real records). Gate
+        # waits only: judging an identical genuine veto is the hygiene collapser's job.
         if str(result.get("status") or "") in _DEDUP_STATUSES:
             key = (episode.goal, episode.question, episode.summary, episode.outcome)
             for old in store.load():
@@ -248,7 +204,7 @@ def record_self_build_episode(
                     return False
         store.save(episode)
     except Exception as exc:  # noqa: BLE001 — journaling must never break the caller
-        # Сбой виден: журнал и счётчик, вызывающий не падает (проверка 16.11, мелкая).
+        # The failure is visible: journal and counter, the caller does not fail.
         STORE_FAILURES["count"] += 1
         STORE_FAILURES["last"] = f"{type(exc).__name__}: {exc}"[:300]
         logger.warning("self-build episode not stored (%s): %s", kind, STORE_FAILURES["last"])
@@ -273,22 +229,13 @@ def _with_untagged_lessons(
 
 
 def _names_path(text: str, target: str) -> bool:
-    """Текст называет путь целиком: «core/a.py» не находится в «tests/core/a.py.bak»
-    (проверка 16.11, мелкая)."""
+    """The text names the whole path: "core/a.py" is not found in "tests/core/a.py.bak"."""
     pattern = r"(?<![\w./\\-])" + re.escape(target) + r"(?![\w/\\-]|\.\w)"
     return re.search(pattern, text) is not None
 
 
 def recent_self_build_lessons(agent: Any, target: str, *, limit: int = 3) -> list[str]:
-    """Return short summaries of PAST FAILED self-build attempts for
-    ``target``.
-
-    Reads the agent's episodic memory for lesson episodes tagged with the
-    target path AND a failed outcome, newest first, so the Builder can be
-    warned not to repeat a mistake it already made on this exact file (e.g.
-    "left a dangling import to a class it forgot to move"). Best-effort:
-    returns ``[]`` when memory is unavailable or empty, and never raises.
-    """
+    """Short summaries of PAST FAILED self-build attempts for ``target``, newest first; ``[]`` when memory is unavailable. Never raises."""
     try:
         store = getattr(agent, "episodic_store", None)
         if store is None or not target:
@@ -324,15 +271,9 @@ def _veto_was_about_the_target(episode: Any, tags: tuple[str, ...]) -> bool:
 
 
 def recently_vetoed_self_build_targets(agent: Any, *, limit: int = 20) -> frozenset[str]:
-    """Return concrete target paths whose LAST self-build attempt was critic-vetoed.
+    """Target paths whose LAST self-build attempt was critic-vetoed, used by the producer as a short cooldown set.
 
-    Reads the agent's episodic memory for lesson episodes tagged with BOTH
-    ``self-build`` and ``critic_veto`` and extracts the file-path tag each such
-    episode carries (see :func:`build_self_build_episode`). The producer uses this
-    as a short cooldown set so the very next ``:self-build-produce`` run skips a
-    target it just failed on and advances to the next grounded candidate instead
-    of re-picking the same wall. Best-effort: returns an empty set when memory is
-    unavailable or empty, and never raises.
+    Empty set when memory is unavailable; never raises.
     """
     try:
         store = getattr(agent, "episodic_store", None)

@@ -1,13 +1,4 @@
-"""Narrow, safe VCS helper for the trusted self-apply lane (TD-023).
-
-This is deliberately NOT a general shell. ``tools/shell_exec.py`` keeps git
-read-only (log/diff/status); the trusted self-apply lane needs a *small, fixed*
-set of local write operations — create a temp branch, inspect status, commit
-locally, and roll back within the lane — without ever exposing arbitrary shell
-or a ``push``. Every method maps to exactly one hard-coded ``git`` argv; branch
-names are validated; there is intentionally no push / fetch / remote method at
-all, so the lane physically cannot reach the network.
-"""
+"""Narrow, safe VCS helper for the trusted self-apply lane."""
 from __future__ import annotations
 
 import re
@@ -16,16 +7,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-# Branch names are generated internally, but validate anyway: no shell
-# metacharacters, no leading dash, no ``..`` path tricks.
+# Branch names are validated: no shell metacharacters, no leading dash, no ``..``.
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
 
 # Never delete or hard-target these, even if asked.
 _PROTECTED_BRANCHES = frozenset({"main", "master", "HEAD"})
 
-#: Every subcommand this class issues, and nothing else. An allowlist rather
-#: than a list of forbidden names: the absent name was never the property —
-#: the property is that no invocation can reach a remote.
+# Every subcommand this class issues, and nothing else: an allowlist, so no invocation can reach a remote.
 _LOCAL_VERBS = frozenset({
     "add", "branch", "checkout", "clean", "commit", "reset", "rev-parse",
     "status",

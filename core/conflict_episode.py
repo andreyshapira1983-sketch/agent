@@ -1,34 +1,7 @@
-"""Procedural memory for instruction conflicts: инструкция → конфликт → решение.
+"""Procedural memory for instruction conflicts: instruction -> conflict -> decision.
 
-A gate that blocks and forgets teaches nothing. The operator's requirement is
-that each conflict survives as an episode: what was being asked, which two
-sources collided, what the agent refused to do, and — later — how the operator
-ruled and what the lesson was.
-
-Three things depend on this record:
-
-* the agent can be shown past episodes before it meets a new trap;
-* an exam can check that a stop was *recorded*, not merely narrated;
-* accumulated ``instruction → conflict → correct decision`` rows are the raw
-  material for a fine-tuning dataset (:meth:`ConflictEpisode.to_training_row`).
-
-Lifecycle
----------
-
-An episode is written ``open`` the moment the gate blocks — before any operator
-involvement, so the record cannot be lost by an agent that decides not to
-mention the stop. It becomes ``resolved`` only when a human rules on it.
-
-The store is append-only: resolving writes a *new* row with the same ``id``,
-and reads collapse rows by id keeping the last. Nothing is ever rewritten in
-place, so the history of a disputed ruling stays inspectable.
-
-Design principles
------------------
-* The episode dataclass is pure and frozen; only ``ConflictEpisodeStore``
-  touches disk (JSONL under ``data/``, same idiom as the assumption registry).
-* Writing an episode must never be able to break the refusal it records —
-  callers wrap the write defensively.
+Each gate block is recorded as an episode (what was asked, which two sources collided, what was refused, later the operator's ruling and lesson). Written ``open`` the moment the gate blocks, ``resolved`` only when a human rules. The store is append-only: resolving writes a new row with the same ``id`` and reads keep the last. Resolved rows feed a fine-tuning dataset (:meth:`ConflictEpisode.to_training_row`).
+Writing an episode must never break the refusal it records; callers wrap the write defensively.
 """
 from __future__ import annotations
 
@@ -64,9 +37,6 @@ def default_path(workspace: Path | str) -> Path:
     return Path(workspace) / "data" / "conflict_episodes.jsonl"
 
 
-# ---------------------------------------------------------------------------
-# The episode
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ConflictEpisode:
@@ -74,18 +44,18 @@ class ConflictEpisode:
 
     id: str
     created_at: str
-    context: str                      # what the agent was doing / was asked
-    subject: str                      # the axis the two sources fought over
-    higher: dict[str, Any]            # the stronger directive, serialised
-    lower: dict[str, Any]             # the weaker directive, serialised
+    context: str  # what the agent was doing / was asked
+    subject: str  # axis the two sources fought over
+    higher: dict[str, Any]  # stronger directive, serialised
+    lower: dict[str, Any]  # weaker directive, serialised
     same_level: bool
     priority_verdict: str
     blocked_actions: tuple[str, ...]
     status: str = STATUS_OPEN
-    ruling: str = ""                  # the operator's decision, verbatim
+    ruling: str = ""  # operator's decision, verbatim
     ruled_by: str = ""
     ruled_at: str = ""
-    lesson: str = ""                  # what to carry into the next episode
+    lesson: str = ""  # what to carry into the next episode
 
     @property
     def is_open(self) -> bool:
@@ -99,7 +69,7 @@ class ConflictEpisode:
         lesson: str = "",
         ruled_at: str | None = None,
     ) -> ConflictEpisode:
-        """Return the resolved copy. Never mutates — the store appends it."""
+        """Return the resolved copy; never mutates, the store appends it."""
         return replace(
             self,
             status=STATUS_RESOLVED,
@@ -110,12 +80,7 @@ class ConflictEpisode:
         )
 
     def to_training_row(self) -> dict[str, Any]:
-        """The ``instruction → conflict → decision`` row for a future dataset.
-
-        Only resolved episodes carry a decision; an open one returns the same
-        shape with an empty ``decision`` so unresolved rows are filtered, never
-        silently presented as answered.
-        """
+        """The ``instruction -> conflict -> decision`` row for a dataset; an open episode has an empty ``decision`` so it can be filtered."""
         return {
             "instruction": self.context,
             "conflict": {
@@ -203,7 +168,7 @@ def episodes_from_outcome(
     context: str = "",
     now_iso: str | None = None,
 ) -> tuple[ConflictEpisode, ...]:
-    """One episode per conflicting subject. Empty when the gate let work pass."""
+    """One episode per conflicting subject; empty when the gate let work pass."""
     if not outcome.is_blocked:
         return ()
     return tuple(
@@ -217,16 +182,9 @@ def episodes_from_outcome(
     )
 
 
-# ---------------------------------------------------------------------------
-# The store
-# ---------------------------------------------------------------------------
 
 def _parse_row(row: dict[str, Any]) -> ConflictEpisode | None:
-    """Decode one stored row, or None if it is unreadable.
-
-    A corrupt line must not hide the episodes around it — losing the whole
-    conflict history to one bad write would be worse than losing the one row.
-    """
+    """Decode one stored row, or None; one corrupt line must not hide the episodes around it."""
     try:
         return ConflictEpisode.from_dict(row)
     except Exception:  # noqa: BLE001 — see the docstring
@@ -234,13 +192,12 @@ def _parse_row(row: dict[str, Any]) -> ConflictEpisode | None:
 
 
 class ConflictEpisodeStore:
-    """Append-only JSONL store. Rows with a repeated ``id`` supersede earlier ones."""
+    """Append-only JSONL store; a repeated ``id`` supersedes earlier rows."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    # ---------- writes ----------
 
     def save(self, episode: ConflictEpisode) -> None:
         self.save_many([episode])
@@ -262,9 +219,7 @@ class ConflictEpisodeStore:
         lesson: str = "",
         ruled_at: str | None = None,
     ) -> ConflictEpisode | None:
-        """Append the resolved version of an episode. None if the id is
-        unknown.
-        """
+        """Append the resolved version of an episode; None if the id is unknown."""
         with state_file_lock(self.path):
             current = self._get_unlocked(episode_id)
             if current is None:
@@ -275,17 +230,11 @@ class ConflictEpisodeStore:
             append_state_jsonl_unlocked(self.path, [resolved.to_dict()])
         return resolved
 
-    # ---------- reads ----------
 
     def _load_all_unlocked(self) -> tuple[ConflictEpisode, ...]:
-        """Read without acquiring the lock.
+        """Read without taking the lock (``*_unlocked`` as in core/state_integrity.py).
 
-        ``*_unlocked`` follows `core/state_integrity.py`: it means "does not
-        take the lock", not "caller must hold it". Reads are lock-free by
-        design here, as in `core/assumption_registry.py` — appends are
-        line-oriented and `_parse_row` drops a partially written trailing line.
-        `resolve` calls this while holding the lock precisely because the lock
-        is not re-entrant.
+        Reads are lock-free by design: appends are line-oriented and `_parse_row` drops a partial trailing line. `resolve` calls this under the lock because the lock is not re-entrant.
         """
         if not self.path.exists():
             return ()
@@ -320,7 +269,7 @@ class ConflictEpisodeStore:
         return tuple(reversed(every[-n:])) if every else ()
 
     def training_rows(self, *, resolved_only: bool = True) -> tuple[dict[str, Any], ...]:
-        """Dataset rows. Unresolved episodes are excluded by default."""
+        """Dataset rows; unresolved episodes are excluded by default."""
         return tuple(
             episode.to_training_row()
             for episode in self.load_all()

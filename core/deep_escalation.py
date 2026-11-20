@@ -1,34 +1,10 @@
-"""Deep/Opus escalation gate — "Opus is an event, not a habit".
+"""Deep/Opus escalation gate: a pure, deterministic decision on whether ``ModelRouter.for_task`` may use the DEEP tier.
 
-A pure, deterministic decision layer that governs the single expensive seam in
-the runtime: ``ModelRouter.for_task`` escalating to the DEEP tier (opus / o-series).
-The autonomous agent must NEVER open the most expensive model *for itself*.
-Deep escalation is unlocked only by an explicit, structured operator reason
-plus a concrete expected output. With no valid reason the request *gracefully
-downgrades* to the standard tier — the task still runs, just on the cheaper
-brain — instead of failing. There is no I/O, no LLM call, and no free-text
-judgement here: free text can never decide whether to spend money on a model.
+The autonomous agent never opens the most expensive model for itself: escalation needs a structured operator reason plus a concrete
+expected output, otherwise the request downgrades to the standard tier. No I/O, no LLM, no free-text judgement; the decision is
+recorded only as a ``route_reason`` string so ``data/model_usage.jsonl`` keeps its schema.
 
-The decision is recorded ONLY as a ``route_reason`` string (ledger variant A),
-so ``data/model_usage.jsonl`` keeps its existing schema and integrity hashes.
-
-v1 scope (verified against the codebase, 2026-06-07)
-────────────────────────────────────────────────────
-* Applies only to the ``for_task`` path (``core/loop.py`` ``run()`` →
-  ``core/model_router.py`` ``for_task``). That path is reached both from the
-  interactive ``--ask`` answer cycle AND from an autonomous campaign goal task
-  (``core/autonomous_runtime.py`` → ``self.agent.run(...)``). The default
-  (no reason supplied) downgrade therefore protects the autonomous path
-  automatically: the agent cannot self-open Opus.
-* Active roles: ``planner``, ``synthesizer`` (the only ``for_task`` callers).
-* Active reasons: ``operator_explicitly_requested_opus``,
-  ``planner_multi_file_architecture_change``.
-* Reserved for v2 (NOT active): ``high_value_repair``,
-  ``critical_inconclusive_verification``, ``subagent_disagreement_high_risk``.
-  Those roles (repair_proposal / verifier / subagent) are wired through
-  ``for_role`` and cannot reach the DEEP tier yet; accepting their reasons now
-  would imply behaviour that does not exist, so they are deliberately kept out
-  of ``ACTIVE_REASONS``.
+Active roles: planner, synthesizer, repair_proposal. Reserved reasons (not accepted) belong to roles wired through ``for_role``.
 """
 from __future__ import annotations
 
@@ -40,37 +16,25 @@ GateOutcome = Literal["approved", "downgraded"]
 
 
 # Roles allowed to escalate to deep at all (the only for_task callers).
-# `repair_proposal` joined them when `propose_repair` was moved off `for_role`:
-# rewriting a whole module correctly is the hardest thing the agent attempts,
-# and it was being sent to whatever the role config happened to name.
 ACTIVE_ROLES: frozenset[str] = frozenset({
     "planner", "synthesizer", "repair_proposal",
 })
 
-# Structured reasons that may unlock deep. "complexity" / "better quality" /
-# "just in case" are intentionally absent: the task being hard is not a reason,
-# the operator must say WHY the standard tier is not enough.
+# Structured reasons that may unlock deep; vague ones ("complexity", "just in case") are absent on purpose.
 ACTIVE_REASONS: frozenset[str] = frozenset({
     "operator_explicitly_requested_opus",
     "planner_multi_file_architecture_change",
-    # Active since `propose_repair` routes through `for_task`. Note what this
-    # does and does not buy: it lets a repair *ask* for the deep tier. The
-    # answer is still no unless `deep_budget_ok` says the operator funded it —
-    # `operator_approved` stays False on the autonomous path, so the budget is
-    # the only key, and it is zero until someone sets it.
+    # a repair may ask for deep, but `deep_budget_ok` decides; the budget is zero until the operator sets it
     "high_value_repair",
 })
 
-# Reserved until verifier/subagent are routed through the same gate. Documented
-# here so the boundary is explicit, but NOT accepted: accepting a reason for a
-# role that cannot reach deep would imply behaviour that does not exist.
+# Reserved until verifier/subagent are routed through this gate; documented but NOT accepted.
 RESERVED_REASONS: frozenset[str] = frozenset({
     "critical_inconclusive_verification",
     "subagent_disagreement_high_risk",
 })
 
-# Concrete deliverables a deep call may be asked for. A vague expected output
-# ("make it better") is not in the set and therefore downgrades.
+# Concrete deliverables a deep call may be asked for; a vague expected output downgrades.
 EXPECTED_OUTPUTS: frozenset[str] = frozenset({
     "minimal_patch_plan",
     "architecture_tradeoff",
@@ -83,11 +47,7 @@ EXPECTED_OUTPUTS: frozenset[str] = frozenset({
 class OperatorEscalation:
     """Role-free escalation context supplied by the operator at the CLI.
 
-    The router attaches the concrete role when it evaluates the gate, so this
-    object only carries the operator's structured intent. ``operator_approved``
-    and ``budget_ok`` default to ``True`` because a human typing ``--reason`` at
-    the interactive ``--ask`` prompt IS present and approving; the autonomous
-    path never constructs this object and so always falls through to a downgrade.
+    `operator_approved` and `budget_ok` default to True because a human typing `--reason` is present; the autonomous path never builds this.
     """
 
     reason: str | None = None
@@ -114,12 +74,7 @@ class DeepEscalationRequest:
     deep_model_available: bool = True
     budget_ok: bool = False
     operator_approved: bool = False
-    #: State of the model cache when the tier could not be resolved: `expired`,
-    #: `missing`, `unreadable`, or `fresh`/None when the cache is not the
-    #: explanation. All three bad states mean "no model at this tier" is a
-    #: *cache* fact rather than a provider fact, and all three are fixed by
-    #: `:refresh-models` — but they are reported separately because "never built"
-    #: and "went stale" are different things to read in a ledger.
+    #: Model cache state when the tier could not be resolved: `expired`, `missing`, `unreadable`, or `fresh`/None; the first three are fixed by `:refresh-models`.
     catalog_status: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -166,26 +121,15 @@ def _downgrade(code: str) -> DeepEscalationDecision:
     )
 
 
-#: Env var funding autonomous deep calls for this session. **Zero by default**,
-#: and that default is the whole safety story: with it unset, an autonomous
-#: repair asks for the deep tier, `deep_budget_ok` says no, and the run
-#: continues on the standard model exactly as it did before this was wired.
-#: Turning it on is an operator act, and it is a *ceiling*, not an allowance.
+#: Env var funding autonomous deep calls per session: zero by default (the safety default), and a ceiling, not an allowance.
 DEEP_BUDGET_ENV = "AGENT_DEEP_MAX_CALLS_PER_SESSION"
 
-#: Route reasons written by an approved deep call. Counting these is how spend
-#: is measured — from the ledger the router already writes, not from a second
-#: counter that could drift away from it.
+#: Route reasons written by an approved deep call; spend is counted from the ledger, not a second counter.
 _DEEP_APPROVED_PREFIX = "deep_approved:"
 
 
 def deep_call_budget() -> int:
-    """How many autonomous deep calls the operator has funded this session.
-
-    Fails closed on anything unreadable: an unset, empty, negative, fractional
-    or non-numeric limit is zero. A budget nobody can parse must not become a
-    budget nobody bounded.
-    """
+    """How many autonomous deep calls the operator has funded this session; fails closed (any unparseable value is zero)."""
     import os
 
     raw = (os.getenv(DEEP_BUDGET_ENV) or "").strip()
@@ -197,11 +141,7 @@ def deep_call_budget() -> int:
 def deep_budget_ok(usage_ledger: Any, *, limit: int) -> bool:
     """Is there room under `limit` for one more deep call?
 
-    Spend is counted only for approved deep records that have positive token
-    usage. A rejected call has no billed tokens and does not consume budget;
-    an errored call with positive token usage does, because it may have failed
-    after the provider billed it. ``status`` is therefore not a spend signal.
-    ``limit <= 0`` is off — no ledger state can unlock it.
+    Counts approved deep records with positive token usage; an errored call with tokens counts, a rejected one does not. `limit <= 0` is off.
     """
     if limit <= 0:
         return False
@@ -220,33 +160,20 @@ def deep_budget_ok(usage_ledger: Any, *, limit: int) -> bool:
 
 
 def evaluate_deep_escalation(request: DeepEscalationRequest) -> DeepEscalationDecision:
-    """Decide whether a deep-tier request is allowed or must downgrade.
+    """Decide whether a deep-tier request is allowed or must downgrade; pure, never raises.
 
-    Pure and deterministic. Called only for DEEP-tier requests (LIGHT/cheap
-    escalation is never gated). Returns a downgrade decision for every failing
-    check rather than raising, so the caller can always continue on the
-    standard tier and the task never fails just because Opus is not allowed.
+    Called only for DEEP-tier requests; every failing check returns a downgrade so the task continues on the standard tier.
     """
     if request.role not in ACTIVE_ROLES:
         return _downgrade("role_not_eligible")
     if not request.deep_model_available:
-        # Same outcome, different instruction. "No model at this tier" tells the
-        # operator to look at their provider; a cache state tells them the list
-        # is stale/absent and one command fixes it. Reporting the first when the
-        # second is true costs an investigation — that is the whole point of
-        # carrying the status. `missing` and `unreadable` count too: they were
-        # falling through to `no_deep_model`, which is exactly the misleading
-        # message this distinction exists to remove.
+        # same outcome, different instruction: a cache state (expired/missing/unreadable) points to `:refresh-models`, not to the provider
         status = request.catalog_status
         if status and status != "fresh":
             return _downgrade(f"catalog_{status}")
         return _downgrade("no_deep_model")
     if request.reason not in ACTIVE_REASONS:
-        # Тот же приём, что строкой выше для каталога: один исход, две разные
-        # инструкции оператору. `not_requested` — никто глубокий тир и не
-        # просил, читать нечего; `unknown_reason` — просили словом, которого
-        # ворота не знают, и вот это стоит посмотреть. Прежний общий код
-        # `missing_reason` заставлял расследовать штатный путь (2026-08-10).
+        # `not_requested` (nobody asked for deep) vs `unknown_reason` (a reason the gate does not know) need different operator reads
         if not (request.reason or "").strip():
             return _downgrade("not_requested")
         return _downgrade("unknown_reason")

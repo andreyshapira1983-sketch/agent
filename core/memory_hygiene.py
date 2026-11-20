@@ -1,4 +1,4 @@
-"""Гигиена памяти: просрочка, дедупликация, сводка, архивация."""
+"""Memory hygiene: expiry, deduplication, summarisation, archival."""
 from __future__ import annotations
 
 import re
@@ -34,12 +34,7 @@ _MEANING_CHANGE_CEILING = 0.5
 
 
 def _meaning_markers(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Negation words and numbers — the tokens that flip or change a fact.
-
-    Counted WITH multiplicity: «не отвечает и база не отвечает» vs «…и база
-    отвечает» has the same SET of negations but one fewer, and as sets the
-    user's correction was refused again (проверка 17.11, серьёзная №1).
-    """
+    """Negation words and numbers, the tokens that flip or change a fact, counted WITH multiplicity (as sets, a dropped second negation goes unnoticed)."""
     tokens = _MARKER_RE.findall(text)
     negs = tuple(sorted(t for t in tokens if t in _NEGATIONS or t.endswith("n't")))
     nums = tuple(sorted(t.replace(",", ".") for t in tokens if t[0].isdigit()))
@@ -47,41 +42,31 @@ def _meaning_markers(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
 
 
 def _similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
-    """Word-overlap similarity, capped when the two texts differ in a negation
-    or a number: «сервер отвечает» vs «сервер НЕ отвечает» scored 0.93 and the
-    user's correction was refused as a duplicate, then dedup kept the wrong
-    record (проверка 16.11, серьёзная №9). A changed fact is not a repeat."""
+    """Word-overlap similarity, capped when the two texts differ in a negation or a number: a changed fact is not a repeat."""
     score = _raw_similarity(a, b, order_sensitive=order_sensitive)
     if score > _MEANING_CHANGE_CEILING:
         na, nb = _normalise(a), _normalise(b)
         if na != nb:
             negs_a, nums_a = _meaning_markers(na)
             negs_b, nums_b = _meaning_markers(nb)
-            # A negation flips the fact for both consumers. A changed NUMBER
-            # is a correction only for the write gate: for the echo antibody
-            # (order_sensitive=False) «finished at 10:31» / «10:32» is exactly
-            # the counter loop it exists to catch.
+            # A negation flips the fact for both consumers. A changed NUMBER is a correction only for the write gate:
+            # for the echo antibody (order_sensitive=False) "finished at 10:31" vs "10:32" is exactly the counter loop it exists to catch.
             if negs_a != negs_b or (order_sensitive and nums_a != nums_b):
                 return _MEANING_CHANGE_CEILING
     return score
 
 
 def _raw_similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
-    """Cheap Jaccard over word sets, then boosted by substring containment.
+    """Cheap Jaccard over word sets, boosted by substring containment.
 
-    `order_sensitive` разводит ДВУХ потребителей с противоположной ценой ошибки,
-    и разводит явно, а не молчанием (F-2 в docs/audit/FIELD_CHECK_QUEUE.md):
+        `order_sensitive` separates two consumers with opposite cost of error, explicitly:
 
-    * ворота записи (`find_duplicate`) отвергают дубликат, поэтому ложное
-      слияние ТЕРЯЕТ ПОПРАВКУ. Перестановка слов должна их настораживать —
-      `True`, и это дефолт, чтобы будущий потребитель по умолчанию получал
-      осторожную половину;
-    * антитело эха ловит, как агент ПОВТОРЯЕТ САМ СЕБЯ. Пересказ теми же
-      словами в другом порядке — это и есть эхо, и пропустить его значит
-      разрешить петлю. Оно передаёт `False` осознанно.
+        * the write gate (`find_duplicate`) refuses duplicates, so a false merge LOSES A CORRECTION;
+          reordering must alarm it: `True`, the default;
+        * the echo antibody catches the agent REPEATING ITSELF; a re-wording in another order is the echo,
+          so it passes `False` on purpose.
 
-    Одна реализация на обоих нарочно: комментарий в антителе прямо называет
-    причину — иначе меры разойдутся молча.
+        One implementation serves both so the measures cannot silently diverge.
     """
     na, nb = _normalise(a), _normalise(b)
     if not na or not nb:
@@ -94,21 +79,13 @@ def _raw_similarity(a: str, b: str, *, order_sensitive: bool = True) -> float:
     if not tokens_a or not tokens_b:
         return 0.0
     if order_sensitive and tokens_a == tokens_b:
-        # ПЕРЕСТАНОВКА: те же слова, другой порядок. Жаккар по множествам даёт
-        # здесь 1.00 и не различает «openai падает, anthropic работает» от
-        # обратного, а на записи дубликат ОТВЕРГАЕТСЯ — то есть поправка,
-        # меняющая роли местами, в память не попадала (F-2 в
-        # docs/audit/FIELD_CHECK_QUEUE.md).
-        #
-        # Порогом это не лечится: развёртка 0.70…1.00 показала, что ложные
-        # слияния стоят ровно на 1.00 и не отсекаются ничем ниже единицы, а
-        # порог 1.00 оставляет их и роняет верные слияния с 75% до 50%. Менять
-        # надо МЕРУ, и только для этого случая.
-        #
-        # Порядок меряется по последовательности слов. Русский порядок слов
-        # свободен, поэтому перестановка ЧАСТО безобидна — и цена ошибки
-        # несимметрична: лишняя запись в памяти стоит мало, потерянная
-        # поправка стоит дорого. Ошибаться здесь положено в сторону «сохранить».
+        # REORDERING: same words, different order. Set-Jaccard gives 1.00 and cannot tell "openai down, anthropic up"
+        # from the reverse, and on write a duplicate is REFUSED, so a role-swapping correction never reached memory.
+        # 
+        # A threshold does not cure it (sweep 0.70..1.00: false merges sit exactly at 1.00, and threshold 1.00 drops
+        # correct merges from 75% to 50%); the MEASURE must change, for this case only. Order is measured on the word
+        # sequence. Russian word order is free, so reordering is often harmless, but the error cost is asymmetric:
+        # an extra record is cheap, a lost correction is dear. Err toward "keep".
         return SequenceMatcher(
             None, na.split()[:_ORDER_TOKEN_CAP], nb.split()[:_ORDER_TOKEN_CAP]
         ).ratio()
@@ -188,11 +165,8 @@ def deduplicate_memory(
 ) -> DedupReport:
     """Collapse near-duplicates already on disk.
 
-    A supersession target (some record's `superseded_by`) is canonical and
-    never deleted; otherwise the OLDEST record in every duplicate group is
-    canonical (oldest = first to be deliberately remembered). Newer
-    near-copies are deleted. This makes dedup idempotent: a second run finds
-    zero new groups.
+        A supersession target (some record's `superseded_by`) is canonical and never deleted; otherwise the OLDEST
+        record of each group is canonical and newer copies are deleted. Idempotent: a second run finds no new groups.
     """
     if not 0.0 < threshold <= 1.0:
         raise ValueError(f"threshold must be in (0, 1], got {threshold}")
@@ -203,11 +177,8 @@ def deduplicate_memory(
     if len(records) < 2:
         return report
 
-    # A record some `superseded_by` points to is current: it goes first as
-    # canonical and is never deleted, or the pointer dangles (проверка 17.11,
-    # средняя). Then a human's record over the agent's own near-copy, whatever
-    # their ages (проверка 16.11, №9); then oldest first, ties by id so the
-    # result is deterministic even when timestamps collide.
+    # Canonical order: a record some `superseded_by` points to first (or the pointer dangles), then a human's record
+    # over the agent's own near-copy whatever the ages, then oldest first, ties by id so the result is deterministic.
     targets = {r.superseded_by for r in records if r.superseded_by}
     ordered = sorted(
         records,
@@ -221,8 +192,7 @@ def deduplicate_memory(
     for rec in ordered:
         text = rec.content if isinstance(rec.content, str) else str(rec.content)
         match = find_duplicate(text, keep, threshold=threshold)
-        # Never delete a supersession target, and never let a human's record be
-        # removed as a copy of the agent's own (проверка 17.11, средняя).
+        # Never delete a supersession target, and never remove a human's record as a copy of the agent's own.
         human_vs_agent = (match is not None and rec.source == "user-explicit"
                           and match[0].source != "user-explicit")
         if match is None or rec.id in targets or human_vs_agent:
@@ -271,11 +241,7 @@ class ExpiryReport:
         }
 
 def _is_expired(record: MemoryRecord, now: datetime) -> bool:
-    """Same rule as `PersistentMemoryStore._is_expired`: ttl<=0 is already expired.
-
-    Прежде гигиена считала ttl<=0 вечным, а хранилище — истёкшим
-    (проверка 16.11, мелкая).
-    """
+    """Same rule as `PersistentMemoryStore._is_expired`: ttl<=0 is already expired."""
     from core.persistent_memory import record_is_expired
 
     return record_is_expired(record, now)
@@ -355,12 +321,10 @@ def summarise_memory(
     max_records: int = DEFAULT_SUMMARY_MAX_RECORDS,
     dry_run: bool = False,
 ) -> SummaryReport:
-    """Merge records sharing `tag` into a single summarised record.
+    """Merge records sharing `tag` into one summarised record.
 
-    Behaviour: - 0 matching records -> no-op (skipped_reason='no records') -
-    1 matching record -> no-op (skipped_reason='single record') -
-    2..max_records -> LLM called, summary saved, originals removed -
-    >max_records -> only the oldest `max_records` are merged
+        0 or 1 matching records: no-op (skipped_reason set); 2..max_records: LLM called, summary saved, originals removed;
+        more than max_records: only the oldest `max_records` are merged.
     """
     if not tag or not tag.strip():
         raise ValueError("tag must be a non-empty string")
@@ -377,9 +341,8 @@ def summarise_memory(
 
     records = store.load()
     matching = [r for r in records if tag_norm in {t.lower() for t in (r.tags or [])}]
-    # Already-summarised records are excluded. So are a human's own records:
-    # merging them turned two `user-explicit` assertions into one agent
-    # paraphrase and lost their authority and causal credit (проверка 17.11, №4).
+    # Already-summarised records are excluded, and so are a human's own records: merging them turned two
+    # `user-explicit` assertions into one agent paraphrase and lost their authority and causal credit.
     matching = [r for r in matching if SUMMARY_TAG not in {t.lower() for t in (r.tags or [])}
                 and r.source != "user-explicit"]
 
@@ -416,10 +379,8 @@ def summarise_memory(
             max_tokens=1024,
             temperature=0.2,
         )
-    # Not silent: the failure is written INTO the report as
-    # `skipped_reason`, so a summarisation that could not run is visible
-    # to the operator instead of looking like a summarisation that found
-    # nothing. Hygiene must not take the caller down with it.
+    # Not silent: the failure is written INTO the report as `skipped_reason`, so a summarisation that could not run
+    # is distinguishable from one that found nothing. Hygiene must not take the caller down with it.
     except Exception as exc:  # noqa: BLE001
         report.skipped_reason = f"llm_error: {type(exc).__name__}: {exc}"
         return report
@@ -437,10 +398,8 @@ def summarise_memory(
     if len(summary_text) > max(800, combined_chars):
         summary_text = summary_text[:800].rstrip() + "…"
 
-    # Preserve the canonical tag + add the marker so summarised records
-    # are excluded from future summarisation passes. Protective categories
-    # the originals carried (decision, lesson, …) are kept, or the summary of
-    # protected records could be archived (проверка 16.11, №8).
+    # Preserve the canonical tag and add the marker so summarised records are excluded from future passes. Protective
+    # categories of the originals (decision, lesson, ...) are kept, or the summary of protected records could be archived.
     kept_categories = {
         t.lower() for r in selected for t in (r.tags or [])
         if t.lower() in _TAG_WEIGHTS or t.lower() in _ARCHIVE_PROTECTED_TAGS
@@ -450,9 +409,8 @@ def summarise_memory(
     selected_ids = sorted(r.id for r in selected)
     report.summarised_ids = selected_ids
 
-    # The summary is the MODEL's text: it goes through the same write policy
-    # as any agent write (secrets, PII, and — since 17.11 — injection). Writing it straight to the
-    # store was a path past the door (проверка 16.11, №8).
+    # The summary is the MODEL's text: it goes through the same write policy as any agent write (secrets, PII,
+    # injection); writing it straight to the store would bypass the door.
     from core.memory_policy import MemoryWritePolicy
 
     others = [r for r in records if r.id not in set(selected_ids)]
@@ -532,13 +490,9 @@ def _importance_score(record: MemoryRecord, now: datetime) -> float:
     """
     tags_lower = {t.strip().lower() for t in (record.tags or [])}
     base = max((_TAG_WEIGHTS.get(t, 0.0) for t in tags_lower), default=0.3)
-    # MIR-074 (operator ruling): the pipeline stamps every auto-extracted
-    # claim with `fact` (weight 0.8) AND `source-backed` — with the idle
-    # penalty capped at 0.3 that floor (0.5 > threshold 0.25) made auto
-    # records unarchivable FOREVER, however useless. An auto record with
-    # zero CAUSAL credit no longer inherits the tag's immortality: its tag
-    # base is capped so pure idleness can carry it below the threshold —
-    # «пока не пригодилось — отодвинем подальше», dormant, not destroyed.
+    # Auto-extracted claims carry `fact` (weight 0.8) AND `source-backed`; with the idle penalty capped at 0.3 that floor
+    # (0.5 > threshold 0.25) made auto records unarchivable forever. An auto record with zero CAUSAL credit therefore has
+    # its tag base capped so idleness alone can carry it below the threshold (dormant, not destroyed).
     causal_use = int(getattr(record, "causal_use", 0) or 0)
     if "source-backed" in tags_lower and causal_use == 0:
         base = min(base, 0.4)
@@ -546,9 +500,8 @@ def _importance_score(record: MemoryRecord, now: datetime) -> float:
     # important must not be scored down to the archive by tag/access heuristics.
     base = max(base, float(record.importance or 0.0))
 
-    # Access boost — each use bumps importance; CAUSAL use (the record was
-    # cited in a verified answer) weighs four times an injection, per the
-    # ruling: «совпадение слов при вставке ≈ нулевой кредит».
+    # Access boost: each use bumps importance; CAUSAL use (cited in a verified answer) weighs four times an injection,
+    # since word overlap at injection is about zero credit.
     access_boost = min(0.3, record.access_count * 0.05)
     access_boost += min(0.6, causal_use * 0.2)
 

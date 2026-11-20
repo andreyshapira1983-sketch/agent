@@ -1,4 +1,4 @@
-"""Ворота цикла: четыре места, где ход заканчивается, не начавшись."""
+"""Loop gates: four places where a turn ends before it starts."""
 from __future__ import annotations
 
 import re
@@ -6,13 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from core.replay_freshness import replay_note, with_replay_note
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — annotation only
     from core.clarification_policy import ClarificationResult
     from core.operational_domain import DomainResult
 
 
-#: Узкие маркеры ссылки на предыдущий шаг (R5): «результат предыдущего шага»,
-#: «previous step/result». Нарочно не общая анафора.
+#: Narrow markers of a reference to the previous step ("previous step/result"); deliberately not general anaphora.
 _PRIOR_STEP_RE = re.compile(
     r"(?i)предыдущ\w*\s+(?:шаг|запрос|ответ|результат)"
     r"|результат\w*\s+предыдущ|прошл\w*\s+шаг"
@@ -21,20 +20,16 @@ _PRIOR_STEP_RE = re.compile(
 
 
 def _names_its_material(question: str) -> bool:
-    """Вопрос сам называет файлы — значит, «предыдущий шаг» в нём описание, а
-    не висящая ссылка. 2026-09-21: Claude описал дефект словами «вывод
-    предыдущего шага» в вопросе с путями и следом, и ворота вернули
-    «уточните, какой результат использовать» — модель вопрос не увидела.
-    """
+    """True when the question itself names files, so "previous step" is a description, not a dangling reference."""
     from core.file_request_intent import extract_path_mentions
 
     return bool(extract_path_mentions(question or ""))
 
 
 class AgentLoopGates:
-    """Ранние выходы: ход решён до планирования — или не решён."""
+    """Early exits: the turn is decided before planning, or not decided."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         memory: Any
         odd_enabled: Any
@@ -44,26 +39,17 @@ class AgentLoopGates:
         _stream_on_token: Any
         _last_best_similar_episode: Any
         _last_best_similar_score: Any
-        # Как в `AgentLoop.__init__`: список или None до начала цикла.
+        # As in AgentLoop.__init__: a list, or None before the loop starts.
         _cycle_findings: list[dict[str, Any]] | None
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as callable attributes: an empty-body stub reads to analyzers as "function without return" (false E1111).
         _record_experience_memory: Any
-        # Остались в `core/loop.py` намеренно: обе именуют `AgentLoop` прямо
-        # в теле (константы порога живут на классе), и переезд означал бы
-        # правку тела, а не перенос. Разрешаются по MRO, как и всё здесь.
+        # Left in core/loop.py on purpose: both name AgentLoop in their body (threshold constants live on the class); resolved via MRO.
         _fast_path_allows_replay: Any
 
     def _odd_gate(self, user_question: str) -> str | None:
-        """Отказ, если запрос вне домена применимости, иначе `None`."""
-        # 2b. Operational Design Domain gate (§7 ODD / B-05).
-        # Pure-heuristic check — no LLM, no I/O.  When the request falls
-        # outside the agent's operational domain (harmful/illegal, real
-        # money, physical world, regulated advice, authority over people),
-        # the loop stops here BEFORE any planning and returns an honest
-        # refusal/escalation message instead of improvising an action.
+        """Refusal if the request is outside the applicability domain, else None."""
+        # ODD gate (§7): pure heuristic, no LLM; stops before any planning with an honest refusal/escalation message.
         if self.odd_enabled:
             _odd = self._check_operational_domain(user_question)
             if _odd.blocks:
@@ -83,12 +69,9 @@ class AgentLoopGates:
         return None
 
     def _resume_clarification(self, user_question: str) -> tuple[str, bool]:
-        """Re-attach the question a clarification asked ABOUT to the answer.
+        """Re-attach the question a clarification asked ABOUT to the answer; returns (effective question, is_resumption).
 
-        Returns the effective question and whether this run is a resumption —
-        a resumed run is never re-gated, because the trigger lives in the
-        original text and asking again could only ask forever. See
-        docs/CODE_NOTES.md, "Уточнение не выбрасывает вопрос".
+        A resumed run is never re-gated, or it would ask forever.
         """
         pending = None
         if getattr(self, "pending_clarification_path", None) is not None:
@@ -103,23 +86,15 @@ class AgentLoopGates:
         return pending + "\n\n" + user_question, True
 
     def _park_clarification(self, user_question: str) -> None:
-        """Park the question a clarification was just raised about.
-
-        Ставит и флаг «ход ответил вопросом»: его читает безлюдный рантайм,
-        чтобы вопрос не уехал как сделанная работа (Д1, замер 2026-09-03).
-        """
+        """Park the question a clarification was raised about; also sets the "turn answered with a question" flag the unattended runtime reads."""
         self.last_answer_was_clarification = True
         if getattr(self, "pending_clarification_path", None) is not None:
             from core.pending_clarification import pending_clarification
             pending_clarification(self.pending_clarification_path, user_question)
 
     def _clarification_gate(self, user_question: str) -> str | None:
-        """Уточняющий вопрос, если запрос двусмыслен, иначе `None`."""
-        # 2c. Clarification Policy (§3 Clarification Policy).
-        # Pure-heuristic check — no LLM, no I/O.  When the question is
-        # ambiguous about a destructive action the loop stops here and
-        # returns the clarification question to the caller so the REPL
-        # can surface it before any planning starts.
+        """Clarifying question if the request is ambiguous, else None."""
+        # Clarification Policy (§3): pure heuristic; returns the question to the caller before planning.
         if self.clarification_enabled:
             _clarif = self._check_clarification(user_question)
             if _clarif.should_ask:
@@ -138,7 +113,7 @@ class AgentLoopGates:
         return None
 
     def _contract_ambiguity_gate(self, contract: Any) -> str | None:
-        """Шестые ворота (R1b, 2026-08-13): двусмысленный контракт спрашивает."""
+        """Sixth gate: an ambiguous contract asks."""
         if not self.clarification_enabled:
             return None
         ambiguities = tuple(getattr(contract, "ambiguities", ()) or ())
@@ -155,7 +130,7 @@ class AgentLoopGates:
         return question_text
 
     def _prior_step_gate(self, user_question: str) -> str | None:
-        """Пятые ворота (R5, 2026-08-13): предыдущий шаг, которого нет."""
+        """Fifth gate: a previous step that does not exist."""
         from core.referent_resolver import referent_resolver_mode
         if not self.clarification_enabled:
             return None
@@ -187,21 +162,11 @@ class AgentLoopGates:
         goal: Any,
         local_critique_active: bool,
     ) -> str | None:
-        """Сохранённый ответ, если ход в точности повторяет прошлый, иначе `None`."""
-        # ── Episodic fast path ───────────────────────────────────────────────────
-        # Jaccard ≥ 0.85 AND quality ≥ 0.70 → serve the stored answer directly,
-        # skipping both the planner LLM call and the synthesizer LLM call.
-        # Conditions that disable the fast path:
-        #   - episodic_replay is False (this agent may read experience memory
-        #     but may not serve a stored answer in place of a fresh cycle —
-        #     the unattended profile runs this way)
-        #   - file_hint is set (the answer is tied to a specific file)
-        #   - question starts with ':' (operator command)
-        #   - full_answer is empty (episode from before this feature)
-        #   - the cached episode acted, or read something that changed since
-        #     (core/replay_freshness.py, checked when the candidate is chosen in
-        #     loop_memory_read; operator 17.11)
-        #   - local_critique_active (must critique current referent, not replay)
+        """Stored answer if the turn exactly repeats a past one, else None."""
+        # Episodic fast path: Jaccard >= 0.85 and quality >= 0.70 serve the stored answer, skipping planner and synthesizer.
+        # Disabled when: episodic_replay is False (the unattended profile may read experience but not replay it), file_hint is set,
+        # the question starts with ':', full_answer is empty, the cached episode acted or read something that changed
+        # (core/replay_freshness.py), or local_critique_active.
         _fp_ep = self._last_best_similar_episode
         _fp_score = self._last_best_similar_score
         if (
@@ -220,16 +185,8 @@ class AgentLoopGates:
                     "answer_chars": len(_fp_ep.full_answer),
                 },
             )
-            # A replay produces NO new evidence: nothing was fetched, nothing
-            # was verified this cycle. Banking it as verified_chunks=1 minted
-            # verification out of "it matched something in memory", and the
-            # replay then looked as trustworthy as the answer it copied — a
-            # self-reinforcing chain (MIR-041).
-            #
-            # unverified=1 rather than 0/0 on purpose: an empty chain scores
-            # quality 1.0 (MIR-002), which would hand the replay top marks for
-            # having no evidence at all. The source episode is named in
-            # source_labels so the copy stays traceable to its origin.
+            # A replay produces no new evidence: unverified=1, not verified_chunks=1 (no self-reinforcing trust) and not 0/0 (an empty
+            # chain scores 1.0); the source episode is named in source_labels so the copy stays traceable.
             self._record_experience_memory(
                 goal_description=goal.description,
                 question=user_question,
@@ -239,9 +196,7 @@ class AgentLoopGates:
                 verified_chunks=0,
                 unverified_chunks=1,
                 replan_exhausted=False,
-                # No verifier ran on a replay, so none of it crashed. The
-                # distinction matters: this flag means "the verifier threw",
-                # not "no verification happened".
+                # No verifier ran on a replay: this flag means "the verifier threw", not "no verification happened".
                 verifier_failure=False,
             )
             if self.memory is not None:
@@ -257,7 +212,7 @@ class AgentLoopGates:
         return None
 
     def _noted_replay(self, answer: str) -> str:
-        """The served stored answer, with one line saying it came from memory (operator 17.11)."""
+        """The served stored answer plus one line saying it came from memory."""
         episode = self._last_best_similar_episode
         return with_replay_note(answer, replay_note(episode)) if episode is not None else answer
 
@@ -269,7 +224,7 @@ class AgentLoopGates:
         file_hint: str | None,
         goal: Any,
     ) -> str | None:
-        """Отказ многофайлового разбора, если он вынесен, иначе `None`."""
+        """Refusal of multi-file analysis if one was issued, else None."""
         if multi_file["kind"] == "refusal":
             answer = str(multi_file["message"])
             self.log.log("multi_file_review_refused", multi_file)
@@ -310,8 +265,7 @@ class AgentLoopGates:
                 verified_chunks=0,
                 unverified_chunks=1,
                 replan_exhausted=False,
-                # The refusal returns before planning, so verification never
-                # started — again not a crash.
+                # The refusal returns before planning, so verification never started (not a crash).
                 verifier_failure=False,
             )
             self._stream_on_token = None
@@ -321,11 +275,11 @@ class AgentLoopGates:
 
 
     def _check_clarification(self, user_question: str) -> ClarificationResult:
-        """Run the Clarification Policy (§3) — pure heuristic, no LLM."""
+        """Run the Clarification Policy (§3): heuristic, no LLM."""
         from core.clarification_policy import check_clarification
         return check_clarification(user_question)
 
     def _check_operational_domain(self, user_question: str) -> DomainResult:
-        """Run the Operational Design Domain gate (§7 ODD) — pure, no LLM."""
+        """Run the Operational Design Domain gate (§7): pure, no LLM."""
         from core.operational_domain import check_operational_domain
         return check_operational_domain(user_question)

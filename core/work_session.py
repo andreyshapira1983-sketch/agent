@@ -1,19 +1,4 @@
-"""MVP-17.1  Long Work Session Skeleton.
-
-A bounded multi-cycle session that:
-
-* runs up to ``max_cycles`` autonomous health passes
-* stops when the wall-clock ``minutes`` budget expires
-* stops when the circuit breaker opens (too many consecutive failures)
-* stops early when successive cycles converge — i.e. produce an identical
-  outcome signature ``convergence_window`` times in a row (TD-018), so a
-  session that keeps re-running the same goal with the same result does not
-  burn its whole budget spinning in place
-* emits a progress line every ``report_every`` cycles to stderr
-* never performs side-effects in dry-run mode (delegates to AutonomousRuntime)
-
-This is the first layer only — a single-command skeleton that proves the
-timing/budget/circuit mechanics work before real multi-hour sessions land.
+"""Long work session skeleton (MVP-17.1): a bounded multi-cycle session of autonomous health passes that stops on ``max_cycles``, the wall-clock ``minutes`` budget, an open circuit breaker or convergence (identical outcome signature ``convergence_window`` times in a row); progress goes to stderr every ``report_every`` cycles; no side effects in dry-run (delegates to AutonomousRuntime).
 
 Usage (CLI):
     :work-session "project health" --dry-run --minutes 10 --max-cycles 3 --report-every 1
@@ -34,9 +19,7 @@ logger = logging.getLogger(__name__)
 
 WorkSessionStatus = Literal["completed", "stopped", "interrupted"]
 
-#: Цель-расследование для цикла, следующего за серией одинаковых концовок
-#: (авторство агента, груз №3). {signature} — повторившаяся сигнатура серии,
-#: {goal} — исходная цель смены, к которой цикл после расследования вернётся.
+#: Investigation goal for the cycle after a run of identical endings; {signature} is the repeated signature, {goal} the shift's original goal the session returns to.
 INVESTIGATION_GOAL_TEMPLATE = (
     "Investigate why goal {goal!r} keeps producing the same outcome "
     "signature {signature!r}; propose and apply a fix."
@@ -52,33 +35,19 @@ class WorkSessionConfig:
     """Immutable configuration for one work session."""
 
     goal: str = "project health"
-    # dry_run=False means real effects; the AutonomousRuntime will still block
-    # unless effects_approved=True, so this is safe to default to False.
-    # Pass dry_run=True explicitly from the CLI when you want a read-only pass.
+    # dry_run=False means real effects; AutonomousRuntime still blocks unless effects_approved=True, so False is a safe default.
     dry_run: bool = False
     minutes: float = 10.0
     max_cycles: int = 3
     report_every: int = 1
-    # TD-018 convergence stop: when successive cycles produce an identical
-    # outcome signature this many times in a row *and* cycles remain, the
-    # session stops early (stop_reason="converged") instead of spinning on a
-    # goal it can no longer make progress on. Set False to disable.
+    # Convergence stop: identical outcome signatures this many times in a row while cycles remain stop the session early (stop_reason="converged"). False disables.
     stop_on_convergence: bool = True
     convergence_window: int = 3
-    # Marathon heartbeat (2026-08-29): minimum wall-clock seconds one cycle's
-    # slot occupies. After each non-final cycle the session sleeps the slot's
-    # remainder, so a long shift spreads over real hours instead of sprinting
-    # into the persistent hour budget window. 0 keeps the sprint behaviour.
+    # Marathon heartbeat: minimum wall-clock seconds one cycle's slot occupies; after each non-final cycle the session sleeps the remainder. 0 keeps sprint behaviour.
     pace_seconds: float = 0.0
-    # ── investigation switch (authorship: the agent, cargo 3; default OFF —
-    # preserves current behaviour) ────────────────────────────────────────────
-    # When True, a cycle whose outcome signature repeats `investigation_window`
-    # times in a row triggers a follow-up cycle with the investigation goal
-    # template instead of stopping. Default False keeps the session as today.
+    # Investigation switch (default OFF): when a cycle's outcome signature repeats `investigation_window` times in a row, a follow-up cycle with the investigation goal template runs instead of stopping.
     investigate_on_repeat: bool = False
-    # Number of identical outcome signatures required before investigation
-    # fires. Must be strictly LESS than convergence_window so investigation
-    # triggers before the TD-018 stop-crane (see __post_init__).
+    # Identical signatures required before investigation fires; strictly LESS than convergence_window so it triggers before the stop-crane (see __post_init__).
     investigation_window: int = 2
 
     def __post_init__(self) -> None:
@@ -179,14 +148,10 @@ def run_work_session(
     workspace: Any,
     approval_inbox: Any = None,
 ) -> WorkSessionResult:
-    """Run a bounded work session.  Safe to call from the CLI and tests.
+    """Run a bounded work session (blocking; safe from the CLI and tests).
 
-    The function is blocking.  It returns a WorkSessionResult when:
-    - all ``max_cycles`` complete  (stop_reason="")
-    - wall-clock ``minutes`` are exhausted  (stop_reason="time_budget")
-    - the circuit breaker trips   (stop_reason="circuit_open: ...")
-    - successive cycles converge  (stop_reason="converged", TD-018)
-    - the user presses Ctrl-C     (status="interrupted")
+    Returns a WorkSessionResult when all ``max_cycles`` complete (stop_reason=""), the ``minutes`` budget is exhausted ("time_budget"),
+    the circuit breaker trips ("circuit_open: ..."), cycles converge ("converged") or the user presses Ctrl-C (status="interrupted").
     """
     deadline = time.monotonic() + config.minutes * 60.0
     circuit = CircuitBreaker(CircuitBreakerConfig())
@@ -200,14 +165,11 @@ def run_work_session(
     stop_reason: str = ""
     status: WorkSessionStatus = "completed"
     session_start = time.monotonic()
-    # TD-018 convergence tracking: signature of the previous cycle's outcome and
-    # how many times in a row the same signature has repeated.
+    # Convergence tracking: signature of the previous cycle's outcome and how many times in a row it repeated.
     prev_signature: Any = None
     repeat_count: int = 0
-    # Investigation switch locals (authorship: the agent, cargo 3): the goal the
-    # NEXT cycle will actually run (swapped to the investigation template when
-    # the sensor fires, restored after the probe cycle), plus the one-probe-per-
-    # series limiter and the "probe just ran" marker.
+    # Investigation switch locals: the goal the NEXT cycle runs (swapped to the investigation template when the sensor fires, restored after the probe),
+    # the one-probe-per-series limiter and the 'probe just ran' marker.
     current_goal: str = config.goal
     investigation_done: bool = False
     investigation_just_ran: bool = False
@@ -222,13 +184,13 @@ def run_work_session(
 
     try:
         for cycle in range(1, config.max_cycles + 1):
-            # ── time budget check before starting a new cycle ───────────────
+            # Time budget check before starting a new cycle.
             if time.monotonic() >= deadline:
                 stop_reason = "time_budget"
                 status = "stopped"
                 break
 
-            # ── circuit breaker check ────────────────────────────────────────
+            # Circuit breaker check.
             decision = circuit.check()
             if not decision.allowed:
                 stop_reason = f"circuit_open: {decision.reason}"
@@ -243,12 +205,8 @@ def run_work_session(
 
             cycle_start = time.monotonic()
 
-            # ── one autonomous pass per cycle ─────────────────────────────────
-            # include_goal=True when a non-default goal was supplied so the
-            # agent actually executes it via agent.run().  Queue = [status,
-            # learn, goal] → need limit=3 so the goal task is not cut off.
-            # current_goal, не config.goal: переключатель расследования подменяет
-            # цель ровно одного цикла (авторство агента, груз №3).
+            # include_goal=True for a non-default goal so the agent executes it via agent.run(); queue = [status, learn, goal], so limit=3 keeps the goal task.
+            # current_goal, not config.goal: the investigation switch swaps the goal for exactly one cycle.
             has_real_goal = bool(current_goal) and current_goal != "project health"
             run_report = runtime.run(
                 AutonomousRuntimeConfig(
@@ -279,15 +237,8 @@ def run_work_session(
             )
             cycle_reports.append(cr)
 
-            # ── approval-pause stop ──────────────────────────────────────────
-            # A cycle that blocked waiting for human approval is NOT a failure —
-            # it is the safety design working. Park the session with an explicit
-            # "awaiting_approval" stop_reason and event, WITHOUT recording a
-            # circuit-breaker failure. Otherwise two approval-blocked cycles in a
-            # row would exhaust the failure budget and open the breaker, hiding
-            # the real reason behind a scary "circuit_open" message. Checked
-            # before the budget/convergence/circuit updates so an approval pause
-            # is never mis-recorded as a failure.
+            # Approval pause: a cycle blocked on human approval is NOT a failure; park the session with stop_reason "awaiting_approval" WITHOUT recording a circuit-breaker failure.
+            # Checked before the budget/convergence/circuit updates so it is never mis-recorded.
             if _is_approval_blocked(run_report):
                 _log(agent, "work_session_awaiting_approval", {
                     "cycle": cycle,
@@ -297,13 +248,8 @@ def run_work_session(
                 status = "stopped"
                 break
 
-            # ── budget-exhaustion stop ───────────────────────────────────────
-            # If the cycle's goal task died on a model/token budget limit
-            # (ModelBudgetExceeded surfaces as a failed task carrying
-            # error_type="ModelBudgetExceeded"), stop now instead of spinning
-            # the remaining cycles, which would each hit the same exhausted
-            # window. Checked before the convergence/circuit update so a
-            # starved cycle is never mis-recorded as a success.
+            # Budget-exhaustion stop: a goal task that died on a model/token budget limit ends the session instead of spinning cycles that would hit the same window;
+            # checked before the convergence/circuit update.
             if _is_budget_exhausted(run_report):
                 stop_reason = "budget_exhausted"
                 status = "stopped"
@@ -313,31 +259,17 @@ def run_work_session(
                 })
                 break
 
-            # ── convergence stop (TD-018) + investigation switch (cargo 3) ───
-            # If the cycle produced the same outcome signature as the previous
-            # ones for `convergence_window` passes in a row, the session is
-            # spinning. With investigate_on_repeat, a shorter window fires ONE
-            # investigation cycle first: the next cycle's goal becomes the
-            # investigation template, then the original goal returns. The
-            # stop-crane stays as the last resort, unchanged.
+            # Convergence stop plus investigation switch: the same outcome signature for `convergence_window` passes means spinning; with investigate_on_repeat a shorter window
+            # first fires ONE investigation cycle (next goal = investigation template, then the original goal returns); the stop-crane stays the last resort.
             if config.stop_on_convergence:
                 if investigation_just_ran:
-                    # ── half-open probe (Microsoft Circuit Breaker Pattern) ──
-                    # The investigation cycle is a PROBE: its report must NOT
-                    # enter the series counter. Per the pattern, a probe's
-                    # outcome decides the transition but is never mixed into
-                    # the failure/success series. Skip signature computation,
-                    # series updates and the stop-crane for this report; the
-                    # original goal's series resumes next cycle with its
-                    # previous count. (Courier note: assembled as if/else
-                    # instead of the author's `continue` so the cycle-end log,
-                    # circuit update and pacing below still run.)
+                    # Half-open probe: the investigation cycle's report must NOT enter the series counter; skip signature computation, series updates and the stop-crane for it.
+                    # The original goal's series resumes next cycle with its previous count. Built as if/else instead of `continue` so cycle-end log, circuit update and pacing still run.
                     current_goal = config.goal
                     investigation_just_ran = False
                 else:
                     signature = _cycle_signature(run_report)
-                    # ── investigation branch: fires BEFORE the stop-crane, on
-                    #    its own (strictly smaller) threshold ─────────────────
+                    # Investigation branch: fires BEFORE the stop-crane, on its own (strictly smaller) threshold.
                     if (
                         config.investigate_on_repeat
                         and repeat_count == config.investigation_window
@@ -355,18 +287,16 @@ def run_work_session(
                             "investigation_window": config.investigation_window,
                             "goal": config.goal,
                         })
-                        # Do NOT update prev_signature/repeat_count on this
-                        # pass — the series is preserved; the stop-crane is
-                        # skipped because the investigation branch consumed it.
+                        # Do NOT update prev_signature/repeat_count on this pass: the series is preserved and the stop-crane is skipped.
                     else:
-                        # ── series tracking (non-investigation passes) ───────
+                        # Series tracking (non-investigation passes).
                         if signature == prev_signature:
                             repeat_count += 1
                         else:
                             repeat_count = 1
                         prev_signature = signature
 
-                        # ── stop-crane (TD-018, unchanged) ───────────────────
+                        # Stop-crane.
                         if (
                             repeat_count >= config.convergence_window
                             and cycle < config.max_cycles
@@ -381,7 +311,7 @@ def run_work_session(
                             })
                             break
 
-            # ── update circuit based on run outcome ──────────────────────────
+            # Update the circuit from the run outcome.
             if run_report.status == "completed":
                 circuit.record_success()
             elif run_report.status in ("stopped", "blocked"):
@@ -389,7 +319,7 @@ def run_work_session(
 
             _log(agent, "work_session_cycle_end", cr.to_dict())
 
-            # ── periodic progress report ─────────────────────────────────────
+            # Periodic progress report.
             if cycle % config.report_every == 0:
                 remaining = max(0.0, deadline - time.monotonic())
                 _log(agent, "work_session_report", {
@@ -403,13 +333,13 @@ def run_work_session(
                     file=sys.stderr,
                 )
 
-            # ── time budget post-cycle check ─────────────────────────────────
+            # Time budget post-cycle check.
             if time.monotonic() >= deadline:
                 stop_reason = "time_budget"
                 status = "stopped"
                 break
 
-            # ── pacing pause (marathon heartbeat) ────────────────────────────
+            # Pacing pause (marathon heartbeat).
             _pace_pause(agent, config, cycle, cycle_elapsed, deadline)
 
     except KeyboardInterrupt:
@@ -431,7 +361,6 @@ def run_work_session(
     return result
 
 
-# ── internal helpers ───────────────────────────────────────────────────────────
 
 def _pace_pause(
     agent: Any,
@@ -479,12 +408,8 @@ def _cycle_signature(run_report: Any) -> tuple:
         )
         return (getattr(run_report, "status", ""), tasks)
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # The signature feeds repetition detection. `("__unknown__",)` is
-        # deliberately CONSTANT: two unreadable reports in a row compare equal
-        # and trip the "nothing is changing" guard, which is the safe direction
-        # — a stuck session stops. Journaled because otherwise the operator
-        # sees a session halted for looping when in fact the report could not
-        # be read (MIR-077).
+        # The signature feeds repetition detection; `("__unknown__",)` is deliberately CONSTANT so two unreadable reports compare equal and trip the 'nothing is changing' guard (a stuck session stops).
+        # Journaled so the operator can tell a loop from an unreadable report.
         logger.warning(
             "run report unreadable, cycle signature degraded: %s: %s",
             type(exc).__name__, exc,
@@ -510,9 +435,7 @@ def _is_budget_exhausted(run_report: Any) -> bool:
             if details.get("error_type") == "ModelBudgetExceeded":
                 return True
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # `False` means "budget is fine, keep going" — the permissive answer.
-        # An unreadable report therefore does not stop the session, it lets it
-        # spend on (MIR-077).
+        # `False` means 'budget is fine, keep going' (permissive): an unreadable report does not stop the session.
         logger.warning(
             "budget-exhaustion check could not read the run report: %s: %s",
             type(exc).__name__, exc,
@@ -549,9 +472,7 @@ def _is_approval_blocked(run_report: Any) -> bool:
             if "approval" in str(details.get("reason", "")).lower():
                 return True
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # Same permissive direction as the budget check above: `False` means
-        # "nothing is waiting for a human", so an unreadable report silently
-        # removes the reason to pause (MIR-077).
+        # Same permissive direction as the budget check: an unreadable report removes the reason to pause.
         logger.warning(
             "approval-block check could not read the run report: %s: %s",
             type(exc).__name__, exc,

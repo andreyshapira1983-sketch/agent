@@ -1,22 +1,6 @@
-"""Termination awareness — addresses MAST FM-1.5 and FM-3.1.
+"""Termination awareness (MAST FM-1.5, FM-3.1): two observational checks that flag the loop when it should recognise a terminal state.
 
-Two observational checks that flag the loop when it should *recognize* a
-terminal state but might not:
-
-* **Stagnation** (FM-1.5, "unaware of termination", 12.4% of failures —
-  almost exclusively in failed runs per UC Berkeley 2025).  If two
-  consecutive replan attempts produce the same failure-code signature
-  AND the same set of usable artifacts, the loop is looping.  We surface
-  this as ``stagnation_detected`` so an operator (or a future stricter
-  policy) can stop early instead of burning the rest of the attempt
-  budget on the same broken plan.
-
-* **Premature completion** (FM-3.1, 6.2%).  If the loop is about to
-  return an answer with an empty evidence chain on a question that
-  appears to *require* tools (looking-up files, running tests, reading
-  logs, fetching the web), we surface ``premature_completion_risk``.
-  The synthesizer still runs — this is a signal, not a block — but the
-  event makes the failure mode auditable.
+Stagnation: two consecutive replan attempts with the same failure-code signature AND the same usable artifacts mean the loop is looping; surfaced as ``stagnation_detected``. Premature completion: answering with an empty evidence chain on a question that seems to require tools; surfaced as ``premature_completion_risk``. Signals, not blocks.
 """
 
 from __future__ import annotations
@@ -24,9 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-# Question keywords (EN + RU) that strongly suggest the answer needs a
-# fresh tool call rather than general-knowledge synthesis.  Keep tight
-# to avoid flagging philosophical / definition-style questions.
+# Question keywords (EN + RU) suggesting the answer needs a fresh tool call; kept tight to avoid flagging definition-style questions.
 _TOOL_DEMANDING_KEYWORDS: tuple[str, ...] = (
     # File / repo
     "open ", "read ", "show me", "look at", "содерж", "прочит", "покаж",

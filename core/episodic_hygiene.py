@@ -1,10 +1,4 @@
-"""Episodic memory hygiene — staleness scoring and pruning.
-
-* :func:`score_staleness(ep, now)` — pure scoring function. Higher = more
-worth evicting. Always non-negative; ``inf`` for protected = NEVER. *
-:func:`select_for_pruning(episodes, *, max_age_days, ...)` — returns the
-subset whose score crosses the threshold and that are old enough.
-"""
+"""Episodic memory hygiene: staleness scoring and pruning of old low-value episodes."""
 
 from __future__ import annotations
 
@@ -18,14 +12,10 @@ _DEFAULT_MIN_QUALITY = 0.4  # below this, the episode is a distractor risk
 _DEFAULT_STALENESS_THRESHOLD = 1.5  # tuned with score_staleness's weights
 
 
-# Score-component weights. Exposed as module constants so a future config
-# can override without code change.
+# Score-component weights; module constants so a config can override them.
 _W_AGE = 1.0 / 30.0          # +1.0 per 30 days
 _W_LOW_QUALITY = 1.5         # full weight when quality == 0
-# Where an unmeasured answer sits on the quality axis. Mid-scale is a
-# statement about this consumer's treatment of missing data, not a guess at
-# the episode's worth: it neither rewards nor punishes an answer that carried
-# no evidence to measure.
+# Unmeasured answers sit mid-scale on the quality axis: neither rewarded nor punished for carrying no evidence.
 _QUALITY_WHEN_UNMEASURED = 0.5
 _W_FAILED = 0.75
 _W_PARTIAL = 0.25
@@ -48,24 +38,14 @@ def _parse_iso(iso: str) -> datetime | None:
 
 
 def score_staleness(ep: EpisodeRecord, now: datetime | None = None) -> float:
-    """Higher value = better candidate for eviction.
-
-    Protected episodes return ``float("inf")`` from the *protection*
-    side: callers are expected to filter these out *before* calling
-    :func:`select_for_pruning`. To keep this function safe to use in
-    isolation it returns ``0.0`` for protected episodes — that way they
-    never cross any positive threshold and won't be selected.
-    """
+    """Eviction score (higher = better candidate); protected episodes return 0.0 so they never cross a positive threshold."""
     if EpisodicMemoryStore.PROTECTED_TAGS & set(ep.tags):
         return 0.0
     now = now or datetime.now(timezone.utc)
     created = _parse_iso(ep.created_at)
     age_days = max(0.0, (now - created).total_seconds() / 86400.0) if created else 0.0
 
-    # An unmeasured answer (no evidence chunks at all) earns neither the bonus
-    # of a perfect score nor the penalty of a bad one — mid-scale is the honest
-    # placement for "we do not know". Reading None as 1.0 is what let groundless
-    # episodes outlive well-evidenced ones (MIR-002).
+    # An unmeasured answer (no evidence chunks) gets mid-scale quality, not 1.0, so groundless episodes cannot outlive well-evidenced ones.
     raw_quality = ep.answer_quality_score
     quality = (
         _QUALITY_WHEN_UNMEASURED
@@ -91,20 +71,11 @@ def select_for_pruning(
     staleness_threshold: float = _DEFAULT_STALENESS_THRESHOLD,
     now: datetime | None = None,
 ) -> list[EpisodeRecord]:
-    """Return episodes that *should* be removed.
+    """Return episodes that should be removed.
 
-    An episode is selected iff ALL of:
-
-    * it is NOT protected (no PROTECTED_TAGS),
-    * it is older than ``max_age_days``,
-    * its ``answer_quality_score`` is below ``min_quality``
-      OR its outcome is ``failed`` OR ``replan_exhausted`` is True,
-    * its computed staleness score exceeds ``staleness_threshold``.
-
-    Selection is intentionally conservative: an old high-quality success
-    is kept even past the age bar.  Recent (≤ ``max_age_days``) episodes
-    are *always* kept regardless of quality so the loop can still learn
-    from very recent failures.
+        Selected iff ALL hold: not protected; older than ``max_age_days``; quality below ``min_quality``
+        or outcome failed or ``replan_exhausted``; staleness above ``staleness_threshold``.
+        Recent episodes are always kept so the loop can learn from fresh failures.
     """
     if max_age_days < 0:
         raise ValueError("max_age_days must be >= 0")
@@ -119,15 +90,8 @@ def select_for_pruning(
         created = _parse_iso(ep.created_at)
         if created is None or created > cutoff:
             continue
-        # Two distinct reasons an episode carries no reusable value, kept
-        # apart because they are different facts:
-        #   low_quality — measured, and most of its support did not hold up
-        #   unmeasured  — carried no evidence at all, so there is nothing to
-        #                 reuse: no sources, no verified findings
-        # Both are candidates. Treating `unmeasured` as pristine is what let a
-        # groundless episode outlive one with 8/10 chunks verified (MIR-002).
-        # Neither is deleted on this basis alone — age, staleness and the
-        # protected-tag guard still apply.
+        # Two separate reasons for no reusable value: low_quality (measured, support did not hold up) and
+        # unmeasured (no evidence at all). Both are candidates; age, staleness and the protected-tag guard still apply.
         low_quality = (
             ep.answer_quality_score is not None
             and ep.answer_quality_score < min_quality
@@ -152,13 +116,8 @@ def prune_stale_episodes(
     now: datetime | None = None,
     keep_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Apply :func:`select_for_pruning` to ``store`` and remove the selected
-    episodes. Returns the IDs of episodes that were (or, in dry-run mode,
-    would have been) deleted.
-    """
-    # We use the store's public helpers + a re-write so we do not depend
-    # on the file_lock helpers' private API. EpisodicMemoryStore.save
-    # already serializes appends, and we re-serialize the kept rows.
+    """Apply :func:`select_for_pruning` to ``store`` and delete the selected episodes; returns their IDs (would-be IDs in dry-run)."""
+    # Uses the store's public helpers and a re-write, avoiding the file_lock helpers' private API.
     from core.state_integrity import (
         read_state_jsonl_unlocked,
         rewrite_state_jsonl_unlocked,
@@ -183,8 +142,7 @@ def prune_stale_episodes(
             staleness_threshold=staleness_threshold,
             now=now,
         )
-        # MIR-128: эпизод-опора зачёта процедур уборке не отдаётся — проход
-        # обслуживания однажды вынес 47 опор, и уверенность пережила улику.
+        # Credit-anchor episodes (`keep_ids`) are never handed to cleanup.
         if keep_ids:
             victims = [ep for ep in victims if ep.id not in keep_ids]
         victim_ids = {ep.id for ep in victims}
@@ -192,9 +150,8 @@ def prune_stale_episodes(
             return [ep.id for ep in victims]
         kept = [(ep, row) for ep, row in zip(episodes, originals, strict=True) if ep.id not in victim_ids]
         kept.sort(key=lambda pair: pair[0].created_at)
-        # Kept rows go back as their ORIGINAL dicts (unknown keys intact), and a
-        # row this reader cannot parse is not evidence of staleness: it is
-        # written back untouched (проверка 16.11, средняя).
+        # Kept rows go back as their ORIGINAL dicts (unknown keys intact); a row this reader cannot parse
+        # is written back untouched, not treated as stale.
         rewrite_state_jsonl_unlocked(
             store.path, [row for _ep, row in kept] + unparsed,
         )
@@ -207,10 +164,7 @@ def stale_candidates(
     now: datetime | None = None,
     limit: int = 10,
 ) -> list[tuple[EpisodeRecord, float]]:
-    """Diagnostic: top-N highest-staleness episodes with their scores.
-
-    Useful for an `:audit memory` command before committing to deletion.
-    """
+    """Diagnostic: top-N highest-staleness episodes with their scores, for auditing before deletion."""
     now = now or datetime.now(timezone.utc)
     pairs: list[tuple[EpisodeRecord, float]] = []
     for ep in episodes:
@@ -221,15 +175,8 @@ def stale_candidates(
     return pairs[: max(0, limit)]
 
 
-# ---------------------------------------------------------------------------
-# Duplicates
-# ---------------------------------------------------------------------------
-#
-# `save_once` dedupes by episode id, and every tick mints a fresh one, so a gate
-# that blocks the same way each tick banks a new identical record forever.
-# Measured 2026-08-14: 14 byte-identical `dirty_tree_wait` episodes over 14 days.
-# Why it matters and why persistent memory did not have this hole:
-# docs/CODE_NOTES.md, "Episodic duplicates".
+# Duplicates: `save_once` dedupes by episode id and every tick mints a new one, so a gate that
+# blocks identically each tick would bank identical records forever.
 
 def _duplicate_key(ep: EpisodeRecord) -> tuple[str, str, str, str]:
     """What makes two episodes the same lesson rather than two lessons."""
@@ -252,15 +199,9 @@ def select_duplicate_episodes(
     *,
     keep_ids: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """IDs of every episode but the best copy of each identical group.
+    """IDs of every episode except the best copy of each identical group (eligible, then better verified, then newest).
 
-    The best copy is the eligible one, then the better verified, then the
-    newest: keeping the newest blindly dropped a verified anchor for a
-    quarantined twin (проверка 16.11, средняя). `keep_ids` (credit anchors,
-    MIR-128) are never selected. Protected episodes are never selected,
-    matching `select_for_pruning`: a lesson tagged by hand outranks this rule.
-    An empty summary is not a key — those records carry no lesson to collapse
-    and are left to age out.
+        `keep_ids` and protected episodes are never selected; an empty summary is not a key (no lesson to collapse).
     """
     return [episodes[i].id for i in _victim_indices(episodes, keep_ids)]
 
@@ -268,9 +209,7 @@ def select_duplicate_episodes(
 def _victim_indices(
     episodes: Sequence[EpisodeRecord], keep_ids: frozenset[str],
 ) -> list[int]:
-    """Positions of the copies to drop. By POSITION, not id: legacy rows share
-    a content-hash id, so «drop by id» either removed nothing or removed the
-    survivor too (проверка 17.11, мелкая)."""
+    """Positions of the copies to drop, by POSITION not id: legacy rows share a content-hash id."""
     seen: dict[tuple[str, str, str, str], list[tuple[int, EpisodeRecord]]] = {}
     for index, ep in enumerate(episodes):
         if set(ep.tags or ()) & EpisodicMemoryStore.PROTECTED_TAGS:

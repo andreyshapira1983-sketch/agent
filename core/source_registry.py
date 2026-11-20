@@ -33,10 +33,7 @@ SourceType = Literal[
     "forum",
     "memory",
     "user",
-    # Дословная реплика ЭТОГО разговора. Своего типа не имела и проваливалась
-    # в "unknown" — отсюда 27 ложных конфликтов по предмету "user asked claude"
-    # (MIR-054, дообнаружено 2026-09-23): «user asked: X» читалось как
-    # утверждение «user asked ЕСТЬ X».
+    # Verbatim line of THIS conversation; it needs its own type or it falls into "unknown" and "user asked: X" reads as the claim "user asked IS X".
     "dialogue",
     "tool_output",
     "unknown",
@@ -47,9 +44,7 @@ ClaimStatus = Literal[
     "verified",
     "conflicted",
     "unverified",
-    # MIR-011: extracted from content the injection guard flagged `suspicious`.
-    # Stored (visible, auditable), refused by the memory write policy, never
-    # upgraded by corroboration — quarantine, not blunt exclusion.
+    # Extracted from content the injection guard flagged `suspicious`: stored (visible, auditable), refused by the memory write policy, never upgraded by corroboration.
     "suspect",
 ]
 
@@ -69,8 +64,7 @@ DEFAULT_SOURCE_TRUST: dict[SourceType, float] = {
     "video": 0.60,
     "podcast": 0.55,
     "memory": 0.55,
-    # 0.60 — как у kind="session_dialogue" в core/evidence.py: одно число на
-    # обе стороны, иначе доверие расходится в двух местах.
+    # 0.60, same as kind="session_dialogue" in core/evidence.py: one number for both sides so trust does not diverge.
     "dialogue": 0.60,
     "forum": 0.45,
     "tool_output": 0.45,
@@ -166,10 +160,7 @@ class ClaimRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ClaimRecord:
         status = data.get("status", "extracted")
-        # The vocabulary is the type's own, `suspect` included: a hand-kept
-        # list without it turned a guard-flagged claim into an ordinary one on
-        # every reload (проверка 17.11, серьёзная №5). An unknown token is NOT
-        # promoted to `extracted` — it stays quarantined as `suspect`.
+        # The vocabulary is the type's own, `suspect` included: a hand-kept list without it turned a guard-flagged claim ordinary on reload. An unknown token stays quarantined as `suspect`, never promoted to `extracted`.
         if status not in ClaimStatus.__args__:
             status = "suspect"
         return cls(
@@ -280,10 +271,7 @@ class SourceRegistry:
             and "suspect" in (existing.status, claim.status)
             and claim.status != "suspect"
         ):
-            # Claim ids are content hashes (same sentence, same document), so
-            # two windows of one file collide here. A sentence the guard
-            # flagged in ANY window stays flagged: «last write wins» let a
-            # clean window launder the taint (проверка 16.11, вечер).
+            # Claim ids are content hashes, so two windows of one file collide; a sentence the guard flagged in ANY window stays flagged (last write must not launder the taint).
             from dataclasses import replace
 
             claim = replace(claim, status="suspect")
@@ -397,13 +385,7 @@ def claim_from_evidence(
         metadata={
             "evidence_id": evidence.id,
             "evidence_kind": evidence.kind,
-            # Provenance, so a reader never has to guess from the wording.
-            # `Evidence.claim` is ALWAYS written by us — "Directory listing of
-            # workspace path X", "Test run verdict: …", "Proposed change to …",
-            # fifteen templates in `evidence_from_tool_result` plus the
-            # ingestion ones — while the source's own words live in `excerpt`.
-            # A label for a tool result is not an assertion about the world,
-            # and the write policy refuses it on that ground.
+            # Provenance, so a reader never has to guess from the wording: `Evidence.claim` is always written by us (templates in `evidence_from_tool_result`), the source's own words are in `excerpt`; a label for a tool result is not an assertion about the world and the write policy refuses it.
             "extraction": "evidence_claim",
         },
     )
@@ -412,15 +394,7 @@ def claim_from_evidence(
 def source_type_from_evidence(evidence: Evidence) -> SourceType:
     kind = evidence.kind
     if kind == "file":
-        # A directory listing carries kind="file" so its `[file:<path>]`
-        # citation resolves — but it is a snapshot of a folder's shape at one
-        # moment, not a document that states anything. Typing it `file` let the
-        # knowledge pipeline bank «Directory listing of workspace path
-        # knowledge/» and the bare filename «self-audit-lessons.md» as durable
-        # facts at confidence 0.85 (measured on the operator's store,
-        # 2026-08-14). `tool_output` is already in the non-asserting set, which
-        # is the same doctrine `file_write` follows two branches above: an
-        # action, and now an observation, are not sources of truth.
+        # A directory listing carries kind="file" so its citation resolves, but it is a snapshot, not a document that states anything; typing it `file` let the pipeline bank listings as durable facts. `tool_output` is already in the non-asserting set.
         if evidence.obtained_via == "list_dir":
             return "tool_output"
         return "file"
@@ -437,9 +411,7 @@ def source_type_from_evidence(evidence: Evidence) -> SourceType:
     if kind in {"shell_output", "tool_output", "diff_preview"}:
         return "tool_output"
     if kind == "session_dialogue":
-        # Реплика разговора — не источник знания о мире. Тот же довод, что у
-        # list_dir выше: наблюдение одного мгновения не утверждает ничего
-        # стоящего. Две реплики об одном — это разговор, а не противоречие.
+        # A conversation line is not a source of knowledge about the world; two lines about one thing are a conversation, not a contradiction.
         return "dialogue"
     if kind == "memory":
         return "memory"

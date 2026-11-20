@@ -1,14 +1,4 @@
-"""Keeping the anatomy map and its group table in step with a proposal.
-
-Born of surgery 2026-09-04: `_sync_anatomy_index` lived in
-`core/self_build_producer.py`, wrote its own canned row and never touched
-the module total, so EVERY split proposal that added a module rolled back
-on the anatomy guard (which compares the map with `scripts/gen_anatomy.py`
-byte for byte). The repair rendered the proposal's map through the
-generator itself; the producer file then grew past its size ratchet, and
-this block moved here. Nothing decides anything: the functions rewrite two
-files inside a proposal so the guards downstream find what they expect.
-"""
+"""Keep the anatomy map and its group table in step with a proposal."""
 from __future__ import annotations
 
 import re
@@ -31,22 +21,14 @@ def _new_core_module_stems(files: list[dict[str, Any]]) -> list[str]:
     return stems
 
 
-#: Таблица групп карты анатомии — лежит в core НАМЕРЕННО (MIR-180): полоса
-#: вправе менять core/*.py и не вправе scripts/, а без строки группировки
-#: каждый инкрементальный раскол откатывался анатомическим сторожем.
+#: Lives in core on purpose: the change lane may edit core/*.py but not scripts/.
 _ANATOMY_GROUPS_PATH = "core/anatomy_groups.py"
 
 
 def _sync_anatomy_groups(
     build: dict[str, Any], target: str, reader: Callable[[str], str | None]
 ) -> None:
-    """Вложить строку группировки нового core-модуля в само предложение.
-
-    Правило наследования детерминированное: новый модуль встаёт в группу
-    своего ИСХОДНИКА — семантику расщепитель знать не может, происхождение
-    знает точно. Исходника нет в таблице — строку не выдумываем: анатомический
-    сторож поймает пропуск и назовёт его, а выдуманная группа лгала бы карте.
-    """
+    """Add the group row of each new core module to the proposal, inheriting the group of its source module; a source missing from the table gets no row (the guard reports it)."""
     files = build.get("files") or []
     target_norm = str(target or "").replace("\\", "/").strip()
     if not target_norm.startswith("core/"):
@@ -68,16 +50,13 @@ def _sync_anatomy_groups(
     if not insertion:
         return
     updated = groups_src.replace(anchor, anchor + insertion, 1)
-    # Замена, не добавление: второй вызов (карта синхронизирует группы сама,
-    # 2026-09-04) удваивал файл в заявке — files_changed нёс путь дважды.
+    # Replace, do not append: a second call would list the file twice in files_changed.
     _carry_file(files, _ANATOMY_GROUPS_PATH, updated)
     build["files"] = files
 
 
 def _load_anatomy_generator(workspace: str | Path | None) -> Any:
-    """The repo's own `scripts/gen_anatomy.py`, loaded by path the way the
-    anatomy test loads it — never imported as a package. ``None`` when the
-    workspace has no generator (a sandbox), so the caller can fall back."""
+    """Load the repo's scripts/gen_anatomy.py by path (not as a package); None when absent."""
     if workspace is None:
         return None
     path = Path(workspace) / "scripts" / "gen_anatomy.py"
@@ -100,32 +79,14 @@ def _sync_anatomy_index(
     build: dict[str, Any], target: str, reader: Callable[[str], str | None],
     *, workspace: str | Path | None = None,
 ) -> None:
-    """Keep ``knowledge/generated/AGENT_ANATOMY.md`` in sync when the proposal
-    adds NEW core modules.
-
-    Измерено 2026-09-04 (полоса, откат ain_b7a0…): эта функция дописывала
-    СВОЮ строку («Extracted from … by autonomous self-build module split») и
-    не трогала «_Total: N modules», а сторож анатомии сравнивает карту с
-    выводом `scripts/gen_anatomy.py` побайтно. Итог: каждый раскол с новым
-    модулем откатывался на одном и том же тесте — молча, всегда. Теперь
-    карта в заявке — то, что напишет САМ генератор для предложенного дерева:
-    группы из предложенного `core/anatomy_groups.py`, модули с диска плюс
-    новые, назначение — первая фраза докстринга из содержимого заявки.
-
-    Без рабочей области (песочница без генератора) — прежний канцелярский
-    путь. Best-effort: если карту нельзя отрисовать (группы не покрывают
-    модули), она остаётся как была, и сторож полосы назовёт пропуск.
-    """
+    """Sync knowledge/generated/AGENT_ANATOMY.md when the proposal adds new core modules; best-effort."""
     files = build.get("files") or []
     stems = _new_core_module_stems(files)
     if not stems:
         return
     gen = _load_anatomy_generator(workspace)
     if gen is not None:
-        # Группы — прежде карты, независимо от порядка у вызывающего: карта
-        # рендерится ПО группам, и без строки нового модуля генератор честно
-        # отказывает («not grouped»), а отказ уводил в канцелярский путь —
-        # второй откат того же раскола 2026-09-04 (ain_0bd1…).
+        # Groups first: the map is rendered per group and the generator refuses a module without a group row.
         _sync_anatomy_groups(build, target, reader)
         files = build.get("files") or files
         rendered = _render_map_for_proposal(gen, files, stems, reader, workspace)

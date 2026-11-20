@@ -1,24 +1,9 @@
-"""Шаблоны работы по Agent Workflow Memory (Wang et al., arXiv 2409.07429).
+"""Workflow templates after Agent Workflow Memory (Wang et al., arXiv 2409.07429), stored separately from procedural memory.
 
-Зачем, замер 2026-09-25. Процедурная память (core/smart_memory.py) хранит
-СЛЕДЫ: ключ — точная цепочка инструментов, поэтому 98 процедур дали 98 разных
-ключей и ни одна похожая задача не легла к другой; шаги — «Run tool: file_read»
-четыре раза, а «ситуация» — дословный старый вопрос. При этом процедуры шли в
-подсказку в 95% ходов. Ключ старых процедур несущий (по нему решается, какая
-процедура отработала), поэтому шаблоны — ОТДЕЛЬНОЕ хранилище рядом.
-
-Как в AWM:
-* шаблон строит модель из НЕСКОЛЬКИХ успешных опытов одной группы — общий
-  повторяющийся кусок работы (подзадача, а не вся задача);
-* изменчивое (пути, запросы, числа) заменяется переменными в фигурных скобках;
-* шаблон — описание плюс шаги, у шага — зачем он и каким инструментом;
-* группы — как «сайт» в AWM; у нас это род работы (core/work_kinds.work_kinds),
-  и в подсказку идут шаблоны рода текущего вопроса.
-
-Ограничения из той же статьи, которые надо помнить: жёсткая цепочка шагов
-плохо переживает перемену среды посреди работы, и разница «модель против
-правила» при построении невелика (45,1 против 43,4 успеха шагов на Mind2Web) —
-главное подзадачи и переменные. Польза проверяется экзаменом, а не на глаз.
+A model builds a template from SEVERAL successful experiences of one group (a repeated sub-task, not a whole task); variable parts
+(paths, queries, numbers) become `{variables}`; a template is a description plus steps (why, which tool). Groups are work kinds
+(core/work_kinds.work_kinds) and the prompt gets the templates of the current question's kind. Procedural-memory keys are load-bearing,
+hence a separate store.
 """
 from __future__ import annotations
 
@@ -86,7 +71,7 @@ class WorkflowRecord:
     def from_dict(cls, row: dict[str, Any]) -> WorkflowRecord:
         steps = row.get("steps") or ()
         if isinstance(steps, str):
-            # Строка — один шаг, а не шаг на каждую букву (проверка 16.11, средняя).
+            # A line is one step, not a step per letter.
             steps = (steps,)
         return cls(kind=str(row.get("kind") or ""), description=str(row.get("description") or ""),
                    steps=tuple(str(s) for s in steps),
@@ -110,12 +95,12 @@ class WorkflowMemoryStore:
             try:
                 out.append(WorkflowRecord.from_dict(r))
             except (TypeError, ValueError):
-                # Одна битая строка роняла всю подсказку (проверка 16.11, средняя).
+                # One broken line must not take down the whole hint.
                 continue
         return out
 
     def replace_kind(self, kind: str, records: list[WorkflowRecord]) -> None:
-        """Шаблоны рода строятся заново целиком: новый вывод заменяет старый."""
+        """Templates of a kind are rebuilt whole: new output replaces the old."""
         with state_file_lock(self.path):
             rows = read_state_jsonl_unlocked(self.path) if self.path.exists() else []
             kept = [r for r in rows if isinstance(r, dict) and r.get("kind") != kind]
@@ -129,7 +114,7 @@ class WorkflowMemoryStore:
 
 
 def experience_lines(episodes: list[Any], procedures: list[Any]) -> dict[str, list[str]]:
-    """Успешные опыты по родам работы: строка «что просили; чем; над чем»."""
+    """Successful experiences per work kind: a line "what was asked; with what; over what"."""
     from core.smart_memory import lesson_from_episode, procedure_credit_allowed
 
     groups: dict[str, list[str]] = {}
@@ -144,8 +129,7 @@ def experience_lines(episodes: list[Any], procedures: list[Any]) -> dict[str, li
         if procedure_credit_allowed(ep):
             add(ep.question, lesson_from_episode(ep))
     for proc in procedures:
-        # Только действующие: candidate и needs_review не проверены
-        # (проверка 16.11, мелкая).
+        # Only active ones: candidate and needs_review are unverified.
         if getattr(proc, "status", "") != "active":
             continue
         for question, lesson in zip(proc.source_questions, proc.lessons, strict=False):
@@ -154,18 +138,15 @@ def experience_lines(episodes: list[Any], procedures: list[Any]) -> dict[str, li
 
 
 def unabstracted(steps: tuple[str, ...] | list[str]) -> list[str]:
-    """Шаги, в которых остался литерал опыта (путь к файлу, адрес) вместо переменной."""
+    """Steps that still contain an experience literal (file path, address) instead of a variable."""
     return [s for s in steps if _LITERAL_RE.search(s)]
 
 
 def _unsafe(texts: tuple[str, ...]) -> bool:
-    """Сторож блокирует текст или текст обращается к инструкциям агента; ошибка
-    сторожа — тоже отказ: шаблон идёт в подсказку (проверка 17.11, средняя)."""
+    """True when the guard blocks the text or it addresses the agent's instructions; a guard error is also a refusal."""
     try:
-        # The SAME rule as the memory write gate: text that addresses the
-        # model's instructions, or two blocked guard categories at once. The
-        # guard's single «blocked» and a loose stem regex refused ordinary
-        # steps («новый правильный порядок») (проверка 17.11, вечер).
+        # The SAME rule as the memory write gate: text that addresses the model's instructions, or two blocked guard categories at once.
+        # The guard's single "blocked" plus a loose stem regex refused ordinary steps.
         from core.memory_policy import _memory_injection
 
         return any(_memory_injection(t) or _MENTIONS_PROMPT_RE.search(t) for t in texts)
@@ -174,7 +155,7 @@ def _unsafe(texts: tuple[str, ...]) -> bool:
 
 
 def induce(kind: str, lines: list[str], llm: Any) -> list[WorkflowRecord]:
-    """Шаблоны рода по AWM; неразобранный ответ или неабстрагированный шаг — не шаблон."""
+    """Templates of a kind after AWM; an unparsed answer or an unabstracted step is not a template."""
     if len(lines) < 2:
         return []
     shown = lines[-MAX_EXPERIENCES:]
@@ -190,13 +171,13 @@ def induce(kind: str, lines: list[str], llm: Any) -> list[WorkflowRecord]:
             continue
         raw_steps = item.get("steps") or ()
         if isinstance(raw_steps, str):
-            # Строка — один шаг, как в from_dict (проверка 17.11, средняя).
+            # A line is one step, as in from_dict.
             raw_steps = (raw_steps,)
         elif not isinstance(raw_steps, (list, tuple)):
             continue
         steps = tuple(str(s).strip() for s in raw_steps if str(s).strip())
         description = str(item.get("description") or "").strip()
-        # Описание проверяется наравне с шагами (проверка 17.11, средняя).
+        # The description is checked like the steps.
         if (description and len(steps) >= 2 and not unabstracted((description, *steps))
                 and not _unsafe((description, *steps))):
             out.append(WorkflowRecord(kind=kind, description=description, steps=steps[:8],
@@ -205,10 +186,9 @@ def induce(kind: str, lines: list[str], llm: Any) -> list[WorkflowRecord]:
 
 
 def induce_all(data_dir: Path | str, llm: Any, *, out: Path | str | None = None) -> dict[str, int]:
-    """Построить шаблоны всех родов из опыта в `data_dir`; вернуть число по родам.
+    """Build templates of all kinds from the experience in `data_dir`; returns counts per kind.
 
-    `out` — куда писать (по умолчанию `data_dir/workflow_memory.jsonl`): замер
-    строит шаблоны в отдельный файл, не трогая живую память.
+        `out` is where to write (default `data_dir/workflow_memory.jsonl`): a measurement builds into a separate file, leaving live memory alone.
     """
     from core.smart_memory import EpisodicMemoryStore, ProceduralMemoryStore
 
@@ -226,7 +206,7 @@ def induce_all(data_dir: Path | str, llm: Any, *, out: Path | str | None = None)
 
 
 def format_workflows(records: list[WorkflowRecord]) -> str:
-    """Блок подсказки: шаблоны — подсказка к порядку работы, а не приказ."""
+    """Prompt block: templates are a hint about work order, not a command."""
     if not records:
         return ""
     lines = ["<agent_workflows>",
@@ -239,6 +219,5 @@ def format_workflows(records: list[WorkflowRecord]) -> str:
 
 
 def _inert(text: str) -> str:
-    """Текст модели — данные: без угловых скобок и переводов строк он не
-    закроет блок <agent_workflows> (проверка 16.11, средняя)."""
+    """Model text is data: without angle brackets and newlines it cannot close the <agent_workflows> block."""
     return " ".join(str(text).replace("<", "‹").replace(">", "›").split())

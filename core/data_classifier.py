@@ -1,12 +1,4 @@
-"""Data Classifier (§7 Data Governance).
-
-public Free to use, log, save, send to LLM. Default for `web_search`
-results. private Use for the current task, may save with consent. Default
-for `file_read` outputs and user input. sensitive Personal data (email, SSN,
-…). Must not be saved without an explicit user-approved tag, redact when
-shown. secret Credentials. Must not be saved, must not appear in any prompt
-or output. Always redacted by the kernel.
-"""
+"""Classify text into public / private / sensitive / secret data classes with reasons."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,15 +13,11 @@ class DataClass(str, Enum):
     PUBLIC = "public"
     PRIVATE = "private"
     SENSITIVE = "sensitive"
-    # Подавление по месту, а не по пути: это ЧЛЕН ПЕРЕЧИСЛЕНИЯ классов
-    # данных — метка «здесь секрет», а не сам секрет. Правило смотрит на имя.
-    # (Строка пояснения не должна начинаться со слова-директивы: раф прочтёт
-    # её как сплошное подавление всей строки.)
+    # A data-class label, not a secret itself; keep this comment from starting with a directive word.
     SECRET = "secret"  # noqa: S105
 
 
-# Source hints carry the provenance of the text. They decide the default
-# class when no stronger evidence (secret / PII) is found.
+# Source hints carry provenance; they set the default class when no secret/PII evidence is found.
 SourceHint = Literal["file", "web", "cli", "memory", "tool_output", "unknown"]
 
 
@@ -40,7 +28,6 @@ class ClassificationResult:
     source: SourceHint
 
 
-# Per-source default class when no stronger signal is found.
 _SOURCE_DEFAULTS: dict[SourceHint, DataClass] = {
     "web": DataClass.PUBLIC,
     "file": DataClass.PRIVATE,
@@ -57,18 +44,10 @@ def classify(
     *,
     keyword_secrets: bool = True,
 ) -> ClassificationResult:
-    """Assign a DataClass to `text` with explanatory reasons.
+    """Assign a DataClass to text with reasons: secret signals -> SECRET, any PII -> SENSITIVE, else the per-source default.
 
-    Decision rules, in order:
-      1. Secret signals (regex or keyword) -> SECRET
-      2. Any PII match  -> SENSITIVE
-      3. Otherwise the per-source default (web=public, everything else=private)
-
-    ``keyword_secrets`` forwards to :func:`core.secret_scanner.contains_secret`.
-    Set it False for output that originates inside the trusted boundary (the
-    agent's own logs, files, diffs) so a bare mention of a credential word
-    like ``api_key`` does not falsely elevate the agent's own evidence to
-    SECRET. Real credential *shapes* (regex spans) still classify as SECRET.
+    keyword_secrets=False for output from inside the trusted boundary: a bare credential word then does not elevate it;
+    real credential shapes still classify as SECRET.
     """
     reasons: list[str] = []
 

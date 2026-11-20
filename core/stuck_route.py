@@ -1,7 +1,4 @@
-"""Уткнулся — собери улики и реши; человека — только когда шаг не твой (core/own_decisions.py).
-
-Застревание — величина: одинаковые пустые циклы и дефекты без зелёной правки поднимают драйв
-`stuck_need`; его цель детерминирована и проверяется машиной (stuck_goal)."""
+"""Stuck route: gather evidence and decide, ask a human only when the step is not ours."""
 from __future__ import annotations
 
 import json
@@ -9,13 +6,8 @@ from pathlib import Path
 from typing import Any
 
 OUTBOX_RELPATH = "data/chat_outbox.jsonl"
-#: Начало цели «спроси». Её собственный провал считается, но не цитируется:
-#: 24.09 каждый провал вкладывал её текст в следующую — «Ты застрял: цель «Ты
-#: застрял: цель «Почини…»»», а предмет уходил за обрезку в 120 символов.
-#: 2026-09-25: без слова «застрял». Работа Anthropic (arXiv 2604.07729): внутреннее
-#: «отчаяние» модели включают провалы и нехватка бюджета, и оно причинно ведёт к
-#: подгонке результата; строка «ты застрял» в подсказке — тот же нажим текстом.
-#: Прежняя приставка остаётся опознаваемой в старых строках журнала.
+# Start of the "ask" goal; its own failure is counted but not quoted, so goal text does not nest.
+# The stuck word is avoided on purpose; the old prefix stays recognisable in old journal lines.
 STUCK_PREFIX = "Цель не продвигается:"
 _STUCK_PREFIXES = (STUCK_PREFIX, "Ты застрял:")
 _UNPRODUCTIVE = frozenset({"empty", "failed", "idle", "blocked"})
@@ -35,7 +27,7 @@ def _rows(path: Path) -> list[dict[str, Any]]:
 
 
 def stuck_evidence(root: Path | str) -> list[str]:
-    """Чем подтверждается застревание: повторы впустую и брошенные дефекты."""
+    """What confirms being stuck: wasted repeats and abandoned defects."""
     root = Path(root)
     evidence: list[str] = []
     ledger = _rows(root / "data" / "campaign_ledger.jsonl")[-12:]
@@ -64,7 +56,7 @@ def stuck_evidence(root: Path | str) -> list[str]:
 
 
 def stuck_goal(root: Path | str) -> Any:
-    """Цель «уткнулся»: собрать улики и записать решение; успех — это решение по номеру."""
+    """The "stuck" goal: gather evidence and record a decision; success is a decision by number."""
     import hashlib
 
     from core.drive_goal import DriveGoal

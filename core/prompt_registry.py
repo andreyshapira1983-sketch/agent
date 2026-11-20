@@ -6,7 +6,6 @@ import hashlib
 import os
 from dataclasses import dataclass
 
-# ── Data ─────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -20,7 +19,6 @@ class PromptRecord:
     description: str  # optional human-readable note
 
 
-# ── Registry class ────────────────────────────────────────────────────────────
 
 
 class PromptRegistry:
@@ -29,7 +27,6 @@ class PromptRegistry:
     def __init__(self) -> None:
         self._store: dict[str, PromptRecord] = {}
 
-    # ── write ─────────────────────────────────────────────────────────────
 
     def register(
         self,
@@ -50,7 +47,6 @@ class PromptRegistry:
         self._store[key] = record
         return record
 
-    # ── read ──────────────────────────────────────────────────────────────
 
     def get(self, key: str) -> str:
         """Return prompt text for *key*."""
@@ -81,7 +77,6 @@ class PromptRegistry:
         """Return sorted list of all registered prompt keys."""
         return sorted(self._store)
 
-    # ── dunder helpers ────────────────────────────────────────────────────
 
     def __contains__(self, key: object) -> bool:
         return key in self._store
@@ -90,7 +85,6 @@ class PromptRegistry:
         return len(self._store)
 
 
-# ── Global singleton + convenience functions ──────────────────────────────────
 
 _REGISTRY = PromptRegistry()
 

@@ -1,32 +1,16 @@
-"""Опись рабочего места для выбора цели: что лежит на диске и какие руки открыты.
-
-Вынесено из core/charter_goal.py: выбор цели по уставу — одно, а снимок диска
-(папки, число и типы файлов) и список инструментов, открытых безнадзорному
-прогону, — другое; им пользуются два выбора цели — по уставу
-(core/charter_goal.py) и по драйвам (core/drive_goal.py, прежде брал эти
-функции как приватные имена charter_goal). Только факты — ни слова о том,
-чем заниматься.
-"""
+"""Workspace inventory for goal choice: what is on disk and which tools are open."""
 from __future__ import annotations
 
 from pathlib import Path
 
-#: Служебные папки рабочего места: журналы, состояние, кэши — не содержимое.
+# Service folders of the workspace (logs, state, caches), not content.
 _INVENTORY_SKIP = frozenset({".git", "logs", "data", "__pycache__", ".venv", "venv", ".pytest_cache",
                              ".ruff_cache", "node_modules", "runtime", ".github", ".codacy"})
 _INVENTORY_LINES = 30
 
 
 def workspace_inventory(root: Path) -> tuple[str, ...]:
-    """Что лежит в рабочей папке — снято с диска в момент выбора цели.
-
-    Суточный прогон 2026-09-19: цель выбирается вызовом модели БЕЗ единого
-    инструмента, по одному тексту — уставу, дефектам, прошлым целям. Книги
-    (math_study/, knowledge_library/), лаборатория и веб в этом тексте не
-    назывались, и выбор всякий раз шёл по кругу собственных детекторов. Руки
-    у агента были, но выбирал он вслепую. Здесь только факты диска — папки,
-    число и типы файлов; ни одного слова о том, чем заниматься.
-    """
+    """What lies in the workspace folder, read from disk at goal-choice time; facts only."""
     def files_in(d: Path) -> list[Path]:
         return [f for f in d.rglob("*")
                 if f.is_file() and f.suffix != ".pyc"
@@ -57,7 +41,7 @@ def workspace_inventory(root: Path) -> tuple[str, ...]:
 
 
 def unattended_tools(root: Path) -> tuple[str, ...]:
-    """Инструменты, открытые безнадзорному прогону: зарегистрированные минус закрытые."""
+    """Tools open to an unattended run: registered minus closed."""
     import ast
 
     from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
@@ -79,7 +63,7 @@ def unattended_tools(root: Path) -> tuple[str, ...]:
 
 
 def inventory_block(inventory: tuple[str, ...], tools: tuple[str, ...]) -> str:
-    """Опись диска и открытых инструментов для запроса — факты, без советов."""
+    """Disk and open-tools inventory for a prompt: facts, no advice."""
     block = ""
     if inventory:
         block += ("\n\nWHAT IS IN YOUR WORKSPACE RIGHT NOW (listed from disk just before this "

@@ -17,7 +17,7 @@ def _resolve_imports(tree: ast.AST) -> dict[str, Any]:
                 try:
                     mod = importlib.import_module(node.module)
                     obj = getattr(mod, alias.name, None)
-                except Exception:  # noqa: BLE001, S112 — сомнение = молчание
+                except Exception:  # noqa: BLE001, S112 — doubt = silence
                     continue
                 if obj is not None:
                     out[alias.asname or alias.name] = obj
@@ -27,7 +27,7 @@ def _resolve_imports(tree: ast.AST) -> dict[str, Any]:
 def _return_type(func: Any) -> Any:
     try:
         return typing.get_type_hints(func).get("return")
-    except Exception:  # noqa: BLE001 — сомнение = молчание
+    except Exception:  # noqa: BLE001 — doubt = silence
         return None
 
 

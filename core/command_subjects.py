@@ -1,21 +1,10 @@
-"""Команда как ПРЕДМЕТ цели: `:team-run` → модуль, где живёт её обработчик.
-
-Агент пишет цели двумя словарями — путём к файлу и именем команды, — а
-распознаватель предмета читал только первый. Карта не ведётся руками: она
-РАЗБИРАЕТСЯ из диспетчера, который и маршрутизирует команды, потому что
-рукописная разошлась бы с кодом в первый же день.
-
-Читается исходник, а не импортируется модуль: `core` не вправе зависеть от
-`cli` — это правило проверяет `tests/test_architecture_invariants.py`, и оно
-поймало первую версию этого файла. Замер и границы: MIR-174.
-"""
+"""Map a command used as a goal subject (`:team-run`) to the module holding its handler, parsed from the dispatcher source."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-#: Где ищутся обработчики. Соглашение проекта: команду `:team-run` обслуживает
-#: функция `_handle_team_run`, и определена она в `cli/` или в `app/`.
+#: Handler search roots; convention: `:team-run` is served by `_handle_team_run`, defined in `cli/` or `app/`.
 _HANDLER_DIRS: tuple[str, ...] = ("cli", "app")
 _DISPATCH_REL = "cli/command_dispatch.py"
 
@@ -28,7 +17,7 @@ _CACHE: dict[str, dict[str, str]] = {}
 
 
 def _handler_modules(root: Path) -> dict[str, str]:
-    """`_handle_<key>` → относительный путь модуля, где он ОПРЕДЕЛЁН."""
+    """`_handle_<key>` -> relative path of the module that defines it."""
     found: dict[str, str] = {}
     for directory in _HANDLER_DIRS:
         base = root / directory
@@ -58,8 +47,7 @@ def _build(root: Path) -> dict[str, str]:
         tokens = _TOKEN_RE.findall(line)
         if not tokens:
             continue
-        # Обработчик вызывается в пределах ближайших строк ветви; дальше
-        # начинается следующая проверка, и приписывать ей эти токены нельзя.
+        # A handler is called within the nearest lines of its branch; further down is the next check.
         for follow in lines[index + 1 : index + 4]:
             call = _CALL_RE.search(follow)
             if call is None:
@@ -73,7 +61,7 @@ def _build(root: Path) -> dict[str, str]:
 
 
 def command_module(token: str, *, root: Path | str = ".") -> str | None:
-    """Модуль, отвечающий за эту команду, или None, если такой команды нет."""
+    """Module responsible for this command, or None."""
     name = str(token or "").strip().strip("`'\",.;()[]")
     if not name.startswith(":"):
         return None

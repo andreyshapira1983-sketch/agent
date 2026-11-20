@@ -34,11 +34,7 @@ class ModelRole(StrEnum):
 
 @dataclass(frozen=True)
 class ModelRoute:
-    """One role -> provider/model mapping.
-
-    `provider` or `model` may be None, in which case the router falls back to
-    its default route (`AGENT_PROVIDER` / `AGENT_MODEL`, then LLM defaults).
-    """
+    """One role -> provider/model mapping; None falls back to the default route (AGENT_PROVIDER / AGENT_MODEL, then LLM defaults)."""
 
     role: str
     provider: str | None = None
@@ -149,22 +145,14 @@ _DEFAULT_PROVIDER_ENV: dict[str, tuple[str, ...]] = {
 }
 
 
-# ── TD-010: provider-by-complexity preference ─────────────────────────────────
-# Ordered provider preference per complexity tier, chosen only among providers
-# that are already supported. ``local`` is a real OpenAI-compatible backend
-# (LM Studio / vLLM / llama.cpp); include it via AGENT_TIER_PROVIDERS_* when
-# desired. Model names are never hardcoded here — the concrete model always
-# comes from ``model_catalog.tier_model_for(tier, provider)``.
-#
-# Keyed by ComplexityTier.value so this module needs no task_complexity import.
+# Ordered provider preference per complexity tier among supported providers (`local` via AGENT_TIER_PROVIDERS_*); model names come from model_catalog.tier_model_for, never hardcoded. Keyed by ComplexityTier.value to avoid importing task_complexity.
 _TIER_PROVIDER_PREF: dict[str, tuple[str, ...]] = {
     "light": ("huggingface", "openai"),
     "standard": ("openai",),
     "deep": ("anthropic",),
 }
 
-# Per-tier operator override. Comma-separated provider list, e.g.
-#   AGENT_TIER_PROVIDERS_LIGHT="huggingface,openai"
+# Per-tier operator override, e.g. AGENT_TIER_PROVIDERS_LIGHT="huggingface,openai".
 _TIER_PROVIDERS_ENV: dict[str, str] = {
     "light": "AGENT_TIER_PROVIDERS_LIGHT",
     "standard": "AGENT_TIER_PROVIDERS_STANDARD",
@@ -182,22 +170,13 @@ def _tier_provider_prefs(tier_value: str) -> tuple[str, ...]:
 
 
 def _tier_providers_are_explicit(tier_value: str) -> bool:
-    """True when the operator named the tier's providers via AGENT_TIER_PROVIDERS_*.
-
-    The builtin table above is this repo's default; the env var is an operator
-    instruction. Only the latter overrides catalog discovery (see
-    ``ModelRouter._declared_model_for``), so defaults never move silently.
-    """
+    """True when the operator named the tier's providers via AGENT_TIER_PROVIDERS_*; only that overrides catalog discovery, so defaults never move silently."""
     env_name = _TIER_PROVIDERS_ENV.get(tier_value)
     return bool(os.getenv(env_name, "").strip()) if env_name else False
 
 
 def _provider_has_credentials(provider: str) -> bool:
-    """True when every required env var for *provider* is set (non-empty).
-
-    ``mock`` needs no credentials. Providers with no known env requirement are
-    treated as unavailable so the preference loop skips them gracefully.
-    """
+    """True when every required env var of *provider* is set; `mock` needs none, providers with no known requirement count as unavailable."""
     if provider not in _DEFAULT_PROVIDER_ENV:
         return False
     required = _DEFAULT_PROVIDER_ENV[provider]
@@ -266,12 +245,7 @@ class ModelSelectionPolicy:
 
 
 class ModelRegistry:
-    """Catalog of known/available models.
-
-    Builtins are only documentation/default choices. Custom JSON entries are
-    selectable by the router, which is what lets a newly released model be
-    added without editing Python code.
-    """
+    """Catalog of known models; builtins are documentation/defaults, custom JSON entries are selectable, so a new model needs no Python edit."""
 
     def __init__(self, specs: Iterable[ModelSpec] | None = None):
         self._specs = tuple(specs or ())
@@ -335,33 +309,12 @@ _ROLE_ENV_PREFIXES: dict[ModelRole, tuple[str, ...]] = {
     ModelRole.VERIFIER: ("AGENT_VERIFIER",),
 }
 
-#: The role names a router built by `from_env` can serve. Exported alongside
-#: `ensure_known_model_role` so callers can name the legal values without
-#: hand-writing a second copy of this list that is free to drift from the enum.
+#: Role names a router built by `from_env` can serve; exported so callers do not keep a drifting second copy of the list.
 KNOWN_MODEL_ROLES: frozenset[str] = frozenset(role.value for role in ModelRole)
 
 
 def ensure_known_model_role(value: str | None) -> None:
-    """Reject a role name the agent's own router would not be built to serve.
-
-    Contracts carry `model_role` as a free string and a planner model writes
-    it, so a misspelling arrives as data. `route_for` deliberately still
-    serves an unknown role from the default model — a typo must not take down
-    a live answer — which means the mistake would otherwise surface only as a
-    route reason in the usage ledger, long after the plan was accepted.
-
-    The set is closed, matching `_KNOWN_TOOLS` beside the other checks in
-    `team_plan`. A router constructed by hand can route any role named in its
-    `routes`, but `from_env` — the only path the agent itself uses — builds
-    routes solely from `_ROLE_ENV_PREFIXES`, so no operator configuration can
-    put a custom role in front of a running agent while a planner model can
-    easily misspell one into a contract.
-
-    `None` and `""` mean "no preference": callers substitute their own
-    default. A whitespace-only string does not — it is truthy for those
-    callers yet empty for `_coerce_role`, which raises — so it is refused
-    here, where the cause is still visible.
-    """
+    """Reject a role name the agent's own router is not built to serve. `route_for` still serves an unknown role from the default model (a typo must not take down a live answer), so the mistake would otherwise show only in the ledger. The set is closed (`from_env` builds routes solely from `_ROLE_ENV_PREFIXES`); None and "" mean no preference, a whitespace-only string is refused."""
     if value is None:
         return
     role = value.strip()
@@ -393,23 +346,11 @@ class UsageTrackedLLM:
         self.role = role
         self.cost_tier = cost_tier
         self.ledger = ledger
-        # Re-prices the call when failover lands on a different provider/model.
-        # Without it the substitute inherits the original route's tier, so a
-        # free local model that fails over to an expensive hosted one is both
-        # billed and budget-checked as free. ``None`` keeps the old behaviour.
+        # Re-prices the call when failover lands on a different provider/model, so a free local model failing over to a hosted one is not billed as free; None keeps the old behaviour.
         self._reprice = reprice
-        # Factory used to rebuild the client on another provider during
-        # failover. When ``None`` (e.g. no ledger / static LLM paths) failover
-        # is disabled and behaviour is unchanged.
+        # Factory that rebuilds the client on another provider during failover; None disables failover.
         self._llm_factory = llm_factory
-        # ── Routing attribution integrity ────────────────────────────────
-        # The factory can silently *heal* an un-credentialed or policy-vetoed
-        # route to a different provider/model (e.g. anthropic/claude-sonnet-4-5
-        # -> openai/gpt-4o-mini). Historically the ModelRoute (and therefore the
-        # usage-ledger route_reason and adaptive_route logs) kept naming the
-        # *requested* model while the client actually called another one. Never
-        # log "reason: forced X" next to "model: Y". Record requested vs actual
-        # separately and stamp an honest downgrade reason when they diverge.
+        # Routing attribution integrity: the factory can heal an un-credentialed or vetoed route to another provider/model; record requested vs actual separately and stamp an honest downgrade reason when they diverge.
         self.requested_provider = route.provider
         self.requested_model = route.model
         actual_provider = getattr(llm, "provider", route.provider)
@@ -424,14 +365,7 @@ class UsageTrackedLLM:
         actual_provider: str | None,
         actual_model: str | None,
     ) -> ModelRoute:
-        """Annotate ``route.reason`` when the live client diverges from request.
-
-        Only fires when both the requested and actual provider/model are known
-        and differ, so normal role-default routes (provider/model ``None``) and
-        exact matches are untouched. The requested provider/model on the route
-        are preserved; the honest downgrade is recorded in ``reason`` so no log
-        pairs a forced-X reason with an actually-Y model.
-        """
+        """Annotate ``route.reason`` when the live client diverges from the request; fires only when both are known and differ; requested provider/model stay on the route."""
         req_p = route.provider
         req_m = route.model
         provider_diverged = bool(req_p) and bool(actual_provider) and req_p != actual_provider
@@ -466,7 +400,7 @@ class UsageTrackedLLM:
         return getattr(self._llm, name)
 
     def _provider_unhealthy(self, provider: str) -> str | None:
-        """Ledger-derived health (MIR-132); None when unknown or disabled."""
+        """Ledger-derived provider health; None when unknown or disabled."""
         if self._llm_factory is None or not _provider_failover_enabled():
             return None
         try:
@@ -501,11 +435,7 @@ class UsageTrackedLLM:
                 pass
 
     def _failover_llm(self, exc: BaseException, tried: Sequence[str]) -> Any | None:
-        """Return a replacement LLM on another credentialed provider, or None.
-
-        Only for two error shapes: a key/quota/auth problem on any provider,
-        or a downtime-looking error while the current provider is ``local``.
-        """
+        """Return a replacement LLM on another credentialed provider, or None; only for key/quota/auth errors, or downtime-looking errors while the provider is ``local``."""
         if self._llm_factory is None or not _provider_failover_enabled():
             return None
         provider = str(getattr(self._llm, "provider", self.route.provider) or "").lower()
@@ -514,9 +444,7 @@ class UsageTrackedLLM:
         )
         if not switchable:
             return None
-        # Замер первым, карта уровней полом (docs/CODE_NOTES.md). Причина
-        # выбора запоминается и едет в route_reason: живой разрыв
-        # 2026-08-16 — молчаливое решение нельзя было расследовать.
+        # Measurement first, tier map as floor (docs/CODE_NOTES.md); the reason for the choice is remembered and rides in route_reason so a silent decision can be investigated.
         return self._next_provider_llm(tried)
 
     def _call_llm(
@@ -529,14 +457,7 @@ class UsageTrackedLLM:
         allow_continuation: bool,
         json_object: bool = False,
     ) -> str:
-        """Call the wrapped provider, tolerating one that predates the flags.
-
-        Test doubles and older wrappers accept only the four original
-        arguments. Continuation is ON in those, which is the historical
-        behaviour — the caller's request for a whole answer simply cannot be
-        honoured there, and pretending otherwise would hide it. JSON mode is
-        likewise dropped for a wrapper whose signature does not name it.
-        """
+        """Call the wrapped provider, tolerating one that predates the flags (continuation stays ON, JSON mode dropped when the signature does not name it)."""
         flags: dict[str, bool] = {}
         if not allow_continuation:
             flags["allow_continuation"] = False
@@ -557,20 +478,8 @@ class UsageTrackedLLM:
         temperature: float = 0.7,
         on_token: Any | None = None,
     ) -> str:
-        """Route one STREAMED completion through the same billing as
-        `complete`.
-
-        No provider failover here, deliberately: by the time a stream dies,
-        chunks may already have reached the user's screen, and replaying
-        them from a substitute provider would emit the answer twice. The
-        error is recorded and re-raised; the caller's ladder decides what
-        happens next. A provider without `stream_complete` (test doubles;
-        see core/llm.py:384 for the same rule inside LLM) falls back to the
-        billed `complete`.
-        """
-        # MIR-132, same check as `complete` but strictly PRE-stream: nothing
-        # has reached the screen yet, so switching here does not conflict with
-        # the no-mid-stream-failover rule below.
+        """Route one STREAMED completion through the same billing as `complete`; no provider failover (chunks may already be on screen, replay would emit the answer twice): the error is recorded and re-raised. A provider without `stream_complete` falls back to the billed `complete`."""
+        # Same health check as `complete` but strictly PRE-stream, so it does not conflict with the no-mid-stream-failover rule.
         _pre_provider = str(getattr(self._llm, "provider", self.route.provider) or "")
         _unhealthy = self._provider_unhealthy(_pre_provider)
         if _unhealthy:
@@ -668,21 +577,13 @@ class UsageTrackedLLM:
         allow_continuation: bool = True,
         json_object: bool = False,
     ) -> str:
-        """Route one completion. See :meth:`core.llm.LLM.complete`.
-
-        ``allow_continuation=False`` travels through to the provider wrapper for
-        callers whose answer must parse as a whole.
-        """
+        """Route one completion (see core.llm.LLM.complete); ``allow_continuation=False`` goes to the provider wrapper for answers that must parse as a whole."""
         route_reason = self.route.reason
         tried: list[str] = []
         while True:
             provider = str(getattr(self._llm, "provider", self.route.provider) or "")
             model = str(getattr(self._llm, "model", self.route.model) or "")
-            # MIR-132: consult the ledger BEFORE the first call. Per-call
-            # failover already rescued the work (214 of 215 runs), but nothing
-            # remembered across processes, so one empty balance was retried 391
-            # times over four days. First iteration only: after a failover the
-            # provider already changed, and re-checking it would loop.
+            # Consult the ledger BEFORE the first call so an empty balance is remembered across processes; first iteration only, after a failover re-checking would loop.
             if not tried:
                 unhealthy = self._provider_unhealthy(provider)
                 if unhealthy:
@@ -698,8 +599,7 @@ class UsageTrackedLLM:
                         if choice:
                             route_reason += f"|{choice}"
                         continue
-                    # No alternative found: proceed with the configured
-                    # provider — refusing to work is worse than one probe call.
+                    # No alternative found: proceed with the configured provider; refusing to work is worse than one probe call.
             self.ledger.assert_can_start(
                 role=self.role,
                 provider=provider,
@@ -747,8 +647,7 @@ class UsageTrackedLLM:
                 tried.append(provider)
                 replacement = self._failover_llm(exc, tried)
                 if replacement is not None:
-                    # The substitute is a different model on a different
-                    # provider; its price is not the original route's price.
+                    # The substitute is a different model on a different provider; its price is not the original route's.
                     self._adopt_failover(replacement)
                     route_reason = f"provider_failover:{provider}->{self.provider}"
                     choice = getattr(self, "_failover_choice_reason", "")
@@ -814,30 +713,7 @@ def _coerce_role(role: ModelRole | str) -> str:
     return value
 
 
-# Preference order for auto-selecting a credentialed provider when the routed
-# provider cannot authenticate. ``mock`` is intentionally excluded — it is only
-# used as a fallback when explicitly allowed via ``AGENT_ALLOW_MOCK_ROUTING``.
-#
-# ``local`` is LAST and was missing entirely until 2026-08-23. The provider was
-# fully built — declared in ``_DEFAULT_PROVIDER_ENV``, implemented across six
-# branches of ``core/llm.py``, with install and start scripts in ``scripts/`` —
-# and its variables are set in this machine's own ``.env``. It simply was never
-# added to this tuple, and the comment above explains the exclusion of ``mock``
-# while saying nothing about it, which is how an omission reads as a decision.
-#
-# The consequence was the operator's point: with every paid key dead the agent
-# had an option running on its own machine and no way to reach it. Last place,
-# not first — a local model is a last resort, never a preference over a paid
-# provider — and it still earns its place only by having both of its variables
-# set, so an unconfigured host behaves exactly as before.
-#
-# ``deepseek`` repeated the local story beat for beat on 2026-08-29: client
-# built, key in ``.env``, balance topped up by the operator ($5, 2026-08-28) —
-# and a marathon shift died through the whole chain (openai out of money →
-# anthropic no balance → huggingface key errors → local no server) while the
-# one funded provider was never tried, because it was absent both here and in
-# ``_DEFAULT_PROVIDER_ENV``. Second place: the cheap rescuer right after the
-# default brain, ahead of the providers known to be unfunded.
+# Preference order for auto-selecting a credentialed provider when the routed one cannot authenticate; `mock` is excluded (only with AGENT_ALLOW_MOCK_ROUTING). `local` is last (a last resort, only with both its variables set); `deepseek` is second: the cheap rescuer right after the default brain, ahead of unfunded providers.
 _PROVIDER_FALLBACK_ORDER: tuple[str, ...] = (
     "openai", "deepseek", "anthropic", "huggingface", "local",
 )
@@ -851,22 +727,12 @@ def _first_credentialed_provider() -> str | None:
     return None
 
 
-# --- Provider/key failover ---------------------------------------------------
-#
-# When a routed provider's key runs out of money, hits its rate limit, or is
-# rejected for auth reasons *mid-task*, we transparently switch to the next
-# credentialed provider and retry the same call rather than crashing. This is
-# distinct from ``_llm_factory`` (which heals an un-credentialed choice *before*
-# the first call); failover reacts to live errors *during* a call.
+# Provider/key failover: when a routed provider's key runs out of money, hits a rate limit or is rejected mid-task, switch to the next credentialed provider and retry; distinct from `_llm_factory`, which heals before the first call.
 
-# HTTP status codes that indicate the current key can't serve the request but a
-# different key/provider might: unauthorized, payment required, forbidden,
-# too-many-requests.
+# HTTP statuses meaning this key cannot serve the request but another might: 401, 402, 403, 429.
 _SWITCH_KEY_STATUS: frozenset[int] = frozenset({401, 402, 403, 429})
 
-# Exception *class name* fragments (lower-cased) raised by provider SDKs that
-# mean "this key is out of quota / not authorised". Duck-typed so we never have
-# to import the openai / anthropic SDKs here.
+# Lower-cased exception class-name fragments meaning out of quota / not authorised; duck-typed to avoid importing provider SDKs.
 _SWITCH_KEY_NAME_MARKERS: tuple[str, ...] = (
     "ratelimit",
     "authentication",
@@ -874,24 +740,7 @@ _SWITCH_KEY_NAME_MARKERS: tuple[str, ...] = (
     "insufficientquota",
 )
 
-# Error *message* fragments (lower-cased) that indicate a switch-key condition.
-# TWO vocabularies on purpose, one extending the other. The DURABLE class
-# (empty balance, bad key — `_KEY_CLASS_TEXT_MARKERS`, owned beside the ledger)
-# both fails over per-call AND demotes provider health (MIR-132): it does not
-# clear by itself, so every fresh process re-greeting it was waste. The
-# TRANSIENT class below (rate limits) fails over per-call but never demotes:
-# it clears in seconds, and parking a provider for the health cooldown over a
-# rate limit would dodge a healthy provider.
-# Замер 2026-08-25 (H-47): три квотных маркера жили здесь и не могли сработать
-# НИКОГДА — в стойком списке ниже стоит голая подстрока «quota», и она их
-# поглощает. Они убраны, а не «расшторены», потому что поглощение ВЕРНО:
-# `insufficient_quota` у OpenAI означает исчерпанный счёт, а не минутный лимит,
-# и понижать за него правильно. Сузить стойкий список значило бы вернуть класс
-# MIR-132 — один пустой баланс, повторённый 391 раз за четыре дня.
-#
-# Живьём: 391 ошибка провайдеров про баланс и НИ ОДНОЙ со словом «quota», то
-# есть поглощение никому не навредило; вредил только текст, обещавший
-# поведение, которого нет.
+# Lower-cased error-message fragments for a switch-key condition, two vocabularies: the DURABLE class (empty balance, bad key; `_KEY_CLASS_TEXT_MARKERS`) fails over per call and demotes provider health; the TRANSIENT class (rate limits) fails over but never demotes. The bare substring "quota" in the durable list deliberately absorbs the quota markers (`insufficient_quota` means an exhausted account); narrowing it would bring back repeated empty-balance retries.
 _TRANSIENT_SWITCH_TEXT_MARKERS: tuple[str, ...] = (
     "rate limit",
     "rate_limit",
@@ -903,13 +752,7 @@ _SWITCH_KEY_TEXT_MARKERS: tuple[str, ...] = (
 
 
 def _is_switch_key_error(exc: BaseException) -> bool:
-    """True when *exc* looks like "this key can't pay for / isn't allowed to
-    serve this request" — i.e. a *different* credentialed provider might succeed.
-
-    Deliberately conservative: content-policy, validation and generic
-    network/timeout errors do NOT match, so failover only fires for genuine
-    key/quota/auth problems. Local downtime uses ``_is_local_unavailable_error``.
-    """
+    """True when *exc* means this key cannot pay for or serve the request, so another provider might succeed; deliberately conservative (content-policy, validation, network/timeout errors do not match)."""
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(exc, "status", None)
@@ -953,12 +796,7 @@ _LOCAL_UNAVAILABLE_TEXT_MARKERS: tuple[str, ...] = (
 
 
 def _is_local_unavailable_error(exc: BaseException) -> bool:
-    """True when *exc* looks like the local OpenAI-compatible server is down,
-    unreachable, or timed out — so falling over to a cloud provider may help.
-
-    Used only when the current provider is ``local``. Cloud providers still use
-    ``_is_switch_key_error`` alone so a flaky network does not hop providers.
-    """
+    """True when *exc* means the local OpenAI-compatible server is down, unreachable or timed out; used only when the current provider is ``local``."""
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
     errno_val = getattr(exc, "errno", None)
@@ -989,10 +827,7 @@ def _next_failover_provider(tried: Sequence[str]) -> str | None:
 
 
 def _provider_failover_enabled() -> bool:
-    """Whether live provider/key failover is active. Defaults to ON.
-
-    Set ``AGENT_PROVIDER_FAILOVER=0`` (or false/no/off) to disable.
-    """
+    """Whether live provider/key failover is active (default ON; AGENT_PROVIDER_FAILOVER=0/false/no/off disables)."""
     value = _clean_env("AGENT_PROVIDER_FAILOVER")
     if value is None:
         return True
@@ -1000,11 +835,7 @@ def _provider_failover_enabled() -> bool:
 
 
 def _default_provider_name(provider: str | None) -> str:
-    """Resolve the provider that ``llm.LLM`` would actually use.
-
-    Mirrors ``llm._provider()``: an unset provider falls back to
-    ``AGENT_PROVIDER`` and then to ``anthropic``.
-    """
+    """Resolve the provider that ``llm.LLM`` would use (mirrors ``llm._provider()``: AGENT_PROVIDER, then anthropic)."""
     resolved = _normalise_provider(provider)
     if resolved:
         return resolved
@@ -1021,8 +852,7 @@ def _llm_factory(provider: str | None, model: str | None) -> LLM:
 
     substitute = _first_credentialed_provider()
     if substitute is not None:
-        # Switch provider; drop the model so the substitute's own default is
-        # used instead of a model name that belongs to the original provider.
+        # Switch provider and drop the model so the substitute's own default is used.
         return LLM(provider=substitute, model=None)
     if _env_bool("AGENT_ALLOW_MOCK_ROUTING"):
         return LLM(provider="mock", model="mock-1")
@@ -1121,9 +951,7 @@ def _custom_model_specs_from_path() -> tuple[ModelSpec, ...]:
 
 
 class ModelRegistryShapeError(TypeError, ValueError):
-    """A registry entry of the wrong type. Also a ValueError: the loader
-    catches ValueError and falls back to the defaults, and a bad file must
-    keep doing that rather than take the process down."""
+    """A registry entry of the wrong type; also a ValueError, because the loader catches ValueError and falls back to the defaults."""
 
 
 def _model_specs_from_json_data(data: Any, *, source: str) -> tuple[ModelSpec, ...]:
@@ -1227,8 +1055,7 @@ class ModelRouter:
         usage_ledger: ModelUsageLedger | None = None,
         routing_policy: Any | None = None,
     ):
-        # His routing policy (2026-09-04 22:20): read first in `route_for`,
-        # ahead of the env pins — see core/model_routing_policy.py.
+        # Operator routing policy: read first in `route_for`, ahead of the env pins (core/model_routing_policy.py).
         self.routing_policy = routing_policy
         self._policy_stamp: tuple[int, int] | None = None
         self.default_provider = _normalise_provider(default_provider)
@@ -1264,19 +1091,7 @@ class ModelRouter:
         usage_ledger: ModelUsageLedger | None = None,
         routing_policy: Any | None = None,
     ) -> ModelRouter:
-        """Build a router from default and role-specific environment vars.
-
-        Defaults:
-            AGENT_PROVIDER / AGENT_MODEL
-
-        Role overrides:
-            AGENT_PLANNER_PROVIDER / AGENT_PLANNER_MODEL
-            AGENT_SYNTHESIZER_PROVIDER / AGENT_SYNTHESIZER_MODEL
-            AGENT_REPAIR_PROVIDER / AGENT_REPAIR_MODEL
-            AGENT_REPAIR_PROPOSAL_PROVIDER / AGENT_REPAIR_PROPOSAL_MODEL
-            AGENT_MEMORY_PROVIDER / AGENT_MEMORY_MODEL
-            AGENT_VERIFIER_PROVIDER / AGENT_VERIFIER_MODEL
-        """
+        """Build a router from default (AGENT_PROVIDER / AGENT_MODEL) and role-specific (AGENT_<ROLE>_PROVIDER / _MODEL) environment variables for planner, synthesizer, repair, repair_proposal, memory, verifier."""
 
         routes: dict[ModelRole, ModelRoute] = {}
         for role, prefixes in _ROLE_ENV_PREFIXES.items():
@@ -1309,7 +1124,7 @@ class ModelRouter:
 
     def route_for(self, role: ModelRole | str) -> ModelRoute:
         role_key = _coerce_role(role)
-        agent_route = agent_policy_route(self.routing_policy, role_key)  # his decision first
+        agent_route = agent_policy_route(self.routing_policy, role_key)  # operator policy first
         if agent_route is not None:
             return agent_route
         route = self._routes.get(role_key)
@@ -1326,18 +1141,7 @@ class ModelRouter:
                 model=registry_spec.model,
                 reason=f"policy:{self.selection_policy.name}:{registry_spec.id}",
             )
-        # Nothing is configured for this role, so the default is what gets
-        # served either way. But "this role has no configuration" and "there is
-        # no such role" are different facts, and until now both were reported
-        # as a bare "default", so no caller could tell a deliberate fallback
-        # from a misspelling. `model_role` is a free string on team and
-        # sub-agent contracts and neither validates it, so a typo — possibly
-        # written by a model — arrives here as data. Serving it is still right:
-        # a misspelling must not take down a live answer. Naming it is what was
-        # missing. The signal rides the route reason rather than a log line for
-        # the reason given at `record_usage`: this router has no logger of its
-        # own, the reason already reaches the usage ledger with every call, and
-        # a second channel would only be a second thing to keep in sync.
+        # Nothing is configured for this role, so the default is served either way; but "no configuration" and "no such role" differ, and a misspelled role (a free string on contracts) is named in the route reason, which already reaches the usage ledger.
         known_role = role_key in KNOWN_MODEL_ROLES
         return ModelRoute(
             role=role_key,
@@ -1396,13 +1200,7 @@ class ModelRouter:
         provider: str | None,
         model: str | None,
     ) -> ModelRoute:
-        """Return *route* with the provider/model the call will really use.
-
-        Recording what the client resolved keeps the ledger a description of
-        the call that happened rather than of the route that could not be
-        planned. An explicitly routed provider/model always wins; the client
-        is consulted only for the blanks.
-        """
+        """Return *route* with the provider/model the call will really use; an explicit route wins, the client fills only the blanks."""
 
         resolved_provider = (
             (provider or "").strip() or (getattr(llm, "provider", "") or "").strip()
@@ -1422,20 +1220,13 @@ class ModelRouter:
         )
 
     def _for_role_with_reason(self, role_key: str, route_reason: str) -> Any:
-        """Return the standard role LLM but stamp a custom ``route_reason``.
-
-        Used by the deep-escalation gate to record a downgrade in the usage
-        ledger (e.g. ``deep_downgraded:missing_reason``) when no operator
-        standard-tier provider is configured, and by the tier paths that fall
-        back to role routing. Not stored in the role cache so the gate's
-        one-off reason never poisons a later plain :meth:`for_role` call.
-        """
+        """Return the standard role LLM with a custom ``route_reason`` (e.g. ``deep_downgraded:missing_reason``); not cached, so the one-off reason never poisons a later `for_role`."""
         if self._static_llm is not None:
             return self._static_llm
         route = self.route_for(role_key)
         provider = route.provider or self.default_provider
         model = route.model or self.default_model
-        # Actuation test 2026-09-05, criterion 3: keep `agent_policy:<id>` first, tier note after.
+        # keep `agent_policy:<id>` first, tier note after
         if str(route.reason or "").startswith("agent_policy:"):
             route_reason = f"{route.reason}|{route_reason}"
         provider, model, route_reason = self._cap_role_route(
@@ -1469,21 +1260,8 @@ class ModelRouter:
         )
 
     def _declared_model_for(self, provider: str) -> str:
-        """Concrete model the operator has already declared for *provider*.
-
-        ``model_catalog`` can only describe providers it has a fetcher for
-        (anthropic, openai), so a provider the operator names explicitly can
-        have no catalog tier model while a concrete model for it is declared
-        elsewhere: in ``config/model_registry.json``, or — for ``local`` — in
-        ``LOCAL_LLM_MODEL``. Returning it keeps the operator's explicit choice
-        authoritative instead of silently routing the call somewhere else.
-
-        Returns "" when nothing was declared, which is the only honest case for
-        a ``no_model:`` skip.
-        """
-        # Операторские спеки раньше встроенных, доступные по цене — раньше
-        # запертых потолком (R7 2026-08-12, docs/CODE_NOTES.md «Refresh before
-        # adapt»): builtin затенял конфиг, а без цены первым стал бы frontier.
+        """Concrete model the operator has declared for *provider* (config/model_registry.json, or LOCAL_LLM_MODEL for ``local``) when model_catalog cannot describe it; returns "" when nothing was declared."""
+        # Operator specs before builtins, affordable before capped by the ceiling: a builtin would shadow the config, and without a price the frontier model would come first.
         specs = [
             s for s in self.registry.list()
             if _normalise_provider(s.provider) == provider and s.model
@@ -1501,22 +1279,7 @@ class ModelRouter:
     def _resolve_tier_provider(
         self, tier: Any, role_key: str
     ) -> tuple[str | None, str | None, list[str]]:
-        """TD-010: choose a provider for *tier* by complexity preference.
-
-        Returns ``(provider, reason, skipped)`` when a supported,
-        credentialed provider that also has a catalog/env tier model is
-        found; otherwise ``(None, None, skipped)`` so the caller keeps
-        today's role-default behavior. The concrete model is never decided
-        here — only the provider; callers still resolve the model via
-        ``tier_model_for(tier, provider)``.
-
-        An explicit per-role provider (``AGENT_<ROLE>_PROVIDER``) disables
-        the preference entirely so the operator's choice always wins. The
-        same rule applies to ``AGENT_TIER_PROVIDERS_*``: a provider named
-        there is not dropped merely because catalog discovery cannot
-        describe it, as long as the operator declared a model for it
-        (``_declared_model_for``).
-        """
+        """Choose a provider for *tier* by complexity preference; returns (provider, reason, skipped) or (None, None, skipped) to keep the role default. The model is decided by the caller via tier_model_for. An explicit per-role provider, or one named in AGENT_TIER_PROVIDERS_* with a declared model, always wins."""
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
             return None, None, []
@@ -1531,7 +1294,7 @@ class ModelRouter:
             if not norm:
                 continue
             if norm not in SUPPORTED_PROVIDERS or not _provider_has_credentials(norm):
-                # Unsupported (e.g. `local`) or missing credentials → skip.
+                # Unsupported provider or missing credentials: skip.
                 skipped.append(f"provider_unavailable:{norm}")
                 continue
             tier_model = tier_model_for(tier, norm)
@@ -1543,15 +1306,12 @@ class ModelRouter:
                 skipped.append(f"no_model:{norm}")
                 continue
             if not self._tier_model_within_cost_limit(norm, tier_model):
-                # The operator capped spend; this provider's model for the tier
-                # is above the cap, so try the next preference rather than
-                # quietly overspending.
+                # The operator capped spend and this provider's model is above the cap: try the next preference.
                 skipped.append(f"cost_limit:{norm}")
                 continue
             reason = f"complexity:{tier_value}:{norm}"
             if model_source == "declared":
-                # Запаска признаётся в журнале: в probe_r1 она была неотличима
-                # от каталожной, и протухание было невидимым (R7).
+                # A spare is acknowledged in the journal, otherwise it is indistinguishable from the catalog model and staleness is invisible.
                 reason += "|model_source:declared"
             return norm, reason, skipped
         return None, None, skipped
@@ -1598,9 +1358,7 @@ class ModelRouter:
                 f"{reason}|cost_limit:{norm}:{model}->{spec.id}",
             )
 
-        # Nothing affordable is configured for this role. Refusing outright
-        # would strand the agent, so the call proceeds — but the ledger records
-        # that the ceiling was exceeded instead of billing it as a normal route.
+        # Nothing affordable is configured for this role: proceed (refusing would strand the agent) but record in the ledger that the ceiling was exceeded.
         return provider, model, f"{reason}|cost_limit_exceeded:{norm}:{model}"
 
     def for_task(
@@ -1612,32 +1370,7 @@ class ModelRouter:
         force_tier: Any = None,
         task_role: str | None = None,
     ) -> Any:
-        """Like :meth:`for_role` but auto-selects model based on task
-        complexity. Tier resolution order: env
-        ``AGENT_MODEL_TIER_{LIGHT|STANDARD|DEEP}`` (operator override), then
-        ``config/model_catalog.json``, then :meth:`for_role`.
-
-        ``escalation`` is an optional operator-supplied
-        :class:`~core.deep_escalation.OperatorEscalation` (role-free). It
-        only affects a DEEP request: without a valid operator reason the
-        deep request gracefully downgrades to the standard tier (the agent
-        can never open Opus for itself). LIGHT escalation is never gated.
-
-        ``force_tier`` lets a caller pin the tier explicitly (e.g. the
-        loop's cheap-path gate forcing LIGHT for a trivial no-tool turn)
-        instead of deriving it from ``assess_complexity``. It can never open
-        a more expensive tier without the normal escalation gate: a forced
-        DEEP still passes through the operator-escalation check below.
-
-        ``task_role`` is the role decided by
-        :class:`core.role_router.RoleRouter` for this request (repair,
-        programmer, researcher, …). The caller already knows it before
-        choosing a model; forwarding it lets
-        :func:`~core.task_complexity.assess_complexity` refuse the LIGHT
-        tier for roles that edit code or diagnose defects, however tersely
-        the request was phrased. It never opens a *stronger* tier on its
-        own, so it cannot bypass the escalation gate.
-        """
+        """Like `for_role` but selects the model by task complexity (env AGENT_MODEL_TIER_*, then config/model_catalog.json, then `for_role`). `escalation`: operator-supplied OperatorEscalation; without a valid reason DEEP downgrades to standard (the agent cannot open Opus for itself). `force_tier` pins the tier but a forced DEEP still passes the gate. `task_role` (from RoleRouter) lets assess_complexity refuse LIGHT for code-editing roles; it never opens a stronger tier."""
         from core.model_catalog import tier_model_for
         from core.task_complexity import ComplexityTier, assess_complexity
 
@@ -1650,30 +1383,19 @@ class ModelRouter:
         else:
             tier = assess_complexity(task, role=role_key, task_role=task_role)
 
-        # ── TD-010: provider-by-complexity preference ────────────────────────
-        # Pick the PROVIDER by complexity tier among already-supported
-        # providers (LIGHT→huggingface/openai, STANDARD→openai, DEEP→anthropic;
-        # overridable via AGENT_TIER_PROVIDERS_*). Returns None when no
-        # preferred provider is credentialed AND has a catalog tier model, in
-        # which case we keep today's role-default behavior exactly.
+        # TD-010: pick the PROVIDER by complexity tier among supported providers (LIGHT->huggingface/openai, STANDARD->openai, DEEP->anthropic; AGENT_TIER_PROVIDERS_*); None keeps the role-default behaviour.
         route = self.route_for(role_key)
         pref_provider, pref_reason, skipped = self._resolve_tier_provider(tier, role_key)
 
         if pref_provider is not None:
-            # A preferred provider won — model still comes from the catalog,
-            # unless the operator named this provider explicitly and the
-            # catalog has no fetcher for it (see _declared_model_for).
+            # A preferred provider won: the model still comes from the catalog unless the operator named the provider and the catalog has no fetcher for it.
             provider = pref_provider
             tier_model = tier_model_for(tier, provider)
             if not tier_model and _tier_providers_are_explicit(tier.value):
                 tier_model = self._declared_model_for(provider)
             tier_reason = _append_skipped(pref_reason or f"complexity:{tier.value}:{provider}", skipped)
         elif tier == ComplexityTier.STANDARD:
-            # STANDARD with no preferred provider → reuse normal role routing
-            # (backward-compatible fast path; no catalog query, identity kept).
-            # TD-021: keep the resolved model identical to for_role but stamp an
-            # honest reason so the ledger shows the complexity tier and the
-            # fallback, not the registry's opaque policy:* route id.
+            # STANDARD with no preferred provider reuses role routing; TD-021: stamp an honest reason so the ledger shows the tier and the fallback, not the opaque policy:* id.
             reason = _append_skipped(
                 f"complexity:{tier.value}|fallback:role_default", skipped
             )
@@ -1682,9 +1404,7 @@ class ModelRouter:
             # LIGHT / DEEP fall back to the explicit/default role provider.
             provider = _normalise_provider(route.provider or self.default_provider) or "anthropic"
             tier_model = tier_model_for(tier, provider)
-            # If the preference loop actually skipped provider(s), this is a
-            # fallback to the role default; otherwise it's a plain complexity
-            # route to the (explicit or default) provider.
+            # If the preference loop skipped providers this is a fallback to the role default, otherwise a plain complexity route.
             if skipped:
                 tier_reason = _append_skipped("fallback:role_default", skipped)
             else:
@@ -1707,23 +1427,13 @@ class ModelRouter:
                         f"complexity:{tier.value}:{light_spec.id}", skipped
                     )
 
-        # ── Deep/Opus escalation gate ────────────────────────────────────────
-        # DEEP is the only expensive direction; LIGHT (cheap) is never gated.
-        # Without a valid operator reason a deep request downgrades to the
-        # standard tier, recording WHY in route_reason for the usage ledger.
+        # Deep/Opus escalation gate: DEEP is the only expensive direction; without a valid operator reason it downgrades to standard and records WHY in route_reason.
         if tier == ComplexityTier.DEEP:
             from core.deep_escalation import (
                 DeepEscalationRequest,
                 evaluate_deep_escalation,
             )
-            # A stale cache and a provider with no deep model produce the same
-            # empty `tier_model`, and used to produce the same downgrade reason.
-            # They need different actions from the operator, so the gate is told
-            # which one it is.
-            #
-            # Read only when the tier failed to resolve: when a model was found
-            # the cache is self-evidently usable, and this would be a second
-            # disk read on the routing path for nothing.
+            # A stale cache and a provider with no deep model give the same empty `tier_model` but need different operator actions, so the gate is told which; read only when the tier failed to resolve.
             _catalog_status = None
             if not tier_model:
                 from core.model_catalog import catalog_freshness
@@ -1739,17 +1449,9 @@ class ModelRouter:
                 operator_approved=getattr(escalation, "operator_approved", False),
                 catalog_status=_catalog_status,
             ))
-            # No extra event: the router has no logger of its own, and the
-            # decision's `route_reason` is already written to the usage ledger
-            # with every call. `deep_downgraded:catalog_expired` in that ledger
-            # is the diagnosis; a second channel would only be a second thing to
-            # keep in sync.
+            # No extra event: the route_reason (e.g. `deep_downgraded:catalog_expired`) already reaches the usage ledger; a second channel would need syncing.
             if decision.effective_tier == "standard":
-                # Serve the STANDARD tier the way a natively-standard request
-                # would: the operator's AGENT_TIER_PROVIDERS_STANDARD applies
-                # here too. Previously this went straight to the role default,
-                # so a hard question silently abandoned the requested provider
-                # exactly when the work mattered most.
+                # Serve the STANDARD tier like a native standard request, so AGENT_TIER_PROVIDERS_STANDARD applies too (it used to abandon the requested provider on hard questions).
                 dg_provider, _dg_pref, dg_skipped = self._resolve_tier_provider(
                     ComplexityTier.STANDARD, role_key
                 )
@@ -1765,8 +1467,7 @@ class ModelRouter:
                         decision.route_reason, [*skipped, *dg_skipped]
                     )
                 else:
-                    # No operator standard preference (or nothing resolvable for
-                    # it) → unchanged behaviour: the role default.
+                    # No operator standard preference: unchanged behaviour, the role default.
                     return self._for_role_with_reason(
                         role_key, decision.route_reason
                     )
@@ -1774,11 +1475,7 @@ class ModelRouter:
                 tier_reason = decision.route_reason
 
         if not tier_model:
-            # No model configured/discovered for this tier → fall back to role
-            # routing. (DEEP with no model already downgraded above.)
-            # TD-021: the resolved model is unchanged, but stamp an honest reason
-            # so the ledger records the assessed tier and *why* it fell back
-            # (no tier model) instead of the registry's opaque policy:* id.
+            # No model for this tier: fall back to role routing (TD-021: stamp the assessed tier and why it fell back).
             reason = _append_skipped(
                 f"complexity:{tier.value}|fallback:role_default:no_tier_model",
                 skipped,
@@ -1803,10 +1500,7 @@ class ModelRouter:
             llm,
             role=role_key,
             route=tier_route,
-            # Price by the resolved model's real registry cost tier, not the
-            # complexity tier name — the usage ledger's cost table is keyed on
-            # "free/low/medium/high/unknown", so passing "light/standard/deep"
-            # here silently priced every complexity-routed call as "unknown".
+            # Price by the resolved model's real registry cost tier (free/low/medium/high/unknown), not the complexity tier name, which priced every call as unknown.
             cost_tier=self._cost_tier_for_route(tier_route),
             ledger=self.usage_ledger,
             llm_factory=self._llm_factory,
@@ -1851,11 +1545,7 @@ class ModelRouter:
         return self._classified_cost_tier(model)
 
     def _reprice_for_failover(self, provider: str, model: str) -> str:
-        """Cost tier for a provider/model pair a failover landed on.
-
-        Failover substitutes a different model on a different provider, so the
-        original route's tier no longer describes what is being paid for.
-        """
+        """Cost tier for a provider/model pair a failover landed on; the original route's tier no longer describes what is paid for."""
         return self._cost_tier_for_route(
             ModelRoute(role="", provider=provider, model=model, reason="")
         )

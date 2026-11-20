@@ -1,33 +1,7 @@
-"""Синтез ответа — метод `_synthesize`, вырезанный из ``core/loop.py`` дословно.
+"""Answer synthesis: the `_synthesize` method cut verbatim out of ``core/loop.py`` (third piece of the split, after `loop_step_execution` and `loop_response_deciders`).
 
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Третий кусок раскола `core/loop.py` (после `loop_step_execution` и
-`loop_response_deciders`).
-
-Здесь собирается ПРОМПТ синтезатора и делается сам вызов: блоки контекста
-(история, долгая память, профиль, допущения, роль), бюджет промпта с
-пересборкой урезанной памяти, дешёвый путь и локальная критика, разрешённые
-цитаты, `<host_environment>` как справка-не-улика (LPF-001) и лестница
-устойчивого синтеза. Это единственная фаза цикла, целиком укладывающаяся в
-один метод, — поэтому она переезжает целиком, без протягивания run-локалей
-через границу.
-
-Вторым методом сюда уехал ВЫЗОВ синтезатора — лестница устойчивости
-(`run_synthesizer_ladder`): выбор дешёвого яруса модели, одноразовый nonce на
-КАЖДУЮ попытку, разбор маркера завершения и пауза по исчерпанному бюджету.
-Он держится за 14 run-локалей, поэтому уехал под явным состоянием
-(`SynthesisState`), как цикл попыток, — подстановка `имя -> st.имя` объявлена
-и сверяется с историей.
-
-Nonce именно на попытку, а не на прогон: маркер, скопированный из отброшенной
-попытки, не должен пройти проверку у той, что реально записывается (MIR-057).
-
-Тело перенесено символ в символ, что пинится AST-сверкой с историей в
-`tests/test_loop_synthesis_split.py`.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
+Builds the synthesizer prompt (history, long-term memory, profile, assumptions, role), applies the prompt budget with rebuilt trimmed memory, the cheap path and local critique, allowed citations, `<host_environment>` as reference-not-evidence, and runs the resilient synthesis ladder (`run_synthesizer_ladder`: cheap tier choice, one nonce per ATTEMPT, completion-marker parsing, pause on exhausted budget) under explicit `SynthesisState`.
+The body is pinned symbol for symbol by the AST check in `tests/test_loop_synthesis_split.py`. Mixed into ``AgentLoop``; state lives on the composed loop.
 """
 
 from __future__ import annotations
@@ -79,10 +53,7 @@ from core.user_profile import profile_to_prompt_block
 
 
 def _safety_notes_block(cycle_findings: list[dict[str, Any]] | None) -> str:
-    """Kernel-built safety notes — the LLM is told to surface these in the
-    user-facing answer. The notes describe what was redacted (the kernel did
-    it), not what the LLM did.
-    """
+    """Kernel-built safety notes the LLM must surface in the answer; they describe what the kernel redacted, not what the LLM did."""
     if not cycle_findings:
         return ""
     lines = ["<safety_notes>"]
@@ -96,15 +67,9 @@ def _safety_notes_block(cycle_findings: list[dict[str, Any]] | None) -> str:
 
 
 def _failure_context_block(failure_history: list[ReplanTrigger] | None) -> str:
-    """Failure context (MVP-8): the cumulative trigger list, so the synthesizer
-    can write an honest Conclusion («I tried X, Y, Z; here is why none worked»)
-    instead of an empty/fake answer.
+    """Failure context: the cumulative trigger list, so the synthesizer can write an honest Conclusion instead of an empty answer.
 
-    No claim about replan exhaustion: since 2026-08-14 this block also carries
-    the failures of an attempt that SUCCEEDED on another step, where nothing was
-    exhausted. Each entry states its own `attempt=N`, which is the fact.
-    Вынесено из `_synthesize` 2026-09-21 дословно — метод был сверх предела
-    операторов линтера (105 > 100).
+    No claim about replan exhaustion: the block also carries failures of an attempt that SUCCEEDED on another step; each entry states its own `attempt=N`.
     """
     if not failure_history:
         return ""
@@ -125,75 +90,54 @@ def _failure_context_block(failure_history: list[ReplanTrigger] | None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-#: Ниже этого совпадения с вопросом черновик считается «не про то». Живые
-#: разговоры 2026-09-20: 0.20 и 0.22 у двух ответов, каждый из которых отвечал
-#: на свой вопрос, а не на заданный.
+#: Below this match with the question the draft counts as "not about it".
 _OFF_TOPIC_RELEVANCE = 0.35
 
 
 class AgentLoopSynthesis:
-    """Фаза «Ответ»: сборка промпта синтезатора и вызов модели.
+    """Answer phase: builds the synthesizer prompt and calls the model.
 
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
+    Members below are host-contract declarations (``AgentLoop`` creates them in ``__init__``); no assignments, so nothing is created or shadowed at run time.
     """
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
-        # Список инструментов для блока «о себе» (рабочий экзамен 2026-09-19):
-        # зарегистрированные минус закрытые политикой.
+        # Tool list for the "about me" block: registered minus those closed by policy.
         registry: Any
         policy: Any
         llm: Any
         last_provenance: Any
         last_role_context: Any
         last_user_profile: Any
-        # Читается только ради `session_id` в блоке фактов о рантайме: агент
-        # обязан уметь назвать свой сеанс, а не выводить его из подсказки.
+        # Read only for `session_id` in the runtime facts block: the agent must be able to name its session.
         memory: Any
         memory_record_lines: Any
         _synthesis_expects_contract_headers: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a neighbouring mixin via MRO; the cross-module link must be written down.
         _sensor_failed: Any
         _cycle_findings: Any
         _save_budget_pause_checkpoint: Any
         last_referent_decision: Any
         model_router: Any
-        # Свои открытые записи о промахах: заводит чтение контекста хода
-        # (`core/loop_context.py`), синтез ставит их рядом с <failure_context>.
+        # Own open records of misses: set by turn context reading (`core/loop_context.py`), placed beside <failure_context> by synthesis.
         _self_defects_block: Any
 
     def _resolve_synthesis_contract(self) -> str:
         """The active output contract, and a fallback that admits itself.
 
-        Read from the prompt registry so an env/registry override actually takes
-        effect instead of being silently ignored — which is exactly what the old
-        handler here did. Measured (census A4): the built-in `SYSTEM_ANSWER`
-        requires section headers and a task-specific contract need not, so on a
-        registry failure `_synthesis_expects_contract_headers` reads True where
-        it should read False, and the verifier then marks the answer
-        `malformed_output` for headers that contract never asked for. A wrong
-        verdict about the ANSWER, caused by a swallowed error about the PROMPT.
-
-        The fallback stays: a missing registry is no reason to fail a turn. Its
-        silence does not.
+        Read from the prompt registry so an env/registry override takes effect. The built-in `SYSTEM_ANSWER` requires section headers and a task contract need not, so a silent registry failure would make the verifier flag `malformed_output` wrongly. The fallback stays (a missing registry must not fail a turn) but not silent.
         """
         try:
             from core.prompt_registry import get_prompt as _get_prompt
             return chat_contract(_get_prompt("synthesizer.system"))
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Reported through `_sensor_failed`, which journals it — the audit
-            # in `scripts/except_audit.py` looks for a literal `.log(` call and
-            # does not recognise the layer's own reporting helper, so the comment
-            # carries the justification it asks for (the audit itself: item A7).
+            # Reported through `_sensor_failed`, which journals it; scripts/except_audit.py looks only for a literal `.log(` call, so this comment carries the justification.
             self._sensor_failed("synthesis_contract_registry", exc)
             return chat_contract(SYSTEM_ANSWER)
 
     def _runtime_self_prompt_block(self) -> str:
-        """Блок фактов о себе, или пусто — сенсор не имеет права ронять ход."""
+        """Runtime facts block, or empty: a sensor has no right to fail the turn."""
         try:
             from core.run_context import current_run
             ctx = current_run()
@@ -202,25 +146,21 @@ class AgentLoopSynthesis:
                 run_id=str(getattr(ctx, "run_id", "") or ""),
                 session_id=getattr(self.memory, "session_id", None),
                 stores=_organ_map(self),
-                # `None` едет как есть: это «все приёмники», а не «ничего».
+                # `None` goes as is: it means "all sinks", not "nothing".
                 durable_writes=getattr(self, "durable_writes", ()),
                 tools=[t.name for t in self.registry.list()
                        if t.name not in (getattr(self.policy, "blocked_tools", None) or ())],
             )
-        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется
-            # Молча вернуть пустоту здесь — ровно тот порок, который храповик
-            # молчания и сторожит: оператор, читающий журнал, не узнал бы, что
-            # агент не смог назвать собственный состав.
+        except Exception as exc:  # noqa: BLE001 — observing sensor: failure is journaled
+            # Silent emptiness here is exactly what the silence ratchet guards: the operator reading the journal would not learn the agent could not name its own makeup.
             self._sensor_failed("runtime_self", exc)
             return ""
         return f"{block}\n\n" if block else ""
 
     def _self_defects_prompt(self) -> str:
-        """Свои открытые записи о промахах — у того, кто пишет «не могу».
+        """Own open records of misses, shown to whoever writes "I cannot".
 
-        2026-09-21: агент записал «объяснил стену вместо проверки» и повторил
-        это через десять часов. Блок заводит чтение контекста хода; синтез
-        зовут и мимо него, поэтому пустота — законный ответ.
+        Turn context reading creates the block; synthesis is also called without it, so empty is a legal answer.
         """
         block = getattr(self, "_self_defects_block", "") or ""
         return f"{block}\n\n" if block else ""
@@ -246,12 +186,8 @@ class AgentLoopSynthesis:
             if history.strip()
             else ""
         )
-        # Cheap path: drop the heavy, question-irrelevant injections
-        # (long-term memory, user profile, run assumptions). A trivial
-        # greeting / config-flag echo is answered from general knowledge;
-        # these blocks only inflate the prompt token count.
-        # Local critique: keep profile (language/verbosity) but drop LTM,
-        # assumptions, role, and conversation_history — target is explicit.
+        # Cheap path: drop heavy, question-irrelevant injections (long-term memory, profile, assumptions) for a trivial greeting / config echo.
+        # Local critique: keep profile but drop memory, assumptions, role and conversation_history (target is explicit).
         if lean_context or local_critique is not None:
             long_term_block = ""
             assumptions_block = ""
@@ -269,9 +205,7 @@ class AgentLoopSynthesis:
             long_term_block = (
                 f"{persistent_block}\n\n" if persistent_block.strip() else ""
             )
-            # Facts about his own models and spend travel with long-term memory:
-            # the answerer must see what the planner saw (exam 2026-09-04, turn 2:
-            # «the model_roster block is not in the context passed to me» — true).
+            # Facts about the agent's own models and spend travel with long-term memory: the answerer must see what the planner saw.
             if spend_block.strip():
                 long_term_block += f"{spend_block}\n\n"
             role_block = self.last_role_context.to_prompt_block() + "\n\n"
@@ -280,12 +214,9 @@ class AgentLoopSynthesis:
                 if self.last_user_profile is not None
                 else ""
             )
-            # Рядом с профилем ОПЕРАТОРА — проверяемые факты о СЕБЕ. До этого
-            # синтез знал, кто спрашивает, и не знал, что подключено у него
-            # самого; «кто ты» приходилось брать из строки подсказки
-            # (`SYSTEM_ANSWER`), а не из измерения. Персону блок не объявляет.
+            # Next to the OPERATOR profile: checkable facts about SELF, so "who are you" comes from measurement, not from the prompt line. The block declares no persona.
             profile_block += self._runtime_self_prompt_block()
-            # Layer 5 — inject active assumptions into synthesizer.
+            # Layer 5: inject active assumptions into the synthesizer.
             _assumptions_src = getattr(self, "_run_assumptions_current", None)
             assumptions_block = (
                 _assumptions_src.to_prompt_block() + "\n\n"
@@ -296,17 +227,13 @@ class AgentLoopSynthesis:
         safety_block = _safety_notes_block(cycle_findings)
         failure_block = _failure_context_block(failure_history)
 
-        # The question travels into the LLM prompt; redact any credential
-        # or sensitive PII the user pasted in.
+        # The question travels into the LLM prompt; redact credentials and PII the user pasted.
         safe_question, _q_findings, _q_pii_findings = redact_dlp_text(question)
 
-        # Read the active synthesis contract from the prompt registry so an
-        # env/registry override (e.g. a task-specific table-only contract)
-        # actually takes effect here instead of being silently ignored.
+        # Read the active contract from the prompt registry so an env/registry override takes effect.
         system_prompt = with_root_principles(self._resolve_synthesis_contract())
         if completion_nonce:
-            # Appended to the system prompt rather than to one of the three
-            # user-prompt branches, so every synthesis shape carries it.
+            # Appended to the system prompt, not to one of the three user-prompt branches, so every synthesis shape carries it.
             system_prompt = system_prompt + completion_marker_instruction(
                 completion_nonce, _COMPLETION_DECLARATIONS
             )
@@ -364,15 +291,7 @@ class AgentLoopSynthesis:
             )
             raw_blocks = _artifact_blocks(artifacts, question=question)
 
-            # Long-term memory competes for the SAME budget as the evidence
-            # collected this cycle. It used to be concatenated into the prompt
-            # outside `apply_total_budget` entirely, which made recollection
-            # structurally untrimmable while the freshly read file — almost
-            # always the largest block — was cut first. Observed consequence:
-            # a months-old "Bug fixed …" record survived the trim that removed
-            # the code proving it, and the agent reported a fixed bug as
-            # current. Memory is demoted (`trim_first`): it is spent before any
-            # fresh evidence is touched, whatever the relative sizes.
+            # Long-term memory competes for the SAME budget as this cycle's evidence and is demoted (`trim_first`): spent before any fresh evidence is touched, so an old "fixed" record cannot outlive the code proving it.
             memory_label = MEMORY_BLOCK_LABEL
             while memory_label in artifacts:      # never shadow a real artifact
                 memory_label += "_"
@@ -380,8 +299,7 @@ class AgentLoopSynthesis:
             if memory_payload:
                 raw_blocks.append((memory_label, memory_payload))
 
-            # Below one whole record memory rebuilds into nothing, so a stub
-            # keeps chars and no citable id (measured live 2026-08-04).
+            # Below one whole record memory rebuilds into nothing, so a stub keeps chars and no citable id.
             _lines = self.memory_record_lines(getattr(self, "_last_persistent_records", []))
             trimmed_blocks, was_trimmed = apply_total_budget(
                 raw_blocks, trim_first_labels={memory_label},
@@ -389,8 +307,7 @@ class AgentLoopSynthesis:
                             if _lines else None),
             )
             memory_trimmed = False
-            # None = memory was not trimmed, so every retrieved record is still
-            # in the prompt and citable. A set = only these survived.
+            # None = memory was not trimmed (all records citable); a set = only these survived.
             surviving_memory_ids: set[str] | None = None
             evidence_pairs: list[tuple[str, str]] = []
             for lbl, content in trimmed_blocks:
@@ -414,8 +331,7 @@ class AgentLoopSynthesis:
                     )
                 long_term_block = f"{memory_block}\n\n" if memory_block else ""
 
-            # The one truth two consumers need: did any WHOLE record reach the
-            # model. `None` means memory was never trimmed, so all of them did.
+            # The one truth two consumers need: did any WHOLE record reach the model. `None` means never trimmed, so all did.
             memory_has_records = bool(long_term_block.strip()) and (
                 surviving_memory_ids is None or bool(surviving_memory_ids)
             )
@@ -438,9 +354,7 @@ class AgentLoopSynthesis:
                 for lbl, content in evidence_pairs
             ]
             evidence = "\n\n".join(blocks)
-            # A record the trim removed must not stay on the citable list: the
-            # synthesizer would cite text it never saw and the verifier would
-            # book it as cited-but-unmatched.
+            # A record the trim removed must leave the citable list, or the verifier books a cited-but-unmatched citation.
             allowed_citations_block = format_allowed_citations_block(
                 self.last_provenance, memory_ids=surviving_memory_ids
             )
@@ -480,13 +394,7 @@ class AgentLoopSynthesis:
                 f"Question: {safe_question}\n\n"
                 "Answer using the Output Contract from the system instructions. "
                 "Maintain continuity with any prior turns shown in conversation_history."
-                # Only offered when the block is actually in the prompt: the
-                # budget can drop it entirely, and describing how to cite an
-                # absent block is an invitation to cite nothing.
-                # Records, not characters. Since a dropped block leaves a notice
-                # saying so (MIR-092), a non-empty block no longer implies a
-                # citable record — and offering the label over a drop notice is
-                # the same invitation to cite nothing, one step subtler.
+                # Offered only when the block is in the prompt and holds records (not characters): a drop notice leaves a non-empty block with nothing citable.
                 + (
                     " If long_term_memory contains a relevant record you may "
                     "cite it with source label [memory:<record_id>]."
@@ -495,11 +403,7 @@ class AgentLoopSynthesis:
                 )
             )
         else:
-            # No tools were called — either the planner judged this a
-            # general-knowledge question, OR a follow-up answerable from
-            # conversation_history / long_term_memory alone, OR re-planning
-            # exhausted (failure_history present). The Output Contract
-            # still applies in every case.
+            # No tools were called: general-knowledge question, a follow-up answerable from history/memory, or re-planning exhausted (failure_history present). The Output Contract still applies.
             extra_guidance = ""
             if failure_history:
                 extra_guidance = (
@@ -509,11 +413,7 @@ class AgentLoopSynthesis:
                     "unmet information need under Unverified. Cite each fact as "
                     "[general-knowledge] when relying on prior knowledge."
                 )
-            # Exam 2026-09-04, turn 3: on a no-tool turn the sensor blocks
-            # (model roster, spend mirror) were in the prompt but not citable —
-            # fifteen facts read off them were booked «user asserted» and the
-            # whole answer was suppressed. The chain already carries them as
-            # `sensor:` evidence; offer the tokens here as on a tool turn.
+            # On a no-tool turn the sensor blocks (model roster, spend mirror) were in the prompt but not citable; the chain already carries them as `sensor:` evidence, so offer the tokens as on a tool turn.
             sensor_citations_block = format_allowed_citations_block(self.last_provenance)
             user_prompt = (
                 f"{safety_block}"
@@ -536,35 +436,22 @@ class AgentLoopSynthesis:
                 + (f" {extra_guidance}" if extra_guidance else "")
             )
 
-        # Record whether the active contract is the generic Conclusion/Facts
-        # prose contract. When a task-specific/structured contract replaced it,
-        # the verifier must not flag the answer as malformed for lacking the
-        # generic headers (output-contract priority).
+        # Record whether the active contract is the generic Conclusion/Facts one; a task-specific contract must not make the verifier flag missing generic headers.
         self._synthesis_expects_contract_headers = output_contract_requires_headers(
             system_prompt
         )
 
-        # Defence-in-depth: the prompt is now built from redacted artifacts
-        # and a redacted question. One more pass catches anything we missed
-        # (e.g. a secret or PII hiding in planner_reasoning).
+        # Defence-in-depth: one more redaction pass over the built prompt (e.g. secret in planner_reasoning).
         safe_user_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
         from core.host_tools_context import _build_host_tools_block, host_tools_relevant
-        # Local critique must not pull host_tools context. Otherwise inject only
-        # when the turn is actually about host tools (name / task word / an
-        # effect tool was used) — so .env paths don't ride along on unrelated
-        # questions (LPF-001 iteration 1b).
+        # Local critique must not pull host_tools context; otherwise inject only when the turn is about host tools, so .env paths do not ride along on unrelated questions.
         _tools_used = [a.get("tool") for a in artifacts.values() if isinstance(a, dict)]
         if local_critique is None and host_tools_relevant(
             f"{question}\n{planner_reasoning}", _tools_used
         ):
             host_block = _build_host_tools_block()
-            # Reference context ONLY — NOT evidence. Wrapping host tools as an
-            # <evidence> block used to flip the synthesizer into "answer STRICTLY
-            # from evidence" mode (disabling the general-knowledge path) and
-            # produced fabricated [tool:host_tools] citations the verifier could
-            # never match (LPF-001). A <host_environment> block is reference-only,
-            # must not be cited, and never switches off general-knowledge answering.
+            # Reference context ONLY, NOT evidence: as an <evidence> block it flipped the synthesizer to evidence-only mode and produced unmatchable [tool:host_tools] citations. A <host_environment> block must not be cited and never switches off general-knowledge answering.
             if host_block:
                 host_context = (
                     "\n\n<host_environment>\n"
@@ -588,18 +475,9 @@ class AgentLoopSynthesis:
         )
 
     def _rewrite_if_off_topic(self, st: SynthesisState, do_synthesize: Any) -> None:
-        """Один переписанный черновик, когда ответ не про заданный вопрос.
+        """One rewritten draft when the answer is not about the question asked.
 
-        Соответствие вопросу СЧИТАЛОСЬ (`core/confidence_vector.relevance_score`),
-        печаталось человеку и клалось в эпизод — и ничем не распоряжалось.
-        Живой разговор 2026-09-20: на вопрос «какое условие не выполнялось»
-        агент перечислил четыре условия, нашёл ответ среди СВОИХ ЖЕ фактов
-        («цель драйва идёт действием propose_engineering_task, а не
-        improve_failure_to_idea_pipeline»), в выводе написал «данных нет», а
-        собственная проверка отметила 0.22. Мерить и не различать — то же
-        самое, что не мерить. Вторая сборка идёт по ТЕМ ЖЕ уликам, без новых
-        шагов и без сети: меняется только требование отвечать на вопрос.
-        Лучший из двух черновиков по тому же измерению и остаётся.
+        Relevance is computed (`core/confidence_vector.relevance_score`); this acts on it. The second build uses the SAME evidence, no new steps or network; only the demand to answer the question changes. The better draft by the same measure stays.
         """
         import os
 
@@ -607,10 +485,7 @@ class AgentLoopSynthesis:
         from core.replan import ReplanTrigger
         from core.synth_resilience import SynthAttempt
 
-        # Переключатель, по умолчанию выключённый — как `AGENT_OBSERVE_BEFORE_ANSWER`
-        # у наблюдения перед ответом. Мера соответствия груба (совпадение слов), а
-        # цена срабатывания — лишний вызов модели: включать это всем и всегда
-        # означало бы менять поведение каждого хода ради части случаев.
+        # Switch, off by default (like `AGENT_OBSERVE_BEFORE_ANSWER`): relevance is a rough word-overlap measure and a trigger costs an extra model call.
         if (os.getenv("AGENT_REWRITE_OFF_TOPIC", "") or "").strip().lower() not in {"1", "true", "yes", "on"}:
             return
         draft = st.draft_answer or ""
@@ -635,7 +510,7 @@ class AgentLoopSynthesis:
         ))
         try:
             second = do_synthesize(SynthAttempt(index=1, adapt_context=False, is_final=True))
-        except Exception as exc:  # noqa: BLE001 — переписывание не вправе ронять ответ
+        except Exception as exc:  # noqa: BLE001 — a rewrite may not drop the answer
             self._sensor_failed("off_topic_rewrite", exc)
             return
         after = relevance_score(question, second or "")
@@ -650,14 +525,9 @@ class AgentLoopSynthesis:
             st.draft_answer = second
 
     def _read_what_it_left_unverified(self, st: SynthesisState, do_synthesize: Any) -> None:
-        """Файл своей папки, вынесенный в «Не подтверждено», — прочитать и ответить.
+        """A file of its own folder listed under "Not verified": read it and answer.
 
-        Замер 2026-09-21: 44 из 74 блоков «Не подтверждено» были о его же
-        файлах («не проверял, требует ли file_write подтверждения», когда
-        tools/file_write.py рядом), а просьба «открой и проверь» в самом
-        вопросе не помогла. Это дверь, не стена: файлы читаются тем же
-        инструментом (только чтение, не больше трёх), ложатся в улики, и
-        черновик собирается один раз заново с требованием решить эти пункты.
+        A door, not a wall: files are read by the same tool (read only, at most three), become evidence, and the draft is rebuilt once with a demand to settle those items.
         """
         from core.answer_format import unverified_own_paths
         from core.evidence import evidence_from_tool_result
@@ -676,7 +546,7 @@ class AgentLoopSynthesis:
         for rel in paths:
             try:
                 output = tool.run(path=rel)
-            except Exception as exc:  # noqa: BLE001 — непрочитанный файл остаётся непроверенным
+            except Exception as exc:  # noqa: BLE001 — an unread file stays unverified
                 self._sensor_failed("unverified_self_read", exc)
                 continue
             st.artifacts[f"file:{rel}"] = {"tool": "file_read", "output": output, "issues": []}
@@ -700,7 +570,7 @@ class AgentLoopSynthesis:
         ))
         try:
             second = do_synthesize(SynthAttempt(index=1, adapt_context=False, is_final=True))
-        except Exception as exc:  # noqa: BLE001 — дочитывание не вправе ронять ответ
+        except Exception as exc:  # noqa: BLE001 — re-reading may not drop the answer
             self._sensor_failed("unverified_self_read", exc)
             return
         self.log.log("unverified_own_files_read", {"paths": read, "rewritten": bool(second)})
@@ -708,11 +578,9 @@ class AgentLoopSynthesis:
             st.draft_answer = second
 
     def _run_synthesizer_ladder(self, st: SynthesisState) -> None:
-        """Довести черновик ответа, переживая сбои синтезатора.
+        """Bring the draft answer through synthesizer failures.
 
-        Ничего не возвращает: черновик и вердикт о завершении лежат в `st`.
-        `ModelBudgetExceeded` проходит наружу — это не сбой синтеза, а конец
-        бюджета, и ход обязан встать с сохранённой точкой возврата.
+        Returns nothing: draft and completion verdict are in `st`. `ModelBudgetExceeded` propagates (end of budget, not a synthesis failure).
         """
         _synth_llm = st._task_synth_llm
         if st.cheap_path_active:
@@ -728,36 +596,21 @@ class AgentLoopSynthesis:
                     {"model": getattr(_synth_llm, "model", None)},
                 )
             except Exception as _tier_exc:  # noqa: BLE001 — reason stated above
-                # Falling back to the normal model is correct — a tier that
-                # cannot be selected is not a reason to fail the turn. Being
-                # quiet about it is not: the cheap path exists to cut cost, and
-                # its whole point disappears while `cheap_path_active` stays
-                # True and the journal shows a cheap turn. The absent
-                # `cheap_path_synth_model` event was the only difference, and
-                # absence reads the same as "no cheap path was taken".
+                # Falling back to the normal model is right, but quietly is not: the cheap path exists to cut cost, and the absent `cheap_path_synth_model` event would read as "no cheap path taken".
                 _synth_llm = st._task_synth_llm
                 self._sensor_failed("cheap_path_model_tier", _tier_exc)
         _saved_on_token = getattr(self, "_stream_on_token", None)
 
-        # Run-local, deliberately NOT an instance attribute. A `self._last_*`
-        # field survives the run that set it, and the early-return paths
-        # (replay, refusal) bank without ever entering this block — so a
-        # declaration from one run would be attributed to the next run's
-        # episode. Nothing here outlives the closure.
+        # Run-local, deliberately NOT an instance attribute: a `self._last_*` field survives its run and early-return paths bank without entering here, so a declaration would be attributed to the next run's episode.
         st._declared: dict[str, str | None] = {"value": None}
 
         def _do_synthesize(_attempt: SynthAttempt) -> str:
-            # Retries must not double-stream tokens: only the first attempt may
-            # stream to the console; adapted/retry attempts render silently and
-            # the final answer is returned normally.
+            # Retries must not double-stream tokens: only the first attempt streams to the console.
             if _attempt.index > 0:
                 self._stream_on_token = None
-            # Cleared BEFORE the call that can raise: an attempt that dies
-            # part-way must not leave the previous attempt's verdict standing.
+            # Cleared BEFORE the call that can raise, so a dying attempt does not leave the previous verdict.
             st._declared["value"] = None
-            # One nonce per ATTEMPT, not per run: a marker copied out of an
-            # attempt that was thrown away must not validate against the one
-            # that is actually banked (MIR-057).
+            # One nonce per ATTEMPT, not per run: a marker copied from a discarded attempt must not validate against the banked one.
             _nonce = new_completion_nonce()
             _raw = self._synthesize(
                 completion_nonce=_nonce,
@@ -769,21 +622,11 @@ class AgentLoopSynthesis:
                 persistent_block=st.persistent_block,
                 spend_block=st.spend_block,
                 cycle_findings=list(self._cycle_findings),
-                # Every failed step, not only the ones that survived to replan
-                # exhaustion. Until 2026-08-14 this read `if st.replan_exhausted
-                # else None`, so a plan that failed a step and still produced an
-                # answer told the synthesiser nothing about the failure.
-                # Measured live: `file_read README.md` raised FileNotFoundError,
-                # the loop dropped it, and the agent — asked whether the file
-                # exists — could only answer "cannot be determined". The tool
-                # had told it. Nothing carried the answer to synthesis.
-                # `<failure_context>` is not an `<evidence>` block, so this
-                # gives the failure a voice without giving it citation power.
+                # Every failed step, not only those that survived to replan exhaustion, so a plan that failed a step and still answered tells the synthesiser about the failure. `<failure_context>` is not an `<evidence>` block: a voice without citation power.
                 failure_history=failures_for_synthesis(
                     st.failure_history, exhausted=st.replan_exhausted),
                 llm=_synth_llm,
-                # Shrink the prompt/output on the adapted attempt — this is the
-                # recovery for a request the model "could not finish".
+                # Shrink the prompt/output on the adapted attempt: recovery for a request the model could not finish.
                 lean_context=st.cheap_path_active or _attempt.adapt_context,
                 local_critique=(
                     self.last_referent_decision
@@ -791,10 +634,7 @@ class AgentLoopSynthesis:
                     else None
                 ),
             )
-            # Strip here, once. Everything downstream — the verifier, the
-            # user's answer and the stored `full_answer` — is derived from
-            # this return value, so one removal keeps all three identical and
-            # the nonce reaches none of them.
+            # Strip here, once: the verifier, the user's answer and the stored `full_answer` all derive from this return value, so the nonce reaches none of them.
             _parsed = parse_completion_marker(
                 _raw, nonce=_nonce, valid_tokens=_COMPLETION_DECLARATIONS
             )
@@ -802,19 +642,11 @@ class AgentLoopSynthesis:
             self.log.log(
                 "completion_declaration",
                 {
-                    # The nonce is a secret of the attempt and is never logged:
-                    # a log that carries it would hand forgery back to anyone
-                    # who can read logs.
+                    # The nonce is a secret of the attempt and is never logged.
                     "attempt": _attempt.index,
                     "parse": _parsed.status,
                     "declared": _parsed.declared,
-                    # Обрыв — не забывчивость. Маркер стоит в КОНЦЕ ответа, и
-                    # ответ, срезанный потолком, не мог его донести. Без этого
-                    # поля `parse=missing` от обрыва неотличим от `missing` от
-                    # модели, которая маркер просто не написала: живой прогон
-                    # 2026-09-17 дал ровно первое (выход 5 x 2048, все ноги
-                    # израсходованы), а читался как второе. Клиент знал факт,
-                    # строка вердикта — нет.
+                    # Truncation is not forgetfulness: the marker is at the END, so an answer cut by the output ceiling cannot carry it. This field keeps `parse=missing` from truncation apart from a model that did not write it.
                     "truncated": bool(getattr(
                         _synth_llm if _synth_llm is not None else self.llm,
                         "last_answer_was_truncated",
@@ -838,9 +670,7 @@ class AgentLoopSynthesis:
             self._read_what_it_left_unverified(st, _do_synthesize)
             revise_refuted_draft(self, st, _do_synthesize)
             if _ladder.degraded:
-                # The answer the user gets was assembled by the fallback, not
-                # by the attempt that declared. Keeping that declaration would
-                # attribute a verdict to text its author never wrote.
+                # The answer the user gets came from the fallback, not the attempt that declared; keeping that declaration would attribute a verdict to text its author never wrote.
                 st._declared["value"] = None
         except ModelBudgetExceeded as exc:
             self._save_budget_pause_checkpoint(

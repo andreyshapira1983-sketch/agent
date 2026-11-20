@@ -1,7 +1,4 @@
-"""Self-repair value types: the proposal, the per-step record, and the report a repair run produces.
-
-Extracted from `core/self_repair` by autonomous self-build module split.
-"""
+"""Self-repair value types: the proposal, the per-step record and the report of a repair run."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

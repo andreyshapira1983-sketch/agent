@@ -1,8 +1,4 @@
-"""MVP-13.3 repair proposal generation.
-
-This layer gives the agent a way to *think up* a repair, while keeping the
-existing SelfRepairController as the only layer that may apply it.
-"""
+"""Repair proposal generation: the agent thinks up a repair, while SelfRepairController stays the only layer that may apply it."""
 
 from __future__ import annotations
 
@@ -35,52 +31,27 @@ ProposalStatus = Literal[
     "tool_error",
 ]
 
-#: How much of the target file the model is shown — and therefore the largest
-#: file this generator may attempt at all. The prompt asks for
-#: ``proposed_content`` = the COMPLETE replacement file (see ``_SYSTEM_PROMPT``),
-#: so a target that does not fit is a request to reproduce bytes the model was
-#: never given. It is refused up front instead (MIR-065).
-#:
-#: Sized to `core.self_build_producer._MAX_CONTENT_BYTES`, deliberately: both
-#: paths answer the same question — "how large a file may a single shot
-#: rewrite?" — and two different answers would mean the smaller one silently
-#: decides what the agent can repair. Raised from 16 000, at which 43 of 145
-#: `core/` modules were truncated before the model ever saw them.
+#: How much of the target file the model is shown, hence the largest file this generator attempts (the prompt asks for the COMPLETE replacement file).
+#: Sized to `core.self_build_producer._MAX_CONTENT_BYTES` so both paths answer 'how large may a single shot rewrite' the same way.
 DEFAULT_MAX_CONTEXT_CHARS = 60_000
 
-#: Output budget for the proposal. The reply must carry the whole post-image, so
-#: this tracks the context window above (~4 chars per token) rather than the
-#: client default. `self_build_producer` learned the same thing the same way:
-#: too small a cap truncates the JSON mid-file, and the result surfaces as
-#: "empty generated content" rather than as a size problem.
+#: Output budget for the proposal; the reply carries the whole post-image, so it tracks the context window (~4 chars per token), not the client default.
 DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 DEFAULT_MAX_CHANGED_LINES = 200
 
-#: Above this much code to reproduce, a repair is deep work. The proposal must
-#: contain the WHOLE post-image (see `_SYSTEM_PROMPT`), so difficulty scales with
-#: file size in a way it does not for ordinary generation: the model has to
-#: reproduce every untouched line exactly *and* land the edit. Measured on
-#: MIR-052 — `gpt-4o-mini` returned all 36 959 chars of `core/loop_methods2.py`
-#: byte-identical, i.e. it spent the whole budget copying and never made the fix.
+#: Above this much code to reproduce, a repair is deep work: the model must copy every untouched line exactly and still land the edit.
 DEEP_REPAIR_CHARS = 20_000
 
-#: Or this many red tests at once: several failing assertions rarely share a
-#: one-line cause, so the change is unlikely to be local.
+#: Or this many red tests at once: several failing assertions rarely share a one-line cause.
 DEEP_REPAIR_FAILING_TESTS = 4
 
 
 def repair_complexity(*, target_chars: int, failing_tests: int) -> ComplexityTier:
-    """How hard is this repair, from the work itself rather than from wording.
+    """How hard is this repair, from the work itself rather than the wording.
 
-    `assess_complexity` reads prose for signals ("архитектур", "from scratch"),
-    which is right for an operator's request and useless here: every repair asks
-    the same flat sentence, so it would always come out STANDARD no matter
-    whether the target is 40 lines or 4 000.
-
-    The result is passed to `ModelRouter.for_task` as `force_tier`, which still
-    runs it through the operator-escalation gate — a DEEP assessment is a
-    request, never a grant.
+    `assess_complexity` reads prose signals, useless here because every repair asks the same flat sentence.
+    The result goes to `ModelRouter.for_task` as `force_tier`; a DEEP assessment is a request, never a grant.
     """
     from core.task_complexity import ComplexityTier
 
@@ -101,9 +72,7 @@ class ProposalGenerationReport:
     baseline_tests: dict[str, Any] | None = None
     diagnostic_logs: dict[str, Any] | None = None
     diff_preview: dict[str, Any] | None = None
-    #: Whether a model was reached at all. A refusal issued *before* the call
-    #: has no reply to report, and rendering it as an empty one would recreate
-    #: the ambiguity `raw_response_head` exists to remove.
+    #: Whether a model was reached at all; a refusal before the call has no reply to report, and rendering it as empty would recreate the ambiguity `raw_response_head` removes.
     llm_was_called: bool = True
 
     @property
@@ -122,12 +91,7 @@ class ProposalGenerationReport:
             "baseline_tests": _test_summary(self.baseline_tests),
             "diagnostic_logs": _log_summary(self.diagnostic_logs),
             "diff_preview": _diff_summary(self.diff_preview),
-            # Only when the reply could not be used, and only its head. A
-            # failure whose cause is unreadable costs another paid call to
-            # diagnose: "invalid JSON" alone does not distinguish a model that
-            # prefixed prose from one that returned nothing, and the two need
-            # opposite fixes. Redacted and capped — this is a diagnostic, not a
-            # transcript.
+            # Only when the reply was unusable, and only its head (redacted, capped): a diagnostic, not a transcript; it tells a prose-prefixed reply from an empty one.
             "raw_response_head": _raw_head(self.raw_response,
                                            called=self.llm_was_called)
             if self.status in ("llm_error", "rejected")
@@ -188,20 +152,13 @@ class RepairProposalGenerator:
             raise ValueError("max_output_tokens must be > 0")
         self.workspace_root = Path(workspace_root).resolve()
         self.llm = llm
-        # Called with the number of failing baseline tests once they are known,
-        # to pick the model for THIS job. The count is a difficulty signal — many
-        # red tests at once rarely share a one-line cause — but it only exists
-        # after the baseline runs, which is inside `generate()`. Building the
-        # model in the caller meant that signal was always zero. Optional: with
-        # no selector the pre-built `llm` is used, so every existing caller is
-        # unaffected.
+        # Called with the failing-baseline-test count once known, to pick the model for THIS job (the count exists only after the baseline runs inside `generate()`);
+        # with no selector the pre-built `llm` is used.
         self.llm_selector = llm_selector
         self.log = logger
         self.max_context_chars = int(max_context_chars)
         self.max_changed_lines = int(max_changed_lines)
-        # Per-instance like the window, not a module constant read at the call
-        # site: the two budgets describe the same request and one of them being
-        # untunable makes the pair impossible to size together.
+        # Per-instance like the window: the two budgets describe the same request and must be sizable together.
         self.max_output_tokens = int(max_output_tokens)
         self.file_read = FileReadTool(self.workspace_root)
         self.run_tests = RunTestsTool(self.workspace_root)
@@ -241,9 +198,7 @@ class RepairProposalGenerator:
                 baseline_tests=baseline_output,
             ))
 
-        # Choose the model now, with the baseline in hand. Difficulty is a
-        # property of the job — how much code must be reproduced, and how many
-        # assertions are red — and the second half is only knowable here.
+        # Choose the model now, with the baseline in hand: difficulty is code to reproduce plus red assertions, and the second is only knowable here.
         llm = self.llm
         if self.llm_selector is not None:
             failing = int(baseline_output.get("failed") or 0) + int(
@@ -264,11 +219,7 @@ class RepairProposalGenerator:
         try:
             current_content = self.file_read.run(target_path)
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Not silence: the failure becomes the report's own status
-            # (`tool_error`) with the exception type and message in `warnings`,
-            # and `_finish` is what the caller reads. Broad on purpose — this
-            # is a tool boundary, and every way `file_read` can fail is the
-            # same answer here: no baseline content, no proposal.
+            # Not silence: the failure becomes the report's status (`tool_error`) with type and message in `warnings`. Broad on purpose at a tool boundary.
             return self._finish(ProposalGenerationReport(
                 status="tool_error",
                 warnings=[f"file_read failed: {type(exc).__name__}: {exc}"],
@@ -280,19 +231,8 @@ class RepairProposalGenerator:
         if findings:
             warnings.append("target file content was redacted before LLM prompt")
 
-        # Refuse before spending anything. The prompt asks for the complete
-        # replacement file, so a target larger than the window would be a
-        # request to reproduce what was never shown — the model either invents
-        # the missing part or declines, and both cost a call. Same rule
-        # `self_build_producer` applies with `_MAX_SPLIT_TARGET_LINES`: an
-        # oversized target is refused up front rather than burning a doomed
-        # generation.
-        #
-        # Measured on `current_safe`, not on the file: `_build_prompt` truncates
-        # the REDACTED copy, and `[REDACTED:<kind>]` is not the same length as
-        # what it replaces. Checking the raw file would let a secret-dense
-        # module pass here and still be truncated downstream — the same "asked
-        # to reproduce what it never saw" failure through a different door.
+        # Refuse before spending anything: a target larger than the window would ask the model to reproduce what it never saw.
+        # Measured on `current_safe` (the REDACTED copy `_build_prompt` truncates), because `[REDACTED:<kind>]` differs in length from what it replaces.
         if len(current_safe) > self.max_context_chars:
             grew = len(current_safe) > len(current_content)
             return self._finish(ProposalGenerationReport(
@@ -413,8 +353,7 @@ class RepairProposalGenerator:
                 context_lines=3,
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # The reason travels in `reasons`, which `_rejected` puts into the
-            # returned report — the operator sees why the draft was refused.
+            # The reason travels in `reasons`, which `_rejected` puts into the report.
             reasons.append(f"diff_file rejected proposal: {type(exc).__name__}: {exc}")
             return self._rejected(raw_response, baseline_tests, diagnostic_logs, reasons)
 
@@ -487,9 +426,7 @@ class RepairProposalGenerator:
                 return {"ok": False, "error": "run_tests invalid output: " + "; ".join(issues), "output": output}
             return {"ok": True, "output": redact_payload(output)}
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # `ok=False` plus the typed reason IS the report; the caller
-            # branches on it and shows the text. A raise here would abort a
-            # proposal run over a tool that is allowed to be unavailable.
+            # `ok=False` plus the typed reason IS the report; a raise would abort a proposal run over a tool that may be unavailable.
             return {"ok": False, "error": f"run_tests failed: {type(exc).__name__}: {exc}"}
 
     def _read_logs(self, *, trace_id: str) -> dict[str, Any]:
@@ -600,11 +537,7 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
         if not isinstance(data, dict):
             continue
         saw_object = True
-        # Prefer the object that answers the question. An earlier balanced span
-        # can parse perfectly and still be an illustration ("the shape I will
-        # return: {...}"); the first parseable object is not automatically the
-        # proposal. Keep looking, and fall back to the first only if nothing
-        # carries the contract's required key.
+        # Prefer the object that answers the question: an earlier parseable span may be an illustration; fall back to the first only if none carries the required key.
         if "proposed_content" in data:
             return {"ok": True, "data": data}
         if fallback is None:
@@ -644,17 +577,14 @@ def _is_safe_relative_ascii_path(value: str) -> bool:
     return not p.is_absolute() and ".." not in p.parts
 
 
-#: How much of an unusable reply is worth keeping to tell failure modes apart.
-#: Enough to see whether it opens with `{`, with prose, with a fence, or with
-#: nothing at all — and no more.
+#: How much of an unusable reply is kept to tell failure modes apart (opens with `{`, prose, a fence, or nothing).
 _RAW_HEAD_CHARS = 300
 
 
 def _raw_head(raw: str, *, called: bool = True) -> dict[str, Any] | None:
     """The opening of an unusable model reply, redacted and capped."""
     if not called:
-        # Never asked ≠ asked and got nothing. Collapsing the two would undo
-        # the only thing this field is for.
+        # Never asked is not the same as asked and got nothing; do not collapse the two.
         return {"note": "model not called — refused before the request"}
     if not raw:
         return {"length": 0, "head": "", "note": "empty reply"}

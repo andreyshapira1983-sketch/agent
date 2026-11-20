@@ -1,24 +1,4 @@
-"""Synthesizer resilience ladder.
-
-The synthesizer is the single LLM call that turns collected evidence into the
-user-facing Output Contract answer. Historically a model error there had no
-recovery path: the model router only fails over on key/quota/auth errors, and
-the call site caught only ``ModelBudgetExceeded``. Any other provider error —
-e.g. a ``400 BadRequest: Could not finish the message`` — propagated straight
-up, crashing the whole turn (or, inside a sub-agent, demoting it to an error).
-
-This module implements the graded recovery a resilient agent should have,
-without re-executing any side effects (synthesis is a pure model call):
-
-    failure 1  -> ordinary retry (same request; handles a transient blip)
-    failure 2  -> adapted retry  (shrunk context/output; handles a request that
-                  was too large or that the model "could not finish")
-    failure 3  -> stop: return an honest, Output-Contract-shaped degraded answer
-                  instead of a fourth identical attempt or a crash.
-
-``ModelBudgetExceeded`` (and any other caller-supplied *fatal* type) is never
-retried — it must propagate so the budget-pause checkpoint fires.
-"""
+"""Synthesizer resilience ladder: ordinary retry, then adapted retry (shrunk context/output), then an honest degraded Output-Contract answer; ``ModelBudgetExceeded`` and other fatal types are never retried."""
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -27,12 +7,7 @@ from typing import Any
 
 
 def classify_model_error(exc: BaseException) -> str:
-    """Coarse class of a model-call failure, for logging and retry policy.
-
-    Distinguishes a *repeatable request* problem (400/422 — retrying the exact
-    same request will fail again, so adaptation is required) from a *transient*
-    one (429/5xx/timeout — a plain retry may well succeed).
-    """
+    """Coarse class of a model-call failure: a repeatable request problem (400/422, needs adaptation) versus a transient one (429/5xx/timeout, a plain retry may work)."""
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(exc, "status", None)
@@ -65,12 +40,7 @@ def is_transient_error(exc: BaseException) -> bool:
 
 
 class _BlankSynthesis(RuntimeError):
-    """Raised internally when an attempt produces no visible text.
-
-    Never escapes ``run_synthesizer_ladder``: it exists so a blank draft
-    walks the retry -> adapt -> honest-partial path instead of being
-    mistaken for a finished answer.
-    """
+    """Raised internally when an attempt produces no visible text; never escapes ``run_synthesizer_ladder``."""
 
 
 @dataclass(frozen=True)
@@ -111,10 +81,7 @@ def run_synthesizer_ladder(
 
     for index in range(max_attempts):
         is_final = index == max_attempts - 1
-        # Only the last attempt adapts the request: failure 1 -> plain retry,
-        # failure 2 -> adapted retry, which is also the final one before we
-        # degrade. This guarantees we never repeat the exact same request more
-        # than once and never fire a fourth attempt.
+        # Only the last attempt adapts the request: failure 1 -> plain retry, failure 2 -> adapted (and final) retry; the same request is never repeated more than once.
         attempt = SynthAttempt(
             index=index,
             adapt_context=is_final and max_attempts > 1,
@@ -122,13 +89,7 @@ def run_synthesizer_ladder(
         )
         try:
             answer = do_synthesize(attempt)
-            # A blank draft is not an answer. The provider can return success
-            # with no visible text — measured live 2026-08-02: the synthesizer
-            # billed 14336 output tokens, status=success, and handed back the
-            # empty string; the run banked outcome=success and the operator
-            # received a 110-character evidence notice with nothing under it.
-            # Treating it as a finished answer is how a non-answer earns
-            # credit, so it enters the same ladder an exception does.
+            # A blank draft is not an answer (a provider can return success with no visible text), so it enters the same ladder as an exception.
             if not answer.strip():
                 raise _BlankSynthesis("synthesizer returned no visible text")  # noqa: TRY301 — a blank answer enters the same recovery ladder as an exception
         except fatal_types:
@@ -156,7 +117,6 @@ def run_synthesizer_ladder(
                 },
             )
             continue
-        # Success.
         if index > 0:
             on_event(
                 "synthesizer_recovered",

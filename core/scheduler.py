@@ -1,9 +1,4 @@
-"""Persistent scheduler for autonomous runtime tasks.
-
-This is deliberately not a background daemon yet. A scheduler "tick" checks
-which schedules are due, enqueues concrete runtime tasks, advances their next
-run time, and exits. A future service can call the same tick periodically.
-"""
+"""Persistent scheduler for autonomous runtime tasks: a tick enqueues due tasks, advances their next run and exits."""
 from __future__ import annotations
 
 import asyncio
@@ -89,18 +84,11 @@ class ScheduleTickReport:
     enqueued_count: int
     task_ids: tuple[str, ...]
     schedule_ids: tuple[str, ...]
-    #: How many schedules the store held when this tick ran — every record, not
-    #: only the due ones. Deliberately has NO default: the store knows the number
-    #: and a producer that cannot state it must say so at the call site rather
-    #: than silently emit 0.
-    #:
-    #: Added 2026-08-14 (C16). Without it one journal line answered three
-    #: different questions identically — no schedules configured at all, which is
-    #: the live workspace today; schedules present with none due; and a severed
-    #: wire. The operator's question is "why is my agent doing nothing?", and
-    #: `due_count=0` alone cannot tell an unconfigured daemon from a patient one.
+    # How many schedules the store held at this tick (every record, not only due ones).
+    # Deliberately NO default: a producer that cannot state it must say so, not emit 0.
+    # Without it `due_count=0` cannot tell an unconfigured daemon from a patient one.
     total_count: int
-    #: Rows in the file the reader could not parse; kept on disk, never run.
+    # Rows in the file the reader could not parse; kept on disk, never run.
     unparsed_count: int = 0
 
     def to_dict(self) -> dict:
@@ -307,39 +295,22 @@ class SchedulerStore:
         )
 
 
-# ── in-loop timer scheduler (plan item 2.1) ──────────────────────────────────
+# ── in-loop timer scheduler ──
 
 NowFn = Callable[[], datetime]
 SleepFn = Callable[[float], Awaitable[None]]
 TickCallback = Callable[[ScheduleTickReport], "Awaitable[None] | None"]
 
-# Fallback wait (seconds) used when no active schedule has a next-run time yet.
-# The service still re-evaluates after this bound, so a schedule added by an
-# out-of-band writer is picked up without an unbounded sleep — but it is long
-# enough to avoid busy polling.
+# Fallback wait (seconds) when no active schedule has a next-run time; long enough to avoid busy
+# polling, yet an out-of-band schedule is picked up.
 DEFAULT_IDLE_INTERVAL = 3600.0
 
 
 class SchedulerService:
     """Drive :class:`SchedulerStore.tick` from inside an asyncio event loop.
 
-    This is the in-loop replacement for calling the scheduler tick from an
-    external cron: the service sleeps precisely until the next schedule is due
-    (no busy polling), fires the tick, and repeats. It cooperates with the
-    daemon event loop (plan items 1.1/1.2) rather than owning it — a caller can
-    ``spawn`` :meth:`run` as a task and ``stop`` / cancel it during shutdown.
-
-    Time is fully injectable so tests use a controllable clock instead of real
-    sleeps:
-
-    - ``now`` supplies the current time (defaults to UTC ``datetime.now``).
-    - ``sleep`` performs the actual waiting (defaults to :func:`asyncio.sleep`).
-      A test can pass a fake ``sleep`` that advances a fake ``now`` and returns
-      immediately, exercising many simulated hours in milliseconds.
-
-    Backward compatibility: the persisted schedule format and
-    :class:`SchedulerStore` semantics are unchanged; existing schedules are
-    honoured as-is.
+    Sleeps until the next schedule is due, fires the tick and repeats; a caller can spawn :meth:`run` as a task and ``stop`` / cancel it.
+    Time is injectable: ``now`` (UTC ``datetime.now`` by default) and ``sleep`` (:func:`asyncio.sleep` by default).
 
     Parameters
     ----------
@@ -350,11 +321,9 @@ class SchedulerService:
     now:
         Injectable clock returning a timezone-aware ``datetime``.
     sleep:
-        Injectable awaitable sleep. Defaults to :func:`asyncio.sleep`.
+        Injectable awaitable sleep.
     on_tick:
-        Optional callback (sync or async) invoked with the
-        :class:`ScheduleTickReport` whenever a tick enqueues at least one task.
-        This is the hook the daemon loop uses to wake its dispatcher.
+        Optional callback (sync or async) invoked with the :class:`ScheduleTickReport` whenever a tick enqueues at least one task.
     limit:
         Optional per-tick cap forwarded to :meth:`SchedulerStore.tick`.
     idle_interval:
@@ -471,10 +440,10 @@ class SchedulerService:
                     )
                     await self._emit(report)
                 else:
-                    # Nothing became due after all (e.g. the schedule was paused
-                    # or removed by an out-of-band writer between our two reads).
-                    # Yield, then loop: the next read recomputes a real wait, so
-                    # this can never hot-spin.
+                    # Nothing became due after all (paused or removed by an out-of-band writer
+                    # between two reads).
+                    # Yield, then loop: the next read recomputes a real wait, so this never hot-
+                    # spins.
                     await asyncio.sleep(0)
         except asyncio.CancelledError:
             logger.info("scheduler service cancelled")

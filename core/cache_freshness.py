@@ -1,9 +1,9 @@
-"""Прошлый результат шага отдаётся вместо вызова, только если мир не мог измениться.
+"""Reuse a previous step result only if the world cannot have changed.
 
-  * веб-источники — в пределах сессии;
-  * file_read и find_in_files по одному файлу — пока у файла те же время изменения и размер;
-  * python_probe, list_dir, find_in_files по папке — в том же ходе, пока не было записи;
-  * всё остальное (тесты, запись, время, память) — заново.
+* web sources: within the session;
+* file_read and single-file find_in_files: while the file's mtime and size match;
+* python_probe, list_dir, directory find_in_files: within the same turn, until a write;
+* everything else (tests, writes, time, memory): run again.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _effects_stamp(effects: int | None, turn: int | None) -> str | None:
 
 def cache_stamp(tool_name: str, arguments: dict[str, Any], root: Path | None,
                 effects: int | None = None, turn: int | None = None) -> str | None:
-    """Отпечаток состояния, при котором результат верен; None — не отдавать; effects — записи, turn — ход."""
+    """Fingerprint of the state under which a result is valid; None means do not reuse; effects = writes, turn = turn."""
     if tool_name in _REMOTE_READS:
         return "remote"
     if tool_name in _EFFECT_STAMPED:

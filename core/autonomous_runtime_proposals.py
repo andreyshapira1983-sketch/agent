@@ -1,20 +1,4 @@
-"""Proposals and self-build — cut out of ``core/autonomous_runtime`` verbatim.
-
-The operator's rule, restated 2026-08-22: a file too large to read through
-produces mistakes, and a class of 1251 lines is such a file even after its data
-carriers moved out. This is the same treatment `core/loop.py` received: a mixin
-holding one coherent concern, bodies moved character-for-character, state
-staying on the composed runtime.
-
-What lives here: turning a run into self-improvement proposals — generating
-them, parsing the model's answer, fingerprinting and de-duplicating against
-what the inbox already holds, and driving the self-build producer. Nothing
-about queues, budgets, grants or reflection.
-
-The move is pinned against git history by AST comparison in
-`tests/test_autonomous_runtime_proposals_split.py`: this file is not allowed to
-differ from what it replaced by a single node.
-"""
+"""Mixin that generates, parses and de-duplicates self-improvement proposals and drives the self-build producer."""
 from __future__ import annotations
 
 import hashlib
@@ -74,13 +58,7 @@ def _proposal_tokens(text: str) -> frozenset[str]:
 
 
 def _proposal_canonical_signature(kind: str, description: str) -> str:
-    """Deterministic, human-readable bucket key like 'tests:claim:registry:source'.
-
-    Different `kind` always yields different signatures. Within a kind, two
-    descriptions collapse to the same signature only if their token-sets are
-    identical *after* taking the top alphabetic slice; this is intentionally
-    coarse so the operator can grep the inbox.
-    """
+    """Return a deterministic bucket key like 'tests:claim:registry:source'; coarse so the inbox can be grepped."""
     kind = (kind or "other").strip().lower() or "other"
     toks = sorted(_proposal_tokens(description))
     return f"{kind}:{':'.join(toks[:6])}"
@@ -101,8 +79,7 @@ class AutonomousRuntimeProposals:
         config: AutonomousRuntimeConfig,
         budget: BudgetGovernor,
     ) -> AutonomousTaskReport:
-        """Ask the LLM for 1-3 bounded next-task proposals and write them to
-        the approval inbox. Never executes any proposal."""
+        """Ask the LLM for 1-3 bounded proposals and write them to the approval inbox; never executes them."""
         cap = max(0, int(budget.limits.max_proposals_per_run))
         if cap == 0:
             return AutonomousTaskReport(task, "skipped", "proposals disabled (cap=0)")
@@ -261,26 +238,19 @@ class AutonomousRuntimeProposals:
         if not raw:
             return None
         text = raw.strip()
-        # Strip ```json fences if present.
         if text.startswith("```"):
             text = text.strip("`")
-            # remove a leading "json" language tag
             if text.lower().startswith("json"):
                 text = text[4:]
             text = text.strip()
-        # Find first JSON object.
         try:
             data = json.loads(text)
         except Exception:  # noqa: BLE001 — reason stated above
-            # Silent on purpose: this is not the verdict, it is the first of
-            # two attempts. A reply wrapped in prose is ordinary and the
-            # brace-slice below is the normal recovery — journaling here would
-            # log a failure that did not happen.
+            # First of two attempts: a reply wrapped in prose is ordinary, so stay silent here.
             start = text.find("{")
             end = text.rfind("}")
             if start < 0 or end <= start:
-                # `@staticmethod`: no `self` here, so the module logger
-                # carries it.
+                # @staticmethod: no self, so the module logger is used.
                 logger.warning(
                     "proposal reply has no JSON object (raw_chars=%d)", len(text)
                 )
@@ -288,10 +258,7 @@ class AutonomousRuntimeProposals:
             try:
                 data = json.loads(text[start : end + 1])
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # This one IS the verdict: both attempts are spent and a paid
-                # model reply is about to be dropped. §4 of the notebook was
-                # written for exactly this — an expensive result discarded with
-                # nothing said about why (MIR-077).
+                # Both attempts are spent and a paid reply is dropped: log why.
                 logger.warning(
                     "proposal reply did not parse after brace-slice rescue "
                     "(raw_chars=%d, sliced_chars=%d): %s: %s",
@@ -312,20 +279,13 @@ class AutonomousRuntimeProposals:
     def _existing_proposal_fingerprints(
         self,
     ) -> tuple[set[str], list[tuple[str, frozenset[str]]]]:
-        """Return (sha256_hashes, [(kind, token_set), ...]) for pending proposals.
-
-        Hashes catch verbatim repeats. Token sets feed the Jaccard-based
-        semantic dedup so reworded near-duplicates do not bloat the inbox.
-        """
+        """Return (sha256 hashes, [(kind, token_set)]) of pending proposals for exact and Jaccard dedup."""
         hashes: set[str] = set()
         token_sets: list[tuple[str, frozenset[str]]] = []
         try:
             snap = self.approval_inbox.snapshot()
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Returning empty sets does not merely lose information: it turns
-            # duplicate detection OFF for this cycle, so the very next proposal
-            # is admitted as new however many times it has already been filed.
-            # The inbox fills up and nothing says why (MIR-077).
+            # Empty sets would silently turn duplicate detection off for this cycle.
             self._log(
                 "proposal_dedup_unavailable",
                 {"error_type": type(exc).__name__, "error": str(exc)[:200]},
@@ -355,7 +315,6 @@ class AutonomousRuntimeProposals:
             "persistent_memory_records": self._memory_count(),
             "approval_inbox_pending": int(snap.get("pending") or 0),
         }
-        # Recent lessons from persistent memory (tagged "lesson"), best-effort.
         store = getattr(self.agent, "persistent_store", None)
         if store is not None:
             try:
@@ -367,10 +326,7 @@ class AutonomousRuntimeProposals:
                 ]
                 digest["recent_lessons"] = lessons[-5:]
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # An empty list here goes into the prompt that asks the model
-                # what to propose next. "No lessons banked" and "the store
-                # would not open" lead to different proposals, and both used to
-                # arrive as the same empty list (MIR-077).
+                # Distinguish "no lessons" from "store would not open" in the log.
                 digest["recent_lessons"] = []
                 self._log(
                     "proposal_digest_lessons_failed",
@@ -379,21 +335,14 @@ class AutonomousRuntimeProposals:
         return digest
 
     def _has_pending_self_build_proposal(self) -> bool:
-        """True when a self-apply proposal is already awaiting human review.
-
-        Prevents the tick from stacking a fresh (expensive) LLM-produced split on
-        top of one the operator has not decided on yet.
-        """
+        """Return True when a self-apply proposal already awaits human review."""
         try:
             return any(
                 item.operation == "self_apply_lane.run"
                 for item in self.approval_inbox.pending()
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # False is the permissive answer — it means "nothing pending, go
-            # ahead and propose". An unreadable inbox therefore does not block
-            # the lane, it opens it, which is the wrong direction to fail in
-            # silence (MIR-077).
+            # False is permissive: an unreadable inbox must be logged, not silent.
             self._log(
                 "pending_self_build_check_failed",
                 {"error_type": type(exc).__name__, "error": str(exc)[:200]},
@@ -401,16 +350,8 @@ class AutonomousRuntimeProposals:
             return False
 
     def _run_self_build_proposal(self, config: AutonomousRuntimeConfig) -> dict | None:
-        """Autonomously PROPOSE (never apply) one low-risk self-build split.
-
-        Mirrors the manual ``:self-build-produce`` trigger but runs inside the
-        autonomous tick. It only ever writes a *pending* approval-inbox item;
-        applying stays behind the human ``:self-apply-run`` gate. The outcome
-        (proposed / vetoed / no target, and why) is journalled to episodic
-        memory so the agent accumulates its own lessons. Best-effort: never
-        raises back into the run path.
-        """
-        # Never create real approval artifacts during a dry run.
+        """Propose (never apply) one low-risk self-build split; journal the outcome; never raises."""
+        # No real approval artifacts in a dry run.
         if config.dry_run:
             self._log("self_build_proposal_skipped", {"reason": "dry_run"})
             return None
@@ -422,9 +363,7 @@ class AutonomousRuntimeProposals:
             try:
                 llm = model_router.for_role("synthesizer")
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # `None` sends the caller down the no-model branch, which looks
-                # from the outside like a deliberate choice not to use one
-                # (MIR-077).
+                # None sends the caller down the no-model branch; log it.
                 llm = None
                 self._log(
                     "self_build_router_unavailable",
@@ -436,8 +375,7 @@ class AutonomousRuntimeProposals:
             self._log("self_build_proposal_skipped", {"reason": "no llm"})
             return None
 
-        # De-duplicate: do not run the expensive producer while an undecided
-        # self-build proposal is still sitting in the inbox.
+        # Do not run the expensive producer while an undecided proposal exists.
         if self._has_pending_self_build_proposal():
             self._log(
                 "self_build_proposal_skipped",
@@ -473,16 +411,12 @@ class AutonomousRuntimeProposals:
                     "target_path": result.get("target_path"),
                     "approval_id": result.get("approval_id"),
                     "veto_reasons": result.get("veto_reasons"),
-                    # MIR-185: без причины отказ в трассе недиагностируем —
-                    # улика обязана рождаться в момент отказа, не зондом позже.
                     "reason": result.get("reason"),
                 },
             )
-            # Journal the outcome (and WHY) so the agent remembers this attempt.
             record_self_build_episode(
                 agent, kind="self-build-produce", result=result,
-                # Семейная связка тика (MIR-184): тот же trace, что у
-                # эпизода-ответа этого прогона, — по ней их сошьёт читатель.
+                # Same trace_id as this run's answer episode so a reader can join them.
                 trace_id=str(getattr(
                     getattr(agent, "log", None), "trace_id", "") or ""),
             )

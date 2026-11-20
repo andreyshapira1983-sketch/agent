@@ -34,27 +34,13 @@ _PROMOTION_MIN_SUCCESSES = 2
 def _procedure_status_for(
     success_count: int, confidence: float, *, failure_count: int = 0,
 ) -> ProcedureStatus:
-    """Статус процедуры по её опыту. Незнание — не приговор.
+    """Procedure status from its experience: not knowing is not a verdict.
 
-    H-44 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Прежняя редакция смотрела
-    только на уверенность и потому сваливала «ещё не проверено» и «проверено и
-    не годится» в один исход. У ни разу не запускавшейся процедуры уверенность
-    — это ПРИОР (0.5), а не результат, и `needs_review` для неё означал бы
-    приговор без суда.
-
-    Цена измерена, а не предположена: `needs_review` исключается из выдачи, а
-    `candidate` используется. В живой памяти 24 процедуры из 34 — ровно
-    новорождённые, и проход-починка по прежнему правилу отключил бы 71 %
-    процедурной памяти, при том что ни один факт о них не изменился.
-
-    `failure_count` с умолчанием: старые вызывающие продолжают работать, а
-    послабление действует только там, где ОБА счётчика нулевые.
+    For a never-run procedure confidence is a PRIOR (0.5), not a result, so `needs_review` would be judgement without trial (`needs_review` is excluded from retrieval, `candidate` is used). `failure_count` has a default; the relaxation applies only where BOTH counters are zero.
     """
     if success_count == 0 and failure_count == 0:
         return "candidate"
-    # Retire only a losing record: retrieval never offers `needs_review` again,
-    # so a tie or a winning record (2:2, 3:2, 4:3) could never earn the success
-    # that clears it (проверки 16.11 п. 7 и 18.11). Ties stay `candidate`.
+    # Retire only a losing record: retrieval never offers `needs_review` again, so a tie or winning record (2:2, 3:2, 4:3) could never earn the success that clears it. Ties stay `candidate`.
     if failure_count > success_count:
         return "needs_review"
     if success_count < _PROMOTION_MIN_SUCCESSES or confidence < 0.6:
@@ -74,14 +60,7 @@ def _clean_text(text: str, *, max_chars: int = 800) -> str:
 def _compute_quality_score(
     verified: int, unverified: int, weak: int = 0
 ) -> float | None:
-    """Fraction of evidence chunks that stood up as verified support.
-
-    ``weak`` counts claims the verifier could NOT confirm as faithful
-    support — sub-agent-asserted, cited-but-unmatched, receipt-missing and
-    topic-only chunks. They belong in the denominator, never in the
-    numerator: an answer resting on unconfirmed support must not score as if
-    it were verified.
-    """
+    """Fraction of evidence chunks that stood up as verified support; ``weak`` chunks (sub-agent-asserted, cited-but-unmatched, receipt-missing, topic-only) count in the denominator only."""
     total = verified + unverified + weak
     if total == 0:
         return None
@@ -92,11 +71,7 @@ _tokens = topic_tokens
 _ADMISSIBLE_COMPLETIONS = frozenset({"achieved", "partially_achieved"})
 
 def episode_id_for_run(run_id: str) -> str:
-    """Deterministic episode id for one attempt.
-
-    Derived rather than random so `EpisodicMemoryStore.save_once` can detect a
-    duplicate of the same run without a side ledger.
-    """
+    """Deterministic episode id for one attempt, so `EpisodicMemoryStore.save_once` can detect a duplicate run without a side ledger."""
     return f"ep-run-{run_id}"
 
 _MAX_LESSONS = 12
@@ -112,16 +87,12 @@ def _capped_lessons(lessons: Iterable[str]) -> tuple[str, ...]:
     return deduped[-_MAX_LESSONS:]
 
 def _capped_source_questions(questions: Iterable[str]) -> tuple[str, ...]:
-    """ПЕРВЫЕ пять, а не последние: вытесняем поздние приросты, не происхождение.
-
-    Обратное правило `_capped_lessons` (последние N) здесь было бы порчей: урок
-    тем ценнее, чем свежее, а вопрос-происхождение — тем, что он первый.
-    """
+    """The FIRST five, not the last: later additions are evicted, not the origin (the reverse of `_capped_lessons`: a lesson is worth more the fresher, a source question the earlier)."""
     deduped = tuple(dict.fromkeys(_clean_text(x, max_chars=200) for x in questions if x))
     return tuple(x for x in deduped if x)[:_MAX_SOURCE_QUESTIONS]
 
 def _summarise_labels(labels: tuple[str, ...]) -> str:
-    """`a, b, c, +N more` — bounded, and identical wherever labels are shown."""
+    """`a, b, c, +N more`: bounded, identical wherever labels are shown."""
     if not labels:
         return ""
     shown = ", ".join(labels[:_MAX_SHOWN_LABELS])
@@ -150,12 +121,9 @@ def _episode_tags(
 
 
 def episode_tools(planned_sources: Iterable[dict[str, Any]], executed: Iterable[str]) -> list[str]:
-    """Инструменты хода для эпизода: план последнего круга плюс исполненное раньше.
+    """Tools of the turn for the episode: last round's plan plus what executed earlier.
 
-    С кругом наблюдения (`core/observation_round.py`) последний план часто пуст —
-    «всё сделано», — и эпизод записывал пустой список за ход, который читал и
-    писал (замер 2026-09-19). Без кругов всё исполненное входит в последний план,
-    и список остаётся прежним.
+    With an observation round (`core/observation_round.py`) the last plan is often empty ("all done") and the episode would record no tools for a turn that read and wrote.
     """
     planned = [s["tool"] for s in planned_sources]
     return planned + [t for t in dict.fromkeys(executed) if t not in planned]

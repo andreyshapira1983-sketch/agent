@@ -1,17 +1,9 @@
-"""Russian question, English record — one domain vocabulary between them.
-
-Deliberately a table, not a translator: no model call, no embeddings, so
-recall stays deterministic and testable — the same contract the retrieval
-policy states for itself. Keys are STEMS, matched as prefixes, because
-Russian inflects ("архитектура / архитектурой / архитектуры"). Keep entries
-to terms this project actually uses; a general dictionary would make every
-question match everything.
-"""
+"""Russian-to-English domain term table so a Russian question can match English records."""
 from __future__ import annotations
 
 import re
 
-#: stem -> English terms it should also search for.
+#: stem -> English terms it should also search for; keys are Russian stems matched as prefixes (inflection). Deterministic: no model call, no embeddings. Keep to terms the project uses.
 _TERMS: dict[str, tuple[str, ...]] = {
     "агент": ("agent",),
     "архитектур": ("architecture",),
@@ -86,11 +78,7 @@ def recall_language_diagnostics(question: str) -> dict[str, object]:
 
 
 def english_terms_for(tokens: set[str]) -> set[str]:
-    """English terms the given (already lowercased) question tokens imply.
-
-    Returns an empty set for a question with no Russian domain terms, so an
-    English question is scored exactly as before.
-    """
+    """English terms implied by the given (lowercased) question tokens; empty for a question with no Russian domain terms."""
     out: set[str] = set()
     for token in tokens:
         for stem, english in _TERMS.items():

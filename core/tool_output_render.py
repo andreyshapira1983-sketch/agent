@@ -1,13 +1,4 @@
-"""Как вывод инструмента выглядит для модели: текст, на который она опирается.
-
-Вынесено из core/answer_format.py: тот модуль — о том, как выглядит ОТВЕТ
-модели (контракт вывода, печать для человека, цитаты), а здесь — как выглядит
-для модели то, что вернули инструменты: `format_artifact` (результаты
-web_search списком, прочитанный файл — через бюджет доказательств, листинг
-папки как есть, всё прочее — `str()`) и `number_lines` (нумерация строк
-только для запроса; построена и намеренно НЕ подключена — почему, см.
-tests/test_the_model_can_see_line_numbers.py и docs/CODE_NOTES.md).
-"""
+"""How tool output looks to the model: `format_artifact` (web_search as a list, a read file through the evidence budget, folder listings as is, anything else via `str()`) and `number_lines` (per-request line numbering, built but deliberately not wired in; see tests/test_the_model_can_see_line_numbers.py and docs/CODE_NOTES.md)."""
 from __future__ import annotations
 
 from typing import Any
@@ -65,9 +56,7 @@ def format_artifact(
         return "\n".join(lines)
     if tool_name == "file_read" and isinstance(output, str):
         from core.evidence_budget import budget_file_content
-        # Строки здесь НЕ нумеруются (number_lines не подключена): номер попал бы в
-        # запись свидетельства. Если подключать — до бюджета, иначе номер будет
-        # позицией в выдержке, а не в файле.
+        # Lines are NOT numbered here (number_lines is not wired in): a number would enter the evidence record; if wired, do it before the budget so the number is a file position, not an excerpt position.
         return budget_file_content(
             output, question=question, self_documentation=self_documentation,
         )

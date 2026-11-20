@@ -1,9 +1,4 @@
-"""Say what was wrong with a builder reply, in words rather than in silence.
-
-The first version of this named only the raw length, so a live rejection
-that cost 183 budget units explained nothing — the actual cause was a single
-stray backslash. Each answer here is meant to be actionable on its own.
-"""
+"""Explain in words what was wrong with a builder reply."""
 from __future__ import annotations
 
 import json
@@ -20,9 +15,7 @@ def why_builder_reply_failed(build: dict[str, Any], *, max_tokens: int) -> str:
     raw = str(build.get("raw_reply") or "")
     if not raw.strip():
         return "no raw reply was preserved"
-    # Judge the JSON part, not the whole raw: the model often wraps the object
-    # in prose or a fence, and `json.loads` on the full text would report
-    # "Expecting value" instead of the real cause (review round #303).
+    # Judge the JSON part, not the whole raw: the model often wraps the object in prose or a fence.
     start, end = raw.find("{"), raw.rfind("}")
     candidate = raw[start:end + 1] if start != -1 and end > start else raw
     try:

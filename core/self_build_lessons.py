@@ -1,12 +1,8 @@
-"""Уроки самоправки с происхождением: что сломалось, что сделали, чем проверено.
+"""Self-build lessons with provenance (what broke, what was done, how it was verified), kept in ``data/self_build_lessons.jsonl``.
 
-Вынесено из core/self_build_rules.py: там живут узкие правила («символ X
-обязан остаться импортируемым»), которые Критик исполняет сам, а здесь —
-журнал уроков (``data/self_build_lessons.jsonl``) со своими воротами записи
-(`lesson_write_verdict`) и своим читателем-запретом (`blocking_lesson`).
-Урок шире правила и автоматически не исполняется — его читают перед тем, как
-повторить работу по тому же адресу. Мост, который пишет и правила, и урок из
-одного исхода, остался там: `record_lessons_from_result`.
+Split out of core/self_build_rules.py: rules there are narrow and executed by the Critic, while a lesson is broader and is only READ
+before repeating work at the same address. Owns the write gate (`lesson_write_verdict`) and the blocking reader (`blocking_lesson`);
+the bridge `record_lessons_from_result` stays in the rules module.
 """
 from __future__ import annotations
 
@@ -25,26 +21,20 @@ def default_lessons_path(workspace: Path) -> Path:
 
 @dataclass
 class Lesson:
-    """Один урок с происхождением: что сломалось, что сделали, чем проверено.
+    """One lesson with provenance: what broke, what was done, how it was verified.
 
-    Правило (`Rule`) выше — узкое и детерминированно применимое: Критик умеет
-    его исполнить сам. Урок шире и слабее: он НЕ исполняется автоматически, он
-    читается перед тем, как повторить работу по тому же адресу. Разница
-    намеренная — знание, которое машина применяет молча, обязано быть
-    проверяемым, а знание с прозой внутри проверяемым не бывает.
-
-    Пять полей происхождения обязательны, потому что урок без происхождения
-    нельзя ни подтвердить, ни отозвать: непонятно, из какого сбоя он вырос.
+        Unlike a rule, a lesson is not executed automatically; it is read before repeating work at the same address.
+        The five provenance fields are mandatory: a lesson without origin can be neither confirmed nor revoked.
     """
 
     created_at: str
-    origin: str  # кто добыл: "rule_approved_apply" (без человека) или "cli:..."
+    origin: str  # who produced it: "rule_approved_apply" (no human) or "cli:..."
     proposal_id: str
-    failure: str  # исходный сбой — то, чем кончилась проверка
-    change: str  # что менялось
-    verification: str  # чем проверено: перечень тестов и исход отката
+    failure: str  # the original failure: how the verification ended
+    change: str  # what was changed
+    verification: str  # how it was verified: list of tests and rollback outcome
     outcome: str  # "verified_candidate" | "rolled_back"
-    scope: tuple[str, ...] = ()  # адреса, к которым урок относится
+    scope: tuple[str, ...] = ()  # addresses the lesson applies to
 
     def key(self) -> tuple[str, str, str]:
         return (self.outcome, "|".join(self.scope), self.failure[:200])
@@ -71,21 +61,18 @@ _KNOWN_OUTCOMES = frozenset({"verified_candidate", "rolled_back", "accepted"})
 def lesson_from_apply_result(
     result: dict, *, origin: str, reason: str = ""
 ) -> Lesson | None:
-    """Урок из исхода одного применения, или None, если учиться нечему.
+    """Lesson from the outcome of one apply, or None when there is nothing to learn.
 
-    Учит только ТЕРМИНАЛЬНЫЙ исход: принято или откачено. Отказ ворот («риск
-    отклонён», «шлюз закрыт») — это несостоявшаяся попытка, из неё не следует
-    ничего о самом изменении, и записывать её уроком значило бы учиться на
-    собственной осторожности.
+        Only a TERMINAL outcome teaches (accepted or rolled back). A gate refusal is an attempt that did not happen
+        and says nothing about the change itself.
     """
     status = str(result.get("status") or "")
     outcome = _TERMINAL_OUTCOMES.get(status)
     if outcome is None:
         return None
     if outcome == "rolled_back" and "timed out" in str(result.get("reason") or ""):
-        # Не успевшая проверка ничего не говорит об изменении — как и отказ
-        # ворот выше. Урок из неё навсегда запрещал бы повторить, возможно,
-        # верную правку (суточный прогон 2026-09-19, core/step_sanitizer.py).
+        # A verification that did not finish says nothing about the change, like a gate refusal above: a lesson from it
+        # would forbid repeating a possibly correct edit forever.
         return None
     files = tuple(
         str(p).replace("\\", "/") for p in (result.get("files_changed") or []) if p
@@ -99,17 +86,13 @@ def lesson_from_apply_result(
             f"status: {status}",
             f"rollback: {rollback}",
         ]
-        # Слово полосы о ПРИНЯТОМ кандидате — свидетельство проверки, и оно
-        # переезжает сюда, а не пропадает: иначе починка поля `failure` просто
-        # меняла бы одну потерю на другую. У отката это слово уходит в `failure`
-        # ниже, потому что там оно и есть сбой.
+        # The lane's wording about an ACCEPTED candidate is verification evidence and moves here instead of being lost;
+        # for a rollback it goes into `failure` below, where it is the failure.
         + ([lane_says] if lane_says and outcome != "rolled_back" else [])
     )
-    # Сбой урока — то, ОТКУДА он вырос. Ревизия Copilot по PR #333: у принятого
-    # кандидата `reason` полосы — это её успех («targeted + full tests passed»),
-    # непустой всегда, поэтому запасной ход на повод заявки не срабатывал
-    # никогда, и «сбой» с «проверкой» несли один текст. У отката наоборот:
-    # повод полосы и ЕСТЬ сбой — что именно покраснело при проверке.
+    # A lesson's failure is where it grew FROM. For an accepted candidate the lane's `reason` is its success text
+    # (never empty), so a fallback to the request's reason never fired and `failure` and `verification` carried the same
+    # text; for a rollback the lane's reason IS the failure: what turned red during verification.
     if outcome == "rolled_back":
         failure = lane_says or str(reason or "").strip()
     else:
@@ -136,20 +119,13 @@ LESSON_SINK = "procedure"
 
 
 def lesson_write_verdict(durable_writes: Any) -> tuple[bool, str]:
-    """Разрешена ли запись урока при этом наборе стоков, и если нет — почему.
+    """Whether a lesson write is allowed under this set of sinks, and if not, why.
 
-    Ревизия PR #333: `LessonStore.add()` писала JSONL напрямую, мимо
-    `MemoryWritePolicy`, и звалась в том числе с ПРОИЗВОДСТВЕННОГО
-    `rule_approved_apply`. Требование «никаких неуправляемых прямых записей»
-    фактически не выполнялось: профиль песочницы открывал `procedure` для
-    одного пути, а урок ехал другим.
+        The ladder repeats `_durable_learning_suppressed` (rules 4 and 5) letter for letter so a second ladder cannot diverge:
 
-    Лестница повторена буква в букву (`_durable_learning_suppressed`, правила 4
-    и 5), потому что вторая лестница разошлась бы с первой:
-
-    * ``None`` — стоки не ограничены (человек за клавиатурой): разрешено;
-    * набор со стоком урока — разрешено полномочием, которое его открыло;
-    * набор без стока урока — отказ. Это и есть безнадзорное производство.
+        * ``None``: sinks unrestricted (a human at the keyboard): allowed;
+        * a set containing the lesson sink: allowed by the authority that opened it;
+        * a set without the lesson sink: refused (unattended production).
     """
     if durable_writes is None:
         return True, "интерактивный профиль: стоки не ограничены"
@@ -166,7 +142,7 @@ def lesson_write_verdict(durable_writes: Any) -> tuple[bool, str]:
 
 
 class LessonStore:
-    """Append-only JSONL уроков. Читается кодом, а не только человеком."""
+    """Append-only JSONL of lessons, read by code and not only by humans."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -176,12 +152,10 @@ class LessonStore:
         return lessons
 
     def read(self) -> tuple[list[Lesson], int]:
-        """Уроки И число нечитаемых строк.
+        """Lessons AND the number of unreadable lines.
 
-        Счёт нечитаемых строк нужен воротам: `load()` их молча пропускал, и
-        испорченная строка могла оказаться ровно тем уроком, который запрещает
-        повторить откат. Молчаливый пропуск в воротах — это разрешение
-        (ревизия PR #333).
+                The gate needs the count: `load()` skipped them silently, and a corrupted line could be exactly the lesson
+                that forbids a repeat. A silent skip at a gate is a permission.
         """
         lessons: list[Lesson] = []
         bad = 0
@@ -207,18 +181,17 @@ class LessonStore:
                 except (ValueError, TypeError, AttributeError):
                     bad += 1
                     continue
-                # `accepted` оставлен ради уроков, записанных до ревизии
-                # PR #333: журнал переживает переименование, и старые записи
-                # не вправе становиться нечитаемыми задним числом.
+                # `accepted` is kept for lessons written before the rename: the journal outlives renames, and old records must
+                # not become unreadable retroactively.
                 if lesson.outcome not in _KNOWN_OUTCOMES:
                     continue
                 lessons.append(lesson)
         except OSError:
-            return [], -1  # журнал не прочитан вовсе
+            return [], -1  # journal not read at all
         return lessons, bad
 
     def add(self, lesson: Lesson) -> bool:
-        """Записать урок; дубликат того же вывода из того же сбоя не пишется."""
+        """Record a lesson; a duplicate of the same conclusion from the same failure is not written."""
         try:
             if lesson.key() in {existing.key() for existing in self.load()}:
                 return False
@@ -249,22 +222,13 @@ SHARED_BOOKKEEPING = frozenset({
 
 
 def blocking_lesson(workspace: Path, targets) -> Lesson | None:
-    """Урок, запрещающий ПОВТОРИТЬ автономную правку по этим адресам.
+    """The lesson that forbids REPEATING an autonomous edit at these addresses.
 
-    Здесь петля и замыкается: откат оставляет урок, а следующая заявка по тому
-    же адресу этот урок ЧИТАЕТ и не уезжает в полосу второй раз. Без такого
-    читателя откат ничему не учил — тик подавал ту же правку, полоса снова
-    гоняла батарею и снова откатывала, и так до конца суток (аудит
-    автономности 2026-09-17, находка 10).
+        This closes the loop: a rollback leaves a lesson, and the next request for the same address READS it and does
+        not enter the lane twice. A refusal is not forever: the request stays in the inbox and a human may approve it
+        the usual way.
 
-    Отказ здесь — не запрет навсегда: заявка остаётся в ящике, и человек
-    вправе одобрить её обычным путём. Автомат лишь перестаёт повторять то, что
-    один раз уже не прошло проверку.
-
-    Нечитаемый журнал ЗАПРЕЩАЕТ. До ревизии PR #333 любое исключение чтения
-    отвечало `None`, то есть «препятствий нет»: испорченная строка снимала
-    ворота, которые сама же и должна была держать. У ворот незнание обязано
-    означать отказ.
+        An unreadable journal FORBIDS: at a gate, not knowing must mean refusal.
     """
     wanted = {str(t).replace("\\", "/").strip() for t in targets if t}
     if not wanted:
@@ -273,7 +237,7 @@ def blocking_lesson(workspace: Path, targets) -> Lesson | None:
         store = LessonStore(default_lessons_path(workspace))
         lessons, bad = store.read()
     except Exception as exc:  # noqa: BLE001 — чтение не роняет вызывающего,
-        return _unreadable_journal_lesson(  # но и не разрешает молча
+        return _unreadable_journal_lesson(  # but does not allow silently either
             wanted, f"журнал уроков не прочитан: {type(exc).__name__}: {exc}"
         )
     if bad != 0:
@@ -293,7 +257,7 @@ def blocking_lesson(workspace: Path, targets) -> Lesson | None:
 
 
 def _unreadable_journal_lesson(scope: set[str], reason: str) -> Lesson:
-    """Урок-отказ: «я не знаю, что тут было» на языке ворот."""
+    """A refusal lesson: "I do not know what was here" in the gate's language."""
     return Lesson(
         created_at=datetime.now(timezone.utc).isoformat(),
         origin="lesson_store",

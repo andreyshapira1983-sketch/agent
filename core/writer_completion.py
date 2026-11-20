@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# Coarse episodic outcome -> completion verdict, for writers that hold no other
-# evidence. Deliberately partial: an outcome outside this table yields no
-# verdict rather than a guessed one, so the axis stays unset and visibly so.
+# Coarse episodic outcome -> completion verdict for writers with no other evidence. Deliberately partial: an unknown outcome yields no verdict rather than a guess.
 COMPLETION_BY_OUTCOME: dict[str, str] = {
     "success": "achieved",
     "partial": "partially_achieved",

@@ -1,4 +1,4 @@
-"""Запись знаний, добытых конвейером, в долгую память."""
+"""Writing knowledge gathered by the pipeline into long-term memory."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -9,15 +9,14 @@ from core.models import MemoryRecord
 
 
 class AgentLoopKnowledge:
-    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле."""
+    """Mixed into ``AgentLoop``; state lives on the composed loop."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         persistent_store: Any
 
         def _durable_learning_suppressed(self, sink: str) -> bool: ...
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Provided by a sibling mixin via the MRO; the cross-module link is recorded here.
         remember: Any
 
     def _remember_from_knowledge(

@@ -1,7 +1,4 @@
-"""Helper functions used by `core.loop_synthesis.AgentLoopSynthesis`.
-
-Split out to keep `core/loop_synthesis.py` small while preserving behavior.
-"""
+"""Helper functions of `core.loop_synthesis.AgentLoopSynthesis`, split out to keep that module small."""
 
 from __future__ import annotations
 
@@ -9,7 +6,7 @@ from typing import Any
 
 
 def _organ_map(agent: object) -> dict[str, object]:
-    """Органы, о наличии которых агент вправе сообщить как о факте."""
+    """Organs the agent may report as fact."""
     names = (
         "memory", "persistent_store", "episodic_store", "procedural_store",
         "source_registry_store", "user_profile_store", "approval_provider",

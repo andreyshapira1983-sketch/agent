@@ -1,21 +1,8 @@
-"""Предсказание помощника против факта — сверка при его завершении.
+"""Helper prediction against fact: reconciliation when a subagent finishes.
 
-Журнал оператора, «Память и под-агенты» (25.09): модель легко пишет
-убедительное обоснование для чего угодно, поэтому текст «почему» — слабая
-защита. Сильным его делает проверяемое предсказание, которое при удалении
-под-агента сравнивается с фактом; систематическое завышение ожиданий тогда
-видно в журнале.
-
-Что проверяемо. У помощника жёсткий потолок в три вызова (planner_prompt),
-так что предсказывать вызовы незачем. Проверяемо — НА СКОЛЬКИХ ВНЕШНИХ
-ИСТОЧНИКАХ будет стоять ответ: образец поручения в подсказке планировщику —
-«3 papers with URLs and years». Факт — `external_evidence_count` результата.
-Anthropic («How we built our multi-agent research system», 2025): каждому
-под-агенту — цель, формат результата и границы; бюджет называется в поручении.
-
-Предсказание берётся из явного `expect_sources`, иначе — первое число в тексте
-`expect` («3–5 принципов» → 3), иначе оно «непроверяемо» и так и считается:
-доля непроверяемых — тоже цифра, а не молчание.
+A checkable prediction (how many EXTERNAL sources the answer will stand on) is compared with the result's `external_evidence_count`, so systematic
+over-promising shows in the journal. The prediction comes from an explicit `expect_sources`, else the first number in the `expect` text, else it is
+"unchecked" and counted as such (the unchecked share is a number, not silence).
 """
 from __future__ import annotations
 
@@ -31,7 +18,7 @@ _FIRST_NUMBER = re.compile(r"(?<![\w.])(\d{1,2})(?![\w.])")
 
 
 def predicted_sources(expect: str, stated: Any = None) -> tuple[int | None, str]:
-    """(число источников, откуда оно: stated | parsed | unchecked)."""
+    """(number of sources, where it came from: stated | parsed | unchecked)."""
     if isinstance(stated, int) and not isinstance(stated, bool) and 0 <= stated <= 20:
         return stated, "stated"
     m = _FIRST_NUMBER.search(expect or "")
@@ -39,7 +26,7 @@ def predicted_sources(expect: str, stated: Any = None) -> tuple[int | None, str]
 
 
 def child_tool_calls(log_dir: Path | str, trace_id: str) -> int | None:
-    """Сколько вызовов инструментов сделал помощник — по его собственному следу."""
+    """How many tool calls the helper made, from its own trace."""
     try:
         text = (Path(log_dir) / f"{trace_id}.jsonl").read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -48,7 +35,7 @@ def child_tool_calls(log_dir: Path | str, trace_id: str) -> int | None:
 
 
 def compare(expected: int | None, sources: int, status: str) -> bool | None:
-    """Сбылось ли: помощник кончил успехом и вернул не меньше обещанных источников."""
+    """Whether it came true: the helper finished successfully and returned at least the promised number of sources."""
     if expected is None:
         return None
     return status == "success" and sources >= expected
@@ -65,7 +52,7 @@ def record(workspace: Path | str, row: dict[str, Any]) -> None:
 
 
 def tally(workspace: Path | str) -> dict[str, Any]:
-    """Сводка по журналу: сколько предсказаний проверяемо и сколько сбылось."""
+    """Journal summary: how many predictions are checkable and how many came true."""
     try:
         lines = (Path(workspace) / RELPATH).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -90,14 +77,12 @@ def tally(workspace: Path | str) -> dict[str, Any]:
     }
 
 
-# ── приём шага плана (перенесено из core/step_sanitizer.py 2026-09-25: файл
-#    упёрся в потолок размера, а эти правила — про помощника, не про разбор) ──
+# Plan step intake (moved from core/step_sanitizer.py: these rules concern the helper, not parsing)
 
 def expect_sources_arg(args: dict[str, Any]) -> dict[str, int]:
-    """Проверяемое число источников из шага плана — или ничего.
+    """Checkable number of sources from a plan step, or nothing.
 
-    Не число — не ошибка: сверка возьмёт первое число из `expect` или назовёт
-    предсказание непроверяемым.
+        A non-number is not an error: the comparison takes the first number from `expect` or calls the prediction unchecked.
     """
     sources = args.get("expect_sources")
     if isinstance(sources, int) and not isinstance(sources, bool) and 0 <= sources <= 20:
@@ -106,11 +91,9 @@ def expect_sources_arg(args: dict[str, Any]) -> dict[str, int]:
 
 
 def subagent_reason(args: dict[str, Any], idx: int, warnings: list[str]) -> tuple[str, str] | None:
-    """Зачем помощник и что он вернёт — или None (шаг отброшен).
+    """Why the helper and what it will return, or None (step dropped).
 
-    Правило оператора 2026-09-25: создавать помощника можно, но письменно —
-    «зачем помощник, а не прямой вызов» и проверяемое «что вернёт». Ночь 24.09:
-    37 помощников в трёх ходах поиска вакансий дали 0–1 объявление.
+        A helper may be created, but in writing: "why a helper rather than a direct call" and a checkable "what it returns".
     """
     why, expect = args.get("why"), args.get("expect")
     if isinstance(why, str) and why.strip() and isinstance(expect, str) and expect.strip():

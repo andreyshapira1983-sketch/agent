@@ -1,33 +1,29 @@
-"""Шаблон там, где должен стоять адрес или содержимое."""
+"""A template where an address or content should stand (unfilled placeholder detection)."""
 from __future__ import annotations
 
 import os
 import re
 
-#: Одиночная угловая заготовка целиком: `<to be synthesized …>`, `<insert path>`.
+#: A lone angle-bracket stub as a whole: `<to be synthesized ...>`, `<insert path>`.
 SINGLE_TAG_RE = re.compile(r"^<[^<>\n]+>$")
 
-#: Слова, выдающие незаполненный шаблон даже без пробелов внутри.
+#: Words that give away an unfilled template even without inner spaces.
 PLACEHOLDER_HINTS: tuple[str, ...] = (
     "to be", "tbd", "todo", "placeholder", "synthes",
     "fill in", "fill-in", "fill_me", "fillme",
     "your text", "goes here", "insert ",
 )
 
-#: Формы, встречающиеся В ПУТИ. Отдельно от `PLACEHOLDER_HINTS`, потому что путь
-#: — не проза: здесь ловятся скобочные подстановки шаблонизаторов и
-#: общепринятые «примерные» имена, а не слова английского языка.
+#: Forms found IN A PATH; separate from `PLACEHOLDER_HINTS` because a path is not prose: template substitutions and conventional example names, not English words.
 _PATH_TEMPLATE_RE = re.compile(
     r"<[^<>/\\]*>"          # <identified_file>, <insert path>
     r"|\{\{[^}]*\}\}"        # {{module}}
     r"|\$\{[^}]*\}"          # ${MODULE}
-    r"|(?<![A-Za-z])XXX(?![A-Za-z])"   # test_XXX.py — подчёркивание не граница слова
+    r"|(?<![A-Za-z])XXX(?![A-Za-z])"  # test_XXX.py: underscore is not a word boundary
     , re.IGNORECASE,
 )
 
-#: Куски имени, которыми человек помечает «сюда подставить». Проверяются по
-#: сегментам пути и по основе имени, а не по подстроке где попало: подстрочный
-#: поиск «path/to» поймал бы легитимный `docs/path/tools.md`.
+#: Name pieces a person uses for "fill in here"; matched by path segment and name stem, not by substring (`path/to` would hit the legitimate `docs/path/tools.md`).
 _PATH_PLACEHOLDER_SEGMENTS: frozenset[str] = frozenset({
     "to", "your", "yourfile", "yourpath", "example", "somefile", "filename",
 })
@@ -38,32 +34,18 @@ _PATH_PLACEHOLDER_MARKS: tuple[str, ...] = (
 )
 
 
-#: Маркер незавершённой работы В САМОМ НАЧАЛЕ содержимого. Проверяется только у
-#: ОДНОСТРОЧНОГО содержимого: файл, который целиком состоит из одной строки
-#: «TODO: …», — заготовка по построению, а `# TODO: …` первой строкой обычного
-#: файла — законный комментарий, и его трогать нельзя.
+#: Unfinished-work marker AT THE START of SINGLE-line content only: a file that is one "TODO: ..." line is a stub, a `# TODO` first line of a normal file is a legitimate comment.
 _WHOLE_FILE_TODO_RE = re.compile(r"^(?:TODO|FIXME|XXX|HACK)\b\s*[:\-—]", re.IGNORECASE)
 
 
-#: --- Родной диалект заглушек самой модели (авторство агента, 2026-08-29) -----
-#: Пойман на четырёх живых промахах: прозаический однострочник со словом-маркером
-#: («PLACEHOLDER — will be filled by executor»), комментарий «# placeholder …»,
-#: многострочник, чьи единственные операторы — голые pass / assert False / «...».
-#: Настоящий код определяется разбором синтаксиса, не решёткой: проза не
-#: парсится, стаб парсится в голый оператор, а документация — комментарии без
-#: маркеров — законна (решение агента, закреплено его же свидетелем).
+#: The model's own stub dialect: one-line prose with a marker word, a `# placeholder` comment, a multi-line body of only bare pass / assert False / "...". Real code is told by parsing: prose does not parse, a stub parses to a bare statement, and marker-free comment documentation is legitimate.
 _STUB_MARKER_WORDS: tuple[str, ...] = (
     "placeholder", "will be filled", "will be replaced", "write me",
     "to be", "tbd", "todo", "fixme", "stub", "fill in", "fill-in", "insert ",
 )
 
 
-#: --- Сторож v2 (авторство агента, 2026-08-29, вторая волна) ------------------
-#: Атака невиданными формами показала: v1 знал только четыре формы из своих же
-#: тестов и пропускал семь других, включая те, что РЕАЛЬНО ложились на диск
-#: вместо кода (голый токен-маркер; `def f(): pass`; `raise NotImplementedError`;
-#: docstring-заглушка). Общий признак, названный агентом: «нет реального тела»,
-#: и решает его разбор синтаксиса, а не список слов.
+#: Guard v2: the common sign is "no real body", decided by parsing, not by a word list; covers a bare marker token, `def f(): pass`, `raise NotImplementedError`, a docstring-only stub.
 _STUB_TOKENS: frozenset[str] = frozenset({
     "placeholder",
     "placeholder_replaced_by_executor_with_full_file",
@@ -77,11 +59,7 @@ _STUB_TOKENS: frozenset[str] = frozenset({
 
 
 def _body_is_stub(node) -> bool:
-    """True, когда тело функции — заглушка (авторство агента, часть 1).
-
-    Декоратор @abstractmethod авторитетен: у абстрактного метода законно ЛЮБОЕ
-    тело (pass / ... / docstring / raise), это объявление интерфейса, а не стаб.
-    """
+    """True when the function body is a stub; @abstractmethod is authoritative (any body is a legitimate interface declaration)."""
     import ast
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return False
@@ -120,18 +98,11 @@ def _body_is_stub(node) -> bool:
 
 
 def _has_executable_statement(tree) -> bool:
-    """True, когда в дереве есть хоть один исполняемый оператор (авторство агента).
-
-    Комментарии в AST невидимы, поэтому файл из одних комментариев даёт пустое
-    тело. Определения сами по себе не исполняемы — рекурсируем в них, а не
-    пропускаем: файл из настоящих функций обязан считаться живым кодом.
-    """
+    """True when the tree has at least one executable statement; comments are invisible in the AST, definitions recurse (a file of real functions is live code)."""
     import ast
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Тело-заглушка не делает файл живым: pass/.../raise NotImplementedError
-            # внутри стаба — это отсутствие работы, а не работа. Абстрактный метод
-            # (@abstractmethod) _body_is_stub не считает заглушкой, и он живой.
+            # A stub body does not make a file live; an abstract method is not a stub and is live.
             if not _body_is_stub(node) and _has_executable_statement(node):
                 return True
             continue
@@ -150,7 +121,7 @@ def _has_executable_statement(tree) -> bool:
 
 
 def _all_defs_are_stubs(tree) -> bool:
-    """True, когда в дереве есть определения и ВСЕ они — заглушки."""
+    """True when the tree has definitions and ALL of them are stubs."""
     import ast
     found = False
     for node in ast.walk(tree):
@@ -167,7 +138,7 @@ _DOCSTRING_STUB_MARKERS: tuple[str, ...] = (
 
 
 def _docstring_has_marker(tree) -> bool:
-    """True, когда docstring модуля или любого определения несёт маркер заготовки."""
+    """True when the docstring of the module or any definition carries a placeholder marker."""
     import ast
     for node in ast.walk(tree):
         if isinstance(
@@ -180,7 +151,7 @@ def _docstring_has_marker(tree) -> bool:
 
 
 def _is_bare_statement_tree(tree) -> bool:
-    """Голый стаб: единственный оператор pass, «...» или assert False (с любым сообщением)."""
+    """Bare stub: the only statement is pass, "..." or assert False (any message)."""
     import ast
     if len(tree.body) != 1:
         return False
@@ -201,31 +172,24 @@ def _is_bare_statement_tree(tree) -> bool:
 
 
 def looks_like_unfilled_content(content: str) -> bool:
-    """True, когда всё содержимое — одна незаполненная заготовка.
-
-    Контракт органа: content: str -> bool (живой вызывающий — tools/file_write —
-    передаёт строку целиком). Старый закон сохранён дословно; новый закон —
-    авторство агента, собран курьером из его v5 и двух его словесных правок.
-    """
+    """True when the whole content is one unfilled stub; contract: content: str -> bool (live caller tools/file_write passes the whole string)."""
     import ast
     stripped = (content or "").strip()
     if not stripped:
         return False
-    # Закон v2: голый токен-маркер целиком (PLACEHOLDER, TODO_LATER, «...»).
+    # v2 law: a bare marker token as a whole (PLACEHOLDER, TODO_LATER, "...").
     if stripped.casefold().replace(" ", "") in _STUB_TOKENS or stripped == "...":
         return True
-    # Старый закон, дословно: однострочный TODO:/FIXME:/XXX:/HACK: — заготовка.
+    # Old law: a one-line TODO:/FIXME:/XXX:/HACK: is a stub.
     if "\n" not in stripped and _WHOLE_FILE_TODO_RE.match(stripped):
         return True
-    # Старый закон, дословно: «<тег>» целиком.
+    # Old law: a whole `<tag>`.
     if SINGLE_TAG_RE.match(stripped):
         inner = stripped[1:-1]
         if any(ch.isspace() for ch in inner):
             return True
         return any(hint in stripped.casefold() for hint in PLACEHOLDER_HINTS)
-    # Закон v2: структурный разбор — «есть ли реальное тело». Комментарии в AST
-    # невидимы, поэтому чистая документация сюда не попадает (её решает старая
-    # ветка ниже, по маркерам). Файл из настоящих функций — живой код.
+    # v2 law: structural parse, "is there a real body"; comments are invisible in the AST so pure documentation falls to the old marker branch below.
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -235,18 +199,15 @@ def looks_like_unfilled_content(content: str) -> bool:
             return True
         if not _has_executable_statement(tree) and _all_defs_are_stubs(tree):
             return True
-        # Модуль, чьё единственное содержимое — голый стаб (pass / ... / assert
-        # False), заглушка и без комментариев рядом: старая ветка ниже видела
-        # такие формы только в компании комментариев (атака курьера, 2026-08-29).
+        # A module whose only content is a bare stub is a stub even without comments next to it.
         if _is_bare_statement_tree(tree):
             return True
-    # Новый закон: решает разбор синтаксиса.
+    # New law: parsing decides.
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]
     if not lines:
         return False
     if len(lines) == 1 and not lines[0].startswith("#"):
-        # Проза со словом-маркером — заглушка, ТОЛЬКО если не парсится как
-        # Python: «x = fill_rate(1)» парсится и законен (граница — его решение).
+        # Prose with a marker word is a stub only if it does not parse as Python (`x = fill_rate(1)` parses and is legitimate).
         lowered = lines[0].casefold()
         if any(word in lowered for word in _STUB_MARKER_WORDS):
             try:
@@ -260,9 +221,9 @@ def looks_like_unfilled_content(content: str) -> bool:
     ).casefold()
     has_marker_comment = any(word in comment_text for word in _STUB_MARKER_WORDS)
     if not code_lines:
-        # Одни комментарии: маркерные — заглушка, документация — законна.
+        # Only comments: marker comments are a stub, documentation is legitimate.
         return has_marker_comment
-    # Код есть: заглушка, только если ВЕСЬ он — голые стабы.
+    # Code present: a stub only if ALL of it is bare stubs.
     for line in code_lines:
         try:
             tree = ast.parse(line)
@@ -274,20 +235,7 @@ def looks_like_unfilled_content(content: str) -> bool:
 
 
 def looks_like_unfilled_path(path: str, base_dir: str | None = None) -> bool:
-    """True, когда путь — заготовка, а не адрес.
-
-    Пустая строка сюда не относится: у неё свой отказ, и два диагноза на одну
-    неисправность мешают читателю понять, который сработал.
-
-    Контракт факта существования (авторство агента, 2026-08-29, груз №2):
-    если передан ``base_dir`` (корень рабочей области), путь, существующий на
-    диске относительно него, считается настоящим адресом и возвращает False —
-    даже при шаблонных признаках в имени. Признак родился из живого отказа:
-    сторож осуждал реальный ``core/placeholder_text.py`` — собственный модуль —
-    за подстроку в имени, и 26 раз записал вину в память агента как его
-    ошибку планирования. У настоящего адреса есть факт существования; у
-    заготовки — никогда. Без ``base_dir`` решают только текстовые правила.
-    """
+    """True when the path is a placeholder, not an address; an empty string has its own refusal. With ``base_dir`` (workspace root) a path that exists on disk is a real address and returns False even with template-like name parts (a real module was condemned by name substring)."""
     raw = (path or "").strip()
     if not raw:
         return False
@@ -298,9 +246,7 @@ def looks_like_unfilled_path(path: str, base_dir: str | None = None) -> bool:
     lowered = raw.casefold()
     if any(mark in lowered for mark in _PATH_PLACEHOLDER_MARKS):
         return True
-    # Посегментно: «path/to/your/file.py» выдаёт себя сегментом `to` рядом с
-    # `your`, а `docs/path/tools.md` — нет, потому что таких сегментов у него
-    # нет ни одного.
+    # Per segment: "path/to/your/file.py" gives itself away by a `to` segment beside `your`, `docs/path/tools.md` has none.
     segments = [s for s in re.split(r"[\\/]+", lowered) if s]
     stems = {s.split(".")[0] for s in segments}
     return len(stems & _PATH_PLACEHOLDER_SEGMENTS) >= 2

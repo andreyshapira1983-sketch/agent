@@ -1,8 +1,4 @@
-"""Применение того, на что разрешение даёт ПРАВИЛО, а не человек.
-
-Здесь замыкается петля для одного узкого класса продукта агента — новых
-документов. Замер, отвергнутые варианты и границы: MIR-173.
-"""
+"""Apply what a RULE, not a human, permits: the loop for one narrow product class, new documents."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -13,43 +9,30 @@ from typing import Any
 
 @dataclass
 class _Authority:
-    """Кто разрешает это применение, чем ограничен и что пропускает.
+    """Who authorises this apply, what limits it and what it lets through.
 
-    Двое возможных: правило («только новые документы», под стоячим грантом
-    оператора) и песочница («код внутри изолированной копии», под явным
-    полномочием burn-in). Форма одна нарочно — тело слива не должно знать, под
-    чьей властью работает, иначе вторая власть заводит вторую ветку, а вторая
-    ветка расходится с первой.
-    """
+        Two authorities: the rule ("new documents only", under a standing operator grant) and the sandbox (code inside an isolated copy, under explicit burn-in authority). One shape on purpose, so the drain body does not branch on authority."""
 
     id: str
     actor: str
     verdict: Callable[[Any], tuple[bool, str]]
-    #: Занять одну единицу потолка. True — занято, можно применять; False —
-    #: остатка нет. Решение и запись неразделимы (ревизия PR #333): пара
-    #: «спросить остаток → записать расход» пропускала два одновременных слива.
+    #: Reserve one unit of the ceiling. True = reserved, may apply; False = nothing left. Decision and record are inseparable: ask-then-record let two concurrent drains through.
     reserve: Callable[[], bool]
-    #: Снимок остатка на входе. Только для быстрого отказа и журнала; истина о
-    #: потолке живёт в `reserve`, и спорить надо с ней.
+    #: Snapshot of the remainder on entry, for fast refusal and the journal only; the truth lives in `reserve`.
     remaining: int
     sandbox: bool
 
 
-#: Умолчание набора стоков для слива. Это НЕ `None`: `None` на лестнице
-#: означает «человек за клавиатурой, ограничений нет», а слив по своей природе
-#: безнадзорен. Вызывающий, забывший назвать профиль, обязан получить самый
-#: узкий, а не самый широкий ответ (ревизия PR #333).
+#: Default sink set for a drain. Not `None`: `None` on the ladder means a human at the keyboard with no limits, and a drain is unattended, so a caller that forgets the profile gets the narrowest answer.
 _UNATTENDED: frozenset[str] = frozenset()
 
 
 def _authority_for(
     workspace: Path, inbox: Any, *, env: Any, say: Callable[[str, dict], None]
 ) -> _Authority | None:
-    """Действующая власть, или None, если разрешать некому.
+    """The acting authority, or None if nobody can permit it.
 
-    Песочница спрашивается первой; без включённого полномочия функция ведёт
-    себя ровно как прежний код: стоячий грант или отказ.
-    """
+        The sandbox is asked first; without its authority enabled the function behaves as before: standing grant or refusal."""
     from core.autonomous_runtime import (
         active_standing_grant,
         reserve_standing_grant_use,
@@ -86,10 +69,7 @@ def _authority_for(
         reserve=lambda: reserve_standing_grant_use(
             workspace, grant_id, max_per_day=grant_cap
         ),
-        # Остаток на сегодня, а не потолок: журнал расхода общий с рантаймом.
-        # Аудит автономности 2026-09-17 нашёл здесь проход без учёта — «3
-        # прогона в день» означало 3 прогона рантайма ПЛЮС неограниченное
-        # число применений правилом, то есть не означало ничего.
+        # Remainder for today, not the ceiling: the spend journal is shared with the runtime, so a rule-applied apply must count against the daily runs.
         remaining=standing_grant_remaining_runs(workspace, grant),
         sandbox=False,
     )
@@ -107,14 +87,9 @@ def _authorised_candidates(inbox: Any, authority: _Authority) -> list[Any]:
 
 
 def stale_proposal_files(workspace, proposal) -> list[str]:
-    """Пути заявки, чей файл на диске уже новее её, — ДО расхода полномочия.
+    """Request paths whose file on disk is already newer than the request, checked BEFORE spending authority.
 
-    Живой слив 2026-09-20: правка оператора в core/step_sanitizer.py сделала
-    вчерашнее предложение устаревшим; полоса честно отказала у своих базовых
-    ворот, но единица гранта уже была списана — три цикла подряд сожгли грант
-    до нуля, не сделав ничего и не запустив ни одного теста. Правило то же
-    самое, что у полосы (`core.self_apply_lane._stale_changes`).
-    """
+        Same rule as the lane (`core.self_apply_lane._stale_changes`); otherwise a stale proposal burns grant units doing nothing."""
     from core.self_apply_lane import _stale_changes
 
     return _stale_changes(Path(workspace), getattr(proposal, "files", ()))
@@ -128,32 +103,9 @@ def drain_rule_approved_proposals(
     env: Any = None,
     durable_writes: Any = _UNATTENDED,
 ) -> dict:
-    """Применить предложения, которые правило разрешает без человека.
+    """Apply proposals that a rule permits without a human.
 
-    Замер 2026-08-27 по живому ящику и по ИСТОРИИ, а не по сегодняшнему дереву:
-    из 27 предложений полосы 11 на момент подачи трогали только новые файлы, и
-    все 11 — документы. Каждое ждало человека, который откроет ящик; здесь и
-    рвалась петля.
-
-    Производственное правило не даёт новых полномочий: `file_write` уже умеет
-    создавать файлы; полоса добавляет тесты и автоматический откат.
-
-    Двое ворот перед любым действием: эффекты включены И стоячий грант
-    действует. Второе спрашивается ТОЙ ЖЕ функцией, что у рантайма: вторая
-    проверка разошлась бы с первой (класс H-26 проспективного аудита).
-
-    Просьба, разрешение и исполнение остаются тремя событиями (MIR-117,
-    правило B): заявка уже лежит, разрешение записывается ОТ ИМЕНИ ПРАВИЛА, а
-    не «unattributed», исполнение идёт отдельно и логируется.
-
-    ВТОРАЯ ВЛАСТЬ, и она названа. С 2026-09-17 то же место умеет действовать
-    под полномочием песочницы (`core/burn_in_sandbox.py`) — явным, срочным,
-    включаемым двумя независимыми жестами. Пока полномочие не включено, всё
-    ниже идёт прежним путём буква в букву: другой ветки для производства здесь
-    нет. Что меняет песочница — КТО разрешает и какой класс файлов проходит;
-    чего она не меняет — сухость прогона (проверяется раньше всего), полосу
-    применения, её тесты, ветку, откат и отсутствие push.
-    """
+        Two gates before any action: effects enabled AND the standing grant valid, the latter asked by the SAME function the runtime uses. Request, permission and execution stay three events: the permission is recorded on behalf of the rule, execution is logged separately. The sandbox authority (`core/burn_in_sandbox.py`) changes only WHO permits and which file class passes; dryness, the apply lane, its tests, branch, rollback and the no-push rule are unchanged. Not enabled: the production path runs unchanged."""
     from core.approval_inbox import DEFAULT_APPROVAL_INBOX_PATH, ApprovalInbox
     from core.safe_vcs import SafeVCS
     from core.self_apply_bridge import (
@@ -178,18 +130,13 @@ def drain_rule_approved_proposals(
         return out
     inbox = ApprovalInbox(path=Path(workspace) / DEFAULT_APPROVAL_INBOX_PATH)
 
-    # Власть спрашивается ПОСЛЕ сухости: эксперимент вправе расширить класс
-    # изменений, но не вправе отменить «ничего не менять».
+    # Authority is asked AFTER dryness: an experiment may widen the change class but not cancel "change nothing".
     authority = _authority_for(workspace, inbox, env=env, say=_say)
     if authority is None:
         out["blocked"] = "no active standing grant"
         return out
     remaining = authority.remaining
-    # Полномочие называет себя СВОИМ именем. Ревизия Copilot по PR #333:
-    # исчерпанная песочница отказывала словами «стоячий грант» и событием
-    # `standing_grant_exhausted` — разрешением другой природы, с другим сроком
-    # и другим владельцем. Журнал, называющий не то разрешение, хуже молчания:
-    # оператор идёт искать грант, которого нет.
+    # The authority names itself: an exhausted sandbox must not refuse with the words "standing grant", a permission of another nature.
     spent_word = "sandbox daily cap reached" if authority.sandbox else "standing grant spent for today"
     spent_event = "sandbox_cap_exhausted" if authority.sandbox else "standing_grant_exhausted"
 
@@ -214,10 +161,7 @@ def drain_rule_approved_proposals(
             out["refused"] += 1
             _say("rule_approval_refused", {"approval_id": item.id, "reason": reason})
             continue
-        # Опыт прошлых заходов — ворота, а не архив. Откат по этому адресу уже
-        # случался: автомат не повторяет проверку, которую один раз провалил,
-        # заявка остаётся в ящике для человека (MIR-173, находка 10 аудита
-        # автономности 2026-09-17).
+        # Past attempts are a gate, not an archive: a rollback at this address already happened, so the automaton does not repeat a check it failed once; the request stays in the inbox for a human.
         targets = [getattr(f, "path", "") for f in getattr(proposal, "files", ())]
         lesson = blocking_lesson(workspace, targets)
         if lesson is not None:
@@ -239,10 +183,7 @@ def drain_rule_approved_proposals(
                 "next_human_action": "rebuild the proposal against the current file",
             })
             continue
-        # Расход занимается ДО применения и НЕРАЗДЕЛИМО с проверкой остатка:
-        # прерванный тик должен оставить пережатую оценку расхода, а не
-        # незамеченное полномочие, а два одновременных слива не должны
-        # потратить одну и ту же последнюю единицу (ревизия PR #333).
+        # Spend is reserved BEFORE applying and inseparably from the remainder check: an interrupted tick leaves an over-estimated spend, and two concurrent drains cannot spend the same last unit.
         if not authority.reserve():
             out["refused"] += 1
             out["blocked"] = spent_word
@@ -263,23 +204,12 @@ def drain_rule_approved_proposals(
         )
         out["attempted"] += 1
         status = str(result.get("status") or "")
-        # `applied` считает ПРИМЕНЁННОЕ, а не начатое. Ревизия PR #333: счётчик
-        # рос на любом исходе, включая откат и обрыв, поэтому по журналу выходило
-        # больше применений, чем изменений в дереве, и разница молча копилась.
-        # Расход полномочия при этом остаётся потраченным — попытка стоила
-        # прогона батареи, — а `attempted` хранит честный итог.
+        # `applied` counts what was APPLIED, not started; authority spend stays spent (the attempt cost a battery run) and `attempted` holds the honest total.
         if status == "committed_local":
             out["applied"] += 1
         else:
             out["unapplied"] += 1
-        # Нетерминальный исход — про состояние МИРА, а не про заявку: очередь
-        # одобрений, бюджет, шлюз. Следующая заявка упрётся в ту же стену,
-        # заняв ещё единицу потолка. Ревизия Copilot по PR #333; замерено:
-        # `core/self_apply_bridge._pending_excluding` считает ОСТАЛЬНЫЕ
-        # ожидающие, поэтому слив из трёх заявок тратил три единицы и не
-        # применял ничего. Заявка остаётся одобренной: песочница повторяет
-        # собственное решение при следующем сливе, снова проверяя полномочие.
-        # Производственное решение по-прежнему повторяет оператор.
+        # A non-terminal outcome is about the state of the WORLD (approval queue, budget, gateway), not the request: the next request would hit the same wall and take another unit. The request stays approved; the sandbox repeats its decision at the next drain. A production decision is still repeated by the operator.
         if status not in TERMINAL_LANE_STATUSES:
             out["blocked"] = out["blocked"] or f"lane refused: {status or 'unknown'}"
             _say("rule_approved_lane_wall", {
@@ -290,22 +220,15 @@ def drain_rule_approved_proposals(
                 "grant_runs_left": remaining,
             })
             break
-        # Проверенный кандидат ПРЕДЪЯВЛЯЕТСЯ принимающему. Не принимается:
-        # предъявление прав не даёт и голову опыта не двигает — оно лишь
-        # сужает множество того, что `core/burn_in_supervisor.adopt_offer`
-        # вообще станет рассматривать. Только в песочнице: производственный
-        # путь никакого опыта не ведёт и предъявлять ему нечему.
+        # A verified candidate is OFFERED to the adopter, not adopted: offering grants no rights and does not move the experience head; it only narrows what `core/burn_in_supervisor.adopt_offer` will consider. Sandbox only.
         if authority.sandbox and status == "committed_local":
             _offer_to_supervisor(workspace, result, item_id=item.id, log=_say)
-        # Исход становится знанием ЗДЕСЬ, без команды человека. До 2026-09-17
-        # запись уроков жила ровно в одном месте — `cli/commands_self_apply.py`,
-        # то есть опыт появлялся только когда за клавиатурой сидел человек.
+        # The outcome becomes knowledge HERE, without a human command (lessons used to be written only by `cli/commands_self_apply.py`).
         learned = record_lessons_from_result(
             workspace, result,
             origin="burn_in_sandbox" if authority.sandbox else "rule_approved_apply",
             reason=getattr(proposal, "reason", ""),
-            # Тот же набор стоков, что у сборки агента: урок — долговременная
-            # запись, и проходит он теми же воротами, а не мимо них.
+            # Same sink set as the agent's build: a lesson is a durable record and passes the same gates.
             durable_writes=durable_writes,
             log=log,
         )
@@ -324,12 +247,9 @@ def drain_rule_approved_proposals(
 def _offer_to_supervisor(
     workspace: Path, result: dict, *, item_id: str, log: Callable[[str, dict], None]
 ) -> None:
-    """Положить SHA проверенного кандидата в реестр предложений.
+    """Put the SHA of the verified candidate into the offers registry.
 
-    Best-effort по образцу соседей: сбой реестра не вправе ронять применение —
-    но и не вправе пройти молча, иначе разомкнутая петля выглядит как
-    замкнутая. Отсутствие события неотличимо от мёртвого кода.
-    """
+        Best-effort: a registry failure must not crash the apply, but must not pass silently either."""
     sha = str(result.get("commit_hash") or "")
     try:
         from core.burn_in_supervisor import offer_verified_commit
@@ -354,14 +274,9 @@ def drain_and_log(
     log_tick: Callable[[dict], None],
     durable_writes: Any = _UNATTENDED,
 ) -> None:
-    """Обёртка для живого пути кампании: след пишется ВСЕГДА, ошибки глотаются.
+    """Wrapper for the live campaign path: the trace is ALWAYS written, errors are swallowed.
 
-    Первая проводка (MIR-173) стояла в хвосте `run_tick`, а плановая задача
-    туда не доходит: `--campaign` выходит через `run_paced_campaign`. Найдено
-    по прогону 2026-08-27 11:31 — грант списан, событий петли ноль, последний
-    `tick_complete` в журнале датирован 25 августа. Отсутствие события
-    неотличимо от мёртвого кода — ровно так дефект и был пойман (MIR-175).
-    """
+        The first wiring sat at the tail of `run_tick`, which the scheduled task does not reach (`--campaign` exits through `run_paced_campaign`)."""
     try:
         drain = drain_rule_approved_proposals(
             workspace, dry_run=dry_run,

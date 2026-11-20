@@ -1,33 +1,8 @@
-"""Хвост прогона: ответ готов, эпизод ещё не записан — из ``core/loop.py``.
+"""Run tail, carved from ``core/loop.py``: the answer is final, the episode is not yet written.
 
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Седьмой кусок раскола `core/loop.py` и пятый — раскола `_run_inner`.
-
-Всё, что происходит между «текст ответа окончателен» и «эпизод записан»:
-последняя редакция на выходе, теневой учёт сенсоров S2/S5, запись хода в
-рабочую память, уплотнение памяти, обновление профиля пользователя и
-сохранение допущений.
-
-Редакция здесь — эшелонированная оборона, а не дубль: модель, выдумавшая
-учётку или ПДн, не должна пройти мимо ядра даже если её пропустили все
-проверки выше.
-
-Теневые сенсоры считаются именно ЗДЕСЬ, в конце, потому что интересный
-вопрос — «а изменила бы что-нибудь остановка тогда?» — можно задать только
-когда известно, что дали оставшиеся попытки. Они сообщают и никогда не
-действуют.
-
-Запись эпизода сюда НЕ переехала намеренно: она обязана оставаться последней
-в цикле. Успех, записанный раньше, оставляет окно, в котором последующий сбой
-роняет ход с уже забаненным успехом, и идемпотентность по `run_id` потом
-откажется это исправить.
-
-Тело перенесено символ в символ, что пинится AST-сверкой с историей в
-`tests/test_loop_run_tail_split.py`.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
+Covers final redaction, shadow sensor accounting (S2/S5), working-memory write, compaction, profile update and assumption
+persistence. Episode writing deliberately stays OUT: it must be the last step of the cycle, or a later failure would
+leave a success already banked and `run_id` idempotence would refuse to correct it.
 """
 from __future__ import annotations
 
@@ -40,12 +15,7 @@ from core.requested_format import honor, llm_converter, requested_labels
 
 
 class AgentLoopRunTail:
-    """Между готовым ответом и записанным эпизодом.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """Between a ready answer and a written episode; members are host-contract declarations with no runtime assignments."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -57,14 +27,11 @@ class AgentLoopRunTail:
         last_assumptions: Any
         _current_attempt: int
 
-        # Объявляем ВЫЗЫВАЕМЫМ атрибутом: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as a CALLABLE attribute: an empty-body stub function is read by analyzers as "no return", and every call gets a false E1111.
         _sensor_failed: Any
         _defect_signals: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a neighbouring mixin via the MRO; the cross-module link must be written down or it only shows at run time.
         _cycle_findings: Any
         last_source_ranking: Any
 
@@ -83,15 +50,10 @@ class AgentLoopRunTail:
         _disagreement_shadow: list[dict[str, Any]],
         _cp: Any,
     ) -> tuple[str, Any, int]:
-        """Отредактированный ответ, отчёт проверки и число слабых чанков.
+        """Redacted answer, verification report and weak-chunk count.
 
-        Первый элемент может ОТЛИЧАТЬСЯ от входного: последняя редакция
-        вырезает то, что не должно уехать пользователю. Возвращаем его, а не
-        меняем на месте, — вызывающий записывает в эпизод именно тот текст,
-        который увидел пользователь.
-
-        Имена с подчёркиванием (`_cp`, `_run_assumptions`, теневые сенсоры)
-        сохранены как в цикле: перенос дословный.
+                The first element may DIFFER from the input (the final redaction strips what must not reach the user);
+                it is returned, not mutated, so the episode records exactly the text the user saw.
         """
         safe_answer, answer_findings, answer_pii_findings = redact_dlp_text(answer)
         if answer_findings:
@@ -117,11 +79,8 @@ class AgentLoopRunTail:
             )
         answer = safe_answer
 
-        # ── Sensor shadow accounting (S2, S5) ───────────────────────────────
-        # Emitted at the end of the run because the interesting question —
-        # "would stopping there have changed anything?" — can only be answered
-        # once it is known what the remaining attempts actually produced.
-        # Reported, never acted on: neither sensor stops or replans anything.
+        # Sensor shadow accounting (S2, S5), emitted at the end of the run: "would stopping there have changed
+        # anything?" can only be answered once the remaining attempts' results are known. Reported, never acted on.
         if _stagnation_shadow is not None:
             try:
                 _at = int(_stagnation_shadow.get("attempt") or 0)
@@ -131,8 +90,7 @@ class AgentLoopRunTail:
                     **_stagnation_shadow,
                     "would_stop": True,
                     "would_save_attempts": max(0, self._current_attempt - _at),
-                    # The honest form of "would it have changed the result":
-                    # did anything new actually arrive after the stop point?
+                    # The honest form of "would it have changed the result": did anything new arrive after the stop point?
                     "would_change_result": bool(_new_after),
                     "artifacts_gained_after_detection": _new_after,
                     "replan_exhausted": replan_exhausted,
@@ -188,9 +146,8 @@ class AgentLoopRunTail:
                     "labels": turn.artifact_labels,
                 },
             )
-            # Anthropic 2025 context engineering — compact older turns into
-            # one summary Turn instead of silently dropping them when
-            # max_turns is exceeded. No-op until the threshold is crossed.
+            # Compact older turns into one summary Turn instead of silently dropping them when max_turns is exceeded;
+            # no-op until the threshold is crossed.
             try:
                 if self.memory.compact_if_needed():
                     self.log.log(
@@ -211,25 +168,19 @@ class AgentLoopRunTail:
                 + verification.cited_but_unmatched_chunks
                 + verification.receipt_missing_chunks
                 + verification.topic_supported_but_claim_unverified_chunks
-                # Issue #119: a self-analysis answer is legitimately shippable
-                # and legitimately NOT a reusable procedure. Counted as weak so
-                # `episode_from_agent_cycle` banks it `partial`, not `success` —
-                # otherwise verified=0/unverified=0 would score a perfect run
-                # (MIR-002) and promote "explaining my own mistake" into
-                # procedural memory.
+                # A self-analysis answer is shippable but NOT a reusable procedure: counted as weak so the episode is banked
+                # `partial`, not `success`, and "explaining my own mistake" is not promoted into procedural memory.
                 + verification.dialogue_supported_chunks
-                # Operator ruling 2026-08-03 (MIR-028): support that is only
-                # the operator's own words must not bank a clean success —
-                # counted weak, so the episode lands `partial` when user-echo
-                # is all (or most of) what the answer leans on.
+                # Support that is only the operator's own words must not bank a clean success: counted weak, so the episode
+                # lands `partial` when user-echo is all or most of what the answer leans on.
                 + verification.user_asserted_chunks
                 + verification.refuted_chunks
             )
-            # Опровергнутое — не доля, а факт: сигнал дисквалифицирует эпизод
-            # из опыта и кредита (см. docs/CODE_NOTES.md, «REFUTED is a polarity»).
+            # Refuted is a fact, not a share: the signal disqualifies the episode from experience and credit
+            # (docs/CODE_NOTES.md, "REFUTED is a polarity").
             if verification.refuted_chunks:
                 self._defect_signals.append("content_refuted")
-        # Layer 4 — update user profile from this interaction.
+        # Update the user profile from this interaction.
         if may_profile and self.user_profile_store is not None:
             try:
                 updated = self.user_profile_store.update_from_interaction(
@@ -251,11 +202,10 @@ class AgentLoopRunTail:
                     },
                 )
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # A7: must never abort the run, and must not be invisible.
-                # Silence here reads exactly like "no update was due".
+                # Must never abort the run, and must not be invisible: silence reads exactly like "no update was due".
                 self._sensor_failed("user_profile_update", exc)
 
-        # Layer 5 — persist assumptions and expose via last_assumptions.
+        # Persist assumptions and expose them via last_assumptions.
         self.last_assumptions = _run_assumptions
         if (
             may_assumptions
@@ -265,8 +215,7 @@ class AgentLoopRunTail:
             try:
                 self.assumption_store.save_many(_run_assumptions.new_assumptions)
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # A7, the worse of the two: measured, a run that lost every
-                # assumption journalled exactly like a healthy one.
+                # The worse of the two: a run that lost every assumption journalled exactly like a healthy one.
                 self._sensor_failed("assumption_store_save", exc)
 
         return answer, verification, weak_chunks
@@ -275,10 +224,10 @@ class AgentLoopRunTail:
     def _honor_requested_format(
         self, answer: str, user_question: str, draft_answer: str, synth_llm: Any,
     ) -> str:
-        """Заданная человеком строка ответа — последней и без наших меток.
+        """The human-specified answer line goes last and without our markers.
 
-        После композиции и снятия пометок, до обязательств: те читают ровно тот
-        текст, что уйдёт человеку. Почему так — в `core/requested_format.py`.
+                After composition and marker removal, before obligations (they read the exact text the human gets);
+                see `core/requested_format.py`.
         """
         if not requested_labels(user_question):
             return answer
@@ -301,23 +250,15 @@ class AgentLoopRunTail:
         completion_contract: Any,
         _premature_keyword_fired: bool,
     ) -> None:
-        """Спросить об обязательствах хода — по ответу, а не по словам.
+        """Ask about the turn's obligations from the answer, not from keywords.
 
-        Наблюдательно: вердикт кладётся в журнал и в сигналы дефектов, ход не
-        меняется. Стоит ПОСЛЕ композиции, потому что три из четырёх состояний
-        обязательства зависят от того, сказали ли оператору, — а это читается
-        только с того текста, который он получит.
-
-        Старый ключевой детектор продолжает срабатывать выше, и его вердикт
-        едет сюда же: два способа спросить одно и то же сравниваются на живом
-        трафике прежде, чем что-то решать.
+                Observational: the verdict goes to the journal and defect signals, the turn is unchanged. Runs AFTER
+                composition because three of four obligation states depend on whether the operator was told, which is
+                readable only from the text they receive. The old keyword detector still fires above; its verdict is
+                carried here so the two can be compared on live traffic.
         """
-        # Premature completion, asked as an OBLIGATION question rather than a
-        # keyword question (S3). Runs here, after composition, because three of
-        # the four obligation states turn on whether the operator was actually
-        # told — and that can only be read off the answer they receive.
-        # Observational; the old keyword detector still fires above, so the two
-        # can be compared in the journal before anything is decided.
+        # Premature completion asked as an OBLIGATION question, not a keyword question (S3); observational, compared
+        # with the old detector in the journal.
         try:
             _denied = tuple(
                 str(getattr(t, "tool_name", "") or "")
@@ -341,16 +282,11 @@ class AgentLoopRunTail:
                 contract=completion_contract,
             )
             _payload = _obl.to_log_payload()
-            # Shadow comparison against the detector this replaces, so the
-            # disagreement between them is a number in the journal rather than
-            # something a later reader has to reconstruct.
+            # Shadow comparison against the detector this replaces, so their disagreement is a number in the journal.
             _payload["shadow_keyword_detector"] = bool(_premature_keyword_fired)
             self.log.log("completion_obligation", _payload)
-            # Прочитанное этим ходом становится ИСТОЧНИКОМ, а не только
-            # конспектом. Замер 2026-09-23: за ночь прочитаны десятки
-            # первоисточников, а в реестре источников не прибавилось ни одной
-            # записи — весь слой приёма знания висел на командах cli/, и
-            # работающий агент не мог пополнить своё знание ничем.
+            # What this turn read becomes a SOURCE in the registry, not only a summary: the working agent must be able
+            # to extend its own knowledge without CLI commands.
             try:
                 from core.read_sources_registry import register_read_sources
 
@@ -358,28 +294,20 @@ class AgentLoopRunTail:
             except Exception as exc:  # noqa: BLE001 — знание не валит ход
                 self.log.log("read_sources_unregistered",
                              {"error": f"{type(exc).__name__}: {exc}"[:200]})
-            # Recorded here, enforced at banking — not mid-run. This signal IS
-            # authoritative: `assemble_completion_verdict` lowers a claim of
-            # `achieved` to `partially_achieved` when it is present, which also
-            # withholds procedure credit. Nothing is stopped or replanned while
-            # the cycle is still running, so the run's own path is unchanged;
-            # what changes is the verdict it is banked under. S3's ruling was
-            # "keep the requirement, replace the detector", and the requirement
-            # is what carries that authority.
+            # Recorded here, enforced at banking, not mid-run. This signal IS authoritative: `assemble_completion_verdict`
+            # lowers `achieved` to `partially_achieved` when it is present, which also withholds procedure credit.
+            # Nothing is stopped or replanned while the cycle runs; what changes is the verdict it is banked under.
             if _obl.triggered:
                 self._defect_signals.append("obligation_silently_missing")
-            # Соседний сигнал с той же односторонней властью и другим основанием:
-            # часть контракта оператора модуль не сумел ПРЕДСТАВИТЬ, значит и
-            # удостоверять её выполнение не на чем (живой повтор 2026-08-10).
+            # Neighbouring signal with the same one-sided authority but a different ground: a part of the operator's
+            # contract could not be REPRESENTED, so there is nothing to certify its fulfilment against.
             if _obl.contract_coverage == "partial":
                 self._defect_signals.append("user_contract_unrepresented")
-            # Отдельный сигнал: единицы БЫЛИ представимы и всё равно не
-            # адресованы. Это уже не граница извлекателя, а потерянная часть
-            # задания — то самое дробление, которое оператор видел глазами.
+            # Separate signal: the units WERE representable and still not addressed; a lost part of the task, not an
+            # extractor limit.
             if _obl.unaddressed_units:
                 self._defect_signals.append("named_units_unaddressed")
-            # Чек-лист поручения (TICK/RLCF): важный пункт, отвеченный «нет»,
-            # понижает «выполнено» — та же односторонняя власть, что у соседей.
+            # Task checklist (TICK/RLCF): an important item answered "no" lowers "done"; same one-sided authority as the neighbours.
             if judge_contract_checklist(self, user_question, answer, completion_contract):
                 self._defect_signals.append("checklist_unmet")
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается

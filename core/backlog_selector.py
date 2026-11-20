@@ -1,15 +1,6 @@
-"""Grounded backlog selector for the self-build producer (TD-036, Phase 1).
+"""Grounded backlog selector for the self-build producer: ranks candidates from registered read-only signals and picks the top one.
 
-Turns the read-only signals from :mod:`core.backlog_signals` into ranked
-:class:`BacklogCandidate`s and picks the top one. The whole point is
-anti-hallucination: a candidate may originate ONLY from a registered signal,
-must carry provenance (``evidence_ref``), and its ``problem_quote`` must be an
-exact substring of the cited source. A candidate that fails provenance
-validation is dropped; an empty backlog yields ``None`` (the producer then
-refuses rather than inventing work).
-
-Pure and deterministic: no LLM, no network, no git, no writes. ``load_backlog``
-performs read-only file IO only.
+A candidate must come from a registered signal and carry provenance (``evidence_ref``); its ``problem_quote`` must be an exact substring of the cited source, otherwise it is dropped. An empty backlog yields ``None``. Pure and deterministic; ``load_backlog`` does read-only file IO only.
 """
 from __future__ import annotations
 
@@ -36,22 +27,15 @@ from core.backlog_signals import (
 
 logger = logging.getLogger(__name__)
 
-# Deterministic per-source base rank and confidence. Human-authored TECH_DEBT
-# work outranks the docs pilot, which outranks the agent's own architecture-audit
-# findings, which outrank the advisory anatomy follow-up list so TD-030...TD-036
-# remain blocked unless explicitly mapped later.
+# Deterministic per-source base rank and confidence: human-authored TECH_DEBT > docs pilot > architecture-audit findings > advisory anatomy follow-ups.
 _SOURCE_BASE_SCORE = {
     "tech_debt": 2.0,
     "self_build_docs": 1.5,
     ARCHITECTURE_AUDIT_SOURCE: 1.25,
-    # code_todo (1.1) sat here until 2026-08-28 — erased by operator ruling,
-    # see the tombstone in core/backlog_signals.py and MIR-183.
     "anatomy": 1.0,
-    # Oversized-module advisories sit at the very bottom: they are report-only
-    # (abstract ``split:`` target, no mapper) and never displace actionable work.
+    # Oversized-module advisories rank last: report-only, never displace actionable work.
     OVERSIZED_MODULE_SOURCE: 0.9,
-    # Доказанная переделка (дубль, два предмета) стоит над голым размером:
-    # размер — повод посмотреть, доказательство — работа (оператор, 2026-09-21).
+    # Proven rework (duplicate, two subjects) ranks above bare size.
     SPLIT_PROOF_SOURCE: 0.95,
 }
 _SOURCE_CONFIDENCE = {
@@ -67,9 +51,7 @@ _PENALTY_SCORE = 1.0
 
 @dataclass(frozen=True)
 class BacklogCandidate:
-    """One grounded, ranked backlog item. Every field is either copied verbatim
-    from a source (``target_path``/``evidence_ref``/``problem_quote``) or a
-    deterministic, non-fabricated template — never an invented claim."""
+    """One grounded, ranked backlog item; fields are copied verbatim from a source or are deterministic templates, never invented."""
 
     target_path: str
     signal_source: str
@@ -108,8 +90,7 @@ def _finalize(
 ) -> list[BacklogCandidate]:
     """Validate provenance, drop suppressed/untraceable records, enrich, and rank.
 
-    ``sources`` maps ``signal_source`` -> the raw source text used to prove the
-    quote. ``penalties`` suppresses/penalizes targets from human value reviews.
+    ``sources`` maps ``signal_source`` -> raw source text proving the quote; ``penalties`` comes from human value reviews.
     """
     penalties = penalties or ValuePenalties.empty()
     candidates: list[BacklogCandidate] = []
@@ -201,17 +182,9 @@ def _path_exists(path: Path) -> bool:
 
 
 def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
-    """Run the read-only architecture audit and turn its priority gaps into
-    grounded backlog signals. This is the wire that lets the agent find its own
-    work from self-analysis, not only from human-authored docs.
+    """Run the read-only architecture audit and turn its priority gaps into backlog signals.
 
-    The audit only makes sense against a genuine checkout of this agent, so it is
-    gated on a sentinel (``core/architecture_audit.py``). For any other workspace
-    (e.g. a throwaway tmp dir in a unit test) it degrades to empty instead of
-    reporting every missing repo file as a spurious gap.
-
-    Best-effort: any import/audit failure degrades to an empty backlog so a bad
-    audit never breaks self-build. The audit itself performs read-only file IO.
+    Gated on a sentinel (``core/architecture_audit.py``) so other workspaces yield empty; any failure degrades to empty.
     """
     if not _path_exists(root / "core" / "architecture_audit.py"):
         return [], ""
@@ -224,9 +197,7 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
             gaps, exists=lambda rel: _path_exists(root / rel)
         )
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # An empty candidate list is indistinguishable from "the audit found
-        # nothing wrong" — the backlog quietly loses a whole source of work and
-        # looks healthier for it (MIR-077).
+        # An empty list is indistinguishable from "nothing wrong", so the failure must be visible.
         logger.warning(
             "architecture audit unavailable for backlog: %s: %s",
             type(exc).__name__, exc,
@@ -234,16 +205,12 @@ def _load_architecture_audit(root: Path) -> tuple[list[SignalRecord], str]:
         return [], ""
 
 
-# Directories scanned for oversized modules. Kept to the product code homes
-# (not ``tests``): splitting large test files is not the modularity goal.
+# Directories scanned for oversized modules: product code only, not ``tests``.
 _OVERSIZED_SCAN_DIRS: tuple[str, ...] = ("core", "cli", "tools")
 
 
 def _scan_oversized_modules(root: Path) -> tuple[list[SignalRecord], str]:
-    """Read the agent's own ``*.py`` modules and flag oversized ones as
-    report-only backlog advisories. Read-only, deterministic (sorted), and fully
-    best-effort: an unreadable file degrades to empty rather than raising.
-    """
+    """Flag oversized ``*.py`` modules as report-only advisories. Read-only, sorted, best-effort."""
     files: list[tuple[str, str]] = []
     for name in _OVERSIZED_SCAN_DIRS:
         base = root / name
@@ -265,11 +232,7 @@ def _scan_oversized_modules(root: Path) -> tuple[list[SignalRecord], str]:
 
 
 def _load_split_proofs(root: Path) -> tuple[list[SignalRecord], str]:
-    """Доказательства переделки по собственному коду, сильнейшие первыми.
-
-    Только для настоящей копии агента (как аудит архитектуры): во временной
-    папке без core/split_proof.py — пусто. Любой сбой — пусто, не исключение.
-    """
+    """Rework proofs from the agent's own code, strongest first; empty without core/split_proof.py or on any failure."""
     if not _path_exists(root / "core" / "split_proof.py"):
         return [], ""
     try:
@@ -291,9 +254,7 @@ def load_backlog(
     value_reviews: Any = None,
     item_target_map: Mapping[str, str] | None = None,
 ) -> list[BacklogCandidate]:
-    """Read the Phase 1 sources from ``workspace`` (read-only) and build the
-    ranked backlog. Missing files degrade to empty; never raises.
-    """
+    """Read the Phase 1 sources from ``workspace`` (read-only) and build the ranked backlog; never raises."""
     root = Path(workspace)
     tech_debt_text = _read_text(root / "TECH_DEBT.md")
     anatomy_text = _read_text(root / "knowledge" / "generated" / "AGENT_ANATOMY.md")

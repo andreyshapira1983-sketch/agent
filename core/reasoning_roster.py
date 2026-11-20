@@ -1,32 +1,15 @@
-"""Реестр моделей, которые тратят бюджет вывода на рассуждение («молчавших»).
-
-Вынесено из core/llm.py: клиент LLM — тонкая обёртка над провайдерами, а это
-отдельный хранимый орган со своим журналом (``data/reasoning_roster.jsonl``) и
-своим правилом дома: где он лежит, решает рантайм в точке входа, а не
-библиотека. Клиент только спрашивает `is_known_reasoning_model` и пополняет
-`remember_reasoning_model`, когда модель промолчала, истратив бюджет.
-"""
+"""Roster of models that spend the output budget on reasoning (the 'silent' ones), kept in its own journal (``data/reasoning_roster.jsonl``)."""
 from __future__ import annotations
 
 import os
 from typing import Any
 
-#: Home of the roster, chosen by the RUNTIME, never by this library. Unset
-#: means "no roster here": a store with a default location would be written by
-#: anything that ever truncates — the suite did exactly that on 2026-08-29 and
-#: banked three invented models into the live journal, after which real budget
-#: tests read 8192 where they had asked for 1024. Entry points set it (see
-#: `main.py`); libraries and tests get silence unless they ask for a home.
-#: Дом реестра молчавших внутри рабочей области. Библиотека сама хранилище
-#: НЕ выбирает (решение 2026-08-29: дефолт в библиотеке дал батарее тестов
-#: записать три выдуманные модели в живой журнал — и 2026-09-03 при пробе
-#: дефолта это повторилось). Дом задаёт РАНТАЙМ в точке входа —
-#: `ensure_roster_home` из agent_tick и REPL.
+#: Home of the roster, set by the RUNTIME at the entry point (`ensure_roster_home`), never by this library; unset means no roster here.
 ROSTER_RELPATH = "data/reasoning_roster.jsonl"
 
 
 def _roster_path() -> Any:
-    """Путь к реестру молчавших из окружения; None — рантайм дом не задал."""
+    """Roster path from the environment; None means the runtime set no home."""
     from pathlib import Path
 
     configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()
@@ -34,14 +17,7 @@ def _roster_path() -> Any:
 
 
 def ensure_roster_home(workspace: Any) -> Any:
-    """Точка входа объявляет дом реестра, если оператор не задал свой.
-
-    Замер 2026-09-03: AGENT_REASONING_ROSTER не задавал никто, путь был None
-    в каждом живом процессе, реестр не читался и не писался, и думающая
-    модель получала лестницу 1200→2400→4800 вместо пола 8192 — три молчания
-    по 8 400 токенов за утро. Орган работал; подключения не было. Возвращает
-    действующий путь.
-    """
+    """Entry point declares the roster home unless the operator set one; returns the effective path."""
     from pathlib import Path
 
     configured = (os.getenv("AGENT_REASONING_ROSTER") or "").strip()

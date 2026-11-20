@@ -1,4 +1,4 @@
-"""Из текста — тема, и вес темы: насколько слово вообще что-то разрешает."""
+"""Topic words from text, and topic weight: how much a word resolves at all."""
 from __future__ import annotations
 
 import math
@@ -6,26 +6,15 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-#: Слово из букв/цифр. Разделяет любой другой знак — запятая не буква.
+#: A word of letters/digits; any other character separates (a comma is not a letter).
 _WORD_RE = re.compile(r"[\W_]+", re.UNICODE)
 
-#: Составное имя: две и более части через `_` или `.`. Кириллица допущена
-#: наравне с латиницей — оператор пишет и так, и так.
+#: Compound name: two or more parts joined by `_` or `.`. Cyrillic is allowed as well as Latin.
 _COMPOUND_RE = re.compile(r"[^\W\d_][\w]*(?:[_.][^\W\d_][\w]*)+", re.UNICODE)
 
 
-#: Полярность: слова, переворачивающие смысл. Они добавляются к набору
-#: РЕШЕНИЯ отдельно, прямо из текста — `topic_tokens` не трогается, потому
-#: что её порог длины (CORE-10) закреплён тестом и её словарь читают другие
-#: потребители. Менять общий словарь ради одного матчера — та ошибка, за
-#: которую эту правку поймала батарея 2026-08-22.
-#: Поле называет этот провал прямо — «movies WITHOUT nicolas cage» после
-#: удаления служебного слова становится своей противоположностью, и жёсткие
-#: стоп-списки за это критикуют (современная практика — занижать вес через
-#: IDF, а не выбрасывать). Проверено на нашем коде 2026-08-22: «почему тест
-#: падает» и «почему тест НЕ падает» совпадали дословно, пока «не» лежало в
-#: списке. Список достался от `memory_policy`; правка сделала его
-#: последствия боевыми, потому что раньше память опыта стоп-слова не резала.
+#: Polarity: words that flip meaning. Added to the DECISION set separately, straight from the text; `topic_tokens` is untouched because its length threshold is pinned by a test and other consumers read its vocabulary.
+#: Dropping such a word makes "movies WITHOUT nicolas cage" its own opposite ("why does the test fail" vs "why does the test NOT fail" matched verbatim while "не" was in the stop list).
 _POLARITY_WORDS: frozenset[str] = frozenset({
     "не", "нет", "ни", "без", "кроме", "нельзя",
     "no", "not", "never", "without", "except", "none", "nor", "neither",
@@ -33,13 +22,12 @@ _POLARITY_WORDS: frozenset[str] = frozenset({
 
 
 def topic_tokens(text: str) -> set[str]:
-    """Слова темы: части и составные имена целиком."""
+    """Topic words: parts and whole compound names."""
     raw = str(text or "")
     out = {
         token.casefold()
         for token in _WORD_RE.split(raw)
-        # Порог длины и оговорка про цифры — прежние (CORE-10): короткие
-        # числовые токены («17», «v2») несут сигнал, короткие буквенные нет.
+        # Length threshold and digit exception as before: short numeric tokens ("17", "v2") carry signal, short alphabetic ones do not.
         if len(token.strip()) > 2 or any(ch.isdigit() for ch in token)
     }
     out.update(
@@ -50,12 +38,7 @@ def topic_tokens(text: str) -> set[str]:
     return out
 
 
-#: Слова, которые не различают: они есть почти в любом тексте оператора, и
-#: совпадение ТОЛЬКО по ним не значит родства. Список перенесён сюда из
-#: `core/memory_policy.py` 2026-08-22 (MIR-008/024/105): две подсистемы
-#: расходились именно в этом — постоянная память стоп-слова резала, память
-#: опыта нет, — и одна из них решала подбор по «вот», «что», «мне».
-#: `memory_policy` теперь читает отсюда: один словарь, а не два мнения.
+#: Words that do not discriminate: they appear in almost any operator text, so a match ONLY on them does not mean kinship. Moved here from `core/memory_policy.py`, which now reads from here: one vocabulary, not two opinions.
 STOPWORDS: frozenset[str] = frozenset(
     {
         # English
@@ -70,10 +53,7 @@ STOPWORDS: frozenset[str] = frozenset(
         "в", "на", "с", "по", "из", "у", "к", "о", "за", "от", "до",
         "ли", "бы", "был", "была", "было", "были", "есть", "быть",
         "мой", "моя", "мое", "мои", "твой", "твоя", "ваш", "наш",
-        # Дополнено 2026-08-22 из ЖИВОГО замера: ровно эти слова решали
-        # подбор в MIR-105 (17 процедур из 34 по «вот»/«что»/«мне») и в
-        # MIR-024 (0.400 на паре «запустить агента» / «удалить все логи»).
-        # Разговорный слой оператора — не тема, а способ спросить.
+        # Added from a live measurement: these words alone decided matching (17 procedures of 34 on "вот"/"что"/"мне"; 0.400 on "запустить агента" vs "удалить все логи"). The operator's conversational layer is a way of asking, not a topic.
         "вот", "мне", "тебе", "тебя", "вас", "нам", "им", "ему", "ей",
         "себе", "себя", "ты", "вы", "мы", "он", "она", "они", "оно",
         "делать", "сделать", "сделай", "хочу", "надо", "нужно", "можно",
@@ -90,14 +70,9 @@ STOPWORDS: frozenset[str] = frozenset(
 
 
 def discriminating_tokens(text: str) -> set[str]:
-    """Слова темы без служебных: чем текст ОТЛИЧАЕТСЯ, а не из чего состоит.
+    """Topic words without the service ones: what a text DIFFERS in, not what it consists of.
 
-    Токенизация не меняется — составные имена, цифровые токены и всё
-    остальное работают как прежде. Меняется РЕШЕНИЕ: два текста связаны,
-    только если делят хоть одно различающее слово. Замер 2026-08-22: запрос
-    из одних служебных слов доставал 17 процедур из 34, а «запустить агента»
-    и «удалить все логи» считались одним вопросом (0.400 при пороге 0.40).
-    """
+        Tokenization is unchanged; the DECISION changes: two texts are related only if they share at least one discriminating word."""
     words = {w.casefold() for w in _WORD_RE.split(str(text or "")) if w}
     return ({t for t in topic_tokens(text) if t not in STOPWORDS}
             | (words & _POLARITY_WORDS))
@@ -105,11 +80,10 @@ def discriminating_tokens(text: str) -> set[str]:
 
 @dataclass(frozen=True)
 class TokenSalience:
-    """Сколько стоит совпадение по слову."""
+    """What a match on a word is worth."""
 
     weights: Mapping[str, float]
-    #: Слово, которого в корпусе нет вовсе, разрешает сильнее всех известных:
-    #: оператор его никогда не произносил, значит оно пришло с этой задачей.
+    #: A word absent from the corpus resolves more than any known one: the operator never said it, so it came with this task.
     unseen: float
 
     def weight(self, token: str) -> float:
@@ -119,16 +93,14 @@ class TokenSalience:
         return sum(self.weight(token) for token in query & document)
 
 
-#: Отсутствие корпуса — не повод менять правила: вес плоский, счёт штучный.
+#: No corpus is no reason to change the rules: flat weight, counting by pieces.
 FLAT = TokenSalience(weights={}, unseen=1.0)
 
 
 def build_salience(documents: Iterable[str]) -> TokenSalience:
-    """Вес по редкости в корпусе. Документ — одна реплика, не одно слово.
+    """Weight by rarity in the corpus. A document is one utterance, not one word.
 
-    Считается по документам, а не по вхождениям: слово, двадцать раз сказанное
-    в одном разговоре, обыденным от этого не становится.
-    """
+        Counted by documents, not occurrences: a word said twenty times in one conversation does not become ordinary."""
     seen: dict[str, int] = {}
     total = 0
     for document in documents:
@@ -137,10 +109,7 @@ def build_salience(documents: Iterable[str]) -> TokenSalience:
             seen[token] = seen.get(token, 0) + 1
     if not total:
         return FLAT
-    # `total + 1`, чтобы вес не мог стать нулём. Слово, встреченное во ВСЕХ
-    # документах, обыденно донельзя, но нулевой вес — это не «мало значит», а
-    # «не существует»: корпус из одного эпизода обнулял всё подряд, и подбор
-    # переставал находить хоть что-нибудь. Пусть весит мало, но весит.
+    # `total + 1` so the weight can never be zero: a word in ALL documents is very common, but zero weight means "does not exist", and a one-episode corpus zeroed everything.
     return TokenSalience(
         weights={token: math.log((total + 1) / count) for token, count in seen.items()},
         unseen=math.log(total + 1),

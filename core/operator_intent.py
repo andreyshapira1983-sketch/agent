@@ -91,9 +91,7 @@ def route_operator_intent(text: str) -> OperatorIntent | None:  # noqa: PLR0911,
         return None
     if _looks_like_explicit_non_routing_command(normalized):
         return None
-    # A social / greeting-laden chat turn is not an operator command — let the
-    # LLM answer it naturally (guards against the capability-check matcher
-    # hijacking "Привет, как дела, что ты умеешь?" into a rigid operator dump).
+    # a social chat turn is not an operator command: leave it to the LLM
     if _looks_like_conversational_turn(normalized):
         return None
     if _matches_self_build_request(normalized):
@@ -170,8 +168,7 @@ def route_operator_intent(text: str) -> OperatorIntent | None:  # noqa: PLR0911,
             command=":coding-readiness",
             reason="safe programming readiness wording",
         )
-    # Просьба доказать делом не отвечается перечнем вне цикла: её ведёт
-    # планировщик, который умеет показать (core/proof_demand.py).
+    # a "prove it by doing" request goes to the planner, not to a capability list (core/proof_demand.py)
     if _matches_capability_check(normalized) and not demands_demonstration(normalized):
         return OperatorIntent(
             kind="capability_check",

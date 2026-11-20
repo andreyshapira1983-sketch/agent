@@ -6,10 +6,8 @@ from typing import Any
 
 from core.evidence import Evidence
 
-#: Отличительные литералы: идентификаторы, SHA, пути, версионные триплеты (`3.11.9`).
-#: Голые и десятичные числа не входят — их судит `evaluate_claim_arithmetic`.
-#: Через дефис — только с цифрой внутри, иначе проза («read-only») стала бы идентификатором.
-#: Посессивные кванторы и потолки {,160} держат разбор линейным на враждебном тексте.
+#: Distinctive literals: identifiers, SHAs, paths, version triplets (`3.11.9`); bare and decimal numbers are judged by `evaluate_claim_arithmetic`.
+#: Hyphenated only with a digit inside (else prose like "read-only" would be an identifier); possessive quantifiers and {,160} caps keep parsing linear on hostile text.
 _SALIENT_LITERAL_RE = re.compile(
     r"\b(?:[A-Za-z][A-Za-z0-9]{0,160}+(?:_[A-Za-z0-9]{1,160}+)++"
     r"|[A-Za-z][A-Za-z0-9]{0,160}+"
@@ -20,24 +18,24 @@ _SALIENT_LITERAL_RE = re.compile(
 )
 
 
-#: Маркер ссылки в тексте ответа: `[file:core/loop.py]`, `[memory:mem_…]`.
+#: Citation marker in the answer text: `[file:core/loop.py]`, `[memory:mem_...]`.
 _CITATION_TOKEN_RE = re.compile(r"\[[^\[\]]*\]")
 
 
 def salient_literals(text: str) -> set[str]:
-    """Отличительные литералы текста, в нижнем регистре."""
+    """Distinctive literals of the text, lower-cased."""
     return {m.group(0).lower() for m in _SALIENT_LITERAL_RE.finditer(text or "")}
 
 
 def literals_absent_from_excerpt(
     claim: str, excerpt: str, source_id: str = ""
 ) -> set[str]:
-    """Литералы утверждения, которых НЕТ в цитируемой улике."""
+    """Literals of the claim that are NOT in the cited evidence."""
     if not claim or not excerpt:
         return set()
-    # Маркер ссылки — адрес источника, а не утверждение о мире.
+    # a citation marker is a source address, not a claim about the world
     body = _CITATION_TOKEN_RE.sub(" ", claim)
-    # Имя собственного источника чужим литералом не считается.
+    # the source's own name is not a foreign literal
     known = salient_literals(excerpt) | salient_literals(source_id or "")
     haystack = f"{excerpt}\n{source_id}".lower()
     return {
@@ -50,23 +48,23 @@ _VERSION_RE = re.compile(r"\d+(?:\.\d+){2,}")
 
 
 def _literal_covered(lit: str, known: set[str], haystack: str) -> bool:
-    """Есть ли литерал в улике; версия — только целиком («3.15.2» не внутри «3.15.20»)."""
+    """Whether the literal is in the evidence; a version only as a whole ("3.15.2" is not inside "3.15.20")."""
     if _VERSION_RE.fullmatch(lit):
         return re.search(rf"(?<![\d.]){re.escape(lit)}(?!\w|\.\d)", haystack) is not None
     return lit in known or any(lit in k or k in lit for k in known)
 
 
 def excerpt_is_cut(excerpt: str) -> bool:
-    """Обрезана ли выдержка: бюджетом (R8) или при создании улики (evidence._truncate)."""
+    """Whether the excerpt is cut: by the budget (R8) or when the evidence was created (evidence._truncate)."""
     return ("[INTENT-BUDGET:" in excerpt or "[TOTAL-BUDGET:" in excerpt
             or excerpt.rstrip().endswith("...[truncated]"))
 
 
 def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
-    """Причина демоции, если утверждение называет то, чего нет в улике."""
+    """Demotion reason if the claim names what is not in the evidence."""
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
-    # Утверждение об отсутствии судит пятый гейт по обратному правилу.
+    # an absence claim is judged by the fifth gate under the inverse rule
     if asserts_absence(chunk_text):
         return None
     absent = literals_absent_from_excerpt(
@@ -75,19 +73,17 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     if not absent:
         return None
     from .verifier_models import ClaimReason
-    # Путь, отличный от цитируемого источника, — приписывание (ложь о происхождении);
-    # иначе лишь нехватка подпорки: вырезка может быть про другое место файла.
+    # a path other than the cited source is attribution (a lie about origin); otherwise only missing support (the excerpt may be about another place in the file)
     cited = (ev.source_id or "").split(":", 1)[-1].replace("\\", "/").lower()
     foreign = [
         lit for lit in absent
         if "/" in lit and "." in lit.rsplit("/", 1)[-1]
         and lit.replace("\\", "/").lower() not in cited
     ]
-    # Число, которого улика не печатала, — тоже ложь, а не нехватка подпорки.
+    # a number the evidence never printed is also a lie, not missing support
     if not foreign:
         foreign = [lit for lit in absent if any(ch.isdigit() for ch in lit)]
-    # Усечённая улика (R8) отсутствия не доказывает, но и подтвердить литерал
-    # за срезом не может: нехватка подпорки, не ложь и не «подтверждено».
+    # a truncated excerpt proves no absence and cannot confirm a literal beyond the cut: missing support, neither a lie nor "confirmed"
     if excerpt_is_cut(ev.excerpt or ""):
         foreign = []
     return ClaimReason(
@@ -99,12 +95,12 @@ def absent_literal_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | N
     )
 
 
-#: Минимум содержательных слов, чтобы расхождение с уликой что-то значило («Да.» — не предмет).
+#: Minimum content words for a divergence from the evidence to mean anything ("Yes." is no subject).
 _OFF_TOPIC_MIN_TOKENS = 3
 
 
 def _dominant_script(text: str) -> str:
-    """`cyrillic`, `latin` или `none` — какой алфавит преобладает в тексте."""
+    """`cyrillic`, `latin` or `none`: which script dominates the text."""
     cyr = sum(1 for ch in text if "\u0400" <= ch <= "\u04ff")
     lat = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
     if cyr == 0 and lat == 0:
@@ -117,14 +113,14 @@ def _dominant_script(text: str) -> str:
 
 
 def _subject_tokens(text: str) -> set[str]:
-    """Содержательные слова без голых чисел: общая цифра не делает общей темы."""
+    """Content words without bare numbers: a shared digit does not make a shared topic."""
     from .topic_tokens import discriminating_tokens
 
-    # `discriminating_tokens`: только она применяет стоп-лист («the», «was»).
+    # `discriminating_tokens` is the only one that applies the stop list ("the", "was")
     return {t for t in discriminating_tokens(text) if not t.isdigit()}
 
 
-#: Слова мета-утверждений — про сами улики, а не про мир («both files agree»).
+#: Words of meta-claims about the evidence itself, not the world ("both files agree").
 _META_VOCABULARY: frozenset[str] = frozenset({
     "file", "files", "value", "values", "sum", "sums", "total", "count",
     "contains", "contain", "agree", "agrees", "report", "reports", "test",
@@ -142,38 +138,34 @@ _META_VOCABULARY: frozenset[str] = frozenset({
 })
 
 
-#: Префиксы, чья улика — проза: против кода и структурированного вывода сравнение слов
-#: ничего не доказывает и перехватывало бы вердикт у более точных гейтов.
+#: Prefixes whose evidence is prose: against code and structured output a word comparison proves nothing and would pre-empt more precise gates.
 _PROSE_PREFIXES: frozenset[str] = frozenset({"web", "search"})
 
 
 def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
-    """Причина демоции, если разрешённая цитата не про это утверждение (шестой гейт, MIR-060).
+    """Demotion reason if the allowed citation is not about this claim (sixth gate).
 
-    Демоция только при нуле общих содержательных слов: ложный отказ дорог,
-    а пересказ почти всегда оставляет хоть одно общее слово.
+    Demotes only on zero shared content words: a false refusal is costly and a paraphrase nearly always keeps one common word.
     """
     if prefix not in _PROSE_PREFIXES:
         return None
     excerpt_raw = ev.excerpt or ""
-    # Усечённая улика судится по видимой части: общее слово могло быть за
-    # срезом, но гейт лишь понижает, а «подтверждено» вслепую — хуже.
+    # a truncated excerpt is judged by its visible part: the gate only demotes, and a blind "confirmed" is worse
     if not excerpt_raw.strip():
         return None
-    # Требование числа снято (проба); разноязычие и мета-утверждения отсекаются ниже.
+    # no number requirement; different languages and meta-claims are cut off below
     claim_tokens = _subject_tokens(_CITATION_TOKEN_RE.sub(" ", chunk_text))
-    # Кусок про сами улики: отсутствие общих слов ничего не доказывает.
+    # a piece about the evidence itself: no shared words proves nothing
     if claim_tokens and claim_tokens <= _META_VOCABULARY:
         return None
-    # Мета-слова не вычитаются: «запись», «файл» — и обычные существительные.
+    # meta words are not subtracted: "record", "file" are also ordinary nouns
     if len(claim_tokens) < _OFF_TOPIC_MIN_TOKENS:
         return None
-    # Разные алфавиты — не разные предметы: агент читает по-английски, отвечает по-русски.
+    # different scripts are not different subjects: the agent reads English and answers Russian
     if _dominant_script(chunk_text) != _dominant_script(excerpt_raw):
         return None
     known = _subject_tokens(excerpt_raw) | _subject_tokens(ev.source_id or "")
-    # Порог доли невозможен: естественный пересказ делит с уликой так же мало слов,
-    # как чужая тема.
+    # no share threshold: a natural paraphrase shares as few words with the evidence as an unrelated topic
     if claim_tokens & known:
         return None
     from .verifier_models import ClaimReason
@@ -190,8 +182,7 @@ def off_topic_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     )
 
 
-#: Мета-отрицание: обороты, объявляющие неверным всё утверждение, а не его член
-#: («не менее», «а не 30» сюда не входят).
+#: Meta-denial: phrases declaring the whole claim false, not one of its members ("not less than", "and not 30" are excluded).
 _META_DENIAL_RE = re.compile(
     r"(?:\bневерн\w*"
     r"|\bэто\s+не\s+так\b"
@@ -207,24 +198,21 @@ _META_DENIAL_RE = re.compile(
 
 
 def denies_own_evidence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
-    """Причина демоции, если утверждение объявляет неверной свою же улику (девятый гейт).
-
-    Если отрицание несёт и сама улика, утверждение его лишь передаёт.
-    """
+    """Demotion reason if the claim declares its own evidence false (ninth gate); if the evidence carries the denial too, the claim only relays it."""
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
     excerpt_raw = ev.excerpt or ""
     if not excerpt_raw.strip():
         return None
-    # Лексикон отрицания языкозависим: отрицание в улике на другом языке не видно.
+    # the denial lexicon is language-dependent: a denial in other-language evidence is invisible
     if _dominant_script(chunk_text) != _dominant_script(excerpt_raw):
         return None
     body = _CITATION_TOKEN_RE.sub(" ", chunk_text)
     if not _META_DENIAL_RE.search(body):
         return None
     if _META_DENIAL_RE.search(excerpt_raw):
-        return None  # улика сама отрицает — утверждение её передаёт
-    # Без общего предмета это вопрос гейта «не по теме».
+        return None  # the evidence itself denies: the claim relays it
+    # without a shared subject it is the off-topic gate's business
     if not (_subject_tokens(body) & _subject_tokens(excerpt_raw)):
         return None
     from .verifier_models import ClaimReason
@@ -241,10 +229,10 @@ def denies_own_evidence_reason(chunk_text: str, ev: Evidence, prefix: str) -> An
     )
 
 
-#: Число в тексте; при приближении («около 20») оно не судится.
+#: A number in the text; with an approximation ("about 20") it is not judged.
 _BARE_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
-#: Точка между цифрами — десятичный разделитель, а не конец предложения.
+#: A point between digits is a decimal separator, not a sentence end.
 _SENTENCE_SPLIT = re.compile(r"(?<![0-9])[.!?]+(?![0-9])|" + chr(10) + "+")
 
 _APPROXIMATION_RE = re.compile(
@@ -253,15 +241,14 @@ _APPROXIMATION_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Доля слов утверждения в предложении улики, при которой кусок — дословный пересказ.
+#: Share of claim words in an evidence sentence at which the piece is a verbatim restatement.
 _RESTATEMENT_OVERLAP = 0.8
 
 
 def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
-    """Причина демоции, если кусок повторяет предложение улики, изменив число (десятый гейт).
+    """Demotion reason if the piece repeats an evidence sentence with a changed number (tenth gate).
 
-    Не правило присутствия: вычисленные числа и границы сравнения законно
-    отсутствуют в улике (MIR-143), поэтому судится только почти дословный пересказ.
+    Not a presence rule: computed numbers and comparison bounds legitimately are absent from the evidence, so only a near-verbatim restatement is judged.
     """
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
@@ -289,15 +276,14 @@ def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | 
         shared = len(claim_words & words) / len(claim_words)
         if shared < _RESTATEMENT_OVERLAP:
             continue
-        # Кусок повторяет это предложение: разница может быть только в числах.
+        # the piece repeats this sentence: the difference can only be in numbers
         known = {m.group(0) for m in _BARE_NUMBER_RE.finditer(sentence)}
         missing = {n for n in claimed if not any(n == k or n in k for k in known)}
         if not missing:
             return None
         from .verifier_models import ClaimReason
 
-        # За срезом могло стоять предложение с названным числом: усечённая
-        # улика не обвиняет, а только не подтверждает.
+        # the cut may have hidden a sentence with the named number: truncated evidence does not accuse, it only fails to confirm
         if excerpt_is_cut(excerpt_raw):
             return ClaimReason(
                 code="cited_support_missing",
@@ -319,14 +305,14 @@ def restated_number_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | 
     return None
 
 
-#: Утверждение об отсутствии («нет X», «not implemented»); маркер ищется по всему куску.
+#: Absence claim ("no X", "not implemented"); the marker is searched across the whole piece.
 _ABSENCE_ASSERTION_RE = re.compile(
     r"(?:\bотсутству\w*|\bне\s+(?:найден\w*|реализован\w*|существу\w*|"
-    # Глаголы отсутствия механизма («не обрабатывает», «не предусмотрены»).
+    # verbs of a missing mechanism ("does not handle", "not provided")
     r"содерж\w*|определ\w*|предусмотр\w*|обрабатыва\w*|поддержива\w*|"
     r"учитыва\w*)|\bнет\b|\bни\s+одного\b"
     r"|\bno\s+(?:\S+\s+){1,3}(?:exists?|found|implemented)|\bnot\s+(?:implemented|"
-    # Те же глаголы по-английски, и `no handling` без завершающего глагола.
+    # the same verbs in English, and `no handling` without a closing verb
     r"found|present|defined|exist)|\bdoes\s+not\s+(?:exist|contain|define|"
     r"implement|handle|support|check)"
     r"|\bno\s+(?:handling|support|validation|check|mechanism)\b"
@@ -334,23 +320,23 @@ _ABSENCE_ASSERTION_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Предмет, названный явно в кавычках или апострофах; прозаический предмет не судится намеренно.
+#: A subject named explicitly in quotes or apostrophes; a prose subject is deliberately not judged.
 _NAMED_SUBJECT_RE = re.compile(r"[`\"']([A-Za-z_][A-Za-z0-9_.]{2,})[`\"']")
 
 
-#: Часть предложения, утверждающая наличие своего предмета: он не предмет отсутствия.
+#: Part of a sentence asserting its subject is present: not a subject of absence.
 _PRESENCE_RE = re.compile(
     r"(?:(?<!не\s)\bнайден\w*|\bпрочита\w*|\bпрочё?л\w*|\bзавершил\w*|\bесть\b"
     r"|(?<!не\s)\bсуществу\w*|(?<!не\s)\bприсутству\w*|\bна\s+месте\b"
     r"|\bзаписан\w*|\bсоздан\w*|\bread\b|\bfound\b|\bexists?\b|\bis\s+present\b"
     r"|\bcompleted\b|\bfinished\b|\bwritten\b|\bcreated\b"
-    # Назвать — значит сказать, что есть («клиент называется `LLM`»).
+    # to call is to say it exists ("the client is called `LLM`")
     r"|(?<!не\s)\bназыва\w*|(?<!не\s)\bзов[её]т\w*|\bis\s+called\b|\bis\s+named\b)",
     re.IGNORECASE,
 )
-#: Границы частей сложного предложения: запятая, точка с запятой, тире.
+#: Boundaries of clauses in a compound sentence: comma, semicolon, dash.
 _CLAUSE_SPLIT_RE = re.compile(r"[,;]|\s[—–]\s")
-#: Место поиска («в `stderr` нет ошибок», «по файлу x.txt»): оно существует, отсутствует искомое.
+#: Place of search ("no errors in `stderr`", "in file x.txt"): the place exists, the searched thing is absent.
 _SEARCH_PLACE_RE = re.compile(
     r"\b(?:в|во|по|in|inside|within|across)\s+"
     r"(?:(?:файле|файлу|файлам|файлах|книге|тексте|логе|журнале|(?:the\s+)?(?:file|book|log|text))\s+)?"
@@ -360,31 +346,25 @@ _SEARCH_PLACE_RE = re.compile(
 )
 
 
-#: Перечень найденного после слова о находке — не предмет отсутствия.
-#: Конец — точка с пробелом, чтобы точка внутри `core/loader.py` его не обрывала.
+#: A list of findings after a finding word is not a subject of absence; ends at a period+space so a period inside `core/loader.py` does not cut it.
 _FOUND_MATERIAL_RE = re.compile(
     r"(?:совпадени\w*|результат\w*|matches|match|hits|найден\w*|found)\b(?:(?!\.\s)[^;\n])*",
     re.IGNORECASE)
 
 
-#: Показанный материал — скобочный перечень и «ёлочки»; апострофы и прямые
-#: кавычки не входят: ими называют сам предмет (`itertools.batched`).
+#: Shown material: a parenthesised list and guillemets; apostrophes and straight quotes are excluded (they name the subject itself).
 _ENUMERATED_SPAN_RE = re.compile(r"\([^()\n]*\)|«[^»\n]*»")
 
-#: Хвост сообщения исключения до конца предложения — цитата прибора, а не предмет.
+#: Tail of an exception message up to the sentence end: the instrument's quote, not a subject.
 _ERROR_TAIL_RE = re.compile(
     r"\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Warning)\b[^.;\n]*")
 
 
 def absence_subjects(claim: str) -> set[str]:
-    """Явно названные предметы утверждения об отсутствии.
-
-    Не предметы: то, что утверждается наличным, места поиска и найденное.
-    """
-    # Перечисленное вырезается до разбора по частям: запятая в скобках рвёт перечень.
+    """Subjects explicitly named in an absence claim; not subjects: what is asserted present, places of search, and findings."""
+    # enumerations are cut out before the clause split: a comma in parentheses breaks the list
     body = _ENUMERATED_SPAN_RE.sub(" ", _CITATION_TOKEN_RE.sub(" ", claim or ""))
-    # Голые литералы берутся только из части с отрицанием; из соседних — лишь
-    # названное явно и без хвоста сообщения об ошибке.
+    # bare literals come only from the clause with the negation; from neighbours only what is named explicitly and without an error-message tail
     parts = _CLAUSE_SPLIT_RE.split(body)
     denying = [bool(_ABSENCE_ASSERTION_RE.search(_own_voice(p))) for p in parts]
     kept = [
@@ -399,7 +379,7 @@ def absence_subjects(claim: str) -> set[str]:
     return named | salient_literals(denied)
 
 
-#: Чужой голос внутри утверждения: цитаты в кавычках/апострофах и хвост сообщения исключения.
+#: A foreign voice inside the claim: quotes and apostrophes, and an exception-message tail.
 _QUOTED_SPAN_RE = re.compile(
     r"`[^`\n]*`"
     r"|«[^»\n]*»"
@@ -409,17 +389,17 @@ _QUOTED_SPAN_RE = re.compile(
 
 
 def _own_voice(claim: str) -> str:
-    """Текст утверждения без цитат и хвостов сообщений об ошибках."""
+    """The claim text without quotes and error-message tails."""
     return _QUOTED_SPAN_RE.sub(" ", claim or "")
 
 
 def asserts_absence(claim: str) -> bool:
-    """Утверждает ли кусок СВОИМ ГОЛОСОМ, что чего-то нет."""
+    """Whether the piece asserts in its OWN voice that something is absent."""
     return bool(_ABSENCE_ASSERTION_RE.search(_own_voice(claim)))
 
 
 def absence_refuted_by_excerpt(claim: str, excerpt: str) -> bool:
-    """Опровергает ли цитируемая улика утверждение об отсутствии."""
+    """Whether the cited evidence refutes the absence claim."""
     if not claim or not excerpt or not asserts_absence(claim):
         return False
     body = excerpt.lower()
@@ -427,7 +407,7 @@ def absence_refuted_by_excerpt(claim: str, excerpt: str) -> bool:
 
 
 def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
-    """Причина демоции, если улика содержит то, чего утверждение не нашло."""
+    """Demotion reason if the evidence contains what the claim did not find."""
     if prefix in {"user", "memory", "general-knowledge"}:
         return None
     from .verifier_utils import truth_excerpt
@@ -435,7 +415,7 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
     outcome = truth_excerpt(ev.excerpt or "")
     if not absence_refuted_by_excerpt(chunk_text, outcome):
         return None
-    # Опровергнуть отсутствие может только само названное место, а не другой источник.
+    # only the named place itself can refute an absence, not another source
     places = _denied_places(chunk_text)
     if places and _cited_path(ev.source_id or "") not in places:
         return None
@@ -453,8 +433,7 @@ def absence_reason(chunk_text: str, ev: Evidence, prefix: str) -> Any | None:
 
 _PLACE_PATH_RE = re.compile(
     r"[\w./\\-]+\.(?:py|md|json|jsonl|txt|yaml|yml|cmd|toml|csv|log)\b", re.IGNORECASE)
-#: Место — путь после «в/in» не дальше трёх слов и не после «про/about»
-#: (там путь — предмет, а не место).
+#: A place: a path after "in" not farther than three words and not after "about" (there the path is the subject, not the place).
 _PLACE_RE = re.compile(
     r"\b(?:в|во|in|inside|within)\s+"
     r"(?:(?!(?:про|о|об|about|for)\b)[^\s,;:`'\"«]+\s+){0,3}"
@@ -463,7 +442,7 @@ _PLACE_RE = re.compile(
 
 
 def _denied_places(claim: str) -> set[str]:
-    """Файлы, названные МЕСТОМ в той части утверждения, где стоит отрицание."""
+    """Files named as a PLACE in the clause where the negation stands."""
     body = _CITATION_TOKEN_RE.sub(" ", claim or "")
     return {
         m.group(1).replace("\\", "/").lower()
@@ -474,34 +453,33 @@ def _denied_places(claim: str) -> set[str]:
 
 
 def _cited_path(source_id: str) -> str:
-    """Путь цитируемого источника без префикса вида и без диапазона строк."""
+    """Path of the cited source without the kind prefix and line range."""
     rest = source_id.split(":", 1)[-1] if ":" in source_id else source_id
     found = _PLACE_PATH_RE.search(rest)
     return found.group(0).replace("\\", "/").lower() if found else ""
 
 
 def absence_certifiable(claim: str, excerpt: str) -> bool:
-    """Можно ли вообще СЕРТИФИЦИРОВАТЬ утверждение об отсутствии выдержкой."""
+    """Whether an absence claim can be CERTIFIED by an excerpt at all."""
     return not asserts_absence(claim)
 
 
-#: Отчёт поиска о ненайденном (tools/find_in_files.py): искомое и область.
+#: Search report of nothing found (tools/find_in_files.py): the searched thing and the scope.
 _SEARCH_NONE_RE = re.compile(
     r"no matches for (['\"])(?P<query>.+?)\1 in \d+ text files under (?P<scope>\S+)")
 
 
-#: Ответ «ресурса нет» (tools/web_fetch.py, 404/410): код и адрес.
+#: "No such resource" answer (tools/web_fetch.py, 404/410): code and URL.
 _NOT_FOUND_RE = re.compile(r"^HTTP (?:404|410)\b[^:]*: (?P<url>\S+)")
-#: Части адреса, которые называют не предмет, а устройство сайта.
+#: URL parts that name the site structure, not a subject.
 _GENERIC_SEGMENTS = frozenset({"json", "simple", "project", "projects", "pypi", "api", "v1", "v2",
                                "www", "http", "https", "index", "search", "package", "packages"})
 
 
 def absence_certified_by_not_found(claim: str, evidences: list[Any]) -> bool:
-    """Отсутствие доказано ответом 404/410 от web_fetch на адрес, где назван предмет.
+    """Absence proven by a 404/410 from web_fetch on a URL naming the subject.
 
-    Узко: только если часть пути, называющая предмет, стоит в утверждении.
-    Страница-ошибка — источник только для «по этому адресу ничего нет» (обход H-01).
+    Narrow: only if the path part naming the subject stands in the claim; an error page is a source only for "nothing at this address".
     """
     if not asserts_absence(claim):
         return False
@@ -512,7 +490,7 @@ def absence_certified_by_not_found(claim: str, evidences: list[Any]) -> bool:
         m = _NOT_FOUND_RE.search(getattr(ev, "excerpt", "") or "")
         if not m:
             continue
-        # Имя сайта предмет не называет — смотрится только путь.
+        # the site name does not name the subject: only the path is looked at
         path = m.group("url").split("://", 1)[-1].split("?", 1)[0].lower().partition("/")[2]
         segments = [s for s in re.split(r"[/.]", path) if len(s) >= 4 and s not in _GENERIC_SEGMENTS]
         if any(s in low for s in segments):
@@ -521,10 +499,7 @@ def absence_certified_by_not_found(claim: str, evidences: list[Any]) -> bool:
 
 
 def absence_certified_by_search(claim: str, evidences: list[Any]) -> bool:
-    """Отсутствие доказано полным поиском: искомое и область названы в утверждении.
-
-    Отчёт find_in_files — не усечённая выдержка: инструмент прошёл всю область (MIR-060 (e)).
-    """
+    """Absence proven by a full search: the searched thing and scope are named in the claim; a find_in_files report is not a truncated excerpt."""
     if not asserts_absence(claim):
         return False
     low = (claim or "").lower().replace("\\", "/")

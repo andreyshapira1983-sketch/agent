@@ -1,8 +1,4 @@
-"""Learning planner.
-
-Controlled ingestion is the tool. The LearningPlanner decides which local
-sources are worth feeding into that tool for a learning goal.
-"""
+"""Learning planner: decides which local sources are worth feeding into controlled ingestion for a learning goal."""
 from __future__ import annotations
 
 import re
@@ -26,10 +22,7 @@ if TYPE_CHECKING:
 
 
 class _SourceLookup(Protocol):
-    """Единственное требование окна свежести — ответ на `get_source`.
-
-    Замер и отвергнутые варианты: MIR-152 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    """
+    """The only requirement of the freshness window: an answer to `get_source`."""
 
     def get_source(self, source_id: str) -> SourceRecord | None: ...
 
@@ -91,7 +84,7 @@ class LearningPlanner:
         target = _resolve_inside_workspace(workspace, root)
         if not target.exists():
             raise FileNotFoundError(f"Path not found: {target}")
-        # MIR-106: слабое место с уликой ищет свои файлы BM25 (core/weak_spot_retrieval.py).
+        # A weak spot with evidence searches its files with BM25 (core/weak_spot_retrieval.py).
         retrieved: frozenset[str] = frozenset()
         if evidence_query:
             from core.weak_spot_retrieval import retrieve_files
@@ -183,13 +176,8 @@ def _score(
     score = 0
     reasons: list[str] = []
 
-    # Reflection names its weak spot as a path (`core/reflection.py:375`), and
-    # whatever this plan picks is what the agent then reads. Until 2026-08-04
-    # being named was worth nothing: `core/planner.py` scored 115 against
-    # `core/architecture_audit.py`'s 165, which won on its filename alone — so
-    # the plan came out the same whatever reflection had found.
-    # This only re-ranks candidates already inside the workspace; a path in the
-    # goal is untrusted text and must never widen what may be read.
+    # A file named in the goal is re-ranked above generic bonuses; only candidates already inside the workspace are re-ranked,
+    # since a path in the goal is untrusted text and must never widen what may be read.
     if named and _is_named(rel, named):
         score += _NAMED_BY_GOAL_BONUS
         reasons.append("named by the goal")
@@ -240,35 +228,18 @@ def _score(
     return score, reasons
 
 
-#: Must outrank every generic bonus, including the doctrine (300+) and
-#: confidence (360+) source priorities: a file the goal names outright is the
-#: subject of the pass, not a candidate for it.
+#: Must outrank every generic bonus (doctrine 300+, confidence 360+): a file the goal names outright is the subject of the pass.
 _NAMED_BY_GOAL_BONUS = 500
-#: Выше любого общего бонуса (README 100, ядро 70), ниже названного пути:
-#: найденное по улике — предмет прохода, но путь, названный прямо, точнее.
+#: Above any generic bonus (README 100, core 70), below an explicitly named path.
 _RETRIEVED_BY_EVIDENCE_BONUS = 200
 
-#: The dot is load-bearing, not an oversight: it is the only thing separating a
-#: path from an ordinary word in a sentence. Widening this to extensionless
-#: names (review of #313 suggested `README`, `Makefile`) would make every word
-#: of the goal a "named file" worth `_NAMED_BY_GOAL_BONUS` — measured on
-#: "improve the memory handling in core/memory.py" the pattern picks exactly one
-#: token today. The case it would buy is empty here: the repository has two
-#: extensionless tracked files, `Dockerfile` and `LICENSE`, and neither is
-#: something the learning planner studies. Reconsider only alongside a different
-#: discriminator, e.g. "the token resolves to a file that exists".
+#: The dot is load-bearing: it separates a path from an ordinary word; extensionless names would make every goal word a 'named file'.
 _PATH_IN_GOAL_RE = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9_]{1,20}")
 _TEXT_SUFFIXES = frozenset(ext.lstrip(".") for ext in TEXT_EXTENSIONS)
 
 
 def _named_paths(goal: str) -> frozenset[str]:
-    """Paths the goal names outright, normalised to a workspace-relative shape.
-
-    The reflection prompt asks for "file or module", so both arrive:
-    `core/memory.py` and `core.memory`. Dotted module notation is turned into a
-    path — a token with no slash whose last segment is not a known text suffix
-    is a module, not a filename.
-    """
+    """Paths the goal names outright, normalised to workspace-relative form; dotted module notation (`core.memory`) becomes a path."""
     out: set[str] = set()
     for raw in _PATH_IN_GOAL_RE.findall(goal or ""):
         token = raw.replace("\\", "/").strip("./").casefold()
@@ -281,12 +252,7 @@ def _named_paths(goal: str) -> frozenset[str]:
 
 
 def _is_named(rel: str, named: frozenset[str]) -> bool:
-    """True when `rel` is one of the named paths, or the file they mean.
-
-    Compared both with and without the suffix, so a module name matches the
-    file that implements it. Matching is by whole path segments, so `memory.py`
-    never matches `smart_memory.py`.
-    """
+    """True when `rel` is one of the named paths or the file they mean (with or without suffix, by whole path segments)."""
     stem = rel.rsplit(".", 1)[0] if "." in rel.rsplit("/", 1)[-1] else rel
     return any(
         rel == n or rel.endswith("/" + n) or stem == n or stem.endswith("/" + n)
@@ -295,13 +261,7 @@ def _is_named(rel: str, named: frozenset[str]) -> bool:
 
 
 def _named_candidates(workspace: Path, named: frozenset[str]) -> list[Path]:
-    """Files the goal names, resolved regardless of the pass's `root`.
-
-    A rotated `root` used to exclude the named file from the candidate set
-    entirely, so the plan was quietly about something else. Only the named file
-    crosses that boundary — everything else stays inside `root` — and it must
-    still resolve inside the workspace: the path comes from model output.
-    """
+    """Files the goal names, resolved regardless of the pass's `root`; only the named file crosses it and must still resolve inside the workspace."""
     found: list[Path] = []
     for name in named:
         for candidate in (name, *(f"{name}{ext}" for ext in TEXT_EXTENSIONS)):
@@ -359,22 +319,16 @@ def _goal_terms(goal: str) -> tuple[str, ...]:
 def _staleness_reader(
     source_registry: _SourceLookup | None,
 ) -> Callable[[str], str | None]:
-    """Один проход по складу за план вместо вопроса на каждый файл.
-
-    Замер и отвергнутые варианты: MIR-153 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    """
+    """One pass over the store per plan instead of a query per file."""
     if source_registry is None:
         return lambda _rel: None
     bulk = getattr(source_registry, "load_sources", None)
     if callable(bulk):
         try:
             records = bulk()
-        except Exception:  # noqa: BLE001 — не умеет пачкой, спросим поштучно
+        except Exception:  # noqa: BLE001 — no batch support: ask per item
             records = None
-        # Проверяется ВОЗВРАЩЁННОЕ, а не наличие имени: заглушка отвечает на
-        # любой вызов и отдала пустую последовательность, из-за чего пустой
-        # указатель был принят за «свежих записей нет» и понижение молча
-        # исчезло. Список настоящих записей ни с чем не спутать.
+        # Check the RETURNED value, not the name's presence: a stub answers any call and its empty result must not read as 'no fresh records'.
         if isinstance(records, list) and all(hasattr(r, "id") for r in records):
             index = {
                 r.id: r.last_read_at

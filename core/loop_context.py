@@ -1,36 +1,8 @@
-"""Контекст хода до планирования — вырезано из ``core/loop.py`` дословно.
+"""Turn context gathered before planning (history, self-analysis classification, referent, long-term and experience memory), carved verbatim from ``core/loop.py``.
 
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Девятый кусок раскола `core/loop.py` и седьмой — раскола `_run_inner`.
-
-Всё, что цикл читает ПЕРЕД тем, как что-то планировать: история разговора,
-классификация хода как самоанализа, разрешение референта и выборка из долгой
-и опытной памяти.
-
-Ровно ОДИН долговременный побочный эффект, и он намеренный: выборка из долгой
-памяти бампает `access_count` / `last_accessed_at` у отобранных записей
-(`core/loop_memory_read.py`), потому что оценщику архива нужно знать, какие
-записи реально работают. Запись подчиняется разрешению приёмника
-`access_stats`: при его отсутствии в allowlist фаза не трогает диск вовсе.
-Прежняя формулировка «чтение и только чтение» была опровергнута замером
-2026-08-08; обе полярности закреплены в `tests/test_turn_context_read_c05.py`,
-поэтому появление ВТОРОГО долговременного приёмника в этой фазе покраснеет.
-
-Классификация самоанализа стоит здесь, до планирования, не для красоты: она
-решает, к какому классу улик будет отнесён ответ. Утверждение о ТЕКУЩЕМ
-обмене подтверждается стенограммой, а не внешним источником, и решить это
-после ответа — значит судить его не по той шкале.
-
-Локальная критика подавляет выдачу долгой и опытной памяти по умолчанию
-(PR2): предмет разбора назван явно, и подмешивать к нему воспоминания
-означает разбирать не то, о чём спросили.
-
-Тело перенесено символ в символ, что пинится AST-сверкой с историей в
-`tests/test_loop_context_split.py`.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
+Only durable side effect, deliberate: long-term retrieval bumps `access_count` / `last_accessed_at` of the picked records
+(`core/loop_memory_read.py`), gated by the `access_stats` sink allowlist; both polarities are pinned in
+`tests/test_turn_context_read_c05.py`. State lives on the composed loop, not here.
 """
 from __future__ import annotations
 
@@ -57,12 +29,7 @@ from core.spend_report import load_spend_rows, spend_mirror_block
 
 
 class AgentLoopContext:
-    """Чтение контекста хода: история, самоанализ, референт, память.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """Turn-context reads: history, self-analysis, referent, memory; members are host-contract declarations with no runtime assignments."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -75,18 +42,13 @@ class AgentLoopContext:
         _last_best_similar_episode: Any
         _last_best_similar_score: Any
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as CALLABLE attributes: an empty-body stub function is read by analyzers as "no return", and every call gets a false E1111.
         _retrieve_persistent: Any
         _retrieve_experience_memory: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a neighbouring mixin via the MRO; the cross-module link must be written down or it only shows at run time.
         _file_read_workspace_root: Any
-        # `core/loop_sensor.py`. Объявлен здесь, потому что до сих пор не был:
-        # два обработчика ниже гасили сбой без следа именно из-за этого —
-        # средство у слоя было, а вызвать его файл не мог.
+        # `core/loop_sensor.py` helper, declared so the handlers below can report failures instead of swallowing them.
         _sensor_failed: Any
 
     def _retrieve_turn_context(
@@ -95,11 +57,9 @@ class AgentLoopContext:
         *,
         file_hint: str | None,
     ) -> tuple[str, bool, str, str, str]:
-        """История, критика, блоки долгой и опытной памяти, зеркало трат.
+        """History, critique, long-term and experience memory blocks, spend mirror.
 
-        Порядок здесь — часть контракта: референт разрешается ДО выборки
-        памяти, потому что именно его вердикт решает, подмешивать её вообще
-        или нет.
+                Order is contract: the referent is resolved BEFORE memory retrieval, because its verdict decides whether memory is injected at all.
         """
         history = ""
         if self.memory is not None:
@@ -115,13 +75,9 @@ class AgentLoopContext:
                     },
                 )
 
-        # Issue #119 — conversational correction / self-analysis classification.
-        # Decided here, before planning, because it changes which evidence class
-        # the answer is later judged against: a claim about THIS session's own
-        # exchange is backed by the transcript, not by an external source.
-        # Deterministic and always on (no feature flag): its only effect is to
-        # admit dialogue evidence that the verifier then scopes narrowly, and a
-        # bug the operator cannot report is worse than the risk of that.
+        # Conversational correction / self-analysis classification, decided before planning because it changes the
+        # evidence class the answer is judged against: a claim about THIS session's own exchange is backed by the
+        # transcript, not by an external source. Deterministic and always on (no feature flag).
         _self_analysis = is_self_analysis_turn(
             user_question,
             has_prior_turn=bool(
@@ -132,7 +88,7 @@ class AgentLoopContext:
         if _self_analysis.is_self_analysis:
             self.log.log("self_analysis_turn", _self_analysis.to_log_payload())
 
-        # Referent resolver (critique PR1/PR2) — shadow logs; on enables path.
+        # Referent resolver: shadow mode only logs; ``on`` enables the local-critique path.
         self._maybe_resolve_referent(user_question, file_hint=file_hint)
         local_critique_active = (
             referent_resolver_mode() == "on"
@@ -153,10 +109,8 @@ class AgentLoopContext:
                 },
             )
 
-        # Persistent memory retrieval — pick a few long-term records that
-        # share keywords with the question, then format them as a
-        # <long_term_memory> block injected into planner + synthesizer.
-        # Local-critique turns suppress default LTM/episodic injection (PR2).
+        # Persistent memory retrieval: pick a few long-term records sharing keywords with the question and inject
+        # them as a <long_term_memory> block; local-critique turns suppress default LTM/episodic injection.
         if local_critique_active:
             persistent_block = ""
             experience_block = ""
@@ -166,21 +120,17 @@ class AgentLoopContext:
             persistent_block = self._retrieve_persistent(user_question)
             experience_block = self._retrieve_experience_memory(user_question)
 
-        # Зеркало трат (MIR-177) — ПЯТЫЙ элемент, а не примесь к блоку опыта:
-        # у того свой контракт и свои тесты, и первая проводка, подмешавшая
-        # зеркало внутрь, уронила шестнадцать. Собственные пары «потратил →
-        # получил», данные, не указание; пустые журналы не занимают подсказку.
-        # На витке локальной критики подавляется вместе с остальной памятью.
+        # Spend mirror: a fifth element, not a part of the experience block (own contract and tests). Own
+        # "spent -> got" pairs as data; empty journals take no prompt space; suppressed on local-critique turns.
         spend_block = "" if local_critique_active else self._spend_mirror()
-        # Свои открытые записи о промахах (2026-09-21) — в тот же пятый
-        # элемент «о себе», не в блок опыта; синтез берёт их с цикла.
+        # Own open defect records go into the same "about myself" element, not the experience block.
         self._self_defects_block = "" if local_critique_active else self._self_defects()
         spend_block = "\n\n".join(p for p in (spend_block, self._self_defects_block) if p)
 
         return history, local_critique_active, persistent_block, experience_block, spend_block
 
     def _self_defects(self) -> str:
-        """Открытые записи реестра о собственных промахах — блоком для хода."""
+        """Open registry records of the agent's own defects, as a turn block."""
         try:
             rows = open_self_defects(self._file_read_workspace_root())
         except Exception as exc:  # noqa: BLE001 — напоминание не вправе ронять ход
@@ -192,28 +142,23 @@ class AgentLoopContext:
         return format_open_self_defects(rows)
 
     def _spend_mirror(self) -> str:
-        """Блок зеркала из живых журналов; без рабочей папки — пустота."""
+        """Spend-mirror block from the live journals; empty without a work folder."""
         try:
             usage_rows, ledger_rows = load_spend_rows(self._file_read_workspace_root())
             spend = spend_mirror_block(usage_rows=usage_rows, ledger_rows=ledger_rows)
         except Exception as exc:  # noqa: BLE001 — зеркало не вправе ронять ход
-            # Молчать нельзя (храповик тишины журнала): оператор, читающий
-            # логи, должен видеть, что зеркала не было и почему.
+            # Never silent: an operator reading logs must see that the mirror was absent and why.
             self.log.log("spend_mirror_unavailable", {"error": repr(exc)[:200]})
             spend = ""
         roster = self._model_roster_block()
         return "\n\n".join(part for part in (spend, roster) if part)
 
     def _model_roster_block(self) -> str:
-        """Глаз на собственные модели (2026-09-04): провайдеры, ключи есть/нет,
-        роли, здоровье, цена, расход за день, остаток потолка. Только факты;
-        до этого дня ни один блок контекста не называл провайдера, и о ключе
-        он узнавал лишь по его смерти. Без роутера с журналом глаза нет: блок
-        описывает провайдеров «как их видят роутер и журналы», а роутер-заглушка
-        (`ModelRouter.single`, песочница тестов) журнала не имеет — читать
-        окружение разработчика вместо него нельзя: первый ход в чистой
-        песочнице получал бы <conversation_history> из ничего (батарея
-        2026-09-04, 11 красных)."""
+        """Eyes on the agent's own models: providers, key present/absent, roles, health, price, daily spend, remaining cap. Facts only.
+
+                Without a router with a journal there is no block: a stub router (`ModelRouter.single`) has none,
+                and reading the developer's environment instead would leak it into clean sandboxes.
+        """
         usage_ledger = getattr(getattr(self, "model_router", None), "usage_ledger", None)
         if usage_ledger is None:
             return ""
@@ -236,7 +181,7 @@ class AgentLoopContext:
         *,
         file_hint: str | None,
     ) -> None:
-        """Shadow/on referent resolution. Shadow logs only; ``on`` enables PR2 path."""
+        """Shadow/on referent resolution. Shadow logs only; ``on`` enables the local-critique path."""
         mode = referent_resolver_mode()
         if mode == "off":
             self.last_referent_decision = None
@@ -286,37 +231,24 @@ class AgentLoopContext:
             payload = decision.to_dict()
             payload["mode"] = mode
             payload["local_critique_eligible"] = eligible
-            # True when enabling ``on`` would change the answer path (PR2).
+            # True when enabling ``on`` would change the answer path.
             payload["would_change_answer"] = eligible
             self.log.log("referent_decision", payload)
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Observability must never abort the run — and its failure must not
-            # be invisible either. Measured before this line existed: a healthy
-            # turn logs `referent_decision`, a broken one logged NOTHING and
-            # left the decision `None`. The local-critique path then never
-            # engaged, and no reader could tell that from a turn where no
-            # referent resolved.
-            #
-            # The `None` stays: it is the fail-safe half, and it is what keeps
-            # a broken resolver from enabling a path it cannot support.
+            # Observability must never abort the run, and its failure must not be invisible: a broken resolver logs
+            # NOTHING and leaves the decision `None`, which looks like an unresolved referent.
+            # The `None` stays: it is the fail-safe that keeps a broken resolver from enabling a path it cannot support.
             self.last_referent_decision = None
             self._sensor_failed("referent_resolution", exc)
 
 
     def _open_run(self, user_question: str) -> tuple[Any, Any]:
-        """Профиль, реестр допущений и писатель контрольных точек.
+        """Profile, assumption registry and checkpoint writer: everything opened ONCE before the first phase.
 
-        Открывающая часть прогона: всё, что заводится ОДИН раз и до первой
-        фазы. Возвращает реестр допущений и писателя — остальное ложится на
-        поля цикла.
-
-        Реестр создаётся ЧИСТЫМ: хранилище допущений — архив, а не вход.
-        Межходовое авто-восстановление, стоявшее здесь, перетаскивало
-        допущения между несвязанными целями (идентификатор трассы живёт всю
-        сессию) и не обслуживало ни одного другого потребителя; архивные
-        строки возвращаются только явной выборкой (MIR-027).
+                Returns the registry and the writer; the rest lands on loop fields. The registry starts CLEAN:
+                the assumption store is an archive, not an input.
         """
-        # Layer 4 — load the user profile for this cycle.
+        # Load the user profile for this cycle.
         if self.user_profile_store is not None:
             self.last_user_profile = self.user_profile_store.load_or_default()
             self.log.log(
@@ -330,17 +262,13 @@ class AgentLoopContext:
                 },
             )
 
-        # Layer 5 — create a fresh AssumptionRegistry and seed it from the question.
-        # Layer 4→5 bridge: pass the profile's known language so extract_from_question
-        # uses a higher-confidence profile signal instead of a raw heuristic.
+        # Create a fresh AssumptionRegistry seeded from the question, passing the profile's known language so
+        # extraction uses the higher-confidence profile signal.
         _run_assumptions = AssumptionRegistry(
             run_id=getattr(self.log, "trace_id", ""),
         )
-        # MIR-027: the store is an ARCHIVE, not an active input. The cross-
-        # turn auto-restore that sat here leaked assumptions between unrelated
-        # goals (session-lifetime trace id) and served no other caller;
-        # archived rows return only via explicit retrieval. Measurements and
-        # the operator's ruling live in the MIR-027 registry entry.
+        # The assumption store is an ARCHIVE, not an active input: archived rows return only via explicit
+        # retrieval (cross-turn auto-restore leaked assumptions between unrelated goals).
         try:
             _known_lang: str | None = None
             if self.last_user_profile is not None:
@@ -352,17 +280,12 @@ class AgentLoopContext:
             )
             _run_assumptions.register_many(_q_assumptions)
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Reported, not swallowed. This one hid better than the referent
-            # above: `assumptions_registered` fires later (loop_attempt) and
-            # ONLY when the registry is non-empty, so a crash here produced the
-            # same silence as a question with nothing to assume. Measured: 2
-            # assumptions on the healthy path, 0 on the broken one, and no
-            # event in either case.
+            # Reported, not swallowed: `assumptions_registered` fires later and only for a non-empty registry, so a
+            # crash here would look like a question with nothing to assume.
             self._sensor_failed("assumption_extraction", exc)
 
-        # §3.5 Checkpoint writer — one file per trace, append-only.
-        # Falls back to a no-op sentinel when the logger is a test spy that
-        # does not expose trace_id / log_dir (avoids coupling tests to I/O).
+        # Checkpoint writer: one file per trace, append-only; falls back to a no-op sentinel when the logger is
+        # a test spy without trace_id / log_dir.
         try:
             from core.checkpoint import CheckpointWriter as _CPWriter
             _cp: Any = _CPWriter(trace_id=self.log.trace_id, log_dir=self.log.log_dir)

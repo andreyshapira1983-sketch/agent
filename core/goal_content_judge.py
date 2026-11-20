@@ -1,26 +1,4 @@
-"""Судья цели читает ПРОДУКТ, а не только находит его на диске.
-
-Сверка 2026-09-25 (артефакт «Как учат агентов» против кода): судья цели
-(core/campaign_verdict.py) говорит «verified», если названные критерием файлы
-есть и свежие. Критерий свободным текстом — «документ называет каждое
-хранилище с его писателями» — сводился к «файл появился», и «проверено» у
-учёбы и задач становилось бумажкой: из 873 целей с «результатом» судья
-признал 168, и все по наличию файла (мерило полезности, тот же день).
-
-Модель сюда не звали намеренно: судить слово модели той же моделью. Решение
-по литературе — судья с СОБСТВЕННЫМ доступом к продукту и проверкой по
-требованиям:
-
-* Agent-as-a-Judge (Zhuge et al., ICML 2025, arXiv 2410.10934): судья сам
-  открывает артефакты и проверяет каждое требование — ~90 % совпадения с
-  людьми против 60–70 % у «модель оценивает ответ»;
-* TICK (Cook et al., arXiv 2410.03608): критерий раскладывается на вопросы
-  «да/нет», по одному на требование, — согласие с людьми выше общей оценки.
-
-Защита от доверия на слово — без модели: каждое «да» обязано нести дословную
-цитату, и код ищет её в самом файле. «Да» без найденной цитаты — «нет».
-Судья зовётся только когда файлы уже найдены и свежие: по пути вызовов нет.
-"""
+"""Goal judge that reads the product itself and checks each requirement by a quoted passage found in the file."""
 from __future__ import annotations
 
 import json
@@ -28,11 +6,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-#: Сколько текста продукта видит судья: по файлу и всего.
+#: How much product text the judge sees: per file and in total.
 _PER_FILE_CHARS = 12_000
 _TOTAL_CHARS = 24_000
 _MAX_QUESTIONS = 5
-#: Цитата короче — не доказательство (совпадёт случайно).
+#: A shorter quote is not proof (it can match by chance).
 _MIN_QUOTE = 12
 
 _SYSTEM = (
@@ -51,7 +29,7 @@ def _norm(text: str) -> str:
 
 
 def _read(workspace: Any, paths: list[str]) -> list[tuple[str, str]]:
-    """(путь, видимый судье кусок) по каждому файлу продукта."""
+    """(path, judge-visible slice) for each product file."""
     parts, total = [], 0
     for rel in paths:
         try:
@@ -59,9 +37,7 @@ def _read(workspace: Any, paths: list[str]) -> list[tuple[str, str]]:
         except OSError:
             continue
         room = min(_PER_FILE_CHARS, _TOTAL_CHARS - total)
-        # Журнал дописывается в конец: свежий продукт цели — последние строки.
-        # Живая проба 2026-09-25: заявка в data/causal_claims.jsonl лежала за
-        # первыми 12 000 знаков, и судья честно её «не нашёл».
+        # logs are appended: the newest product is at the end
         chunk = text[-room:] if rel.endswith((".jsonl", ".log")) and room > 0 else text[:room]
         if not chunk:
             break
@@ -86,11 +62,9 @@ def _parse(raw: str) -> list[dict[str, str]] | None:
 
 
 def judge_content(success_check: str, fresh_paths: list[str], workspace: Any, llm: Any) -> dict[str, Any] | None:
-    """Проверка содержания продукта по критерию, или None (судить нечем).
+    """Check the product content against the criterion; None when it cannot be judged.
 
-    Возвращает {"met": bool, "unmet": [вопросы], "checked": n}. None — нет
-    модели, нет текста продукта или ответ судьи не разобрать: тогда вердикт
-    остаётся прежним, файловым, — незнание не выдаётся за «нет».
+    Returns {"met": bool, "unmet": [questions], "checked": n}; None (no model, no text, unparseable answer) keeps the file-based verdict.
     """
     if llm is None or not fresh_paths:
         return None
@@ -101,13 +75,12 @@ def judge_content(success_check: str, fresh_paths: list[str], workspace: Any, ll
     try:
         raw = llm.complete(system=_SYSTEM, user=f"CRITERION:\n{success_check}\n\nFILE CONTENT:\n{content}",
                            max_tokens=900)
-    except Exception:  # noqa: BLE001 — судья содержания не валит вердикт
+    except Exception:  # noqa: BLE001 — the content judge must not break the verdict
         return None
     rows = _parse(str(getattr(raw, "text", raw)))
     if rows is None:
         return None
-    # Цитата ищется в текстах файлов, не в заголовках «=== FILE … ===»: живая
-    # проба 2026-09-25 — на «файл создан?» судья процитировал заголовок.
+    # quotes are searched in file text, not in the "=== FILE ... ===" headers
     haystack = _norm("\n".join(chunk for _, chunk in parts))
     unmet = []
     for row in rows:

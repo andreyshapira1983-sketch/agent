@@ -1,18 +1,8 @@
-"""MVP-14.3 — Source Ranker / Evidence Trust Layer.
+"""Source ranker / evidence trust layer: deterministic, local scoring of how far each Evidence record can be trusted for the current question.
 
-Verifier answers a binary question: did this citation resolve to evidence?
-SourceRanker answers the next question: how much should this evidence be
-trusted for this specific user question?
-
-This first cut is deterministic and local. It does not call an LLM and does
-not fetch the network. It scores existing Evidence records by:
-
-  - source tier (test/file/user > fetched web page > search pointer > LLM)
-  - freshness for time-sensitive questions
-  - whether the evidence class can support realtime claims at all
-
-The ranker feeds the Ranker-to-Output policy, so support diagnostics can
-cap final confidence and move unsuitable realtime claims to Unverified.
+Scores by source tier (test/file/user > fetched web page > search pointer > LLM), freshness for time-sensitive questions and whether the
+evidence class can support realtime claims at all. Feeds the Ranker-to-Output policy (caps confidence, moves unsuitable realtime claims to
+Unverified). No LLM call, no network.
 """
 
 from __future__ import annotations
@@ -90,7 +80,7 @@ _REPUTABLE_DOMAINS = frozenset({
     "pubmed.ncbi.nlm.nih.gov",
     "ncbi.nlm.nih.gov",
     "plato.stanford.edu",
-    # Operator-vetted 28.09: primary AI, security and tech-news sources.
+    # Operator-vetted primary AI, security and tech-news sources.
     "anthropic.com",
     "nvidia.com",
     "bleepingcomputer.com",
@@ -100,10 +90,8 @@ _REPUTABLE_DOMAINS = frozenset({
     "arstechnica.com",
     "semanticscholar.org",
     "pypi.org",
-    # Note: docs.python.org / developer.mozilla.org / learn.microsoft.com /
-    # rfc-editor.org are deliberately NOT listed here — _is_official_domain()
-    # below always classifies them as "authoritative" (score 1.00) first, so
-    # a "reputable" (0.82) entry for them here would be unreachable dead data.
+    # docs.python.org, developer.mozilla.org, learn.microsoft.com and rfc-editor.org are deliberately NOT listed:
+    # `_is_official_domain()` below classifies them "authoritative" (1.00) first, so a "reputable" entry here would be unreachable.
 })
 
 _BLOG_OR_FORUM_DOMAINS = frozenset({
@@ -168,12 +156,9 @@ _REALTIME_FRAGMENT_TERMS = frozenset({
     "биткоин",
 })
 
-# Recency words that are genuinely ambiguous: they signal "fresh data" in a
-# market/news context, but in a code/repo context ("current implementation",
-# "latest commit", "use current repo docs/code only") they are NOT time-sensitive.
-# When a repo-local marker is present these are ignored so repo/architecture
-# tasks are not misclassified as realtime (which would downgrade confidence and
-# report weak evidence support on purely local evidence).
+# Genuinely ambiguous recency words: "fresh data" in a market/news context, but not time-sensitive in a code/repo
+# context ("current implementation", "latest commit"). With a repo-local marker present they are ignored, so repo
+# tasks are not misclassified as realtime.
 _AMBIGUOUS_REALTIME_TERMS = frozenset({
     "current",
     "currently",
@@ -183,14 +168,12 @@ _AMBIGUOUS_REALTIME_TERMS = frozenset({
     "сейчас",
     "текущ",
     "последн",
-    # «сегодня» стояло рядом с «биткоин» и «погода» (2026-09-21): вопрос
-    # оператора «что ты успел сделать сегодня» получал потолок уверенности
-    # `low` и штамп про live-источник. Это слово о времени, а не о рынке.
+    # "today" is a word about time, not about the market: treated as a market term it capped confidence at `low`
+    # on questions like "what did you do today".
     "сегодня",
 })
 
-# Strong markers that a question is about the local repository / codebase, not
-# the live external world.
+# Strong markers that a question is about the local repository, not the live external world.
 _REPO_LOCAL_MARKERS = (
     "repo",
     "repository",
@@ -297,7 +280,7 @@ def is_realtime_question(question: str) -> bool:
 
 
 def _has_realtime_term(lowered: str, *, skip_ambiguous: bool) -> bool:
-    """Есть ли слово свежести; `skip_ambiguous` оставляет только предметы (цена, курс, погода)."""
+    """Whether a freshness word is present; `skip_ambiguous` keeps only subjects (price, rate, weather)."""
 
     def _ignored(term: str) -> bool:
         return skip_ambiguous and term in _AMBIGUOUS_REALTIME_TERMS
@@ -308,9 +291,8 @@ def _has_realtime_term(lowered: str, *, skip_ambiguous: bool) -> bool:
         if not _ignored(term)
     ):
         return True
-    # Фрагмент — НАЧАЛО слова, а не любая его середина: 2026-09-21 «с тем же
-    # сценарием» содержало «цена» (с-ЦЕНА-рием), и вопрос о своём коде получил
-    # приписку «источники недостаточны для realtime-значения без live-источника».
+    # A fragment must match the START of a word, not any middle (a Russian word containing the stem for "price"
+    # falsely marked a question about the agent's own code as realtime).
     if any(
         re.search(rf"(?<![а-яёa-z0-9_]){re.escape(term)}", lowered)
         for term in _REALTIME_FRAGMENT_TERMS
@@ -353,7 +335,7 @@ def rank_evidence(
     realtime = is_realtime_question(question) if realtime_required is None else realtime_required
     tier, tier_reasons = _source_tier(evidence)
     fresh, fresh_reasons = _freshness_status(evidence, realtime_required=realtime, now=now)
-    # «Последняя версия X» — не котировка: только что открытая страница и есть живой источник.
+    # "Latest version of X" is not a quote: a freshly opened page is itself the live source.
     page_is_live = (fresh == "fresh" and evidence.kind == "web_page" and bool(question)
                     and not _has_realtime_term((question or "").casefold(), skip_ambiguous=True))
     support, support_reasons = _support_level(

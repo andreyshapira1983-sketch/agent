@@ -1,7 +1,4 @@
-"""Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures.
-
-Extracted from `core/verifier` by autonomous self-build module split.
-"""
+"""Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures."""
 from __future__ import annotations
 
 import re
@@ -16,45 +13,27 @@ CITATION_PREFIXES: dict[str, str] = {
     "tool": "tool_output",
     "diff": "diff_preview",
     "memory": "memory",
-    # A block the loop read from its own journals (model roster, spend
-    # mirror): evidence with the loop as origin (exam 2026-09-04, turn 3).
+    # A block the loop read from its own journals (model roster, spend mirror): evidence with the
+    # loop as origin.
     "sensor": "sensor",
-    # Verbatim earlier turn of this session (issue #119). Resolves only to
-    # dialogue-scoped claims; see core/evidence_classes.py.
+    # Verbatim earlier turn of this session; resolves only to dialogue-scoped claims
+    # (core/evidence_classes.py).
     "dialogue": "session_dialogue",
-    # Facts this process measured about itself: interpreter, version, pid, cwd.
-    # `[runtime:python_version]`. Trace-class, so it supports claims about the
-    # agent's own execution and never a claim about the world.
+    # Facts this process measured about itself (`[runtime:python_version]`): trace-class, never
+    # supports a claim about the world.
     "runtime": "runtime",
     "user": "user_explicit",
     "general-knowledge": "llm_claim",
-    # РЕШЕНИЕ, а не факт: «я выбираю это, и вот на чём стоит выбор».
-    # Класс улики тот же `llm_claim`: судить о ПРАВИЛЬНОСТИ решения
-    # верификатор не умеет и не должен — он лишь перестаёт считать его ЛОЖЬЮ.
+    # A DECISION, not a fact. Evidence class is `llm_claim`: the verifier cannot judge a decision's
+    # correctness, it only stops counting it as a lie.
     "judgement": "llm_claim",
 }
 
-#: Префиксы, которыми высказывание ЧЕСТНО НАЗЫВАЕТ своё происхождение. Такой
-#: кусок получает вердикт `self_declared` вместо `cited_but_unmatched` и не
-#: попадает в счёт фабрикаций.
-#:
-#: Второе слово добавлено 2026-09-21 по разбору самого агента. Живой случай:
-#: на вопрос «должен ли твой собственный дефект побеждать цель человека» он
-#: дал лучшее рассуждение за вечер — и его же судья вырезал оттуда
-#: утверждение с пометкой `fabricated_claims_excised`, а всему ответу
-#: поставил низкую уверенность (подтверждено 2 из 8). Причина: у суждения
-#: НЕТ строки в файле, ссылка к нему не разрешается, и судья читал это как
-#: выдуманную цитату.
-#:
-#: Различитель нашёл сам агент, и он точнее, чем «есть ссылка или нет»:
-#: важно, ЧТО ПРЕДЛОЖЕНИЕ ОБЕЩАЕТ. Суждение обещает «вот моё решение и вот
-#: на чём оно стоит»; фабрикация обещает «вот факт и вот его источник».
-#: Первое проверяется спором, второе — разрешением ссылки, и смешивать их
-#: значит наказывать ровно за то, чего от агента добивались весь вечер: за
-#: принятое решение.
-#:
-#: Прецедент не выдуман: `general-knowledge` стоит здесь затем же — честное
-#: «это из обучения» ложью не считается.
+# Prefixes by which a statement HONESTLY names its origin: such a piece gets verdict `self_declared`
+# instead of `cited_but_unmatched` and is not counted as fabrication.
+# A judgement promises "my decision and what it rests on" (argued), a fabrication promises "a fact
+# and its source" (resolved by the reference).
+# `general-knowledge` is here for the same reason.
 SELF_DECLARED_PREFIXES: frozenset[str] = frozenset({"general-knowledge", "judgement"})
 
 _CITATION_RE = re.compile(
@@ -63,10 +42,9 @@ _CITATION_RE = re.compile(
     + r")(?::([^\]\n]+))?\]"
 )
 
-# Точка перед СТРОЧНОЙ буквой (латиница И кириллица — «шт. не» резалось как
-# конец предложения, R2 2026-08-13) — сокращение, не граница: предложение не
-# начинается со строчной. Разрез внутри перечисления прятал счётную ложь B1
-# от гейта, потому что скобка уезжала в соседний кусок.
+# A period before a LOWERCASE letter (Latin and Cyrillic) is an abbreviation, not a sentence
+# boundary.
+# A cut inside an enumeration would hide a count lie from the gate.
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.\!\?])\s+(?![a-zа-яё])|\n+")
 
 _OUTPUT_CONTRACT_HEADERS: frozenset[str] = frozenset({
@@ -105,8 +83,7 @@ _STAT_TRIGGER_RE = re.compile(
 )
 
 _STAT_FIGURE_RE = re.compile(
-    # Разряды через пробел — ОДНО число: «48 750 руб.», «1 500» (24.09 сверка
-    # резала их на «48» и «750 руб», и каждая русская сумма была «не подтверждена»).
+    # Digit groups separated by spaces are ONE number ("48 750", "1 500").
     r"\b\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:[.,]\d+)?(?:\s*(?:usd|eur|gbp|долл|руб|rub)\b)?"
     r"|\d+\s*%"
     r"|\$\s*\d+(?:[.,]\d+)?"

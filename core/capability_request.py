@@ -1,15 +1,4 @@
-"""Autonomous capability request proposals.
-
-This layer lets the agent notice that a goal needs a missing capability and
-prepare a bounded, human-readable request before any connector, subagent, model
-tier, memory write, or long-running mode is activated.
-
-It is deliberately deterministic and read-only:
-- no connector activation;
-- no tool execution;
-- no LLM call;
-- approval is required by default.
-"""
+"""Proposes bounded, read-only capability requests that require human approval; no activation, no tool execution, no LLM call."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

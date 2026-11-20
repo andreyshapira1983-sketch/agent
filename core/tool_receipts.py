@@ -1,9 +1,4 @@
-"""Append-only tool receipt ledger — Stage 1 evidence layer (slice 1a + G5b).
-
-Records bounded tool observations for filesystem / shell / test / network tools
-(slice 1a) and successful ``file_write`` executions (Gateway G5b).
-Receipts are redacted before persist; no raw secrets in ``data/tool_receipts.jsonl``.
-"""
+"""Append-only tool receipt ledger: redacted bounded records of tool executions and gateway decisions."""
 from __future__ import annotations
 
 import hashlib
@@ -28,7 +23,7 @@ ReceiptPath = Literal["repl", "runtime", "daemon", "unknown"]
 ReceiptKind = Literal["tool", "approval", "gateway"]
 ReceiptStatus = Literal["success", "error", "blocked", "skipped"]
 
-# Slice 1a — filesystem / shell / test / network only.
+# Slice 1a: filesystem / shell / test / network only.
 SLICE_1A_RECEIPT_TOOLS: frozenset[str] = frozenset(
     {
         "file_read",
@@ -45,7 +40,7 @@ SLICE_1A_RECEIPT_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Gateway G5b — effect-tool execution proof (paired with gateway.allow; no raw file body).
+# Gateway G5b: effect-tool execution proof (paired with gateway.allow; no raw file body).
 SLICE_G5B_EFFECT_RECEIPT_TOOLS: frozenset[str] = frozenset({"file_write"})
 
 _RECEIPT_TOOLS: frozenset[str] = SLICE_1A_RECEIPT_TOOLS | SLICE_G5B_EFFECT_RECEIPT_TOOLS
@@ -329,11 +324,8 @@ def record_tool_invoke_receipt(
         try:
             risk = str(risk_for(call.arguments))
         except Exception:  # noqa: BLE001 — reason stated above
-            # Falls back to the tool's DECLARED risk, which is the conservative
-            # direction: a receipt is still written, and written with the
-            # tool's own class rather than with a guess. `read_only` as the
-            # last resort matches the registry default for tools that declare
-            # nothing.
+            # Falls back to the tool's DECLARED risk (conservative: a receipt is still written);
+            # `read_only` is the last resort, as in the registry default.
             risk = str(getattr(tool, "risk", "read_only"))
 
     status: ReceiptStatus = "success" if result.status == "success" else "error"
@@ -383,10 +375,7 @@ def record_approval_receipt(
 ) -> ToolReceipt | None:
     """Record an approval-inbox transition receipt (slice 1b-a).
 
-    ``operation`` is an explicit ``approval_inbox.*`` name. ``item`` is the
-    ApprovalInboxItem after the transition. Only fingerprints + a redacted
-    summary are stored — never raw payload/secrets. Returns None when no
-    workspace can be resolved (e.g. in-memory inbox with no receipt context).
+    ``operation`` is an explicit ``approval_inbox.*`` name, ``item`` the ApprovalInboxItem after the transition. Only fingerprints and a redacted summary are stored. Returns None when no workspace can be resolved.
     """
     ctx = get_receipt_context()
     ws = (
@@ -447,11 +436,7 @@ def record_gateway_receipt(
 ) -> ToolReceipt | None:
     """Record a gateway *decision* receipt (slice G4).
 
-    ``decision`` is an ``ActuationGateway`` GatewayDecision (or a stand-in with
-    ``outcome`` / ``tool_name`` / ``path`` / optional ``policy`` / ``reasons``).
-    Only fingerprints + a redacted summary are stored — never raw tool args,
-    proposal payloads, or file/patch contents. Mirrors ``record_approval_receipt``:
-    append-only, never raises, returns None when no workspace can be resolved.
+    ``decision`` is an ``ActuationGateway`` GatewayDecision (or a stand-in with ``outcome`` / ``tool_name`` / ``path`` / optional ``policy`` / ``reasons``). Only fingerprints and a redacted summary are stored. Append-only, never raises, returns None when no workspace can be resolved.
     """
     ctx = get_receipt_context()
     ws = (
@@ -510,10 +495,9 @@ def record_gateway_receipt(
 def summarise_receipts(
     ledger: ToolReceiptLedger, *, trace: str | None = None, recent: int = 10,
 ) -> str:
-    """Спросить накопленную улику (MIR-138): счёт по операциям + хвост.
+    """Ask the accumulated evidence: counts by operation plus a tail.
 
-    Только чтение. `trace` сужает до одной трассы — вопрос «что агент делал
-    в этом прогоне» перестаёт требовать ручного разбора 1,2 МБ jsonl.
+    Read-only. `trace` narrows to one trace, so "what did the agent do in this run" needs no manual parsing of the jsonl.
     """
     rows = ledger.load()
     if trace:

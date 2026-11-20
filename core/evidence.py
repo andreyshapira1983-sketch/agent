@@ -1,8 +1,4 @@
-"""Evidence + Provenance model: LLM — не источник истины; каждое утверждение
-ответа привязывается к типизированной записи Evidence. Одна выдача инструмента —
-максимум одна улика; ошибка инструмента — отсутствие источника, не слабый
-источник. Решения и их причины: docs/CODE_NOTES.md, «Evidence layer design».
-"""
+"""Evidence + provenance model: every claim in an answer is tied to a typed Evidence record; one tool output gives at most one evidence, and a tool error means no source, not a weak one."""
 from __future__ import annotations
 
 import hashlib
@@ -18,9 +14,6 @@ from typing import Any, Literal
 from core.ids import new_id
 from core.injection_guard import carries_suspicious_annotation
 
-# ---------------------------------------------------------------------------
-# Taxonomy
-# ---------------------------------------------------------------------------
 
 EvidenceKind = Literal[
     "file",             # file_read result — workspace file contents
@@ -47,24 +40,12 @@ ALL_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
 )
 
 
-# Baseline confidence per source kind. These are the "all else equal"
-# scores. The Verifier applies modifiers (freshness decay, domain trust,
-# secret presence, conflict resolution) on top.
-#
-# Reading order = source hierarchy from the user spec:
-#   user-explicit > tested code > workspace file > log > shell
-#   > diff preview > fetched web page > generic tool output
-#   > memory (uncertain provenance) > web-search pointer
-#   > llm-claim > unknown
+# Baseline confidence per source kind, "all else equal"; the Verifier applies modifiers on top.
+# Order = source hierarchy: user-explicit > tested code > workspace file > log > shell > diff preview > fetched page > generic tool output > memory > web-search pointer > llm-claim > unknown.
 DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "user_explicit":    1.00,
-    "sensor":           0.90,  # measured about this agent by its own sensors (2026-09-04)
-    # The process reading its own interpreter, version, pid and cwd. Ranked
-    # beside a test result and above a workspace file on purpose: a file can be
-    # stale the moment after it is read, while these were measured by the very
-    # process answering, and its own existence is what makes them true. The
-    # scope is narrow — this run only — and `core/evidence_classes.py` keeps it
-    # in the `trace` class so it can never confirm a claim about the world.
+    "sensor":           0.90,  # measured about this agent by its own sensors
+    # The process reading its own interpreter, pid and cwd ranks above a workspace file (a file can be stale at once) but its scope is this run only; core/evidence_classes.py keeps it in the `trace` class so it never confirms a claim about the world.
     "runtime":          0.95,
     "test_result":      0.95,
     "file":             0.90,
@@ -73,10 +54,7 @@ DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "diff_preview":     0.80,
     "web_page":         0.75,
     "tool_output":      0.70,
-    # A recording of what was actually said in this session. Fidelity is high —
-    # higher than a recollected memory record — but its *scope* is one turn of
-    # dialogue, so the verifier never lets it confirm a world claim (see
-    # core/evidence_classes.py). The number ranks retrieval, not authority.
+    # A recording of what was said in this session: high fidelity but scope is one dialogue turn, so it never confirms a world claim (core/evidence_classes.py). The number ranks retrieval, not authority.
     "session_dialogue": 0.60,
     "memory":           0.55,
     "web_search_hit":   0.35,
@@ -84,26 +62,13 @@ DEFAULT_CONFIDENCE: dict[EvidenceKind, float] = {
     "unknown":          0.10,
 }
 
-# Maximum excerpt length stored on disk / sent into prompts (bounds audit log entries).
+# Maximum excerpt length stored on disk / sent into prompts.
 MAX_EXCERPT_CHARS = 800
 
-#: Граница между исходом опыта и его ВОПРОСОМ (кодом). Всё после маркера —
-#: не улика истины: там живут имена, которые ход сам и написал.
+#: Boundary between the experiment's outcome and its QUESTION (the code). Everything after the marker is not truth evidence: names the turn itself wrote live there.
 QUESTION_CODE_MARKER = "[QUESTION-CODE: the experiment's own code, not evidence of its answer]"
 
-#: Служебные поля, которыми ЭТОТ модуль обрамляет исход инструмента. Они
-#: описывают прогон, а не мир: код возврата, длительность, признак усечения.
-#: Данными они не являются ни для одного судьи.
-#:
-#: Живой случай 2026-09-20: ответ написал «total tickets = 400, A = 100/400 =
-#: 0.25 … сумма вероятностей = 1.0», и гейт арифметики объявил это ложью —
-#: «the sum is 9, not 400». Девять — это `exit_code: 0` плюс `duration_ms: 9`:
-#: разбор пар «ключ: число» шёл по всей выдержке и складывал конверт. Список
-#: живёт здесь, рядом со строками, которые эти имена и печатают.
-#: Замер того же дня, вторая улика: «Sal(7.1) = 1 + 1/2 + … ≈ 2.592857» было
-#: опровергнуто как `sum_mismatch` «ждали 13099» — это `bytes=13060` плюс
-#: `lines=39` из конверта прочитанного файла. Конверт у каждого сборщика свой,
-#: и все его имена собраны здесь.
+#: Service fields this module wraps around a tool outcome (exit code, duration, truncation flag). They describe the run, not the world, and are data for no judge: the arithmetic gate once summed `exit_code: 0` plus `duration_ms: 9` into a false "sum". Each collector has its own envelope; all names are listed here beside the strings that print them.
 ENVELOPE_KEYS: frozenset[str] = frozenset({
     "exit_code", "timed_out", "duration_ms", "stdout_truncated",
     "inputs", "missing_inputs", "stdout", "stderr", "returncode",
@@ -111,9 +76,6 @@ ENVELOPE_KEYS: frozenset[str] = frozenset({
 })
 
 
-# ---------------------------------------------------------------------------
-# Core dataclasses
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Evidence:
@@ -127,9 +89,9 @@ class Evidence:
     confidence: float        # in [0, 1]
     claim: str               # short human-readable claim this evidence supports
     excerpt: str             # first MAX_EXCERPT_CHARS chars of the source
-    # For memory: the record's `source` ("user-explicit", "agent-auto", …); else None.
+    # For memory: the record's `source` ("user-explicit", "agent-auto", ...); else None.
     origin: str | None = None
-    # Весь прочитанный текст источника: только в памяти хода, для сверки утверждений.
+    # Full source text read: kept only in the turn's memory, for claim cross-checks.
     source_text: str = field(default="", compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -204,9 +166,6 @@ class ProvenanceChain:
         return out
 
 
-# ---------------------------------------------------------------------------
-# Hashing & helpers
-# ---------------------------------------------------------------------------
 
 def compute_content_hash(text: str) -> str:
     """sha256 hex of the utf-8 bytes. errors='replace' so a non-UTF-8
@@ -218,26 +177,15 @@ def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-#: Честный отчёт поиска о НЕНАЙДЕННОМ (`tools/find_in_files.py:128`):
-#: «no matches for 'имя' in 3305 text files under .» — он обязан назвать
-#: искомое, иначе это не отчёт.
+#: A search's honest report of NOT FOUND (`tools/find_in_files.py:128`): it must name the thing sought.
 _NO_MATCHES_RE = re.compile(r"^no matches for .+? in (?P<tail>\d+ text files.*)$",
                             re.IGNORECASE | re.DOTALL)
 
 
 def _search_excerpt(output: str) -> str:
-    """Исход поиска отдельно от его запроса.
+    """Search outcome kept apart from its query.
 
-    Живой разговор 2026-09-20: агент честно написал «поиск
-    `smart_memory_helpers2` по 3305 файлам не дал совпадений» — и получил
-    `absence_refuted_by_evidence` трижды. Улика, конечно, содержала искомое
-    имя: пустой результат поиска повторяет запрос ПО ПОСТРОЕНИЮ. Гейт видел
-    имя и заключал, что отсутствие опровергнуто собственным доказательством.
-
-    То же различение, что у кода пробы: имена — из вопроса, истина — из
-    исхода. Отзвук запроса уезжает за маркер; гейты истины его отрезают
-    (`core.verifier_utils.truth_excerpt`), гейт литералов по-прежнему видит,
-    что имя не выдумано. Находку не трогаем: там улика — сами строки.
+    An empty search result repeats the query by construction; the echo goes behind a marker that truth gates cut off (`core.verifier_utils.truth_excerpt`), while the literal gate still sees the name is not invented. Hits are left untouched.
     """
     match = _NO_MATCHES_RE.match(output.strip())
     if not match:
@@ -247,7 +195,7 @@ def _search_excerpt(output: str) -> str:
 
 
 def _page_body(text: str) -> str:
-    """Текст страницы без шапки `[find …]`: в шапке слова запроса, а не страницы."""
+    """Page text without the `[find ...]` header (the header holds query words, not page words)."""
     head, sep, rest = text.partition("\n")
     return rest if sep and head.startswith("[find ") and head.endswith("]") else text
 
@@ -294,42 +242,18 @@ def make_evidence(
     )
 
 
-# ---------------------------------------------------------------------------
-# Factory: (tool_name, output) -> Evidence
-# ---------------------------------------------------------------------------
 
-#: Потолок выдержки исхода опыта. Замер 2026-09-23 на 478 разборах
-#: `python_probe` из 120 свежих следов: при 520 знаках целиком помещались 77%
-#: исходов, при 2000 — 97%, а дальше каждый лишний процент стоил втрое
-#: дороже. Цена подъёма: +118 знаков на улику в среднем (медиана исхода 316,
-#: то есть обычный опыт не подорожал вовсе).
+#: Ceiling of the experiment outcome excerpt. Measured on 478 python_probe analyses: at 520 chars 77% of outcomes fit whole, at 2000 97%, beyond that each percent cost triple. Cost: +118 chars per evidence on average (median outcome 316).
 _PROBE_OUTCOME_CHARS = 2000
 
-#: Сколько знаков исхода отдать под сам вывод, оставив место заголовку.
+#: How many chars of outcome go to the output itself, leaving room for the header.
 _PROBE_STDOUT_BUDGET = 1500
 
 
 def _condense_probe_stdout(stdout: str, budget: int = _PROBE_STDOUT_BUDGET) -> str:
-    """Вывод опыта в пределах `budget`, СОХРАНЯЯ строки с числами.
+    """Probe stdout within `budget`, KEEPING lines with numbers.
 
-    Проверка утверждения требует, чтобы каждое названное число стояло в
-    выдержке улики дословно (`core.verifier_utils._excerpt_supports_figures`);
-    одно отсутствующее число делает непроверенным всё утверждение, а ворота
-    улик затем стирают ответ целиком.
-
-    Обрезка по голове теряла именно числа. Замер 2026-09-23 (478 разборов из
-    120 свежих следов): у 83 разборов (17%) выдержка теряла хотя бы одно
-    число, а когда теряла — теряла 16,4 числа из 28,4, то есть 58%. Худший
-    случай: 273 числа из 295. Расчёт печатает числа по всему выводу, а голова
-    занята подготовительными строками.
-
-    Поэтому строки с цифрами отбираются первыми, в исходном порядке, и только
-    остаток места отдаётся строкам без цифр. Выдержка становится СТРОЖЕ, а не
-    мягче: чисел для сверки в ней больше, чем было.
-
-    Опущенное называется вслух. Молчаливая обрезка — тот же дефект, что панель,
-    резавшая сообщения оператора на 4000 знаках: отсутствие числа в выдержке
-    становилось неотличимо от «числа не было никогда».
+    Claim checks need every named number verbatim in the excerpt (`core.verifier_utils._excerpt_supports_figures`); head truncation lost numbers. Lines with digits are taken first in original order, the rest of the space goes to the others. Omission is announced aloud, never silent.
     """
     text = stdout or ""
     if len(text) <= budget:
@@ -360,14 +284,9 @@ def _condense_probe_stdout(stdout: str, budget: int = _PROBE_STDOUT_BUDGET) -> s
 
 
 def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
-    """Улика эксперимента — его ИСХОД; код — вопрос, и в выдержку не входит.
-    См. docs/CODE_NOTES.md, «The experiment's question refuted its answer».
+    """Experiment evidence is its OUTCOME; the code is the question and stays out of the excerpt (see docs/CODE_NOTES.md).
 
-    Замер 2026-09-19 (одна задача пять раз подряд): верные «скрипт прочитал
-    data.csv, missing_inputs пуст, вывод не усечён» получали [claim-refuted] —
-    этих полей исхода в выдержке не было, и гейт литералов читал их как
-    выдуманные. Верный эпизод терял допуск в опыт. Оба списка файлов называют
-    только то, что в рабочей папке ЕСТЬ (`tools/python_probe.py`).
+    The outcome fields (missing_inputs, truncation) must be in the excerpt or the literal gate reads them as invented.
     """
     if not isinstance(output, dict):
         return None
@@ -383,12 +302,7 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
         f"stdout:\n{_condense_probe_stdout(str(output.get('stdout') or ''))}\n"
         f"stderr:\n{output.get('stderr') or ''}"
     )
-    # Имена — из вопроса, истина — из исхода. Живой прогон 2026-09-20: имена
-    # собственных переменных расчёта (`f_gw`, `k_bt`) объявлялись выдуманными,
-    # потому что в выдержке был только вывод. Код приложен ОТДЕЛЬНОЙ частью за
-    # маркером: гейт литералов видит, что имя существует, а гейты истины эту
-    # часть отрезают (`core.verifier_utils.truth_excerpt`) — иначе вопрос снова
-    # начал бы подтверждать собственный ответ.
+    # Names come from the question, truth from the outcome: the code is attached as a SEPARATE part behind a marker; the literal gate sees names exist, truth gates cut that part (`core.verifier_utils.truth_excerpt`) so the question never confirms its own answer.
     excerpt = _truncate(outcome, _PROBE_OUTCOME_CHARS)
     if code:
         excerpt += f"\n{QUESTION_CODE_MARKER}\n" + _truncate(code, 240)
@@ -401,11 +315,7 @@ def _python_probe_evidence(args: dict[str, Any], output: Any) -> Evidence | None
     )
 
 
-#: Тело страницы-заглушки: сервер ответил 200, а содержимым отдал ошибку, форму
-#: входа, капчу или объявление о продаже домена. Исторический класс H-01 —
-#: Ariane 501 (1996): отказавший блок выставил ДИАГНОСТИКУ на шину данных, и
-#: бортовой компьютер отработал по ней как по полётным данным. Отказ был
-#: честным; неотличимость диагностики от данных — нет.
+#: Body of a stub page: the server answered 200 but the content is an error, login form, captcha or domain-for-sale notice (historical class H-01: a diagnostic mistaken for data).
 _ERROR_PAGE_MARKERS: tuple[str, ...] = (
     "404 not found", "not found", "403 forbidden", "forbidden",
     "service unavailable", "internal server error", "bad gateway",
@@ -417,21 +327,13 @@ _ERROR_PAGE_MARKERS: tuple[str, ...] = (
     "войдите в систему", "включите javascript", "слишком много запросов",
 )
 
-#: Форма заглушки, а не её длина. Порог по одной длине оказался подгонкой:
-#: настоящая статья про soft-404 уложилась в 581 символ и была бы отвергнута.
-#: Различает их доля, которую маркер занимает в теле — у заглушки он и есть всё
-#: содержимое, у статьи это одно упоминание среди многих предложений. Поэтому
-#: два условия сразу: тело коротко И состоит из считанных предложений.
+#: The shape of a stub, not its length (a length threshold was fitting: a real article on soft-404 was 581 chars). What differs is the share the marker takes in the body; hence two conditions at once: the body is short AND made of counted sentences.
 _ERROR_PAGE_MAX_CHARS = 600
 _ERROR_PAGE_MAX_SENTENCES = 3
 _SENTENCE_BREAK = re.compile(r"[.!?" + chr(92) + "n]+")
 
 
-#: Проверка браузера вместо страницы (анти-бот). Веб-экзамен 2026-09-19, второй
-#: прогон, N09: PyPI на адрес пакета ответил 200 и телом «Client Challenge … A
-#: required part of this site couldn't load … disable any ad blockers» —
-#: 240 символов, но по переносам строк это шесть «предложений», и счётчик
-#: предложений заглушку пропускал. Такой маркер сам по себе — всё тело.
+#: Browser check instead of a page (anti-bot): such a marker is the whole body by itself, though a line-break sentence counter would let it pass.
 _INTERSTITIAL_MARKERS: tuple[str, ...] = (
     "client challenge", "a required part of this site couldn", "checking your browser",
     "verify you are human", "just a moment...", "attention required!",
@@ -439,7 +341,7 @@ _INTERSTITIAL_MARKERS: tuple[str, ...] = (
 
 
 def looks_like_error_page(text: str) -> bool:
-    """Является ли тело страницы служебной заглушкой, а не содержимым."""
+    """Whether the page body is a service stub, not content."""
     body = (text or "").strip()
     if not body or len(body) > _ERROR_PAGE_MAX_CHARS:
         return False
@@ -452,21 +354,17 @@ def looks_like_error_page(text: str) -> bool:
     return any(marker in lowered for marker in _ERROR_PAGE_MARKERS)
 
 
-#: Memory whose provenance makes it independent evidence: only a human's own
-#: assertion; the agent's auto-written record is a copy of what it already said.
+#: Memory whose provenance makes it independent evidence: only a human's own assertion; the agent's auto-written record is a copy of what it already said.
 _INDEPENDENT_MEMORY_ORIGINS: frozenset[str] = frozenset({"user-explicit"})
 
 
 def evidence_is_independent(ev: Any) -> bool:
     """May this evidence count as INDEPENDENT support (`verified`)? The one rule.
 
-    - the agent's own state/journals/drafts (`origin="agent-own"`) — never;
-    - the agent searching its memory (`memory_recall`) and persistent memory
-      records (`obtained_via="memory"`) — only when the origin is a human's;
-    - a working-memory artifact (a cached real tool observation) and every
-      other kind — yes.
-    Every verifier road asks THIS function (проверка 17.11): a rule kept per
-    road was bypassed by the roads it did not sit on.
+    - the agent's own state/journals/drafts (`origin="agent-own"`): never;
+    - memory recall (`memory_recall`) and persistent memory records (`obtained_via="memory"`): only when the origin is a human's;
+    - a cached real tool observation and every other kind: yes.
+    Every verifier road must ask THIS function; a per-road rule was bypassed.
     """
     if getattr(ev, "origin", None) == "agent-own":
         return False
@@ -481,11 +379,7 @@ def evidence_is_independent(ev: Any) -> bool:
 def _memory_recall_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     """The agent reading its own memory: independent only if EVERY record is a human's.
 
-    It used to fall through to the generic `tool_output` at 0.70, which the
-    verifier counts as independent — the agent confirmed itself by having
-    remembered (проверка 16.11, серьёзная №2; дефект 30.09). Kind stays
-    `tool_output` so the habitual `[tool:memory_recall]` citation resolves;
-    `_memory_citation_is_independent` judges the origin (obtained_via).
+    Kind stays `tool_output` so the `[tool:memory_recall]` citation resolves; `_memory_citation_is_independent` judges the origin.
     """
     if not isinstance(output, dict):
         return None
@@ -504,19 +398,17 @@ def _memory_recall_evidence(args: dict[str, Any], output: Any) -> Evidence | Non
     )
 
 
-#: Workspace folders that hold what the agent wrote ITSELF (state, journals,
-#: drafts, generated docs). By folder only, relative to the workspace: a user's
-#: `build/server.log` or `dataset.jsonl` elsewhere stays ordinary evidence.
+#: Workspace folders holding what the agent wrote ITSELF (state, journals, drafts, generated docs). By folder only, relative to the workspace: a user's `build/server.log` elsewhere stays ordinary evidence.
 _OWN_STATE_DIRS = ("data/", "logs/", "proposals/", "knowledge/generated/")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-#: Other installs of THIS repo (Ubuntu, unpacked archive); a foreign `…/agent/data/` is not ours.
+#: Other installs of THIS repo (Ubuntu, unpacked archive); a foreign `.../agent/data/` is not ours.
 _INSTALL_ROOTS = ("/opt/agent",)
 _ARCHIVE_DIR = "/agent-main/"
 _ABSOLUTE_RE = re.compile(r"^(/|[a-z]:/)")
 
 
 def _norm_path(path: Any) -> str:
-    """Slashes, `.` and `..` resolved, case folded: `DOCS\\..\\Data` -> `data`."""
+    """Slashes, `.` and `..` resolved, case folded: `DOCS\..\Data` -> `data`."""
     text = str(path or "").strip().strip("'\"`").replace("\\", "/")
     return posixpath.normpath(text).casefold() if text else ""
 
@@ -554,8 +446,7 @@ def _is_own_state_path(path: Any) -> bool:
 
 
 _SHELL_TOKEN_RE = re.compile(r"[\s;|&<>()=,]+")
-#: A word the shell expands (glob, variable, substitution) or the whole workspace
-#: may reach own state without naming it: `cat d*/x`, `grep -r foo .` (18.11).
+#: A word the shell expands (glob, variable, substitution) or the whole workspace may reach own state without naming it: `cat d*/x`, `grep -r foo .`.
 _SHELL_OPAQUE_RE = re.compile(r"[*?\[{$`]")
 _SHELL_WHOLE_TREE = frozenset({".", "./", "*"})
 
@@ -592,10 +483,7 @@ def _search_touches_own_state(path: Any, output: str) -> bool:
 def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
     """Evidence for a `file_read` result, whole file or a line window.
 
-    A windowed read is its own source, named exactly as the plan step labels
-    it (`file:<path>:a-b`, core/step_sanitizer.py). Measured 2026-09-05 (exam
-    turn 33): the synthesizer cited the step's label, the chain knew only
-    `file:<path>`, and six correct citations were judged fabricated.
+    A windowed read is its own source, named as the plan step labels it (`file:<path>:a-b`, core/step_sanitizer.py), or correct citations of the label are judged fabricated.
     """
     if not isinstance(output, str) or not output:
         return None
@@ -606,13 +494,9 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
         window = f":{start}-{end}"
     from core.redaction import redact_text
 
-    # Одна маскировка на выдержку и на полный текст: сверка не видит больше, чем выдержка.
+    # One masking for the excerpt and the full text: the cross-check sees no more than the excerpt.
     output = redact_text(output)[0]
-    # The agent's own state, journals and drafts (data/, logs/, proposals/, …)
-    # are a record of itself, not the world. The kind stays `file` so an honest
-    # `[file:data/…]` citation still resolves; the origin `agent-own` tells the
-    # verifier it is not INDEPENDENT support (проверка 16.11, серьёзная №3;
-    # дефект 30.09).
+    # The agent's own state, journals and drafts are a record of itself, not the world. Kind stays `file` so `[file:data/...]` citations resolve; origin `agent-own` marks it as not INDEPENDENT support.
     own = _is_own_state_path(path)
     return make_evidence(
         kind="file",
@@ -627,18 +511,10 @@ def _file_read_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
 
 
 def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
-    """Улика из convert_file: распознанный текст, иначе путь к файлу-результату.
-
-    Написано агентом 24.09 (задача 4, два свидетеля): запасная ветка давала
-    tool_output из repr(output) без пути исходного файла.
-    """
+    """Evidence from convert_file: recognised text, else the path of the result file."""
     if not isinstance(output, dict):
         return None
-    # source_id = метка шага = «file:<исходный файл>» (tools/convert_file.sanitize_args),
-    # как у file_read: писатель ответа цитирует метку, проверка находит улику по
-    # пути. Вида ссылки «convert_file» проверщик не знает (CITATION_PREFIXES):
-    # 24.09 с меткой «convert_file:…» писатель цитировал листинг папки, и верные
-    # числа из Word получили «опровергнуто».
+    # source_id = step label = "file:<source file>" (tools/convert_file.sanitize_args), as for file_read; the verifier does not know a "convert_file" citation kind (CITATION_PREFIXES).
     source_id = f"file:{str(args.get('path', 'unknown'))[:120]}"
     text = output.get("text", "")
     if text:
@@ -653,21 +529,20 @@ def _convert_file_evidence(args: dict[str, Any], output: Any) -> Evidence | None
 
 
 def _file_write_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
-    """Улика о выполненной записи: путь, режим, байты и что было передано на запись."""
+    """Evidence of a performed write: path, mode, bytes and what was passed to write."""
     if not isinstance(output, dict):
         return None
     path = str(output.get("path") or args.get("path") or "")[:120]
     written = output.get("bytes_written")
     if not path or not isinstance(written, int):
         return None
-    # Свидетель — прогон инструмента, не слова модели: без этой улики верному
-    # «файл создан» не на что сослаться, и черновик отзывался как выдумка.
+    # The witness is the tool run, not the model's words: without it a true "file created" has nothing to cite.
     receipt = f"file_write success path={path} mode={output.get('mode') or ''} bytes_written={written}"
     if output.get("backup_path"):
         receipt += f" backup_path={output['backup_path']}"
     excerpt = receipt
     content = args.get("content")
-    # Переданный текст называется, только если с ним сошёлся счёт байтов инструмента.
+    # The passed text is named only if it matches the tool's byte count.
     if isinstance(content, str) and len(content.encode("utf-8")) == written:
         from core.redaction import redact_payload
 
@@ -677,12 +552,9 @@ def _file_write_evidence(args: dict[str, Any], output: Any) -> Evidence | None:
 
 
 def _flagged_string_evidence(tool_name: str, args: dict[str, Any], output: Any) -> Evidence | None:
-    """Улика из вывода, который сканер пометил и превратил в строку-обёртку.
+    """Evidence from output the scanner flagged and turned into a wrapper string.
 
-    У инструментов без конверта (`_UNTRUSTED_OUTPUT_FIELDS`) пометка делает
-    из словаря строку, и ветки ниже молча роняли улику. Теперь улика остаётся,
-    выдержка — вся обёртка с предупреждением: дальше её предложения идут как
-    `suspect` (проверка 16.11, средняя).
+    For tools without an envelope (`_UNTRUSTED_OUTPUT_FIELDS`) the flag turns a dict into a string; the evidence is kept, the excerpt is the whole wrapper with the warning, so its sentences count as `suspect`.
     """
     if not isinstance(output, str) or not carries_suspicious_annotation(output):
         return None
@@ -694,8 +566,7 @@ def _flagged_string_evidence(tool_name: str, args: dict[str, Any], output: Any) 
         kind, source_id, conf, origin = "diff_preview", f"diff_preview:{args.get('path', '<unknown>')}", None, None
     elif tool_name == "rss_fetch":
         kind, source_id, conf, origin = "web_page", f"web_page:{args.get('url', '<unknown>')}", 0.68, None
-    # Те же kind/source_id, что у чистых веток, чтобы ссылки находили улику
-    # (проверка 17.11, средняя).
+    # Same kind/source_id as the clean branches so citations find the evidence.
     elif tool_name == "web_search":
         kind, source_id, conf, origin = "web_search_hit", f"web_search:{args.get('query', '<unknown>')}", None, None
     elif tool_name == "convert_file":
@@ -706,7 +577,7 @@ def _flagged_string_evidence(tool_name: str, args: dict[str, Any], output: Any) 
             return None
         kind, source_id, conf, origin = "tool_output", f"tool_output:file_write:{path}", None, None
     elif tool_name == "memory_recall":
-        # Чьи записи — не узнать из обёртки; значит, не человека.
+        # Whose records these are cannot be known from the wrapper, so not a human's.
         kind, source_id = "tool_output", "tool_output:memory_recall"
         conf, origin = DEFAULT_CONFIDENCE["memory"], "agent-auto"
     else:
@@ -729,9 +600,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     output: Any,
     status: str = "success",
 ) -> Evidence | None:
-    """Типизированная улика из выдачи инструмента, либо None (ошибка/пустота/
-    инструмент-действие — не источник). Кривой output не роняет цикл.
-    """
+    """Typed evidence from a tool output, or None (error/empty/action tool is not a source). Bad output never crashes the cycle."""
     if status != "success":
         return None
     if not isinstance(tool_name, str) or not tool_name:
@@ -743,29 +612,22 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     if flagged is not None:
         return flagged
 
-    # ---- python_probe (лаборатория) --------------------------------------
     if tool_name == "python_probe":
         return _python_probe_evidence(args, output)
 
-    # ---- file_read --------------------------------------------------------
     if tool_name == "file_read":
         return _file_read_evidence(args, output)
     if tool_name == "convert_file":
         return _convert_file_evidence(args, output)
 
-    # ---- web_search -------------------------------------------------------
     if tool_name == "web_search":
         if not isinstance(output, list):
             return None
         if not output:
-            # An empty search is not evidence — it's a failure mode the
-            # ReplanPolicy will pick up as `web_empty`. Returning None
-            # here keeps the two systems in sync.
+            # An empty search is not evidence; ReplanPolicy picks it up as `web_empty`.
             return None
         query = str(args.get("query", "<unknown>"))
-        # Excerpt = each hit's title + url, concatenated. The Verifier
-        # never trusts a snippet — but the listing is useful for "we
-        # looked, here's what we saw" provenance.
+        # Excerpt = each hit's title + url; snippets are never trusted, but the listing is useful provenance.
         lines: list[str] = []
         for hit in output[:10]:
             if not isinstance(hit, dict):
@@ -785,7 +647,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             source_text="\n".join(lines),
         )
 
-    # ---- web_fetch (MVP-14.2) --------------------------------------------
     if tool_name == "web_fetch":
         if not isinstance(output, dict):
             return None
@@ -793,8 +654,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         text = output.get("text", "")
         if not isinstance(text, str) or not text:
             return None
-        # H-01: страница-ошибка не источник ни для какого утверждения; отсекается
-        # здесь, у производителя улик, а не вторым судьёй рядом с верификатором.
+        # An error page is no source for any claim; cut here at the evidence producer, not by a second judge beside the verifier.
         if looks_like_error_page(text) and output.get("not_found") is not True:  # 404: verifier_absence
             return None
         ch = output.get("content_hash")
@@ -807,10 +667,9 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             fetched_at=output.get("fetched_at"),
             source_text=_page_body(text),
         )
-        # Хэш инструмента покрывает всю страницу, а не выдержку.
+        # The tool's hash covers the whole page, not the excerpt.
         return replace(ev, content_hash=ch) if isinstance(ch, str) and ch else ev
 
-    # ---- rss_fetch --------------------------------------------------------
     if tool_name == "rss_fetch":
         if not isinstance(output, dict):
             return None
@@ -853,7 +712,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             )
         return ev
 
-    # ---- run_tests --------------------------------------------------------
     if tool_name == "run_tests":
         if not isinstance(output, dict):
             return None
@@ -865,15 +723,8 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             f"timed_out={timed_out}" if timed_out
             else f"passed={passed}, failed={failed}, errors={errors}"
         )
-        # Build a citation-friendly source_id that includes BOTH the tool
-        # name the LLM uses in its plans (`run_tests`) AND the literal
-        # test target paths it asked for. The full argv (e.g. the
-        # absolute `python.exe` path on Windows) is too noisy for
-        # citation matching — the LLM cites things like `[test:pytest]`
-        # or `[test:tests/bug_lab]`, not the full python path.
-        #
-        # Shape:  test_result:run_tests:pytest:<paths-comma-joined>
-        # Example: test_result:run_tests:pytest:tests/bug_lab,tests/core
+        # Citation-friendly source_id with the plan's tool name and the requested test paths (not the full argv).
+        # Shape: test_result:run_tests:pytest:<paths-comma-joined>
         paths = args.get("paths")
         if isinstance(paths, list) and paths:
             target = ",".join(str(p) for p in paths)[:60]
@@ -890,7 +741,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             excerpt=str(output.get("stdout_tail", ""))[:MAX_EXCERPT_CHARS],
         )
 
-    # ---- read_logs --------------------------------------------------------
     if tool_name == "read_logs":
         if not isinstance(output, dict):
             return None
@@ -899,10 +749,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
         if not isinstance(events, list):
             return None
         if not events:
-            # Empty logs CAN still be informative ("nothing went wrong
-            # in window X") — but they're weak evidence. We surface them
-            # as a low-confidence record so the planner can still cite
-            # the read.
+            # Empty logs can still inform ("nothing went wrong in window X") but are weak: a low-confidence record.
             return make_evidence(
                 kind="log_event",
                 source_id=f"log_event:{trace}:empty",
@@ -911,8 +758,7 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
                 excerpt="",
                 confidence=0.30,
             )
-        # Содержимое события, не только имя: «error: <ts>» выбрасывало payload и
-        # гейт (c) опровергал верные пересказы (docs/CODE_NOTES.md). Объём — make_evidence.
+        # Event content, not only its name (a bare "error: <ts>" dropped the payload). Volume is bounded in make_evidence.
         excerpt_lines: list[str] = []
         for ev in events[:20]:
             if not isinstance(ev, dict):
@@ -929,7 +775,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             excerpt="\n".join(excerpt_lines),
         )
 
-    # ---- shell_exec -------------------------------------------------------
     if tool_name == "shell_exec":
         if not isinstance(output, dict):
             return None
@@ -944,21 +789,14 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             (stdout if isinstance(stdout, str) else "") + "\n"
             + (stderr if isinstance(stderr, str) else "")
         ).strip()
-        # Source_id includes the tool name (`shell_exec`) AND the
-        # basename of argv[0] (the program the LLM actually thinks
-        # about: `python`, `git`, `pytest`, ...) so substring matches
-        # for typical citations like `[shell:python]` or
-        # `[shell:git]` succeed. The remainder of the command line
-        # (truncated) is preserved for forensic context.
+        # source_id includes the tool name and the basename of argv[0] so citations like `[shell:python]` match.
         # Shape: shell_output:shell_exec:<argv0_basename>:<short_cmd>
         first_arg = ""
         if isinstance(argv, list) and argv:
             first = str(argv[0])
-            # Strip drive letters / directory parts — keep the bare
-            # program name. Works on both POSIX and Windows paths.
+            # Strip drive letters / directory parts (POSIX and Windows).
             first_arg = first.replace("\\", "/").rsplit("/", 1)[-1]
-            # Drop trailing `.exe` so `[shell:python]` matches
-            # `python.exe` on Windows.
+            # Drop trailing `.exe` so `[shell:python]` matches `python.exe`.
             if first_arg.lower().endswith(".exe"):
                 first_arg = first_arg[:-4]
         first_arg = first_arg or "cmd"
@@ -975,7 +813,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             excerpt=excerpt or "<no output>",
         )
 
-    # ---- diff_file --------------------------------------------------------
     if tool_name == "diff_file":
         if not isinstance(output, dict):
             return None
@@ -991,11 +828,9 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             excerpt=str(diff) if isinstance(diff, str) else "",
         )
 
-    # ---- file_write -------------------------------------------------------
     if tool_name == "file_write":
         return _file_write_evidence(args, output)
 
-    # ---- list_dir ---------------------------------------------------------
     if tool_name == "list_dir":
         if not isinstance(output, str) or not output:
             return None
@@ -1009,8 +844,6 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
             excerpt=output,
         )
 
-    # ---- find_in_files ----------------------------------------------------
-    # Выдача поиска — строки файлов с адресами; цитируется [tool:find_in_files].
     if tool_name == "find_in_files":
         if not isinstance(output, str) or not output:
             return None
@@ -1027,17 +860,11 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     if tool_name == "memory_recall":
         return _memory_recall_evidence(args, output)
 
-    # ---- unknown tool fallback -------------------------------------------
-    # Emit a generic tool_output evidence so the chain doesn't lose track
-    # of what happened. Confidence is conservative; the Verifier will
-    # treat this as weak.
+    # Generic tool_output evidence so the chain does not lose track; confidence is conservative.
     try:
         excerpt = repr(output)
     except Exception:  # noqa: BLE001 — reason stated above
-        # Silence is the whole point: this IS the failure report. A tool whose
-        # `__repr__` raises still produced output worth an evidence record, and
-        # the placeholder says so in the text a reader sees. Journaling it
-        # would add an event about a string, not about a defect.
+        # No journaling here: this IS the failure report; the placeholder says so in the text a reader sees.
         excerpt = "<unserialisable tool output>"
     if not excerpt or excerpt in ("None", "''"):
         return None
@@ -1050,12 +877,9 @@ def evidence_from_tool_result(  # noqa: PLR0911, PLR0912, PLR0915 — flat: dept
     )
 
 
-# ---------------------------------------------------------------------------
-# Convenience constructors for non-tool sources
-# ---------------------------------------------------------------------------
 
 def evidence_from_user_directive(*, directive: str, request_id: str) -> Evidence:
-    """User said something explicitly — the strongest source we have."""
+    """User said something explicitly: the strongest source."""
     return make_evidence(
         kind="user_explicit",
         source_id=f"user_explicit:{request_id}",
@@ -1083,20 +907,14 @@ def evidence_from_memory_record(
         claim=f"Memory record {record_id}" + (f" (source={source})" if source else ""),
         excerpt=content,
         confidence=conf,
-        # Structured copy of the same fact the claim states in prose, so the
-        # verifier can weigh provenance without parsing the sentence.
+        # Structured copy of the fact so the verifier can weigh provenance without parsing the sentence.
         origin=source,
         fetched_at=created_at,
     )
 
 
 def evidence_from_sensor_block(*, name: str, content: str) -> Evidence:
-    """A block the loop itself injected from its own sensors (the model
-    roster, the spend mirror). Exam 2026-09-04, turn 3: the answerer read
-    fifteen facts off `<model_roster>` and the verifier classed every one as
-    «user asserted», so the low-evidence gate suppressed the whole answer —
-    a fact the loop measured was not evidence to the loop. Now it is, under
-    its own citation `[sensor:<name>]`, with the loop as origin."""
+    """A block the loop injected from its own sensors (model roster, spend mirror), cited as `[sensor:<name>]` with the loop as origin."""
     return make_evidence(
         kind="sensor",
         source_id=f"sensor:{name}",
@@ -1115,14 +933,9 @@ def evidence_from_prior_turn(
     question: str,
     answer: str,
 ) -> Evidence:
-    """One earlier turn of THIS session, verbatim (issue #119).
+    """One earlier turn of THIS session, verbatim.
 
-    This is a recording, not a recollection: the excerpt is the text the
-    operator sent and the text the agent replied. It is admitted so that a
-    conversational-correction turn can support statements about the preceding
-    exchange. The verifier scopes it deliberately — a claim resolved against
-    this evidence becomes ``dialogue_supported``, never ``verified``, and only
-    when the claim is itself about the dialogue.
+    A recording, admitted so a conversational-correction turn can support statements about the preceding exchange. A claim resolved against it becomes ``dialogue_supported``, never ``verified``, and only when the claim is itself about the dialogue.
     """
     body = (
         f"user asked: {question.strip()}\n"

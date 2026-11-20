@@ -5,24 +5,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-#: A token that could be a repository path. Deliberately loose — it only
-#: proposes candidates, and existence on disk is what decides.
-#: Отрезки ограничены по длине НАРОЧНО (F-8 в docs/audit/FIELD_CHECK_QUEUE.md).
-#: Без предела выражение растёт квадратично на одном непрерывном прогоне
-#: словесных знаков: замер 2026-08-25 — 4,7 мс на 801 знаке, 18,3 на 1601,
-#: 73,3 на 3201, 293,9 на 6401, то есть учетверение на каждое удвоение. Взрыв
-#: даёт не длина текста (92 КБ обычного английского — 5,8 мс) и не base64 (в ней
-#: есть `/`), а именно длинный прогон без разделителя: каждая стартовая позиция
-#: набирает хвост и откатывается, не найдя ни `/`, ни расширения.
-#:
-#: Опереться на чужой предел здесь нельзя. Класс проходили как H-10, и там
-#: защитой служит `MAX_EXCERPT_CHARS`, названный в той же записи ПОБОЧНЫМ —
-#: заведён ради памяти, а не ради стоимости разбора. К тому же он сюда не
-#: достаёт: `names_workspace_path(focus)` в `reflection` получает текст
-#: целиком, без усечения.
-#:
-#: 120 знаков на отрезок и 40 отрезков — с большим запасом над любым рабочим
-#: адресом (весь путь в Windows ограничен 260 знаками).
+#: A token that could be a repository path; deliberately loose (existence on disk decides). Segment lengths are bounded ON PURPOSE
+#: (120 chars, 40 segments): unbounded, the expression is quadratic on a long run of word characters without separators.
 _PATH_TOKEN_RE = re.compile(
     r"[A-Za-z0-9_.\-]{1,120}(?:/[A-Za-z0-9_.\-]{1,120}){1,40}"
     r"|[A-Za-z0-9_\-]{1,120}\.[A-Za-z0-9]{1,5}"

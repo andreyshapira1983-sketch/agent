@@ -1,16 +1,4 @@
-"""Data carried between the autonomous runtime and its callers.
-
-Cut out of `core/autonomous_runtime.py` on 2026-08-22, on the operator's
-reasoning: a file too large to read through produces mistakes — his, mine, and
-the agent's own when it reads its own source. The orchestrator class alone was
-1251 lines of a 1668-line file whose recorded aspiration is 1150; these six
-carriers sat beside it for no reason but history. `core/campaign_types.py` is
-the pattern this follows.
-
-Moved verbatim by AST line-span, never retyped, so no body could drift during
-the move. `core/autonomous_runtime` re-exports every name, so existing imports
-keep working — this is a relocation, not an interface change.
-"""
+"""Data carried between the autonomous runtime and its callers; `core/autonomous_runtime` re-exports every name."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,57 +8,36 @@ from core.budget_governor import BudgetLimits
 from core.circuit_breaker import CircuitBreakerConfig
 from core.reflection import ReflectionConfig
 
-#: Statuses and kinds these carriers speak in. Moved with them: a report whose
-#: vocabulary lives in another module is half a definition.
+#: Statuses and kinds these carriers speak in.
 AutonomousRunStatus = Literal["completed", "stopped", "blocked"]
 AutonomousTaskKind = Literal["status", "learn", "tests", "goal", "propose"]
 AutonomousTaskStatus = Literal["pending", "done", "failed", "skipped", "inconclusive", "clarify"]
 
 
-#: `kw_only` не украшение. Ревизия PR #333: `success_check` встал ВТОРЫМ
-#: полем, и любой позиционный вызывающий с этого дня молча получал
-#: критерий успеха там, где передавал что-то другое. Порядок полей у
-#: растущей настройки — не договор, и притворяться договором он не
-#: должен: пусть ошибка будет громкой, а не тихой.
+#: `kw_only`: field order of a growing config is not a contract; positional misuse must fail loudly.
 @dataclass(frozen=True, kw_only=True)
 class AutonomousRuntimeConfig:
     goal: str = "project health"
-    #: Критерий успеха ЭТОЙ цели — дословно тот, с которым её выбрала хартия.
-    #: До аудита автономности 2026-09-17 поля не существовало: критерий
-    #: обязателен при выборе цели и умирал в месте выбора, а исполнение
-    #: судилось по непустому ответу модели. См. core/success_check.py.
+    #: Success criterion of THIS goal, verbatim as the charter chose it (see core/success_check.py).
     goal_success_check: str = ""
     dry_run: bool = True
     effects_approved: bool = False
-    #: Узкая разблокировка целевого пути (пересекается с _UNBLOCKABLE_TOOLS).
+    #: Narrow unblocking of the goal path (intersects _UNBLOCKABLE_TOOLS).
     unblock_tools: frozenset[str] = frozenset()
     limit: int = 5
     include_tests: bool = True
     include_goal: bool = False
     learning_limit: int = 5
-    #: May an unattended run write what it learned into long-term memory?
-    #: OFF by default; until 2026-08-05 `auto_write_memory=False` was
-    #: hardcoded at both learning call sites and the operator could not say
-    #: yes at all. Turning it on does not open the door: both sites also
-    #: pass `require_verified=True`, so a claim enters memory only when a
-    #: SECOND source corroborated it. Measured — a single `.md` or web page
-    #: is otherwise saved at confidence 0.90 and nobody is watching an
-    #: overnight run. (Code sources were already refused by
-    #: `KnowledgeWritePolicy`: programs do not assert facts.)
+    #: May an unattended run write what it learned into long-term memory? OFF by default; both learning sites also pass `require_verified=True` (a second source must corroborate).
     learning_writes_memory: bool = False
     budgets: BudgetLimits = field(default_factory=BudgetLimits)
     circuit: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
-    # Run ReflectionEngine after the health pass to persist lessons from logs.
+    # run ReflectionEngine after the health pass to persist lessons from logs
     enable_reflection: bool = True
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
-    # After the health pass, autonomously PROPOSE (never apply) at most one
-    # low-risk self-build split into the approval inbox. Applying stays behind
-    # the human :self-apply-run gate, so this only ever creates a pending item
-    # for review. Skipped during dry runs (no real approval artifacts).
+    # after the health pass, PROPOSE (never apply) at most one low-risk self-build split into the approval inbox; skipped in dry runs
     enable_self_build: bool = True
-    # When True, append a 'propose' task that asks the LLM for 1-3 bounded
-    # task ideas and writes them to the approval inbox WITHOUT executing
-    # any of them. Off by default — proposals are an opt-in autonomy feature.
+    # append a 'propose' task asking the LLM for 1-3 bounded task ideas, written to the approval inbox without executing; opt-in
     include_proposals: bool = False
 
 
@@ -126,13 +93,7 @@ class AutonomousRunReport:
         }
 
     def for_log(self) -> dict:
-        """`to_dict` для журнала: ящик одобрений — описью, без тел заявок.
-
-        Прогон «цель первой» 2026-09-19: каждый заход на цель писал в трассу
-        весь ящик вместе с содержимым файлов заявок (текст и base64) — ~2 МБ
-        на событие, 8,4 из 9,5 МБ трассы за шесть минут; панель эфира,
-        читающая хвост трассы, ослепла. Сам отчёт не меняется.
-        """
+        """`to_dict` for the log: the approval inbox as an inventory, without request bodies (keeps the trace small)."""
         out = self.to_dict()
         approvals = dict(out.get("approvals") or {})
         approvals["items"] = [
@@ -143,30 +104,22 @@ class AutonomousRunReport:
         return out
 
     def attempted(self) -> bool:
-        """Была ли ПОПЫТКА: что-то началось или что-то потрачено.
+        """Whether an ATTEMPT happened: something started or something was spent.
 
-        Ключ сжигания одноразового «да» (MIR-117, слово оператора 2026-08-27):
-        одобрение сгорает попыткой, но отказ до старта — задачи skipped/failed
-        при нуле трат — попыткой не является, и грант остаётся жить.
+        Burn key of the one-shot approval: an attempt burns it, a refusal before start (skipped/failed at zero spend) does not.
         """
         if any(t.status in ("done", "clarify", "inconclusive") for t in self.tasks):
             return True
         used = self.budget.get("used", {}) if isinstance(self.budget, dict) else {}
         return int(used.get("llm_calls") or 0) > 0 or int(used.get("web_fetches") or 0) > 0
 
-    #: Задачи, чьё «done» — не работа: служебная проба состояния и учебный
-    #: проход. Аудит 2026-09-03 (A1): очередь КАЖДОГО прогона начинается с
-    #: `status`, она всегда done, и любой прогон — даже с одним встречным
-    #: вопросом — читался как «работа была».
+    #: Tasks whose "done" is not work: the state probe and the learning pass.
     _NOT_WORK_KINDS = frozenset({"status", "learn"})
 
     def semantic_result(self) -> tuple[str, bool]:
-        """(result, work_done) — исход, а не жизненный цикл (MIR-117, норма A).
+        """(result, work_done): the outcome, not the lifecycle.
 
-        ``status='completed'`` чеканится по «дочерпали», и прогон, чью
-        единственную задачу отверг ценовой конверт, носил его как достижение.
-        Здесь слово следует за работой: сделана = хотя бы одна РАБОЧАЯ задача
-        ``done`` (цель, предложение, тесты) — не проба состояния.
+        work_done = at least one WORK task (goal, proposal, tests) is ``done``, not the state probe.
         """
         work = any(
             t.status == "done"
@@ -223,21 +176,17 @@ class AutonomousQueuedTaskReport:
 
 @dataclass
 class AutonomousQueueRunReport:
-    """Two facts, deliberately not merged (MIR-117; norm A, ratified 2026-08-22).
+    """Two facts, deliberately not merged.
 
-    ``status`` is the QUEUE lifecycle: ``completed`` means tasks were PROCESSED,
-    which a failed task also satisfies. Kept as-is — the field is read across
-    the codebase. The ``work_*``/``*_count`` members answer what nothing could
-    ask before: did any of it actually work, derived from the per-task statuses
-    already held. Forcing case: a campaign whose only task was refused on budget
-    still recorded ``completed`` and counted a useful cycle.
+    ``status`` is the QUEUE lifecycle (``completed`` = tasks were processed, a failed task also satisfies it; kept as-is, read across the codebase).
+    The ``work_*``/``*_count`` members say whether any of it actually worked, derived from the per-task statuses.
     """
 
     status: str
     processed: list[AutonomousQueuedTaskReport]
     stop_reason: str = ""
 
-    #: Only `done` is work performed; `blocked` rests awaiting a human (MIR-039).
+    #: Only `done` is work performed; `blocked` rests awaiting a human.
     _SUCCESS_STATUSES = frozenset({"done"})
 
     @property
@@ -261,10 +210,7 @@ class AutonomousQueueRunReport:
     def semantic_result(self) -> tuple[str, bool]:
         """(result, work_done) for consumers that mean OUTCOME, not lifecycle.
 
-        MIR-117: the campaign cycle copied ``status`` verbatim, so a run whose
-        only task was refused pre-flight recorded ``completed``. Here the word
-        follows the work: hollow ``completed`` becomes ``failed``; a stopped
-        run that achieved something still admits the work happened.
+        A hollow ``completed`` becomes ``failed``; a stopped run that achieved something still admits the work happened.
         """
         if self.status == "stopped":
             return "stopped", self.work_succeeded

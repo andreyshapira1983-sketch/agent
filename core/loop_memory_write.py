@@ -1,7 +1,6 @@
-"""Запись памяти циклом — и право на неё.
+"""Loop-side memory writing and the permission for it.
 
-Право проверяется здесь, а не в модуле чтения: выборка не должна иметь
-возможности разрешить себе запись.
+The permission is checked here, not in the read module: a selection must not be able to authorise its own write.
 """
 from __future__ import annotations
 
@@ -18,12 +17,11 @@ from core.smart_memory import (
     resolve_used_procedures,
 )
 
-# Every durable sink the loop can write. A name outside this set is refused,
-# so a typo or an unregistered sink fails closed.
+# Every durable sink the loop can write; a name outside this set is refused, so a typo or unregistered sink fails closed.
 KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
     "episode",          # episodic_store.save
     "procedure",        # procedural_store.upsert_from_episode
-    "consolidation",    # retired (MIR-044): no write site names it;
+    "consolidation",  # retired: no write site names it;
                         # kept so an old config naming it still validates
     "knowledge",        # knowledge pipeline auto-write / remember batch
     "source_registry",  # source_registry_store
@@ -35,38 +33,33 @@ KNOWN_DURABLE_SINKS: frozenset[str] = frozenset({
 
 
 class AgentLoopMemoryWrite:
-    """Долговременная запись и право на неё; члены под TYPE_CHECKING — контракт хоста."""
+    """Durable writing and the right to it; members under TYPE_CHECKING are the host contract."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         persistent_store: Any
         episodic_store: Any
         procedural_store: Any
         consolidation_store: Any
         write_policy: Any
-        # Из `loop_sensor`.
+        # From `loop_sensor`.
         _sensor_failed: Any
         _file_read_workspace_root: Any
-        # Из `loop_verification`.
+        # From `loop_verification`.
         last_confidence_vector: Any
-        # None — хранилище не заведено.
+        # None: store not set up.
         causal_store: Any
-        # Из `loop_memory_commands`: вывод эпизода идёт той же дорогой, что `:remember`.
+        # From `loop_memory_commands`: the episode conclusion goes the same road as `:remember`.
         remember: Any
 
     def _unattended_run(self) -> bool:
-        """True when nobody is at the keyboard for this run (`gateway_path` is not `repl`).
-
-        Decided here, per run, so every write site gets the same answer.
-        """
+        """True when nobody is at the keyboard for this run (`gateway_path` is not `repl`); decided per run so every write site agrees."""
         return str(getattr(self, "gateway_path", "repl")) != "repl"
 
     def _durable_learning_suppressed(self, sink: str | None = None) -> bool:
         """True when a durable learning write must be skipped.
 
-        First match wins: audit read-only, dry run, unknown sink (logged —
-        checked before the allowlist so a typo is refused on every profile),
-        no allowlist (allow), then the allowlist.
+        First match wins: audit read-only, dry run, unknown sink (checked before the allowlist so a typo is refused on every profile), no allowlist (allow), then the allowlist.
         """
         if bool(getattr(self, "audit_read_only", False)):
             return True
@@ -111,10 +104,7 @@ class AgentLoopMemoryWrite:
         return self.audit_read_only
 
     def _log_causal_observation(self, episode: Any) -> None:
-        """Наблюдаемая аномалия — в журнал и causal_store; причину и урок отсюда не выводим.
-
-        Причину из сигнала вывести нельзя, поэтому тег `lesson` здесь не появляется.
-        """
+        """Observable anomaly to the journal and causal_store; no cause or lesson is derived here (a cause cannot be inferred from a signal, so no `lesson` tag)."""
         try:
             from core.causal_lesson import observation_from_episode
             candidate = observation_from_episode(
@@ -123,14 +113,14 @@ class AgentLoopMemoryWrite:
             if candidate is None:
                 return
             payload = candidate.to_log_payload()
-            # Повтор схлопывается по отпечатку; `occurrences` отличает дефект от случайности.
+            # A repeat merges by fingerprint; `occurrences` tells a defect from chance.
             store = getattr(self, "causal_store", None)
             if store is not None and not self._durable_learning_suppressed("episode"):
                 rec = store.record(candidate)
                 payload["fingerprint"] = rec.fingerprint
                 payload["occurrences"] = rec.occurrences
             self.log.log("causal_observation", payload)
-        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой в журнал
+        except Exception as exc:  # noqa: BLE001 — observing sensor: failure goes to the journal
             self._sensor_failed("causal_observation", exc)
 
     def _computed_receipt(self, question: str, answer: str, tools_used: list[str], chunks: int) -> list[str]:
@@ -169,7 +159,7 @@ class AgentLoopMemoryWrite:
         may_episode = not self._durable_learning_suppressed("episode")
         may_procedure = not self._durable_learning_suppressed("procedure")
         if may_episode:
-            learn_after_turn(self)  # карточки прошлых ошибок (core/failure_cards.py)
+            learn_after_turn(self)  # cards of past errors (core/failure_cards.py)
         if not (may_episode or may_procedure):
             self.log.log(
                 "durable_learning_writes_skipped",
@@ -202,26 +192,23 @@ class AgentLoopMemoryWrite:
                 verified_chunks=verified_chunks + len(receipt),
                 unverified_chunks=unverified_chunks,
                 weak_chunks=weak_chunks,
-                # Тот же вектор, что печатает предупреждение оператору.
+                # Same vector that prints the operator warning.
                 relevance_score=getattr(
                     self.last_confidence_vector, "relevance_score", None),
                 replan_exhausted=replan_exhausted,
                 run_id=run.run_id if run else "",
                 task_id=(run.task_id or "") if run else "",
-                # Сшивает эпизод с продуктовым исходом того же прогона (MIR-184).
+                # Stitches the episode to the product outcome of the same run.
                 trace_id=str(getattr(self.log, "trace_id", "") or ""),
                 usage_eligible=None,   # resolved by `admit_for_storage` below
-                # Attributed by what actually executed, never by workflow_key,
-                # which pools unrelated goals (MIR-050).
+                # Attributed by what actually executed, never by workflow_key, which pools unrelated goals.
                 used_procedure_ids=resolve_used_procedures(
                     selected=list(getattr(self, "_last_procedure_records", []) or []),
                     executed_tools=list(getattr(self, "_executed_tools", []) or []),
                 ),
-                # Passed in, not read off `self`: instance state outlives its
-                # run and would leak the previous run's verdict.
+                # Passed in, not read off `self`: instance state outlives its run and would leak the previous run's verdict.
                 declared_completion=declared_completion,
-                # Sensor-accumulated and reset per run in `loop.py`; None means
-                # "never collected", distinct from "none fired".
+                # Sensor-accumulated and reset per run in `loop.py`; None means "never collected", distinct from "none fired".
                 defect_signals=getattr(self, "_defect_signals", None),
                 on_audit=self.log.log,
             )
@@ -285,14 +272,11 @@ class AgentLoopMemoryWrite:
             procedure = None
             created = False
             if self.procedural_store is not None and may_procedure:
-                # The sole credit path (MIR-049). Must run BEFORE upsert: upsert
-                # records this episode id, and credit idempotency would then skip it.
-                # A crashed verifier measured nothing (yet reads as `success`),
-                # so it gets no positive credit and mints no procedure.
+                # The sole credit path. Must run BEFORE upsert (upsert records this episode id and credit idempotency would skip it). A crashed verifier measured nothing, so it gets no positive credit and mints no procedure.
                 feedback = self.procedural_store.apply_episode_feedback(
                     episode, allow_credit=not verifier_failure
                 )
-                # Merge is provenance-only; standing comes only from feedback above.
+                # Merge is provenance-only; standing comes only from the feedback above.
                 if not verifier_failure:
                     procedure, created = self.procedural_store.upsert_from_episode(episode)
                 # `offered` separates "nothing suggested" from "suggested but not applied".
@@ -312,8 +296,7 @@ class AgentLoopMemoryWrite:
                     },
                 )
 
-            # No per-cycle consolidation (MIR-044): the tally is computed on
-            # demand by `:memory-consolidate` / `:smart-memory`.
+            # No per-cycle consolidation: the tally is computed on demand by `:memory-consolidate` / `:smart-memory`.
         except Exception as exc:  # noqa: BLE001
             self.log.log(
                 "smart_memory_error",
@@ -324,7 +307,7 @@ class AgentLoopMemoryWrite:
             )
 
     def _remember_conclusion(self, episode: Any) -> None:
-        """Вывод допущенного эпизода — в долговременную память (`core/learned_conclusion.py`)."""
+        """Conclusion of an admitted episode into long-term memory (`core/learned_conclusion.py`)."""
         from core.learned_conclusion import (
             TAGS,
             WEB_TAGS,
@@ -353,9 +336,9 @@ class AgentLoopMemoryWrite:
             existing = self.persistent_store.load() if self.persistent_store is not None else []
             old, known = superseded_by(content, existing)
             if known:
-                return  # тот же вывод по тому же вопросу уже в памяти
+                return  # same conclusion for the same question already in memory
             if not old:
-                # Структурный ключ не решил — сверка по Mem0; любой сбой там — ADD.
+                # Structural key did not decide: Mem0-style check; any failure there means ADD.
                 consolidation = self._consolidate_conclusion(content, episode, existing)
                 if consolidation.operation == "NOOP":
                     self.log.log("conclusion_memory_write", {
@@ -368,7 +351,7 @@ class AgentLoopMemoryWrite:
                     old = [r for r in existing if r.id == consolidation.target_id]
                 from core.memory_consolidation import merged_content, with_title
                 if consolidation.operation == "UPDATE" and old:
-                    # Слияние, а не замена: прежний вопрос, вывод обоих.
+                    # Merge, not replace: the earlier question, the conclusions of both.
                     content = merged_content(content, old[0].content, consolidation.merged or "")
                 else:
                     content = with_title(content, consolidation.title)
@@ -379,7 +362,7 @@ class AgentLoopMemoryWrite:
             archived = ([r.id for r in old if self.persistent_store.archive_record(r.id)]
                         if record is not None else [])
             self._mark_replaced(record, existing, old)
-        except Exception as exc:  # noqa: BLE001 — опыт уже записан; сбой памяти — в журнал
+        except Exception as exc:  # noqa: BLE001 — the experience is already recorded; a memory failure goes to the journal
             self._sensor_failed("conclusion_memory", exc)
             return
         self.log.log("conclusion_memory_write", {
@@ -394,7 +377,7 @@ class AgentLoopMemoryWrite:
         })
 
     def _mark_replaced(self, record: Any, existing: list[Any], old: list[Any]) -> None:
-        """Jev: прежние похожие выводы, которые заменил новый, получают его id — не прячутся."""
+        """Earlier similar conclusions that the new one replaced get its id; they are not hidden."""
         from core.jev_judge import THRESHOLD, jev_key, replacement_probabilities
         from core.memory_consolidation import similar_conclusions
 
@@ -409,29 +392,26 @@ class AgentLoopMemoryWrite:
                 return
             p = replacement_probabilities(key, str(record.content), candidates)
             marked = [r for r in candidates if p[r.id] >= THRESHOLD]
-            # Only the one field, on the CURRENT record (проверка 17.11, №3).
+            # Only the one field, on the CURRENT record.
             self.persistent_store.patch_many(
                 {r.id: {"superseded_by": record.id} for r in marked})
-        except Exception as exc:  # noqa: BLE001 — Jev только помечает, вывод уже записан; сбой — в журнал
+        except Exception as exc:  # noqa: BLE001 — Jev only marks, the conclusion is already recorded; failure goes to the journal
             self._sensor_failed("jev_memory", exc)
             return
         self.log.log("jev_memory_marks", {
             "record_id": record.id, "p": p, "marked": [r.id for r in marked]})
 
     def _consolidate_conclusion(self, content: str, episode: Any, existing: list[Any]) -> Any:
-        """Решение Mem0 по новому выводу: ADD / UPDATE / DELETE / NOOP."""
+        """Mem0 decision on a new conclusion: ADD / UPDATE / DELETE / NOOP."""
         from core.memory_consolidation import consolidate, gate, similar_conclusions
 
         question = " ".join(str(getattr(episode, "question", "") or "").split())
         similar = similar_conclusions(content, existing)
-        # Модель предлагает, ворота решают (memory_consolidation.gate).
+        # The model proposes, the gate decides (memory_consolidation.gate).
         return gate(consolidate(getattr(self, "llm", None), content, question, similar), content, similar)
 
     def _record_aborted_episode(self, question: str, *, reason: str) -> None:
-        """Bank a `failed` episode for a run that did not complete.
-
-        Runs while an exception propagates, so it must never raise its own.
-        """
+        """Bank a `failed` episode for a run that did not complete; runs while an exception propagates, so it must never raise its own."""
         if self.episodic_store is None:
             return
         if self._durable_learning_suppressed("episode"):
@@ -468,10 +448,7 @@ class AgentLoopMemoryWrite:
             )
 
     def _quarantine_conflicted_memory(self, knowledge_result: Any) -> None:
-        """Withdraw memory records whose claim just turned out contradicted; best-effort.
-
-        Matched by claim link only, never by content (MIR-049/050).
-        """
+        """Withdraw memory records whose claim just turned out contradicted; best-effort, matched by claim link only, never by content."""
         conflicts = getattr(knowledge_result, "conflicts", None)
         conflicted_ids = {
             cid
@@ -490,8 +467,7 @@ class AgentLoopMemoryWrite:
                 records, conflicted_claim_ids=conflicted_ids
             )
             if report["quarantined"]:
-                # One rewrite total, and only the tag is added to the CURRENT
-                # record — a stale whole copy reverted other fields (проверка 17.11, №3).
+                # One rewrite total, and only the tag is added to the CURRENT record (a stale whole copy reverted other fields).
                 self.persistent_store.patch_many({
                     record.id: {"tags": lambda tags: [*(tags or []), "conflicted"]
                                 if "conflicted" not in (tags or []) else list(tags)}

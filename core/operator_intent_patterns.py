@@ -12,11 +12,7 @@ def _has_any(text: str, terms: tuple[str, ...]) -> bool:
 
 @lru_cache(maxsize=2048)
 def _loose_patterns(term: str) -> tuple[re.Pattern[str], ...]:
-    """Regexes matching ``term`` with exactly ONE extra word wedged into it.
-
-    Single-word terms get nothing: there is no gap to be tolerant about, and
-    loosening them would only invite false matches.
-    """
+    """Regexes matching term with exactly ONE extra word wedged into it; single-word terms get none."""
     words = term.split()
     if len(words) < 2:
         return ()
@@ -33,13 +29,7 @@ def _loose_patterns(term: str) -> tuple[re.Pattern[str], ...]:
 
 
 def _has_any_loose(text: str, terms: tuple[str, ...]) -> bool:
-    """``_has_any`` plus tolerance for one word inserted into a phrase.
-
-    Used by the *positive* intent matchers only. The suppression guards
-    (``_looks_like_*``) deliberately keep strict substring matching:
-    loosening them would change *when routing is blocked*, which is a
-    different and riskier decision than widening what is recognised.
-    """
+    """_has_any plus tolerance for one inserted word; for positive matchers only: the _looks_like_* suppression guards keep strict matching (loosening them would change when routing is blocked)."""
     if _has_any(text, terms):
         return True
     for term in terms:
@@ -99,13 +89,7 @@ def _looks_like_explicit_non_routing_command(text: str) -> bool:
 
 
 def _looks_like_conversational_turn(text: str) -> bool:
-    """A social / greeting-laden chat turn — must fall through to the normal
-    conversational path rather than being hijacked into a deterministic operator
-    command. Otherwise "Привет. Как дела? Что ты умеешь делать?" is swallowed by
-    the capability-check matcher and answered with a rigid operator dump instead
-    of a natural reply (the router is intentionally narrow — when a message reads
-    as chat, let the LLM handle it). Markers are distinctive enough not to appear
-    inside real terse operator commands."""
+    """A social/greeting-laden chat turn: falls through to the conversational path instead of being hijacked into a deterministic operator command."""
     return _has_any(
         text,
         (
@@ -142,18 +126,9 @@ def _looks_like_self_build_request(text: str) -> bool:
 
 
 def _matches_self_build_request(text: str) -> bool:
-    # Explicit imperative to KICK OFF the deterministic self-build producer
-    # (:self-build-produce), which creates at most ONE approval item and stops —
-    # it never applies code (apply is a separate human-gated step). Requires an
-    # explicit start/begin verb next to a self-programming target, and rejects
-    # questions, descriptions, negations and meta/rule/test-phrase discussion so
-    # "как ты программируешь себя?", "не начинай …" and "добавь matcher для этой
-    # формулировки" stay out. Checked BEFORE _looks_like_meta_instruction so a
-    # real command may still say "ничего не применяй без моего согласия" (an
-    # apply-consent clause) without being swallowed by that shared guard, and
-    # BEFORE the _looks_like_self_build_request None-guard so ONLY these explicit
-    # start phrases reach the producer; every other self-build mention still
-    # falls through to the planner.
+    # Explicit imperative to KICK OFF the deterministic self-build producer (:self-build-produce: at most ONE approval item, never applies code).
+    # Requires an explicit start verb next to a self-programming target; rejects questions, descriptions, negations and meta/rule discussion.
+    # Checked BEFORE _looks_like_meta_instruction and the _looks_like_self_build_request None-guard so only explicit start phrases reach the producer.
     target = _has_any_loose(
         text,
         (
@@ -225,9 +200,7 @@ def _matches_self_build_request(text: str) -> bool:
     )
     if _has_any_loose(text, blockers):
         return False
-    # Reuse the shared meta-instruction guard to reject genuine rule/spec text,
-    # but first neutralize the apply-consent phrasing that is legitimate inside a
-    # real self-build command ("ничего не применяй без моего согласия").
+    # Reuse the shared meta-instruction guard, after neutralizing the apply-consent phrasing that is legitimate in a self-build command.
     consent_stripped = text
     for consent in (
         "не применяй",
@@ -345,9 +318,7 @@ def _matches_capability_request(text: str) -> bool:
         "capability request",
         "capability proposal",
         "connector proposal",
-        # R6 (2026-08-13, живой перехват): существительное «подключение» —
-        # упоминание, не заказ; «сколько ты видишь Подключение у себя» уезжало
-        # в форму заявки на доступ. Остаются императивы и просьбы доступа.
+        # The noun "подключение" is a mention, not an order; imperatives and access requests remain.
         "подключи ",
         "подключить",
         "дай доступ",
@@ -432,9 +403,7 @@ def _matches_source_review(text: str) -> bool:
     filename_markers = (".py", ".md", ".txt", "\\", "/")
     if _has_any_loose(text, source_review_terms):
         return True
-    # R6 (2026-08-13, живой A3): «Сравни a.md и b.md и перечисли различия» —
-    # содержательная задача, не заказ плана ревью. Мягкая ветка требует слова
-    # о ПЛАНЕ/РЕВЬЮ, а не голого императива над файловыми объектами.
+    # The soft branch requires a word about the PLAN/REVIEW, not a bare imperative over file objects (a content task is not a review-plan order).
     return (
         _has_any_loose(text, filename_markers)
         and _has_any_loose(text, ("сравни", "сравнить", "review", "compare"))
@@ -444,12 +413,7 @@ def _matches_source_review(text: str) -> bool:
 
 
 def _has_any_whole_word(text: str, terms: tuple[str, ...]) -> bool:
-    """`_has_any_loose` restricted to whole words.
-
-    A term that only appears INSIDE a longer word is not that term: «планировщик»
-    is a component name, not the noun «план». Used where a soft branch would
-    otherwise route on a coincidence of letters.
-    """
+    """_has_any_loose restricted to whole words: a term only INSIDE a longer word is not that term ("планировщик" is a component name, not "план")."""
     lowered = (text or "").casefold()
     return any(
         re.search(rf"(?<!\w){re.escape(term.casefold())}(?!\w)", lowered)
@@ -470,22 +434,9 @@ def _matches_implementation_plan(text: str) -> bool:
     filename_markers = (".py", ".md", ".txt", "\\", "/")
     if _has_any_loose(text, planning_terms):
         return True
-    # R6 (2026-08-13, живой d322a875/Q2): «в текущей реализации» — обстоятельство
-    # места, не заказ плана; стем «реализац» изъят из мягкой ветки.
-    #
-    # 2026-08-15: изъятие одного стема класс не закрыло. «план» ловился ПОДСТРОКОЙ
-    # внутри «планировщик» — имени собственного узла агента и самого частого
-    # слова в разговоре о его устройстве, — и «Открой core/loop.py и посмотри на
-    # планировщика» уходило в `:implementation-plan`: 8 событий, модель не звали.
-    # Мягкая ветка сверяет ЦЕЛЫЕ слова: подстрока внутри другого слова — не
-    # заказ плана. Сильная ветка выше не тронута, поэтому «какие файлы менять»
-    # и «план реализации» маршрутизируются как прежде.
-    # «менять» и «тесты» изъяты 2026-08-15: обычные слова технического вопроса.
-    # «Посмотри docs/OPERATIONS.md, какие тесты там упомянуты» — вопрос на
-    # чтение, а не заказ плана. Проверено: без них 87 тестов маршрутизации
-    # проходят, потому что сильная ветка выше уже держит явные формы —
-    # «какие файлы менять», «какие тесты добавить». Мягкая ветка остаётся для
-    # прямого «план»/«implementation» рядом с путём, целым словом.
+    # The soft branch matches WHOLE words: "план" inside "планировщик" (a component name) is not a plan order; the strong branch above is untouched.
+    # The stems "реализац", "менять" and "тесты" were removed from the soft branch (ordinary words of a technical question); the strong branch
+    # still holds explicit forms like "какие файлы менять".
     return _has_any_loose(text, filename_markers) and _has_any_whole_word(
         text,
         (
@@ -512,17 +463,8 @@ def _matches_safe_self_check(text: str) -> bool:
     )
 
 
-#: The same question with a filler word wedged into the middle. Literal
-#: substring matching misses those, and the miss is expensive: measured in a live
-#: session, "что ты уже умеешь" (one inserted "уже") fell through to the LLM,
-#: which answered with generic model boilerplate ("I can translate texts")
-#: instead of the factual capability report the local handler produces — two
-#: model calls spent to say less than nothing about THIS agent.
-#: Deliberately tight: both halves must be present with at most ONE word between
-#: them. Two was tried first and over-captured — 'что ты совсем не умеешь считать'
-#: became a capability command. One covers every real spelling
-#: ('уже', 'сейчас', 'теперь', 'already') and halves the surface. The conversational
-#: guard still runs first, so "привет, что ты уже умеешь?" keeps going to the LLM.
+#: The same question with a filler word wedged into the middle; literal substring matching misses those and the LLM fallback gives generic boilerplate.
+#: Deliberately tight: both halves must be present with at most ONE word between them (two over-captured). The conversational guard still runs first.
 _CAPABILITY_GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"что\s+(?:ты|вы)(?:\s+\S+){0,1}\s+умее(?:шь|те)"),
     re.compile(r"что(?:\s+\S+){0,1}\s+умее(?:шь|те)\s+делать"),
@@ -659,8 +601,7 @@ def _matches_project_health(text: str) -> bool:
 
 
 def _matches_model_status(text: str) -> bool:
-    # Include Russian case forms (моделей / моделями / моделях) so phrases like
-    # "какие роли моделей сейчас активны" route to :models instead of web_search.
+    # Include Russian case forms (моделей / моделями / моделях) so such phrases route to :models, not web_search.
     return _has_any_loose(
         text,
         (
@@ -732,11 +673,8 @@ def _matches_next_actions(text: str) -> bool:
 
 
 def _matches_best_next_action(text: str) -> bool:
-    # The SINGLE most important action to take right now. Deliberately narrow
-    # and kept distinct from _matches_next_actions (a LIST of next steps) by
-    # requiring singular / top-priority wording. Must be routed BEFORE
-    # _matches_next_actions because the English form "most important next
-    # action" contains the "next action" trigger that matcher fires on.
+    # The SINGLE most important action right now; narrow, distinct from _matches_next_actions (a LIST) by singular/top-priority wording;
+    # routed BEFORE it because "most important next action" contains its trigger.
     return _has_any_loose(
         text,
         (
@@ -761,12 +699,8 @@ def _matches_best_next_action(text: str) -> bool:
 
 
 def _matches_self_task_propose(text: str) -> bool:
-    # Stage-A coding-task producer: take a real TODO/FIXME and propose ONE
-    # coding task + failing acceptance test for human approval. Requires BOTH a
-    # code-debt marker AND a propose-task/test signal so it never steals plain
-    # "find X" traffic or a bare bug note. Routed BEFORE the plan/source-review
-    # matchers so a "TODO in foo.py + предложи тесты" phrasing does not fall
-    # into the generic implementation-plan (.py + тесты) branch.
+    # Coding-task producer: take a real TODO/FIXME and propose ONE coding task plus a failing acceptance test for approval. Requires BOTH a
+    # code-debt marker AND a propose-task/test signal; routed BEFORE the plan/source-review matchers.
     debt = _has_any_loose(
         text,
         ("todo", "fixme", "tech debt", "техдолг", "технический долг"),
@@ -794,10 +728,7 @@ def _matches_self_task_propose(text: str) -> bool:
     return debt and propose
 
 
-#: Сообщение, посылающее агента ВО ВНЕШНИЙ МИР, — не внутренняя команда.
-#: Живой перехват 2026-08-16: «Зайди в интернет и прочитай про CrewAI...
-#: архитектурную идею... ПРОВЕРКА:» угнан в :architecture-audit («архитектур*»
-#: + «провер*»), и чтение внешнего мира не случилось вовсе.
+#: A message sending the agent OUTSIDE (to the internet) is not an internal command.
 _OUTSIDE_WORLD_MARKERS: tuple[str, ...] = (
     "интернет", "internet", "http://", "https://", "www.",
     "сайт", "в вебе", "web search", "web page",
@@ -809,12 +740,8 @@ def _sends_the_agent_outside(text: str) -> bool:
 
 
 def _matches_architecture_audit(text: str) -> bool:
-    # Read-only architecture audit (layers / multi-agent gaps). Requires an
-    # architecture term AND an audit/review verb so it never fires on a plain
-    # "проверь проект" (project health) or a mere mention of architecture.
-    # Must be routed BEFORE _matches_project_health, because
-    # "проверь архитектуру проекта" also satisfies that broad project branch.
-    # A message that sends the agent OUTSIDE is never this internal command.
+    # Read-only architecture audit: requires an architecture term AND an audit/review verb; routed BEFORE _matches_project_health, which
+    # "проверь архитектуру проекта" also satisfies. A message that sends the agent OUTSIDE is never this command.
     if _sends_the_agent_outside(text):
         return False
     architecture = _has_any_loose(text, ("архитектур", "architecture", "architectural"))
@@ -843,11 +770,7 @@ def _matches_architecture_audit(text: str) -> bool:
 
 
 def _matches_subagent_proposal(text: str) -> bool:
-    # Scoped autonomous-subagent proposal (SubagentProposal contract from a
-    # goal). Distinct from capability_request (which treats "subagent" as a
-    # missing capability): this needs an explicit PROPOSE/DESIGN verb next to
-    # the subagent term. Routed BEFORE capability_request so "предложи
-    # ограниченного субагента" wins over any capability overlap.
+    # Scoped autonomous-subagent proposal: needs an explicit PROPOSE/DESIGN verb next to the subagent term; routed BEFORE capability_request so it wins any overlap.
     subagent = _has_any_loose(
         text,
         ("субагент", "суб-агент", "подагент", "под-агент", "subagent", "sub-agent"),
@@ -1016,9 +939,7 @@ def _looks_like_engineering_change_request(text: str) -> bool:
 
 
 def _matches_smart_memory_status(text: str) -> bool:
-    # R6 (2026-08-13, живой d322a875/Q3): «проверь конструктор episodic memory
-    # store» — вопрос об УСТРОЙСТВЕ кода, не о состоянии памяти; статус ему
-    # не ответ. Признаки кода снимают маршрут раньше сильных фраз.
+    # A question about the CODE's structure ("проверь конструктор episodic memory store") is not a memory-status question; code markers remove the route before strong phrases.
     if _has_any_loose(
         text,
         ("конструктор", "constructor", ".py", "исходный код",
@@ -1058,18 +979,12 @@ _APPROVAL_STRONG = (
     "approval",
     "approve",
     "pending approval",
-    "одобр",  # одобрение / одобрить / одобрения — approval-specific in RU
+    "одобр",  # approval-specific in RU
     "ожидает разреш",
     "апрув",
 )
 
-# Stems that *can* mean "approval" but are ambiguous in everyday phrasing:
-#   "подтверждённые факты"  = confirmed / verified facts (NOT an approval query)
-#   "разрешение экрана"     = screen resolution
-#   "разрешение конфликта"  = conflict resolution
-# They only signal an approval-inbox query when an approval/inbox context word
-# is also present. Bug: a bare "подтвержд" hijacked normal requests such as
-# "напиши текст с подтверждёнными фактами" into `:approval-list all`.
+# Stems that can mean "approval" but are ambiguous ("подтверждённые факты", "разрешение экрана"); they signal an approval-inbox query only with an approval/inbox context word.
 _APPROVAL_AMBIGUOUS = (
     "подтвержд",
     "разрешени",
@@ -1081,26 +996,19 @@ _APPROVAL_CONTEXT = (
     "одобр",
     "инбокс",
     "inbox",
-    "очеред",  # очередь
+    "очеред",
     "queue",
     "список",
     "list",
-    "заявк",  # заявка
+    "заявк",
     "запрос",
     "pending",
-    "ожида",  # ожидает / ожидающие
+    "ожида",
     "runtime",
 )
 
-# A consent-request directed AT the agent ("запроси моё подтверждение",
-# "request my confirmation") tells it to PAUSE for human sign-off before acting
-# on the real task — it is NOT a question about the approval inbox. Without this
-# guard the pairing of "подтвержд" (ambiguous) + "запрос" (context) hijacked
-# ordinary engineering instructions such as "…и запроси моё подтверждение" into
-# `:approval-list all`, so the request never reached the agent at all. Kept
-# narrow: only the "запрос…/request … confirmation" verb family, matched as a
-# contiguous substring so real queries ("запросы подтверждения в инбоксе") stay
-# routed.
+# A consent-request directed AT the agent ("запроси моё подтверждение") means pause for sign-off, not a question about the approval inbox; narrow:
+# only the "запрос.../request ... confirmation" verb family, as a contiguous substring.
 _APPROVAL_CONSENT_REQUEST = (
     "запроси моё подтвержд",
     "запроси мое подтвержд",
@@ -1118,10 +1026,7 @@ _APPROVAL_CONSENT_REQUEST = (
 )
 
 
-#: Причинный вопрос — не просьба показать список. Живой разговор 2026-09-20:
-#: «Почему сегодня утром твои одобренные заявки не применились?» ушёл в команду
-#: `:approval-list all`, и вместо разбора агент напечатал ящик. «Покажи, какие
-#: заявки ждут одобрения?» — по-прежнему команда: там спрашивают СПИСОК.
+#: A causal question is not a request to show a list ("Почему ... заявки не применились?"); "Покажи, какие заявки ждут одобрения?" stays a command.
 _CAUSAL_QUESTION = (
     "почему", "отчего", "зачем", "по какой причине", "из-за чего",
     "why ", "why?", "what caused", "how come",
@@ -1133,14 +1038,10 @@ def _matches_approval_status(text: str) -> bool:
         return False
     if _has_any_loose(text, ("без одобр", "without approval", "no approval", "без явного")):
         return False
-    # A consent-request aimed at the agent ("запроси моё подтверждение") must not
-    # be read as an approval-inbox query — otherwise the engineering task it is
-    # attached to is silently swallowed by `:approval-list all`.
+    # A consent-request aimed at the agent must not be read as an approval-inbox query (the engineering task would be swallowed).
     if _has_any_loose(text, _APPROVAL_CONSENT_REQUEST):
         return False
     if _has_any_loose(text, _APPROVAL_STRONG):
         return True
-    # Ambiguous stems ("подтвержд", "разрешени") only count when paired with an
-    # approval/inbox context word — otherwise phrases like "подтверждённые
-    # факты" must NOT be routed to the approval inbox.
+    # Ambiguous stems ("подтвержд", "разрешени") count only when paired with an approval/inbox context word.
     return bool(_has_any_loose(text, _APPROVAL_AMBIGUOUS) and _has_any_loose(text, _APPROVAL_CONTEXT))

@@ -1,12 +1,6 @@
-"""Strategy Router: deliberation kernel layer BEFORE the LLM planner.
+"""Strategy Router: deterministic, pure keyword routing of operator input before the LLM planner.
 
-Safety contract --------------- * Pure function — no file I/O, no network,
-no LLM calls. * Deterministic — same input always returns the same strategy.
-* ``general_question`` is the safe default: when in doubt, let the LLM
-handle it rather than silently routing to a wrong local handler. * Explicit
-documentation requests ("по README", "по документации", …) are NOT captured
-by any local strategy — they always map to ``general_question`` so the LLM
-can read the docs as requested.
+``general_question`` is the safe default; explicit documentation requests never map to a local strategy.
 """
 from __future__ import annotations
 
@@ -52,24 +46,9 @@ LOCAL_STRATEGIES: frozenset[OperatorStrategy] = frozenset(
 
 
 def classify_operator_strategy(text: str) -> OperatorStrategy:
-    """Map operator natural-language input to a routing strategy.
+    """Map operator natural-language input to a routing strategy; never raises.
 
-    Returns ``OperatorStrategy.general_question`` when:
-    - no local handler matches the text, OR
-    - the operator explicitly requests documentation ("по README", …)
-      so the LLM can read and summarise the actual docs.
-
-    Non-string inputs are treated as unrecognised (``general_question``).
-
-    Parameters
-    ----------
-    text:
-        Raw operator input (any language, any casing).
-
-    Returns
-    -------
-    OperatorStrategy
-        Always a valid enum member; never raises.
+    Returns ``general_question`` when no local handler matches, the text asks for documentation, or the input is not a string.
     """
     if not isinstance(text, str):
         return OperatorStrategy.general_question
@@ -79,8 +58,7 @@ def classify_operator_strategy(text: str) -> OperatorStrategy:
     try:
         return OperatorStrategy(intent.kind)
     except ValueError:
-        # Unknown intent kind added to operator_intent.py without a
-        # matching enum member here — safe fallback.
+        # unknown intent kind (not yet in this enum): safe fallback
         return OperatorStrategy.general_question
 
 

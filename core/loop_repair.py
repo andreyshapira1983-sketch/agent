@@ -1,21 +1,17 @@
-"""Фасад операторских команд починки на объекте агента."""
+"""Facade of the operator repair commands on the agent object."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-# Точечная форма намеренно. `from core import repair_commands` читается
-# приятнее, но `scripts/architecture_invariants.py` собирает имена модулей и
-# видит там только `core`, поэтому модуль, импортированный ТОЛЬКО так, числится
-# осиротевшим. Псевдоним отличается от последнего сегмента, иначе ruff (PLC0414)
-# справедливо просит `from … import …` обратно.
+# Dotted form on purpose: `scripts/architecture_invariants.py` sees only `core` in `from core import ...`; the alias differs from the last segment to satisfy ruff PLC0414.
 import core.repair_commands as repair_ops
 
 
 class AgentLoopRepair:
-    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле."""
+    """Mixed into ``AgentLoop``; state lives on the composed loop."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         model_router: Any
         compensation_log: Any
@@ -32,7 +28,7 @@ class AgentLoopRepair:
         trace_id: str | None = None,
         extra_context: str = "",
     ):
-        """Фасад: решения живут в `core/repair_commands.propose_repair`."""
+        """Facade: decisions live in `core/repair_commands.propose_repair`."""
         return repair_ops.propose_repair(
             model_router=self.model_router,
             log=self.log,
@@ -64,7 +60,7 @@ class AgentLoopRepair:
         *,
         workspace_root: Path | None = None,
     ):
-        """Фасад: разбор пустых случаев живёт в `core/repair_commands.rollback`."""
+        """Facade: empty-case handling lives in `core/repair_commands.rollback`."""
         return repair_ops.rollback(
             compensation_log=self.compensation_log,
             log=self.log,
@@ -80,7 +76,7 @@ class AgentLoopRepair:
         max_age_days: int | None = None,
         dry_run: bool = False,
     ):
-        """Фасад: умолчания и запись в журнал — в `core/repair_commands`."""
+        """Facade: defaults and journal writing live in `core/repair_commands`."""
         return repair_ops.cleanup_backups(
             workspace_root,
             log=self.log,

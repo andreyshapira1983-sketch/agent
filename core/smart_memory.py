@@ -41,13 +41,9 @@ from core.state_integrity import (
 )
 from core.topic_tokens import FLAT, STOPWORDS, TokenSalience, discriminating_tokens
 
-# Task completion, kept deliberately apart from `EpisodeOutcome`: `outcome`
-# answers "were the claims supported", this answers "was the goal reached".
-# A cycle can be impeccably supported and still have answered nothing.
+# Task completion, kept apart from `EpisodeOutcome`: `outcome` says whether the claims were supported, this says whether the goal was reached.
 
-# What the synthesizer may declare about its own run. `cancelled` and
-# `unknown` are absent on purpose: they are facts about the run's termination
-# that the loop observes, never something the answer gets to claim.
+# What the synthesizer may declare about its own run; `cancelled` and `unknown` are absent on purpose (facts about termination that the loop observes, not for the answer to claim).
 
 _COMPLETION_STATES: frozenset[str] = frozenset(CompletionState.__args__)
 _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__args__)
@@ -61,20 +57,15 @@ _COMPLETION_DECLARATIONS: frozenset[str] = frozenset(CompletionDeclaration.__arg
 _DELIVERY_DECLARATIONS: frozenset[str] = frozenset({"achieved", "partially_achieved"})
 _NON_DELIVERY_DECLARATIONS: frozenset[str] = _COMPLETION_DECLARATIONS - _DELIVERY_DECLARATIONS
 
-# A newly distilled procedure is unproven: born `candidate`, kept out of
-# ordinary planning retrieval, and promoted to `active` only by a SECOND,
-# independent, completed+verified success. Demotion is unchanged, and its
-# check comes first so a doubted procedure is never re-labelled candidate.
+# A newly distilled procedure is born `candidate`, kept out of ordinary planning retrieval, and promoted to `active` only by a SECOND independent completed+verified success.
+# Demotion's check comes first so a doubted procedure is never re-labelled candidate.
 
-# The real status vocabulary, derived from the type rather than restated:
-# operator-facing tallies enumerate THIS, so a hardcoded list goes stale.
+# The real status vocabulary, derived from the type: operator-facing tallies enumerate THIS so a hardcoded list cannot go stale.
 PROCEDURE_STATUSES: tuple[str, ...] = ProcedureStatus.__args__
 
 
-# Laplace (add-one) smoothing prior for procedure confidence, so confidence
-# reflects how much EVIDENCE backs a workflow and not the raw ratio: without
-# it one success reads 1.0. Beta(1,1) puts one success at 0.667 and lets
-# confidence climb toward — but never reach — 1.
+# Laplace (add-one) smoothing prior: confidence reflects how much EVIDENCE backs a workflow, not the raw ratio
+# (one success reads 0.667, not 1.0, and climbs toward but never reaches 1).
 _CONF_PRIOR_SUCCESS: float = 1.0
 _CONF_PRIOR_FAILURE: float = 1.0
 
@@ -90,10 +81,11 @@ _STANDING_RANK = {"needs_review": 0, "candidate": 1, "active": 2}
 
 
 def _repaired_status(stored: Any, success: int, failure: int, confidence: float) -> str:
-    """Status a counter repair may write: lower or keep, never raise
-    (проверка 17.11, средняя). `obsolete` is untouched; `needs_review` (maybe a
-    deliberate MIR-058 demotion) is freed only for the exact 1:1 tie the old
-    rule retired; an unknown status is capped at `candidate`."""
+    """Status a counter repair may write: lower or keep, never raise.
+
+        `obsolete` is untouched; `needs_review` (maybe a deliberate demotion) is freed only for the exact 1:1 tie the old rule retired;
+        an unknown status is capped at `candidate`.
+    """
     derived = _procedure_status_for(success, confidence, failure_count=failure)
     if stored == "obsolete":
         return stored
@@ -121,8 +113,7 @@ _MAX_SOURCE_EPISODE_IDS = 200
 
 
 def _legacy_id(prefix: str, data: dict[str, Any]) -> str:
-    """Stable id for a stored row that has none: the same row reads the same id
-    every time, so idempotency checks recognise it (проверка 16.11, п. 9)."""
+    """Stable id for a stored row that has none: the same row reads the same id every time, so idempotency checks recognise it."""
     import hashlib
     import json
 
@@ -137,23 +128,20 @@ def _capped_episode_ids(ids: Iterable[str]) -> tuple[str, ...]:
 
 
 def _str_items(raw: Any) -> tuple[str, ...]:
-    """A stored list field as strings. A bare string is ONE item: iterating it
-    split «self_contradiction» into letters, and the disqualifying signal was
-    never seen (проверка 17.11, мелкая)."""
+    """A stored list field as strings. A bare string is ONE item: iterating it split a signal name into letters and the disqualifying signal was never seen."""
     if raw is None or raw == "":
         return ()
     if isinstance(raw, (str, bytes)):
         return (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw,)
     if isinstance(raw, dict):
         return tuple(str(k) for k in raw)
-    # A number where a list belongs is a broken row, not one item: raising
-    # keeps the row «unreadable», so rewrites preserve it instead of pruning it.
+    # A number where a list belongs is a broken row, not one item: raising keeps the row unreadable,
+    # so rewrites preserve it instead of pruning it.
     return tuple(str(x) for x in raw)
 
 
 def _stored_flag(raw: Any) -> bool | None:
-    """A flag read from disk by its meaning: `bool("false")` is True, which
-    turned a text "false" into permission (проверка 16.11, п. 12). Unknown → None."""
+    """A flag read from disk by its meaning: `bool("false")` is True, which turned the text "false" into permission. Unknown -> None."""
     if raw is None or isinstance(raw, bool):
         return raw
     if isinstance(raw, (int, float)):
@@ -167,9 +155,7 @@ def _stored_flag(raw: Any) -> bool | None:
 
 
 def _stored_confidence(raw: Any, success: int, failure: int) -> float:
-    """Confidence read from disk: a real number in [0, 1] is kept as is — 0.0
-    included, which `or 0.5` used to turn into 0.5 — anything else (missing,
-    NaN, text) is recomputed from the counters (проверка 16.11, п. 11)."""
+    """Confidence read from disk: a real number in [0, 1] is kept as is (0.0 included); anything else (missing, NaN, text) is recomputed from the counters."""
     import math
 
     try:
@@ -182,10 +168,9 @@ def _stored_confidence(raw: Any, success: int, failure: int) -> float:
 
 
 def _stored_relevance(raw: Any) -> float | None:
-    """Соответствие, прочитанное с диска: число в [0, 1] или «не мерили».
+    """Relevance read from disk: a number in [0, 1] or "not measured".
 
-    Нечисло и число вне отрезка — не мерили, а не ноль: ноль это приговор,
-    и выдумывать его за испорченную строку нельзя.
+        A non-number or an out-of-range number is "not measured", not zero: zero is a verdict and must not be invented for a corrupted row.
     """
     try:
         value = float(raw)
@@ -206,74 +191,48 @@ class EpisodeRecord:
     source_labels: tuple[str, ...] = ()
     verified_chunks: int = 0
     unverified_chunks: int = 0
-    # Chunks the verifier could not confirm as faithful support: sub-agent
-    # asserted, cited-but-unmatched, receipt-missing, topic-only. They lower
-    # quality and block a clean "success" — an answer leaning on unconfirmed
-    # support is not a reusable skill.
+    # Chunks the verifier could not confirm as faithful support (sub-agent asserted, cited-but-unmatched, receipt-missing, topic-only).
+    # They lower quality and block a clean "success".
     weak_chunks: int = 0
     replan_exhausted: bool = False
-    # Quality score: verified / (verified + unverified + weak), clamped to [0, 1].
-    # None when no evidence chunks were seen at all — the fraction is undefined,
-    # NOT perfect. Also None when the counts describe a rejected draft rather
-    # than the delivered answer. Computed, not stored in the JSONL.
+    # Quality score: verified / (verified + unverified + weak), clamped to [0, 1]. None when no evidence chunks were seen
+    # (undefined, NOT perfect) or when the counts describe a rejected draft. Computed, not stored in the JSONL.
     answer_quality_score: float | None = None
     #: Про тот ли вопрос ответ. `None` = не измеряли, и это НЕ провал. Зачем:
     #: docs/CODE_NOTES.md, «Cited, scored, admitted — and off topic».
     relevance_score: float | None = None
     tags: tuple[str, ...] = ()
-    # Full answer text — stored verbatim for the episodic fast path.
-    # Empty string for episodes created before this field was added.
+    # Full answer text, stored verbatim for the episodic fast path; empty for episodes created before this field.
     full_answer: str = ""
-    # Which logical task this episode served, and which attempt produced it.
-    # `task_id` survives a retry; `run_id` is fresh per attempt. Empty string
-    # on legacy records and on runs that carry no task.
+    # Which logical task this episode served and which attempt produced it: `task_id` survives a retry, `run_id` is fresh per attempt.
+    # Empty on legacy records and on runs without a task.
     task_id: str = ""
     run_id: str = ""
-    # Family link (MIR-184): every episode born inside one tick carries that
-    # tick's trace id, so a success answer-episode and the declined product
-    # of the SAME tick can be joined at read time. Empty on legacy rows.
+    # Family link: every episode born inside one tick carries that tick's trace id, so a success episode and the declined
+    # product of the SAME tick can be joined at read time. Empty on legacy rows.
     trace_id: str = ""
-    # May this episode steer later answers? THREE states, deliberately not a
-    # bool: None = legacy row (written before the field), False = quarantined
-    # (an explicit decision to withhold), True = eligible. Collapsing None
-    # into False would hide the difference. Retrieval admits only True.
+    # May this episode steer later answers? THREE states, deliberately not a bool: None = legacy row, False = quarantined
+    # (explicit decision to withhold), True = eligible. Retrieval admits only True.
     usage_eligible: bool | None = None
-    # Procedures that actually influenced THIS run — judged from execution, not
-    # from the plan. THREE states: None = legacy row, attribution unknown and
-    # nothing may be inferred from it; () = this version ran and is certain no
-    # procedure was applied; (ids…) = application observed. MIR-048 debits
-    # these ids, so a looser meaning would turn feedback into misattribution.
+    # Procedures that actually influenced THIS run, judged from execution, not from the plan. THREE states: None = legacy row
+    # (attribution unknown, infer nothing); () = this version ran and no procedure was applied; (ids...) = application observed.
+    # Procedural debit uses these ids, so a looser meaning would turn feedback into misattribution.
     used_procedure_ids: tuple[str, ...] | None = None
-    # What the synthesizer declared about reaching the goal, verbatim. Stored
-    # because it cannot be recovered: the marker is stripped before the answer
-    # is verified or shown, so it never reaches `full_answer`. None means no
-    # declaration was produced — legacy row, no marker, or no synthesis at all.
+    # What the synthesizer declared about reaching the goal, verbatim. Stored because the marker is stripped before verification
+    # and never reaches `full_answer`. None = no declaration (legacy row, no marker, or no synthesis).
     declared_completion: CompletionDeclaration | None = None
-    # The verdict, ASSEMBLED AT BANKING and frozen. Stored rather than derived
-    # on read because procedural feedback is applied once, under the rule in
-    # force at the time; recomputing would silently reclassify episodes whose
-    # credit or debit is already spent. None = never classified; readers go
-    # through `effective_completion`, which maps None → "unknown".
+    # The verdict, ASSEMBLED AT BANKING and frozen: procedural feedback is applied once under the rule in force then, and recomputing
+    # would reclassify episodes whose credit or debit is already spent. None = never classified; readers use `effective_completion`.
     completion_state: CompletionState | None = None
-    # Defect signals this run raised about ITSELF — the sensors that fired
-    # while it worked, recorded because each sensor otherwise logged its
-    # verdict and dropped it. THREE states, same convention as the two fields
-    # above: None = a row written before this axis existed, nothing may be
-    # inferred; () = this version ran and no sensor fired; (names…) = fired.
-    #
-    # Authority is PER SIGNAL, never blanket. `obligation_silently_missing`
-    # IS authoritative: at banking it lowers `achieved` to
-    # `partially_achieved` and so withholds procedure credit. Terminal
-    # `citation_fabricated` blocks delivery; `reasoning_action_mismatch`
-    # remains observational.
-    # Adding a member does NOT grant it power; only naming it in the verdict
-    # rule table does, and that is the operator's call.
+    # Defect signals this run raised about ITSELF. THREE states as above: None = row predates this axis; () = ran and no sensor fired;
+    # (names...) = fired.
+    # 
+    # Authority is PER SIGNAL, never blanket: `obligation_silently_missing` lowers `achieved` to `partially_achieved` at banking (and so
+    # withholds procedure credit); terminal `citation_fabricated` blocks delivery; `reasoning_action_mismatch` stays observational.
+    # A new member gets no power until it is named in the verdict rule table (the operator's call).
     defect_signals: tuple[str, ...] | None = None
-    # The authoritative fact that displaced this run's own claim, when one did.
-    # None = the claim stood (or there was no claim). `declared_completion` is
-    # NEVER edited to match: the operator's rule is that the signal wins the
-    # operational outcome without erasing the self-assessment, so both survive
-    # and the disagreement between them is readable as its own fact.
+    # The authoritative fact that displaced this run's own claim, if any (None = the claim stood). `declared_completion` is NEVER edited
+    # to match: both survive so the disagreement is readable as its own fact.
     completion_override: str | None = None
     #: `path<TAB>sha256` of each file behind the answer, taken at banking; the
     #: replay gate serves the answer only while every hash still matches (17.11).
@@ -296,7 +255,7 @@ class EpisodeRecord:
             "id": self.id,
             "task_id": self.task_id,
             "run_id": self.run_id,
-            # Omit-when-empty: a legacy row stays byte-identical (MIR-184).
+            # Omit-when-empty: a legacy row stays byte-identical.
             **({} if not self.trace_id else {"trace_id": self.trace_id}),
             "usage_eligible": self.usage_eligible,
             "used_procedure_ids": (
@@ -318,9 +277,7 @@ class EpisodeRecord:
             "replan_exhausted": self.replan_exhausted,
             "tags": list(self.tags),
             "created_at": self.created_at,
-            # Omit-when-None rather than an explicit null: an absent key is the
-            # honest encoding of "this row predates the axis", and it keeps a
-            # legacy row byte-identical to what it was.
+            # Omit-when-None, not an explicit null: an absent key honestly encodes "this row predates the axis" and keeps a legacy row byte-identical.
             **({} if self.declared_completion is None
                else {"declared_completion": self.declared_completion}),
             **({} if self.completion_state is None
@@ -329,10 +286,8 @@ class EpisodeRecord:
                else {"defect_signals": list(self.defect_signals)}),
             **({} if self.completion_override is None
                else {"completion_override": self.completion_override}),
-            # Основание третьей оси допуска. Не выводится из счётчиков, в
-            # отличие от answer_quality_score, — поэтому хранится. Без него
-            # приговор usage_eligible=False нельзя было проверить по журналу
-            # (замер 2026-09-21: 200 приговоров, 0 оснований).
+            # Basis for the third eligibility axis. Not derivable from counters (unlike answer_quality_score), hence stored;
+            # without it a usage_eligible=False verdict could not be audited.
             **({} if self.relevance_score is None
                else {"relevance_score": self.relevance_score}),
             **({} if not self.input_digests else {"input_digests": list(self.input_digests)}),
@@ -345,19 +300,15 @@ class EpisodeRecord:
             task_id=str(data.get("task_id") or ""),
             run_id=str(data.get("run_id") or ""),
             trace_id=str(data.get("trace_id") or ""),
-            # `.get` WITHOUT a default: an absent key must stay None
-            # (legacy_unclassified), never collapse into False (quarantined).
+            # `.get` WITHOUT a default: an absent key must stay None (legacy_unclassified), never collapse into False (quarantined).
             usage_eligible=_stored_flag(data.get("usage_eligible")),
             used_procedure_ids=(
                 None
                 if data.get("used_procedure_ids") is None
                 else _str_items(data["used_procedure_ids"])
             ),
-            # Read back as stored, never re-assembled. A legacy row carries no
-            # key and stays None even when it holds an abort tag or
-            # `replan_exhausted`: reconstructing a verdict here would hand one
-            # to episodes whose feedback was already applied without it.
-            # An unrecognised token is refused rather than trusted.
+            # Read back as stored, never re-assembled: a legacy row stays None even with an abort tag or `replan_exhausted`, since reconstructing
+            # a verdict would hand one to episodes whose feedback was applied without it. An unrecognised token is refused.
             declared_completion=(
                 data.get("declared_completion")
                 if data.get("declared_completion") in _COMPLETION_DECLARATIONS
@@ -368,9 +319,7 @@ class EpisodeRecord:
                 if data.get("completion_state") in _COMPLETION_STATES
                 else None
             ),
-            # Absent key stays None (legacy row), an empty list stays () — the
-            # difference between "we never looked" and "we looked and saw
-            # nothing" is the whole point of recording this.
+            # Absent key stays None (legacy row), an empty list stays (): "never looked" differs from "looked and saw nothing".
             defect_signals=(
                 None
                 if data.get("defect_signals") is None
@@ -419,13 +368,9 @@ class ProcedureRecord:
     workflow_key: str
     trigger_tags: tuple[str, ...]
     steps: tuple[str, ...]
-    # One factual line per contributing episode: what was asked, what it
-    # worked on, how the claims held. Accumulated rather than overwritten and
-    # kept parallel to `source_episode_ids`, because a `workflow_key` pools
-    # unrelated runs: a single summary line would describe one situation and
-    # silently claim another's successes. Every line comes from what the
-    # episode observed — nothing is inferred, and an empty tuple means the
-    # run left no honest material.
+    # One factual line per contributing episode (what was asked, what it worked on, how the claims held), accumulated and parallel to
+    # `source_episode_ids`: a `workflow_key` pools unrelated runs, so one summary line would describe one situation and claim another's
+    # successes. Nothing is inferred; an empty tuple means the run left no honest material.
     lessons: tuple[str, ...] = ()
     source_episode_ids: tuple[str, ...] = ()
     #: Вопросы, из которых процедура сделана — НЕЗАВИСИМО от эпизодов, которые
@@ -463,11 +408,8 @@ class ProcedureRecord:
             id=str(data.get("id") or _legacy_id("proc", data)),
             name=str(data.get("name") or "workflow"),
             workflow_key=str(data.get("workflow_key") or ""),
-            # Capped on the way IN as well as on the way out. A record written
-            # by an earlier version, or hand-edited, would otherwise keep its
-            # unbounded fields — and they are spent on every later run, since
-            # the record is injected into planner prompts — until some future
-            # credited episode happened to rewrite it.
+            # Capped on the way IN as well as out: a record from an earlier version or hand-edited would otherwise keep unbounded fields,
+            # which are spent on every later run because the record is injected into planner prompts.
             trigger_tags=tuple(dict.fromkeys(
                 _str_items(data.get("trigger_tags"))
             ))[:_MAX_TRIGGER_TAGS],
@@ -512,12 +454,9 @@ class ProcedureRecord:
         )
 
     def merged_from_episode(self, episode: EpisodeRecord) -> ProcedureRecord:
-        """Fold an episode's PROVENANCE into this procedure without crediting
-        it.
+        """Fold an episode's PROVENANCE into this procedure without crediting it.
 
-        The cap is applied on EVERY return, not only when a lesson is
-        appended: an uncredited fold-in must repair an oversized older
-        record rather than carry it forward untouched.
+                The cap applies on EVERY return: an uncredited fold-in must repair an oversized older record, not carry it forward.
         """
         episode_ids = _capped_episode_ids([*self.source_episode_ids, episode.id])
         lesson = lesson_from_episode(episode)
@@ -534,8 +473,7 @@ class ProcedureRecord:
             updated_at=_now_iso(),
         )
 
-    # Counter-moving fold-in (`with_episode`) no longer exists: counters move
-    # only through the causal `apply_episode_feedback` → `with_outcome` path.
+    # No counter-moving fold-in exists: counters move only through the causal `apply_episode_feedback` -> `with_outcome` path.
 
 
 @dataclass(frozen=True)
@@ -549,8 +487,7 @@ class ConsolidationReport:
     needs_review_procedure_ids: tuple[str, ...]
     obsolete_procedure_ids: tuple[str, ...]
     notes: tuple[str, ...]
-    # Added 2026-07-22 with the `candidate` status. Defaulted, so reports
-    # written before it round-trip unchanged instead of failing to load.
+    # Defaulted, so reports written before the `candidate` status round-trip unchanged instead of failing to load.
     candidate_procedure_ids: tuple[str, ...] = ()
     id: str = field(default_factory=lambda: new_id("consol"))
     created_at: str = field(default_factory=_now_iso)
@@ -589,9 +526,8 @@ class ConsolidationReport:
 class EpisodeSearchResult:
     """What a search returned, and why the rest of the store did not.
 
-    Same contract as `RetrievalSelection` on the persistent side: reasons are
-    reported by the component that decided, counted by reason and never per
-    record, and an absent reason means zero.
+        Same contract as `RetrievalSelection` on the persistent side: reasons are reported by the deciding component and counted by
+        reason, never per record; an absent reason means zero.
     """
 
     episodes: list[EpisodeRecord]
@@ -602,10 +538,8 @@ class EpisodeSearchResult:
 class ProcedureSearchResult:
     """What a procedure search offered, and why the rest of the store did not.
 
-    Same contract as `EpisodeSearchResult`: reasons counted by reason, never per
-    record, absent reason means zero. `excluded_candidate` is the maturity gate
-    (a candidate is never offered until a second success promotes it) — reported
-    so the candidate-vs-no-match distinction stops being invisible.
+        Same contract as `EpisodeSearchResult`. `excluded_candidate` is the maturity gate (a candidate is not offered until a second
+        success promotes it), reported so candidate-vs-no-match is visible.
     """
 
     procedures: list[ProcedureRecord]
@@ -632,11 +566,8 @@ class EpisodicMemoryStore:
     def save_once(self, episode: EpisodeRecord) -> bool:
         """Append the episode unless its id is already stored.
 
-        **Bounded idempotency.** The guarantee lasts only while the episode
-        is inside the FIFO window (`max_episodes`): once evicted, its id
-        becomes writable again. No separate ledger is kept, so this is
-        deduplication for a run and its immediate retries — not a permanent
-        claim.
+                Bounded idempotency: it holds only while the episode is inside the FIFO window (`max_episodes`); once evicted, its id is
+                writable again. Deduplication for a run and its immediate retries, not a permanent claim.
         """
         admitted = admit_for_storage(episode)
         with state_file_lock(self.path):
@@ -648,27 +579,20 @@ class EpisodicMemoryStore:
             return True
 
     def _maybe_prune_unlocked(self) -> int:
-        """Evict oldest non-protected episodes when over *max_episodes*.
+        """Evict oldest non-protected episodes when over *max_episodes*; returns the number removed.
 
-        Protected episodes (carrying any tag in PROTECTED_TAGS) go last, not
-        never: once the unprotected rows are all gone, the OLDEST protected
-        ones are evicted too, so the cap holds (MIR-115, operator 2026-09-25,
-        option г; the other half — `lesson` only for a pass that did work —
-        is in core/self_build_memory.py since 2026-09-23). Returns the number
-        of records removed.
+                Protected episodes (any tag in PROTECTED_TAGS) go last, not never: once unprotected rows are gone, the OLDEST protected
+                ones are evicted too, so the cap holds.
         """
         if self.max_episodes <= 0:
             return 0
         rows = read_state_jsonl_unlocked(self.path)
         if len(rows) <= self.max_episodes:
             return 0
-        # Pair each parsed episode with its ORIGINAL row: kept rows are written
-        # back as they were (unknown fields, stored id and date intact), and a
-        # row that cannot be parsed is kept untouched rather than silently
-        # deleted (проверка 16.11, п. 5). Only readable rows are evicted.
+        # Pair each parsed episode with its ORIGINAL row: kept rows are written back as they were (unknown fields, stored id and date
+        # intact), and an unparseable row is kept untouched rather than deleted. Only readable rows are evicted.
         parsed: list[tuple[int, EpisodeRecord]] = []
-        # The row appended by this very call (always last) is never a
-        # candidate: with many unreadable rows the cut could otherwise evict
+        # The row appended by this very call (always last) is never a candidate: with many unreadable rows the cut could evict
         # the episode `save` is about to report as stored.
         for index, row in enumerate(rows[:-1]):
             try:
@@ -712,29 +636,25 @@ class EpisodicMemoryStore:
 
     @staticmethod
     def _signal_standing(ep: EpisodeRecord) -> int:
-        """2 — подтверждено, 1 — улик не было вовсе, 0 — измеряли, не сошлось.
+        """2 = confirmed, 1 = no evidence at all, 0 = measured and did not hold.
 
-        Три состояния, а не два: «не измеряли» — это незнание, и приравнять его
-        к провалу значило бы выдать незнание за приговор. Замер: MIR-164.
+                Three states, not two: "not measured" is ignorance, and equating it with failure would pass ignorance off as a verdict.
         """
         if (ep.verified_chunks or 0) > 0:
             return 2
         return 0 if (ep.unverified_chunks or 0) + (ep.weak_chunks or 0) else 1
 
     def _rank(self, score: int, ep: EpisodeRecord) -> tuple:
-        """Порядок выдачи: релевантность → метка → сигнал проверки → свежесть.
+        """Ranking: relevance -> label -> verification signal -> recency.
 
-        Метка даёт право ВЫЖИТЬ и право идти первым ПРИ РАВНОЙ релевантности,
-        но не право отменять релевантность: прежняя прибавка +50 была больше
-        любого перекрытия. Подробности и замер: MIR-164.
+                The label grants the right to SURVIVE and to go first AT EQUAL relevance, not to override relevance
+                (the old +50 bonus exceeded any overlap).
         """
         return (
             score,
             1 if self.PROTECTED_TAGS & set(ep.tags) else 0,
             self._signal_standing(ep),
-            # Впустить частичное — не значит уравнять его с завершённым: иначе
-            # свежая частичная запись обходила бы полную по одной свежести
-            # (MIR-169).
+            # Admitting a partial record does not equate it with a completed one: otherwise a fresh partial would beat a full one on recency alone.
             1 if effective_completion(ep) == "achieved" else 0,
             ep.created_at,
         )
@@ -748,13 +668,9 @@ class EpisodicMemoryStore:
     ) -> EpisodeSearchResult:
         """`search`, plus why the rest of the store did not come back.
 
-        A caller that only sees the survivors cannot report on the drops that
-        happened in here — which is how `episodes_selected=0, rejected_by={}`
-        stayed reachable on a store of 200 episodes.
-
-        `admit` returns a rejection reason or None. It runs BEFORE the limit,
-        so records the caller would refuse cannot take the slots of one it
-        would accept (проверка 16.11, п. 3).
+                A caller that sees only survivors cannot report the drops made in here (`episodes_selected=0, rejected_by={}` was reachable on a
+                store of 200 episodes). `admit` returns a rejection reason or None and runs BEFORE the limit, so records the caller would
+                refuse cannot take the slots of one it would accept.
         """
         episodes = self.load()
         q_tokens = _tokens(query)
@@ -771,19 +687,15 @@ class EpisodicMemoryStore:
             haystack = " ".join([ep.goal, ep.question, ep.summary, " ".join(ep.tags)])
             hay_tokens = _tokens(haystack)
             score = len(q_tokens & hay_tokens)
-            # MIR-105/024/008: a match made of function words is not a match.
-            # Scoring still counts every shared token (order unchanged); only
-            # ELIGIBILITY requires at least one discriminating word — measured
-            # 2026-08-22, filler alone retrieved 17 of 34 procedures, and a
-            # launch and a deletion scored as one question.
+            # A match made of function words is not a match. Scoring still counts every shared token; only ELIGIBILITY requires at least one
+            # discriminating word (filler alone retrieved 17 of 34 procedures and scored a launch and a deletion as one question).
             if not (score and (q_content & hay_tokens)):
                 no_overlap += 1
                 continue
             try:
                 reason = admit(ep) if admit is not None else None
             except Exception:  # noqa: BLE001 — counted below, never silent
-                # One record the gate cannot judge is refused and counted; it
-                # must not abort retrieval for the whole turn.
+                # One record the gate cannot judge is refused and counted; it must not abort retrieval for the whole turn.
                 reason = "admit_error"
             if reason:
                 refused[reason] = refused.get(reason, 0) + 1
@@ -820,24 +732,15 @@ class EpisodicMemoryStore:
         threshold: float = 0.35,
         admit: Callable[[EpisodeRecord], bool] | None = None,
     ) -> tuple[EpisodeRecord | None, float]:
-        """Return the episode whose *question* has the highest Jaccard
-        similarity to *query* and the similarity score. Returns ``(None,
-        0.0)`` when no episode reaches *threshold*.
+        """Return the episode whose *question* has the highest Jaccard similarity to *query*, and the score; ``(None, 0.0)`` when none reaches *threshold*.
 
-        Only the stored ``question`` field is compared (not
-        goal/summary/tags), so the signal is «did the user ask THIS before?»
-        and not «is this topic familiar?». A candidate with a low
-        ``answer_quality_score`` gets the threshold lowered by 0.10.
-
-        ``admit`` (True = accept) runs BEFORE the best is chosen, so a refused
-        winner cannot hide an admissible runner-up (проверка 16.11, средняя).
+                Only the stored ``question`` field is compared, so the signal is "did the user ask THIS before?", not "is this topic familiar?".
+                A candidate with a low ``answer_quality_score`` gets the threshold lowered by 0.10. ``admit`` (True = accept) runs BEFORE the best is
+                chosen, so a refused winner cannot hide an admissible runner-up.
         """
-        # MIR-024: the frame is not the question. Similarity is computed over
-        # DISCRIMINATING words only — «Я хочу ЗАПУСТИТЬ АГЕНТА, что мне
-        # сделать?» and «Я хочу УДАЛИТЬ ВСЕ ЛОГИ, что мне сделать?» scored
-        # 0.400 (the threshold) on the shared frame alone, so a launch was
-        # annotated to the planner as a repeat of a deletion. A question made
-        # entirely of filler has nothing to compare and matches nothing.
+        # The frame is not the question: similarity is computed over DISCRIMINATING words only (a shared frame such as "I want to X, what
+        # should I do?" alone scored the threshold, so a launch was annotated as a repeat of a deletion). A question made entirely of filler
+        # matches nothing.
         q_tokens = discriminating_tokens(query)
         if not q_tokens:
             return None, 0.0
@@ -856,10 +759,7 @@ class EpisodicMemoryStore:
                 best_ep = ep
         if best_ep is None:
             return None, 0.0
-        # Lower the threshold when the best candidate was a low-quality — or
-        # unmeasured — answer. A re-ask hint is an offer to go deeper, not a
-        # verdict, and an answer with no evidence is a plausible reason
-        # someone is asking again.
+        # Lower the threshold when the best candidate was a low-quality or unmeasured answer: a re-ask hint is an offer to go deeper, not a verdict.
         effective_threshold = threshold
         if (
             best_ep.answer_quality_score is None
@@ -879,11 +779,9 @@ class EpisodicMemoryStore:
         dry_run: bool = False,
         keep_ids: frozenset[str] = frozenset(),
     ) -> list[str]:
-        """Remove old, low-quality, non-protected episodes.
+        """Remove old, low-quality, non-protected episodes; returns the evicted IDs.
 
-        Wraps :func:`core.episodic_hygiene.prune_stale_episodes`.
-        Returns the IDs of evicted episodes. ``keep_ids`` — эпизоды-опоры
-        зачёта процедур, уборке не отдаются (MIR-128).
+                Wraps :func:`core.episodic_hygiene.prune_stale_episodes`. ``keep_ids`` (procedure-credit anchor episodes) are never handed to cleanup.
         """
         # Local import: keeps episodic_hygiene out of the tight import
         # graph of smart_memory.
@@ -916,22 +814,20 @@ class ProceduralMemoryStore:
         return out
 
     def rewrite(self, procedures: list[ProcedureRecord]) -> None:
-        """The given list becomes the READABLE set; each record is merged over its
-        original row (unknown keys kept), unreadable rows are kept untouched
-        (проверка 16.11, средняя).
+        """The given list becomes the READABLE set; each record is merged over its original row (unknown keys kept), unreadable rows are kept untouched.
 
-        Only when you own the whole store (tests, fresh files): a list loaded
-        earlier silently undoes every write made since — use `update_procedures`
-        for read-modify-write (проверка 17.11, средняя)."""
+                Only when you own the whole store (tests, fresh files): a list loaded earlier silently undoes every write made since.
+                Use `update_procedures` for read-modify-write.
+        """
         with state_file_lock(self.path):
             self._replace_readable_unlocked(self._rows_unlocked(), procedures)
 
     def update_procedures(
         self, fn: Callable[[list[ProcedureRecord]], list[ProcedureRecord]]
     ) -> list[ProcedureRecord]:
-        """Locked read-modify-write: `fn` gets the CURRENT readable list and returns
-        the new one; unreadable rows and unknown keys survive; the same objects
-        back = no write (проверка 17.11, средняя)."""
+        """Locked read-modify-write: `fn` gets the CURRENT readable list and returns the new one; unreadable rows and unknown keys survive;
+                the same objects back = no write.
+        """
         with state_file_lock(self.path):
             rows = self._rows_unlocked()
             current = [p for _row, p in rows if p is not None]
@@ -970,8 +866,7 @@ class ProceduralMemoryStore:
         changed: dict[str, ProcedureRecord],
         added: list[ProcedureRecord] = (),  # type: ignore[assignment]
     ) -> None:
-        """Rewrite: changed records over their original row (unknown keys kept),
-        every other row exactly as read, unreadable ones included (проверка 16.11, п. 5)."""
+        """Rewrite: changed records over their original row (unknown keys kept), every other row exactly as read, unreadable ones included."""
         payloads = [
             {**row, **changed[proc.id].to_dict()} if proc is not None and proc.id in changed else row
             for row, proc in rows
@@ -987,14 +882,9 @@ class ProceduralMemoryStore:
     ) -> dict:
         """Feed one run's outcome back to the procedures it actually used.
 
-        `allow_credit=False` withholds the POSITIVE direction only, for a
-        cycle whose verifier threw: `verified=0, unverified=0` falls through
-        the outcome derivation to `success`, so an unmeasured run would
-        otherwise credit a procedure exactly like a verified one. The
-        negative direction is untouched — a debit comes from a structural
-        failure the verifier had no part in, and suppressing it would let a
-        crash shield a procedure that genuinely failed. The suppression is
-        reported rather than made to look like an absent verdict.
+                `allow_credit=False` withholds the POSITIVE direction only, for a cycle whose verifier threw (`verified=0, unverified=0` falls
+                through to `success`, so an unmeasured run would credit a procedure like a verified one). The negative direction is untouched:
+                a debit comes from a structural failure the verifier had no part in. The suppression is reported, not disguised as an absent verdict.
         """
         used = episode.used_procedure_ids
         verdict = feedback_for_episode(episode)
@@ -1007,8 +897,7 @@ class ProceduralMemoryStore:
             "credit_suppressed": credit_suppressed,
             "attribution": "unknown" if used is None else "recorded",
         }
-        # A credit withheld only for lack of a verified fact is named, so it
-        # does not read like a run that simply did not succeed.
+        # A credit withheld only for lack of a verified fact is named, so it does not read like a run that simply did not succeed.
         if (
             verdict == "none"
             and episode.verified_chunks == 0
@@ -1042,18 +931,12 @@ class ProceduralMemoryStore:
     def recompute_legacy_confidence(
         self, *, dry_run: bool = True, limit: int | None = None
     ) -> dict:
-        """Restore `confidence == _smoothed_confidence(success, failure)`
-        (MIR-051).
+        """Restore `confidence == _smoothed_confidence(success, failure)`.
 
-        Touches **only** derived values: `confidence`, and `status` with it,
-        since status is decided by `_procedure_status_for` from the counters.
-        Leaving status stale would just trade one broken invariant for another;
-        a row whose confidence is right but whose status follows an older rule
-        is repaired too (проверка 16.11: a 1:1 tie retired under the old rule).
-        The repair only lowers or keeps standing — see `_repaired_status`
-        (проверка 17.11, средняя).
+                Touches only derived values: `confidence`, and `status` with it (decided by `_procedure_status_for` from the counters),
+                since a stale status would trade one broken invariant for another. The repair only lowers or keeps standing (see `_repaired_status`).
         """
-        # One lock for the read AND the write (проверка 16.11, п. 6).
+        # One lock for the read AND the write.
         with state_file_lock(self.path):
             rows = read_state_jsonl_unlocked(self.path)
 
@@ -1116,9 +999,8 @@ class ProceduralMemoryStore:
                 report["corrected"] += 1
                 if not dry_run:
                     row["confidence"] = expected
-                    # H-44: у поля была ТРЕТЬЯ власть — эта строка знала только
-                    # `active`/`needs_review` и `candidate` не производила вовсе,
-                    # поэтому проход по новорождённым переименовал бы их все.
+                    # The field had a THIRD authority: this line knew only `active`/`needs_review` and never produced `candidate`,
+                    # so a pass over newborns would rename them all.
                     row["status"] = status
                     changed = True
 
@@ -1141,8 +1023,7 @@ class ProceduralMemoryStore:
         candidate = procedure_from_episode(episode)
         if candidate is None:
             return None, False
-        # Read and write under ONE lock: two separate locks let a write made in
-        # between (a credit from feedback) be overwritten (проверка 16.11, п. 6).
+        # Read and write under ONE lock: two separate locks let a write made in between (a credit from feedback) be overwritten.
         with state_file_lock(self.path):
             rows = self._rows_unlocked()
             changed: dict[str, ProcedureRecord] = {}
@@ -1164,26 +1045,21 @@ class ProceduralMemoryStore:
                 return None, False
             added: list[ProcedureRecord] = []
             if updated is None:
-                # A brand-new candidate records its creating episode's PROVENANCE
-                # but earns no credit: it was not USED by the run that produced it
-                # (it did not exist yet), so its counters stay at birth (zero).
+                # A brand-new candidate records its creating episode's PROVENANCE but earns no credit: it was not USED by the run that produced it,
+                # so its counters stay at birth (zero).
                 updated = candidate.merged_from_episode(episode)
                 added.append(updated)
             self._write_rows_unlocked(rows, changed, added)
         return updated, created
 
     def search(self, query: str, *, limit: int = 3) -> list[ProcedureRecord]:
-        """Procedures to offer the planner. Thin wrapper over the reporting form
-        so the one production caller can log *why* the rest were dropped."""
+        """Procedures to offer the planner; thin wrapper over the reporting form so the one production caller can log why the rest were dropped."""
         return self.search_with_report(query, limit=limit).procedures
 
     def search_with_report(
         self, query: str, *, limit: int = 3, salience: TokenSalience = FLAT
     ) -> ProcedureSearchResult:
-        """Same as `search`, but it also reports why the store's other
-        procedures did not surface — symmetric with
-        `EpisodicMemoryStore.search_with_report`.
-        """
+        """Same as `search`, but also reports why the store's other procedures did not surface; symmetric with `EpisodicMemoryStore.search_with_report`."""
         procedures = self.load()
         q_tokens = _tokens(query)
         q_content = q_tokens - STOPWORDS
@@ -1196,24 +1072,20 @@ class ProceduralMemoryStore:
         excluded_retired = 0
         no_overlap = 0
         for proc in procedures:
-            # Кандидат ПОКАЗЫВАЕТСЯ: затвор зрелости смешивал видимость с
-            # кредитом и запирал круг. Почему и чем это мерялось:
-            # docs/CODE_NOTES.md, «The method that could not survive the turn».
+            # A candidate is SHOWN: the maturity gate conflated visibility with credit and locked the circle
+            # (see docs/CODE_NOTES.md, "The method that could not survive the turn").
             if proc.status in {"obsolete", "needs_review"}:
                 excluded_retired += 1
                 continue
             haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
-            # Взвешенно, а не штуками: три служебных слова не должны обходить
-            # одно имя сигнала. Без корпуса вес плоский и счёт прежний.
+            # Weighted, not counted: three function words must not outweigh one signal name. Without a corpus the weight is flat and the count as before.
             hay_tokens = _tokens(haystack)
             score = salience.overlap(q_tokens, hay_tokens)
             if score and (q_content & hay_tokens):
                 scored.append((score, 0 if proc.status == "candidate" else 1, proc))
             else:
                 no_overlap += 1
-        # Уместность первой, зрелость — при РАВНОЙ уместности. Правило
-        # «неподтверждённое не вытесняет подтверждённое» сохранено там, где
-        # вопрос зрелости и живёт; поверх темы оно стоило точности.
+        # Relevance first, maturity only at EQUAL relevance: "unconfirmed does not displace confirmed" stays where maturity lives, but over topic it cost accuracy.
         scored.sort(key=lambda item: (item[0], item[1], item[2].confidence,
                                       item[2].updated_at), reverse=True)
         selected = [proc for _score, _proven, proc in scored[:limit]]
@@ -1254,19 +1126,15 @@ class MemoryConsolidationStore:
 def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
     """May this run raise a procedure's standing?
 
-    `completion_state` is read FROZEN, through the shared accessor. It is
-    never recomputed and never taken from `declared_completion`.
+        `completion_state` is read FROZEN through the shared accessor; never recomputed, never taken from `declared_completion`.
     """
-    # Третья ось, общая с допуском эпизода в использование: предикат один на
-    # оба рубежа, чтобы они не разошлись.
+    # Third axis, shared with the episode's usage eligibility: one predicate for both boundaries so they cannot diverge.
     if _answer_disqualified(episode):
         return False
-    # Эхо памяти (`memory:`) и ответ не по теме не поднимают метод — те же оси,
-    # что отказывают в допуске (проверка 16.11, средняя).
+    # Memory echo (`memory:`) and an off-topic answer do not raise a method: the same axes that refuse eligibility.
     if _lesson_provenance_disqualified(episode):
         return False
-    # Хотя бы один проверенный факт: без него «achieved» — только слово самого
-    # прогона, и метод поднимался бы на самопохвале (проверка 16.11, п. 2).
+    # At least one verified fact: without it "achieved" is only the run's own word and the method would be raised on self-praise.
     return bool(
         effective_completion(episode) == "achieved"
         and episode.outcome == "success"
@@ -1278,23 +1146,13 @@ def procedure_credit_allowed(episode: EpisodeRecord) -> bool:
 def procedure_debit_allowed(episode: EpisodeRecord) -> bool:
     """May this run lower a procedure's standing?
 
-    Deliberately narrow: only a failure the RUN ITSELF demonstrates. An
-    exhausted replan is the loop giving up after trying — a fact about
-    execution that the procedure took part in.
+        Deliberately narrow: only a failure the RUN ITSELF demonstrates (an exhausted replan: the loop gave up after trying, a fact about
+        execution the procedure took part in). Everything else is neutral: a DECLARED `failed`, `cancelled`, `blocked` / `refused` /
+        `partially_achieved` (the procedure may have executed perfectly), `unknown` / legacy `None`, and an ABORTED run (no
+        `used_procedure_ids`, so no causal link to debit through).
 
-    Everything else is neutral: a DECLARED `failed` (the answer's own claim
-    about itself), `cancelled` (a control signal), `blocked` / `refused` /
-    `partially_achieved` (non-completions the procedure may have executed
-    perfectly through), and `unknown` / legacy `None`. An ABORTED run is
-    neutral structurally — it carries no `used_procedure_ids`, so there is
-    no causal link to debit through.
-
-    The frozen state is authoritative and comes first: `replan_exhausted`
-    NARROWS an existing `failed`, it can never create one. A record claiming
-    `achieved` while carrying an exhausted replan is not debited.
-
-    Derived `aborted:*` tags are never consulted. A value computed from
-    another value must not be what authorises a debit.
+        The frozen state is authoritative and comes first: `replan_exhausted` NARROWS an existing `failed`, never creates one.
+        Derived `aborted:*` tags are never consulted: a value computed from another value must not authorise a debit.
     """
     return bool(
         effective_completion(episode) == "failed"
@@ -1327,12 +1185,10 @@ def resolve_used_procedures(
     executed = list(executed_tools)
 
     def _completed_at(workflow: list[str]) -> int | None:
-        """Index where every step of the workflow had run AS MANY TIMES as the
-        workflow names it, or None. Mere membership let a run that called a
-        tool once count as applying a workflow that needs it twice
-        (проверка 16.11, п. 8). Order is NOT required: the key is built by
-        `episode_tools` (last round's plan first, earlier rounds after), so it
-        need not match the execution order of a multi-round run."""
+        """Index where every step of the workflow had run AS MANY TIMES as the workflow names it, or None. Mere membership let a one-time call
+                count as applying a workflow that needs it twice. Order is NOT required: the key is built by `episode_tools` (last round's plan
+                first), so it need not match the execution order of a multi-round run.
+        """
         need: dict[str, int] = {}
         for tool in workflow:
             need[tool] = need.get(tool, 0) + 1
@@ -1413,14 +1269,9 @@ def assemble_completion_state(
 class CompletionVerdict:
     """The operational verdict plus the divergence that produced it.
 
-    Operator's rule: an authoritative signal must outrank the run's own
-    self-assessment **in the operational outcome**, and must not destroy that
-    self-assessment — the disagreement is itself a diagnostic fact and is kept.
-
-    So three things are stored, never two: what the answer claimed
-    (`EpisodeRecord.declared_completion`, untouched), what actually holds
-    (`state`), and — only when they diverge — which fact displaced the claim
-    (`overridden_by`). A reader can always reconstruct both sides and the reason.
+        An authoritative signal outranks the run's own self-assessment in the operational outcome without destroying it. Three things are
+        stored: what the answer claimed (`EpisodeRecord.declared_completion`, untouched), what holds (`state`), and, only when they diverge,
+        which fact displaced the claim (`overridden_by`).
     """
 
     state: CompletionState
@@ -1442,13 +1293,10 @@ def assemble_completion_verdict(
     citation_integrity_violation: bool = False,
     checklist_unmet: bool = False,
 ) -> CompletionVerdict:
-    """The single rule table. :func:`assemble_completion_state` delegates here.
+    """The single rule table; :func:`assemble_completion_state` delegates here.
 
-    `obligation_unmet` is authoritative in one direction only: it can lower a
-    claim of `achieved` to `partially_achieved`, never raise anything. A run
-    that left a duty silently unmet did not finish the job, whatever it said —
-    but a run that already reported `blocked` or `failed` is not made worse by
-    it, because the honest report was never the problem.
+        `obligation_unmet` is authoritative in one direction only: it can lower a claim of `achieved` to `partially_achieved`, never raise
+        anything. A run that already reported `blocked` or `failed` is not made worse by it.
     """
     if aborted_reason == "cancelled":
         return _displaced("cancelled", declared, "cancelled")
@@ -1462,23 +1310,18 @@ def assemble_completion_verdict(
         return _displaced(
             "partially_achieved", declared, "obligation_silently_missing"
         )
-    # Та же односторонняя власть, другое основание: `obligation_unmet` — долг
-    # остался невыполненным; здесь — часть контракта оператора модуль вообще
-    # не сумел представить. Отказ УДОСТОВЕРЯТЬ не равен утверждению провала:
-    # `partially_achieved` и означает «сделано не всё, что просили».
+    # Same one-sided authority, different ground: `obligation_unmet` is a duty left unmet; here a part of the operator's contract could not
+    # be represented at all. Refusing to CERTIFY is not asserting failure: `partially_achieved` means "not everything asked was done".
     if user_contract_partial and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "user_contract_unrepresented"
         )
-    # Чек-лист поручения (core/request_checklist.py): судья ответил «нет» на
-    # важное требование человека — «не больше 8 предложений», «строка VERDICT в
-    # конце». Та же односторонняя власть: понижает, ничего не повышает.
+    # Task checklist (core/request_checklist.py): the judge answered "no" to an important human requirement ("no more than 8 sentences",
+    # "VERDICT line at the end"). Same one-sided authority: lowers, never raises.
     if checklist_unmet and declared == "achieved":
         return _displaced("partially_achieved", declared, "checklist_unmet")
-    # Census A2: the answer-safety check raised, so the run delivered a safe
-    # refusal instead of the draft it had written — work happened, the honest
-    # outcome reached the user, and the process was defective.
-    # `partially_achieved` also withholds procedure credit and eligibility.
+    # The answer-safety check raised, so the run delivered a safe refusal instead of its draft: work happened and the honest outcome reached
+    # the user, but the process was defective. `partially_achieved` also withholds procedure credit and eligibility.
     if enforcement_failed and declared == "achieved":
         return _displaced(
             "partially_achieved", declared, "answer_enforcement_failed"
@@ -1504,12 +1347,8 @@ def _displaced(
 def effective_completion(episode: EpisodeRecord) -> CompletionState:
     """The completion verdict a reader should act on.
 
-    `None` on the record means the episode was never classified — it was
-    written before the axis existed. Readers get `unknown` for it, which is
-    fail-closed everywhere the gates land: an unclassified episode steers
-    nothing, credits nothing and is not replayed. The stored `None` is kept
-    distinct from a stored `"unknown"` so a legacy row remains recognisable as
-    legacy rather than as a run we examined and could not classify.
+        `None` on the record means never classified (written before the axis existed); readers get `unknown`, fail-closed at every gate:
+        such an episode steers nothing, credits nothing and is not replayed. A stored `None` stays distinct from a stored "unknown".
     """
     state = episode.completion_state
     return state if state in _COMPLETION_STATES else "unknown"  # type: ignore[return-value]
@@ -1526,7 +1365,7 @@ DISQUALIFYING_DEFECT_SIGNALS: frozenset[str] = frozenset(
 
 
 def _answer_disqualified(episode: EpisodeRecord) -> bool:
-    """Опровергал ли этот ответ сам себя — единый вопрос для обоих рубежей."""
+    """Whether this answer refuted itself: one question for both boundaries."""
     return bool(
         DISQUALIFYING_DEFECT_SIGNALS & set(episode.defect_signals or ())
     )
@@ -1535,9 +1374,7 @@ def _answer_disqualified(episode: EpisodeRecord) -> bool:
 def _lesson_provenance_disqualified(episode: EpisodeRecord) -> bool:
     """The two axes a `lesson` may NOT waive: its sources and its subject.
 
-    Kept beside `_answer_disqualified` because both answer the same shape of
-    question — is this record admissible at all — as opposed to the outcome
-    axes, which ask how the run went.
+        Kept beside `_answer_disqualified`: both ask whether the record is admissible at all, unlike the outcome axes, which ask how the run went.
     """
     if any(str(label).startswith("memory:") for label in episode.source_labels):
         return True
@@ -1558,58 +1395,34 @@ def _lesson_provenance_disqualified(episode: EpisodeRecord) -> bool:
 def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
     """Decide whether a freshly banked episode may steer later answers.
 
-    Admitted only when ALL hold: `completion_state == "achieved"` (read
-    frozen, never re-derived, never from the declaration); `outcome ==
-    "success"`; `verified_chunks > 0` (something was independently
-    confirmed); and not a replay. One exception: a curated `lesson` is
-    admitted whatever its outcome.
-
-    Always returns a bool — `None` means "never classified" and belongs to
-    rows written before the field existed. No threshold constant appears
-    here on purpose: every rule reads a fact the verifier measured.
+        Admitted only when ALL hold: `completion_state == "achieved"` (read frozen, never re-derived, never from the declaration);
+        `outcome == "success"`; `verified_chunks > 0`; and not a replay. Exception: a curated `lesson` is admitted whatever its outcome.
+        Always returns a bool (`None` belongs to legacy rows). No threshold constant on purpose: every rule reads a fact the verifier measured.
     """
-    # ПЕРЕД всеми остальными осями, включая исключение для урока: ответ,
-    # который сам себя опроверг, не становится опытом ни на каком основании.
-    # Такой ответ проходит КАЖДУЮ проверку ниже, потому что верификация меряет
-    # разрешимость ссылки, а не истинность референта (MIR-060).
+    # BEFORE all other axes, including the lesson exemption: an answer that refuted itself never becomes experience on any ground,
+    # since it passes EVERY check below (verification measures link resolvability, not the truth of the referent).
     if _answer_disqualified(episode):
         return False
     if "lesson" in episode.tags:
-        # The exemption now waives what it always PROMISED to waive and no
-        # more. Failing legitimately costs an episode its outcome, its
-        # completion and its verified chunks — a run that failed confirmed
-        # nothing — and remembering that failure as a warning is the whole
-        # point of the tag (101 of 127 lessons in the live store are failures).
-        # It does NOT excuse two axes that have nothing to do with failing:
-        #   * a `memory:` source is memory citing itself — an echo is not a
-        #     second witness, and it is the amplification step a memory
-        #     poisoning attack needs (MIR-115 measured the bypass, MIR-121
-        #     the threat class);
-        #   * an off-topic record is off-topic whether or not it failed.
-        # Measured before the change: zero live lessons are affected, so this
-        # is prophylaxis on the attack path rather than repair of live damage.
+        # The exemption waives what it promised to waive and no more. A legitimate failure costs an episode its outcome, completion and verified
+        # chunks, and remembering that failure as a warning is the point of the tag. It does NOT excuse two axes unrelated to failing: a `memory:`
+        # source is memory citing itself (an echo is not a second witness and is the amplification step of a memory-poisoning attack), and an
+        # off-topic record is off-topic whether or not it failed. No live lesson is affected: this is prophylaxis on the attack path.
         return not _lesson_provenance_disqualified(episode)
     if episode.outcome != "success":
         return False
-    # The second axis: `outcome` reports that the claims held up, which a
-    # blocked non-answer can satisfy perfectly. Both must agree — neither
-    # substitutes for the other — and this one only ever subtracts permission.
-    # Read from the FROZEN state through the shared accessor, never from
-    # `declared_completion`.
+    # The second axis: `outcome` says the claims held up, which a blocked non-answer can satisfy perfectly. Both must agree, neither substitutes
+    # for the other, and this one only subtracts permission. Read from the FROZEN state through the shared accessor.
     completion = effective_completion(episode)
     if completion not in _ADMISSIBLE_COMPLETIONS:
         return False
-    # «Частично» бывает ДВУХ происхождений, и различитель уже в записи.
-    # Собственная честная оценка прогона — одно; принудительное понижение,
-    # когда авторитетный сигнал вытеснил его утверждение, — другое. Второе
-    # разжаловано по правилу оператора, и впускать его как честную частичность
-    # значило бы отменить это правило (MIR-169).
+    # "Partial" has TWO origins and the differentiator is in the record: the run's own honest assessment versus a forced downgrade when an
+    # authoritative signal displaced its claim. The second was demoted by the operator's rule; admitting it as honest partiality would void it.
     if completion != "achieved" and episode.completion_override is not None:
         return False
     if any(str(label).startswith("memory:") for label in episode.source_labels):
         return False
-    # Третья ось: первые две спрашивают, устояли ли утверждения, эта — про тот
-    # ли они вопрос. Порог общий с предупреждением оператору, из замера.
+    # Third axis: the first two ask whether the claims held, this asks whether they answered THIS question. The threshold is shared with the operator warning.
     from core.verification_summary import _LOW_RELEVANCE
 
     if episode.relevance_score is not None and episode.relevance_score < _LOW_RELEVANCE:
@@ -1620,9 +1433,7 @@ def decide_usage_eligibility(episode: EpisodeRecord) -> bool:
 def is_usage_eligible(episode: EpisodeRecord) -> bool:
     """May this episode steer a later answer?
 
-    Only an EXPLICIT `True` admits it. Both `None` (legacy_unclassified) and
-    `False` (quarantined) are refused — fail-closed, because an episode whose
-    provenance was never established is not evidence that it is trustworthy.
+        Only an EXPLICIT `True` admits it; both `None` (legacy_unclassified) and `False` (quarantined) are refused (fail-closed).
     """
     return episode.usage_eligible is True
 
@@ -1630,25 +1441,16 @@ def is_usage_eligible(episode: EpisodeRecord) -> bool:
 def admit_for_storage(episode: EpisodeRecord) -> EpisodeRecord:
     """Resolve the admission verdict for an episode about to be written.
 
-    ``None`` means "no one has decided yet" and is the only state this
-    resolves. An explicit ``True``/``False`` from the caller is a decision
-    already taken and is passed through untouched — that is how an aborted
-    run stays quarantined even though the policy is willing to look at it.
-
-    Idempotent, so calling it at the write site *and* inside the store is a
-    no-op the second time. Applied on **write only**: a ``None`` read back
-    off disk is a row that predates the field, and re-deciding it now would
-    rewrite history with today's rule.
+        ``None`` (no one has decided yet) is the only state resolved; an explicit ``True``/``False`` is a decision already taken and passes
+        through untouched (that is how an aborted run stays quarantined). Idempotent, and applied on **write only**: a ``None`` read back
+        from disk is a row predating the field, and re-deciding it would rewrite history with today's rule.
     """
     if episode.usage_eligible is None:
         episode = replace(
             episode, usage_eligible=decide_usage_eligibility(episode)
         )
-    # The completion axis, same boundary: every NEW record carries an explicit
-    # verdict. A writer that knows its outcome writes it; one that cannot
-    # classify writes the explicit ``"unknown"``. Absence of the field is
-    # legal only when READING rows that predate the axis. Write-only, like the
-    # eligibility rule above: a `None` read back off disk stays `None`.
+    # The completion axis, same boundary: every NEW record carries an explicit verdict (a writer that cannot classify writes ``"unknown"``).
+    # Absence is legal only when READING rows that predate the axis. Write-only: a `None` read back from disk stays `None`.
     if episode.completion_state is None:
         episode = replace(episode, completion_state="unknown")
     return episode
@@ -1673,32 +1475,23 @@ def _derive_episode_outcome(
     5. otherwise the counters judge the support the answer had.
     """
     if aborted_reason:
-        # The run did not finish. Decided before the counters and never
-        # overridden into a success by them.
+        # The run did not finish: decided before the counters and never overridden into a success by them.
         return "failed"
     if replan_exhausted:
         return "failed"
     if answer_withheld:
         return "failed"
     if declared_completion in _NON_DELIVERY_DECLARATIONS:
-        # A well-cited non-delivery used to count as a well-cited success:
-        # outcome came from chunk counts alone, so the request asked for work,
-        # the answer said it was not done, and memory recorded a success.
-        # `usage_eligible=False` does not repair that — the row still READS
-        # as a success.
+        # A well-cited non-delivery used to count as a well-cited success (outcome came from chunk counts alone), so memory recorded a success for
+        # an answer that said the work was not done. `usage_eligible=False` does not repair that: the row still READS as a success.
         return "failed" if declared_completion == "failed" else "partial"
     if unverified > verified:
-        # A relative-majority test (mirrors the `weak >= verified` guard
-        # below), not a magic threshold: a single lucky verified chunk must
-        # not immunise an answer with many more unverified ones.
-        # verified=0/unverified=0 is untouched — general knowledge stays
-        # `success`.
+        # A relative-majority test (mirrors the `weak >= verified` guard below), not a magic threshold: one lucky verified chunk must not
+        # immunise an answer with many more unverified ones. verified=0/unverified=0 is untouched: general knowledge stays `success`.
         return "partial"
     if weak > 0 and weak >= verified:
-        # The answer leans at least as much on support the verifier could not
-        # confirm (sub-agent claims, unmatched citations, missing receipts) as
-        # on verified evidence. Not a clean success — do NOT let it graduate to
-        # a reusable procedure or bank a 1.0 quality score.
+        # The answer leans at least as much on support the verifier could not confirm as on verified evidence: not a clean success, so it must
+        # not graduate to a reusable procedure or bank a 1.0 quality score.
         return "partial"
     return "success"
 
@@ -1755,9 +1548,8 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
     tags = _episode_tags(tools=tools, outcome=outcome, labels=labels)
     if aborted_reason:
         tags = (*tags, "aborted", f"aborted:{aborted_reason}")
-    # A run-derived id is what makes duplicate detection possible at all: the
-    # store can recognise "this attempt was already banked" without keeping a
-    # ledger. Runs without an id keep the random default.
+    # A run-derived id makes duplicate detection possible without a ledger: the store can recognise "this attempt was already banked".
+    # Runs without an id keep the random default.
     episode_id = episode_id_for_run(run_id) if run_id else new_id("ep")
     _verdict = assemble_completion_verdict(
         aborted_reason=str(aborted_reason or ""),
@@ -1788,40 +1580,30 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
         answer_quality_score=(
             None if answer_withheld else _compute_quality_score(verified, unverified, weak)
         ),
-        # Same check as on read: NaN or a value outside [0, 1] is "not
-        # measured", never a pass of the relevance gate (проверка 16.11, п. 13).
+        # Same check as on read: NaN or a value outside [0, 1] is "not measured", never a pass of the relevance gate.
         relevance_score=_stored_relevance(relevance_score),
         tags=tags,
         task_id=str(task_id or ""),
         run_id=str(run_id or ""),
         trace_id=str(trace_id or ""),
-        # Defaults to None (legacy_unclassified): banking an episode is not by
-        # itself a verdict that it may steer later answers. The caller decides.
+        # Defaults to None (legacy_unclassified): banking an episode is not itself a verdict that it may steer later answers; the caller decides.
         usage_eligible=usage_eligible,
         used_procedure_ids=used_procedure_ids,
-        # Both completion fields are settled here, at the moment of banking,
-        # and never recomputed afterwards (MIR-057). An unrecognised token is
-        # dropped rather than stored, so the declaration column can only ever
-        # hold something the parser is allowed to produce.
+        # Both completion fields are settled here, at banking, and never recomputed. An unrecognised token is dropped, so the declaration column
+        # only holds what the parser may produce.
         declared_completion=_checked_declaration(declared_completion, on_audit),
         completion_state=_verdict.state,
         completion_override=_verdict.overridden_by,
-        # Order preserved, duplicates dropped: a sensor that fires on three
-        # attempts is one fault, and a stable order keeps two runs with the same
-        # faults byte-comparable. `None` passes through untouched so a caller
-        # that cannot collect signals stays distinguishable from one that
-        # collected none.
+        # Order preserved, duplicates dropped: a sensor firing on three attempts is one fault, and a stable order keeps runs byte-comparable.
+        # `None` passes through so a caller that cannot collect signals stays distinguishable from one that collected none.
         defect_signals=signals,
         id=episode_id,
     )
 
 
-# Bounds on the two fields that accumulate across episodes. A common
-# `workflow_key` pools every credited run into one record, so both fields
-# would otherwise grow without limit — and the growth is paid again on every
-# later run, since the record is rewritten to JSONL and injected into planner
-# prompts. Unbounded tags also destroy retrieval: a record carrying every
-# token matches every query. The most RECENT lessons are kept.
+# Bounds on the two fields that accumulate across episodes: a common `workflow_key` pools every credited run into one record, so both
+# would grow without limit, and the growth is paid again on every later run (record rewritten to JSONL, injected into planner prompts).
+# Unbounded tags also destroy retrieval: a record carrying every token matches every query. The most RECENT lessons are kept.
 #: Сколько вопросов-происхождений держит одна процедура. Запись уходит в
 #: подсказки планировщика, поэтому ограничено всё, что в ней копится.
 #: Evidence labels shown in one line, before a "+N more" summary. Shared by the
@@ -1829,9 +1611,7 @@ def episode_from_agent_cycle(  # noqa: PLR0913 — flat: depth 1, all 1 returns 
 
 
 def lesson_from_episode(episode: EpisodeRecord) -> str:
-    """One factual line about what this run met and how it went. Never
-    inferred.
-    """
+    """One factual line about what this run met and how it went; never inferred."""
     asked = _clean_text(episode.question, max_chars=160)
     if not asked:
         return ""
@@ -1843,36 +1623,29 @@ def lesson_from_episode(episode: EpisodeRecord) -> str:
     claims = episode.verified_chunks + episode.unverified_chunks
     if claims:
         parts.append(f"{episode.verified_chunks}/{claims} claims verified")
-    # Faults are part of the causal record: a workflow that worked *despite* an
-    # observed fault is a different thing from one that ran clean, and hiding
-    # the difference is how a flawed method gets reused as a good one.
+    # Faults are part of the causal record: a workflow that worked despite an observed fault differs from one that ran clean,
+    # and hiding that is how a flawed method gets reused as a good one.
     if episode.defect_signals:
         parts.append("observed: " + ", ".join(episode.defect_signals))
     return "; ".join(parts)
 
 
 def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
-    # Same predicate as the counter and the verdict: a workflow is only worth
-    # minting from a run that finished the job. Widening admission would bank
-    # better-written lessons behind the same false successes.
+    # Same predicate as the counter and the verdict: a workflow is worth minting only from a run that finished the job.
     if not procedure_credit_allowed(episode):
         return None
-    # Left as the tool sequence on purpose. `resolve_used_procedures` parses it
-    # back into that sequence to decide which procedures actually ran, so the
-    # key is load-bearing for attribution. Its known pooling defect (MIR-050)
-    # is why `lessons` accumulates instead of holding one summary line.
+    # Left as the tool sequence on purpose: `resolve_used_procedures` parses it back to decide which procedures ran, so the key is
+    # load-bearing for attribution. Its known pooling defect is why `lessons` accumulates instead of holding one summary line.
     workflow_key = "tools:" + "->".join(episode.tools_used)
     lesson = lesson_from_episode(episode)
     subject = _clean_text(episode.question, max_chars=60)
     readable_tools = ", ".join(episode.tools_used)
     steps = (
-        # The situation first: a step list that starts with the tools answers
-        # "how" without ever saying "for what".
+        # The situation first: a step list starting with the tools answers "how" without saying "for what".
         f"Situation: {subject}" if subject else "Situation: (not recorded)",
         *(f"Run tool: {tool}" for tool in episode.tools_used),
-        # Bounded by the same helper as the lesson: this string is stored
-        # verbatim and scored during retrieval, so an unbounded sweep over many
-        # files would otherwise put an arbitrarily long line into both.
+        # Bounded by the same helper as the lesson: this string is stored verbatim and scored in retrieval, so an unbounded sweep over many
+        # files would put an arbitrarily long line into both.
         (
             "Evidence gathered: " + _summarise_labels(episode.source_labels)
             if episode.source_labels
@@ -1883,27 +1656,22 @@ def procedure_from_episode(episode: EpisodeRecord) -> ProcedureRecord | None:
     return ProcedureRecord(
         name=f"{subject} via {readable_tools}" if subject else f"Workflow using {readable_tools}",
         workflow_key=workflow_key,
-        # Question tokens join the tags so retrieval can match on what the
-        # workflow was FOR: scoring reads name/tags/steps, and tool names
-        # alone score zero against a query about the subject. Tokenised from
-        # the FULL question, never the 60-char display subject.
+        # Question tokens join the tags so retrieval can match what the workflow was FOR (scoring reads name/tags/steps, and tool names alone
+        # score zero against a subject query). Tokenised from the FULL question, never the 60-char display subject.
         trigger_tags=tuple(dict.fromkeys([
             *episode.tools_used, *episode.tags, *sorted(_tokens(episode.question)),
         ]))[:_MAX_TRIGGER_TAGS],
         steps=tuple(steps),
         lessons=(lesson,) if lesson else (),
         source_episode_ids=(),
-        # Полный вопрос, а не 60-знаковый `subject` из шагов: тот обрезан и
-        # лежит внутри стога подбора, поэтому свидетелем происхождения быть
-        # не может (MIR-165).
+        # The full question, not the 60-char `subject` from the steps: that one is truncated and lies inside the retrieval haystack,
+        # so it cannot witness provenance.
         source_questions=_capped_source_questions((episode.question,)),
         success_count=0,
         failure_count=0,
         confidence=0.5,
-        # Born unproven. `upsert_from_episode` folds in the first episode via
-        # `merged_from_episode` — provenance and lesson only, no counter and
-        # no status change. Promotion comes solely from the causal feedback
-        # path, so a fresh procedure stays `candidate`, never `active`.
+        # Born unproven: `upsert_from_episode` folds in the first episode via `merged_from_episode` (provenance and lesson only, no counter or
+        # status change). Promotion comes solely from the causal feedback path, so a fresh procedure stays `candidate`.
         status="candidate",
     )
 
@@ -1952,10 +1720,8 @@ def format_experience_context(
     if not episodes and not procedures:
         return ""
     open_tag, close_tag = "<agent_experience_memory>", "</agent_experience_memory>"
-    # Stored text is data: angle brackets are swapped for look-alikes so a
-    # remembered answer cannot close the block and speak as an instruction.
-    # One entry = one line: a stored id with a newline started its own line
-    # inside the block (проверка 17.11, средняя).
+    # Stored text is data: angle brackets are swapped for look-alikes so a remembered answer cannot close the block and speak as an
+    # instruction. One entry = one line: a stored id with a newline started its own line inside the block.
     def _safe(text: str) -> str:
         return (
             str(text).replace("<", "‹").replace(">", "›")
@@ -1992,12 +1758,10 @@ def family_product_warnings(
     *,
     max_each: int = 200,
 ) -> list[str]:
-    """Продуктовые исходы тех же прогонов, что и выбранные success-эпизоды.
+    """Product outcomes of the same runs as the selected success episodes.
 
-    MIR-184, замысел самого агента (прогон run_e4d9a8e8, 2026-08-29: «тест
-    фиксирует оба значения одновременно»): эпизод-успех не имеет права ехать
-    в будущую подсказку без отказа-брата из того же тика. Семья сшивается по
-    trace_id; чистая функция — судить может любой полигон.
+        A success episode must not ride into a future hint without the declined sibling from the same tick; the family is joined by
+        trace_id. A pure function, so any test bed can judge it.
     """
     traces = {
         ep.trace_id for ep in selected

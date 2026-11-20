@@ -1,21 +1,9 @@
-"""Слабое место рефлексии → улики → файлы кода (MIR-106).
+"""Reflection weak spot -> evidence -> code files.
 
-Два приёма из литературы, оба открыты 2026-09-25 до правки:
-
-* **Обоснование уликами.** Обзор памяти агентов (arXiv 2603.07670, §4.3,
-  «reflection grounding»): вывод рефлексии обязан ссылаться на конкретные
-  случаи; ошибочный вывод в долго живущем агенте опасен тем, что влияет на
-  тысячи последующих решений. У нашего урока улика — шаблон ошибки из
-  журналов (`Lesson.pattern`: тип события, инструмент, текст, число случаев).
-  Нет улики — слабое место не изучается.
-* **Поиск файлов по описанию.** SWE-bench (Jimenez et al., ICLR 2024, §4.1
-  «Sparse retrieval»): файлы кода к задаче на естественном языке ищут BM25;
-  запрос — описание задачи, документы — файлы. Там же предел: примерно в
-  половине случаев BM25 не находит ни одного нужного файла — это базовый
-  способ, не точный. BM25 здесь тот же, что у памяти (core/memory_policy.py).
-
-Прежде тема вроде «planner interface design» не сверялась ни с чем: план был
-тем же, что без слабого места и что для бессмыслицы.
+Two techniques from the literature: evidence grounding (a reflection conclusion must cite concrete cases; for a lesson the
+evidence is the error pattern from the logs, `Lesson.pattern`; no evidence means the weak spot is not studied) and BM25 file
+retrieval by description (query = task description, documents = files; the same BM25 as core/memory_policy.py). BM25 finds no
+relevant file in about half of the cases, so this is a baseline, not exact.
 """
 from __future__ import annotations
 
@@ -30,7 +18,7 @@ TOP_K = 5
 
 
 def evidence_query(lesson: Any) -> str:
-    """Запрос по улике урока; пусто — улики нет, и изучать нечего."""
+    """Query built from the lesson's evidence; empty means no evidence and nothing to study."""
     pattern = getattr(lesson, "pattern", None)
     if pattern is None or int(getattr(pattern, "count", 0) or 0) < 1:
         return ""
@@ -40,7 +28,7 @@ def evidence_query(lesson: Any) -> str:
 
 
 def retrieve_files(workspace: Path, query: str, *, top_k: int = TOP_K) -> list[str]:
-    """Файлы `.py`, лучшие по BM25 против запроса; только с ненулевым баллом."""
+    """`.py` files with the best BM25 score against the query; only non-zero scores."""
     root = Path(workspace).resolve()
     q = tokens(query)
     if not q:
@@ -52,15 +40,14 @@ def retrieve_files(workspace: Path, query: str, *, top_k: int = TOP_K) -> list[s
             continue
         rel = path.relative_to(root).as_posix()
         if rel.startswith("tests/"):
-            # Замер 2026-09-25: тесты дословно цитируют тексты ошибок и забирали
-            # все пять мест; изучать слабое место — это читать код, который
-            # ошибается (в SWE-bench нужные файлы — исходники, не тесты).
+            # Tests quote error texts verbatim and took all five places; studying a weak spot means reading the code that errs,
+            # and the relevant files are sources, not tests.
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        # Путь — часть документа: имя модуля говорит о нём не меньше текста.
+        # The path is part of the document: a module name says as much as its text.
         rels.append(rel)
         docs.append(term_counts(rel.replace("/", " ").replace("_", " ") + " " + text, []))
     scores = bm25_scores(q, docs)

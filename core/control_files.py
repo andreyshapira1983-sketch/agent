@@ -1,44 +1,22 @@
-"""Тормоза агента — файлы, которые меняет только оператор.
-
-Выключатель бюджета, лимиты расходов, дневной счётчик самоправок и список
-запретов оператора останавливают или ограничивают агента. До 2026-09-25 их
-берегли только ворота одобрения: перезапись существующего файла шла к
-человеку, а новый файл (снятый выключатель ещё не лежит на диске) — вовсе
-без вопроса. Тормоз, который агент может отпустить сам, не тормоз.
-
-Источники: AgentSpec (arXiv 2503.18666, ICSE'26) — правило проверяется в
-момент действия, до исполнения, детерминированно, а не судом модели;
-«OPSEC for Agents» (dev.to/rxkov) — всё вне границы запрещено по
-умолчанию, а отказ пишется в след как сигнал намерения.
-
-Поэтому запрет жёсткий: инструменты записи (`file_write`, `shell_exec
-touch/mkdir`) отказывают ДО одобрения, и никакое одобрение его не снимает.
-Оператор меняет эти файлы сам — руками или своими командами (`:budget`,
-`:kill-switch`), которые пишут мимо инструментов агента.
-"""
+"""Agent brakes: files only the operator changes; write tools refuse them before approval and no approval lifts it."""
 from __future__ import annotations
 
 from pathlib import Path
 
-#: Пути от корня рабочей папки. Заодно — их рядом лежащие .tmp (атомарная
-#: запись выключателя идёт через `<путь>.tmp` и replace).
+#: Paths relative to the workspace root, plus their sibling .tmp files (atomic writes go through `<path>.tmp` and replace).
 CONTROL_RELPATHS: tuple[str, ...] = (
     "data/budget_kill_switch.json",
     "config/budget_limits.json",
     "data/patch_route_state.json",
     "config/vetoed_goals.txt",
     ".env",
-    # Решения Клода по очереди на суд (core/judge_queue.py): подсудимый их не пишет.
+    # Claude's decisions from the judge queue (core/judge_queue.py); the defendant does not write them.
     "data/judge_rulings.jsonl",
 )
 
 
 def control_file_hit(workspace_root: Path, target: Path) -> str | None:
-    """Какой тормоз задевает запись в `target` (или None).
-
-    Сравнение по разрешённому пути, так что `./config//budget_limits.json`
-    и обход через ссылку ловятся так же, как прямое имя.
-    """
+    """Which brake a write to `target` hits, or None; compared by resolved path so `./x//y` and symlinks are caught."""
     root = Path(workspace_root).resolve()
     resolved = Path(target).resolve()
     for rel in CONTROL_RELPATHS:

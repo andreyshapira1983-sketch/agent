@@ -1,37 +1,5 @@
-"""User Profile — Layer 4 (User Mental Model).
-
-Tracks WHO the user is across sessions so the agent can adapt its
-output style, terminology level, and verbosity without asking every time.
-
-Design principles
------------------
-* No LLM calls — all updates are heuristic, deterministic, O(n).
-* Single JSONL file per workspace (one profile record, overwritten on update).
-* Expertise signals accumulate: the profile only moves *toward* a level,
-  never jumps abruptly. This avoids a single jargon word permanently
-  labelling a novice user as an expert.
-* Preference signals (verbosity, language) are sticky: explicit user markers
-  ("кратко", "подробно") override the inferred default and stay set until
-  the user explicitly changes them.
-* Profile is injected into the synthesizer as a ``<user_profile>`` block.
-  The planner never sees it — planning does not depend on who the user is.
-
-Expertise levels
-----------------
-NOVICE       — short, high-level questions; no technical jargon detected.
-               Agent uses plain language, analogies, step-by-step guidance.
-INTERMEDIATE — mix of technical and conversational language; some domain
-               familiarity. Default level for new profiles.
-EXPERT       — sustained use of deep technical terms, architecture commands,
-               low-level Python/system references. Agent assumes domain
-               knowledge, uses precise terminology, skips basics.
-
-Verbosity levels
-----------------
-BRIEF        — user prefers short, punchy replies.
-NORMAL       — balanced; length matches question complexity. (default)
-DETAILED     — user explicitly asked for comprehensive treatment.
-"""
+"""User profile (layer 4): who the user is across sessions, so the agent adapts output style, terminology and verbosity (heuristic, no LLM)."""
+# Expertise only moves toward a level, never jumps; explicit verbosity/language markers are sticky; the profile goes to the synthesizer only, never the planner.
 from __future__ import annotations
 
 import re
@@ -48,9 +16,6 @@ from core.state_integrity import (
     state_file_lock,
 )
 
-# ---------------------------------------------------------------------------
-# Type aliases / enums
-# ---------------------------------------------------------------------------
 
 ExpertiseLevel = Literal["novice", "intermediate", "expert"]
 VerbosityLevel = Literal["brief", "normal", "detailed"]
@@ -60,9 +25,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
 
 class UserProfile(BaseModel):
     """Persistent user mental model."""
@@ -100,11 +62,7 @@ class UserProfile(BaseModel):
         return v
 
 
-# ---------------------------------------------------------------------------
-# Signal detection
-# ---------------------------------------------------------------------------
 
-# Expert signals: deep technical jargon or architecture commands.
 _EXPERT_PATTERNS = re.compile(
     r"\b("
     r"GIL|PEP\s*\d+|CPython|bytecode|AST|coroutine|asyncio|"
@@ -123,7 +81,6 @@ _EXPERT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Novice signals: simple meta-questions, conceptual "what is".
 _NOVICE_PATTERNS = re.compile(
     r"\b("
     r"что\s+такое|как\s+работает|почему\s+это|как\s+пользоваться|"
@@ -135,18 +92,13 @@ _NOVICE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Explicit brevity request.
 _BRIEF_PATTERNS = re.compile(
     r"\b(кратко|вкратце|коротко|одним\s+словом|tl;?dr|brief(?:ly)?|"
     r"in\s+short|short\s+answer|one.liner|quick\s+answer)\b",
     re.IGNORECASE,
 )
 
-# Explicit detail request.
-# NOTE: bare "подробнее" is intentionally excluded — it is a comparative
-# adverb that frequently modifies a specific object ("покажи тесты подробнее")
-# rather than expressing a global verbosity preference.  Only directive
-# forms (paired with a communication verb) trigger the lock.
+# Bare "подробнее" is excluded: a comparative adverb that usually modifies an object; only directive forms paired with a communication verb lock verbosity.
 _DETAILED_PATTERNS = re.compile(
     r"\b(подробно|детально|развёрнуто|расскажи\s+всё|"
     r"объясни\s+подробно|full\s+explanation|in\s+detail|"
@@ -155,12 +107,10 @@ _DETAILED_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Russian language markers (common functional words).
 _RU_MARKERS = re.compile(
     r"\b(и|в|на|с|по|из|для|это|что|как|тот|тут|там|всё|его|её|их)\b"
 )
 
-# English language markers.
 _EN_MARKERS = re.compile(
     r"\b(the|and|of|to|in|is|are|that|this|with|for|from|have|it)\b",
     re.IGNORECASE,
@@ -168,33 +118,27 @@ _EN_MARKERS = re.compile(
 
 # Domain interest keywords → canonical topic label.
 _INTEREST_KEYWORDS: dict[str, str] = {
-    # Python internals
     "gil": "python-internals",
     "cpython": "python-internals",
     "bytecode": "python-internals",
     "free.thread": "python-internals",
     "asyncio": "python-async",
     "coroutine": "python-async",
-    # Agent architecture
     "planner": "agent-architecture",
     "synthesizer": "agent-architecture",
     "architecture": "agent-architecture",
     "control.loop": "agent-architecture",
-    # Memory
     "episodic": "agent-memory",
     "procedural": "agent-memory",
     "memory": "agent-memory",
     "knowledge": "agent-memory",
-    # Security
     "injection": "security",
     "owasp": "security",
     "cve": "security",
     "secret": "security",
-    # Testing
     "pytest": "testing",
     "coverage": "testing",
     "test": "testing",
-    # Multi-agent
     "multi.agent": "multi-agent",
     "subagent": "multi-agent",
     "team": "multi-agent",
@@ -206,9 +150,6 @@ _INTEREST_RE = re.compile(
 )
 
 
-# ---------------------------------------------------------------------------
-# Heuristic update
-# ---------------------------------------------------------------------------
 
 def _detect_language(text: str) -> str | None:
     """Return 'ru', 'en', or None (ambiguous)."""
@@ -239,18 +180,9 @@ def update_profile(
     question: str,
     response: str = "",
 ) -> UserProfile:
-    """Return a NEW profile updated from one interaction.
+    """Return a NEW profile updated from one interaction (pure).
 
-    Pure function — the original *profile* is not mutated.
-
-    Rules
-    -----
-    * verbosity_locked / language_locked: explicit user signals set these
-      and prevent further heuristic overrides.
-    * Expertise is a sliding average: expert signals increment
-      ``expert_signals``, novice signals increment ``novice_signals``.
-      The current level is re-derived every update from the ratio.
-    * Interests are additive (set union), capped at 20 topics.
+    Explicit signals lock verbosity/language; expertise is re-derived from the expert/novice signal ratio; interests are a union capped at 20.
     """
     data = profile.model_dump()
     text = question + " " + response
@@ -258,7 +190,6 @@ def update_profile(
     data["interaction_count"] += 1
     data["updated_at"] = _now()
 
-    # --- Verbosity (sticky if locked) ---
     if not data["verbosity_locked"]:
         if _BRIEF_PATTERNS.search(question):
             data["verbosity"] = "brief"
@@ -272,7 +203,6 @@ def update_profile(
     elif _DETAILED_PATTERNS.search(question):
         data["verbosity"] = "detailed"
 
-    # --- Language (sticky if locked) ---
     if not data["language_locked"]:
         lang = _detect_language(question)
         if lang is not None:
@@ -281,13 +211,11 @@ def update_profile(
             if data["interaction_count"] >= 3:
                 data["language_locked"] = True
 
-    # --- Expert / novice signals ---
     expert_hits = len(_EXPERT_PATTERNS.findall(text))
     novice_hits = len(_NOVICE_PATTERNS.findall(text))
     data["expert_signals"] += expert_hits
     data["novice_signals"] += novice_hits
 
-    # Reclassify expertise.
     total = data["expert_signals"] + data["novice_signals"]
     if total > 0:
         expert_ratio = data["expert_signals"] / total
@@ -298,7 +226,6 @@ def update_profile(
         else:
             data["expertise"] = "intermediate"
 
-    # --- Technical vocabulary flag ---
     # Expert always prefers technical; novice prefers plain by default.
     if data["expertise"] == "expert":
         data["technical"] = True
@@ -308,25 +235,14 @@ def update_profile(
     # --- Interests ---
     new_interests = _extract_interests(question)
     merged = list(dict.fromkeys(data["interests"] + new_interests))
-    data["interests"] = merged[:20]  # cap at 20
+    data["interests"] = merged[:20]
 
     return UserProfile(**data)
 
 
-# ---------------------------------------------------------------------------
-# Prompt injection
-# ---------------------------------------------------------------------------
 
 def profile_to_prompt_block(profile: UserProfile) -> str:
-    """Render a ``<user_profile>`` XML block for synthesizer injection.
-
-    P2 — STYLE-ONLY block. Only fields that influence presentation
-    (verbosity, vocabulary, language, expertise level for terminology
-    depth) are emitted. Domain-tied fields like ``interests`` and
-    ``interaction_count`` are deliberately withheld so the LLM cannot
-    use the operator's past-topic history to narrow or steer the
-    current answer's domain. The current question alone defines scope.
-    """
+    """Render a <user_profile> XML block for the synthesizer; style-only: domain-tied fields like interests are withheld so past topics cannot steer the current answer."""
     vocab = "technical" if profile.technical else "plain"
     return (
         "<user_profile>\n"
@@ -338,9 +254,6 @@ def profile_to_prompt_block(profile: UserProfile) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
 
 class UserProfileStore:
     """Single-record JSONL store for the user profile."""
@@ -356,7 +269,6 @@ class UserProfileStore:
         records = read_state_jsonl_unlocked(self.path)
         if not records:
             return None
-        # Walk backwards to find the latest valid record.
         for raw in reversed(records):
             try:
                 return UserProfile(**raw)

@@ -1,4 +1,4 @@
-"""Подъём по причинной лестнице: гипотезы, вмешательства, обобщение."""
+"""Causal ladder climb: hypotheses, interventions, generalisation."""
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -15,7 +15,7 @@ from core.causal_lesson import (
 
 @dataclass(frozen=True)
 class MeasuredOutcome:
-    """Что вмешательство ДЕЙСТВИТЕЛЬНО показало."""
+    """What the intervention ACTUALLY showed."""
 
     command: str
     summary: str
@@ -31,7 +31,7 @@ Runner = Callable[[], MeasuredOutcome | None]
 def propose_explanation(
     statement: str, *, author: CausalAuthor = "agent", predicts: str = "",
 ) -> Explanation:
-    """Оформить предложенную гипотезу. Сочиняет её автор, не этот модуль."""
+    """Record a proposed hypothesis; the author composes it, not this module."""
     return Explanation(statement=statement, author=author, predicts=predicts)
 
 
@@ -42,11 +42,7 @@ def attach_explanations(
     chosen: str = "",
     violated_invariant: str = "",
 ) -> CausalClaim:
-    """Привязать конкурирующие объяснения и выбор к наблюдению.
-
-    Ничего не проверяет сверх записи: судит `state_of`, и он же скажет, чего
-    не хватает — одного объяснения мало, двух живых тоже.
-    """
+    """Attach competing explanations and the choice to an observation (records only; `state_of` judges what is missing)."""
     return replace(
         claim,
         explanations=tuple(explanations),
@@ -62,7 +58,7 @@ def run_intervention(
     predicted: str,
     runner: Runner,
 ) -> CausalClaim:
-    """Поставить вмешательство и записать ИЗМЕРЕННОЕ."""
+    """Set up an intervention and record the MEASURED outcome."""
     outcome = runner()
     if outcome is None:
         raise ValueError(
@@ -95,7 +91,7 @@ def try_generalization(
     case_ref: str,
     runner: Runner,
 ) -> CausalClaim:
-    """Проверить правило на ДРУГОМ случае."""
+    """Test the rule on a DIFFERENT case."""
     origin = claim.observation.episode_id
     if case_ref.strip() == origin.strip():
         raise ValueError(
@@ -116,20 +112,12 @@ def try_generalization(
 
 
 def refute(explanation: Explanation, reason: str) -> Explanation:
-    """Снять соперника с доски, назвав ЧЕМ он снят.
-
-    Пустая причина не принимается: «объяснение отброшено» без основания — это
-    выбор без соперника, переодетый в разбор.
-    """
+    """Remove a rival from the board, naming WHAT removed it; an empty reason is rejected."""
     if not reason.strip():
         raise ValueError("соперник снимается основанием, а не молчанием")
     return replace(explanation, refuted_by=reason)
 
 
 def name_scope(claim: CausalClaim, scope: str) -> CausalClaim:
-    """Назвать область, в которой правило доказано, — последний шаг.
-
-    Оставлен человеку: у машины есть только прогнанные ею случаи, а область —
-    утверждение о границе, где правило ПРОВЕРЕНО. См. `applies_to`.
-    """
+    """Name the scope where the rule is proven, the last step; left to the human (see `applies_to`)."""
     return replace(claim, scope=scope)

@@ -1,10 +1,4 @@
-"""Role / mode routing for the agent core.
-
-The agent should not use the same posture for every task. A repair run, a
-technical audit, a human chat, and a learning pass all need different memory
-scopes and output expectations. This layer is deliberately deterministic: the
-router is policy, not another LLM prompt.
-"""
+"""Deterministic role/mode routing for the agent core: the router is policy, not another LLM prompt."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,26 +52,15 @@ class RoleContext:
 class RoleRouter:
     """Deterministic first-pass role classifier.
 
-    Scoring rules
-    -------------
-    * Anchor terms (explicit operator commands like ``:repair``, ``:learn``)
-      and long, specific multi-word phrases trigger a role on a **single**
-      match — they cannot appear by accident in unrelated text.
-    * Short, ambiguous terms (``ошибки``, ``diff``, ``source`` …) are
-      "soft" signals: they count toward the score for a role but require
-      **at least 2 soft matches** before the role is selected.
-    * Multiple roles may score > 0; the one with the highest score wins.
-      Priority order (insertion order below) breaks ties.
+        Anchor terms (explicit commands like ``:repair``) and long specific phrases select a role on ONE match;
+        short ambiguous terms are soft signals and need at least 2 matches. The highest score wins,
+        insertion order breaks ties.
     """
 
     def route(self, text: str) -> RoleContext:
         lowered = (text or "").casefold()
 
-        # ------------------------------------------------------------------
-        # Stage 1: Anchor signals — single match is sufficient.
-        # These are either explicit CLI commands (`:repair`) or very long,
-        # domain-specific phrases that cannot appear in casual conversation.
-        # ------------------------------------------------------------------
+        # Stage 1: anchor signals, a single match suffices (explicit CLI commands or long domain-specific phrases).
         if _has_any(lowered, _REPAIR_ANCHORS):
             return _context(
                 role="repair",
@@ -105,8 +88,7 @@ class RoleRouter:
                 reasons=("learning anchor",),
             )
 
-        # PROGRAMMING_READINESS and OPERATOR_SELF consist only of long, unique
-        # phrases — single match is unambiguous.
+        # PROGRAMMING_READINESS and OPERATOR_SELF consist only of long unique phrases: a single match is unambiguous.
         if _has_any(lowered, _PROGRAMMING_READINESS_TERMS):
             return _context(
                 role="operator_chat",
@@ -133,13 +115,8 @@ class RoleRouter:
                 reasons=("operator self/status terms",),
             )
 
-        # ------------------------------------------------------------------
-        # Stage 2: Score-based selection.
-        # Compute how many soft terms match for each role, then pick the
-        # winner. The winner must score >= 2 to be selected; a score of 1
-        # on a generic word (e.g. "ошибки" in a history question) is not
-        # enough to override the default operator_chat role.
-        # ------------------------------------------------------------------
+        # Stage 2: score-based selection; the winner needs >= 2 soft matches, so one generic word cannot override
+        # the default operator_chat role.
         _SCORE_MIN = 2
 
         role_scores: list[tuple[int, str]] = [
@@ -211,9 +188,7 @@ class RoleRouter:
                     reasons=(f"research terms score={best_score}",),
                 )
 
-        # ------------------------------------------------------------------
-        # Stage 3: Default — generic question, operator conversation.
-        # ------------------------------------------------------------------
+        # Stage 3: default, a generic question.
         return _context(
             role="operator_chat",
             tone="human",

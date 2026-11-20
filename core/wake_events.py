@@ -1,25 +1,12 @@
-"""Что будит спящую кампанию: перемена мира, а не ход часов.
+"""What wakes a sleeping campaign: a change in the world, not the clock.
 
-Замер 2026-09-25 по журналу кампаний 19–24.09: 109 ожиданий (блок 8,
-core/campaign.py), и все 109 кончились по таймеру — ни одного пробуждения по
-событию. Будили только два события: сменился состав запрещённых инструментов
-(2 строки за пять дней) и новое одобрение (ни разу во время сна). Слово
-оператора, новый код и найм на площадке агента не будили: он досыпал до
-15 минут, пока мир уже был другим.
-
-Схема — как в практике проактивных агентов (Zylos, «Cadence Control»;
-«Proactive AI Agents»): пробуждение по событию плюс редкий запасной таймер.
-Таймер остаётся прежним (`_BACKOFF_MAX_SECONDS`); здесь — список событий:
-
-- `world_changed` — журнал перемен способностей (core/capability_events.py);
-- `code_changed` — новая правка основной ветки, автор которой не сам агент:
-  своя правка агента — не весть извне, иначе он будил бы сам себя;
-- `file:<имя>` — файлы из `AGENT_WAKE_FILES` (через `os.pathsep`): разговор
-  оператора с агентом, найм на площадке. Какие файлы — решает установка
-  сервера, а не код: их пути живут вне рабочей папки агента.
-
-Новое одобрение проверяет сам цикл (у него ящик), здесь его нет.
-"""
+    Wake by event plus a rare fallback timer (`_BACKOFF_MAX_SECONDS`, unchanged).
+    Events: `world_changed` (capability change journal, core/capability_events.py);
+    `code_changed` (a new main-branch commit not authored by the agent itself, else
+    it would wake itself); `file:<name>` (files from `AGENT_WAKE_FILES`, separated
+    by `os.pathsep`: operator conversation, platform hiring; set by the server
+    install because the paths live outside the agent's workspace). A new approval
+    is checked by the loop itself, not here."""
 from __future__ import annotations
 
 import os
@@ -31,7 +18,7 @@ from typing import Any
 from core.capability_events import last_capability_change_ts
 
 WAKE_FILES_ENV = "AGENT_WAKE_FILES"
-#: Автор правок самого агента (core/safe_vcs.py, полоса самоправки).
+#: Author of the agent's own commits (core/safe_vcs.py, the self-repair lane).
 AGENT_GIT_AUTHORS = frozenset({"Self-Apply Lane"})
 _MAIN_BRANCHES = ("main", "master")
 
@@ -45,7 +32,7 @@ def _file_sig(path: Path) -> tuple[int, int] | None:
 
 
 def _outside_head(workspace: Path) -> str | None:
-    """Последняя правка основной ветки не от агента; None — не репозиторий."""
+    """Latest main-branch commit not by the agent; None if not a repository."""
     for branch in _MAIN_BRANCHES:
         try:
             cmd = ["git", "-C", str(workspace), "log", "-30", "--format=%H%x1f%an", branch, "--"]
@@ -63,7 +50,7 @@ def _outside_head(workspace: Path) -> str | None:
 
 
 def outside_commit_ts(workspace: str | Path) -> str:
-    """Время (ISO, UTC) последней чужой правки основной ветки; "" — неизвестно."""
+    """Time (ISO, UTC) of the latest foreign main-branch commit; "" if unknown."""
     sha = _outside_head(Path(workspace))
     if not sha:
         return ""
@@ -84,7 +71,7 @@ def wake_files() -> list[Path]:
 
 
 def wake_mark(workspace: str | Path) -> dict[str, Any]:
-    """Снимок всех источников пробуждения; сравнивается с прошлым снимком."""
+    """Snapshot of all wake sources, compared with the previous snapshot."""
     ws = Path(workspace)
     mark: dict[str, Any] = {"world_changed": last_capability_change_ts(ws),
                             "code_changed": _outside_head(ws)}
@@ -94,5 +81,5 @@ def wake_mark(workspace: str | Path) -> dict[str, Any]:
 
 
 def woken_by(before: dict[str, Any], after: dict[str, Any]) -> str:
-    """Какой источник изменился ("" — никакой). Порядок — порядок снимка."""
+    """Which source changed ("" if none). Order is the snapshot's order."""
     return next((key for key, value in after.items() if before.get(key, value) != value), "")

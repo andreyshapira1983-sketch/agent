@@ -18,11 +18,7 @@ from core.budget_ledger import BudgetLedger
 from core.run_context import current_run, run_cost_ceiling
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
-#: Error-text fragments meaning "this key cannot pay for / is not allowed this
-#: request". Owned HERE beside the ledger that stores the error text; the
-#: router's `_is_switch_key_error` consumes the same tuple, so the two rules
-#: cannot drift apart. Only this class demotes provider health — a flaky
-#: network must never take a provider out of rotation.
+#: Error-text fragments meaning "this key cannot pay for / is not allowed this request"; the router's `_is_switch_key_error` shares this tuple. Only this class demotes provider health.
 _KEY_CLASS_TEXT_MARKERS: tuple[str, ...] = (
     "quota",
     "invalid api key",
@@ -35,33 +31,18 @@ _KEY_CLASS_TEXT_MARKERS: tuple[str, ...] = (
     "payment required",
     "credit balance",
     "insufficient funds",
-    # The list above was written from OpenAI's and Anthropic's phrasings, and
-    # the third provider in the fallback order says none of it. Probed against
-    # huggingface's own wording: an exhausted monthly allowance and a rejected
-    # token both read as HEALTHY, so the provider would be greeted on every
-    # call until the month rolled over — the same failure MIR-132 was opened
-    # for, one provider along. The guard against the next such hole is
-    # `tests/test_every_configured_provider_can_be_demoted.py`, which demands
-    # measured evidence for every provider in `_PROVIDER_FALLBACK_ORDER`,
-    # durable AND transient, so coverage can no longer be inherited silently.
+    # provider-specific wordings (huggingface); `tests/test_every_configured_provider_can_be_demoted.py` requires evidence per provider in `_PROVIDER_FALLBACK_ORDER`
     "included credits",
     "authorization header is invalid",
-    # deepseek (2026-08-29, added with the provider's entry into the fallback
-    # order; phrasing from DeepSeek's own error-code documentation): a drained
-    # account answers 402 "Insufficient Balance" — matched by none of the
-    # markers above ("insufficient funds" is OpenAI's wording, not theirs).
-    # Its 401 "Authentication Fails" is already caught by "authentication",
-    # and its 429 "sending requests too quickly" must stay transient.
+    # deepseek: a drained account answers 402 "Insufficient Balance"; its 429 must stay transient
     "insufficient balance",
 )
 
 #: Consecutive key-class failures after which a provider is skipped.
 _UNHEALTHY_AFTER = 3
-#: How long the skip lasts after the newest failure. A cooldown, never a ban:
-#: past this the provider gets one probe call again — the operator may have
-#: topped the balance up, and the agent may not retire its own toolkit.
+#: How long the skip lasts after the newest failure: a cooldown, never a ban; afterwards the provider gets one probe call.
 _UNHEALTHY_COOLDOWN_MINUTES = 120
-#: Bounded tail read for health (MIR-125: this file only grows).
+#: Bounded tail read for health (the file only grows).
 _TAIL_READ_BYTES = 131072
 
 _COST_UNITS_PER_1K_TOKENS = {
@@ -74,8 +55,7 @@ _COST_UNITS_PER_1K_TOKENS = {
 
 
 def cost_units_per_1k(tier: str) -> int:
-    """Публичное чтение тарифа. Одна таблица на весь проект: вторая копия
-    разошлась бы с первой (класс H-26 проспективного аудита; MIR-176)."""
+    """Public read of the tariff; one table for the whole project."""
     return _COST_UNITS_PER_1K_TOKENS.get(str(tier or "unknown"), _COST_UNITS_PER_1K_TOKENS["unknown"])
 
 
@@ -94,8 +74,7 @@ def _env_int(name: str, default: int = 0) -> int:
 
 
 def _estimate_tokens(*parts: str) -> int:
-    # Cheap deterministic fallback used only when a provider/FakeLLM does not
-    # expose token usage. It is intentionally rough, not billing-grade.
+    # cheap deterministic fallback when a provider/FakeLLM exposes no token usage; rough, not billing-grade
     return sum(len(part or "") for part in parts) // 4
 
 
@@ -150,15 +129,9 @@ class ModelUsageRecord:
     completed_at: str
     duration_ms: int
     error: str | None = None
-    # Which run spent this. Optional and last so a ledger written before this
-    # field existed still constructs — load_records() drops rows it cannot
-    # build and does so silently, so a required field here would erase spend
-    # history rather than report a problem.
+    # Which run spent this; optional and last so older ledger rows still construct (load_records() drops unbuildable rows silently).
     run_id: str | None = None
-    # Кэш промпта у поставщика. None значит НЕ ИЗМЕРЕНО — так строки, писанные
-    # до 2026-09-23, честно отличаются от свежих с нулевым попаданием.
-    # Стоят последними по той же причине, что и run_id: старая строка без них
-    # должна собираться, иначе load_records() молча сотрёт историю расхода.
+    # Provider prompt cache; None = NOT MEASURED (distinguishes old rows from fresh zero-hit ones); last for the same reason as run_id.
     cache_hit_tokens: int | None = None
     cache_miss_tokens: int | None = None
 
@@ -229,24 +202,13 @@ class ModelUsageLedger:
     logger: Any | None = None
     budget_ledger: BudgetLedger | None = None
     records: list[ModelUsageRecord] = field(default_factory=list)
-    # Fallback identity for records written outside any run, and the value an
-    # explicit caller pins. The ledger file is append-only and outlives the
-    # process, so without an id every run's spend lands in one undifferentiated
-    # history. Left unset it takes `TraceLogger.trace_id`, which names the
-    # AGENT SESSION — a sub-agent carries its own trace id and so stays
-    # separable from its parent for free. Which run a given record belongs to
-    # is decided per record in `_run_id_for_record`, because one session runs
-    # many cycles.
+    # Fallback identity for records outside any run, or an explicit pin; unset it takes `TraceLogger.trace_id` (the agent session); the run per record is decided in `_run_id_for_record`.
     run_id: str | None = None
-    # Set when the caller named the run itself. A surrounding run scope must
-    # not override that: a sub-agent ledger is built for one run and stays
-    # pinned to it.
+    # Set when the caller named the run itself; a surrounding run scope must not override it.
     _run_id_pinned: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # bootstrap already holds the agent's TraceLogger when it builds the
-        # ledger, so taking the id from there spares every call site from
-        # passing the same value twice. An explicit run_id still wins.
+        # bootstrap already holds the TraceLogger; an explicit run_id still wins
         self._run_id_pinned = self.run_id is not None
         if self.run_id is None:
             self.run_id = getattr(self.logger, "trace_id", None)
@@ -352,9 +314,7 @@ class ModelUsageLedger:
                 f"{est_cost}/{self.limits.max_cost_units} before "
                 f"{role}:{provider}/{model}"
             )
-        # Run-scoped cost envelope (MIR-116): a campaign or any caller may bound
-        # what the session counter can reach WHILE its run is active, so the cap
-        # acts here — before dispatch — instead of between cycles.
+        # run-scoped cost envelope: caps the session counter while a run is active, before dispatch
         ceiling = run_cost_ceiling()
         if ceiling is not None:
             if totals["cost_units"] >= ceiling:
@@ -375,8 +335,7 @@ class ModelUsageLedger:
                 )
         self._assert_usd_hour(f"{role}:{provider}/{model}")
         if self.budget_ledger is not None:
-            # Read-only pre-flight peeks against persistent windows first, so a
-            # blocked estimate never records a phantom llm_call.
+            # read-only pre-flight peeks first, so a blocked estimate never records a phantom llm_call
             if est_tokens > 0:
                 token_peek = self.budget_ledger.check(
                     "model_tokens",
@@ -524,21 +483,9 @@ class ModelUsageLedger:
     ) -> str | None:
         """Reason this provider should be skipped right now, or None.
 
-        Derived from the ledger's own recent records — no new state, no new
-        writer. MIR-132 measured why: **presence of an API key was treated as
-        availability**, and one provider answered "credit balance is too low"
-        391 consecutive times across four days while every fresh process began
-        with it again. Per-call failover rescued the work; nothing remembered.
-
-        Unhealthy means ALL of: the provider's newest records show
-        ``_UNHEALTHY_AFTER`` consecutive key/quota/billing-class failures
-        (`_KEY_CLASS_TEXT_MARKERS` — the same conservatism as the router's
-        switch rule: a flaky network never demotes); no success since; and the
-        newest failure is younger than ``_UNHEALTHY_COOLDOWN_MINUTES`` — past
-        that the provider is probed again, because a cooldown is a delay and a
-        ban would be the agent retiring part of its own toolkit (MIR-131/§9).
-        One success heals everything. No readable history reads as healthy:
-        refusing to work is worse than one wasted probe call.
+        Derived from the ledger's recent records: unhealthy means ``_UNHEALTHY_AFTER`` consecutive key/quota/billing-class
+        failures (`_KEY_CLASS_TEXT_MARKERS`), no success since, and the newest failure younger than
+        ``_UNHEALTHY_COOLDOWN_MINUTES``. One success heals; no readable history reads as healthy.
         """
         wanted = (provider or "").strip().lower()
         if not wanted:
@@ -573,13 +520,11 @@ class ModelUsageLedger:
         return f"{streak}_consecutive_key_errors_within_{int(age)}m"
 
     def _recent_rows_for_any(self, *, limit: int = 200) -> list[dict]:
-        """Newest raw rows regardless of provider — used by the operator's
-        status line to learn WHICH providers this workspace even uses, so the
-        health report names the real set instead of a hardcoded list."""
+        """Newest raw rows regardless of provider, to learn which providers this workspace uses."""
         return self._recent_rows(limit=limit)
 
     def _recent_rows(self, *, limit: int) -> list[dict]:
-        """Bounded tail of raw rows, newest last (MIR-125's lesson at birth)."""
+        """Bounded tail of raw rows, newest last."""
         if self.path is None or not self.path.exists():
             return [r.to_dict() for r in self.records][-limit:]
         try:
@@ -605,12 +550,7 @@ class ModelUsageLedger:
         return rows[-limit:]
 
     def _recent_rows_for(self, provider: str, *, limit: int = 40) -> list[dict]:
-        """Newest-last raw rows for *provider*, from the shared bounded tail.
-
-        The MIR-125 lesson applied at birth rather than retrofitted: this file
-        only grows, and health needs the last few records, so only the final
-        ``_TAIL_READ_BYTES`` are read and parsed.
-        """
+        """Newest-last raw rows for *provider*, from the shared bounded tail (only the final ``_TAIL_READ_BYTES`` are parsed)."""
         wanted = provider.strip().lower()
         rows = self._recent_rows(limit=10_000)
         out = [r for r in rows
@@ -629,9 +569,7 @@ class ModelUsageLedger:
         return loaded
 
     def session_cost_units(self) -> int:
-        """Cost units this session's records sum to — the counter the run cost
-        envelope bounds, exposed so a caller can compute its ceiling from the
-        same source the gate enforces against."""
+        """Cost units this session's records sum to; the counter the run cost envelope bounds."""
         return _totals(self.records)["cost_units"]
 
     def snapshot(self) -> dict[str, Any]:
@@ -711,11 +649,7 @@ def usage_from_llm_or_estimate(
 
 
 def cache_from_llm(llm: Any) -> tuple[int | None, int | None]:
-    """Числа кэша промпта из последнего вызова, или (None, None).
-
-    Отдельно от `usage_from_llm_or_estimate`, потому что кэш НЕЛЬЗЯ оценить
-    по длине текста: оценка тут была бы выдумкой. Нет замера — нет числа.
-    """
+    """Prompt-cache numbers from the last call, or (None, None); never estimated from text length."""
     last_usage = getattr(llm, "last_usage", None)
     if not isinstance(last_usage, dict):
         return None, None

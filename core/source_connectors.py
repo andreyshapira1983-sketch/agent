@@ -1,15 +1,6 @@
-"""Source Connector Registry.
+"""Source connector registry: a read-only routing table over concrete source tools (kind of source, wired/partial/planned, auth needs, budget counters, when to prefer or avoid).
 
-This is the routing table above concrete source tools. A connector answers:
-
-  - what kind of source it can read;
-  - whether it is already wired, partial, or planned;
-  - whether it needs auth/API keys;
-  - what rough budget counters it consumes;
-  - when the agent should prefer or avoid it.
-
-The registry is deliberately read-only. It does not fetch anything by itself;
-execution remains in controlled ingestion commands and tools.
+It fetches nothing itself; execution stays in controlled ingestion commands and tools.
 """
 from __future__ import annotations
 

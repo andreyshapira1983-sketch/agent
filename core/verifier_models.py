@@ -1,7 +1,4 @@
-"""Verifier value types: a citation, a claim chunk, and the verification report.
-
-Extracted from `core/verifier` by autonomous self-build module split.
-"""
+"""Verifier value types: a citation, a claim chunk and the verification report; extracted from `core/verifier`."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,9 +41,7 @@ class ClaimChunk:
     citations: tuple[Citation, ...]
     matched_evidence_ids: tuple[str, ...]
     verdict: str
-    #: Present only when a check REFUTED the claim and could say why. A
-    #: verdict without one is a stamp; the point of MIR-060 direction (b) is
-    #: that arithmetic refutations always carry their working.
+    #: Present only when a check REFUTED the claim and could say why; arithmetic refutations always carry their working (MIR-060 direction b).
     reason: ClaimReason | None = None
 
 
@@ -68,34 +63,15 @@ class VerificationReport:
     topic_supported_but_claim_unverified_chunks: int = 0
     subagent_asserted_chunks: int = 0
     receipt_missing_chunks: int = 0
-    #: Claims about THIS session's dialogue, backed by the verbatim prior turn
-    #: (issue #119). Deliberately its own counter: such a claim is neither
-    #: `verified` (no external source confirms it) nor `unverified` (the
-    #: recording of the exchange does support it), so collapsing it into either
-    #: bucket is what produced the original defect.
+    #: Claims about THIS session's dialogue backed by the verbatim prior turn; its own counter, neither `verified` (no external source) nor `unverified` (the exchange supports it).
     dialogue_supported_chunks: int = 0
-    #: Claims supported ONLY by the operator's words this turn (the injected
-    #: `user_explicit` evidence). Operator ruling 2026-08-03 (MIR-028): user
-    #: words confirm that the user said it — never the content's objective
-    #: truth — so this is its own counter, never folded into `verified`, and
-    #: it neither grants full evidence score nor banks a clean success alone.
+    #: Claims supported ONLY by the operator's words this turn (`user_explicit` evidence): they confirm that the user said it, not the truth, so a separate counter that grants no full evidence score and banks no clean success alone.
     user_asserted_chunks: int = 0
-    #: Claims a content gate PROVED do not follow from the evidence they cite
-    #: (a `ClaimReason` names what was expected and what was found). Operator
-    #: ruling 2026-08-12: refuted is a polarity, not a shade of unverified —
-    #: folding it into `topic_supported...` let five good claims dilute one
-    #: known lie all the way into `usage_eligible=True` (live turn 3,
-    #: trace_d322a875).
+    #: Claims a content gate PROVED do not follow from the cited evidence (a `ClaimReason` names expected and found); refuted is a polarity, not a shade of unverified, so good claims cannot dilute a known lie into `usage_eligible=True`.
     refuted_chunks: int = 0
-    #: Строки, которые ответ САМ вынес в раздел «Unverified» («Не
-    #: подтверждено»). Утверждениями они не являются и в `chunks` не входят
-    #: (раздел — не-утвердительный), но это непроверенное, названное вслух.
-    #: 2026-09-21: без этого счётчика ответ нёс «я не проверял X» и внизу
-    #: «подтверждено 9 из 9; уверенность: высокая» — считалось лёгкое.
+    #: Lines the answer itself put into the "Unverified" section: not claims and not in `chunks`, but unverified things named aloud; counted so the summary does not say "9 of 9 confirmed" next to "I did not check X".
     admitted_unverified_chunks: int = 0
-    #: R2 в теневом режиме (решение оператора 2026-09-25): «число не сошлось
-    #: со своим перечнем в скобках» — только в журнал, на вердикт не влияет.
-    #: Замер: 25 срабатываний на живых ответах, все 25 ложные.
+    #: R2 in shadow mode: "number does not match its parenthesised list" goes to the journal only and does not affect the verdict.
     shadow_count_mismatch: tuple[dict[str, str], ...] = ()
 
     def to_log_payload(self) -> dict[str, Any]:
@@ -118,26 +94,16 @@ class VerificationReport:
             "malformed_output": self.malformed_output,
             "disclaimer_set": self.disclaimer is not None,
             "verdicts": [c.verdict for c in self.chunks],
-            # ПОЧЕМУ опровергнуто, а не только сколько. Замер 2026-09-20:
-            # `content_refuted` закрывает эпизоду вход в опыт раньше всех
-            # прочих осей и несли его 105 из 142 недопущенных эпизодов — а
-            # код причины в журнал не попадал вовсе. Установить его удалось
-            # только реконструкцией: цепочки улик собирались заново из трасс
-            # и пересуживались верификатором. Так нашлись `sum_mismatch`,
-            # сложивший `exit_code` с `duration_ms`, и
-            # `absence_refuted_by_evidence`, взявший предметом отсутствия
-            # перечисленное наличное. Мера, которая не записывает
-            # отвергнутое, не даёт себя перемерить.
+            # WHY refuted, not only how many: the reason code goes to the journal so a refutation can be re-measured without reconstructing evidence chains from traces.
             "refutations": self._refutation_records(),
             "shadow_count_mismatch": list(self.shadow_count_mismatch[: self._REFUTATIONS_LOGGED]),
         }
 
-    #: Сколько опровержений попадает в запись. Причины повторяются, а журнал
-    #: читают целиком: пять разных кодов видно, тысяча одинаковых — шум.
+    #: How many refutations enter a record; reasons repeat and the journal is read whole, so five distinct codes are visible but a thousand identical ones are noise.
     _REFUTATIONS_LOGGED = 5
 
     def _refutation_records(self) -> list[dict[str, str]]:
-        """Причина каждого опровержения: код, работа и само утверждение."""
+        """Reason of each refutation: code, working and the claim itself."""
         out: list[dict[str, str]] = []
         for chunk in self.chunks:
             if chunk.verdict != "refuted" or chunk.reason is None:

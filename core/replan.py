@@ -1,7 +1,4 @@
-"""Re-planning policy: structured failure types + per-type retry budgets.
-
-Side-effect-free: `ReplanPolicy` only decides; the loop owns logging.
-"""
+"""Re-planning policy: structured failure types and per-type retry budgets; side-effect-free, the loop owns logging."""
 from __future__ import annotations
 
 import json
@@ -15,8 +12,8 @@ from typing import Any, Literal
 # FailureType — the taxonomy
 # ---------------------------------------------------------------------------
 
-# Each value MUST also appear in `DEFAULT_BUDGETS`. The strings reach the
-# planner via <replan_context>, so they are vocabulary the LLM reads.
+# Each value MUST also appear in `DEFAULT_BUDGETS`; the strings reach the planner via
+# <replan_context>.
 FailureType = Literal[
     "tool_error",            # tool raised / returned status=error
     "file_not_found",        # file_read / diff_file: path does not exist on disk
@@ -53,9 +50,9 @@ ALL_FAILURE_TYPES: tuple[FailureType, ...] = (
     "unknown",
 )
 
-#: Failures about the WORLD, not the retry machinery: a turn that still answered
-#: must be able to say what failed (the question may be "does this file exist?").
-#: Internal outcomes (plan_parse_failed, verify_failed, ...) stay out as noise.
+# Failures about the WORLD, not the retry machinery: a turn that still answered must be able to say
+# what failed.
+# Internal outcomes (plan_parse_failed, verify_failed, ...) stay out as noise.
 WORLD_FACING_FAILURE_TYPES: frozenset[str] = frozenset({
     "tool_error",
     "file_not_found",
@@ -75,8 +72,7 @@ def world_facing_failures(triggers: list[ReplanTrigger] | None) -> list[ReplanTr
     return [t for t in (triggers or []) if t.code in WORLD_FACING_FAILURE_TYPES]
 
 
-#: Требования ко второй сборке черновика: без них синтезатор видит только
-#: WORLD_FACING и пересобирает ответ вслепую.
+# Requirements for the second draft assembly; without them the synthesizer sees only WORLD_FACING.
 SYNTHESIS_DEMAND_TYPES: frozenset[str] = frozenset({
     "answer_off_topic", "unverified_own_file", "draft_contradicts_evidence",
 })
@@ -85,15 +81,14 @@ SYNTHESIS_DEMAND_TYPES: frozenset[str] = frozenset({
 def failures_for_synthesis(
     triggers: list[ReplanTrigger] | None, *, exhausted: bool,
 ) -> list[ReplanTrigger]:
-    """Что видит синтезатор: всё при исчерпании, иначе мир и требования."""
+    """What the synthesizer sees: everything on exhaustion, otherwise world failures and requirements."""
     if exhausted:
         return list(triggers or [])
     return [t for t in (triggers or [])
             if t.code in WORLD_FACING_FAILURE_TYPES or t.code in SYNTHESIS_DEMAND_TYPES]
 
 
-#: `step[<n>]: <tool> … dropped` — the shape every sanitiser/validator warning
-#: takes when it removes a step (core/step_sanitizer.py, core/planner.py).
+# `step[<n>]: <tool> … dropped`: the shape of every sanitiser/validator warning that removes a step.
 _DROPPED_STEP_RE = re.compile(
     r"^step\[(?P<idx>\d+)\]:\s*(?:tool\s+')?(?P<tool>[a-z_][a-z0-9_]*)?.*dropped\s*$",
     re.DOTALL,
@@ -150,8 +145,8 @@ def count_failures(history: list[ReplanTrigger]) -> dict[str, int]:
     return counts
 
 
-#: Совет с этим тегом (выводы круга наблюдения) вставляется ДОСЛОВНО: отступ и
-#: потеря пустых строк портили бы содержимое файлов, которое переписывают точно.
+# Advice with this tag (observation-round outputs) is inserted VERBATIM: indenting or dropping blank
+# lines would corrupt file contents.
 VERBATIM_ADVICE_TAG = "<observed_results>"
 
 
@@ -220,8 +215,7 @@ class FailureBudget:
     max_occurrences: int
     advice: str
     requires_different_action: bool = False
-    #: Считать повторы ОДНОГО действия (инструмент + аргументы), а не все случаи
-    #: типа: разные ошибки не должны обрывать ход с продвижением.
+    # Count repeats of ONE action (tool + arguments), not all cases of the type.
     per_action: bool = False
 
     def __post_init__(self) -> None:
@@ -231,8 +225,7 @@ class FailureBudget:
             )
 
 
-# Conservative on dangerous failures, permissive on recoverable ones; small on
-# purpose — rarely more than two replans before success or an honest failure.
+# Conservative on dangerous failures, permissive on recoverable ones; small on purpose.
 DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
     "tool_error":     FailureBudget(
         max_occurrences=2, per_action=True,
@@ -242,8 +235,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "submit the same (tool, arguments) pair."
         ),
     ),
-    # A hard fact: the web cannot find it and recreating it would be
-    # hallucination, so stop and say it is absent.
+    # A hard fact: the web cannot find it and recreating it would be hallucination, so stop and say
+    # it is absent.
     "file_not_found": FailureBudget(
         max_occurrences=1,
         advice=(
@@ -264,8 +257,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
             "richer / more relevant output."
         ),
     ),
-    # The ANSWER was wrong, not a tool; the trigger's `reason` carries the
-    # correct value. One correction: wrong twice with the numbers in hand won't fix.
+    # The ANSWER was wrong, not a tool; the trigger's `reason` carries the correct value. One
+    # correction only.
     "claim_refuted":  FailureBudget(
         max_occurrences=2,
         advice=(
@@ -292,8 +285,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         ),
     ),
 
-    # Approval/policy: the rejected pair is forbidden, so max_occurrences=2
-    # means exactly one chance to propose a safer alternative.
+    # Approval/policy: the rejected pair is forbidden, so max_occurrences=2 gives one chance to
+    # propose a safer alternative.
     "approval_deny":         FailureBudget(
         max_occurrences=2,
         advice=(
@@ -361,8 +354,8 @@ DEFAULT_BUDGETS: Mapping[FailureType, FailureBudget] = {
         requires_different_action=True,
     ),
 
-    # A model that can't return JSON twice won't on the third try; better an
-    # honest failure than a confident answer from no plan.
+    # A model that can't return JSON twice won't on the third try; an honest failure beats an answer
+    # from no plan.
     "plan_parse_failed": FailureBudget(
         max_occurrences=2,
         advice=(
@@ -532,7 +525,7 @@ class ReplanPolicy:
         return "unknown"
 
     def _worst_repeat(self, triggers: list[Any], code: FailureType) -> int:
-        """Сколько раз ОДНО действие дало ошибку этого типа — худший случай."""
+        """How many times ONE action failed with this type: the worst case."""
         per: Counter[tuple[str, str]] = Counter()
         for t in triggers:
             if self._coerce_code(t) != code:

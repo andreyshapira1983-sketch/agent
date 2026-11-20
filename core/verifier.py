@@ -1,36 +1,10 @@
-"""MVP-14.4 — Verifier.
+"""Verifier: marks each synthesized claim [unverified] or [verified:<kind>:<source>] against the cycle's ProvenanceChain.
 
-The whole point: **LLM is not an oracle, it is a draft writer.**
-After the synthesizer produces an answer, the Verifier examines every
-claim, checks whether it has a citation, and whether that citation
-resolves to a real :class:`Evidence` record in the cycle's
-:class:`ProvenanceChain`. Claims without a citation are marked
-``[unverified]``; claims with a valid citation get a stronger
-``[verified:<kind>:<source>]`` annotation that survives into the
-final answer.
+Citation grammar: [file:<path>] [web:<url>] [search:<query>] (weak) [test:<cmd>] [log:<trace_id>]
+[shell:<cmd>] [tool:<name>] [diff:<path>] [memory:<mem_id>] [user].
 
-Citation grammar (LLM is instructed to follow this in
-``core.planner.SYNTHESIZER_SYSTEM`` / equivalents):
-
-  - ``[file:<path>]``         — workspace file content
-  - ``[web:<url>]``            — fetched web page (kind=web_page)
-  - ``[search:<query>]``       — search pointer (kind=web_search_hit, weak!)
-  - ``[test:<cmd>]``           — pytest result
-  - ``[log:<trace_id>]``       — JSONL log event
-  - ``[shell:<cmd>]``          — shell_exec stdout
-  - ``[tool:<name>]``          — generic tool output (current_time, etc.)
-  - ``[diff:<path>]``          — diff_file preview
-  - ``[memory:<mem_id>]``      — memory record
-  - ``[user]``                 — user explicit directive
-
-The first structural pass (sentence-level splitting + substring matching
-on source_id) is always run. An optional *semantic NLI pass* can be
-enabled by passing an ``llm`` instance to :func:`verify`. When enabled,
-``cited_but_unmatched`` chunks are re-examined: the LLM is asked whether
-any evidence excerpt in the chain actually supports the claim text. If
-a supporting excerpt is found the verdict is upgraded to ``verified``
-without requiring an exact citation-body / source_id match. This handles
-URL format mismatches, partial paths, and lightly-paraphrased references.
+A structural pass (sentence split + substring match on source_id) always runs; an optional
+NLI pass (``llm`` passed to :func:`verify`) re-checks ``cited_but_unmatched`` chunks against all evidence excerpts.
 """
 from __future__ import annotations
 

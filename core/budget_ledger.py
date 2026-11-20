@@ -11,9 +11,8 @@ from typing import Any
 from core.budget_governor import budget_limit_label as _budget_limit_label
 from core.state_integrity import append_state_jsonl, read_state_jsonl
 
-#: Starting size of the per-call bounded tail read (MIR-125). Doubles until
-#: the read provably covers the longest window; the whole file is the last
-#: resort, never the default.
+# Starting size of the per-call bounded tail read. It doubles until the read provably covers the
+# longest window; the whole file is the last resort.
 _TAIL_READ_BYTES = 65536
 
 BudgetLedgerCounter = str
@@ -182,11 +181,9 @@ class BudgetLedger:
         return loaded
 
     def _records_for_windows(self, now: datetime) -> list[BudgetLedgerRecord]:
-        """Records that can matter to any window — a BOUNDED tail read (MIR-125).
+        """Records that can matter to any window: a BOUNDED tail read.
 
-        Reading too little undercounts usage, so the tail PROVES its coverage:
-        it doubles until its oldest record is older than the longest window's
-        cutoff or the whole file is read; a read failure means the full read.
+        Reading too little undercounts usage, so the tail doubles until its oldest record is older than the longest window's cutoff or the whole file is read; a read failure means the full read.
         """
         if self.path is None or not self.path.exists():
             return list(self.records)
@@ -443,9 +440,9 @@ def _budget_config_path(config_path: Path | None) -> Path | None:
 
 def _load_budget_config(config_path: Path | None) -> dict[str, Any]:
     if config_path is None or not config_path.exists():
-        # Отсутствие файла здесь не ошибка: путь называют все вызывающие по
-        # умолчанию. «Потолок настроен» проверяет живой вход,
-        # `agent_tick._require_budget_config` (H-33).
+        # A missing file is not an error here: every caller names the default path.
+        # Whether a ceiling is configured is checked by the live entry point,
+        # `agent_tick._require_budget_config`.
         return {}
     try:
         text = config_path.read_text(encoding="utf-8")

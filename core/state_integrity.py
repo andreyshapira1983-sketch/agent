@@ -80,20 +80,11 @@ def read_state_jsonl(path: Path | str) -> list[dict[str, Any]]:
 def _decoded_lines(path: Path) -> Iterator[tuple[int, str | None, str]]:
     """Yield ``(line_no, text_or_None, raw)`` for every line of a state file.
 
-    Whole-file decoding is the FAST PATH and is byte-for-byte what this reader
-    always did — a healthy file takes it and nothing below runs. The fallback
-    exists because a process killed mid-append can cut a multi-byte character
-    in half, and `read_text` then raises before any per-line handling: the
-    quarantine machinery built for damaged rows never got to run, and the
-    store was unreadable on EVERY later read. Measured: about 9% of cut points
-    in a row carrying Cyrillic land inside a character, and this repository
-    writes Russian into its state by the operator's own rule.
-
-    A line that does not decode STRICTLY is surfaced as `None` rather than
-    repaired with replacement characters: rows predating the checksum envelope
-    carry no hash, so a substituted character would pass as a value. An
-    undecodable line is quarantined whole, like any other unreadable row.
-    """
+        Whole-file decoding is the fast path. The per-line fallback exists because
+        a process killed mid-append can cut a multi-byte character in half, making
+        `read_text` raise before quarantine could run. A line that does not decode
+        STRICTLY is surfaced as `None`, never repaired with replacement characters
+        (rows without a checksum would pass a substituted character as a value)."""
     try:
         text: str | None = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -154,19 +145,7 @@ def append_state_jsonl_unlocked(path: Path | str, payloads: list[dict[str, Any]]
     with p.open("a", encoding="utf-8") as fh:
         for payload in payloads:
             fh.write(encode_state_row(payload) + "\n")
-        # H-50: барьер долговечности стоял только на пути АТОМАРНОЙ ПЕРЕЗАПИСИ,
-        # а дописывание — путь горячий: через него идут каждый резерв бюджета,
-        # каждая строка расхода и каждое обновление задачи. Потеря хвоста при
-        # обрыве питания бьёт в ту же сторону, что H-27: потолок ЗАБЫВАЕТ
-        # потраченное, а задача может исполниться дважды.
-        #
-        # Цена измерена, а не оценена: +0,628 мс на строку; на живом объёме
-        # бюджета (3302 строки за месяц) это около двух секунд суммарно против
-        # тика, тратящего секунды на один вызов модели. Барьер ОДИН на вызов,
-        # а не на строку, иначе пакетная запись платила бы за каждую.
-        #
-        # Отказ файловой системы не фатален: запись остаётся ровно такой, какой
-        # была до появления барьера. Так же поступает `_atomic_write_lines`.
+        # Durability barrier on the append path: it is hot (budget reserves, spend rows, task updates), and losing the tail on power loss would make the ceiling forget spend or a task run twice. One barrier per call, not per row, so batch writes do not pay for each. A filesystem refusal is not fatal: the write stays as it was before the barrier, like `_atomic_write_lines`.
         fh.flush()
         try:
             os.fsync(fh.fileno())
@@ -230,21 +209,7 @@ def _payload_hash(payload: dict[str, Any]) -> str:
 def _atomic_write_lines(path: Path, lines: list[str]) -> None:
     """Replace *path* with *lines*, durably.
 
-    H-06 in `docs/audit/HISTORICAL_FAILURE_LEDGER.md` — the crash-consistency
-    class (ext3/ext4 rename semantics; Pillai et al., «All File Systems Are
-    Not Created Equal», OSDI 2014). Temp-then-rename buys atomicity of the
-    DIRECTORY ENTRY; it does not by itself guarantee the file's DATA reached
-    the disk. On a host crash or power loss the renamed file can be empty or
-    partially written — and an empty state file is the worst outcome here,
-    because it reads as a legitimately empty store: no tasks, no memory,
-    nothing to check. The per-row checksums cannot help; there is nothing
-    left to checksum.
-
-    Measured cost of the barrier on this machine: +1.3–1.7 ms per write at
-    142 / 1000 / 5155 rows, against a tick that spends seconds in provider
-    calls. A refused `fsync` is not fatal — the write stays atomic in the
-    directory sense, which is exactly what we had before.
-    """
+        Temp-then-rename gives atomicity of the DIRECTORY ENTRY, not of the file's data: after a crash the renamed file can be empty, which reads as a legitimately empty store and checksums cannot catch. A refused `fsync` is not fatal: the write stays atomic in the directory sense."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:

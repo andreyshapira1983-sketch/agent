@@ -1,20 +1,8 @@
-"""Ссылка памяти на код сверяется с кодом в момент чтения.
+"""Memory references to code are checked against the code at read time.
 
-Запись памяти, выученная на прежнем коде, после отката, раскола или
-переименования продолжает называть файл и функцию, которых больше нет. Замер
-2026-09-25 на сервере: 36 ссылок на исчезнувшие файлы — 19 в карточках
-прошлых ошибок, 15 в уроках самосборки, 2 в долгой памяти. Агент им верит:
-другого знания у него нет.
-
-По «Impact Is Not Invalidation» (arXiv 2609.25130): спрашивать надо не «что
-поменялось в коде», а «держится ли ЭТО утверждение», и судья — исполнение, а
-не догадка; хранимое не уничтожать, раз точность важнее полноты. Здесь —
-самая дешёвая проверка, которую исполнение даёт без запуска: существует ли
-названный файл и есть ли в нём названное имя (`путь::имя` или `путь:имя`).
-Не существует — запись доходит до агента как есть, но с пометкой, что её
-адрес устарел и её надо сверить с кодом. Удалять и переписывать память этот
-модуль не вправе.
-"""
+    A reference is stale when the named file or name (`path::name` or `path:name`)
+    no longer exists; the record is still delivered, flagged as needing a check.
+    Memory is never deleted or rewritten here."""
 from __future__ import annotations
 
 import ast
@@ -23,15 +11,14 @@ from pathlib import Path
 
 _CITE_RE = re.compile(
     r"(?<![\w/.])((?:core|tools|cli|app|api|tests|scripts)/[A-Za-z0-9_/]+\.py)"
-    # Имя — от трёх знаков: подпись ошибки прячет номер строки под `:N`
-    # (карточки прошлых ошибок, замер 2026-09-25), а это не имя.
+    # A name is at least three characters: error signatures carry line numbers as `:N`, which is not a name.
     r"(?:::?([A-Za-z_][A-Za-z0-9_]{2,}))?"
 )
 _names_cache: dict[tuple[str, float], frozenset[str]] = {}
 
 
 def _names(path: Path) -> frozenset[str] | None:
-    """Имена верхнего и вложенного уровня файла: функции, классы, присваивания."""
+    """Top-level and nested names of a file: functions, classes, assignments."""
     try:
         key = (str(path), path.stat().st_mtime)
     except OSError:
@@ -50,7 +37,7 @@ def _names(path: Path) -> frozenset[str] | None:
 
 
 def stale_refs(root: Path | str, text: str) -> list[str]:
-    """Ссылки текста на код, которых в рабочей папке больше нет."""
+    """Code references in the text that no longer exist in the working folder."""
     out: list[str] = []
     for m in _CITE_RE.finditer(text or ""):
         rel, name = m.group(1), m.group(2)
@@ -67,7 +54,7 @@ def stale_refs(root: Path | str, text: str) -> list[str]:
 
 
 def annotate(root: Path | str | None, text: str) -> str:
-    """Текст записи — и пометка, если её ссылки на код устарели."""
+    """The record text, plus a note if its code references are stale."""
     if root is None:
         return text
     stale = stale_refs(root, text)
@@ -77,7 +64,7 @@ def annotate(root: Path | str | None, text: str) -> str:
 
 
 def annotate_lines(root: Path | str | None, block: str) -> tuple[str, int]:
-    """Пометить каждую строку блока отдельно; вернуть блок и число пометок."""
+    """Mark each line of a block separately; return the block and the number of marks."""
     if root is None or not block:
         return block, 0
     lines, marked = [], 0

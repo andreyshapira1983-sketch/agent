@@ -1,17 +1,7 @@
-"""Budget governor for autonomous runtime loops.
+"""Outer runtime budget for autonomous loops: cycles, test runs, learning passes and approval requests.
 
-The control loop already has per-attempt replan budgets. This module is the
-outer runtime budget: how many autonomous cycles, test runs, learning passes
-and approval requests one unattended run may spend before it must stop.
-
-Limit semantics
----------------
-  * limit > 0  — hard cap: at most `limit` units may be reserved.
-  * limit == 0 — **unlimited**: the counter is tracked but never denied.
-    This is the intended default for `max_agent_runs`, `max_llm_calls`, and
-    `max_web_fetches` — callers that don't need those caps shouldn't need
-    to supply a large sentinel value; 0 is the natural "off" state.
-"""
+    Limit semantics: limit > 0 is a hard cap; limit == 0 is unlimited (usage is
+    tracked but never denied)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

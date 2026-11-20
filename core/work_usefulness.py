@@ -1,46 +1,4 @@
-"""Мерило полезности: пригодилась ли работа цикла ПОТОМ (слово оператора 2026-09-25).
-
-Замер того же дня по журналу кампаний 19–24.09: «сделано» засчитывалось за
-любой текст ответа (935 «сделанных» циклов, 422 из них начинались с оговорки
-«у меня есть данные только о…»), судья цели проверял лишь «файл появился» и
-не видел 80 % целей. Польза нигде не мерилась. По литературе («Measuring
-Self-Improvement», MAGELLAN) польза — это последующее использование, а не
-наличие продукта.
-
-Работа цикла засчитывается ПОЛЕЗНОЙ, если за `window_days` после цикла
-случилось хоть одно из признаков. Четыре утверждены оператором, три добавлены
-по его же слову того же дня («одобрение человека — один из источников, а не
-единственный»; всё остальное — машинная проверка):
-
-1. `approved` — человек одобрил заявку, поданную циклом (решения песочницы,
-   постоянного разрешения и «без подписи» не в счёт);
-2. `read_later` — файл, записанный или названный циклом, прочитан позже;
-3. `memory_used` — запись долгой памяти, созданная в цикле, позже выдана в ход;
-4. `code_survived` — правка кода агента из цикла стоит в основной ветке и не
-   откачена;
-5. `goal_verified` — судья цели (core/campaign_verdict.py) признал её критерий
-   выполненным, И Клод подтвердил это вне хода (core/judge_queue.py; слово
-   оператора 25.09: пока не судил Клод, решение предварительное, в зачёт нет);
-6. `tests_passed` — цикл что-то создал и прогнал тесты, и они зелёные.
-
-Заказы площадки считаются отдельно: принятая покупателем работа —
-`market_accepted` в сводке (core/market_ledger.py).
-
-Записи через `journal_append` продуктом не считаются: это служебные журналы,
-система читает их постоянно, и «прочитано позже» ничего бы не значило.
-
-ИЗВНЕ петли из них только `approved` (и принятые покупателем заказы): остальное
-судит сам агент или его собственный судья. Долгий цикл, судящий себя, принимает
-застой за прогресс (arXiv 2607.25152: нужен оценщик вне петли с независимым
-доступом к миру), поэтому сводка считает подтверждённое извне отдельно —
-`out_of_band`, — и расхождение двух чисел видно сразу.
-
-Иначе — «сделано, пока без пользы»; моложе окна — «рано судить». Модуль только
-считает: выбор целей он не двигает (сначала убедиться, что мерило не врёт).
-
-Работа цикла — всё, что случилось между предыдущей строкой журнала кампании и
-его собственной: кампания идёт строго по очереди, номера следа в строке нет.
-"""
+"""Usefulness measure: whether a cycle's work was used afterwards (approved, read_later, memory_used, code_survived, goal_verified, tests_passed); only counts, never steers goal selection."""
 from __future__ import annotations
 
 import json
@@ -57,7 +15,7 @@ from core.judge_queue import rulings
 
 WINDOW_DAYS = 3
 SIGNALS = ("approved", "read_later", "memory_used", "code_survived", "goal_verified", "tests_passed")
-#: Признаки, которые ставит не сам агент и не его судья (вне петли).
+#: Signs set neither by the agent nor by its own judge (out of the loop).
 OUT_OF_BAND = frozenset({"approved", "goal_verified"})
 _READ_TOOLS = frozenset({"file_read", "find_in_files", "diff_file", "convert_file"})
 _PATH_RE = re.compile(r"(?<![\w/.])((?:data|proposals|knowledge|docs|core|tools|tests|cli|scripts|"
@@ -104,7 +62,7 @@ class CycleUse:
 
 @dataclass
 class _Traces:
-    """Сжатый след: только то, что нужно мерилу, по времени."""
+    """Compact trace: only what the measure needs, by time."""
 
     writes: list[tuple[datetime, str]] = field(default_factory=list)
     reads: list[tuple[datetime, str]] = field(default_factory=list)
@@ -157,7 +115,7 @@ def _scan_traces(logs: Path) -> _Traces:
 
 
 def _green(output: Any) -> bool:
-    """Зелёный прогон run_tests: код выхода 0 и хоть один прошедший тест."""
+    """Green run_tests: exit code 0 and at least one passed test."""
     if isinstance(output, str):
         try:
             output = json.loads(output)
@@ -167,7 +125,7 @@ def _green(output: Any) -> bool:
 
 
 def _verified_goals(data: Path) -> list[tuple[datetime, str]]:
-    """Цели, признанные достигнутыми, — только подтверждённые Клодом."""
+    """Goals judged achieved, only those confirmed by Claude."""
     confirmed = {i for i, r in rulings(data.parent).items() if r.get("verdict") == "confirmed"}
     return sorted((m, str(r.get("goal") or "")) for r in _rows(data / "campaign_verdicts.jsonl")
                   if r.get("verdict") == "verified" and r.get("judge_item") in confirmed
@@ -181,7 +139,7 @@ def _between(items: list[tuple[datetime, str]], start: datetime, end: datetime) 
 
 
 def _human_approvals(data: Path) -> tuple[dict[str, datetime], dict[str, datetime]]:
-    """(создана: id → время) и (одобрена человеком: id → время)."""
+    """(created: id -> time) and (approved by a human: id -> time)."""
     created, approved = {}, {}
     for row in list(_rows(data / "approval_inbox.jsonl")) + list(_rows(data / "approval_outcomes.jsonl")):
         aid = str(row.get("id") or "")
@@ -204,7 +162,7 @@ def _memory_created(data: Path) -> list[tuple[datetime, str]]:
 
 
 def _agent_commits(root: Path) -> tuple[list[tuple[datetime, str]], set[str]]:
-    """Правки агента в основной ветке (время, sha) и откаченные sha."""
+    """Agent edits on the main branch (time, sha) and reverted shas."""
     try:
         out = subprocess.run(["git", "-C", str(root), "log", "--format=%H%x1f%an%x1f%cI%x1f%B%x1e", "main", "--"],  # noqa: S603, S607
                              capture_output=True, text=True, timeout=60, check=False).stdout
@@ -223,7 +181,7 @@ def _agent_commits(root: Path) -> tuple[list[tuple[datetime, str]], set[str]]:
 
 
 def measure(root: Path | str, *, window_days: int = WINDOW_DAYS, now: datetime | None = None) -> list[CycleUse]:
-    """Каждый цикл кампании с `work_done` — и пригодилась ли его работа."""
+    """Every campaign cycle with `work_done` and whether its work was useful."""
     root = Path(root)
     data, now = root / "data", now or datetime.now(timezone.utc)
     window = timedelta(days=window_days)
@@ -243,15 +201,11 @@ def measure(root: Path | str, *, window_days: int = WINDOW_DAYS, now: datetime |
             continue
         cycle = CycleUse(ts=moment.isoformat(), goal=str(row.get("goal") or "")[:200],
                          llm_calls=int(row.get("llm_calls_spent") or 0))
-        # Продукт — только СОЗДАННОЕ циклом: записанные файлы и названное в
-        # заявке. Текст ответа (`artifact`) называет и прочитанные ИСТОЧНИКИ —
-        # первый прогон на живых данных 2026-09-25 засчитал 629 «прочитано
-        # позже» за повторное чтение той же книги, которую цель велела читать.
+        # Product is only what the cycle CREATED: written files and what the request names; the answer text (`artifact`) also names read SOURCES,
+        # which would count re-reading the same book as 'read later'.
         proposal = str(row.get("proposal") or "")
         cycle.products = set(_between(traces.writes, start, moment)) | set(_PATH_RE.findall(proposal))
-        # Заявки «по времени» — только если цикл сам сказал, что подал их
-        # (`approvals_new=N`): заявку в то же окно кладёт и полоса демона, и
-        # живой прогон приписал было её одобрение циклу «прочитай книгу».
+        # Requests by time only if the cycle itself said it filed them (`approvals_new=N`): the daemon lane files requests in the same window and its approval must not be credited to the cycle.
         cycle.approvals = set(_AIN_RE.findall(proposal)) | (
             {a for a, m in created.items() if start < m <= moment} if proposal.startswith("approvals_new=") else set())
         cycle.memory_ids = set(_between(memories, start, moment))
@@ -276,7 +230,7 @@ def measure(root: Path | str, *, window_days: int = WINDOW_DAYS, now: datetime |
 
 
 def market_accepted(root: Path | str) -> int:
-    """Заказы площадки, принятые покупателем; нечитаемый учёт — `LedgerUnreadable`, не ноль."""
+    """Market orders accepted by the buyer; unreadable accounting raises `LedgerUnreadable`, not zero."""
     from core.market_ledger import FILE_NAME, MarketLedger
 
     lines = MarketLedger(Path(root) / "data" / "market" / FILE_NAME).lines()

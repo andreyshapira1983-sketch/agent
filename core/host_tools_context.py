@@ -5,9 +5,7 @@ import os
 import re
 from collections.abc import Iterable
 
-# Single source of truth for host-tool names (env var, tool name, description).
-# Reused by `_build_host_tools_block` and `host_tools_relevant` so the two never
-# drift apart.
+# Single source of truth for host-tool names, shared by `_build_host_tools_block` and `host_tools_relevant`.
 _HOST_ENV_TOOLS = [
     ("BLENDER_PATH",   "blender",   "3D rendering / animation (Blender)"),
     ("OPENSCAD_PATH",  "openscad",  "parametric 3D modelling (OpenSCAD)"),
@@ -47,10 +45,7 @@ def host_tools_relevant(text: str, tools_used: Iterable[str] = ()) -> bool:
 
 
 def _build_host_tools_block() -> str:
-    """Read tool paths from env vars (loaded from .env) and return a planner
-    context block listing what is actually installed on this host.
-    Only includes vars that are set and non-empty.
-    """
+    """Build the planner context block of host tools actually installed (env vars that are set and non-empty)."""
     found: list[str] = []
     python_verified = False
     for env_var, tool_name, description in _HOST_ENV_TOOLS:
@@ -63,10 +58,8 @@ def _build_host_tools_block() -> str:
             # Path configured but file not found at that location
             found.append(f"  {tool_name:12s} → {path}  ({description}) [path configured but not verified]")
 
-    # Auto-detect Python from common Windows locations unless a VERIFIED
-    # PYTHON_PATH was found. The old substring check ("python" in line) also
-    # matched the "[path configured but not verified]" entry, so a broken
-    # PYTHON_PATH suppressed exactly the fallback that would have rescued it.
+    # Auto-detect Python in common Windows locations unless a VERIFIED PYTHON_PATH was found
+    # (a plain substring check also matched the unverified entry).
     if not python_verified:
         username = os.environ.get("USERNAME", "")
         common_python = [

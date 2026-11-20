@@ -1,31 +1,4 @@
-"""Агент выбирает следующую цель кампании сам — отталкиваясь от хартии.
-
-До этого модуля цель каждой кампании печатал человек: «его толкают и дают
-что-то делать» (оператор, 2026-08-15). Хартия — knowledge/doctrine/future/
-CORPORATE_MODEL.md, документ о целевой форме системы — становится источником
-целей: агент читает её и своё текущее состояние и называет ОДИН ограниченный
-шаг, который приближает к цели.
-
-Свобода пропорциональна обратимости. Выбор цели — мысль, она свободна; ворота
-стоят на последствиях, и этот модуль их НЕ трогает: предложенная цель уходит в
-тот же кампейн-механизм с теми же одноразовыми грантами эффектов и правами §9.
-
-Судья целей — структурный, не вкусовой:
-* якорь: цель обязана опираться на ДОСЛОВНУЮ строку хартии. Живой замер
-  2026-08-15: 4 из 4 попыток запасной модели процитировать хартию дали
-  пересказ — честный, но не дословный. Поэтому модель не переписчик, а
-  указатель: хартия даёт пронумерованные якоря, модель выбирает номер, и
-  дословность гарантирована конструкцией, а не прилежанием модели;
-* новизна: цель, повторяющая недавнюю цель журнала кампаний, отклоняется —
-  топтание уже измерено (охоты 3-7: 24 попытки без нового класса результата);
-* твёрдые инварианты: цель со словами о расширении собственных прав (merge,
-  kill-switch, governance, push) умирает на входе — «no agent may widen policy
-  for itself» — это оборона в глубину, ворота политики ниже по течению стоят
-  как стояли;
-* проверяемость: без `success_check` цель — желание, а не работа.
-
-Зачем: docs/CODE_NOTES.md, "The charter replaces the push".
-"""
+"""The agent picks the next campaign goal itself, starting from the charter (goal judge: verbatim anchor, novelty, authority invariant, success_check)."""
 from __future__ import annotations
 
 import json
@@ -43,19 +16,16 @@ from core.workspace_inventory import workspace_inventory as _workspace_inventory
 
 CHARTER_RELPATH = Path("knowledge") / "doctrine" / "future" / "CORPORATE_MODEL.md"
 
-#: Решения хартии — граждане памяти (2026-08-19, «день сурка»): отказ,
-#: живший только в stdout, заставлял каждый тик задавать Sol байт-в-байт
-#: тот же вопрос. Каждый исход выбора цели переживает свой тик здесь.
+# Charter decisions persist in memory: every goal-choice outcome survives its tick so the next
+# choice sees what was declined.
 DECISIONS_RELPATH = Path("data") / "charter_decisions.jsonl"
 
-#: Сколько последних ОТКЛОНЁННЫХ целей селектор показывает модели.
+# How many latest DECLINED goals the selector shows the model.
 _RECENT_DECLINED = 6
 
-#: Инвариант полномочий судит НАМЕРЕНИЕ, не словарь (2026-08-19: маркер
-#: «governance» по подстроке дважды за день убил законные учебные цели).
-#: Отказ = глагол изменения СВОИХ прав рядом с объектом власти, либо
-#: жёсткая форма («без человека», bypass). Анализ/описание власти — не её
-#: захват. Регекс-пары ниже; вход — вся цель в нижнем регистре.
+# The authority invariant judges INTENT, not vocabulary: a verb changing one's OWN rights next to an
+# object of power, or a hard form ("without a human", bypass).
+# Analysing authority is not seizing it. Regex pairs below; input is the whole goal in lower case.
 _AUTHORITY_OBJECTS = (
     r"authority|authorit|governance|kill.?switch|approval|permission|merge"
     r"|push|полномочи|прав[оа]|одобрени|слияни"
@@ -74,42 +44,33 @@ _AUTHORITY_INTENT_RE = _re.compile(
 
 
 def _widens_own_authority(goal: str) -> bool:
-    """True только для намерения изменить/расширить/обойти собственные права."""
+    """True only for an intent to change/widen/bypass one's own rights."""
     low = (goal or "").lower()
     return bool(_AUTHORITY_HARD_RE.search(low) or _AUTHORITY_INTENT_RE.search(low))
 
-#: Сколько последних целей журнала показываются модели и сторожат новизну.
+# How many latest journal goals are shown to the model and guard novelty.
 _RECENT_GOALS = 8
 
-#: Исходы, при которых цель прозвучала, но работы не дала — к ней можно
-#: вернуться. Замер 2026-09-01: cost_cap в 11:31 сделал цель «недавней» и
-#: запер её от повтора в 15:31.
+# Outcomes where the goal was voiced but gave no work: it may be revisited (otherwise a cost cap
+# would make a goal "recent" and lock it from repeating).
 _NO_WORK_RESULTS = frozenset({
     "cost_cap", "repeat", "idle", "approval_wait", "dirty_tree_wait",
     "stalled", "error", "declined",
-    # Блок 3 (L12, 2026-09-03): исходы прогона без работы — по A2/A9 «blocked»
-    # и «failed» писались в леджер как занявшие тему. Для строк, где есть
-    # честное поле `work_done` (пишется с блока 3), этот список не нужен.
+    # Outcomes of a run without work; rows that have the honest `work_done` field do not need this
+    # list.
     "blocked", "failed", "empty", "inconclusive",
-    "waiting",  # блок 8: ожидание внутри смены — не работа по теме
+    "waiting",  # waiting inside a shift is not work on the topic
 })
 
 _JACCARD_REPEAT = 0.6
 
-#: Баланс «про себя / про мир» — слово оператора 2026-09-25: если из последних
-#: 10 выбранных целей 7 и больше были про себя, следующая обязана смотреть
-#: наружу. Замер того же дня (журнал кампаний 19–24.09): 70 % циклов — про свой
-#: код, детекторы и дефекты, 17 % — про мир, 23–24.09 внешних целей не было ни
-#: одной. Замкнутая петля даёт эхо: без внешней обратной связи модель себя не
-#: исправляет (Huang et al., ICLR 2024), цикл, судящий себя, принимает застой
-#: за прогресс (arXiv 2607.25152). Число 7 из 10 — решение оператора, не
-#: литература.
+# Self/world balance: if 7 or more of the last 10 chosen goals were about self, the next must look
+# outward.
+# The 7-of-10 number is an operator decision, not literature.
 _OUTWARD_WINDOW, _OUTWARD_SELF_MAX = 10, 7
-#: Цель смотрит наружу, только если НАЗЫВАЕТ внешний источник. Всё прочее —
-#: работа внутри своей папки. Словарь «про себя» (свой, core/, детектор…)
-#: пробовался и промахивался на живых целях 2026-09-25: «Read the run log where
-#: obligation_silently_missing fired…», «Read the capability map…» выходили
-#: «ничьими», хотя это чтение самого себя.
+# A goal looks outward only if it NAMES an external source; everything else is work inside the own
+# folder.
+# A vocabulary of "self" words missed on live goals.
 _WORLD_RE = _re.compile(
     r"https?://|интернет|первоисточник|\bweb\b|web_search|web_fetch|\bonline\b|knowledge_library/|"
     r"math_study/library|книг|учебник|стать[юяией]|\bpaper\b|\bbook\b|arxiv|площадк|"
@@ -118,12 +79,12 @@ _WORLD_RE = _re.compile(
 
 
 def goal_faces(goal: str) -> str:
-    """'world' — цель называет внешний источник; иначе 'self'."""
+    """'world' if the goal names an external source; otherwise 'self'."""
     return "world" if _WORLD_RE.search(goal or "") else "self"
 
 
 def _balance_or_abandoned(root: Path, goal: str, outward_due: str, change_ts: str) -> str:
-    """Два отказа за итог прошлых выборов: баланс «про себя» и брошенная цель."""
+    """Two refusals from the history of earlier choices: self-balance and an abandoned goal."""
     if outward_due and goal_faces(goal) == "self":
         return (f"{outward_due}; the next goal must face the outside world "
                 "(a web source, a library book, a market order)")
@@ -135,12 +96,12 @@ def _balance_or_abandoned(root: Path, goal: str, outward_due: str, change_ts: st
 
 
 def _outward_due(root: Path) -> str:
-    """Причина «пора наружу» ("" — не пора): счёт по последним выбранным целям."""
+    """Reason for "time to look outward" ("" if not): counted over the latest chosen goals."""
     from core.state_integrity import read_state_jsonl
 
     try:
         rows = read_state_jsonl(root / DECISIONS_RELPATH)
-    except Exception:  # noqa: BLE001 — сомнение = правило молчит, выбор не падает
+    except Exception:  # noqa: BLE001 — doubt means the rule stays silent, the choice does not fail
         return ""
     chosen = [str(r.get("goal") or "") for r in rows if r.get("status") == "proposed"][-_OUTWARD_WINDOW:]
     own = sum(1 for g in chosen if goal_faces(g) == "self")
@@ -151,7 +112,7 @@ def _outward_due(root: Path) -> str:
 
 @dataclass(frozen=True)
 class CharterGoalReport:
-    """Итог выбора: предложенная цель или отказ с названной причиной."""
+    """Outcome of the choice: a proposed goal or a refusal with a named reason."""
 
     status: str  # "proposed" | "declined"
     goal: str = ""
@@ -159,10 +120,9 @@ class CharterGoalReport:
     why_now: str = ""
     success_check: str = ""
     reason: str = ""
-    #: Учёт прошлых остановок — МАШИННЫЙ, а не фраза в рассуждении: требование
-    #: оператора 2026-09-01 («докажи управляющий эффект, а не красивую фразу»).
-    #: stop_considered — держал ли выбор перед глазами журнал своих остановок;
-    #: previous_stop_ref — подпись стены, на которую выбор реально опирался.
+    # Accounting of past stops is MACHINE-checked, not a phrase in reasoning: stop_considered says
+    # whether the choice had the stop journal before its eyes; previous_stop_ref is the signature of
+    # the wall it actually relied on.
     stop_considered: bool = False
     previous_stop_ref: str = ""
 
@@ -171,48 +131,23 @@ def _decline(reason: str) -> CharterGoalReport:
     return CharterGoalReport(status="declined", reason=reason)
 
 
-#: Сколько последних остановок видит выбор цели. Число — из его проекта
-#: (self_record_design.md, «последние 20»); окно, а не вся история, чтобы
-#: журнал остановок не превращался во второй склад истины.
+# How many latest stops goal choice sees: a window, not the whole history, so the stop journal does
+# not become a second store of truth.
 _RECENT_STOPS = 20
 
 
-#: Остановка ВЫБОРА цели о стену повтора. Выбирателю она не показывается ни как
-#: «остановка», ни как «необъяснённое наблюдение»: её содержание — отклонённый
-#: вариант с причиной — он и так видит в блоке DECLINED. Суточный прогон
-#: 2026-09-19, 18:42–18:43: десять попыток подряд, семь — «прочитай код стены
-#: goal_repeat и лог goal_selection_failure»; все отклонены как повтор, каждая
-#: оставила новую такую же остановку, и подсказка снова звала разобраться с
-#: ней. Петля кормила сама себя, и прогон уснул.
+# A stop of goal CHOICE against the repeat wall is not shown to the chooser: its content (the
+# declined variant with reason) is already in the DECLINED block, and showing it made a self-feeding
+# loop.
 _PICKER_OWN_STOP = "goal_selection_failure"
-#: Только эта стена дублирует DECLINED; `goal_parse` и прочие — другая новость.
+# Only this wall duplicates DECLINED; `goal_parse` and others are different news.
 _REPEAT_WALL = "goal_repeat"
 
 
 def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
-    """Последние собственные остановки — НИЗКОДОВЕРЕННАЯ подсказка.
+    """Latest own stops: a LOW-TRUST hint (a matching signature means "check the past wall", not "this reason is true").
 
-    Контракт оператора (2026-09-01): совпавшая подпись означает «проверь
-    прошлую стену», а НЕ «эта причина истинна». Поэтому здесь только чтение,
-    без вердиктов: сам журнал пишет `core/self_stop_record.py` из рантайма.
-    Нечитаемый журнал — не отказ выбора: отсутствие подсказки хуже, чем
-    остановка всей работы из-за неё.
-
-    Окно считает РАЗНЫЕ СТЕНЫ, а не строки. Замер живого журнала 2026-09-18:
-    35 строк на 3 подписи, и хвост из 20 строк нёс только 2 стены — третья
-    (`goal_parse`, три удара днём раньше) не доходила до выбора цели вообще.
-    Причина не в сроке и не в объёме: `agent_tick.py` пишет остановку внутри
-    цикла трёх попыток, поэтому шесть мёртвых прогонов за 112 секунд оставили
-    двадцать одинаковых строк и вымыли соседей.
-
-    Писатель при этом не виноват: разные попытки одного прогона могут
-    удариться о РАЗНЫЕ стены, и такую запись терять нельзя. Виновата единица
-    счёта у читателя.
-
-    Повторяемость не выбрасывается, а становится числом (`hits`): стена,
-    ударенная двадцать раз, и стена, ударенная однажды, — разные новости.
-    Двадцать одинаковых строк читаются как двадцать свидетельств, а это
-    ложный вес — свидетельство одно.
+    Read-only; an unreadable journal is not a refusal of choice. The window counts DISTINCT WALLS, not rows; repeats become a number (`hits`).
     """
     path = workspace / "data" / "self_stops.jsonl"
     if not path.is_file():
@@ -221,25 +156,15 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
         rows = read_state_jsonl_unlocked(path)
     except (OSError, ValueError):
         return ()
-    # Ключ сворачивания — подпись; строки без подписи сворачивать НЕЛЬЗЯ:
-    # объявить их одной стеной значило бы выдумать за журнал.
+    # The folding key is the signature; rows without one must NOT be folded (calling them one wall
+    # would invent a journal).
     #
-    # Отказ САМОМУ СЕБЕ по повтору цели не показывается, и это решение
-    # УСТОЯЛО против пересмотра 2026-09-21. Агент предложил показывать такие
-    # отказы со счётчиком `hits` и довод привёл верный: сворачивание по
-    # подписи решает переполнение, ради которого пропуск когда-то вводили.
-    # Довод приняли, правку внесли — и прогон поймал подмену предмета.
-    # Пропуск ставили НЕ против переполнения, а против САМОПОДПИТКИ: стена
-    # `goal_repeat`, показанная выбирателю, звала «разобраться со стеной
-    # повтора», это отклонялось как повтор и оставляло новую такую же стену
-    # (суточный прогон 2026-09-19, 18:42–18:43). Счётчик этой петли не
-    # разрывает: одна строка «ударена 25 раз» зовёт разбираться с ней ровно
-    # так же, как двадцать пять.
-    #
-    # Цена пропуска остаётся настоящей и названа честно: в
-    # `data/self_stops.jsonl` 25 записей, и ВСЕ они этого вида, то есть самая
-    # частая форма собственной сдержанности агента до выбора цели не доходит.
-    # Кто будет это чинить — чинит ПЕТЛЮ, а не показ.
+    # A refusal to oneself on goal repeat is not shown, and this decision survived a review: the
+    # skip was set against SELF-FEEDING (the shown `goal_repeat` wall called for "dealing with the
+    # repeat wall", got declined as a repeat and left a new wall), not against overflow, and a
+    # counter does not break that loop.
+    # The cost is real: in `data/self_stops.jsonl` all 25 records are of this kind. Whoever fixes it
+    # fixes the LOOP, not the display.
     collapsed: dict[str, dict[str, str]] = {}
     for index, row in enumerate(rows):
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
@@ -254,29 +179,22 @@ def _recent_stops(workspace: Path) -> tuple[dict[str, str], ...]:
         }
         key = stop["signature"] or f"#unsigned:{index}"
         seen = collapsed.pop(key, None)
-        # Показывается ПОСЛЕДНИЙ удар: иначе стена, о которую бьются прямо
-        # сейчас, выглядела бы вчерашней. Перевставка держит порядок по
-        # последнему удару.
+        # The LAST hit is shown, so a wall being hit right now does not look like yesterday's; re-
+        # insertion keeps the order by last hit.
         stop["hits"] = (seen["hits"] + 1) if seen else 1
         collapsed[key] = stop
     return tuple(list(collapsed.values())[-_RECENT_STOPS:])
 
 
-#: Столько ПЛАТНЫХ заходов без результата — и цель брошена до перемены мира.
-#: Voyager (arXiv 2305.16291): после четырёх неудачных раундов задача
-#: оставляется. Замер 2026-09-25 по журналу 19–24.09: 16 целей получили 4+
-#: платных захода без работы, одна — 34 (свести повтор в core/secret_scanner.py);
-#: исходы без работы по замыслу «не занимают тему», и предела не было.
+# This many PAID passes without result and the goal is abandoned until the world changes (Voyager,
+# arXiv 2305.16291: a task is dropped after four failed rounds).
 _ABANDON_AFTER = 4
 
 
 def _abandoned_goals(workspace: Path, world_ts: str) -> tuple[str, ...]:
-    """Цели с `_ABANDON_AFTER`+ платными заходами без работы после перемены мира.
+    """Goals with `_ABANDON_AFTER`+ paid passes without work since the last world change.
 
-    Платный — с вызовами модели: ожидание одобрения, стена на воротах и
-    простой попыткой не считаются (MIR-117). Перемена мира — журнал способностей
-    или чужая правка основной ветки (core/wake_events.py): после неё цель снова
-    открыта, как и у стража повторов.
+    Paid means with model calls: approval waits, gate walls and idling do not count. A world change is the capability journal or a foreign main-branch edit (core/wake_events.py); after it the goal is open again.
     """
     from core.wake_events import outside_commit_ts
 
@@ -297,19 +215,9 @@ def _abandoned_goals(workspace: Path, world_ts: str) -> tuple[str, ...]:
 
 
 def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
-    """Цели, которые действительно ЗАНИМАЛИ прогон, а не просто прозвучали.
+    """Goals that actually OCCUPIED a run, not merely sounded.
 
-    Клинч 2026-09-01, замерен: в 11:31 цель прошла ворота, но исполнение
-    остановил межзапусковый бюджет (`result="cost_cap"`, ноль вызовов, ноль
-    работы). Запись цели легла в леджер — и в 15:31 та же цель была отвергнута
-    как «повтор недавней». Страж считал повтором ЗАЯВЛЕНИЕ цели, а не
-    ВЫПОЛНЕНИЕ работы, и цель, прерванную внешним лимитом, стало нельзя
-    повторить: два исправных механизма вместе дали тупик.
-
-    Поэтому цель попадает в «недавние» только если по ней был хотя бы один
-    цикл с работой. Исходы без работы (`cost_cap`, `repeat`, `idle`,
-    `dirty_tree_wait`, `approval_wait`) не занимают тему: к ним можно и нужно
-    вернуться.
+    A goal enters "recent" only if at least one cycle with work was spent on it. Outcomes without work (`cost_cap`, `repeat`, `idle`, `dirty_tree_wait`, `approval_wait`) do not occupy the topic: they should be revisited.
     """
     path = workspace / "data" / "campaign_ledger.jsonl"
     if not path.is_file():
@@ -328,14 +236,13 @@ def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
         result = str(payload.get("result") or "").strip()
         recorded = payload.get("work_done")
         if isinstance(recorded, bool):
-            # Блок 3 (L12): леджер пишет слово исхода — оно и решает.
+            # the ledger writes the outcome word, and it decides
             did_work = recorded
         else:
-            # Строки до блока 3: чёрный список ЯВНО безработных исходов, но
-            # продукт (заявка, артефакт) — работа при любом исходе. Всё прочее
-            # (включая записи старого формата без поля result) считается
-            # занявшим тему: инвертировать нельзя — неполная запись молча
-            # вернула бы «день сурка».
+            # Rows before the outcome field: an explicit blacklist of workless outcomes, but a
+            # product (request, artifact) is work under any outcome.
+            # Everything else (including old-format rows without `result`) counts as occupying the
+            # topic; do not invert it, or an incomplete row would bring back the repeat loop.
             did_work = bool(payload.get("proposal") or payload.get("artifact")) \
                 or result not in _NO_WORK_RESULTS
         if did_work:
@@ -347,27 +254,24 @@ def _recent_goals(workspace: Path) -> tuple[tuple[str, str], ...]:
             unworked.discard(goal)
         elif goal not in worked_ts:
             unworked.add(goal)
-    # Блок 3 (L11): окно — по ПОСЛЕДНЕЙ работе, а не по первому появлению;
-    # иначе тема, над которой работали вчера, выпадала из окна, если впервые
-    # прозвучала месяц назад.
+    # The window is by the LAST work, not the first appearance, otherwise a topic worked on
+    # yesterday but first voiced a month ago falls out.
     pairs = sorted(worked_ts.items(), key=lambda kv: kv[1])
     return tuple(pairs[-_RECENT_GOALS:])
 
 
-#: Артефакт, НАД которым цель работает: её личность. Вскрытие 19:31
-#: (2026-08-19): инженерные цели приходят по шаблону, и два раскола разных
-#: модулей совпали на 0.78 — различались model/router/smart/memory. Судить
-#: надо предмет работы, а не формулировку; порог при этом не трогаем.
+# The artifact the goal works ON is its identity: engineering goals come from a template and two
+# splits of different modules matched on 0.78; judge the subject of the work, not the wording, and
+# leave the threshold alone.
 _GOAL_IDENTITY_RE = _re.compile(
     r"[\w/\\.-]+\.(?:py|md|jsonl|json|toml|yaml|yml|txt)\b"
 )
 
 
 def _goal_identity(goal: str) -> str:
-    """Basename файла, над которым цель работает, или "" — если не назван.
+    """Basename of the file the goal works on, or "" if none named.
 
-    Basename, а не путь: «model_router.py» и «core/model_router.py» — одна
-    работа, и модель называет их вперемешку.
+    A basename, not a path: "model_router.py" and "core/model_router.py" are one work.
     """
     match = _GOAL_IDENTITY_RE.search(goal or "")
     if not match:
@@ -376,12 +280,10 @@ def _goal_identity(goal: str) -> str:
     return name.rsplit("/", 1)[-1].casefold()
 
 
-#: Стадия работы над предметом (блок 3, L7, 2026-09-03). Правило личности
-#: файла равняло «implement X.md» с «draft X.md» и «trace X.py» с «split
-#: X.py»: 23 из 80 решений — отказ «повтор», среди них следующий шаг ONE
-#: PAPER RULE (03:47) и пять раз расследование, убитое предложением о
-#: расколе того же модуля. Решает ПЕРВЫЙ глагол цели. Для документа бумага
-#: и код — разные работы; для кода бумага о нём и правка его — одна.
+# Stage of work on the subject. The file-identity rule equated "implement X.md" with "draft X.md"
+# and "trace X.py" with "split X.py".
+# The FIRST verb of the goal decides. For a document paper and code are different work; for code, a
+# paper about it and its edit are one.
 _GOAL_STAGE_RES: tuple[tuple[str, _re.Pattern[str]], ...] = (
     ("read", _re.compile(
         r"\b(?:trace|investigate|read|study|analy[sz]e|compare|measure|verify|"
@@ -396,7 +298,7 @@ _GOAL_STAGE_RES: tuple[tuple[str, _re.Pattern[str]], ...] = (
 
 
 def _goal_stage(goal: str, identity: str) -> str:
-    """'read' | 'paper' | 'code' | 'work' | '' — по первому глаголу."""
+    """'read' | 'paper' | 'code' | 'work' | '' by the first verb."""
     low = (goal or "").lower()
     first: tuple[int, str] | None = None
     for stage, pattern in _GOAL_STAGE_RES:
@@ -407,7 +309,7 @@ def _goal_stage(goal: str, identity: str) -> str:
         return ""
     stage = first[1]
     if stage in ("paper", "code") and not identity.endswith(".md"):
-        return "work"  # о коде: предложение о правке и правка — одна работа
+        return "work"  # about code: a proposal to edit and the edit are one work
     return stage
 
 
@@ -419,8 +321,8 @@ def _repeats_recent(goal: str, recent: tuple[str, ...]) -> str:
     for old in recent:
         old_id = _goal_identity(old)
         if mine_id and old_id:
-            # Обе цели назвали предмет: решает он, а не слова — и стадия
-            # работы над ним (L7): следующий шаг по той же бумаге не повтор.
+            # Both goals named a subject: it decides, with the stage of work (the next step on the
+            # same paper is not a repeat).
             if mine_id == old_id:
                 mine_stage = _goal_stage(goal, mine_id)
                 old_stage = _goal_stage(old, old_id)
@@ -437,29 +339,18 @@ def _repeats_recent(goal: str, recent: tuple[str, ...]) -> str:
     return ""
 
 
-#: Сколько строк хартии доходит до выбора цели.
-#:
-#: Было 80 при 169 подходящих строках — то есть 89 строк собственной
-#: конституции агент не видел вовсе, и узналось это случайно: раздел про
-#: работу с внешним миром, дописанный в конец документа, не стал якорем ни
-#: одной строкой и не оставил следа ни в ошибке, ни в журнале.
-#:
-#: Поднято словом оператора 2026-09-21: «надо поднять». Цена названа честно
-#: — окно оплачивается токенами при каждом выборе цели, и 180 вместо 80
-#: означает примерно вдвое более длинный блок якорей. Взамен исчезает
-#: молчаливая потеря: хартия либо помещается целиком, либо `anchor_overflow`
-#: скажет, на сколько строк она переросла окно.
+# How many charter lines reach goal choice.
+#
+# Raised from 80 to 180 on the operator's word: 89 of 169 eligible lines were never seen. The window
+# costs tokens at every choice; in return the charter either fits entirely or `anchor_overflow` says
+# by how many lines it outgrew the window.
 _ANCHOR_WINDOW = 180
 
 
 def _anchor_lines(charter: str) -> tuple[str, ...]:
-    """Пронумерованные якоря — содержательные строки самой хартии.
+    """Numbered anchors: the content lines of the charter itself.
 
-    Окно КОНЕЧНО, и это узнаётся дорого: замер 2026-09-21 показал 169
-    подходящих строк при окне в 80, то есть 89 строк собственной конституции
-    агент не видел вовсе. Раздел про работу с внешним миром, дописанный в
-    конец документа, не стал якорем НИ ОДНОЙ строкой — и молча: ни ошибки,
-    ни предупреждения, ни следа в журнале.
+    The window is FINITE: a section appended at the end was silently never an anchor.
     """
     anchors: list[str] = []
     for raw in charter.splitlines():
@@ -470,12 +361,9 @@ def _anchor_lines(charter: str) -> tuple[str, ...]:
 
 
 def anchor_overflow(charter: str) -> int:
-    """Сколько строк хартии НЕ дошло до выбора цели.
+    """How many charter lines did NOT reach goal choice.
 
-    Отдельная функция, а не печать внутри отбора: потеря должна быть
-    ЧИСЛОМ, которое можно показать человеку и проверить тестом, а не
-    сообщением в журнале, которое никто не читает. Ноль значит, что
-    хартия помещается в окно целиком.
+    A function, not a print inside selection: the loss must be a NUMBER that can be shown and tested. Zero means the charter fits the window entirely.
     """
     anchors: list[str] = []
     for raw in charter.splitlines():
@@ -500,14 +388,13 @@ def _record_decision(
             "status": status,
             "goal": goal,
             "reason": reason,
-            # Отсутствие ключа = ноль, как у всех причинных ключей. Без этой
-            # записи «видел вопрос и отклонил» неотличимо от «не видел» —
-            # ровно тишина, пойманная тиком 15:31 (MIR-178).
+            # A missing key means zero, as for all causal keys; without this entry "saw the question
+            # and declined" is indistinguishable from "did not see".
             **({"mentor_questions_shown": mentor_questions_shown}
                if mentor_questions_shown else {}),
         }])
-    except Exception:  # noqa: BLE001, S110 — журнал решений не роняет выбор;
-        pass           # молчание здесь стоит дешевле, чем упавший тик хартии
+    except Exception:  # noqa: BLE001, S110 — the decision journal must not fail the choice;
+        pass  # silence here is cheaper than a failed charter tick
 
 
 def _recent_declined(root: Path) -> tuple[tuple[str, str], ...]:
@@ -516,7 +403,7 @@ def _recent_declined(root: Path) -> tuple[tuple[str, str], ...]:
 
     try:
         rows = read_state_jsonl(root / DECISIONS_RELPATH)
-    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+    except Exception:  # noqa: BLE001 — doubt means empty, not a failure
         return ()
     declined = [
         (str(r.get("goal") or ""), str(r.get("reason") or ""))
@@ -532,7 +419,7 @@ def _recent_verdicts(root: Path) -> tuple[tuple[str, str, str], ...]:
 
     try:
         rows = read_state_jsonl(root / "data" / "approval_outcomes.jsonl")
-    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+    except Exception:  # noqa: BLE001 — doubt means empty, not a failure
         return ()
     out = [
         (str(r.get("verdict") or ""), str(r.get("summary") or ""),
@@ -545,13 +432,7 @@ def _recent_verdicts(root: Path) -> tuple[tuple[str, str, str], ...]:
 def _backlog_lines(root: Path) -> tuple[str, ...]:
     """Top real engineering candidates the agent MAY act on; failures = empty.
 
-    Живой прогон 18.09 01:59: этот список уходит в запрос со словами «real,
-    measured candidates» и просьбой «name ONE ... and repair it». Запретные
-    файлы лежали в нём наравне с рабочими, и хартия взяла `core/
-    self_build_producer.py` — сам механизм самосборки, стоящий в
-    `CRITICAL_DENY`. Двадцать один цикл ушёл в отказ при пяти доступных
-    кандидатах рядом. Список поручений не вправе называть работой то, что
-    исполнителю заповедано; сомнение о кандидате — тоже не предлагать.
+    The list goes into a prompt as "real, measured candidates", so it must not name forbidden files (the self-build mechanism in `CRITICAL_DENY` was once chosen). A doubtful candidate is not offered either.
     """
     try:
         from core.backlog_selector import load_backlog
@@ -563,7 +444,7 @@ def _backlog_lines(root: Path) -> tuple[str, ...]:
         def actionable(candidate: object) -> bool:
             try:
                 targets = _candidate_concrete_targets(candidate, root)
-            except Exception:  # noqa: BLE001 — неясный кандидат не предлагается
+            except Exception:  # noqa: BLE001 — an unclear candidate is not offered
                 return False
             return any(_is_self_build_target_allowed(t) for t in targets)
 
@@ -576,12 +457,12 @@ def _backlog_lines(root: Path) -> tuple[str, ...]:
             if len(out) == 6:
                 break
         return tuple(out)
-    except Exception:  # noqa: BLE001 — сомнение = пусто, не падение
+    except Exception:  # noqa: BLE001 — doubt means empty, not a failure
         return ()
 
 
 def _open_defect_lines(root: Path) -> tuple[str, ...]:
-    """Незакрытые дефекты его собственного реестра; сомнение = пусто."""
+    """Unclosed defects of its own registry; doubt = empty."""
     try:
         from core.self_improvement_issues import SelfImprovementIssueRegistry
 
@@ -596,13 +477,13 @@ def _open_defect_lines(root: Path) -> tuple[str, ...]:
                 + (f" — next: {suggestion[:90]}" if suggestion else "")
             )
         return tuple(out)
-    except Exception:  # noqa: BLE001 — нечитаемый реестр отнимает подсказку,
-        # а не прогон: выбор цели идёт дальше без этих строк.
+    except Exception:  # noqa: BLE001 — an unreadable registry costs the hint,
+        # not the run: goal choice goes on without these lines.
         return ()
 
 
 def _unexplained_lines(root: Path) -> tuple[str, ...]:
-    """Наблюдения, которых никто не объяснил; сомнение = пусто."""
+    """Observations nobody has explained; doubt = empty."""
     try:
         from core.causal_climb_action import unexplained_observations
 
@@ -615,26 +496,14 @@ def _unexplained_lines(root: Path) -> tuple[str, ...]:
                         and _REPEAT_WALL in str(getattr(o, "observed_mismatch", "")))
             ][:5]
         )
-    except Exception:  # noqa: BLE001 — то же правило: подсказка необязательна.
+    except Exception:  # noqa: BLE001 — same rule: the hint is optional.
         return ()
 
 
 def _open_work_lines(root: Path) -> tuple[str, ...]:
-    """Собственные незакрытые дела агента — то, что ждёт именно его.
+    """The agent's own unclosed matters: what waits for it specifically.
 
-    Замер 2026-09-01, из-за которого блок появился: получив право менять
-    исчерпанную цель, агент предложил себе замену — и она оказалась повтором
-    уже сделанного. Причина не в механике: его бэклог состоит из ПЯТИ строк
-    одного класса («слишком большой модуль»), поэтому все цели подряд были
-    про расщепление очередного файла — smart_memory, self_build_producer,
-    autonomous_runtime. Спрашивать себя ему было больше не о чем.
-
-    При этом дела у него были: открытая проблема в собственном реестре и
-    пять наблюдений, которые никто не объяснил. Они просто не попадали в
-    поле зрения на выборе цели.
-
-    Источники разные по смыслу, и это видно в строках: реестр говорит «здесь
-    сломано», лестница — «здесь непонятно».
+    Sources differ in meaning: the registry says "broken here", the ladder says "unclear here".
     """
     return _open_defect_lines(root) + _unexplained_lines(root)
 
@@ -720,9 +589,8 @@ def _ask(
         + ("\n".join(f"- {g}" for g in recent) or "- (none)")
     )
     if open_work:
-        # Его собственные незакрытые дела: реестр говорит «здесь сломано»,
-        # лестница — «здесь непонятно». До 2026-09-01 на выборе цели он видел
-        # только список больших файлов и потому предлагал одно и то же.
+        # Its own unclosed matters: the registry says "broken here", the ladder says "unclear here";
+        # before, only a list of big files was visible.
         user += (
             "\n\nYOUR OWN OPEN WORK — defects you recorded and observations "
             "nobody has explained. These are yours, they are waiting, and they "
@@ -730,8 +598,8 @@ def _ask(
             + "\n".join(f"- {line}" for line in open_work)
         )
     if stops:
-        # Низкодоверенная подсказка: совпавшая подпись значит «проверь прошлую
-        # стену», а не «эта причина истинна» (контракт оператора 2026-09-01).
+        # Low-trust hint: a matching signature means "check the past wall", not "this reason is
+        # true".
         stop_lines = "\n".join(
             "- [{kind}] {reason} (hit {hits}x, signature {sig}, latest {ts})".format(
                 kind=st["kind"], reason=st["reason"],
@@ -768,15 +636,15 @@ def _ask(
             + "\n".join(_verdict_line(v, s, r) for v, s, r in verdicts)
         )
     if mentor_questions:
-        # Канал наставника (MIR-178): вопросы, не приказы. Власть названа в
-        # самом блоке — совещательно, отклонить можно, отказ тоже ответ.
+        # Mentor channel: questions, not orders; its authority is named in the block (advisory, may
+        # be declined).
         user += "\n\n" + mentor_questions
     try:
         raw = llm.complete(system=system, user=user, max_tokens=1200, temperature=0.4)
-    except Exception as exc:  # noqa: BLE001 — отказ модели = отказ выбора, не падение
+    except Exception as exc:  # noqa: BLE001 — a model refusal is a choice refusal, not a crash
         return None, f"the model call failed: {type(exc).__name__}"
-    # Молчание (finish_reason=length, content='') ≠ сбой разбора: клиент их
-    # различает (last_answer_was_truncated), шов доносит различие (Д2, 2026-09-03).
+    # Silence (finish_reason=length, content='') is not a parse failure: the client tells them apart
+    # (last_answer_was_truncated) and the seam passes the difference on.
     if not str(raw or "").strip():
         if bool(getattr(llm, "last_answer_was_truncated", False)):
             return None, (
@@ -791,12 +659,9 @@ def _ask(
 
 
 def _last_json_object(raw: str) -> dict | None:
-    """Последний ПОЛНЫЙ JSON-объект в ответе, или None.
+    """The last COMPLETE JSON object in the answer, or None.
 
-    Прежний разбор брал «первую { … последнюю }»: фигурные скобки в прозе перед
-    финальным JSON (думающие модели так делают) превращали годный ответ в
-    «no parseable goal». Здесь каждая «{» пробуется как начало объекта, и
-    побеждает последний, который разобрался в словарь.
+    Every "{" is tried as an object start and the last one that parses into a dict wins (braces in prose before the final JSON must not spoil a good answer).
     """
     decoder = json.JSONDecoder()
     found: dict | None = None
@@ -813,14 +678,13 @@ def _last_json_object(raw: str) -> dict | None:
 
 
 
-#: Список отзывов, написанный ЧЕЛОВЕКОМ: одна цель или один предмет работы в
-#: строке, `#` — заметка. Живёт в `config/`, потому что туда не дотягивается ни
-#: гигиена памяти, ни лента самоправки (MIR-154).
+# Veto list written by a HUMAN: one goal or work subject per line, `#` is a note. Lives in `config/`
+# because neither memory hygiene nor the self-fix feed reaches it.
 VETO_RELPATH = "config/vetoed_goals.txt"
 
 
 def _operator_vetoes(root: Path) -> tuple[str, ...] | None:
-    """Строки отзыва. `None` — список есть, но прочитать его не удалось."""
+    """Veto lines. `None` means the list exists but could not be read."""
     path = root / VETO_RELPATH
     if not path.exists():
         return ()
@@ -835,10 +699,7 @@ def _operator_vetoes(root: Path) -> tuple[str, ...] | None:
 
 
 def _verdict_line(v: str, s: str, r: str) -> str:
-    """One verdict as the charter reads it. Замер 2026-09-04: три одобренных
-    раскола породили цели «выполни одобренный раскол», а выполнять их агент
-    не может — одобренное применяет полоса оператора; цель кончалась
-    оплаченным прогоном и бесплатным approval_wait."""
+    """One verdict as the charter reads it."""
     line = f"- [{v}] {s}" + (f" — reviewer: {r}" if r else "")
     if v == "approved":
         line += (" — APPROVED items are applied by the operator's lane, not by "
@@ -848,13 +709,9 @@ def _verdict_line(v: str, s: str, r: str) -> str:
 
 
 def _ask_shorter(llm: Any, goal: str) -> str:
-    """Одна попытка семантически сократить ту же цель до лимита.
+    """One attempt to semantically shorten the same goal to the limit.
 
-    Policy и recovery разделены (слово оператора 2026-09-02): лимит 300 НЕ
-    меняется и не обходится — но отказ по длине обязан вести к переформулировке,
-    а не к остановке всей системы. Замер 2026-09-02T09:03: содержательно годная
-    цель в 312 символов стала третьим и последним отказом старта — прогон
-    честно умер из-за двенадцати лишних символов.
+    Policy and recovery are separate: the 300 limit is NOT changed or bypassed, but a length refusal must lead to rewording, not to stopping the system.
     """
     prompt = (
         f"Your goal is {len(goal)} characters; the hard limit is 300. "
@@ -867,8 +724,8 @@ def _ask_shorter(llm: Any, goal: str) -> str:
                            temperature=0.2)
         start, end = raw.find("{"), raw.rfind("}")
         parsed = json.loads(raw[start:end + 1]) if start >= 0 else None
-    except Exception:  # noqa: BLE001 — сокращение — это recovery, не несущая
-        # конструкция: его провал возвращает прежний честный отказ по длине.
+    except Exception:  # noqa: BLE001 — shortening is recovery, not a load-bearing
+        # construction: its failure returns the earlier honest length refusal.
         return ""
     if not isinstance(parsed, dict):
         return ""
@@ -876,7 +733,7 @@ def _ask_shorter(llm: Any, goal: str) -> str:
 
 
 def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
-    """Одна цель от хартии — или отказ, называющий, какие ворота не пройдены."""
+    """One goal from the charter, or a refusal naming which gates were not passed."""
     root = Path(workspace)
     charter_path = root / CHARTER_RELPATH
     if not charter_path.is_file():
@@ -885,11 +742,8 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     anchors = _anchor_lines(charter)
     if not anchors:
         return _decline("the charter has no anchorable lines")
-    # Потеря хартии записывается КАЖДЫЙ раз, а не только когда она велика:
-    # 2026-09-21 из 169 строк до выбора цели доходили 80, и узналось это
-    # случайно — раздел, дописанный в конец, не стал якорем ни одной
-    # строкой и не оставил следа. Число попадает в журнал решений, потому
-    # что счётчик без читателя — это та же тишина, только с цифрой.
+    # Charter loss is recorded EVERY time and goes into the decision journal: a counter without a
+    # reader is silence with a number.
     dropped = anchor_overflow(charter)
     if dropped:
         _record_decision(
@@ -899,11 +753,11 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
                     f"{_ANCHOR_WINDOW + dropped}"),
         )
     recent_pairs = _recent_goals(root)
-    # Мир мог измениться: записываем состав заблокированных инструментов
-    # безнадзорного пути (строка ложится только на перемене) и отсекаем от
-    # стража повторов темы, чья последняя РАБОТА старше последней перемены.
-    # Recentness ≠ completion (слово оператора 2026-09-02): вердикт «здесь
-    # больше нечего делать», вынесенный в другом мире, не запирает тему.
+    # The world may have changed: record the set of blocked tools of the unattended path (a row only
+    # on change) and cut off from the repeat guard topics whose last WORK is older than the last
+    # change.
+    # Recentness is not completion: a "nothing more to do" verdict from another world does not lock
+    # the topic.
     try:
         from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
         from core.capability_events import (
@@ -912,9 +766,9 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
         )
         record_capability_snapshot(root, _AUTONOMOUS_GOAL_BLOCKED_TOOLS)
         change_ts = last_capability_change_ts(root)
-    except Exception:  # noqa: BLE001 — без журнала событий действует прежнее
-        # правило (всё недавнее блокирует): потеря нового смягчения не должна
-        # ломать выбор цели.
+    except Exception:  # noqa: BLE001 — without the event journal the earlier
+        # rule applies (everything recent blocks): losing the new softening must not break goal
+        # choice.
         change_ts = ""
     recent = tuple(
         goal_text for goal_text, work_ts in recent_pairs
@@ -922,25 +776,23 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
     )
     stops = _recent_stops(root)
 
-    # Каждый исход ниже — гражданин памяти: решение переживает свой тик,
-    # и следующий выбор видит отклонённое (см. «день сурка», 2026-08-19).
+    # Every outcome below persists in memory: the decision survives its tick and the next choice
+    # sees what was declined.
     def _declined(reason: str, goal_text: str = "") -> CharterGoalReport:
         _record_decision(root, status="declined", goal=goal_text, reason=reason)
         return CharterGoalReport(
             status="declined", reason=reason, stop_considered=bool(stops),
         )
 
-    # Читается ДО обращения к модели: отзыв, потерянный из-за сбоя чтения,
-    # вернул бы отозванную работу без ведома человека, поэтому нечитаемый
-    # список отказывает названно и бесплатно.
+    # Read BEFORE the model call: a veto lost to a read failure would bring back revoked work, so an
+    # unreadable list refuses by name and for free.
     vetoes = _operator_vetoes(root)
     if vetoes is None:
         return _declined(f"operator veto list unreadable: {VETO_RELPATH}")
 
     mentor_qs = open_questions(root)
     outward_due = _outward_due(root)
-    # Правило баланса модель видит ДО траты вызова — там же, где решения своих
-    # ворот: это и есть решение ворот, заранее.
+    # The balance rule is seen by the model BEFORE a call is spent, where the gate decisions are.
     declined_now = _recent_declined(root)
     if outward_due:
         declined_now += ((
@@ -985,9 +837,8 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
             "(fabricated anchor)", goal,
         )
     quote = anchors[anchor_id]
-    # Слово человека связывает так же, как своя история, и тем же правилом:
-    # судится ПРЕДМЕТ работы, потому что формулировку модель каждый раз даёт
-    # новую.
+    # A human's word binds like own history and by the same rule: the work SUBJECT is judged, since
+    # the model words it anew each time.
     vetoed = _repeats_recent(goal, vetoes)
     if vetoed:
         return _declined(
@@ -1007,9 +858,8 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
 
     _record_decision(root, status="proposed", goal=goal,
                      mentor_questions_shown=len(mentor_qs))
-    # Машинный след учёта прошлых стен: подпись берётся ТОЛЬКО из журнала
-    # остановок — выдуманная моделью строка сюда не проходит (иначе поле
-    # доказывало бы фразу, а не эффект).
+    # Machine trace of past-wall accounting: the signature comes ONLY from the stop journal; a
+    # string invented by the model does not pass.
     claimed_ref = str(parsed.get("previous_stop_ref") or "").strip()
     known = {st["signature"] for st in stops if st["signature"]}
     return CharterGoalReport(
@@ -1021,10 +871,9 @@ def propose_charter_goal(llm: Any, workspace: str | Path) -> CharterGoalReport:
 
 
 def charter_status_lines(workspace: Path) -> list[str]:
-    """Строка о том, почему выбор цели отказал — или пусто, если он работает.
+    """A line on why goal choice refused, or empty if it works.
 
-    Замер и отвергнутые варианты: MIR-154 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Только чтение и никогда не бросает.
+    Read-only and never raises.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -1054,6 +903,6 @@ def charter_status_lines(workspace: Path) -> list[str]:
             f"[CHARTER] goal choice declined {len(declined)}x in 24h, "
             f"nothing proposed: {reason[:90]}"
         )
-    except Exception:  # noqa: BLE001 — строка состояния не стоит тика
+    except Exception:  # noqa: BLE001 — a status line is not worth a tick
         return []
     return [line]

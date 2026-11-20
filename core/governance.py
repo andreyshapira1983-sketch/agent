@@ -1,23 +1,4 @@
-"""Governance modes for safe autonomous growth.
-
-This module separates *what the agent is trying to do* from the lower-level
-tool risk policy. PolicyGate answers "is this tool call safe?". Governance
-answers "is this kind of autonomous behaviour allowed in this mode?".
-
-The five modes mirror the architecture notes:
-
-  - diagnostic   -> inspect logs/tests/evidence
-  - learning     -> ingest and store useful knowledge
-  - repair       -> diagnose + propose/apply a fix under approval
-  - improvement  -> add or improve capabilities under stricter approval
-  - governance   -> change policy/permissions/rollback boundaries
-
-Rules are conservative by default. Anything that writes code, changes
-policies, runs shell, or performs external side effects escalates to human
-approval. Repair writes are allowed only after a verified diagnosis and with
-a rollback path; tests are then run after the write, and rollback may be
-applied automatically when verification fails.
-"""
+"""Governance modes (diagnostic, learning, repair, improvement, governance) for safe autonomous growth: which kind of autonomous behaviour is allowed."""
 
 from __future__ import annotations
 

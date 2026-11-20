@@ -1,34 +1,4 @@
-"""SubAgent Runner — executes one bounded sub-agent contract using AgentLoop.
-
-Design principles
------------------
-1. ISOLATION   — child gets its own TraceLogger (separate trace_id) and a
-                 filtered ToolRegistry containing only read-only tools
-                 explicitly listed in ``allowed_tools``.  ``spawn_subagent``
-                 is NEVER included, so recursion is prevented structurally.
-
-2. BOUNDED     — ``max_replan_attempts=1`` (no replanning inside a sub-agent).
-
-3. TRANSPARENT — every spawning is logged by the parent loop as a normal
-                 ``tool_call`` / ``tool_result`` event pair, so the audit
-                 trail is complete.
-
-4. NO CYCLES   — this module uses ``from core.loop import AgentLoop`` only
-                 inside ``SubAgentRunner.run()`` (lazy import) to avoid the
-                 circular dependency: loop.py → SpawnSubagentTool
-                 → subagent_runner.py → loop.py.
-
-Typical flow
-------------
-  parent AgentLoop
-    → planner emits spawn_subagent step
-    → _execute_step calls SpawnSubagentTool.run()
-    → SpawnSubagentTool calls SubAgentRunner.run()
-    → SubAgentRunner creates isolated child AgentLoop
-    → child runs its objective, returns an answer string
-    → SubAgentRunResult.to_evidence_text() flows back as Evidence
-      to parent's synthesizer, cited as [subagent:<name>]
-"""
+"""SubAgent Runner: executes one bounded sub-agent contract using AgentLoop."""
 from __future__ import annotations
 
 import json
@@ -67,8 +37,8 @@ _SAFE_SUBAGENT_TOOLS: frozenset[str] = frozenset({
     "current_time",
 })
 
-#: Tools that send caller-chosen text to an outside host. A subagent holding granted
-#: memory gets none, or the memory could leave in a URL query (проверка 18.11).
+# Tools that send caller-chosen text to an outside host. A subagent holding granted memory gets
+# none, or the memory could leave in a URL query.
 _EGRESS_SUBAGENT_TOOLS: frozenset[str] = frozenset({
     "web_fetch", "web_search", "rss_fetch", "semantic_scholar_search",
 })
@@ -85,12 +55,9 @@ MAX_SUBAGENT_TOOL_CALLS = 3
 class SubagentContractRefused(ValueError):
     """Raised before execution when the runner cannot enforce a contract."""
 
-# Evidence kinds that count as EXTERNAL — i.e. verifiable artefacts the
-# sub-agent fetched from outside the LLM. `memory`, `llm_claim`,
-# `tool_output` (the catch-all for opaque tool returns), `unknown`, and
-# `user_explicit` are deliberately excluded: they don't add new
-# verifiable information beyond what the parent already trusts the LLM
-# or operator for.
+# Evidence kinds that count as EXTERNAL: verifiable artefacts fetched from outside the LLM.
+# `memory`, `llm_claim`, `tool_output`, `unknown` and `user_explicit` are excluded: they add nothing
+# the parent does not already trust.
 _EXTERNAL_EVIDENCE_KINDS: frozenset[str] = frozenset({
     "file", "web_page", "web_search_hit", "test_result",
     "log_event", "shell_output", "diff_preview",
@@ -136,14 +103,7 @@ _JUDGE_SYSTEM = (
 def _compute_structural_confidence(answer: str) -> float:
     """Heuristic confidence score for a sub-agent answer, in [0.0, 1.0].
 
-    No LLM call — purely structural signals inspired by 'More Agents Is All
-    You Need' (Li et al., 2024) observation that answer quality correlates
-    with specificity and lack of hedging.
-
-    Signals used:
-    * Length   — very short answers are likely low-quality
-    * Hedging  — phrases like "I cannot" / "I don't know" reduce score
-    * Specificity — numbers, URLs, code blocks suggest concrete content
+    No LLM call: structural signals only (length, hedging phrases, specificity such as numbers, URLs, code blocks).
     """
     if not answer or not answer.strip():
         return 0.0
@@ -202,30 +162,21 @@ class SubAgentRunResult:
     confidence_score: float = 0.0   # structural quality signal [0.0, 1.0]
     quality_score: int = 0          # LLM judge score [1-5], 0 = not judged
     complexity_tier: str = "standard"  # "trivial" | "standard" | "complex"
-    # Trust signal: how many pieces of evidence with an EXTERNAL kind
-    # (file / web_page / web_search_hit / test_result / log_event /
-    # shell_output / diff_preview) the sub-agent itself collected.
-    # When 0 the sub-agent only re-asserted what an LLM said with
-    # no verifiable backing — the parent verifier must NOT count
-    # such citations as `verified`.
+    # Trust signal: how many pieces of EXTERNAL evidence the sub-agent itself collected.
+    # When 0 it only re-asserted what an LLM said, and the parent verifier must NOT count such
+    # citations as `verified`.
     external_evidence_count: int = 0
     external_evidence_kinds: tuple[str, ...] = ()
-    #: The child's EXTERNAL evidences themselves (serialized `Evidence` dicts:
-    #: kind, source_id, excerpt, obtained_via, fetched_at, confidence), so the
-    #: parent can carry provenance across the boundary instead of a count.
-    #: Work order 1, pass 2 (2026-09-05): three subagents fetched real pages
-    #: and got HTTP 429 / unsupported / dynamic shells; the parent held only
-    #: their prose, the verifier booked every claim «subagent_asserted», and
-    #: an honest negative report was suppressed.
+    # The child's EXTERNAL evidences themselves (serialized `Evidence` dicts), so the parent can
+    # carry provenance across the boundary instead of a count.
     external_evidences: tuple[dict[str, Any], ...] = ()
     execution_receipt: SubagentExecutionReceipt | None = None
     contract_audit: ContractAuditReport | None = None
 
     def to_evidence_text(self) -> str:
         """Format for injection into the parent loop's Evidence chain."""
-        # First line is a parseable trust marker that survives memory
-        # caching; the parent verifier reads it to decide whether the
-        # sub-agent's answer is admissible as `verified` evidence.
+        # First line is a parseable trust marker that survives memory caching; the parent verifier
+        # reads it to decide whether the answer is admissible as `verified` evidence.
         kinds_csv = ",".join(self.external_evidence_kinds)
         lines = [
             (f"[subagent-meta external_evidence_count={self.external_evidence_count}"
@@ -262,11 +213,8 @@ def _carry_external_evidences(
 ) -> tuple[int, tuple[str, ...], list[dict[str, Any]]]:
     """Count the child's external evidences and carry them whole for the parent.
 
-    Origin is stamped ``subagent:<name>:<trace>`` so the parent's verifier can
-    match a claim against the page the child read. The child's receipt lives
-    under the child's trace; in the parent this is a carried observation, not
-    a parent tool call, so ``obtained_via`` is ``subagent:<name>`` and no
-    parent receipt is owed (work order 1, defect 1)."""
+    Origin is stamped ``subagent:<name>:<trace>`` so the parent's verifier can match a claim against the page the child read. In the parent this is a carried observation, not a parent tool call, so ``obtained_via`` is ``subagent:<name>`` and no parent receipt is owed.
+    """
     count = 0
     seen: list[str] = []
     carried: list[dict[str, Any]] = []
@@ -313,20 +261,15 @@ class SubAgentRunner:
     ) -> SubAgentRunResult:
         """Execute a canonical contract after strict capability prechecks.
 
-        This compatibility entry point is intentionally strict. The current
-        child loop is stateless, read-only, and single-iteration, so policy
-        it cannot honour is refused rather than silently ignored. The legacy
-        :meth:`run` API remains available while callers migrate in stages.
+        The child loop is stateless, read-only and single-iteration, so policy it cannot honour is refused rather than ignored.
         """
         if contract.approval_required and not approved:
             raise SubagentContractRefused(
                 f"contract {contract.contract_id} requires human approval"
             )
 
-        # Право ЧИТАТЬ и право ПИСАТЬ — разные полномочия, и выданы они
-        # по-разному: чтение исполняется проекцией, запись по-прежнему
-        # отказана, потому что путь «находка -> проверка -> продвижение» не
-        # построен (MIR-156).
+        # The right to READ and the right to WRITE are different authorities: reading is executed by
+        # projection, writing stays refused because the finding-check-promotion path is not built.
         memory_scope = contract.memory_scope
         if memory_scope is not None and memory_scope.write_tags:
             raise SubagentContractRefused(
@@ -361,9 +304,8 @@ class SubAgentRunner:
             allowed_tools=[t for t in contract.tool_scope.allowed_tools if t in allowed],
             model_role=contract.model_role or "synthesizer",
         )
-        # Keep compatibility with test doubles and third-party legacy runners
-        # that return their own result type.  Real SubAgentRunResult instances
-        # receive the typed receipt and deterministic audit report.
+        # Keep compatibility with test doubles and legacy runners that return their own result type;
+        # real SubAgentRunResult instances get the typed receipt and audit report.
         if not isinstance(result, SubAgentRunResult):
             return result
         receipt = self._execution_receipt(
@@ -378,10 +320,9 @@ class SubAgentRunner:
         )
 
     def _with_granted_memory(self, context: str, memory_scope) -> str:
-        """Добавить к контексту ТОЛЬКО ту память, что названа в контракте.
+        """Add to the context ONLY the memory named in the contract.
 
-        Замер, отвергнутые варианты и границы: MIR-156 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-        Отдаётся текстом, а не складом: чего нет в строке, ребёнок не прочтёт.
+        Handed over as text, not as a store: what is not in the string the child cannot read.
         """
         read_tags = getattr(memory_scope, "read_tags", ()) or ()
         if not read_tags:
@@ -393,8 +334,8 @@ class SubAgentRunner:
         try:
             records = PersistentMemoryStore(path).load()
         except (OSError, ValueError):
-            # Нечитаемая память — это НЕ разрешение показать всё; субагент
-            # остаётся беспамятным, а причина уходит в журнал вызывающего.
+            # Unreadable memory is NOT permission to show everything: the subagent stays memoryless
+            # and the reason goes to the caller's journal.
             return context
         block, _audit = project_memory(records, read_tags)
         if not block:
@@ -477,13 +418,10 @@ class SubAgentRunner:
                 complexity_tier=complexity_tier,
             )
 
-        # ── child succeeded — Fix #5: re-scan answer for prompt injection BEFORE
-        # embedding it in the parent loop's Evidence chain.
-        # A hostile web page or file that triggered a 'suspicious' verdict (not
-        # 'blocked') at the tool level may still have slipped through with an
-        # annotation.  When the sub-agent's answer propagates to the parent as
-        # evidence text the malicious payload would reach the parent LLM's
-        # context unchanged.  We do a second scan here to catch that.
+        # Child succeeded: re-scan the answer for prompt injection BEFORE embedding it in the
+        # parent's Evidence chain.
+        # A payload that got only an annotation at the tool level would otherwise reach the parent
+        # LLM unchanged.
         from core.injection_guard import (
             annotate_suspicious,
             scan_for_injection,
@@ -540,10 +478,8 @@ class SubAgentRunner:
                     child_chain, contract_name, child_trace_id,
                 )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Zero external evidence is a JUDGEMENT about the sub-agent's
-            # answer — it feeds the quality score. "The child cited nothing
-            # external" and "we could not read the child's chain" are different
-            # facts that used to produce the same zero (MIR-077).
+            # Zero external evidence is a JUDGEMENT about the answer and feeds the quality score;
+            # "cited nothing external" and "could not read the chain" are different facts.
             ext_count = 0
             ext_kinds = ()
             child_logger.log(
@@ -669,11 +605,9 @@ class SubAgentRunner:
             m = re.search(r"[1-5]", response)
             return int(m.group()) if m else 0
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # 0 is the worst rating on a 1-5 scale, so a judge that CRASHED is
-            # indistinguishable from a judge that read the answer and hated it
-            # — and the score gates whether the sub-agent's work is used.
-            # No run logger reaches this method, so the module logger carries
-            # it (MIR-077).
+            # 0 is the worst rating on a 1-5 scale, so a crashed judge looks like one that hated the
+            # answer, and the score gates use of the work.
+            # No run logger reaches here, so the module logger carries the failure.
             logger.warning(
                 "sub-agent answer judge failed, scoring 0: %s: %s",
                 type(exc).__name__, exc,
@@ -690,8 +624,8 @@ class SubAgentRunner:
         if allowed_tools is None:
             requested = _SAFE_SUBAGENT_TOOLS
         else:
-            # Intersect with the safe set — the LLM cannot expand scope by
-            # listing a dangerous tool in ``allowed_tools``.
+            # Intersect with the safe set: the LLM cannot expand scope by listing a dangerous tool
+            # in ``allowed_tools``.
             requested = _SAFE_SUBAGENT_TOOLS & set(allowed_tools)
 
         child_reg = ToolRegistry()

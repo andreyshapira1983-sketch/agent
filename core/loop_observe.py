@@ -1,4 +1,4 @@
-"""Наблюдение, разбор запроса и выбор модели — вырезано из ``core/loop.py``."""
+"""Observe, interpret and model-selection phases, cut out of core/loop.py."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -10,32 +10,28 @@ from core.redaction import collect_pii_findings, scan
 
 
 class AgentLoopObserve:
-    """Фазы «Observe» и «Interpret»: что спросили и чем это отвечать."""
+    """Observe and Interpret phases: what was asked and what to answer it with."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         role_router: Any
         model_router: Any
         last_role_context: Any
-        # Как в `AgentLoop.__init__`: список или None до начала цикла.
+        # As in AgentLoop.__init__: a list, or None before the loop starts.
         _cycle_findings: list[dict[str, Any]] | None
 
-        # Объявляем ВЫЗЫВАЕМЫМ атрибутом: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as a callable attribute: an empty-body stub reads to analyzers as "function without return" (false E1111).
 
     def _observe_and_route(
         self,
         user_question: str,
         *,
         file_hint: str | None,
-        # `Any`, а не `bool`: хост принимает необязательный
-        # `core.deep_escalation.OperatorEscalation`, и маршрутизатор
-        # моделей читает именно его, а не флаг.
+        # Any, not bool: the host passes an optional core.deep_escalation.OperatorEscalation that the model router reads.
         deep_escalation: Any,
         _cp: Any,
     ) -> tuple[Goal, Any, Any]:
-        """Цель хода и две модели под него (планировщик, синтезатор)."""
+        """The turn's goal and two models for it (planner, synthesizer)."""
         observation = Observation(
             source="cli",
             modality="text",
@@ -48,8 +44,7 @@ class AgentLoopObserve:
         self.log.log("observe", observation)
         _cp.save_observe(question=user_question, file_hint=file_hint)
 
-        # Classify the question itself. A user can paste a secret into the
-        # prompt; the kernel must catch it BEFORE the LLM sees it.
+        # Classify the question itself: a pasted secret must be caught BEFORE the LLM sees it.
         q_cls = classify(user_question, source="cli")
         self.log.log(
             "data_classified",
@@ -94,23 +89,9 @@ class AgentLoopObserve:
         self.last_role_context = self.role_router.route(user_question)
         self.log.log("role_route", self.last_role_context.to_log_payload())
 
-        # Adaptive model routing: choose LLM tier based on task complexity.
-        # LIGHT tasks (greetings, quick lookups) get a cheap/fast model.
-        # DEEP tasks (architecture, full audits, from-scratch builds) get
-        # the most powerful available model (opus, o1, …).
-        # STANDARD tasks reuse the default role route — no change.
-        # The RoleRouter verdict computed just above is forwarded so a repair
-        # or programming task can never be downgraded to the LIGHT tier on the
-        # strength of a terse phrasing alone.
-        #
-        # Failure handling mirrors `_record_experience_memory`: a `TypeError`
-        # here is a CALL-SIGNATURE DEFECT, not a routing fault -- `for_task()`
-        # was invoked with an argument it does not accept (or without one it
-        # requires). Laundering that into a silent fallback hid the defect
-        # completely: every task would quietly answer on the default model with
-        # nothing in the log to say routing had stopped working. So `TypeError`
-        # PROPAGATES; every other failure keeps the default-LLM fallback but is
-        # now recorded instead of vanishing.
+        # Adaptive model routing by task complexity (LIGHT cheap, DEEP strongest, STANDARD default). The RoleRouter verdict is forwarded
+        # so a repair/programming task is never downgraded to LIGHT. A TypeError here is a call-signature defect and must PROPAGATE;
+        # every other failure falls back to the default LLM but is recorded.
         try:
             _task_role = getattr(self.last_role_context, "role", None)
             _task_planner_llm = self.model_router.for_task(
@@ -141,7 +122,7 @@ class AgentLoopObserve:
                 },
             )
         except TypeError:
-            # Visible on purpose -- see the comment above.
+            # Visible on purpose: see the routing comment above.
             raise
         except Exception as exc:  # noqa: BLE001
             _task_planner_llm = None
@@ -164,12 +145,7 @@ class AgentLoopObserve:
 
     def _interpret(self, observation: Observation) -> Goal:
         question = observation.content["question"]
-        # LPF-007: the criterion used to demand «citing every claim back to a
-        # provided source» on EVERY turn — including turns where no sources
-        # are collected at all (small talk, pure synthesis). A duty to cite
-        # what was never provided is a duty to fabricate; the criterion below
-        # is conditional on evidence actually existing, so it is satisfiable
-        # on every turn without lying on any.
+        # The criterion about citing sources is conditional on evidence existing, so it is satisfiable on every turn.
         return Goal(
             description=f"Answer the question: {question}",
             success_criteria=(

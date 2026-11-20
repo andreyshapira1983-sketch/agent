@@ -1,8 +1,4 @@
-"""Gateway hard-stop consult helpers (G5a).
-
-Pure, deterministic inputs for :mod:`core.actuation_gateway` — kill-switch and
-readiness blockers. Keeps gateway wiring out of CLI modules.
-"""
+"""Gateway hard-stop consult helpers: kill-switch and readiness blockers for core.actuation_gateway."""
 from __future__ import annotations
 
 import logging
@@ -61,25 +57,12 @@ def budget_enforcement_blockers(snapshot: Mapping[str, Any] | None) -> tuple[str
     return ()
 
 
-#: Приставка причины, которую ворота снимают, когда действие не касается
-#: файлов висящей заявки. Совпадать должна ровно одна строка, поэтому она
-#: собрана в одном месте и здесь же разбирается.
+#: Reason prefix the gate lifts when an action does not touch the files of a pending proposal; built and parsed in one place so exactly one line matches.
 APPROVAL_BLOCKER_PREFIX = "approval item(s) pending"
 
 
 def approval_paths(inbox: Any) -> frozenset[str]:
-    """Файлы, которых касаются висящие заявки.
-
-    Слово оператора 2026-09-23: блокировка должна быть соразмерной. Замер того
-    дня: одна заявка на разделение `core/loop_step_execution.py` запрещала
-    агенту ВСЕ записи — десять циклов подряд пустые, конспект по физике в
-    `data/notes` не ложился из-за бумаги про файл в `core/`. Заявка называет
-    свои файлы сама (payload.files[].path), и дальше этих файлов её запрет не
-    простирается.
-
-    Нечитаемый ящик возвращает пустое множество: это НЕ разрешение, а
-    отсутствие сведений — вызывающий в таком случае оставляет запрет общим.
-    """
+    """Files touched by pending proposals (payload.files[].path); the block does not extend beyond them. An unreadable inbox returns an empty set, which is no permission but no information: the caller keeps the blanket ban."""
     paths: set[str] = set()
     try:
         items = list(inbox.pending())
@@ -123,10 +106,7 @@ def budget_ledger_snapshot(workspace: Path) -> dict | None:
         )
         return ledger.snapshot()
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # `None` makes the caller skip the budget check entirely, so an
-        # unreadable ledger does not block the action — it waves it through.
-        # Failing open on a spend guard is exactly the direction that must
-        # never be silent (MIR-077).
+        # None makes the caller skip the budget check, so an unreadable ledger waves the action through; failing open on a spend guard must never be silent.
         logger.warning(
             "budget ledger unreadable, budget hard-stop not evaluated: %s: %s",
             type(exc).__name__, exc,
@@ -141,13 +121,7 @@ def collect_hard_stop_reasons(
     blockers: tuple[str, ...] = (),
     check_readiness: bool = False,
 ) -> tuple[str, ...]:
-    """Return non-empty reason tuple when gateway must ``block``.
-
-    ``blockers`` rather than ``readiness_blockers``: the latter is a function in
-    this same module, and a parameter of that name shadowed it here — inside
-    this body the name meant a tuple, so the function could not be called at
-    all. Nothing tried to, which is why it cost nothing until now.
-    """
+    """Return a non-empty reason tuple when the gateway must block; the parameter is `blockers` because `readiness_blockers` is a function in this module and a parameter of that name shadowed it."""
     reasons: list[str] = []
     if kill_switch is not None:
         state = kill_switch.status(budget_snapshot)

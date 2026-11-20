@@ -1,21 +1,6 @@
-"""Deterministic pre-publish value gate for self-build proposals (TD-035).
-
-The self-build producer's Critic (``core/self_build_producer.py``) checks
-that a generated patch is *technically* valid: it parses, is not a diff, is
-not a critical file, has tests, and passes the lane risk classifier. It does
-NOT judge whether the change is *worth making*. A live run produced a
-proposal for ``core/redaction.py`` that reached ``committed_local`` and
-passed tests but was only a comment-capitalization edit (``WIDEST`` ->
-``widest``) dressed up as a "robustness improvement" — technically valid,
-zero value.
-
-* **Hard veto** (``value_veto``): the change has *no code effect* — it is
-whitespace-only, formatting-only, comment-only (Python), or identical after
-normalization. The producer must not publish such a proposal. * **Soft
-flag**: the change is published, but a human-visible warning is attached
-(e.g. the summary overclaims value relative to a trivial diff). A soft flag
-never blocks publication and never weakens human approval.
-"""
+"""Deterministic pre-publish value gate for self-build proposals: hard veto for changes with no code effect, soft flags for overclaiming summaries."""
+# The producer's Critic checks technical validity only; this gate judges whether the change is worth making.
+# A soft flag never blocks publication and never weakens human approval.
 from __future__ import annotations
 
 import io
@@ -26,8 +11,7 @@ from typing import Any, Literal
 
 ValueVerdict = Literal["ok", "value_veto"]
 
-# Tokens that carry no code semantics; two sources that differ only in these are
-# considered to have "no code effect".
+# Tokens with no code semantics; sources differing only in these have "no code effect".
 _NONSEMANTIC_TOKENS = frozenset(
     {
         tokenize.COMMENT,
@@ -36,8 +20,7 @@ _NONSEMANTIC_TOKENS = frozenset(
         tokenize.ENDMARKER,
     }
 )
-# Structural tokens whose exact whitespace text is irrelevant (a 4-space vs
-# 2-space indent is formatting, not semantics), but whose presence/count is not.
+# Structural tokens whose exact whitespace is irrelevant (indent width) but whose presence and count are not.
 _STRUCTURAL_TOKENS = frozenset(
     {
         tokenize.INDENT,
@@ -46,15 +29,13 @@ _STRUCTURAL_TOKENS = frozenset(
     }
 )
 
-# A diff touching at most this many changed lines counts as "trivial" for the
-# overclaim soft-flag heuristic.
+# A diff touching at most this many lines is "trivial" for the overclaim soft flag.
 _TRIVIAL_CHANGED_LINES = 2
 
 
 @dataclass
 class ValueGateResult:
-    """Outcome of the value gate. ``verdict == "value_veto"`` means do not
-    publish; ``flags`` are human-visible warnings that never block."""
+    """Value gate outcome: verdict "value_veto" means do not publish; flags are human-visible warnings that never block."""
 
     verdict: ValueVerdict = "ok"
     veto_reasons: list[str] = field(default_factory=list)
@@ -81,22 +62,12 @@ def _is_python_target(target: str) -> bool:
 
 
 def _normalize_ws(text: str) -> str:
-    """Canonical form ignoring pure whitespace/blank-line differences.
-
-    Strips each line and drops blank lines. Two sources equal under this form
-    differ only in whitespace/formatting layout.
-    """
+    """Canonical form ignoring whitespace and blank-line differences (strip each line, drop blank lines)."""
     return "\n".join(line.strip() for line in text.splitlines() if line.strip())
 
 
 def _python_token_skeleton(text: str) -> tuple | None:
-    """A tuple of semantic tokens for Python source, or ``None`` if it will not
-    tokenize. Comments and non-logical newlines are dropped; structural tokens
-    (INDENT/DEDENT/NEWLINE) keep their identity but not their exact whitespace.
-
-    Two sources with the same skeleton differ only in comments and formatting —
-    i.e. they have no code effect.
-    """
+    """Tuple of semantic tokens of Python source, or None if it will not tokenize; comments and non-logical newlines dropped, so an equal skeleton means no code effect."""
     skeleton: list[tuple[int, str]] = []
     try:
         for tok in tokenize.generate_tokens(io.StringIO(text).readline):
@@ -120,11 +91,7 @@ def _changed_line_count(current: str, proposed: str) -> int:
 
 
 def _no_code_effect(target: str, current: str, proposed: str) -> str | None:
-    """Return a hard-veto reason if the change has no code effect, else None.
-
-    Only called for non-doc targets. Order: identical-after-normalization,
-    Python comment/formatting-only, then generic whitespace-only.
-    """
+    """Hard-veto reason if the change has no code effect (identical, Python comment/formatting-only, whitespace-only), else None; non-doc targets only."""
     if _is_python_target(target):
         cur_skel = _python_token_skeleton(current)
         prop_skel = _python_token_skeleton(proposed)
@@ -137,8 +104,7 @@ def _no_code_effect(target: str, current: str, proposed: str) -> str | None:
                 "comment-only or formatting-only Python change "
                 "(identical code token skeleton; no code effect)"
             )
-        # If either side fails to tokenize we fall through to the whitespace
-        # check rather than trusting an unparseable comparison.
+        # If either side fails to tokenize, fall through to the whitespace check.
 
     if _normalize_ws(current) == _normalize_ws(proposed):
         return "whitespace-only or formatting-only change (no code effect)"
@@ -153,8 +119,7 @@ def _overclaim_flag(
     *,
     hype_fn: Callable[[str], Any],
 ) -> str | None:
-    """Return a soft-flag string if the summary overclaims value relative to a
-    trivial diff, else None. Deterministic (reuses truth_hype_filter)."""
+    """Soft-flag string if the summary overclaims value relative to a trivial diff, else None (reuses truth_hype_filter)."""
     reason = (reason or "").strip()
     if not reason:
         return None
@@ -183,11 +148,7 @@ def evaluate_proposal_value(
     *,
     hype_fn: Callable[[str], Any] | None = None,
 ) -> ValueGateResult:
-    """Evaluate the value of a proposed change to ``target``.
-
-    Returns a :class:`ValueGateResult`. Never raises, never has side
-    effects.
-    """
+    """Evaluate the value of a proposed change to target; returns a ValueGateResult, never raises."""
     current = current_content or ""
     proposed = proposed_content or ""
 
@@ -202,8 +163,7 @@ def evaluate_proposal_value(
         if veto_reason is not None:
             result.verdict = "value_veto"
             result.veto_reasons.append(veto_reason)
-            # A no-effect change plus an overclaiming summary is the exact
-            # incident shape; surface the overclaim as a flag on the veto too.
+            # No-effect change plus an overclaiming summary: surface the overclaim as a flag on the veto too.
             over = _overclaim_flag(current, proposed, reason, hype_fn=hype_fn)
             if over is not None:
                 result.flags.append(over)

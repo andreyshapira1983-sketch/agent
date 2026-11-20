@@ -1,7 +1,4 @@
-"""Campaign I/O helpers: journal writes, cost totals, and the default signal-gathering and action-executing callbacks.
-
-Extracted from `core/campaign` by autonomous self-build module split.
-"""
+"""Campaign I/O helpers: journal writes, cost totals and the default signal-gathering and action-executing callbacks; extracted from `core/campaign`."""
 from __future__ import annotations
 
 import hashlib
@@ -37,32 +34,21 @@ def _cost_totals(agent: Any) -> tuple[int, int]:
 
 
 def router_spend(router: Any) -> tuple[int, int]:
-    """Расход по общему реестру, измеренный с ОДНОГО роутера, без агента.
-
-    Первый выбор цели делает хартия до постройки агента (`agent_tick`), и
-    мерить его было нечем. Реестр бюджета один на процесс, поэтому роутера
-    достаточно. Сомнение = `(0, 0)`.
-    """
+    """Spend from the shared registry measured from ONE router, without an agent (the charter picks the first goal before the agent exists); doubt = (0, 0)."""
     from types import SimpleNamespace
 
     return _cost_totals(SimpleNamespace(model_router=router))
 
 
 def spend_since(router: Any, before: tuple[int, int]) -> tuple[int, int]:
-    """Дельта расхода с отметки `before`; убыль реестра читается как ноль."""
+    """Spend delta since the `before` mark; a registry decrease reads as zero."""
     after = router_spend(router)
     return (max(0, after[0] - before[0]), max(0, after[1] - before[1]))
 
 
 def _action_focused_goal(goal: str, action: BestNextAction) -> str:
     if action.action == "pursue_goal":
-        # Цель выбрана агентом и она сама — задание: делать, а не советовать
-        # человеку. Прежняя формула («the ONE step a human should take … do not
-        # perform any effects») превращала каждый заход в записку оператору.
-        # Ни одного слова свежести («now», «right now», «current»): обёртка
-        # читается ранжиром источников как часть вопроса, и «now» 2026-09-19
-        # делало КАЖДЫЙ заход «вопросом реального времени» — любая веб-цитата
-        # (Гёдель 1931, Нётер 1918) получала insufficient_for_realtime.
+        # The goal is chosen by the agent and is itself the task: do, not advise a human. No freshness words ("now", "current") in the wrapper: the source ranker reads it as part of the question and every web citation would get insufficient_for_realtime.
         return (f"{goal.strip()}\n\nThis is your own chosen goal. Do the work yourself with "
                 "your tools and produce the checkable result it names; if something is missing, "
                 "say exactly what, instead of handing the step to a human.")
@@ -104,16 +90,9 @@ def _default_gather_signals(
     triage = triage_inbox(inbox.pending())
     ack_store = AlertAckStore(path=ws / "data" / "alert_acknowledgements.jsonl")
     acknowledged = ack_store.active_actions()
-    # Собственный список дефектов. Без него непригляданный путь был слеп ровно
-    # на то, ради чего заведён: живой прогон 2026-08-15 остановился с
-    # «healthy_idle: nothing warrants action», держа ШЕСТЬ открытых
-    # самонайденных дефектов. Кандидат под них в выбирателе есть
-    # (`_candidate_open_self_improvement_issue`), но вход ему давал только
-    # REPL — то есть путь, где человек и так смотрит.
-    # Зачем: docs/CODE_NOTES.md, «The unattended path was the blind one».
+    # Own defect list, so the unattended path is not blind to what it exists for (the selector's open-issue candidate was fed only by the REPL); see docs/CODE_NOTES.md, "The unattended path was the blind one".
     open_issues, registry_available = _open_self_improvement_issues(ws)
-    # Предмет цели разрешается ЗДЕСЬ: файловая система знает рабочую область,
-    # а таблица решений остаётся чистой (MIR-158).
+    # The goal subject is resolved HERE: the filesystem knows the workspace, the decision table stays pure (MIR-158).
     from pathlib import Path as _Path
 
     from core.best_next_action import (
@@ -146,10 +125,7 @@ def _default_gather_signals(
         acknowledged=acknowledged,
         self_improvement_registry_available=registry_available,
         open_self_improvement_issues=open_issues,
-        # Неудачи самоулучшения — БЕЗЛЮДНОМУ пути тоже (MIR-186): до
-        # 2026-08-29 их передавала только REPL-команда, где и так сидит
-        # человек, — демон был слеп к собственным провалам при выборе дела.
-        # Тот же класс, что «The unattended path was the blind one» выше.
+        # Self-improvement failures also for the unattended path (MIR-186); only the REPL passed them before.
         recent_self_improvement_failures=_recent_failures(agent, ws),
         fresh_self_improvement_failure=_has_fresh_failure(agent, ws),
         unexplained_observations_count=_unexplained_observation_count(ws),
@@ -162,7 +138,7 @@ def _default_gather_signals(
 
 
 def _recent_failures(agent: Any, workspace: Any) -> tuple[str, ...]:
-    """Свежая история неудач самоулучшения; провал сбора — пусто, не падение."""
+    """Recent self-improvement failure history; a collection failure gives empty, not a crash."""
     try:
         from core.self_build_memory import (
             recent_unresolved_self_improvement_failures,
@@ -176,7 +152,7 @@ def _recent_failures(agent: Any, workspace: Any) -> tuple[str, ...]:
 
 
 def _has_fresh_failure(agent: Any, workspace: Any) -> bool:
-    """Скоропортящийся сигнал (MIR-186): неудача младше суток."""
+    """Perishable signal (MIR-186): a failure younger than a day."""
     try:
         from core.self_build_memory import has_fresh_self_improvement_failure
 
@@ -186,7 +162,7 @@ def _has_fresh_failure(agent: Any, workspace: Any) -> bool:
 
 
 def _unexplained_observation_count(workspace: Any) -> int:
-    """Сигнал MIR-096: провал сбора — ноль, не падение (незнание не приговор)."""
+    """MIR-096 signal: a collection failure is zero, not a crash (ignorance is not a verdict)."""
     try:
         from core.causal_climb_action import unexplained_observations
 
@@ -196,7 +172,7 @@ def _unexplained_observation_count(workspace: Any) -> int:
 
 
 def _discriminable_claim_count(workspace: Any) -> int:
-    """Сигнал MIR-096, слайс 2: заявки, которые журналы могут рассудить."""
+    """MIR-096 slice 2 signal: claims the journals can judge."""
     try:
         from core.causal_climb_action import discriminable_claims
 
@@ -206,9 +182,7 @@ def _discriminable_claim_count(workspace: Any) -> int:
 
 
 def _birth_candidate_count(workspace: Any) -> int:
-    """Сигнал рождения: помеченные «ждёт эксперимента» и выбранные-без-
-    вмешательства (блок 4, M1) без ноты невыразимости — один список с
-    исполнителем, чтобы сигнал и действие не разошлись."""
+    """Birth signal: claims marked "waits for experiment" and chosen-without-intervention (block 4, M1) without an inexpressibility note; one list with the executor so signal and action cannot diverge."""
     try:
         from core.causal_climb_action import birth_candidates
 
@@ -218,7 +192,7 @@ def _birth_candidate_count(workspace: Any) -> int:
 
 
 def _experimentable_claim_count(workspace: Any) -> int:
-    """Сигнал MIR-096, слайс 3: заявки, доказуемые вмешательством."""
+    """MIR-096 slice 3 signal: claims provable by intervention."""
     try:
         from core.causal_climb_action import experimentable_claims
 
@@ -228,11 +202,7 @@ def _experimentable_claim_count(workspace: Any) -> int:
 
 
 def _is_own_issue_action(action: BestNextAction) -> bool:
-    """Действие — про собственный дефект: привычка реестра ИЛИ запись, которую
-    цель назвала. Реестр стал выдавать делу его собственное имя действия
-    (2026-08-31+), и мост «диагноз → заявка», открытый одному имени
-    `improve_failure_to_idea_pipeline`, закрылся для всех его дел (L3,
-    аудит 2026-09-03). Узнаётся по улике, которую кладут оба генератора."""
+    """The action is about an own defect: the registry's habit OR an entry the goal named; recognised by the evidence both generators put (the bridge diagnosis -> proposal must stay open for all registry action names)."""
     if action.action == "improve_failure_to_idea_pipeline":
         return True
     return any(
@@ -245,23 +215,7 @@ def _propose_repair_from_diagnosis(
     *, agent: Any, workspace: Any, config: CampaignConfig,
     action: BestNextAction, answer: str, approval_inbox: Any,
 ) -> str | None:
-    """Подтверждённый диагноз становится долговременной заявкой на ремонт.
-
-    Четыре условия, каждое структурное, и все обязаны сойтись:
-
-    * действие — про собственный дефект (`improve_failure_to_idea_pipeline`):
-      health-pass и прочие действия ремонта не обещали;
-    * не dry-run: заявка в очереди — долговременный эффект;
-    * проверка ПОЛНОСТЬЮ подтвердила диагноз (тот же стандарт, что снимает
-      прокси релевантности): частично обоснованный текст патча не заслуживает;
-    * диагноз называет существующий .py в репозитории — существование
-      спрашивается у диска (`workspace_paths_named`), не у регулярки: именно
-      регулярка по прозе завела в реестр reasoning.py и citation.py.
-
-    Дальше — существующие рубежи без изъятий: генератор со своими гейтами
-    уверенности, заявка `self_apply_lane.run` в очереди, решение человека
-    (§9), лента с полным pytest и откатом. Здесь ничего не исполняется.
-    """
+    """A confirmed diagnosis becomes a durable repair proposal; all four structural conditions must hold: the action is about an own defect, not dry-run, the check FULLY confirmed the diagnosis, and the diagnosis names an existing .py in the repository (asked of the disk via `workspace_paths_named`, not a regex over prose). Nothing is executed here; the existing gates follow unchanged (generator confidence gates, `self_apply_lane.run` item, human decision, pytest ribbon with rollback)."""
     if not _is_own_issue_action(action) or config.dry_run:
         return None
     if not answer or approval_inbox is None:
@@ -295,12 +249,7 @@ def _propose_repair_from_diagnosis(
                 "target": target, "status": status,
             })
             if status == "no_failing_tests":
-                # Ветка А. Ремонтник чинит только красное, и это его принцип
-                # («refusing to invent a repair»). Дефект без красного теста
-                # сперва ЗАРАБАТЫВАЕТ тест: Stage A формулирует задачу и
-                # падающий приёмочный тест, человек благословляет тест до
-                # существования реализации. Замер: 6 попыток охоты, дважды
-                # диагноз 4/4 и 5/5 — и оба раза честный отказ ремонтника.
+                # Branch A: the repairer fixes only red; a defect without a red test first earns one (Stage A formulates the task and a failing acceptance test, a human blesses the test before an implementation exists).
                 note = _propose_failing_test_from_diagnosis(
                     agent=agent, workspace=workspace, target=target,
                     answer=answer, approval_inbox=approval_inbox,
@@ -331,8 +280,7 @@ def _propose_repair_from_diagnosis(
             dedup_key=dedup_key,
         )
         collision = collision or _refused_repeat(item)
-        # F-1: при столкновении в ящике остаётся ПРЕЖНЯЯ заявка, и назвать это
-        # предложением значило бы записать работу, которой не было.
+        # F-1: on a collision the PRIOR proposal stays in the inbox; calling that a proposal would record work that did not happen.
         _log(agent, "campaign_repair_superseded" if collision
              else "campaign_repair_proposed", {
             "approval_id": item.id, "target": prop.path,
@@ -346,19 +294,13 @@ def _propose_repair_from_diagnosis(
         return None
     else:
         if collision:
-            # A5 (2026-09-03): столкновение — не предложение; в ящике осталась
-            # прежняя заявка, и цикл ничего не подал. Журнал уже был честен,
-            # исход — нет.
+            # A5: a collision is not a proposal; the prior proposal stayed and the cycle submitted nothing, so the outcome must say so.
             return None
         return f"repair_proposed:{item.id}"
 
 
 def _unwrap_outer_fence(text: str) -> str:
-    """Снять ОДНУ внешнюю markdown-ограду, если модель обернула ею весь ответ.
-
-    Живой грех первого черновика (ain_848a6f8f, 2026-08-15): ```md вокруг
-    всего документа вопреки инструкции. Внутренние ограды не трогаются.
-    """
+    """Strip ONE outer markdown fence if the model wrapped the whole answer in it; inner fences are untouched."""
     lines = text.strip().splitlines()
     if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
         return "\n".join(lines[1:-1]).strip()
@@ -366,17 +308,10 @@ def _unwrap_outer_fence(text: str) -> str:
 
 
 def _dedup_verdict(approval_inbox, dedup_key: str) -> str | None:
-    """Строка о СТОЛКНОВЕНИИ, если заявка с таким ключом уже ждёт человека.
-
-    F-1 в docs/audit/FIELD_CHECK_QUEUE.md. `add` при совпадении ключа молча
-    возвращает существующую заявку, и кампания писала в журнал «предложено» с
-    длиной своего нового текста, тогда как в ящике лежал старый. Потеря второго
-    черновика ограничена сроком жизни заявки; ложь в журнале не ограничена
-    ничем, и чинится именно она.
-    """
+    """Line about a COLLISION when a proposal with this key already waits for a human: `add` silently returns the existing proposal on a key match, so the journal must not say "proposed" with the length of the new text (F-1 in docs/audit/FIELD_CHECK_QUEUE.md)."""
     try:
         existing = approval_inbox.find_pending_by_dedup_key(dedup_key)
-    except AttributeError:  # ящик без этого метода — старый вызывающий
+    except AttributeError:  # an inbox without this method is an old caller
         return None
     if existing is None:
         return None
@@ -384,15 +319,14 @@ def _dedup_verdict(approval_inbox, dedup_key: str) -> str | None:
 
 
 def _refused_repeat(item: Any) -> str | None:
-    """Строка об ОТКАЗЕ ящика, если `add` вернул отклонённую заявку (блок 3,
-    L10): ящик помнит отказ и не подаёт то же самое второй раз."""
+    """Line about the inbox REFUSING, when `add` returned a rejected proposal (block 3, L10): the inbox remembers the refusal and does not submit the same again."""
     if getattr(item, "status", "pending") != "denied":
         return None
     return f"refused_repeat_of_denied:{item.id}"
 
 
 def _prior_denial(approval_inbox: Any, dedup_key: str) -> tuple[str, str] | None:
-    """(id, причина) недавнего отказа по этому ключу — или None."""
+    """(id, reason) of a recent denial for this key, or None."""
     reader = getattr(approval_inbox, "recently_denied", None)
     if reader is None:
         return None
@@ -406,12 +340,7 @@ def _prior_denial(approval_inbox: Any, dedup_key: str) -> tuple[str, str] | None
 
 
 def _engineering_target_waits(inbox: Any, target: str | None) -> str:
-    """Why an engineering proposal for ``target`` would be refused before any
-    model is paid: the file already sits under a pending/approved self-apply
-    item (the operator's lane applies those, not the agent), or a human
-    denied it recently (block 3 cooldown). Empty string = nothing waits.
-    An inbox that cannot say (no reader, unreadable) answers «unknown» and
-    the cycle proceeds as before — doubt must not widen a refusal silently."""
+    """Why an engineering proposal for ``target`` would be refused before any model is paid: the file sits under a pending/approved self-apply item, or a human denied it recently (block 3 cooldown). Empty string = nothing waits; an inbox that cannot say answers "unknown" and the cycle proceeds (doubt must not widen a refusal silently)."""
     from core.self_apply_bridge import SELF_APPLY_OPERATION
 
     if not target:
@@ -438,14 +367,7 @@ def _engineering_preflight(
     *, agent: Any, workspace: Any, action: Any, config: CampaignConfig,
     approval_inbox: Any,
 ) -> CampaignActionOutcome | None:
-    """Замер 2026-09-04 (вечер OpenAI, 65 центов): под целью «выполни
-    одобренный раскол X» цикл сначала ПЛАТИЛ за полный прогон модели
-    (планировщик + синтез, ~25k токенов), и лишь потом производитель заявок
-    отвечал бесплатным «approval_wait: цель уже ждёт полосы». Девять таких
-    циклов, три из них — по расколам, одобренным в тот же день; ноль заявок.
-    Ожидание человека читается ДО прогона и стоит ноль: одобренное — не
-    предмет для нового предложения, недавно отклонённое — остывает (L10).
-    ``None`` = ничего не ждёт, прогон идёт как раньше."""
+    """Read a human wait BEFORE the run, at zero cost: under a goal "carry out the approved split X" cycles paid for a full model run (~25k tokens) only to get a free "approval_wait" (9 cycles, 0 proposals, 2026-09-04). Approved work is not a subject for a new proposal, a recently denied one cools down (L10). ``None`` = nothing waits."""
     from core.approval_inbox import ApprovalInbox
     from core.best_next_action import resolve_goal_subject
 
@@ -475,11 +397,7 @@ def _engineering_hands(
     *, agent: Any, workspace: Any, action: Any, config: CampaignConfig,
     approval_inbox: Any,
 ) -> str | None:
-    """Инженерные руки: дорога хартия → бэклог (2026-08-19). Продукт — заявка
-    ленты, все ворота ниже по течению стоят как стояли. Предмет берётся из
-    РЕШЕНИЯ, а если решение его не назвало — из цели тем же существованием в
-    рабочей области (MIR-158/159): голова и руки связаны значением, а не
-    совпадением тика."""
+    """Engineering hands: road charter -> backlog. The product is a lane proposal, all downstream gates stand; the subject comes from the DECISION, else from the goal by the same workspace existence check (MIR-158/159)."""
     from core.best_next_action import resolve_goal_subject
 
     ws = Path(workspace)
@@ -493,9 +411,7 @@ def _engineering_hands(
 
 
 def _approvals_born(inbox: Any, before: set[str]) -> str | None:
-    """«approvals_new=N» — ДЕЛЬТА ящика за прогон (A3), без вопросов о
-    разрешении эффектов (A5, 2026-09-04): грант 40/сутки сгорел к 12:28 на
-    29 таких вопросах, и каждый считался «approvals_new=1» — полезным циклом."""
+    """"approvals_new=N" is the inbox DELTA per run (A3), without effect-permission questions (A5): a 40/day grant burned on 29 such questions, each counted as a useful cycle."""
     try:
         new_items = [
             i for i in inbox.pending()
@@ -507,10 +423,7 @@ def _approvals_born(inbox: Any, before: set[str]) -> str | None:
     return f"approvals_new={len(new_items)}" if new_items else None
 
 
-#: Heads of the strings the hands return when something was CREATED — an
-#: inbox item or a recorded hypothesis. Everything else they return is a
-#: reason («doc_declined:doc_exists», «repair_declined:…», «engineering_error:…»,
-#: «superseded_by_existing:…», «refused_repeat_of_denied:…») and is not a product.
+#: Heads of the strings the hands return when something was CREATED (inbox item or recorded hypothesis); everything else is a reason ("doc_declined:...", "repair_declined:...", "engineering_error:...") and not a product.
 _PRODUCT_HEADS: tuple[str, ...] = (
     "approvals_new=", "repair_proposed:", "engineering_proposed:",
     "doc_draft_proposed:", "hypothesis_recorded:", "test_proposed:",
@@ -518,10 +431,7 @@ _PRODUCT_HEADS: tuple[str, ...] = (
 
 
 def _product(agent: Any, said: str | None) -> str | None:
-    """Замер 2026-09-04: строка отказа («doc_declined:doc_exists»,
-    «repair_declined:…») ехала в `proposal`, и цикл без продукта читался как
-    продуктивный (did_work, сброс серии без продукта, «полезный цикл»). Отказ
-    остаётся в журнале по имени; в леджер едет только созданное."""
+    """A refusal string must not travel into `proposal` or a cycle without a product reads as productive; the refusal stays in the journal by name, only what was created goes to the ledger."""
     if not said:
         return None
     if any(said.startswith(head) for head in _PRODUCT_HEADS):
@@ -533,11 +443,7 @@ def _product(agent: Any, said: str | None) -> str | None:
 def _engineering_product_only(
     agent: Any, *, work_done: bool, proposal: str | None, artifact: str | None,
 ) -> tuple[bool, str | None]:
-    """У инженерного действия продукт — заявка, не рассуждение (тот же замер:
-    девять «completed / work_done» без единой заявки — текст, кончавшийся
-    «следующий шаг: человек должен утвердить…», считался работой, а его
-    дайджест как artifact делал цикл «продуктивным» и держал цель живой).
-    Дайджест остаётся в журнале, не в леджере."""
+    """For an engineering action the product is a proposal, not reasoning; a digest as artifact would make a cycle "productive" and keep the goal alive; the digest stays in the journal, not the ledger."""
     work_done = work_done and proposal is not None
     if proposal is None and artifact is not None:
         _log(agent, "campaign_engineering_prose_only", {"digest": artifact[:200]})
@@ -546,9 +452,7 @@ def _engineering_product_only(
 
 
 def _goal_answer_and_digest(report: Any) -> tuple[str, str | None]:
-    """Ответ ВЫПОЛНЕННОЙ задачи цели и его 160-значный дайджест как artifact.
-    A4 (2026-09-03): вопрос ворот (clarify) и пустой ответ (inconclusive)
-    продуктом не являются."""
+    """Answer of a COMPLETED goal task and its 160-char digest as artifact; a gate question (clarify) and an empty answer (inconclusive) are not a product (A4)."""
     for task_report in getattr(report, "tasks", []) or []:
         if getattr(task_report.task, "kind", "") != "goal":
             continue
@@ -564,12 +468,7 @@ def _goal_answer_and_digest(report: Any) -> tuple[str, str | None]:
 def _propose_engineering_step(
     *, agent: Any, workspace: Any, approval_inbox: Any, target: str | None = None,
 ) -> str | None:
-    """Turn the top real backlog candidate into a self-build lane proposal.
-
-    The road charter → backlog (2026-08-19): the campaign may now PRODUCE an
-    engineering approval item; blessing, the lane and every downstream gate
-    stay human-owned. A refusal is surfaced by name in the log, never hidden —
-    and never counted as a proposal (block 3, L9)."""
+    """Turn the top real backlog candidate into a self-build lane proposal; the campaign may PRODUCE an engineering approval item, blessing, lane and downstream gates stay human-owned; a refusal is surfaced by name, never counted as a proposal (block 3, L9)."""
     from pathlib import Path as _Path
 
     from core.budget_kill_switch import BudgetKillSwitch, default_path
@@ -590,10 +489,9 @@ def _propose_engineering_step(
             vcs=SafeVCS(workspace=_Path(workspace)),
             kill_switch=kill_state,
             max_builder_attempts=2,
-            # Дорога головы к рукам (MIR-159). `None` значит «цель предмета не
-            # называла» — тогда производитель выбирает сам, как и раньше.
+            # Road from head to hands (MIR-159); `None` means the goal named no subject, the producer chooses.
             candidate_targets=(target,) if target else None,
-            # Блок 3 (L10): вето критика помнит и кампания, не только CLI.
+            # Block 3 (L10): the critic's veto is remembered by the campaign too, not only the CLI.
             recently_vetoed_targets=recently_vetoed_self_build_targets(agent),
         )
     except Exception as exc:  # noqa: BLE001 — отказ именуется, не прячется
@@ -606,41 +504,31 @@ def _propose_engineering_step(
     _log(agent, "campaign_engineering_proposed", {
         "status": status, "approval_id": approval_id,
         "target": str(getattr(report, "target_path", "") or ""),
-        # Живой прогон 18.09 01:59: докстринг выше обещает «a refusal is
-        # surfaced by name», но имени тут не было. Управляющий отвечал
-        # «grounded target 'core/self_build_producer.py' is critical», а
-        # наверх уходило голое `no_grounded_target` — оно читается как
-        # «работы не осталось», хотя правда была «предмет вне твоих
-        # полномочий». Двадцать один цикл подряд прошёл под этой подменой.
+        # Surface the refusal by name: a bare `no_grounded_target` reads as "no work left" while the truth was "subject outside your authority" (21 cycles ran under this substitution, 2026-09-18).
         "reason": str(getattr(report, "reason", "") or ""),
     })
     if approval_id:
         return f"engineering_proposed:{approval_id}"
-    # Блок 3 (L9): ожидание человека, вето критика, остывание после отказа —
-    # не предложение. Статус остаётся в журнале выше; в строке леджера
-    # `proposal` пуст, и цикл не считается полезным.
+    # Block 3 (L9): a human wait, critic veto or cooldown is not a proposal; the status stays in the journal, `proposal` is empty and the cycle is not useful.
     return None
 
 
 def _propose_doctrine_draft(
     *, agent: Any, workspace: Any, goal: str, approval_inbox: Any,
 ) -> str | None:
-    """Документная цель становится черновиком в очереди — не файлом на диске."""
+    """A document goal becomes a draft in the queue, not a file on disk."""
     from core.best_next_action import doc_target_from_goal
 
     target = doc_target_from_goal(goal)
     if not target:
         return "doc_declined:no_target_doc"
-    # Блок 3 (L10): отказ человека по этому же документу читается ДО генерации
-    # и попадает в задание — иначе «ревизия» была бы новым броском кости.
+    # Block 3 (L10): a human refusal of this document is read BEFORE generation and goes into the task, or a "revision" would be a new dice roll.
     dedup_key = f"self_apply:{target}:campaign_doctrine_draft"
     prior_denial = _prior_denial(approval_inbox, dedup_key)
     existing = ""
     target_file = Path(workspace) / target
     if target_file.exists():
-        # Наполнять разрешено ТОЛЬКО файл, сам несущий баннер DRAFT в шапке
-        # (скелет -> протокол, команда оператора 2026-08-15). Действующий
-        # документ без баннера — отдельное решение, не черновик.
+        # Only a file that itself carries a DRAFT banner in its header may be filled (skeleton -> protocol, operator 2026-08-15); an operative document without a banner is a separate decision.
         existing = target_file.read_text(encoding="utf-8")
         if "DRAFT" not in "\n".join(existing.splitlines()[:5]):
             return "doc_declined:doc_exists"
@@ -653,8 +541,7 @@ def _propose_doctrine_draft(
         "the charter's hard invariants (human-reserved authority stays), and "
         "never claim a capability exists in code unless you can name the module."
         + (
-            # Живой замер 2026-08-15 (ain_2edf62f4): «наполнение» совпало со
-            # скелетом на 89% — модель пересказала требования вместо содержания.
+            # A "fill" matched the skeleton 89% (the model retold the requirements instead of content).
             " You are FILLING an existing skeleton: do NOT restate its section "
             "requirements or normative 'must include/define' rules — REPLACE "
             "each of them with the actual content it demands: real tables with "
@@ -712,24 +599,18 @@ def _propose_doctrine_draft(
         dedup_key=dedup_key,
     )
     collision = collision or _refused_repeat(item)
-    # F-1: `chars` описывал НОВЫЙ черновик, а в ящике при столкновении лежал
-    # старый — запись говорила о предложении, которого не было.
+    # F-1: `chars` described the NEW draft while the old one sat in the inbox on a collision.
     _log(agent, "campaign_doc_draft_superseded" if collision
          else "campaign_doc_draft_proposed", {
         "approval_id": item.id, "target": target, "chars": len(draft),
         **({"collision": collision} if collision else {}),
     })
     if collision:
-        return None  # A5: столкновение — не предложение (см. _propose_repair_from_diagnosis)
+        return None  # A5: a collision is not a proposal (see _propose_repair_from_diagnosis)
     return f"doc_draft_proposed:{item.id}"
 
 
-#: Инлайн-цитаты веба в проверенном ответе — единственный источник ссылок
-#: гипотезы: живой урок конденсатора 2026-08-16 — модель выдумала «Page 12».
-#: Обе орфографии: сырая [web:x] и переписанная верификатором
-#: [verified:web:x]/[topic-only:web:x] — жнец работает ПОСЛЕ проверки (живой
-#: обрыв цепочки на первом прогоне автомата: no_web_citations при
-#: состоявшемся чтении).
+#: Inline web citations in the verified answer are the only source of hypothesis references (the model invented "Page 12"); both spellings: raw [web:x] and verifier-rewritten [verified:web:x]/[topic-only:web:x], since the reaper runs AFTER verification.
 _WEB_CITATION_RE = re.compile(
     r"\[(?:verified:|topic-only:)?(?:web|web_fetch|web_search)[:\s]([^\]]{4,200})\]"
 )
@@ -738,13 +619,12 @@ _WEB_CITATION_RE = re.compile(
 def _propose_hypothesis_from_study(
     *, agent: Any, workspace: Any, goal: str, answer: str,
 ) -> str:
-    """Чтение внешнего мира оставляет ГИПОТЕЗУ нижней ступени — не истину."""
+    """Reading the outside world leaves a lowest-rung HYPOTHESIS, not truth."""
     refs = tuple(dict.fromkeys(
         m.group(1).strip() for m in _WEB_CITATION_RE.finditer(answer or "")
     ))
     if not refs:
-        # Прибор: молчаливый отказ нельзя расследовать (урок route_reason,
-        # 2026-08-16) — голова полученного текста едет в журнал.
+        # Instrument: a silent refusal cannot be investigated, so the head of the received text goes to the journal.
         _log(agent, "campaign_hypothesis_declined", {
             "reason": "no_web_citations",
             "answer_chars": len(answer or ""),
@@ -798,7 +678,7 @@ def _propose_hypothesis_from_study(
 def _propose_failing_test_from_diagnosis(
     *, agent: Any, workspace: Any, target: str, answer: str, approval_inbox: Any,
 ) -> str:
-    """Диагноз без красного теста едет в Stage A — за тестом, не за патчем."""
+    """A diagnosis without a red test goes to Stage A: for a test, not a patch."""
     from types import SimpleNamespace
 
     from core.self_task_producer import produce_coding_task
@@ -841,7 +721,7 @@ def _propose_failing_test_from_diagnosis(
 
 
 def _open_self_improvement_issues(workspace: Path) -> tuple[tuple[dict, ...], bool]:
-    """Открытые самонайденные дефекты и признак «реестр вообще читается»."""
+    """Open self-found defects and whether the registry is readable at all."""
     try:
         from core.self_improvement_issues import SelfImprovementIssueRegistry
 
@@ -873,8 +753,7 @@ def _execute_daemon_liveness_probe(workspace: Any) -> CampaignActionOutcome:
         step = "Запустить один тик: agent_tick.py --workspace . ; для постоянной жизни — scripts/install_daemon.ps1"
         confidence = "высокая (файл фактически отсутствует)"
     elif age is None:
-        # The file exists but carries no readable timestamp — saying
-        # «0.0 мин назад» here would be a lie about a broken record.
+        # The file exists but has no readable timestamp; "0.0 min ago" would lie about a broken record.
         verdict = (
             "Файл пульса есть, но повреждён или без метки времени — возраст "
             "тика неизвестен."
@@ -927,27 +806,24 @@ def _default_execute_action(
     config: CampaignConfig,
     approval_inbox: Any = None,
 ) -> CampaignActionOutcome:
-    # MIR-070: liveness is answerable from state — never spend a model on it.
+    # MIR-070: liveness is answerable from state, never spend a model on it.
     if action.action == "restore_daemon_liveness":
         return _execute_daemon_liveness_probe(workspace)
 
-    # MIR-096 (слайс 1): подъём собственного провала — свой исполнитель,
-    # с воротами качества и без выбора победителя автором.
+    # MIR-096 slice 1: lifting an own failure has its own executor with quality gates and no author-picked winner.
     if action.action == "explain_causal_observation":
         from core.causal_climb_action import explain_causal_observation
 
         return explain_causal_observation(
             agent=agent, workspace=workspace, dry_run=config.dry_run)
 
-    # MIR-096 (слайс 2): различение детерминированное — журналы судят,
-    # модель не зовётся, dry-run не нужен (эффект — строка в заявке).
+    # MIR-096 slice 2: deterministic discrimination, the journals judge, no model, no dry-run needed.
     if action.action == "discriminate_causal_claim":
         from core.causal_climb_action import discriminate_causal_claim
 
         return discriminate_causal_claim(agent=agent, workspace=workspace)
 
-    # MIR-096 (слайс 3): причина доказывается устранением — двурукавный
-    # эксперимент на белом списке чистых функций, ноль вызовов модели.
+    # MIR-096 slice 3: the cause is proved by elimination, a two-arm experiment over a whitelist of pure functions, zero model calls.
     if action.action == "run_claim_experiment":
         from core.causal_climb_action import run_claim_experiment
 
@@ -963,7 +839,7 @@ def _default_execute_action(
     from core.budget_governor import BudgetLimits
     from core.goal_progress import start_pass
 
-    # Ожидание человека читается ДО прогона и стоит ноль (замер 2026-09-04: 9 платных циклов, 0 заявок; L10).
+    # A human wait is read BEFORE the run at zero cost (L10).
     if action.action == "propose_engineering_task" and not config.dry_run:
         refused = _engineering_preflight(
             agent=agent, workspace=workspace, action=action, config=config,
@@ -976,9 +852,7 @@ def _default_execute_action(
     progress = start_pass(agent, workspace, config, action)
     focused_goal = _action_focused_goal(config.goal, action)
     focused_goal = progress.prompt(focused_goal) if progress else focused_goal
-    # A3 (2026-09-03): предложение этого цикла — ДЕЛЬТА ящика, не его размер.
-    # Абсолютный счёт делал любой цикл «полезным», пока в ящике лежала чужая
-    # вчерашняя заявка, и гасил страж «loop_suspected».
+    # A3: this cycle's proposal is the inbox DELTA, not its size; an absolute count made every cycle useful while another's old proposal sat there and silenced the `loop_suspected` guard.
     _inbox = approval_inbox or ApprovalInbox(
         path=Path(workspace) / "data" / "approval_inbox.jsonl"
     )
@@ -987,8 +861,7 @@ def _default_execute_action(
     report = runtime.run(
         AutonomousRuntimeConfig(
             goal=focused_goal,
-            # Критерий едет вместе с целью: без него исполнитель судит
-            # выполнение по собственному ответу (аудит автономности 2026-09-17).
+            # The criterion travels with the goal; without it the executor judges completion by its own answer.
             goal_success_check=config.success_check,
             dry_run=config.dry_run,
             limit=3,
@@ -996,9 +869,7 @@ def _default_execute_action(
             include_goal=True,
             budgets=BudgetLimits(max_agent_runs=1),
             enable_reflection=False,
-            # Учебному действию открывается ровно веб (узкая разблокировка,
-            # решение оператора 2026-08-16; поле пересекается с
-            # _UNBLOCKABLE_TOOLS и ничего другого открыть не может).
+            # A learning action gets exactly the web (narrow unblock; the field intersects _UNBLOCKABLE_TOOLS and can open nothing else).
             unblock_tools=(
                 frozenset({"web_search", "web_fetch"})
                 if action.action == "study_external_source" else frozenset()
@@ -1009,11 +880,7 @@ def _default_execute_action(
     goal_answer, artifact = _goal_answer_and_digest(report)
     if progress is not None:
         progress.finish(goal_answer)
-    # Переход «диагноз -> ремонт». До 2026-08-15 подтверждённый диагноз умирал
-    # здесь в 160-значном дайджесте: четвёртый прогон дня процитировал свой
-    # дефект из настоящей трассы, получил 6 из 6 подтверждённых — и кампания
-    # выбросила это, как и три прогона до него.
-    # Зачем и границы: docs/CODE_NOTES.md, «A diagnosis that dies in a digest».
+    # Transition diagnosis -> repair: a confirmed diagnosis used to die here in a 160-char digest; see docs/CODE_NOTES.md, "A diagnosis that dies in a digest".
     repaired = _propose_repair_from_diagnosis(
         agent=agent, workspace=workspace, config=config,
         action=action, answer=goal_answer, approval_inbox=approval_inbox,
@@ -1021,7 +888,7 @@ def _default_execute_action(
     repaired = _product(agent, repaired)
     if repaired:
         proposal = f"{proposal}; {repaired}" if proposal else repaired
-    # Учебные руки: чтение внешнего мира оставляет гипотезу нижней ступени.
+    # Learning hands: reading the outside world leaves a lowest-rung hypothesis.
     if action.action == "study_external_source" and not config.dry_run:
         studied = _propose_hypothesis_from_study(
             agent=agent, workspace=workspace, goal=config.goal,
@@ -1030,8 +897,7 @@ def _default_execute_action(
         studied = _product(agent, studied)
         if studied:
             proposal = f"{proposal}; {studied}" if proposal else studied
-    # Документные руки: цель, просящая документ доктрины, рождает черновик
-    # заявкой в очередь — см. _propose_doctrine_draft.
+    # Document hands: a goal asking for a doctrine document yields a draft proposal in the queue (_propose_doctrine_draft).
     if action.action == "draft_doctrine_document" and not config.dry_run:
         drafted = _propose_doctrine_draft(
             agent=agent, workspace=workspace, goal=config.goal,
@@ -1048,17 +914,13 @@ def _default_execute_action(
         engineered = _product(agent, engineered)
         if engineered:
             proposal = f"{proposal}; {engineered}" if proposal else engineered
-    # MIR-117 (норма A): токен жизненного цикла очереди не копируется в исход
-    # цикла — прогон, чью единственную задачу отвергли, писал «completed».
+    # MIR-117: the queue lifecycle token is not copied into the cycle outcome; a run whose only task was rejected wrote "completed".
     semantic, work_done = report.semantic_result()
     if action.action == "propose_engineering_task":
         work_done, artifact = _engineering_product_only(
             agent, work_done=work_done, proposal=proposal, artifact=artifact,
         )
-    # Показания снимаются ЗДЕСЬ, за руками, а не сразу после рабочей сессии.
-    # Замер 2026-09-17 23:09: реестр 19 вызовов, книги кампании «llm_calls: 0»
-    # — и нулём платил не журнал, а `--max-llm-calls` и детектор петли.
-    # Свидетель: tests/test_the_hands_spend_on_the_campaigns_own_meter.py.
+    # Readings are taken HERE, behind the hands, not right after the work session; witness: tests/test_the_hands_spend_on_the_campaigns_own_meter.py.
     llm_after, cost_after = _cost_totals(agent)
     return CampaignActionOutcome(
         result=semantic,

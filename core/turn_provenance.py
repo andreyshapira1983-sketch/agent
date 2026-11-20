@@ -1,17 +1,4 @@
-"""Порождено этим ходом или только использовано — по диску, а не по словам.
-
-24.09, 18:51: оператор попросил «создай 3D-сцену… не считай задачу
-выполненной, пока видео нельзя открыть». Рендер нового скрипта упал, а в
-ответе результатом значилось converted/build_character_v4…/character.mp4 —
-видео, сделанное в 17:46 по прошлой просьбе. Все проверки («файл есть,
-200 КБ, 10 с») старый файл прошёл: ни одна не спросила, КОГДА он появился.
-
-W3C PROV различает сущность, порождённую действием (wasGeneratedBy, со
-временем порождения), и использованную им (used). Здесь то же: если ход
-действовал (писал, собирал, конвертировал), а файл из вывода ответа старше
-начала хода — к ответу приписывается показание журнала. Слова ответа не
-разбираются: решают путь, существующий на диске, и его время.
-"""
+"""Produced by this turn or only used, judged by disk and mtime, not by words: if the turn acted (wrote, built, converted) but an output file named in the answer is older than the turn start, a journal statement is attached to the answer."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,15 +6,10 @@ from pathlib import Path
 
 from core.workspace_reference import workspace_paths_named
 
-#: Где лежат ПРОДУКТЫ работы агента: выходы convert_file (tools/convert_file.py,
-#: OUTPUT_DIR) и его опыты. Код и документы, которые он читает (core/, tools/,
-#: docs/…), ход только ИСПОЛЬЗУЕТ — ночь 24→25.09: строка ложно называла
-#: «не созданными» прочитанные tools/base.py и core/model_router.py, и этот
-#: сигнал кормил его цели «объяснить наблюдение о себе».
+#: Where the agent's PRODUCTS live: convert_file outputs (tools/convert_file.py, OUTPUT_DIR) and its experiments; code and documents it reads (core/, tools/, docs/) are only USED by the turn, not created.
 PRODUCT_DIRS = ("converted/", "experiments/")
 
-#: Инструменты, которыми ход что-то порождает. Ход без них только читал — там
-#: старые файлы в ответе законны («что лежит в X»).
+#: Tools by which a turn produces something; a turn without them only read, so old files in the answer are legitimate.
 PRODUCING_TOOLS = frozenset({
     "file_write", "journal_append", "memory_bank", "convert_file", "render3d", "shell_exec",
 })
@@ -39,7 +21,7 @@ def _clock(ts: float) -> str:
 
 def older_than_turn(head: str, root: Path | None, started_at: float,
                     executed_tools: list[str]) -> str | None:
-    """Показание журнала: файлы вывода, не порождённые этим ходом; None — нечего сказать."""
+    """Journal statement: output files not produced by this turn; None when there is nothing to say."""
     if root is None or started_at <= 0 or not PRODUCING_TOOLS & set(executed_tools):
         return None
     old: list[str] = []

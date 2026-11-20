@@ -1,7 +1,4 @@
-"""Карантин находок субагента: запись есть, права влиять — нет.
-
-Замер, отвергнутые варианты и границы: MIR-157 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-"""
+"""Quarantine of subagent findings: recorded, but with no right to influence anything."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -10,15 +7,13 @@ from typing import Any
 
 from core.ids import new_id
 
-#: Хранилище карантина. Отдельный файл, а не память: попав в память, запись
-#: получила бы её полномочия, а весь смысл карантина в том, что их нет.
+#: Quarantine store: a separate file, not memory, because a record in memory would acquire its authority.
 QUARANTINE_RELPATH = "data/subagent_quarantine.jsonl"
 
-#: Полномочие записи карантина — ровно одно и неизменное. Поле пишется явно,
-#: потому что умолчание уже однажды раздало человеческий голос (MIR-151).
+#: The quarantine record's authority is exactly one and unchanging; written explicitly because a default once handed out a human voice.
 QUARANTINE_AUTHORITY = "none"
 
-#: Потолок на текст находки: карантин — место для улики, а не второй архив.
+#: Cap on finding text: quarantine holds evidence, not a second archive.
 MAX_ANSWER_CHARS = 2000
 
 
@@ -31,11 +26,7 @@ def quarantine_path(workspace: Path | str) -> Path:
 
 
 def quarantine_finding(workspace: Path | str, result: Any) -> dict[str, Any]:
-    """Положить находку субагента в карантин и вернуть записанную строку.
-
-    Никогда не роняет вызывающего: потерянная находка хуже, чем упавший
-    родитель, ровно наоборот — упавший родитель хуже потерянной находки.
-    """
+    """Put a subagent finding into quarantine and return the row written; never raises (a crashed parent is worse than a lost finding)."""
     from core.redaction import redact_payload
     from core.state_integrity import append_state_jsonl
 
@@ -44,14 +35,13 @@ def quarantine_finding(workspace: Path | str, result: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": new_id("sqf"),
         "ts": _now_iso(),
-        # Происхождение: кто спрашивал, о чём, и в какой трассе это искать.
+        # Origin: who asked, about what, and where to look in the trace.
         "contract_name": str(getattr(result, "contract_name", "") or ""),
         "role": str(getattr(result, "role", "") or ""),
         "objective": str(getattr(result, "objective", "") or ""),
         "trace_id": str(getattr(result, "trace_id", "") or ""),
         "status": str(getattr(result, "status", "") or ""),
-        # Сигнал доверия, который уже считается бегуном: сколько внешнего
-        # субагент принёс сам, а не сочинил.
+        # Trust signal the runner already counts: how much external evidence the subagent brought rather than invented.
         "external_evidence_count": int(getattr(result, "external_evidence_count", 0) or 0),
         "external_evidence_kinds": list(getattr(result, "external_evidence_kinds", ()) or ()),
         "answer": answer[:MAX_ANSWER_CHARS],
@@ -69,7 +59,7 @@ def quarantine_finding(workspace: Path | str, result: Any) -> dict[str, Any]:
 
 
 def load_quarantine(workspace: Path | str) -> list[dict[str, Any]]:
-    """Все находки в карантине, старейшие первыми; нечитаемое — пусто."""
+    """All findings in quarantine, oldest first; unreadable means empty."""
     from core.state_integrity import read_state_jsonl
 
     path = quarantine_path(workspace)
@@ -82,10 +72,7 @@ def load_quarantine(workspace: Path | str) -> list[dict[str, Any]]:
 
 
 def quarantine_status_lines(workspace: Path | str) -> list[str]:
-    """Строка о накопленных находках — иначе карантин станет складом без читателя.
-
-    Только чтение и никогда не бросает.
-    """
+    """A line about accumulated findings, so quarantine does not become a warehouse with no reader; read-only, never raises."""
     try:
         rows = load_quarantine(workspace)
         if not rows:
@@ -96,6 +83,6 @@ def quarantine_status_lines(workspace: Path | str) -> list[str]:
             f"[SUBAGENT] {len(rows)} finding(s) in quarantine, {grounded} with "
             f"external evidence, oldest {oldest}; none may influence a decision"
         )
-    except Exception:  # noqa: BLE001 — строка состояния не стоит тика
+    except Exception:  # noqa: BLE001 — a status line is not worth a tick
         return []
     return [line]

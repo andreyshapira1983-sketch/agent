@@ -14,9 +14,9 @@ from core.planner import PlannerOutput
 
 @dataclass
 class SynthesisState:
-    """То, что вызов синтезатора носит с собой за один прогон."""
+    """What a synthesizer call carries within one run."""
 
-    # ── Вход ─────────────────────────────────────────────────────────────
+    # Input
     goal: Goal
     user_question: str
     file_hint: str | None
@@ -36,7 +36,7 @@ class SynthesisState:
     _task_synth_llm: Any
     _cp: Any
 
-    # ── Выход ────────────────────────────────────────────────────────────
+    # Output
     draft_answer: str = ""
     #: Цепочка улик хода — для сверки черновика до ответа (core/draft_refutation.py).
     chain: Any = None

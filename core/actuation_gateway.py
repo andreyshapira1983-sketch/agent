@@ -1,6 +1,4 @@
-"""Actuation gateway — checked door for effectful actions (REPL, runtime,
-daemon).
-"""
+"""Actuation gateway: checked door for effectful actions (REPL, runtime, daemon)."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -18,12 +16,12 @@ from tools.base import ToolRegistry
 GatewayPath = Literal["repl", "runtime", "daemon", "self_apply", "cli"]
 GatewayOutcome = Literal["allow", "deny", "escalate", "simulate", "passthrough", "block"]
 
-# Effectful tools routed through gateway (see gateway-proposal.md).
+# Effectful tools routed through the gateway.
 EFFECTFUL_TOOL_NAMES: frozenset[str] = frozenset({"file_write", "shell_exec"})
 
 
 def gateway_path_from_receipt(receipt_path: str) -> GatewayPath:
-    """Map receipt context path to gateway path (G2 runtime/daemon)."""
+    """Map receipt context path to gateway path."""
     if receipt_path == "daemon":
         return "daemon"
     if receipt_path == "repl":
@@ -92,11 +90,11 @@ class ActuationGateway:
         self.budget_snapshot = budget_snapshot
         self.readiness_blockers = readiness_blockers
         self.check_readiness = check_readiness
-        #: Файлы висящих заявок. `None` — сведений нет, запрет остаётся общим.
+        # Files of pending approval requests. `None` means no information, so the general ban stays.
         self.pending_approval_paths = pending_approval_paths
 
     def _touches_pending_approval(self, args: Mapping[str, Any]) -> bool:
-        """Касается ли действие файла, о котором уже лежит заявка."""
+        """Whether the action touches a file that already has a pending approval request."""
         if not self.pending_approval_paths:
             return True
         named: list[str] = []
@@ -109,7 +107,7 @@ class ActuationGateway:
                 if isinstance(value, str) and value.strip():
                     named.append(value)
         if not named:
-            return True  # действие без названного файла судится по-старому
+            return True  # action without a named file is judged the old way
         cleaned = {p.replace("\\", "/").strip().lstrip("./") for p in named}
         return any(p.endswith(tuple(cleaned)) or p in cleaned
                    for p in self.pending_approval_paths)
@@ -123,11 +121,9 @@ class ActuationGateway:
             blockers=self.readiness_blockers,
             check_readiness=self.check_readiness,
         )
-        # Соразмерность (слово оператора 2026-09-23): висящая заявка запрещает
-        # работу с ТЕМИ файлами, которых касается, а не со всеми сразу. Замер:
-        # одна заявка про `core/loop_step_execution.py` стоила десяти пустых
-        # циклов — конспект по физике в `data/notes` не ложился из-за неё.
-        # Остальные жёсткие причины (выключатель, бюджет) не трогаются.
+        # Proportionality: a pending request forbids work on the files it touches, not on
+        # everything.
+        # Other hard reasons (kill switch, budget) are untouched.
         if reasons and not self._touches_pending_approval(args or {}):
             reasons = tuple(r for r in reasons
                             if APPROVAL_BLOCKER_PREFIX not in r)
@@ -202,9 +198,7 @@ class ActuationGateway:
         *,
         operation: str = "self_apply_lane.run",
     ) -> GatewayDecision:
-        """G3: the single actuation door before an approved self-apply lane
-        run.
-        """
+        """Single actuation door before an approved self-apply lane run."""
         blocked = self._hard_stop_decision(operation)
         if blocked is not None:
             return blocked

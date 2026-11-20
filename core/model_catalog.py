@@ -178,7 +178,7 @@ def _fetch_openai(api_key: str | None = None) -> list[str]:
 
 
 def _fetch_deepseek(api_key: str | None = None) -> list[str]:
-    """Модели DeepSeek через OpenAI-совместимый API (GET /models)."""
+    """DeepSeek models via the OpenAI-compatible API (GET /models)."""
     import openai  # optional dep — only needed at refresh time
     key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
     if not key:
@@ -214,7 +214,7 @@ def discover_catalog(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "providers":  {},
     }
-    #: Поставщики, которых не удалось спросить, и почему.
+    #: Providers that could not be queried, and why.
     unreachable: dict[str, str] = {}
 
     for provider in providers:
@@ -226,7 +226,7 @@ def discover_catalog(
             model_ids = fetcher(api_keys.get(provider))
         except Exception as exc:  # noqa: BLE001 — the failure is reported to the caller
             logger.warning("model fetch failed for %s: %s", provider, exc)
-            # «Не смогли спросить» — не «ответил пусто» (MIR-170).
+            # could not ask is not "answered empty"
             unreachable[provider] = f"{type(exc).__name__}: {exc}"[:200]
             continue
 
@@ -269,22 +269,19 @@ def refresh_catalog(
 
 
 def _read_catalog_file() -> dict[str, Any]:
-    """Каталог с диска независимо от срока годности: перенос нужен как раз для просроченного."""
+    """Catalog from disk regardless of expiry: carry-over needs the expired one."""
     path = _catalog_path()
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8")) or {}
-    except Exception as exc:  # noqa: BLE001 — перенос не вправе ронять обновление
+    except Exception as exc:  # noqa: BLE001 — carry-over must not break the refresh
         logger.warning("model_catalog carry-over read failed: %s", exc)
         return {}
 
 
 def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
-    """Сохранить прежние модели поставщика, которого не смогли спросить (MIR-170).
-
-    Только при ошибке запроса: честный пустой ответ записывается как есть.
-    """
+    """Keep the previous models of a provider that could not be queried; only on a query error (an honest empty answer is saved as is)."""
     unreachable = catalog.get("unreachable") or {}
     if not unreachable:
         return
@@ -297,7 +294,7 @@ def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
         entry = dict(prior)
         entry["carried_over"] = True
         entry["carried_reason"] = reason
-        # Дата первого переноса, иначе запись молодела бы с каждым обновлением.
+        # date of the first carry-over, else the entry would look younger on every refresh
         entry.setdefault("carried_from", previous.get("updated_at"))
         catalog["providers"][provider] = entry
         logger.warning(
@@ -306,9 +303,8 @@ def _carry_over_unreachable(catalog: dict[str, Any]) -> None:
         )
 
 
-# ── autorefresh: обновление прежде подстройки ─────────────────────────────────
 
-#: Одна попытка на процесс, чтобы сбойное обновление не молотило по сети.
+#: One attempt per process so a failing refresh does not hammer the network.
 _AUTOREFRESH_DONE = False
 
 
@@ -318,7 +314,7 @@ def _autorefresh_enabled() -> bool:
 
 
 def _credentialed_providers() -> list[str]:
-    """Провайдеры, для которых заданы ключи."""
+    """Providers that have credentials set."""
     out = []
     if os.getenv("ANTHROPIC_API_KEY", "").strip():
         out.append("anthropic")
@@ -330,8 +326,8 @@ def _credentialed_providers() -> list[str]:
 
 
 def ensure_fresh_catalog() -> str:
-    """Мёртвый каталог сначала пытаются обновить — и только потом обходят."""
-    global _AUTOREFRESH_DONE  # noqa: PLW0603 — одна попытка на процесс и есть контракт
+    """A dead catalog is refreshed first and only then bypassed."""
+    global _AUTOREFRESH_DONE  # noqa: PLW0603 — one attempt per process is the contract
     if _load_catalog() is not None:
         return "fresh"
     if not _autorefresh_enabled():
@@ -344,7 +340,7 @@ def ensure_fresh_catalog() -> str:
         return "no_credentials"
     try:
         refresh_catalog(providers=providers)
-    except Exception as exc:  # noqa: BLE001 — сбой сети не роняет маршрутизацию
+    except Exception as exc:  # noqa: BLE001 — a network failure must not break routing
         logger.warning("catalog autorefresh failed: %s", exc)
         return f"refresh_failed:{type(exc).__name__}"
     return "refreshed"
@@ -419,17 +415,17 @@ def catalog_summary() -> dict[str, Any]:
 
 
 def peer_model_at_same_tier(model: str | None, provider: str) -> str | None:
-    """Равный по уровню у нового провайдера, или None — тогда его дефолт."""
+    """Same-tier model at the new provider, or None (then its default)."""
     if not model:
         return None
     try:
         return tier_model_for(classify_model(str(model)), provider) or None
-    except Exception:  # noqa: BLE001 — каталог ходит в сеть; None = прежнее поведение
+    except Exception:  # noqa: BLE001 — the catalog reaches the network; None = previous behaviour
         return None
 
 
 def offered_models(provider: str) -> frozenset[str]:
-    """Что провайдер предлагает СЕЙЧАС, по последнему наблюдению мира."""
+    """What the provider offers NOW, per the last observation."""
     if catalog_freshness().get("expired"):
         ensure_fresh_catalog()
     catalog = _load_catalog() or {}

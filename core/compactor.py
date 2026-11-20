@@ -1,15 +1,6 @@
-"""Conversation history compaction (Anthropic 2025 — context engineering).
+"""Conversation history compaction: older turns fold into one synthetic summary turn.
 
-* Default summarizer is **deterministic** (no LLM call): it lists each user
-question, the tools that were exercised, and a one-line answer excerpt.
-Cheap, predictable, no extra latency or cost. * An optional ``summarizer``
-callable can be supplied for richer LLM- driven compaction (e.g. via Haiku).
-The callable receives the list of `Turn` objects and must return the summary
-string.
-
-Always returns a list whose first element (when compaction occurred) is the
-synthetic summary turn carrying the index of the latest dropped turn,
-followed by the kept recent turns in original order.
+The default summarizer is deterministic (no LLM); an optional ``summarizer`` callable (receives `Turn`s, returns a string) allows LLM compaction. The summary turn comes first, followed by the kept recent turns in order.
 """
 
 from __future__ import annotations
@@ -61,20 +52,7 @@ def compact_turns(
 ) -> tuple[list[Turn], Turn | None]:
     """Fold turns older than the last ``keep_recent`` into one summary Turn.
 
-    Returns ``(new_turns, summary_turn)``. If no compaction happened
-    (not enough turns, or ``keep_recent`` >= len), ``summary_turn`` is
-    ``None`` and ``new_turns`` mirrors the original list.
-
-    The synthetic summary turn:
-    * `index` — index of the LAST dropped turn (so the kept turns'
-      indices remain strictly greater).
-    * `id` — fresh `turn_…` id.
-    * `question` — `[compacted history]`.
-    * `tools_used` — concatenation of tools across dropped turns
-      (deduplicated, preserved order).
-    * `artifact_labels` — same idea for labels.
-    * `answer` — output of the summarizer.
-    * `planner_reasoning` — empty.
+    Returns ``(new_turns, summary_turn)``; ``summary_turn`` is ``None`` when nothing was compacted. The summary turn's `index` is that of the LAST dropped turn; `tools_used` and `artifact_labels` are deduplicated in order.
     """
     if keep_recent < 0:
         raise ValueError("keep_recent must be >= 0")

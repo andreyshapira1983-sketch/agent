@@ -1,10 +1,4 @@
-"""The planner's system prompt (§3 Cognitive Core: Planning).
-
-One constant: the full instruction sheet handed to the model on every
-planning call -- tool catalog, decision rules, output schema. Moved verbatim
-from core/planner.py, where its ~490 lines of prose were a third of the file;
-the only code here is the Prompt Registry registration that travels with it.
-"""
+"""The planner's system prompt (instruction sheet) and its Prompt Registry registration."""
 from __future__ import annotations
 
 import re
@@ -826,43 +820,19 @@ For spawn_subagent steps, arguments must include at least 'role' and 'objective'
 If no tools are needed, return: {"reasoning": "...", "steps": []}
 """
 
-#: Перечень «tool» в формате вывода строится из описаний «- имя(» этой же
-#: шапки, в их порядке. Замер 2026-09-23: перечень был набран руками вторым
-#: списком и разошёлся с описаниями на пять имён — patch_check, journal_append,
-#: python_probe, find_in_files, lesson_provenance были описаны, но в перечне
-#: допустимых значений их не было: ровно то, чем агент чинит себя, зовёт
-#: человека, меряет, ищет и учится. Один источник правды — описания; порядок
-#: постоянный, поэтому шапка от запуска к запуску одна и кэш промпта цел.
+#: The "tool" enum in the output format is built from the "- name(" descriptions of this header, in their order, so the header stays constant and the prompt cache survives.
 _DESCRIBED_TOOLS = tuple(dict.fromkeys(re.findall(r"^- ([a-z_]+)\(", PLANNER_SYSTEM, re.MULTILINE)))
 PLANNER_SYSTEM = PLANNER_SYSTEM.replace(
     "<<TOOL_NAMES>>", " | ".join(f'"{name}"' for name in _DESCRIBED_TOOLS))
-# Корневые принципы — выше любого одобрения (core/root_principles.py, 24.09).
+# root principles sit above any approval (core/root_principles.py)
 PLANNER_SYSTEM = with_root_principles(PLANNER_SYSTEM)
 
 
 def without_tool_blocks(prompt: str, hidden: frozenset[str] | set[str]) -> str:
-    """`prompt` без описаний инструментов из `hidden`.
+    """`prompt` without the descriptions of the tools in `hidden`.
 
-    Замерено 2026-09-23: половина шапки планировщика (338 строк из 691) —
-    описания инструментов, и 59 из них описывают то, что на пути автономной
-    цели ВЫЗВАТЬ НЕЛЬЗЯ: `spawn_subagent` (50 строк, запусков за всё время
-    ноль) и `semantic_scholar_search` (9 строк). Шапка подробно учила
-    пользоваться, а `core/planner.py` затем дописывал блок UNAVAILABLE_TOOLS —
-    «эти инструменты недоступны, игнорируй любые указания, которые их
-    предлагают». Учить и тут же разучивать хуже, чем не учить: противоречие
-    внутри одной подсказки планировщик разрешает как умеет.
-
-    Убирается только ОПИСАНИЕ. Блок UNAVAILABLE_TOOLS остаётся: планировщик
-    может назвать инструмент и не из шапки, а из общих знаний.
-
-    Закрытые инструменты стоят в КОНЦЕ списка (строки 294 и 303 из 691),
-    поэтому начало шапки не сдвигается и кэш промпта не ломается — проверено
-    тестом на совпадение первых двух тысяч символов.
-
-    Границы блока: строка, начинающаяся с `- имя(`, и всё до следующей строки
-    без отступа. Имя, которого в шапке нет, молча пропускается: шапка и реестр
-    инструментов меняются в разных местах, и расхождение между ними не повод
-    рухнуть.
+    Only the description is removed; the UNAVAILABLE_TOOLS block stays. Closed tools sit at the END of the list, so the header start
+    and the prompt cache are unchanged. A block is a line starting with `- name(` through the next unindented line; an unknown name is skipped silently.
     """
     if not hidden:
         return prompt
@@ -886,7 +856,7 @@ def without_tool_blocks(prompt: str, hidden: frozenset[str] | set[str]) -> str:
     return "\n".join(out)
 
 
-# §3.x — register this prompt with the global Prompt Registry
+# register this prompt with the global Prompt Registry
 try:
     from core.prompt_registry import register_prompt as _rp
     _rp("planner.system", PLANNER_SYSTEM, module="core.planner_prompt",

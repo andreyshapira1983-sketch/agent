@@ -1,21 +1,8 @@
-"""Lightweight, read-only self-build supervisor cycle.
+"""Lightweight, read-only self-build supervisor cycle: one short pass decides whether the agent should wait, stop, or propose exactly one evidence-backed candidate.
 
-The supervisor decides — in one short pass — whether the agent should *wait*,
-*stop*, or *propose* exactly one evidence-backed self-build candidate. It never
-applies changes, never writes files, never runs tests, never calls shell_exec,
-and never refreshes models or provider catalogs. All inputs are gathered by the
-caller from existing local operator helpers; this module holds only the pure
-decision logic so it is trivially testable with no real LLM/provider/network.
-
-Decision order (first gate that trips wins):
-1. budget      -> status="budget_wait"   when the hour window is near exhaustion
-2. approvals   -> status="approval_wait"  when approval items are pending
-3. scheduler / task queue / recent errors / TECH_DEBT.md  (informational)
-4. candidate   -> status="ok" with one candidate payload or "NO_PATCH"
-
-The candidate is produced lazily through ``candidate_provider`` and is only
-invoked once budget and approval gates have passed, so a waiting cycle never
-runs the heavier candidate analysis.
+Pure decision logic; the caller gathers inputs. Gate order, first to trip wins: budget (`budget_wait`), pending approvals
+(`approval_wait`), informational scheduler / errors / TECH_DEBT.md, then the candidate (`ok` with a payload or "NO_PATCH").
+The candidate is produced lazily via ``candidate_provider`` only after the gates pass, so a waiting cycle runs no analysis.
 """
 from __future__ import annotations
 
@@ -25,9 +12,8 @@ from typing import Any
 # Counters in the persistent hour window that gate a new self-build cycle.
 _GATED_WINDOW = "hour"
 
-# Default safety margins. A cycle waits when fewer than this many hourly LLM
-# calls remain, or when the hourly model-token headroom drops to/below this
-# fraction of the configured limit.
+# Default safety margins: a cycle waits when fewer than this many hourly LLM calls remain, or when hourly
+# model-token headroom is at or below this fraction of the limit.
 _DEFAULT_LLM_CALLS_MIN = 3
 _DEFAULT_TOKEN_RATIO_MIN = 0.1
 
@@ -114,7 +100,7 @@ def evaluate_self_build_supervisor(
     checked: list[str] = []
     evidence: dict[str, Any] = {}
 
-    # 1. budget window ---------------------------------------------------------
+    # 1. budget window
     checked.append("budget")
     headroom = hour_budget_headroom(budget_windows)
     evidence["hour_budget_headroom"] = headroom
@@ -134,7 +120,7 @@ def evaluate_self_build_supervisor(
             ),
         }
 
-    # 2. pending approvals -----------------------------------------------------
+    # 2. pending approvals
     checked.append("approvals")
     pending = int(approvals_pending or 0)
     evidence["approvals_pending"] = pending
@@ -151,7 +137,7 @@ def evaluate_self_build_supervisor(
             ),
         }
 
-    # 3. scheduler / task queue (informational) --------------------------------
+    # 3. scheduler / task queue (informational)
     checked.append("scheduler")
     evidence["scheduler_due"] = int((scheduler or {}).get("due", 0) or 0)
     checked.append("task_queue")
@@ -159,18 +145,18 @@ def evaluate_self_build_supervisor(
         (task_queue or {}).get("pending_due", 0) or 0
     )
 
-    # 4. recent errors (informational) -----------------------------------------
+    # 4. recent errors (informational)
     checked.append("recent_errors")
     errors = list(recent_errors or [])
     evidence["recent_error_count"] = len(errors)
     if errors:
         evidence["recent_error_sample"] = errors[:5]
 
-    # 5. tech debt (informational) ---------------------------------------------
+    # 5. tech debt (informational)
     checked.append("tech_debt")
     evidence["tech_debt"] = dict(tech_debt or {})
 
-    # 6. one candidate ---------------------------------------------------------
+    # 6. one candidate
     checked.append("candidate")
     candidate = candidate_provider() if candidate_provider is not None else None
     if not candidate or candidate.get("diff") == "NO_PATCH":

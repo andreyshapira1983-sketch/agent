@@ -1,11 +1,4 @@
-"""Слайс 1 органа подъёма: наблюдение → конкурирующие объяснения (MIR-096).
-
-Проект, конституция и литературные основания:
-docs/audit/CAUSAL_CLIMB_ORGAN_DESIGN.md. Коротко: гипотеза без предсказания
-не принимается; меньше двух выживших — отказ без записи; автор не судит себя
-(Huang ICLR'24) — заявка сохраняется с chosen == "" до различения; dry-run не
-тратит и не пишет. Различение и чеканка урока — слайсы 2–3, не здесь.
-"""
+"""Causal climb actions: explain observations, discriminate by probes, prove a cause by removal."""
 from __future__ import annotations
 
 import re
@@ -21,14 +14,8 @@ from core.causal_store import CausalObservationStore, ObservationRecord
 
 _OBSERVATIONS_RELPATH = Path("data") / "causal_observations.jsonl"
 
-#: Пары «ОБЪЯСНЕНИЕ N / ПРЕДСКАЗАНИЕ N» из ответа модели. Разбор построчный
-#: и терпимый к хвостам: незнакомые строки игнорируются, пустые поля убивают
-#: пару на воротах качества, не в разборе.
-#: Живой прогон 2026-09-20: подъём отказал шесть раз подряд — «нужны
-#: конкурирующие фальсифицируемые объяснения: выжило 0». Модель писала пары,
-#: но перенос строки внутри объяснения (или пустая строка перед
-#: предсказанием) ломал разбор, требовавший ДВУХ соседних строк. Номер тоже
-#: стал необязательным: пара опознаётся по словам, а не по нумерации.
+#: Pairs "ОБЪЯСНЕНИЕ N / ПРЕДСКАЗАНИЕ N" from the model reply. Tolerant of line breaks and missing numbers;
+#: empty fields kill the pair at the quality gate, not in parsing.
 _PAIR_RE = re.compile(
     r"ОБЪЯСНЕНИЕ\s*\d*\s*:\s*(?P<statement>.+?)\s*\n\s*"
     r"ПРЕДСКАЗАНИЕ\s*\d*\s*:\s*(?P<predicts>.+?)"
@@ -53,11 +40,7 @@ _SYSTEM_PROMPT = (
 
 
 def unexplained_observations(workspace: str | Path) -> tuple[ObservationRecord, ...]:
-    """Наблюдения, чей отпечаток не покрыт ни одной заявкой.
-
-    Самое повторяющееся — первым: повторяемость = сильнейший повод
-    расследования (класс MIR-100); при равенстве — свежее.
-    """
+    """Observations not covered by any claim: most repeated first, then freshest."""
     store = CausalObservationStore(Path(workspace) / _OBSERVATIONS_RELPATH)
     records = store.load()
     if not records:
@@ -74,7 +57,7 @@ def unexplained_observations(workspace: str | Path) -> tuple[ObservationRecord, 
 
 
 def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
-    """(объяснение, предсказание) — только пары, где живы ОБА поля."""
+    """(explanation, prediction) pairs where both fields are non-empty."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for m in _PAIR_RE.finditer(raw or ""):
@@ -89,14 +72,9 @@ def _parse_hypotheses(raw: str) -> list[tuple[str, str]]:
 
 def _decline(agent: Any, reason: str, *, llm_calls_spent: int = 0,
              result: str = "failed", **payload: Any) -> CampaignActionOutcome:
-    """Отказ не носит продукта: artifact = работа (MIR-117), а причина —
-    в журнале `causal_climb_declined`, молчаливых отказов нет. Потраченные
-    до отказа вызовы едут в исходе — бюджет кампании не врёт (SPEC_WEAVE §3).
+    """Log a decline and return an outcome without artifact; result is "failed" or "idle" (nothing to do).
 
-    `result` разделяет два разных отказа. «Не смог» — это `failed`. «Нечего
-    делать» — это `idle`: живой прогон 2026-09-20, все наблюдения оказались
-    закрыты, и шесть циклов подряд записали провал там, где была выполненная
-    работа; драйв поломок считал их сломанными действиями."""
+    Calls spent before the decline travel in the outcome so the campaign budget stays honest."""
     _log(agent, "causal_climb_declined", {"reason": reason, **payload})
     return CampaignActionOutcome(result=result, llm_calls_spent=llm_calls_spent)
 
@@ -106,14 +84,14 @@ def _log(agent: Any, event: str, payload: dict) -> None:
     if log is not None:
         try:
             log.log(event, payload)
-        except Exception:  # noqa: BLE001, S110 — журнал не роняет подъём
+        except Exception:  # noqa: BLE001, S110 — the journal must not break the climb
             pass
 
 
 def explain_causal_observation(
     *, agent: Any, workspace: str | Path, dry_run: bool = False,
 ) -> CampaignActionOutcome:
-    """Одно наблюдение → заявка с ≥2 фальсифицируемыми объяснениями."""
+    """One observation to a claim with at least two falsifiable explanations."""
     naked = unexplained_observations(workspace)
     if not naked:
         return _decline(agent, "нет непокрытых наблюдений — подъёму нечего объяснять",
@@ -127,8 +105,7 @@ def explain_causal_observation(
 
     spent_before = _llm_calls(agent)
     try:
-        # Кормление реальностью (проект агента): без списка модель выдумывала
-        # имена журналов, и суд давился неведением — замер 2/2 кампаний.
+        # Real file inventory in the prompt: without it the model invented log names.
         mismatch = _repaired_address(record.observed_mismatch)
         inventory = _live_inventory_block(workspace, named=_named_files(mismatch, workspace))
         raw = str(agent.llm.complete(
@@ -142,22 +119,20 @@ def explain_causal_observation(
             ),
             max_tokens=600, temperature=0.4,
         ) or "")
-    except Exception as exc:  # noqa: BLE001 — провод не роняет кампанию
+    except Exception as exc:  # noqa: BLE001 — the wiring must not break the campaign
         return _decline(agent, f"model_error:{type(exc).__name__}",
                         llm_calls_spent=max(0, _llm_calls(agent) - spent_before),
                         fingerprint=record.fingerprint)
 
     pairs = _parse_hypotheses(raw)
-    # Ворота рождения (проект агента): проба в несуществующий файл убивает
-    # пару здесь, а «меньше двух выживших» решает существующий порог ниже.
+    # Birth gate: a probe at a missing file kills the pair; the two-survivor threshold applies below.
     pairs = _pairs_with_real_targets(pairs, workspace)
     if len(pairs) < 2:
-        # Ворота качества: гипотеза без предсказания мертва, а одна выжившая —
-        # подтверждение задним числом, не расследование.
+        # Quality gate: no prediction means dead; one survivor is hindsight, not investigation.
         return _decline(
             agent,
             f"нужны конкурирующие фальсифицируемые объяснения: выжило {len(pairs)}",
-            # Вызов модели уже оплачен: 2026-09-22 отказ писал 0, и бюджет врал.
+            # The model call is already paid; keep the spend accurate.
             llm_calls_spent=max(0, _llm_calls(agent) - spent_before),
             fingerprint=record.fingerprint,
             answer_head=" ".join((raw or "").split())[:200],
@@ -177,7 +152,7 @@ def explain_causal_observation(
             propose_explanation(statement, author="agent", predicts=predicts)
             for statement, predicts in pairs[:3]
         ),
-        # chosen НАМЕРЕННО пуст: выбор — исход различения (слайс 2), не автора.
+        # chosen is intentionally empty: choosing is the outcome of discrimination, not the author's.
     )
     key = save_claim(claim, workspace=workspace,
                      machine_action="explain_causal_observation")
@@ -205,12 +180,9 @@ def _llm_calls(agent: Any) -> int:
         return 0
 
 
-# ── Слайс 2: детерминированное различение ────────────────────────────────────
-#
-# Проба — машинная часть предсказания: `[probe: путь | подстрока | есть|нет]`.
-# Пути только ВНУТРИ logs/ и data/ рабочей области: побег («..», абсолютный,
-# чужой каталог) делает пробу невалидной, и она НЕ читается. Различение не
-# зовёт модель вовсе: слово автора — не улика (Huang ICLR'24), улика — файл.
+# ── Slice 2: deterministic discrimination ──
+# A probe is the machine part of a prediction: [probe: path | substring | есть|нет]. Paths only inside
+# logs/ and data/ of the workspace; an escape makes the probe invalid and unread. No model call.
 
 _PROBE_RE = re.compile(
     r"\[probe:\s*(?P<path>[^|\]]+?)\s*\|\s*(?P<needle>[^|\]]+?)\s*\|\s*"
@@ -223,7 +195,7 @@ _PROBE_DIRS = ("logs", "data")
 
 @dataclass(frozen=True)
 class Probe:
-    """Машинно-проверяемая половина предсказания."""
+    """Machine-checkable half of a prediction."""
 
     rel_path: str
     needle: str
@@ -231,7 +203,7 @@ class Probe:
 
 
 def parse_probe(predicts: str) -> Probe | None:
-    """Проба из текста предсказания; невалидная (побег, чужой каталог) — None."""
+    """Probe parsed from prediction text; None when invalid (escape, foreign directory)."""
     m = _PROBE_RE.search(predicts or "")
     if not m:
         return None
@@ -251,9 +223,7 @@ def parse_probe(predicts: str) -> Probe | None:
 
 
 AWAITING_EXPERIMENT_MARK = "awaiting_experiment"
-#: Нота невыразимости (SPEC_WEAVE §2, авторство агента): развод гипотез не
-#: выражается песочными целями — заявка ждёт слова человека; вечерний отчёт
-#: находит все такие одним грепом по "spec_unexpressible".
+#: Note that the split is not expressible with sandbox targets; the claim waits for a human.
 SPEC_UNEXPRESSIBLE_NOTE = "spec_unexpressible_in_sandbox"
 
 
@@ -290,7 +260,7 @@ def _birth_experiment_spec(agent, claim):
         if why:
             _log(agent, "causal_spec_rejected", {"why": why, "kind": "discriminate"})
             return None
-    except Exception:  # noqa: BLE001 — рождение не роняет суд
+    except Exception:  # noqa: BLE001 — spec birth must not break the court
         return None
     else:
         return spec_text
@@ -300,10 +270,7 @@ _INVARIANT_RE = re.compile(r"ИНВАРИАНТ\s*:\s*(?P<text>[^\n]+)", re.IGNO
 
 
 def _birth_intervention_spec(agent, claim):
-    """(spec_text, invariant) for a claim whose cause is chosen but unproven
-    (block 4, M1): one hypothesis, arm A carries the cause, arm B removes it,
-    and the model names the invariant the cause violates — the prose field no
-    machine wrote before. None when inexpressible or the invariant is missing."""
+    """Return (spec_text, invariant) for a claim with a chosen but unproven cause, or None if inexpressible or no invariant."""
     try:
         target = chosen_explanation(claim)
         if target is None:
@@ -336,15 +303,14 @@ def _birth_intervention_spec(agent, claim):
         invariant = found.group("text").strip() if found else ""
         if not invariant:
             return None
-    except Exception:  # noqa: BLE001 — рождение не роняет суд
+    except Exception:  # noqa: BLE001 — spec birth must not break the court
         return None
     else:
         return response, invariant
 
 
 def _apply_born_spec(claim, extra, spec_text, workspace, *, invariant=""):
-    """Applies a born specification to the hypothesis it is for — the chosen
-    one when the claim awaits its proof, else the first alive — and saves."""
+    """Attach a born spec to the chosen (or first alive) hypothesis and save the claim."""
     import dataclasses
 
     alive = [e for e in claim.explanations if e.alive]
@@ -374,21 +340,18 @@ def _apply_born_spec(claim, extra, spec_text, workspace, *, invariant=""):
 
 
 def awaiting_experiment(claim) -> bool:
-    """True, если заявка помечена "ждёт эксперимента" (метка присутствует в claim.notes).
-    Чистая функция, только чтение."""
+    """True when the claim carries the awaiting-experiment mark in claim.notes."""
     return AWAITING_EXPERIMENT_MARK in claim.notes
 
 
 def needs_intervention(claim) -> bool:
-    """EXPLAINED без хода (блок 4, M1, 2026-09-03): объяснение выбрано пробами
-    по журналам, а причина вмешательством не доказана. Замер: 15 живых заявок
-    стояли так навсегда — `chosen` запирал слайс 3, ступени выше не было."""
+    """EXPLAINED with no intervention: chosen by probes, cause not yet proven by intervention."""
     return bool(claim.chosen.strip()) and not claim.refuted_reason.strip() \
         and claim.intervention is None
 
 
 def chosen_explanation(claim):
-    """Живое объяснение, которое заявка выбрала, или None."""
+    """The alive explanation the claim chose, or None."""
     for exp in claim.explanations:
         if exp.alive and exp.statement == claim.chosen:
             return exp
@@ -396,9 +359,7 @@ def chosen_explanation(claim):
 
 
 def birth_candidates(workspace: str | Path):
-    """Заявки, которым нужна спецификация: помеченные «ждёт эксперимента» и
-    выбранные-без-вмешательства, у которых выбранное объяснение спеки не несёт.
-    Нота невыразимости снимает заявку с рождения."""
+    """Claims needing a spec: awaiting experiment, or chosen without intervention and lacking a spec; the unexpressible note excludes a claim."""
     out = []
     for claim, extra in load_claims(workspace):
         if SPEC_UNEXPRESSIBLE_NOTE in claim.notes:
@@ -414,13 +375,13 @@ def birth_candidates(workspace: str | Path):
 
 
 def discriminable_claims(workspace: str | Path):
-    """Заявки без выбранного и без опровержения, где есть хоть одна живая проба."""
+    """Claims with no chosen explanation, no refutation and at least one live probe."""
     out = []
     for claim, extra in load_claims(workspace):
         if claim.chosen.strip() or claim.refuted_reason.strip():
             continue
         if awaiting_experiment(claim):
-            continue  # помеченные "ждёт эксперимента" пропускаются судом на входе
+            continue
         probed = any(
             e.alive and parse_probe(e.predicts) is not None
             for e in claim.explanations
@@ -431,7 +392,7 @@ def discriminable_claims(workspace: str | Path):
 
 
 def _run_probe(workspace: Path, probe: Probe) -> bool | None:
-    """True = подстрока найдена, False = нет, None = цель нечитаема (не вердикт)."""
+    """True = substring found, False = not found, None = target unreadable (not a verdict)."""
     base = (workspace / probe.rel_path.split("/", 1)[0]).resolve()
     target = (workspace / probe.rel_path).resolve()
     try:
@@ -453,21 +414,13 @@ def _run_probe(workspace: Path, probe: Probe) -> bool | None:
     return False if found_any_file else None
 
 
-# ── Слайс 3: причина доказывается её устранением ─────────────────────────────
-#
-# Двурукавный эксперимент исполнения (DoVer: атрибуция из журналов —
-# непроверенная гипотеза, пока не подтверждена исполнением):
-#   [exp: цель | A=<вход с причиной> | B=<вход без причины> | след=<подстрока>]
-# Следствие есть в A и исчезает в B → Intervention.proves_cause. Следствие в
-# ОБОИХ рукавах → гипотеза опровергнута (её механизм различия не даёт).
-# Нигде → эксперимент не воспроизвёл явление: неведение, не вердикт.
-# Цели — ТОЛЬКО белый список чистых функций: ни файлов, ни сети, ни состояния.
+# ── Slice 3: a cause is proven by removing it ──
+# Two-arm execution experiment: [exp: target | A=<input with cause> | B=<input without> | след=<substring>].
+# Trace in A only proves the cause; in both arms refutes it; in neither means ignorance, not a verdict.
+# Targets are a whitelist of pure functions: no files, network or state.
 
-#: Слова-заглушки примера спецификации — ОДИН источник: из них собирается
-#: пример в подсказке рождения, и ими же `parse_experiment` отвергает эхо
-#: примера. Живой реестр 2026-09-18 (ветка #352, перенесено 25.09): модель
-#: вернула пример дословно, проверка «непусто ли» его приняла, и 48 прогонов
-#: подряд ушли на рукава-заглушки без единого вердикта.
+#: Placeholder words of the spec example: one source for the birth prompt and for parse_experiment,
+#: which rejects an echoed example.
 _SPEC_PLACEHOLDERS = ("рукав для гипотезы 1", "рукав для гипотезы 2", "наблюдаемое различие")
 
 _EXP_RE = re.compile(
@@ -479,7 +432,7 @@ _EXP_RE = re.compile(
 
 
 def _run_reasoning_action_check(arm: str) -> str:
-    """Адаптер белого списка: «текст ;; tool1,tool2» → строка отчёта сенсора."""
+    """Whitelist adapter: "text ;; tool1,tool2" to a sensor report line."""
     from core.reasoning_action_check import check_reasoning_actions
 
     text, _, tools_raw = arm.partition(";;")
@@ -490,15 +443,7 @@ def _run_reasoning_action_check(arm: str) -> str:
 
 
 def _run_goal_first(arm: str) -> str:
-    """Адаптер: «severity=… ;; action=… ;; goal_action=… ;; attempted=…» → выбор.
-
-    `_goal_first` чиста: строит новые объекты, ничего не читает и не пишет.
-    Взята целью 2026-09-20 по живому случаю: агент нашёл про неё все факты
-    верно и сложил вывод наизнанку — «пайплайн не срабатывает из-за раннего
-    возврата при critical/high», хотя по его же факту у пайплайна severity
-    равен medium. Направление причины лексикой не установить; оно
-    устанавливается прогоном обоих рукавов.
-    """
+    """Adapter: "severity=… ;; action=… ;; goal_action=… ;; attempted=…" to a choice; _goal_first is pure."""
     from core.best_next_action import BestNextAction
     from core.campaign import _goal_first
 
@@ -520,17 +465,14 @@ def _run_goal_first(arm: str) -> str:
             f"decided_by={chosen.decided_by}")
 
 
-#: Белый список целей эксперимента. Только ЧИСТЫЕ функции; расширение —
-#: новая строка здесь плюс свидетель, никогда динамический импорт по имени.
+#: Whitelist of experiment targets: pure functions only; extend here with a witness, never by dynamic import.
 _EXPERIMENT_TARGETS: dict[str, Any] = {
     "reasoning_action_check": _run_reasoning_action_check,
     "goal_first": _run_goal_first,
 }
 
-#: Договор цели: что цель берёт на вход и что печатает. Без него модель
-#: писала рукава прозой («трейс с partially_achieved»), цель принимала её
-#: молча и оба рукава давали один и тот же пустой отчёт — 46 прогонов
-#: «неопределённо» на одной заявке (замер 2026-09-20).
+#: Target contract: what a target takes as input and prints. Without it arms were written as prose
+#: and every run gave the same empty report.
 _TARGET_CONTRACTS: dict[str, str] = {
     "reasoning_action_check": (
         "вход: «<текст рассуждения> ;; <инструмент1,инструмент2>»; "
@@ -546,7 +488,7 @@ _TARGET_CONTRACTS: dict[str, str] = {
 
 
 def target_contracts() -> str:
-    """Список целей С ИХ ДОГОВОРАМИ: рукав — вход цели, след — подстрока вывода."""
+    """Targets with their contracts: an arm is the target's input, the trace is a substring of its output."""
     return "; ".join(
         f"{name} ({_TARGET_CONTRACTS.get(name, 'договор не описан')})"
         for name in _EXPERIMENT_TARGETS
@@ -555,7 +497,7 @@ def target_contracts() -> str:
 
 @dataclass(frozen=True)
 class Experiment:
-    """Машинно-исполняемая спецификация двурукавного вмешательства."""
+    """Machine-executable two-arm intervention spec."""
 
     target: str
     arm_a: str
@@ -564,7 +506,7 @@ class Experiment:
 
 
 def parse_experiment(predicts: str) -> Experiment | None:
-    """Спецификация из предсказания; цель вне белого списка — невалидна."""
+    """Spec from a prediction; a target outside the whitelist is invalid."""
     m = _EXP_RE.search(predicts or "")
     if not m:
         return None
@@ -577,26 +519,19 @@ def parse_experiment(predicts: str) -> Experiment | None:
     if not arm_a or not arm_b or not effect:
         return None
     if any(f.casefold() in _SPEC_PLACEHOLDERS for f in (arm_a, arm_b, effect)):
-        return None  # заполненный словами образца бланк — пустой бланк
+        return None  # a blank filled with the example's words is empty
     return Experiment(target=target, arm_a=arm_a, arm_b=arm_b, effect=effect)
 
 
 def spec_is_executable(spec: Experiment) -> str:
-    """Пустая строка — спека исполнима; иначе причина, по которой она не опыт.
-
-    Замер 2026-09-20: 46 исходов подряд «следствие не воспроизвелось ни в
-    одном рукаве» на ОДНОЙ заявке. Разбор формы её пропускал — рукава были
-    прозой («трейс с partially_achieved»), которую цель на вход не берёт, а
-    `след=` было рассуждением, которого в выводе цели не бывает. Форма — не
-    исполнимость; исполнимость проверяется исполнением.
-    """
+    """Empty string if the spec is executable, else why it is not an experiment (a valid form is not executability)."""
     runner = _EXPERIMENT_TARGETS.get(spec.target)
     if runner is None:
         return f"цели {spec.target!r} нет в белом списке"
     try:
         out_a = str(runner(spec.arm_a))
         out_b = str(runner(spec.arm_b))
-    except Exception as err:  # noqa: BLE001 — сломанный рукав — не вердикт
+    except Exception as err:  # noqa: BLE001 — a broken arm is not a verdict
         return f"рукав не исполняется: {type(err).__name__}"
     if spec.effect not in out_a and spec.effect not in out_b:
         return ("следствие не встречается ни в одном рукаве: "
@@ -607,17 +542,12 @@ def spec_is_executable(spec: Experiment) -> str:
 
 
 def retire_spec(predicts: str) -> str:
-    """Предсказание без спецификации: мёртвая спека снимается, гипотеза живёт."""
+    """Prediction without a spec: a dead spec is dropped, the hypothesis lives."""
     return _EXP_RE.sub("", predicts or "").strip()
 
 
 def experimentable_claims(workspace: str | Path):
-    """Открытые заявки, где живая гипотеза несёт спецификацию.
-
-    Блок 4 (M1): заявка с выбранным ПО ПРОБАМ объяснением, но без
-    вмешательства, на этой ступени открыта — журналы указали, доказывает
-    эксперимент. Заявка с вмешательством или опровержением закрыта.
-    """
+    """Open claims whose live hypothesis carries a spec, including chosen-by-probes without intervention."""
     out = []
     for claim, extra in load_claims(workspace):
         if claim.refuted_reason.strip():
@@ -634,12 +564,7 @@ def experimentable_claims(workspace: str | Path):
 
 
 def _retire_dead_specs(claim, extra, explanations, workspace, agent, retired):
-    """Снять неисполнимые спеки и вернуть заявку под новое рождение.
-
-    Неопределённый исход — не вердикт о гипотезе, а приговор СПЕКЕ: она не
-    воспроизвела явление ни в одном рукаве. До 2026-09-20 он не стоил ей
-    ничего, и следующий цикл брал ту же спеку первой — 46 прогонов подряд.
-    """
+    """Retire unexecutable specs and return the claim for re-birth; an indeterminate outcome is a verdict on the spec, not the hypothesis."""
     import dataclasses
 
     new_claim = dataclasses.replace(
@@ -656,7 +581,7 @@ def _retire_dead_specs(claim, extra, explanations, workspace, agent, retired):
 def run_claim_experiment(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:
-    """Каждая живая спецификация исполняется; исход решает, не автор."""
+    """Execute every live spec; the outcome decides, not the author."""
     import dataclasses
 
     from core.causal_lesson import Intervention
@@ -681,7 +606,7 @@ def run_claim_experiment(
         try:
             out_a = str(runner(spec.arm_a))
             out_b = str(runner(spec.arm_b))
-        except Exception as err:  # noqa: BLE001 — сломанный рукав — не вердикт
+        except Exception as err:  # noqa: BLE001 — a broken arm is not a verdict
             _log(agent, "causal_experiment_inconclusive", {
                 "claim_key": extra["key"], "target": spec.target,
                 "reason": f"рукав упал: {type(err).__name__}",
@@ -694,9 +619,7 @@ def run_claim_experiment(
         in_b = spec.effect in out_b
         if in_a and not in_b:
             verdicts += 1
-            # Блок 4 (M1): выбор достаётся ПЕРВОМУ доказанному. Выбор по
-            # пробам (журналы) — ещё не доказательство, и заявка без
-            # вмешательства здесь открыта.
+            # Choice goes to the first proven one; a probe-based choice is not proof.
             if intervention is None:
                 chosen = exp.statement
                 intervention = Intervention(
@@ -705,13 +628,13 @@ def run_claim_experiment(
                     predicted=f"следствие '{spec.effect}' исчезает",
                     observed=(f"A: следствие есть; B: следствия нет "
                               f"(A='{out_a[:120]}', B='{out_b[:120]}')"),
-                    restored=True,  # чистая функция: состояние не менялось
+                    restored=True,  # pure function: state unchanged
                 )
             new_explanations.append(exp)
         elif in_a and in_b:
             verdicts += 1
             if exp.statement == chosen and intervention is None:
-                chosen = ""  # опровергнутое объяснение выбранным не остаётся
+                chosen = ""  # a refuted explanation does not stay chosen
             new_explanations.append(dataclasses.replace(
                 exp,
                 refuted_by=(f"эксперимент {spec.target}: следствие "
@@ -762,7 +685,7 @@ def run_claim_experiment(
 def discriminate_causal_claim(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:
-    """Одна заявка: каждая живая проба встречает журнал; исход решает, не автор."""
+    """One claim: every live probe meets the log; the outcome decides, not the author."""
     import dataclasses
 
     ws = Path(workspace)
@@ -805,12 +728,11 @@ def discriminate_causal_claim(
     chosen = claim.chosen
     refuted_reason = claim.refuted_reason
     if not alive:
-        # Опровержение всех — тоже знание, заявка закрывается честно.
+        # Refuting every hypothesis is also knowledge; the claim closes.
         refuted_reason = "все объяснения опровергнуты пробами по журналам"
     elif (len(alive) == 1 and len(new_explanations) > 1
           and alive[0].statement in confirmed):
-        # Выбор = исход различения, и только ИСПЫТАННОМУ: выживание без
-        # пробы — не победа, такой соперник ждёт вмешательства (слайс 3).
+        # Choice = outcome of discrimination, only for a tested hypothesis; survival without a probe waits for intervention.
         chosen = alive[0].statement
 
     advanced = (verdicts > 0
@@ -818,11 +740,7 @@ def discriminate_causal_claim(
                      or refuted_reason != claim.refuted_reason
                      or new_explanations != list(claim.explanations)))
     if not advanced:
-        # Суд сам помечает исчерпанную заявку "ждёт эксперимента" (решение
-        # агента, awaiting_experiment.py): пробы не развели соперников — дальше
-        # только вмешательство; фильтр выше её больше не возьмёт. Рождение
-        # спецификации ЖИВЁТ НЕ ЗДЕСЬ: суд без модели на любом пути — его
-        # конституция (INVARIANT_CLASH, вердикт агента: путь (б)).
+        # An exhausted claim is marked awaiting-experiment so the filter skips it; spec birth lives elsewhere (the court never calls a model).
         marked = dataclasses.replace(
             claim, notes=(*claim.notes, AWAITING_EXPERIMENT_MARK))
         save_claim(marked, workspace=ws, directive=extra["directive"],
@@ -853,12 +771,9 @@ def discriminate_causal_claim(
     )
 
 
-# --- Ворота рождения проб и кормление реальностью: проект и обе функции —
-# авторства агента (GUARD_DESIGN + два груза 2026-08-30, оба с первого захода);
-# курьер перенёс дословно. Замер 2/2: объяснитель выдумывал имена журналов,
-# суд честно давился неведением, кампании гасли датчиком петли.
+# --- Probe birth gate and live inventory ---
 def _pairs_with_real_targets(pairs, workspace):
-    """Пробу судят при рождении, чтобы суд не давился неведением."""
+    """Probes are judged at birth so the court does not choke on ignorance."""
     survivors = []
     for statement, predicts in pairs:
         probe = parse_probe(predicts)
@@ -875,23 +790,18 @@ _NAMED_FILE_RE = re.compile(r"\b(?:logs|data)/[\w.\-]+\.jsonl?\b")
 
 
 def _repaired_address(text: str) -> str:
-    """Старые наблюдения (до 2026-09-22) называли «logs/trace_trace_…» —
-    файла нет (`core.causal_lesson.trace_log_path`); адрес чинится при чтении."""
+    """Repair old observation addresses 'logs/trace_trace_…' (no such file) to the real trace log path."""
     return _TRACE_ADDRESS_RE.sub("logs/", text or "")
 
 
 def _named_files(text: str, workspace) -> list[str]:
-    """Файлы, которые называет само наблюдение и которые есть на диске."""
+    """Files named by the observation itself that exist on disk."""
     found = dict.fromkeys(_NAMED_FILE_RE.findall(text or ""))
     return [rel for rel in found if (Path(workspace) / rel).is_file()]
 
 
 def _live_inventory_block(workspace, named=()):
-    """Модель пишет пробы по списку настоящих файлов, а не по памяти.
-
-    Файлы, названные наблюдением, идут первыми: список каталога режется на
-    сорока именах, а в logs/ их сотни — нужный журнал в него не попадал.
-    """
+    """Real file list for the model's prompt; files named by the observation go first (the directory list is cut at 40 names)."""
     lines = [f"названы наблюдением: {', '.join(named)}"] if named else []
     for dirname in _PROBE_DIRS:
         d = Path(workspace) / dirname
@@ -910,15 +820,7 @@ def _live_inventory_block(workspace, named=()):
 def birth_experiment_specs(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:
-    """Помеченной заявке — песочный эксперимент, либо честная нота невыразимости.
-
-    Отдельное действие кампании по конституционному вердикту агента
-    (INVARIANT_CLASH, путь (б)): суд без модели на любом пути, рождение — вне
-    суда. Сборка — объединение его принятых кусков (обход пар и фильтр из
-    его поставки; замер трат — SPEC_WEAVE §3; событие рождения — §4; путь
-    невыразимости — §2 и принятая вплетка суда); оба двигателя не удержали
-    композицию целиком — граница забанкована в леджере, третий замер.
-    """
+    """Give a marked claim a sandbox experiment spec or an honest unexpressible note; the court never calls a model."""
     import dataclasses
 
     ws = Path(workspace)
@@ -930,8 +832,7 @@ def birth_experiment_specs(
     spent_before = _llm_calls(agent)
     invariant = ""
     if needs_intervention(claim):
-        # Блок 4 (M1): выбранной по пробам причине — эксперимент на устранение
-        # и имя нарушенного инварианта; без них EXPLAINED не имел выхода.
+        # Chosen-by-probes cause: removal experiment plus the violated invariant, else EXPLAINED has no exit.
         pair = _birth_intervention_spec(agent, claim)
         spec_text = pair[0] if pair else None
         invariant = pair[1] if pair else ""

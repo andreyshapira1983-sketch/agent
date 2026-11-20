@@ -1,10 +1,6 @@
-"""Строгий разбор полей сохранённых записей: UTC-отметки и булевы флаги.
+"""Strict parsing of stored record fields: UTC stamps and boolean flags.
 
-Одна копия на двух владельцев — очередь задач (`core/task_queue.py`) и
-расписание (`core/scheduler.py`) читают свои JSONL-записи одними и теми же
-правилами. Раньше каждый держал свою копию этих функций слово в слово; правка
-одной (как H-25 ниже) обязана была повторяться во второй руками.
-"""
+    One copy for two owners: the task queue (`core/task_queue.py`) and the scheduler (`core/scheduler.py`)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,21 +18,9 @@ def utc_iso(dt: datetime | None = None) -> str:
 
 
 def parse_utc_iso(value: str) -> datetime:
-    """Отметку без зоны считать UTC, а не местным временем.
+    """Treat a stamp without a zone as UTC, not local time.
 
-    H-25 в docs/audit/HISTORICAL_FAILURE_LEDGER.md — класс «две конвенции, ни
-    одной сквозной проверки» (Mars Climate Orbiter, только во времени).
-    `datetime.fromisoformat("2026-08-24T10:00:00").astimezone(utc)` трактует
-    наивное значение как МЕСТНОЕ и на этой машине даёт 07:00Z — тихий сдвиг на
-    три часа. При сроке сиротства в 30 минут это значит, что живая задача
-    мгновенно «осиротела», то есть открывается класс двойного исполнения,
-    который MIR-033 измерил закрытым.
-
-    В живом состоянии таких отметок нет: замер 2026-08-24 — 12 472 отметки, все
-    с зоной. Механизм при этом жив, а все писатели репозитория пишут UTC,
-    поэтому наивное значение приводится к UTC вместо местного: тихая ошибка
-    становится нулевой, и ни одно чтение не падает на правке файла руками.
-    """
+        `datetime.fromisoformat(...).astimezone(utc)` treats a naive value as LOCAL, a silent shift that could orphan live tasks; all repo writers use UTC."""
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)

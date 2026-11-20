@@ -1,34 +1,20 @@
-"""Self-repair helpers: reading test output, judging a diagnosis or an empty diff, and summarising approval state.
-
-Extracted from `core/self_repair` by autonomous self-build module split.
-"""
+"""Self-repair helpers: reading test output, judging a diagnosis or an empty diff, summarising approval state."""
 from __future__ import annotations
 
 from typing import Any
 
-#: Весь набор — не «названный тест»: красное где-то в нём не воспроизводит ЭТОТ диагноз.
+#: The whole suite is not a "named test": red somewhere in it does not reproduce THIS diagnosis.
 _WHOLE_SUITE = frozenset({"", ".", "tests", "tests/"})
 
 
-#: Коды выхода pytest, которыми прогон НА СТАРОМ КОДЕ свидетельствует о дефекте:
-#: 1 — тесты упали; 2 — прерван или ошибка сбора (новый тест импортирует то, чего
-#: до правки нет; SWE-bench такой FAIL_TO_PASS тоже считает падением). 3 —
-#: внутренняя ошибка pytest, 4 — ошибка вызова, 5 — не собран ни один тест: ни
-#: один из них дефекта не показывает (пустой тестовый файл давал 5 и проходил).
+#: pytest exit codes that show a defect when run on the OLD code: 1 tests failed; 2 interrupted or collection error (a new test imports what is missing before the fix). 3, 4, 5 (internal error, usage error, no tests collected) show nothing.
 _WITNESS_EXIT_CODES = frozenset({1, 2})
 
 
 def red_before_fix(output: Any, proposal: Any = None) -> bool:
-    """ОДНО правило «воспроизведено до правки» — для самопочинки и для свидетеля.
+    """ONE "reproduced before the fix" rule, shared by self-repair and the witness.
 
-    Было два (сведение слоёв, 25.09): `_diagnosis_verified` (MIR-110) требовал,
-    чтобы упавший тест был НАЗВАН диагнозом, а свидетель patch_route/patch_check
-    реально гонял новый тест НА СТАРОМ КОДЕ, но верил любому ненулевому коду.
-    Плюсы обоих: прогон на старом коде не завис, в нём упал тест (Agentless),
-    код выхода — падение, а не «тестов нет», и, если известно предложение,
-    упавший тест им назван (`_names_failure`). Свидетель гоняет только новые
-    тесты правки, поэтому у него упавшее названо самим прогоном.
-    """
+        The run on old code must not hang, a test must fail in it, the exit code must be a failure and not "no tests", and, when the proposal is known, the failing test must be named by it (`_names_failure`). The witness runs only the fix's new tests, so there the run itself names the failure."""
     if not isinstance(output, dict) or output.get("timed_out") is not False:
         return False
     code = output.get("exit_code")
@@ -44,18 +30,16 @@ def red_before_fix(output: Any, proposal: Any = None) -> bool:
 
 
 def _diagnosis_verified(output: Any, proposal: Any = None) -> bool:
-    """Диагноз проверен, только если прогон до правки воспроизвёл дефект (MIR-110).
+    """A diagnosis is verified only if the run before the fix reproduced the defect.
 
-    Решение оператора 25.09, вариант «а» (как в Agentless: тест, воспроизводящий
-    ошибку, падает до правки). Само правило — `red_before_fix`, одно на двоих.
-    """
+        The rule itself is `red_before_fix`, shared."""
     return red_before_fix(output, proposal)
 
 
 def _names_failure(proposal: Any, test_id: str) -> bool:
-    """Назван ли упавший тест: узкой областью прогона или в тексте диагноза."""
+    """Whether the failing test is named: by a narrow run scope or in the diagnosis text."""
     if getattr(proposal, "test_pattern", None):
-        return True  # прогон шёл с -k: всё упавшее в нём выбрано по имени
+        return True  # the run used -k: everything that failed in it was selected by name
     path = test_id.split("::", maxsplit=1)[0]
     for scope in getattr(proposal, "test_paths", ()) or ():
         scope = str(scope).strip().rstrip("/")

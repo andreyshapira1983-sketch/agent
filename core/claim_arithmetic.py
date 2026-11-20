@@ -1,18 +1,6 @@
 """Deterministic evaluation of arithmetic claims against a key=value excerpt.
 
-**It computes, it does not guess.** Every verdict here is arithmetic over
-numbers parsed out of the excerpt. Where a claim's shape is not recognised
-the answer is :data:`SILENT`, never `REFUTES` — a checker that refuses to
-judge costs a missed defect, one that judges by resemblance costs a false
-accusation, and only the second is unrecoverable.
-
-**A refutation carries its working.** :class:`ClaimVerdict` returns the
-expected value, the value the claim asserted, and the numbers the
-computation used. A bare "no" tells the agent it was wrong; "sum is 6, not
-99, over alpha=1 beta=2 gamma=3" tells it what to change. That difference is
-the whole point of the direction — the operator's criterion is that a label
-change means the instrument got honest, and only a usable reason can make
-the next attempt better.
+Unrecognised claim shapes yield :data:`SILENT`, never `REFUTES`; a refutation carries its working (expected, claimed, numbers used).
 """
 from __future__ import annotations
 
@@ -22,13 +10,7 @@ from typing import Literal
 
 Outcome = Literal["supports", "refutes", "silent"]
 
-#: The shapes below are matched against a lower-cased claim. Russian forms sit
-#: next to English ones because the operator writes in Russian and the model
-#: answers in kind; a checker that only reads English would be silent on half
-#: the traffic and would look like a checker that found nothing wrong.
-#: Written-out numerals count as numerals. This is lexicon, not inference:
-#: "three times alpha" states a factor exactly as "3 times alpha" does, and a
-#: checker that reads only digits would be silent on the way people write.
+#: Shapes are matched against a lower-cased claim; Russian and English forms sit side by side, and written-out numerals count as numerals (lexicon, not inference).
 _WORD_NUMBERS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -55,42 +37,34 @@ _CMP_RE = re.compile(
 #: `<` for the words that mean "less". Everything else in `_CMP_RE` means more.
 _LESS_WORDS = {"smaller", "less", "lower"}
 
-#: Разность прогона: `passed = total - failed`. Это ЛЕКСИКОН, а не вывод — в
-#: отчётах о прогоне отношение фиксированное, и «117 tests passed» при
-#: `tests_total=120, tests_failed=3` ровно так и вычисляется. Слепой поиск
-#: «какой-нибудь пары, чья разность равна заявленному» был бы суждением по
-#: сходству, чего этот модуль не делает; здесь названы и слово, и ключи.
+#: Run difference `passed = total - failed` (lexicon, not inference): "117 tests passed" with `tests_total=120, tests_failed=3`; the word and keys are named.
 _PASSED_RE = re.compile(
     rf"\b(?:{_NUM}\s+(?:tests?\s+)?(?:passed|passing)"
     rf"|(?:прошл\w*|пройден\w*)\s+{_NUM}"
     rf"|(?:reports?|records?)\s+{_NUM}\s+passed)", re.IGNORECASE)
 
-#: Сравнение ключа с ЛИТЕРАЛОМ: «version below 3.0», «coverage is above 0.5»,
-#: «версия ниже 3.0». Соседний `_CMP_RE` сравнивает ключ с ключом; эта форма
-#: сравнивает ключ с числом или версией, названными прямо в утверждении.
+#: Key compared with a LITERAL ("version below 3.0", "версия ниже 3.0"); `_CMP_RE` compares key with key.
 _LITERAL_CMP_RE = re.compile(
     r"\b([a-z_][a-z0-9_]*|верси\w*)\s+(?:is\s+|записан\w*\s+|)"
     r"(below|under|above|over|less\s+than|greater\s+than|"
     r"ниже|выше|меньше|больше)\s+"
     r"(\d+(?:\.\d+)*)", re.IGNORECASE)
 
-#: Слова, означающие «меньше», для сравнения с литералом.
+#: Words meaning "less" for the literal comparison.
 _LITERAL_LESS_WORDS = {"below", "under", "less than", "ниже", "меньше"}
 
-#: Ключи разности прогона, в порядке предпочтения.
+#: Keys of the run difference, in order of preference.
 _TOTAL_KEYS = ("tests_total", "total", "tests")
 _FAILED_KEYS = ("tests_failed", "failed", "failures")
 
-#: Русское имя ключа `version` — утверждение о версии оператор пишет словом.
+#: Russian spelling of the `version` key.
 _VERSION_ALIASES = {"верси", "version"}
 
 
 def _version_tuple(raw: str) -> tuple[int, ...] | None:
-    """Версия как кортеж компонент, или None если это обычное число.
+    """Version as a tuple of components, or None for an ordinary number.
 
-    Сравнивать версию как float нельзя: `2.11.0` против `2.9.0` даёт
-    2.11 < 2.9 — истину там, где правда обратна. Триплет узнаётся по двум и
-    более точкам, ровно как в `verifier_absence` («триплет — не число, а имя»).
+    A float comparison is wrong (`2.11.0` vs `2.9.0`); a triplet is recognised by two or more dots, as in `verifier_absence`.
     """
     if raw.count(".") < 2:
         return None
@@ -101,7 +75,7 @@ def _version_tuple(raw: str) -> tuple[int, ...] | None:
 
 
 def parse_version_pairs(excerpt: str) -> dict[str, tuple[int, ...]]:
-    """Пары `key=1.2.3` — версии, которые `parse_pairs` не берёт (не число)."""
+    """Pairs `key=1.2.3` (versions that `parse_pairs` does not take)."""
     out: dict[str, tuple[int, ...]] = {}
     for line in (excerpt or "").splitlines():
         match = _VERSION_PAIR_RE.match(line)
@@ -152,7 +126,7 @@ def parse_pairs(excerpt: str) -> dict[str, float]:
         match = _PAIR_RE.match(line)
         if match:
             key = match.group(1).lower()
-            # Конверт прогона — не его данные: см. ENVELOPE_KEYS.
+            # the run envelope is not its data: see ENVELOPE_KEYS
             if key in ENVELOPE_KEYS:
                 continue
             pairs[key] = float(match.group(2))
@@ -192,7 +166,7 @@ def _literal_comparison(
     holds: bool, key: str, shown: str, word: str, literal: str,
     subset: dict[str, float] | None = None,
 ) -> ClaimVerdict:
-    """Вердикт сравнения ключа с названным в утверждении литералом."""
+    """Verdict of comparing a key with a literal named in the claim."""
     working = _working(subset) if subset else f"{key}={shown}"
     if holds:
         return ClaimVerdict(
@@ -261,7 +235,7 @@ def evaluate(claim: str, excerpt: str) -> ClaimVerdict:
         left_v = versions.get(key)
         right_v = _version_tuple(literal)
         if left_v is not None:
-            # Версия против литерала: покомпонентно, добивая нулями.
+            # version vs literal: component-wise, padded with zeros
             right = right_v or tuple(int(x) for x in literal.split(".") if x.isdigit())
             width = max(len(left_v), len(right))
             lhs = left_v + (0,) * (width - len(left_v))

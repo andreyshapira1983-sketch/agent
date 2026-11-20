@@ -25,11 +25,8 @@ from core.unit_score import clamp_unit as _bounded
 KnowledgeDecision = Literal["save", "reject"]
 
 
-#: Токен, которым `core/redaction.py` заменяет вырезанный секрет. Его наличие
-#: означает, что текст — ОСТАТОК секретного материала, даже если сам секрет уже
-#: не читается. Форма фиксирована там: `[REDACTED:<kind>]`, kind в нижнем
-#: регистре через дефис. Слово «redacted» в прозе под шаблон не подходит —
-#: иначе документация о самой редактуре перестала бы быть знанием.
+#: Token that core/redaction.py puts in place of a cut secret ([REDACTED:<kind>], kind lowercase-hyphenated); its presence means
+#: the text is a leftover of secret material. The word "redacted" in prose does not match.
 _REDACTION_MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
 
 
@@ -138,38 +135,17 @@ class ClaimExtractor:
         if _is_meaningful_claim(evidence.claim):
             claims.append(claim_from_evidence(evidence, source_id=source.id, rank=rank))
 
-        # Hidden text never becomes a claim — structural, so it does not depend
-        # on the attacker's wording. Measured 2026-08-15: eight rephrasings of
-        # the same planted order scored 0 blocked out of 8 against the pattern
-        # table, while every one of them sat in an HTML comment the operator
-        # would never see in the rendered file. See docs/CODE_NOTES.md,
-        # "Concealment, not vocabulary".
+        # Hidden text never becomes a claim: structural, independent of the attacker's wording (docs/CODE_NOTES.md, "Concealment, not vocabulary").
         from core.injection_guard import (
             strip_concealed,
             strip_suspicious_annotation,
         )
 
-        # MIR-011: the guard's verdict used to live ONLY in the wrapper, and
-        # the strip below destroyed it — a sentence from scanner-flagged
-        # content was indistinguishable from clean. Detect BEFORE stripping;
-        # what gets minted from a flagged excerpt is quarantined as `suspect`
-        # (stored and auditable, refused by the write policy, never upgraded
-        # by corroboration — quarantine, not blunt exclusion).
-        # AUDIT of this repair, 2026-08-22: the first version tainted EVERY
-        # claim from a flagged excerpt. Measured on the live registry, 11% of
-        # sources carry at least one tripping sentence and they hold 22% of
-        # all claims — so document-level taint would have quarantined a fifth
-        # of the agent's knowledge to catch the planted lines. That is the
-        # field's named failure for this shape: scanner false positives
-        # strangle legitimate sources. The taint is per-SENTENCE now: only
-        # text the guard actually pointed at is suspect, and the rest of the
-        # document keeps its ordinary standing.
+        # Detect guard flags BEFORE stripping; claims minted from a flagged excerpt are quarantined as `suspect` (stored, refused by write policy,
+        # never upgraded by corroboration). Taint is per sentence, not per document: document-level taint would quarantine legitimate sources.
         suspect_spans = _suspicious_spans(evidence.excerpt)
 
-        # Голос охранника (обёртка annotate_suspicious) — аннотация для
-        # синтезатора, не содержимое источника: снимается до нарезки на
-        # предложения, иначе предупреждение становится «фактом» (живой прогон
-        # 2026-08-16: 7 записей в постоянную память).
+        # The guard's wrapper annotation is not source content: strip it before sentence splitting or the warning becomes a "fact".
         for sentence in _statements(
             strip_suspicious_annotation(strip_concealed(evidence.excerpt))
         ):
@@ -178,11 +154,7 @@ class ClaimExtractor:
             if not self._accept_sentence(sentence):
                 continue
             confidence = rank.final_score if rank is not None else evidence.confidence
-            # Compared with hidden text removed and whitespace collapsed on
-            # BOTH sides: the spans come from the raw body, the sentences from
-            # the stripped one, and a hidden comment or zero-width character
-            # inside the sentence used to break the match and clear the taint
-            # (проверка 16.11, серьёзная №6).
+            # Compared with hidden text removed and whitespace collapsed on both sides, else a hidden comment or zero-width char inside the sentence clears the taint.
             flat = _flat(sentence)
             tainted = any(
                 (fs := _flat(span)) and (fs in flat or flat in fs)
@@ -221,12 +193,7 @@ class ClaimExtractor:
             return False
         if contains_secret(text)[0]:
             return False
-        # MIR-097: a sentence carrying a trimmer's notice was never fully
-        # written by the source — refused, not cleaned. The grammar lives
-        # beside the writers (`core/evidence_budget.py`), keyed on shape, so an
-        # unseen notice of the same class is refused too. Twenty corrupted
-        # claims leaked over seventeen days, and a data-only cleanup on
-        # 2026-08-15 lasted exactly one day because this line was missing.
+        # A sentence carrying a trimmer's notice was never fully written by the source: refused, not cleaned. The grammar lives in core/evidence_budget.py, keyed on shape.
         if carries_framework_notice(text):
             return False
         if text.count("{") + text.count("[") > 4:
@@ -238,7 +205,7 @@ class ClaimExtractor:
             # facts — they are file chunks that flooded memory as distractors.
             return False
         if _is_truncated_text(text):
-            # Та же семья: обрезанное предложение — кусок файла, не факт.
+            # Same family: a truncated sentence is a file chunk, not a fact.
             return False
         words = re.findall(r"[\w]+", text, flags=re.UNICODE)
         return len(words) >= 4
@@ -252,12 +219,7 @@ def claim_provenance_tag(claim_id: str) -> str:
 def quarantine_conflicted_records(
     records: list[MemoryRecord], *, conflicted_claim_ids: set[str]
 ) -> tuple[list[MemoryRecord], dict]:
-    """Tag records whose originating claim is now contradicted.
-
-    Idempotent — a record already carrying the tag is counted, not re-
-    tagged. Resolution is operator-only: removing the tag restores the
-    record.
-    """
+    """Tag records whose originating claim is now contradicted; idempotent, and only the operator removes the tag."""
     report = {"quarantined": 0, "already_quarantined": 0, "unlinked": 0, "unaffected": 0}
     if not conflicted_claim_ids:
         report["unaffected"] = len(records)
@@ -284,54 +246,22 @@ def quarantine_conflicted_records(
     return out, report
 
 
-# Source types where "X is Y" is genuinely a proposition about the world, and
-# two of them disagreeing is a real contradiction worth raising.
-#
-# Everything else is excluded on purpose (MIR-054). `file` is source code and
-# project documents: `path = ...` is an assignment, not an assertion, and every
-# module docstring opens "This module is ...". `memory` is the agent's own
-# prior output: two goals recorded by two runs are two tasks, and citing
-# yourself is not a second source. `log`, `tool_output`, `test_result` are
-# observations of one moment, not standing claims.
-#
-# Measured on the live registry before this rule: 16 conflicts, all false,
-# across 52 claims sourced entirely from `file` (36) and `memory` (16) --
-# not one from a prose source.
-# Source types that do not ASSERT anything, so "X is Y" read out of them is not
-# a proposition and two of them differing is not a contradiction (MIR-054).
-#
-#   memory       the agent's own prior output -- two goals recorded by two runs
-#                are two tasks, and citing yourself is not a second source
-#   log/tool_output/test_result
-#                observations of one moment, not standing claims
-#   code_repository
-#                programs, same reason as code files below
-#
-# Everything else stays in scope, including low-trust sources like `forum`:
-# a forum post does assert things, it just asserts them unreliably, and that
-# is what `trust_level` is for. Excluding it would silently drop a real
-# disagreement instead of resolving it.
+# Source types that do not ASSERT anything (memory, log/tool_output/test_result, code_repository, code files): "X is Y" read out of them is not a
+# proposition and two of them differing is no contradiction. Everything else stays in scope, including low-trust `forum`, which `trust_level` handles.
 _NON_ASSERTING_SOURCE_TYPES = frozenset({
     "memory", "log", "tool_output", "test_result", "code_repository",
-    # dialogue — дословная реплика разговора. Две реплики об одном предмете
-    # это ход беседы, а не спор двух источников о мире.
+    # dialogue: verbatim conversation turns; two turns on one subject are a conversation move, not a dispute.
     "dialogue",
 })
 
-# Схема адреса, под которой лежат реплики разговора. Проверяется ОТДЕЛЬНО от
-# типа, потому что строки, записанные до появления типа "dialogue"
-# (2026-09-23), уже лежат на диске с типом "unknown", и починка у истока их не
-# перепишет. Тот же приём, что `_is_code_locator` ниже: адрес говорит о природе
-# источника даже когда тип потерян.
+# Address scheme of conversation turns; checked apart from the type because rows written before the "dialogue" type exist on disk as "unknown".
 _DIALOGUE_LOCATOR_PREFIX = "session_dialogue:"
 
 
 def _is_dialogue_locator(locator: str) -> bool:
     return (locator or "").strip().casefold().startswith(_DIALOGUE_LOCATOR_PREFIX)
 
-# Extensions whose contents are programs, not assertions. `x = y` there is an
-# assignment, and every module docstring opens "This module is ...". A prose
-# file (.md, .txt) is left in scope -- it really does state things.
+# Extensions whose contents are programs, not assertions; prose files (.md, .txt) stay in scope.
 _CODE_SUFFIXES = frozenset({
     ".py", ".pyi", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".rb",
     ".c", ".h", ".cpp", ".hpp", ".cs", ".sh", ".ps1", ".bat", ".sql", ".toml",
@@ -339,27 +269,18 @@ _CODE_SUFFIXES = frozenset({
 })
 
 
-#: Украшения адреса, которые не меняют его природы: диапазон строк, номер
-#: строки, метка фрагмента. `file_read` с окном отдаёт адрес вида
-#: `core/x.py:284-292`, и проверка окончания на нём не срабатывает.
+#: Address decorations that do not change its nature: line range, line number, fragment label (file_read windows give core/x.py:284-292).
 _LOCATOR_DECORATION_RE = re.compile(r":\d+(?:-\d+)?$|#L\d+(?:-L?\d+)?$")
 
 
 def _document_key(locator: str) -> str:
-    """WHICH document a locator names, whatever way it is written.
-
-    `docs\\guide.md`, `./docs/guide.md:1-9` and `C:/…/agent-main/docs/guide.md`
-    are one document and must be one witness with one claim id; a web address
-    keeps its port (`:8080` vs `:9090` are two servers) (проверка 17.11, №6).
-    """
+    """Which document a locator names, however written; one document is one witness with one claim id; a web address keeps its port."""
     raw = (locator or "").strip()
     if "://" in raw:
-        # Web: the path is case-sensitive and the port names the server; only
-        # a line anchor is decoration.
+        # Web: the path is case-sensitive and the port names the server; only a line anchor is decoration.
         return re.sub(r"#L\d+(?:-L?\d+)?$", "", raw, flags=re.IGNORECASE)
     text = raw.casefold().replace("\\", "/").removeprefix("file:")
-    # A line window is stripped only from a FILE path (`x.md:1-9`), never from
-    # an identifier like `pmid:123` — two papers are two witnesses.
+    # A line window is stripped only from a FILE path, never from an identifier like pmid:123 (two papers are two witnesses).
     if re.search(r"\.\w+(?::\d+(?:-\d+)?|#l\d+(?:-l?\d+)?)$", text):
         text = _bare_locator(text)
     inside = _path_inside_agent(text)
@@ -367,7 +288,7 @@ def _document_key(locator: str) -> str:
 
 
 def _bare_locator(locator: str) -> str:
-    """Адрес без украшений: `core/x.py:284-292` -> `core/x.py`."""
+    """Locator without decorations: core/x.py:284-292 -> core/x.py."""
     text = (locator or "").strip().casefold()
     while True:
         stripped = _LOCATOR_DECORATION_RE.sub("", text)
@@ -377,53 +298,23 @@ def _bare_locator(locator: str) -> str:
 
 
 def _is_code_locator(locator: str) -> bool:
-    """Адрес указывает на программу, а не на прозу.
-
-    Замер 2026-09-23: правило «программы не утверждают фактов» обходилось
-    номерами строк. `core/loop_response_deciders.py` узнавался как код,
-    а `core/loop_response_deciders.py:265-285` — нет, потому что на `.py` не
-    кончается. В памяти агента из-за этого легли 18 записей, собранных из
-    его же кода и комментариев и помеченных как факты о мире с уверенностью
-    0.85 — например обрывок «SEARCH/REPLACE в Aider).» из шапки
-    tools/patch_check.py, записанный дважды.
-
-    Тот же класс, что денежное число со знаком валюты (7c4c957) и урезанное
-    имя следа (df8c2cb): украшенная строка ломает сверку по окончанию.
-    Лечится нормализацией адреса ДО проверки, а не новым списком исключений.
-    """
+    """True when the locator points at a program, not prose; normalized before the check so a line-range suffix does not defeat it."""
     return any(_bare_locator(locator).endswith(suffix) for suffix in _CODE_SUFFIXES)
 
 
-#: Места, где лежит то, что агент написал САМ: черновики правок, журналы и
-#: состояние, следы, документы, собранные скриптом из кода.
-#: Журнальные форматы — запись одного момента, не утверждение о мире.
+#: Places holding what the agent wrote itself (edit drafts, journals, state, traces, script-built docs); journal formats record one moment, not a claim.
 _OWN_ARTIFACT_SUFFIXES = (".jsonl", ".log")
 
 
 def _is_own_artifact(locator: str) -> bool:
-    """Адрес указывает на файл, который агент написал сам.
+    """True when the locator points at a file the agent wrote itself (edit drafts, outbox, script-generated docs).
 
-    Замер 2026-09-23 на живой памяти: фактами «о мире» с уверенностью 0.85
-    ложились его же черновики правок (`proposals/selffix/…/edits.txt` —
-    вместе с маркером `<<<<<<< LINES`), его же ящик голоса
-    (`data/chat_outbox.jsonl` — прямо со скобками JSON) и строки таблицы
-    `knowledge/generated/AGENT_ANATOMY.md`, собранного скриптом из кода. При
-    чистке памяти убрано 44 таких обрывка; пробой на нынешнем коде показал,
-    что все три входа открыты.
-
-    Это класс OWASP ASI06 «отравление памяти» в его тихой форме: своё же,
-    пересказанное своими словами, выглядит как независимое знание, и проверка
-    по содержанию его не отличает — отличает только происхождение. Отсюда
-    правило по адресу, а не по словам. Правило то же, что MIR-054 для
-    журналов и собственной памяти: запись одного момента не утверждает фактов.
-
-    Документы, написанные людьми (`knowledge/doctrine/`, `docs/`), и книги
-    (`knowledge_library/`, `math_study/`) остаются в силе.
+    Decided by provenance, not content: own text re-told looks like independent knowledge (memory poisoning in its quiet form).
+    Human-written docs and books stay in scope.
     """
     bare = _bare_locator(locator).replace("\\", "/")
     if "://" in bare:
-        # A web address is never the agent's own file, whatever its path says
-        # (`https://github.com/x/agent-main/data/…`).
+        # A web address is never the agent's own file, whatever its path says.
         return False
     return _is_own_state_path(bare) or bare.endswith(_OWN_ARTIFACT_SUFFIXES)
 
@@ -442,10 +333,7 @@ class ConflictResolver:
         grouped: dict[str, list[tuple[ClaimRecord, str]]] = {}
         sources_by_id = {source.id: source for source in registry.sources}
         for claim in registry.claims:
-            # Contradiction is only meaningful between sources that assert
-            # things. Code, the agent's own memory, logs and tool output do
-            # not, and reading them as propositions produced only false
-            # positives (MIR-054).
+            # Contradiction is meaningful only between sources that assert things; code, own memory, logs and tool output do not.
             source = sources_by_id.get(claim.source_id)
             if source is None or source.type in _NON_ASSERTING_SOURCE_TYPES:
                 continue
@@ -453,9 +341,7 @@ class ConflictResolver:
                 continue
             if _is_dialogue_locator(source.locator):
                 continue
-            # A scanner-flagged claim neither creates a conflict nor is
-            # relabelled: a planted sentence must not quarantine a clean
-            # claim, and its taint must survive (проверка 17.11, средняя).
+            # A scanner-flagged claim neither creates a conflict nor is relabelled: a planted sentence must not quarantine a clean claim, and its taint must survive.
             if claim.status == "suspect":
                 continue
             parsed = _subject_value(claim.text)
@@ -466,23 +352,16 @@ class ConflictResolver:
 
         conflicts: list[ConflictRecord] = []
         conflicted_ids: set[str] = set()
-        # claim_id -> the OTHER independent source_ids that agree with it.
-        # A claim corroborated by >=2 independent sources (single agreed value,
-        # no contradiction) is promoted to "verified" below — this is the
-        # honest "усвоил и проверил" step: a fact is verified only when more
-        # than one independent source attests it.
+        # claim_id -> the OTHER independent source_ids that agree with it; >=2 independent sources with one agreed value promote a claim to "verified".
         corroborated: dict[str, tuple[str, ...]] = {}
 
         def _origin(claim: ClaimRecord) -> str:
-            # Independence is by DOCUMENT, not by source id: two windows of one
-            # file (`docs/a.md:1-5` and `docs/a.md:1-6`) are one witness, and
-            # used to verify each other (проверка 16.11, серьёзная №5).
+            # Independence is by DOCUMENT, not source id: two windows of one file are one witness.
             src = sources_by_id.get(claim.source_id)
             return _document_key(src.locator) if src is not None else claim.source_id
 
         def _witness(claim: ClaimRecord) -> bool:
-            # The agent's own files (data/, logs/, drafts) are not a second
-            # witness (17.11, №6); nor is a source too weak to save (18.11).
+            # The agent's own files (data/, logs/, drafts) and sources too weak to save are not a second witness.
             src = sources_by_id.get(claim.source_id)
             if src is None or claim.status == "suspect" or claim.status in _REJECTED_CLAIM_STATUSES:
                 return False
@@ -503,13 +382,11 @@ class ConflictResolver:
                     values=tuple(values),
                 ))
             else:
-                # One agreed value from >=2 independent sources -> corroboration.
-                # A witness must be another DOCUMENT, and a scanner-flagged
-                # (`suspect`) claim corroborates nothing.
+                # One agreed value from >=2 independent sources is corroboration; a witness must be another document, and a suspect claim corroborates nothing.
                 for claim, _value in pairs:
                     own_src = sources_by_id.get(claim.source_id)
                     if own_src is None or self.policy.weak_source_reason(own_src) is not None:
-                        continue  # a source too weak to save is not promoted either (18.11)
+                        continue  # a source too weak to save is not promoted either
                     mine = _origin(claim)
                     others = tuple(sorted({
                         other.source_id for other, _v in pairs
@@ -539,9 +416,7 @@ class ConflictResolver:
                     conflict_source_ids=tuple(conflict_sources),
                 ))
             elif claim.id in corroborated and claim.status == "extracted":
-                # Only a normally-extracted claim is promoted; a weak-source
-                # "unverified" claim stays weak even if echoed, so two weak
-                # sources cannot manufacture a "verified" fact.
+                # Only a normally-extracted claim is promoted; a weak-source "unverified" claim stays weak even if echoed.
                 merged_support = tuple(sorted(
                     set(claim.support_source_ids) | set(corroborated[claim.id])
                 ))
@@ -559,7 +434,7 @@ _INTERNET_SOURCE_PREFIXES = ("web_page:", "web_search:", "web:", "search:", "rss
 
 
 def _is_internet_source(source_id: str, source: SourceRecord | None) -> bool:
-    """Пришло ли утверждение из сети — по адресу улики или по локатору источника."""
+    """Whether the claim came from the network, by evidence address or source locator."""
     sid = (source_id or "").lower()
     locator = (getattr(source, "locator", "") or "").lower()
     return sid.startswith(_INTERNET_SOURCE_PREFIXES) or locator.startswith(("http://", "https://"))
@@ -603,20 +478,13 @@ class KnowledgeWritePolicy:
             return KnowledgeWriteDecision("reject", (f"claim too long (>{self.max_chars})",))
         if contains_secret(text)[0]:
             return KnowledgeWriteDecision("reject", ("claim contains secret material",))
-        # Остаток редактуры. Проверка выше судит ТЕКСТ, а текст сюда приходит
-        # уже вычищенным, поэтому `TELEGRAM=[REDACTED:telegram-bot-token]` под
-        # шаблон ключа не подходит и проезжает. Замер 2026-08-10: такие строки
-        # из `.env` легли в долговечную семантическую память с тегами
-        # `fact, knowledge` — значение не утекло, утёк инвентарь секретов
-        # установки, живущий дольше прогона. Маркер редактуры и есть
-        # доказательство, что материал был секретным: вердикт источника
-        # (`class=secret`) до этой политики не доезжает, а маркер доезжает.
+        # Redaction leftover: text arrives already cleaned, so TELEGRAM=[REDACTED:...] fits no key pattern; the marker itself proves the
+        # material was secret (the source verdict class=secret does not reach this policy).
         if _REDACTION_MARKER_RE.search(text):
             return KnowledgeWriteDecision(
                 "reject", ("claim is redacted secret residue",)
             )
-        # Truth/Hype filter (first LEARNING antibody): promotional content with
-        # no checkable substance is "шумиха", not knowledge — never absorb it.
+        # Truth/Hype filter: promotional content with no checkable substance is not knowledge.
         _th = evaluate_truth_hype(text)
         if _th.is_hype:
             return KnowledgeWriteDecision(
@@ -624,18 +492,9 @@ class KnowledgeWritePolicy:
                 ((f"claim is promotional hype (no checkable substance): "
                  f"{'; '.join(_th.reasons[:2])}"),),
             )
-        # A label WE wrote for a tool result is not an assertion about the
-        # world. `Evidence.claim` is framework-authored in every case — fifteen
-        # templates in `evidence_from_tool_result` plus the ingestion ones —
-        # while the source's own words live in `excerpt`. Decided on provenance,
-        # not vocabulary: `_is_meaningful_claim` blacklists six opening phrases,
-        # so which label survived depended on whether two authors happened to
-        # pick the same first words. Measured 2026-08-15: «Fetched RSS/Atom feed
-        # …» and «User explicitly directed» reached `save`; nine others were
-        # stopped by unrelated gates, which is luck, not a rule.
-        # `getattr`, not attribute access: `decide` is fed duck-typed claims by
-        # callers and tests, and a missing optional field must skip this check,
-        # not crash the write path.
+        # A label WE wrote for a tool result (Evidence.claim is framework-authored; the source's words live in excerpt) is not an assertion
+        # about the world; decided on provenance, not vocabulary. getattr, not attribute access: decide is fed duck-typed claims, and a
+        # missing optional field must skip this check, not crash the write path.
         if (getattr(claim, "metadata", None) or {}).get("extraction") == "evidence_claim":
             return KnowledgeWriteDecision(
                 "reject",
@@ -646,9 +505,7 @@ class KnowledgeWritePolicy:
                 ),
             )
         if claim.status == "suspect":
-            # MIR-011 quarantine: the injection guard flagged the content this
-            # claim was extracted from. It stays in the registry for audit and
-            # review, and never becomes durable knowledge.
+            # Injection guard flagged the source content: kept in the registry for audit, never durable knowledge.
             return KnowledgeWriteDecision(
                 "reject",
                 (("claim was extracted from scanner-flagged content "
@@ -665,25 +522,15 @@ class KnowledgeWritePolicy:
         if weak:
             return KnowledgeWriteDecision("reject", (weak,))
         if source.type in _NON_ASSERTING_SOURCE_TYPES:
-            # Same doctrine the conflict resolver applies (MIR-054): a log
-            # line, a test verdict, a tool dump or the agent's own memory is
-            # an observation of one moment, not a standing claim about the
-            # world. Trust cannot rescue it — DEFAULT_SOURCE_TRUST rates
-            # `log` 0.88 and `test_result` 0.95, which is how a diagnostic
-            # run (run_ab3f4bb672…, 2026-07-31) restated five of its own log
-            # events as durable Confidence-0.85 "facts". Reject by assertion
-            # class, before the trust ladder is even consulted for weakness.
+            # Same doctrine as the conflict resolver: a log line, test verdict, tool dump or own memory is an observation of one moment;
+            # trust cannot rescue it, so reject by assertion class before the trust ladder.
             return KnowledgeWriteDecision(
                 "reject",
                 ((f"source type {source.type} does not assert facts "
                  f"(observation of one moment, not a standing claim)"),),
             )
         if source.type == "file" and _is_code_locator(source.locator):
-            # Same rule the conflict resolver applies (MIR-054): programs do
-            # not assert. `x = y` in a .py file is an assignment, an `assert`
-            # line is a test statement — reading either as a world-fact is how
-            # the 2026-07-25 wave banked 776 file rows, 26 of them raw asserts.
-            # Prose files (.md, .txt) stay in scope: they really state things.
+            # Programs do not assert (x = y is an assignment, assert is a test statement); prose files (.md, .txt) stay in scope.
             return KnowledgeWriteDecision(
                 "reject",
                 ((f"source is a code file ({source.locator}): programs do not "
@@ -709,8 +556,7 @@ class KnowledgeWritePolicy:
         )
 
     def memory_tags(self, claim: ClaimRecord, source: SourceRecord) -> list[str]:
-        # `claim:<id>` is provenance, not description: it is what lets a
-        # record be found again if its claim is later contradicted (MIR-047).
+        # claim:<id> is provenance: it lets a record be found again if its claim is later contradicted.
         return [
             "fact", "knowledge", "source-backed", source.type,
             claim_provenance_tag(claim.id),
@@ -762,19 +608,7 @@ class KnowledgePipeline:
             result.source_store = source_store.save_registry(registry)
 
         if not auto_write_memory or remember is None:
-            # A row per claim here too. The `require_verified` skip below
-            # got one and this one did not, so a live run reported
-            # `memory_skipped=45, decisions=[]` — the counter said 45
-            # claims went nowhere and nothing said why. Fixing one of two
-            # silent paths is not fixing the class.
-            #
-            # The rule that refused is named too, not just described. Both
-            # branches once reported `policy_id="auto_write_memory"`, so a
-            # reader filtering decisions by rule — the machine-readable half
-            # of the row — saw the operator blamed for a run where the
-            # operator had opted in and nothing was wired to write. The two
-            # facts were distinguishable in prose and identical in metadata,
-            # which is the same invisible failure one field further down.
+            # A decision row per claim here too, naming the rule that refused: a bare counter, or the same policy_id on both branches, hides the reason.
             reason, policy_id = (
                 ("auto_write_memory is off", "auto_write_memory")
                 if not auto_write_memory
@@ -795,14 +629,8 @@ class KnowledgePipeline:
 
         for claim in registry.claims:
             if not admit_internet and _is_internet_source(claim.source_id, registry.get_source(claim.source_id)):
-                # Два мира (оператор, 2026-09-19): локальная библиотека —
-                # источник истины, интернет — источник, который ещё надо
-                # квалифицировать. Четвёртый веб-прогон, N06: страница
-                # rfc-editor.org (тип «documentation», доверие 0.75) записала
-                # в долговременную память четыре «факта», среди них
-                # «0 Authorization Framework D.». Утверждение из сети остаётся
-                # в реестре источников — для аудита и квалификации; фактом
-                # памяти его делает осознанная загрузка (`ingestion.py`), не ход.
+                # Two worlds: the local library is the source of truth, the internet must still be qualified. A network claim stays in the source
+                # registry for audit; only deliberate ingestion (ingestion.py) makes it a memory fact.
                 result.memory_skipped += 1
                 result.decisions.append({
                     "claim_id": claim.id,
@@ -816,22 +644,9 @@ class KnowledgePipeline:
                 })
                 continue
             if require_verified and claim.status != "verified":
-                # SKIPPED, not rejected: the claim was not judged bad, it
-                # was never corroborated. `verified` is set in
-                # `build_registry` only when a second source says the same
-                # thing AND the claim was normally extracted, so this gate
-                # means "one source is not enough to become a memory".
-                #
-                # It exists for the UNATTENDED path. A human running
-                # `:ingest` is present and can judge; a campaign running
-                # overnight cannot, and a single file asserting something
-                # about itself is not evidence that it is true.
-                #
-                # A decision row all the same. A claim that vanishes
-                # without one leaves the reader a counter and no reason —
-                # the invisible-failure shape MIR-077 was closed for, and
-                # a gate that cannot say why it refused is the worst place
-                # to reintroduce it.
+                # SKIPPED, not rejected: the claim was never corroborated (verified is set in build_registry only with a second source and normal
+                # extraction). For the UNATTENDED path: a human running :ingest can judge, an overnight campaign cannot.
+                # Still a decision row: a claim vanishing without one leaves a counter and no reason.
                 result.memory_skipped += 1
                 result.decisions.append({
                     "claim_id": claim.id,
@@ -909,18 +724,10 @@ _TERMINAL = re.compile(r"[.!?][\"'»”)\]]*$")
 
 
 def _statements(text: str) -> list[str]:
-    """Законченные утверждения источника — кандидаты в факты.
+    """Complete statements of the source, candidates for facts.
 
-    Замер 2026-09-19 (опыт с библиотекой книг): из 30 записей долговременной
-    памяти знанием не было ни одной — «320: Consequence is that (fig 1.5)…»,
-    «5: Michaelmas term 2021/22», «7: 1 Introduction 7», «5304: eβ(ℏ2k2/2m−µ) + 1».
-    Нарезка шла ПО СТРОКАМ: в книге из PDF строка рвёт предложение, окно
-    file_read добавляет номер строки, и каждая строка титула, оглавления или
-    формулы становилась «фактом» с уверенностью 0.85; такие записи потом
-    доставались в ответы до семи раз. Здесь: шапка окна и номера строк
-    снимаются, перенесённые строки склеиваются обратно (продолжение начинается
-    со строчной), а фактом становится только законченное предложение или пункт
-    списка. Титулы, заголовки и обрывки — нет.
+    Window header and line numbers are removed and wrapped lines re-joined (a continuation starts lowercase); only a finished
+    sentence or list item counts, not titles, headings or fragments.
     """
     lines = (text or "").splitlines()
     if lines and _READ_WINDOW_HEADER.match(lines[0].strip()):
@@ -960,12 +767,7 @@ def _sentences(text: str) -> list[str]:
 
 
 def _is_broken_encoding(text: str) -> bool:
-    """True when the text carries mojibake / decode-failure markers.
-
-    The Unicode replacement char (``�``) is the unambiguous signal that
-    bytes were decoded with the wrong codec upstream; such content is garbage,
-    never a fact.
-    """
+    """True when the text carries mojibake markers (the Unicode replacement character means a wrong codec upstream); never a fact."""
     if "�" in text:
         return True
     # A high density of replacement chars or lone control bytes also indicates
@@ -981,17 +783,8 @@ _CODE_LINE_PREFIXES = (
     "async def ", "await ", "@", "#", "//", "/*", "*", '"""', "'''",
     ">>>", ">>> ", "> ", "$ ", "python ", "pip ", "uvicorn ", "pytest ",
     "git ", "cd ", "curl ", "npm ", "--", "```",
-    # Statement keywords — but ONLY the ones prose never opens with.
-    # `assert len(records) == 2` has no call-heavy shape and no code suffix,
-    # so none of the structural rules below fired — which is how 26 raw
-    # assert lines from tests/*.py entered the live store as Confidence-0.85
-    # "facts" in the 2026-07-25 ingestion wave. Deliberately NOT listed:
-    # "if ", "for ", "while ", "with ", "except ", "global ", "pass" — real
-    # prose facts open with those ("If the budget is exceeded, the run
-    # stops."); "del " (Del Toro, Del Monte, Spanish "del"), "finally:"
-    # ("Finally: the last step is testing.") and "lambda " ("Lambda is an
-    # AWS compute service.") for the same reason — a classifier that
-    # rejects prose is a worse defect than the one it fixes.
+    # Statement keywords prose never opens with. Deliberately NOT listed: "if ", "for ", "while ", "with ", "except ", "global ", "pass",
+    # "del ", "finally:", "lambda " -- real prose facts open with them.
     "assert ", "elif ", "else:", "try:",
     "self.",
 )
@@ -1004,29 +797,22 @@ _DANGLING_TAIL = {
 }
 
 
-#: Шапка окна чтения, которую file_read ставит перед куском файла.
+#: Header that file_read puts before a file chunk.
 _READ_WINDOW_HEADER = re.compile(r"^\[[^\]]*\blines?\s+\d+\s*-\s*\d+\s+of\s+\d+\]$", re.IGNORECASE)
-#: Знаки, на которых законченная мысль не кончается.
+#: Marks on which a finished thought does not end.
 _CUT_PUNCTUATION = (",", ":", ";", "—", "–", "(", "⟹", "→", "⇒")
 
 
 def _looks_like_code_fragment(text: str) -> bool:
-    """True when the line is source code / CLI / a mid-sentence file chunk.
-
-    Deterministic, high-precision heuristics — the goal is to keep raw file
-    fragments out of long-term memory without rejecting genuine prose facts.
-    """
+    """True when the line is source code / CLI / a mid-sentence file chunk; high-precision heuristics that keep raw fragments out of memory."""
     stripped = text.strip()
     low = stripped.casefold()
     if any(low.startswith(p.casefold()) for p in _CODE_LINE_PREFIXES):
         return True
-    # Замер 2026-09-19: шапка окна file_read («[data.csv lines 1-20 of 61]»)
-    # сохранялась фактом с уверенностью 0.85 — 11 из 75 записей учебного опыта.
-    # В опыте «одна задача пять раз» она пережила смену данных, всплыла в
-    # следующем ответе как «в памяти 61 строка» и сняла верный эпизод с опыта.
+    # The file_read window header ("[data.csv lines 1-20 of 61]") must not be saved as a fact.
     if _READ_WINDOW_HEADER.match(stripped):
         return True
-    # Обрыв на знаке, после которого мысль обязана продолжиться:
+    # Cut at a mark after which the thought must continue:
     # «…, library/txt/Beck.txt —», «Карта строк txt:».
     if stripped.endswith(_CUT_PUNCTUATION):
         return True
@@ -1062,13 +848,7 @@ def _flat(text: str) -> str:
 
 
 def _suspicious_spans(excerpt: str) -> list[str]:
-    """Sentences the injection guard actually pointed at.
-
-    The guard reports each finding with a byte offset, so the taint can follow
-    the evidence instead of the document. Returns the wrapper-stripped
-    sentences containing a finding; empty when the excerpt is clean or was
-    never wrapped.
-    """
+    """Sentences the injection guard pointed at (by finding offset), wrapper-stripped; empty when clean or never wrapped."""
     from core.injection_guard import (
         carries_suspicious_annotation,
         scan_for_injection,
@@ -1082,9 +862,7 @@ def _suspicious_spans(excerpt: str) -> list[str]:
     offsets = [int(getattr(f, "offset", -1)) for f in result.findings]
     offsets = [o for o in offsets if o >= 0]
     if not offsets:
-        # Flagged on our own wrapper but the body scans clean now — treat the
-        # WHOLE body as suspect rather than nothing: losing the reason for a
-        # flag must not silently clear the flag.
+        # Flagged on our own wrapper but the body scans clean now: treat the WHOLE body as suspect; losing the reason for a flag must not clear it.
         return _sentences(body)
     spans: list[str] = []
     cursor = 0
@@ -1107,20 +885,12 @@ def _status_from_rank(rank: SourceRank | None) -> str:
 
 
 def _is_truncated_text(text: str) -> bool:
-    """Обрезок не утверждает ничего целого. Живой реестр 2026-08-16 читал
-    «...capability is comp...[truncated]» как другое значение того же субъекта
-    и чеканил ложный конфликт с целым предложением из зеркального документа.
-    """
+    """A truncated fragment asserts nothing whole; it must not read as a different value of the same subject."""
     tail = (text or "").rstrip()
     return "[truncated]" in tail or tail.endswith(("...", "…"))
 
 
-#: Вопрос — не утверждение. Живой реестр 2026-09-20: оглавления двух книг,
-#: «1.1 What is a compiler?» и «1.1 What is a plasma?», разобрались как
-#: «предмет `11 what` = компилятор / плазма» и объявились противоречием, а
-#: конфликт сажает на карантин запись памяти, из которой он вырос (MIR-047).
-#: Ни «X is Y» из вопроса, ни вопросительное слово в предмете утверждением о
-#: мире не являются.
+#: A question is not a statement: "X is Y" from a question, or an interrogative word in the subject, is no claim about the world (a conflict quarantines its originating record).
 _INTERROGATIVE_SUBJECT_RE = re.compile(
     r"(?:^|\s)(?:what|who|which|where|when|why|how|что|кто|какой|какая|какие|где|когда|почему|как)$",
     re.IGNORECASE)
@@ -1141,12 +911,7 @@ def _subject_value(text: str) -> tuple[str, str] | None:
         if not match:
             continue
         raw_subject = match.group(1).strip()
-        # MIR-076 (measured live): a DEICTIC noun phrase — «this document»,
-        # «этот документ» — names a different referent in every source, so
-        # grouping it across sources manufactures conflicts out of unrelated
-        # self-descriptions. The bare-pronoun deny-list below cannot catch
-        # the phrase form, and the old subject normaliser even STRIPPED
-        # «этот», collapsing Russian deixis into a groupable common noun.
+        # A deictic noun phrase ("this document") names a different referent in every source; grouping it across sources manufactures conflicts.
         if _DEICTIC_SUBJECT_RE.match(raw_subject) or _INTERROGATIVE_SUBJECT_RE.search(raw_subject):
             continue
         subject = _normalise_subject(raw_subject)
@@ -1175,12 +940,10 @@ def _normalise_value(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().casefold())
 
 
-#: Units that change the fact: «$5» is not «€5», «5%» is not «5». They stay
-#: tokens of their own (проверка 16.11, средняя).
+#: Units that change the fact: "$5" is not "€5", "5%" is not "5"; they stay tokens of their own.
 _VALUE_UNIT_CHARS = "$€£¥₽₪%"
 
-#: A tail word that narrows the shorter value: «all regions» vs «all regions
-#: except the EU» are two facts, not one clipped quote (проверка 16.11, средняя).
+#: A tail word that narrows the shorter value: "all regions" vs "all regions except the EU" are two facts.
 _VALUE_QUALIFIERS = frozenset({
     "except", "excluding", "excl", "only", "until", "till", "unless", "but",
     "however", "before", "after", "without", "not", "no", "apart", "save",
@@ -1188,9 +951,7 @@ _VALUE_QUALIFIERS = frozenset({
     "если", "без", "пока", "не", "после",
 })
 
-#: A tail word that changes the measure: unit, currency, scale or period.
-#: «up by 5» vs «up by 5%», «5 dollars» vs «5 dollars per month» are two
-#: facts (проверка 17.11, средняя).
+#: A tail word that changes the measure (unit, currency, scale, period): "up by 5" vs "up by 5%" are two facts.
 _VALUE_MEASURE_WORDS = frozenset({
     "percent", "per", "pct", "bps", "points", "point",
     "dollar", "dollars", "usd", "eur", "euro", "euros", "gbp", "pound", "pounds",
@@ -1228,14 +989,9 @@ def _value_tokens(value: str) -> list[str]:
 
 
 def _values_equivalent(a: str, b: str) -> bool:
-    """Two claim values that agree, possibly in different words.
+    """Two claim values that agree, possibly in other words: equal token forms, or the shorter is a token-prefix of the longer and has 3+ tokens.
 
-    Equivalent when their token forms match, or when the SHORTER one is a
-    token-prefix of the longer AND is at least three tokens long — long
-    enough that «good» never glues to «good for nothing», while a clipped
-    quotation of the same sentence still counts as the same statement.
-    A tail with a qualifier (except/only/until/кроме…) is a different fact:
-    a missed corroboration is cheaper than a false merge (проверка 16.11, средняя).
+    A tail with a qualifier (except/only/until/кроме) is a different fact: a missed corroboration is cheaper than a false merge.
     """
     ta, tb = _value_tokens(a), _value_tokens(b)
     if ta == tb:
@@ -1244,10 +1000,7 @@ def _values_equivalent(a: str, b: str) -> bool:
     if not short or long_[: len(short)] != short:
         return False
     tail = long_[len(short):]
-    # A tail carrying a unit/scale/period word or a qualifier changes the
-    # value («5» vs «5 billion», «all regions» vs «… except the EU»). A plain
-    # noun after a number does not («100» = «100 requests», «in 1991» = «in
-    # 1991 by Guido») — the digit alone was too eager (проверка 17.11, вечер).
+    # A tail with a unit/scale/period word or qualifier changes the value ("5" vs "5 billion"); a plain noun after a number does not ("100" = "100 requests").
     if any(t in _VALUE_QUALIFIERS or _is_measure_token(t) for t in tail):
         return False
     return len(short) >= 3 or any(ch.isdigit() for ch in short[-1])
@@ -1263,10 +1016,7 @@ def _distinct_values(values: Iterable[str]) -> list[str]:
 
 
 def _claim_id(locator: str = "", text: str = "") -> str:
-    """Stable id: the same sentence from the same document gets the same id
-    in every run. A fresh random id per run meant a record banked in run 1
-    could never be matched when run 2 found the contradiction, so quarantine
-    never fired (проверка 16.11, серьёзная №4; дефект 30.09)."""
+    """Stable id: the same sentence from the same document gets the same id in every run (a random id meant quarantine never matched a later contradiction)."""
     if not text:
         from core.ids import new_id
 

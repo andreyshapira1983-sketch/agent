@@ -1,4 +1,4 @@
-"""Какая модель на какой роли реально даёт подтверждённые ответы."""
+"""Which model on which role actually gives verified answers."""
 from __future__ import annotations
 
 import json
@@ -8,15 +8,13 @@ from pathlib import Path
 
 from core.model_catalog import classify_model, offered_models, peer_model_at_same_tier
 
-#: Ниже этого числа прогонов доля — шум, а не свидетельство. Восемь потому, что
-#: на живых данных 2026-08-15 столько набирали лишь модели, работавшие не один
-#: день; всё, что реже, — это несколько случайных вопросов.
+#: Below this many runs a share is noise, not evidence.
 MIN_RUNS = 8
 
 
 @dataclass(frozen=True)
 class ModelOutcome:
-    """Итог одной модели на одной роли."""
+    """Outcome of one model on one role."""
 
     role: str
     provider: str
@@ -45,7 +43,7 @@ class ModelOutcome:
 
 
 def _episode_verdict(episode: Mapping[str, object]) -> tuple[bool, bool]:
-    """(подтверждён целиком, были детекторы) — по одному эпизоду."""
+    """(fully verified, detectors ran) for one episode."""
     verified = int(episode.get("verified_chunks") or 0)
     unverified = int(episode.get("unverified_chunks") or 0)
     return (verified > 0 and unverified == 0), bool(episode.get("defect_signals"))
@@ -55,7 +53,7 @@ def measure_model_outcomes(
     usage: Iterable[Mapping[str, object]],
     episodes: Iterable[Mapping[str, object]],
 ) -> tuple[ModelOutcome, ...]:
-    """Соединить вызовы моделей с исходами их прогонов. Чистая функция."""
+    """Join model calls with the outcomes of their runs. Pure function."""
     by_run: dict[str, Mapping[str, object]] = {}
     for episode in episodes:
         run_id = str(episode.get("run_id") or "")
@@ -91,16 +89,11 @@ def measure_model_outcomes(
     )
 
 
-#: Насколько доли подтверждённых считаются «неотличимыми». Меньше шага одной
-#: ошибки при MIN_RUNS: на минимуме прогонов равенство означает точное
-#: равенство, и вниз по качеству за дешевизну не меняют.
+#: How close verified shares must be to count as indistinguishable: below one error step at MIN_RUNS, so equality means exact equality.
 _COST_TOLERANCE = 0.05
 
 
-#: Мост словарей: классификатор говорит light/standard/deep, таблица цен —
-#: low/medium/high. Первая версия оси не переводила, и ОБЕ модели молча падали
-#: в «unknown» — те же два словаря одного понятия, что в MIR-174. Полноту моста
-#: держит тест: новый уровень не провалится в «unknown» незамеченным.
+#: Bridge between the classifier vocabulary (light/standard/deep) and the price table (low/medium/high); a test keeps it complete.
 _TIER_TO_COST: dict[str, str] = {
     "light": "low",
     "standard": "medium",
@@ -109,7 +102,7 @@ _TIER_TO_COST: dict[str, str] = {
 
 
 def _cost_units(model: str) -> int:
-    """Тариф уровня модели — из ЕДИНОЙ таблицы, не из копии."""
+    """Tariff of the model's tier, from the single price table."""
     from core.model_usage import cost_units_per_1k
 
     return cost_units_per_1k(_TIER_TO_COST.get(classify_model(model).value, "unknown"))
@@ -123,7 +116,7 @@ def preferred_model(
     min_runs: int = MIN_RUNS,
     offered: Container[str] | None = None,
 ) -> str | None:
-    """Лучшая ИЗМЕРЕННАЯ модель этой роли у этого провайдера, или None."""
+    """Best MEASURED model for this role at this provider, or None."""
     ranked = [
         outcome for outcome in outcomes
         if outcome.role == role and outcome.provider == provider
@@ -132,11 +125,7 @@ def preferred_model(
     ]
     if not ranked:
         return None
-    # Ось стоимости (MIR-176; дайджест, записи 6–7). Среди моделей, чьё
-    # качество НЕОТЛИЧИМО от лучшего, побеждает дешёвый тариф. Допуск меньше
-    # шага одной ошибки при MIN_RUNS=8 (1/8 = 0.125), поэтому измеримо худшее
-    # дешевизной не покупается никогда — болезнь спуска, уже чиненная у
-    # failover (73 спуска за сутки, 2026-08-15), сюда не возвращается.
+    # cost axis: among models indistinguishable in quality from the best, the cheaper tariff wins; the tolerance is below one error step (1/8) so measurably worse is never bought
     best_share = max(o.verified_share for o in ranked)
     bar = [o for o in ranked if best_share - o.verified_share <= _COST_TOLERANCE]
     bar.sort(key=lambda o: (
@@ -145,24 +134,21 @@ def preferred_model(
     return bar[0].model
 
 
-#: Каждый четвёртый прогон таблицы отдаёт следующее решение разведчику: хватает,
-#: чтобы незамеренный ровесник набирал MIN_RUNS за дни, а не никогда; мало
-#: настолько, чтобы измеренный победитель оставался рабочей лошадью.
+#: Every fourth table run hands the next decision to the scout so an unmeasured peer reaches MIN_RUNS.
 SCOUT_PERIOD = 4
 
 
 def scout_turn(decisions: int, *, period: int = SCOUT_PERIOD) -> bool:
-    """Чей ход — разведчика или победителя. По МОНОТОННОМУ счёту решений."""
+    """Whose turn: scout or winner, by a MONOTONIC decision count."""
     return decisions % period == 0
 
 
 def failover_decisions(
     workspace: Path | None = None, *, role: str, provider: str,
 ) -> int:
-    """Сколько failover-решений уже было у пары роль+провайдер. Монотонно.
+    """How many failover decisions a role+provider pair has had; monotonic.
 
-    Один прогон — одно решение, сколько бы вызовов подменённая модель в нём
-    ни сделала; строки без run_id считаются поштучно.
+    One run is one decision however many calls the substitute made; rows without run_id count individually.
     """
     root = Path(workspace or ".")
     runs: set[str] = set()
@@ -189,7 +175,7 @@ def scout_model(
     current_model: str | None,
     min_runs: int = MIN_RUNS,
 ) -> str | None:
-    """Незамеренный ровесник по уровню — кандидат на разведку, или None."""
+    """An unmeasured peer at the same tier: a scouting candidate, or None."""
     peer = peer_model_at_same_tier(current_model, provider)
     if not peer:
         return None
@@ -200,14 +186,9 @@ def scout_model(
     return peer
 
 
-# ── Подключение к выбору замены ──────────────────────────────────────────────
-# Ниже — единственное место, где замер встречается с картой уровней. Порядок
-# важен и он весь смысл: измеренное предпочтение ПЕРВЫМ, карта имён — полом на
-# случай, когда мерить ещё нечего.
+# Hook into replacement choice: the measured preference comes FIRST, the name tier map is the floor when there is nothing to measure.
 
-#: Считанные исходы на процесс. Отказ провайдера — событие редкое, а файлы
-#: растут; читать их на каждый вызов незачем, а держать вечно нельзя — поэтому
-#: сбрасывается по времени изменения источников.
+#: Outcomes read per process, reset by the sources' modification time.
 _CACHE: dict[str, object] = {}
 
 
@@ -227,7 +208,7 @@ def _load_rows(path: Path) -> list[dict]:
 
 
 def measured_outcomes(workspace: Path | None = None) -> tuple[ModelOutcome, ...]:
-    """Исходы по данным рабочей папки, с кэшем по времени изменения файлов."""
+    """Outcomes from the workspace data, cached by file modification time."""
     root = Path(workspace or ".")
     usage_path = root / "data" / "model_usage.jsonl"
     episodes_path = root / "data" / "episodic_memory.jsonl"
@@ -249,7 +230,7 @@ def substitute_model(
     *, role: str, provider: str, current_model: str | None,
     workspace: Path | None = None,
 ) -> str | None:
-    """Кем заменить `current_model` у нового провайдера."""
+    """Which model replaces `current_model` at the new provider."""
     return substitute_model_with_reason(
         role=role, provider=provider, current_model=current_model,
         workspace=workspace,
@@ -260,7 +241,7 @@ def substitute_model_with_reason(
     *, role: str, provider: str, current_model: str | None,
     workspace: Path | None = None,
 ) -> tuple[str | None, str]:
-    """(модель, причина) — решение обязано рассказывать себя."""
+    """(model, reason): the decision must explain itself."""
     try:
         outcomes = measured_outcomes(workspace)
         measured = preferred_model(

@@ -1,43 +1,6 @@
-"""Доказательство того, что модуль надо переделать, — а не его толщина.
-
-Замер 2026-09-21. `core/drives.py:self_improvement_targets` выбирал цель
-самоправки по числу строк: все модули по убыванию, первый — цель. Лестница
-того дня: step_sanitizer 1223, best_next_action 1150, loop_step_execution
-1122, knowledge_pipeline 1074, campaign_io 1067, charter_goal 1041 — шесть
-файлов в пределах 180 строк. Разрежешь первый — корона переедет на второй:
-финиша нет по построению. 141 самостоятельная цель, 139 из них «прочитать
-себя» или «разбить себя»; из десяти заявок на самоправку ни одна строка не
-пережила двух суток.
-
-Требование оператора: прежде чем резать, ДОКАЗАТЬ, что резать надо, и
-доказательство бывает трёх видов — дубль, чужой дом, громоздкость. Размер
-сам по себе доказательством не является, он только повод посмотреть.
-
-Признаки ниже предложил сам агент (разговор 21.09 05:15), здесь они
-посчитаны по коду, без модели:
-
-* ``dup`` — тело определения дословно (по AST, без имени и докстринга)
-  повторяет определение в другом модуле. Правка — СВЕСТИ повтор, а не резать.
-* ``multi_subject`` — если снять входы, которыми модуль пользуются снаружи,
-  его определения распадаются на ≥2 несвязанные группы, каждая не меньше
-  порога. Это два предмета в одном файле; правка — вынести группу в модуль,
-  названный по её смыслу. Дома остаётся группа, чьи имена совпадают с именем
-  модуля (`core/verifier_absence.py` — это ворота отсутствия, выносить надо
-  другие ворота, а не их).
-
-Нет ни одного — ``none``: файл не цель, даже если он самый большой в дереве.
-
-ЧУЖОГО ДОМА здесь НЕТ, и это решение, а не пропуск. Третий вид оператора —
-«функция принадлежит другому существующему файлу» — первым делом был посчитан
-правилом «функцию не зовут в своём модуле, а из чужих берёт ровно один».
-Прогон по настоящему коду 2026-09-21: 110 срабатываний из 311 модулей, и
-почти все ложные — правило объявило, что каждая примесь цикла
-(`AgentLoopSynthesis`, `AgentLoopStepExecution`, …) живёт «не у себя» и её
-надо вернуть в `core/loop.py`. То есть погнало бы агента отменять намеренный
-раскол, сделанный оператором. Модуль с одним клиентом — это обычный модуль.
-Надёжного признака дома (по предмету, по общим данным, по родне) пока нет;
-пока его нет, этот вид не выдаёт цели вовсе — меньше целей, но все настоящие.
-"""
+"""Proof that a module should be reworked, not its thickness: dup (verbatim duplicate definition elsewhere) or multi_subject (unrelated definition groups)."""
+# Size alone is no proof, only a reason to look. A third kind, "foreign home" (a function belongs to another existing file), is deliberately NOT
+# emitted: the rule flagged intentional loop mixins; fewer goals, all real. Computed from the code, no model.
 from __future__ import annotations
 
 import ast
@@ -45,14 +8,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-#: Где живёт собственный код агента.
+#: Where the agent's own code lives.
 CODE_DIRS = ("core", "tools", "app", "cli")
-#: Пороги — сколько строк должно стоять за доказательством, чтобы правка
-#: стоила заявки. Ниже — косметика того же рода, что и раньше.
+#: Thresholds: how many lines must stand behind a proof for the fix to be worth a request.
 MIN_DUP_LOC = 12
 MIN_SUBJECT_LOC = 120
 _KIND_RANK = {"dup": 0, "multi_subject": 1}
-#: Слова имени модуля, которые ничего не говорят о его предмете.
+#: Module-name words that say nothing about its subject.
 _GENERIC_STEM = frozenset({"core", "tools", "helpers", "utils", "types", "io", "base"})
 
 
@@ -69,19 +31,19 @@ class Module:
     rel: str
     lines: int
     defs: dict[str, Definition] = field(default_factory=dict)
-    #: имена, использованные на уровне модуля вне определений
+    #: names used at module level outside definitions
     top_refs: set[str] = field(default_factory=set)
-    #: (модуль-источник, имя) — что этот модуль берёт у других
+    #: (source module, name): what this module takes from others
     imports: set[tuple[str, str]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
 class Proof:
-    kind: str                       # dup | multi_subject
-    loc: int                        # сколько строк стоит за доказательством
-    names: tuple[str, ...]          # какие определения
-    other: str = ""                 # для dup — модуль с копией
-    groups: tuple[tuple[str, ...], ...] = ()   # для multi_subject
+    kind: str  # dup | multi_subject
+    loc: int  # lines behind the proof
+    names: tuple[str, ...]  # which definitions
+    other: str = ""  # for dup: the module with the copy
+    groups: tuple[tuple[str, ...], ...] = ()  # for multi_subject
 
     def describe(self, rel: str) -> str:
         names = ", ".join(self.names[:6]) + (" и др." if len(self.names) > 6 else "")
@@ -133,8 +95,7 @@ def _read(path: Path, rel: str) -> Module | None:
             src_rel = _module_rel(node.module)
             mod.imports.update((src_rel, a.name) for a in node.names)
         elif isinstance(node, ast.Import):
-            # `import core.x` — такая же зависимость на загрузке, как from-импорт;
-            # без неё направление дубля (ниже) видело бы не все рёбра.
+            # `import core.x` is a load-time dependency like a from-import; without it the duplicate direction would miss edges.
             mod.imports.update((_module_rel(a.name), "") for a in node.names)
         else:
             mod.top_refs |= _names_in(node)
@@ -142,7 +103,7 @@ def _read(path: Path, rel: str) -> Module | None:
 
 
 def index_workspace(root: Path | str) -> dict[str, Module]:
-    """Все модули собственного кода агента, разобранные один раз."""
+    """All modules of the agent's own code, parsed once."""
     base = Path(root)
     out: dict[str, Module] = {}
     for folder in CODE_DIRS:
@@ -164,7 +125,7 @@ def _users(index: dict[str, Module]) -> dict[tuple[str, str], set[str]]:
 
 
 def _dependents(index: dict[str, Module], rel: str) -> set[str]:
-    """Модули, которые загружают `rel` — сами или через цепочку импортов."""
+    """Modules that load `rel`, directly or via an import chain."""
     importers: dict[str, set[str]] = defaultdict(set)
     for mod in index.values():
         for src_rel, _name in mod.imports:
@@ -180,14 +141,7 @@ def _dependents(index: dict[str, Module], rel: str) -> set[str]:
 
 
 def _dup_proof(mod: Module, index: dict[str, Module]) -> Proof | None:
-    """Дубль в `mod`, который можно убрать, взяв копию импортом из другого модуля.
-
-    Дом копии обязан не зависеть от `mod`. Эпизод 2026-09-21: цель велела
-    оставить `_bool`/`_parse_iso` в core/scheduler.py и импортировать их в
-    core/task_queue.py — а scheduler.py:21 сам импортирует task_queue, и правка
-    замкнула бы импорт в круг. Такой дом не годится; правка идёт с другой
-    стороны — у того, кто уже зависит.
-    """
+    """A duplicate in `mod` removable by importing the copy from another module; the copy's home must not depend on `mod` (else the import closes a cycle)."""
     by_shape: dict[str, list[tuple[str, str]]] = defaultdict(list)
     depends_on_mod = _dependents(index, mod.rel)
     for other in index.values():
@@ -239,9 +193,7 @@ def _subject_proof(mod: Module, users: dict[tuple[str, str], set[str]]) -> Proof
                  key=lambda g: -sum(inner[n].loc for n in g))
     if len(big) < 2:
         return None
-    # Дома остаётся предмет, названный так же, как модуль; выносится самая
-    # крупная из ЧУЖИХ групп. Если имя модуля не говорит ни об одной —
-    # выносится меньшая, как наименее своя.
+    # The home keeps the group named like the module; the largest FOREIGN group moves out (the smaller one if the name matches none).
     stem = _stem_tokens(mod.rel)
     foreign = [g for g in big if not _owns_the_module(g, stem)]
     moved = foreign[0] if foreign and len(foreign) < len(big) else big[-1]
@@ -250,7 +202,7 @@ def _subject_proof(mod: Module, users: dict[tuple[str, str], set[str]]) -> Proof
 
 
 def proof_for(rel: str, index: dict[str, Module]) -> Proof | None:
-    """Самое сильное доказательство для модуля, или None — модуль не цель."""
+    """Strongest proof for the module, or None when it is not a target."""
     mod = index.get(rel)
     if mod is None:
         return None
@@ -258,5 +210,5 @@ def proof_for(rel: str, index: dict[str, Module]) -> Proof | None:
 
 
 def rank_key(proof: Proof, lines: int) -> tuple[int, int, int]:
-    """Сначала вид доказательства, потом его вес; размер файла — последний."""
+    """Proof kind first, then its weight; file size last."""
     return (_KIND_RANK[proof.kind], -proof.loc, -lines)

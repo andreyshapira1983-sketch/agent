@@ -1,8 +1,4 @@
-"""Core data models for the agent (§12.1 of the architecture).
-
-Every object that crosses a domain boundary must be one of these models.
-This keeps the loop, tools, and policy layer talking the same language.
-"""
+"""Core data models for the agent (§12.1): every object crossing a domain boundary is one of these."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,7 +13,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ---------- intent / planning ----------
 
 class Goal(BaseModel):
     id: str = Field(default_factory=lambda: new_id("goal"))
@@ -62,7 +57,6 @@ class Plan(BaseModel):
     created_at: datetime = Field(default_factory=_now)
 
 
-# ---------- perception / action / tools ----------
 
 class Observation(BaseModel):
     id: str = Field(default_factory=lambda: new_id("obs"))
@@ -105,7 +99,6 @@ class ToolResult(BaseModel):
     completed_at: datetime = Field(default_factory=_now)
 
 
-# ---------- governance ----------
 
 class PolicyDecision(BaseModel):
     id: str = Field(default_factory=lambda: new_id("pol"))
@@ -118,10 +111,7 @@ class PolicyDecision(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
-    """§12.1 + §7 Human Approval. Emitted by the loop whenever the
-    PolicyGate escalates an Action; the bound `ApprovalProvider` answers
-    with an `ApprovalDecision`.
-    """
+    """Human approval request (§12.1, §7), emitted when the PolicyGate escalates an Action; the bound `ApprovalProvider` answers with an `ApprovalDecision`."""
 
     id: str = Field(default_factory=lambda: new_id("appr"))
     action_id: str
@@ -145,7 +135,6 @@ class ApprovalDecision(BaseModel):
     decided_at: datetime = Field(default_factory=_now)
 
 
-# ---------- memory ----------
 
 class MemoryRecord(BaseModel):
     """§12.1 Memory Record. MVP-4 uses only the `working` type."""
@@ -157,18 +146,12 @@ class MemoryRecord(BaseModel):
     owner: str = "session"
     ttl_seconds: int | None = None
     created_at: datetime = Field(default_factory=_now)
-    # WHO asserted this (MIR-074): `user-explicit` records are human assertions and
-    # may verify; agent-auto ones stay non-independent by doctrine (MIR-046).
+    # WHO asserted this: `user-explicit` records are human assertions and may verify; agent-auto ones stay non-independent.
     source: str | None = None
 
-    # --- importance tracking (for archive scoring) ---
-    # How many times this record was retrieved and injected into a prompt.
+    # Importance tracking (archive scoring): how many times the record was retrieved and injected into a prompt.
     access_count: int = 0
-    # MIR-074 (operator ruling 2026-08-03): CAUSAL credits — the record was
-    # cited as [memory:<id>] in an answer chunk the verifier marked
-    # `verified`, i.e. retrieved → changed the answer → independently
-    # checked. Injection alone (access_count) is a near-zero signal; THIS
-    # is the strong one, and it is what keeps a record active.
+    # CAUSAL credits: the record was cited as [memory:<id>] in an answer chunk the verifier marked `verified`; a much stronger signal than access_count and what keeps a record active.
     causal_use: int = 0
     # Last time this record was retrieved (None = never used after creation).
     last_accessed_at: datetime | None = None
@@ -182,15 +165,12 @@ class MemoryRecord(BaseModel):
     @field_validator("created_at", "last_accessed_at")
     @classmethod
     def _aware(cls, value: datetime | None) -> datetime | None:
-        """A stored time without a zone is read as UTC. One legacy naive
-        timestamp made every hygiene comparison raise TypeError and stopped
-        the whole cleanup pass (проверка 16.11, серьёзная №12)."""
+        """A stored time without a zone is read as UTC (a naive timestamp would raise TypeError in hygiene comparisons)."""
         if value is not None and value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value
 
 
-# ---------- failure ----------
 
 class ErrorObject(BaseModel):
     id: str = Field(default_factory=lambda: new_id("err"))

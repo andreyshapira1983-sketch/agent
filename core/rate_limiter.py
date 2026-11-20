@@ -1,19 +1,4 @@
-"""CLI session rate limiter — token bucket (T8 / §6 Security).
-
-Prevents runaway or abusive request bursts from a CLI session.
-One :class:`CLIRateLimiter` instance is created per interactive session
-and checked before each agent invocation.
-
-Token-bucket contract
----------------------
-* Bucket capacity = ``max_requests`` tokens.
-* Tokens refill continuously at ``max_requests / window_seconds`` per second.
-* Each request consumes one token.
-* If the bucket is empty the request is denied and the caller is told how
-  many seconds to wait before the next token becomes available.
-
-Thread safety: single-threaded CLI use only.  No lock is needed.
-"""
+"""CLI session rate limiter: a token bucket (capacity ``max_requests``, refill ``max_requests / window_seconds`` per second); single-threaded CLI use only, no lock."""
 from __future__ import annotations
 
 import time
@@ -48,9 +33,6 @@ class CLIRateLimiter:
         self._tokens: float = float(max_requests)  # start full
         self._last_refill: float = time.monotonic()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def consume(self) -> RateLimitResult:
         """Attempt to consume one token."""
@@ -76,9 +58,6 @@ class CLIRateLimiter:
         elapsed = now - self._last_refill
         return min(self._tokens + elapsed * self._refill_rate, float(self.max_requests))
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _refill(self) -> None:
         now = time.monotonic()

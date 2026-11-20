@@ -1,21 +1,8 @@
-"""Memory Echo Antibody (A1) — refuse agent-auto memory that *echoes* itself.
+"""Memory Echo Antibody: refuse agent-auto memory that echoes itself.
 
-1. **Time window.** Only writes made in the recent past (default 24h) count
-as an echo. A genuine new observation a week later is fine. 2. **Source
-scope.** Only the agent's own `agent-auto` writes are guarded. The human
-operator (`user-explicit`) is never limited — the point is to stop the
-*agent* from talking to itself, not the person.
-
-HARD BOUNDARIES (by design, do not relax): * It NEVER deletes memory. * It
-NEVER writes new memory. * It NEVER calls an LLM. * It draws NO conclusions
-about meaning, truth, or value. * It only ever returns ``allow`` /
-``reject`` plus a human-readable reason.
-
-The detector (`detect_memory_echo`) is a pure function: same inputs → same
-outputs, no I/O. Persistence of the rolling write-log lives in the small
-append-only `MemoryWriteRegistry` (data/memory_writes.jsonl), which is the
-only part that touches disk and is kept deliberately separate from the
-decision.
+Only writes in the recent window (default 24h) count, and only the agent's own `agent-auto` source is guarded (`user-explicit` is never limited).
+Hard boundaries, do not relax: never deletes memory, never writes memory, never calls an LLM, draws no conclusions about meaning; returns only ``allow`` / ``reject`` plus a reason.
+`detect_memory_echo` is pure; the append-only `MemoryWriteRegistry` (data/memory_writes.jsonl) is the only part touching disk.
 """
 
 from __future__ import annotations
@@ -29,19 +16,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-# Reuse the proven Jaccard+containment scorer so the echo guard stays in lock
-# step with the on-disk dedup gate (`core.hygiene`). Importing the internal
-# helper avoids re-implementing — and silently drifting from — the similarity
-# definition the rest of the system already trusts.
+# Reuse the Jaccard+containment scorer of the on-disk dedup gate (`core.hygiene`) so the echo guard cannot drift from it.
 from core.memory_hygiene import _similarity as _text_similarity
 
-# The single write source this antibody guards. Everything else — most
-# importantly `user-explicit` — passes straight through untouched.
+# The single write source guarded; everything else (notably `user-explicit`) passes untouched.
 GUARDED_SOURCE = "agent-auto"
 
-# Mirror of `core.hygiene.DEFAULT_DEDUP_THRESHOLD`; kept as its own name so the
-# echo threshold can be tuned independently of the on-disk dedup threshold if
-# they ever need to diverge.
+# Mirror of `core.hygiene.DEFAULT_DEDUP_THRESHOLD`, a separate name so the thresholds can diverge.
 DEFAULT_ECHO_THRESHOLD = 0.85
 
 # How far back a prior write still counts as a potential echo.
@@ -79,18 +60,11 @@ def _parse_ts(raw: str) -> datetime | None:
     return dt
 
 
-# ============================================================
-# Write-log record
-# ============================================================
 
 
 @dataclass(frozen=True)
 class MemoryWriteEvent:
-    """One agent-auto write as recorded in the rolling log.
-
-    The normalised ``content`` is stored so the *semantic* echo check can run
-    later; ``content_hash`` is the fast exact-repeat fingerprint.
-    """
+    """One agent-auto write as recorded in the rolling log; the normalised ``content`` allows the semantic echo check, ``content_hash`` is the exact-repeat fingerprint."""
 
     content: str
     content_hash: str
@@ -146,9 +120,6 @@ def make_event(
     )
 
 
-# ============================================================
-# Pure detector
-# ============================================================
 
 
 @dataclass(frozen=True)
@@ -195,8 +166,7 @@ def detect_memory_echo(
 
     text = (candidate_content or "").strip()
     if not text:
-        # Empty / blank content is handled by the write policy's own gates;
-        # the echo guard stays silent rather than double-reporting.
+        # Empty content is handled by the write policy's own gates; stay silent rather than double-report.
         return MemoryEchoOutcome(
             decision="allow",
             reason="empty candidate (handled by other gates)",
@@ -218,10 +188,7 @@ def detect_memory_echo(
                 matched_hash=event.content_hash,
                 similarity=1.0,
             )
-        # order_sensitive=False ОСОЗНАННО: антитело ловит повтор агента за
-        # самим собой, и пересказ теми же словами в другом порядке — это эхо,
-        # а не другой факт. У ворот записи цена ошибки обратная, и там дефолт
-        # `True` (F-2 в docs/audit/FIELD_CHECK_QUEUE.md).
+        # order_sensitive=False ON PURPOSE: a retelling in other word order is still an echo (the write gate's cost of error is the reverse, default `True` there).
         sim = _text_similarity(text, event.content, order_sensitive=False)
         if sim > best_sim:
             best_sim = sim
@@ -245,19 +212,12 @@ def detect_memory_echo(
     )
 
 
-# ============================================================
-# Append-only rolling write-log (the only part that touches disk)
-# ============================================================
 
 DEFAULT_REGISTRY_PATH = Path("data") / "memory_writes.jsonl"
 
 
 class MemoryWriteRegistry:
-    """Append-only JSONL log of agent-auto memory writes.
-
-    Deliberately dumb: it records events and serves a time-windowed slice of
-    recent ones. It makes no decisions — that is the detector's job.
-    """
+    """Append-only JSONL log of agent-auto memory writes; records events and serves a time-windowed slice, makes no decisions."""
 
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path is not None else DEFAULT_REGISTRY_PATH
@@ -271,8 +231,7 @@ class MemoryWriteRegistry:
         if not self.path.exists():
             return []
         events: list[MemoryWriteEvent] = []
-        # Не-UTF-8 байты и строка-не-объект (`[1, 2]`, `"x"`) роняли весь
-        # load() (проверка 16.11, средняя): такие строки пропускаются.
+        # Non-UTF-8 bytes and non-object rows (`[1, 2]`, `"x"`) used to crash load(); such rows are skipped.
         with self.path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()

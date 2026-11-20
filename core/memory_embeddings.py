@@ -1,39 +1,12 @@
-"""Поиск по смыслу для долговременной памяти: multilingual-e5-large-instruct.
+"""Semantic search for long-term memory: multilingual-e5-large-instruct.
 
-Зачем, замер 2026-09-23: после BM25 (803763d) нужный урок всплывал 3 раза из
-9. Отбор сравнивал СЛОВА, и вопрос «поставь библиотеку, которой не хватает» не
-находил урок «ставя себе пакет, проверь окружение»: общих слов нет, смысл один.
-В литературе это решают плотными векторами.
-
-Модель — intfloat/multilingual-e5-large-instruct (Wang et al., «Multilingual
-E5 Text Embeddings: A Technical Report», arXiv 2402.05672). Выбор по замеру и
-по ruMTEB (arXiv 2408.12503): 64.7 по русским задачам — лучшая из моделей без
-видеокарты; BGE-M3 — 60.8, mE5-large — 60.4. Первой стояла mE5-small: на семи
-вопросах, где нужный урок сказан другими словами, она ставила его в первую
-тройку 2 раза из 7, а в её тройку лезли записи-«вопросы к агенту» — похожие
-формой, не темой. Большая instruct-модель — 5 из 7. Нарезка длинных записей на
-куски (MaxP, Dai & Callan, SIGIR 2019) и срезание строки вопроса маленькой не
-помогли (те же 2 из 7) — дело было в самой модели.
-
-Правила из карточки: у instruct-модели к вопросу пишется поручение
-«Instruct: {задача}\\nQuery: {вопрос}», записи кодируются без приставки; у
-простых e5 — «query: » и «passage: ». Векторы нормируются, текст режется на
-512 токенах, косинусы кучкуются в 0.7–1.0 — смысл несёт ПОРЯДОК, не число,
-поэтому никаких порогов по косинусу. Своя формулировка задачи («найди урок,
-который отвечает на вопрос») замерена и оказалась хуже стандартной (4 из 7).
-
-Слияние со словами — выпуклая сумма нормированных баллов
-α·смысл + (1 − α)·BM25 (Bruch, Gai, Ingber, «An Analysis of Fusion Functions
-for Hybrid Retrieval», ACM TOIS 2023, arXiv 2210.11934): она обошла
-Reciprocal Rank Fusion и внутри области, и вне её, а единственный параметр
-подбирается по немногим примерам. Нормировка — min-max по кандидатам.
-
-Включение: переменная AGENT_EMBED_MODEL — путь к локальной копии модели.
-Нет переменной, нет библиотеки, сбой загрузки или кодирования — поиск по
-смыслу выключен, работает один BM25, как до правки. Векторы записей хранятся
-на диске по отпечатку текста (рядом с моделью): короткий процесс чата не
-пересчитывает всю память на каждый вопрос.
-"""
+    Model: intfloat/multilingual-e5-large-instruct (arXiv 2402.05672), chosen on ruMTEB.
+    Queries get the instruct prefix "Instruct: {task}\nQuery: {query}", records are
+    encoded plain; vectors are normalised, text cut at 512 tokens. No cosine
+    thresholds: cosines cluster in 0.7-1.0, only ORDER carries meaning. Fusion with
+    BM25 is a convex sum of min-max normalised scores. Enabled by AGENT_EMBED_MODEL
+    (path to a local model copy); any missing piece falls back to BM25 alone.
+    Record vectors are cached on disk by text fingerprint."""
 from __future__ import annotations
 
 import hashlib
@@ -46,25 +19,20 @@ from typing import Any
 MODEL_ENV = "AGENT_EMBED_MODEL"
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
-#: Задача для instruct-модели — стандартная из её карточки.
+#: Instruct-model task: the standard one from its model card (a custom wording measured worse).
 INSTRUCT_TASK = "Given a web search query, retrieve relevant passages that answer the query"
-#: Доля смысла в слиянии; подобрана замером (см. тест и сообщение коммита).
+#: Share of meaning in the fusion; chosen by measurement.
 ALPHA = 0.5
-#: Reciprocal Rank Fusion (Cormack, Clarke, Büttcher, SIGIR 2009) — для сравнения.
+#: Reciprocal Rank Fusion (Cormack et al., SIGIR 2009), kept for comparison.
 RRF_K = 60
-#: Квота процессора контейнера (cgroup v2): «квота период» или «max период».
+#: Container CPU quota (cgroup v2): "quota period" or "max period".
 CPU_MAX_FILE = Path("/sys/fs/cgroup/cpu.max")
 
 
 def cpu_budget(cpu_max: Path = CPU_MAX_FILE) -> int:
-    """Потоки для torch: половина ОПЛАЧЕННЫХ ядер, а не видимых.
+    """Threads for torch: half of the PAID cores, not the visible ones.
 
-    Замер 2026-09-24, сервер Vast: видно 96 ядер, квота контейнера 23. torch
-    брал потоки по видимым, и кампания вместе с разговором держали ~200
-    потоков на 23 ядрах: оба процесса по 8 минут не сдвинулись дальше
-    загрузки модели, 184 записи кодировались 207 секунд. Половина — потому
-    что кампания и разговор работают одновременно.
-    """
+        A container may show many cores but have a small quota; half because the campaign and the chat run at once."""
     try:
         quota, period = cpu_max.read_text(encoding="utf-8").split()[:2]
         cores = int(quota) // int(period) if quota != "max" else (os.cpu_count() or 1)
@@ -82,7 +50,7 @@ _instruct = False
 
 
 def set_encoder(fn: Callable[[list[str]], Any] | None) -> None:
-    """Подменить кодировщик (тесты): fn(тексты) -> нормированные векторы."""
+    """Replace the encoder (tests): fn(texts) -> normalised vectors."""
     global _encoder_override  # noqa: PLW0603 — подмена кодировщика в тестах
     _encoder_override = fn
     _vectors.clear()
@@ -153,7 +121,7 @@ def _passage(text: str) -> str:
 
 
 def semantic_scores(query: str, texts: Sequence[str]) -> list[float] | None:
-    """Косинус каждого текста с вопросом, или None — поиск по смыслу выключен."""
+    """Cosine of each text with the question, or None when semantic search is off."""
     enc = _encoder()
     if enc is None or not texts or not (query or "").strip():
         return None
@@ -179,13 +147,13 @@ def _min_max(values: Sequence[float]) -> list[float]:
 
 
 def convex(lexical: Sequence[float], semantic: Sequence[float], alpha: float = ALPHA) -> list[float]:
-    """α·смысл + (1 − α)·слова, каждое min-max нормировано (Bruch et al. 2023)."""
+    """alpha*meaning + (1 - alpha)*words, each min-max normalised (Bruch et al. 2023)."""
     lex, sem = _min_max(lexical), _min_max(semantic)
     return [alpha * s + (1.0 - alpha) * w for w, s in zip(lex, sem, strict=True)]
 
 
 def rrf(*score_lists: Sequence[float], k: int = RRF_K) -> list[float]:
-    """Reciprocal Rank Fusion: сумма 1/(k + место), место с единицы."""
+    """Reciprocal Rank Fusion: sum of 1/(k + rank), rank starting at one."""
     n = len(score_lists[0]) if score_lists else 0
     out = [0.0] * n
     for scores in score_lists:
@@ -198,7 +166,7 @@ def rrf(*score_lists: Sequence[float], k: int = RRF_K) -> list[float]:
 def fused_relevance(
     question: str, texts: Sequence[str], lexical: list[float],
 ) -> tuple[list[float], list[float] | None]:
-    """Релевантность для отбора и смысловые баллы (None — смысл не участвовал)."""
+    """Relevance for selection and meaning scores (None when meaning did not take part)."""
     semantic = semantic_scores(question, texts)
     if semantic is None:
         return lexical, None
@@ -206,7 +174,7 @@ def fused_relevance(
 
 
 def top_by_meaning(semantic: list[float] | None, n: int) -> frozenset[int]:
-    """Номера n записей, ближайших по смыслу; пусто, если смысл выключен."""
+    """Indices of the n records nearest by meaning; empty when meaning is off."""
     if not semantic or n <= 0:
         return frozenset()
     return frozenset(sorted(range(len(semantic)), key=lambda i: -semantic[i])[:n])

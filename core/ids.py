@@ -5,16 +5,10 @@ import secrets
 
 
 def new_id(prefix: str) -> str:
-    """Generate a prefixed id with 128-bit entropy, e.g. obs_<32 hex chars>.
-
-    128 bits matches the W3C TraceContext / OpenTelemetry trace-id standard
-    and eliminates birthday-collision risk in distributed logs.
-    """
+    """Prefixed id with 128-bit entropy, e.g. obs_<32 hex chars> (W3C TraceContext size, no birthday-collision risk)."""
     return f"{prefix}_{secrets.token_hex(16)}"
 
 
-# Приехало из `core/loop_helpers.py`: идентификатор трассы — это идентификатор,
-# и его дом здесь, рядом с `new_id`, которым он и сделан.
 def new_trace_id() -> str:
-    """Идентификатор СЕАНСА: один журнал, сколько угодно прогонов внутри."""
+    """Id of a SESSION: one journal, any number of runs inside."""
     return new_id("trace")

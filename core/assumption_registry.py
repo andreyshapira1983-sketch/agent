@@ -1,38 +1,7 @@
-"""Assumption Registry — Layer 5 (Explicit Planning Assumptions).
+"""Explicit planning assumptions: heuristic (regex, no LLM) extraction from questions and tool plans, in-memory registry per run, durable JSONL store.
 
-Every time the agent plans a tool call or interprets a question it makes
-implicit assumptions: "the file is UTF-8", "Python 3 is intended", "the
-web is reachable".  Layer 5 surfaces these as first-class objects so they
-can be:
-
-  - **logged** as ``assumption_registered`` trace events (full auditability)
-  - **injected** into the synthesizer as an ``<assumptions>`` block so the
-    LLM can explicitly acknowledge or caveat them in its answer
-  - **persisted** per-run in ``data/assumptions.jsonl`` for retrospective
-    analysis
-  - **surfaced** to the operator via ``:assumptions`` in the REPL
-
-Design principles
------------------
-* No LLM calls — all extraction is heuristic regex, deterministic, O(n).
-* Pure extraction functions — no side effects, easy to unit-test.
-* ``AssumptionRegistry`` is in-memory / per-run; ``AssumptionStore`` is the
-  durable JSONL layer.
-* The update to the run answer must never be aborted by an assumption error —
-  all registry operations are wrapped defensively in ``loop.py``.
-
-Assumption categories
----------------------
-file_encoding       — character encoding of a target file.
-file_format         — expected structure / syntax of a target file.
-language            — expected response / question language.
-python_version      — which Python version is intended.
-tool_availability   — presence of a required CLI tool or library.
-network_access      — availability of public internet.
-workspace_permission — write/execute rights in the workspace.
-user_intent         — interpretation of an ambiguous goal.
-scope               — whether the action is limited to the workspace.
-general             — catch-all for other implicit assumptions.
+Categories: file_encoding, file_format, language, python_version, tool_availability, network_access, workspace_permission, user_intent, scope, general.
+Assumption errors must never abort a run answer; loop.py wraps all registry calls defensively.
 """
 from __future__ import annotations
 
@@ -55,9 +24,6 @@ from core.state_integrity import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------------
 
 AssumptionCategory = Literal[
     "file_encoding",
@@ -77,12 +43,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-#: Через сколько неизменное допущение записывается снова (см. `save_many`).
+#: Hours after which an unchanged assumption is written again (see `save_many`).
 _REPEAT_AFTER = timedelta(hours=24)
 
 
 def _recent_keys(rows: list[dict]) -> dict[tuple, datetime]:
-    """(category, text, verified) → когда записано последний раз."""
+    """(category, text, verified) -> when last written."""
     seen: dict[tuple, datetime] = {}
     for row in rows:
         try:
@@ -96,22 +62,19 @@ def _recent_keys(rows: list[dict]) -> dict[tuple, datetime]:
     return seen
 
 
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
 
 class Assumption(BaseModel):
     """A single explicit assumption made during one agent run."""
 
     id: str = Field(default_factory=lambda: new_id("asmp"))
-    run_id: str = ""                   # trace_id of the owning run
-    text: str                          # human-readable statement
+    run_id: str = ""  # trace_id of the owning run
+    text: str  # human-readable statement
     category: AssumptionCategory = "general"
-    confidence: float = 0.80           # 0.0–1.0
+    confidence: float = 0.80  # 0.0-1.0
     source: Literal[
         "heuristic", "planner", "question", "kernel", "profile"
     ] = "heuristic"
-    verified: bool | None = None       # None=not yet checked
+    verified: bool | None = None  # None = not yet checked
     created_at: datetime = Field(default_factory=_now)
 
     @field_validator("confidence")
@@ -138,11 +101,7 @@ class Assumption(BaseModel):
         return cls.model_validate(d)
 
 
-# ---------------------------------------------------------------------------
-# Heuristic extractors (pure functions — no side effects)
-# ---------------------------------------------------------------------------
 
-# Question-level signals
 _PYTHON_PATTERNS = re.compile(
     r"\bpython\b(?!\s*[\d])",   # "python" not followed by a version number
     re.IGNORECASE,
@@ -162,7 +121,6 @@ _FILE_WITHOUT_PATH = re.compile(
     re.IGNORECASE,
 )
 
-# Tool-level signals (keyed by tool name substrings)
 _TOOL_ASSUMPTIONS: dict[str, list[tuple[str, AssumptionCategory, float]]] = {
     "file_read": [
         ("The target file is UTF-8 encoded.", "file_encoding", 0.85),
@@ -186,7 +144,6 @@ _TOOL_ASSUMPTIONS: dict[str, list[tuple[str, AssumptionCategory, float]]] = {
     ],
 }
 
-# .py extension → additional format assumption
 _PY_FILE_PATTERN = re.compile(r"\.py\b", re.IGNORECASE)
 
 
@@ -198,9 +155,7 @@ def extract_from_question(
     """Extract implicit assumptions from the raw question text."""
     assumptions: list[Assumption] = []
 
-    # Language assumption
-    # Layer 4→5 bridge: if the user profile already knows the language,
-    # use that signal directly (higher confidence, source="profile").
+    # If the user profile knows the language, use it directly (source="profile").
     if known_language is not None:
         if known_language == "ru":
             assumptions.append(Assumption(
@@ -219,7 +174,6 @@ def extract_from_question(
                 source="profile",
             ))
     else:
-        # Fall back to heuristic — only when clearly one-sided
         ru_count = len(_RUSSIAN_WORD.findall(question))
         en_count = len(_ENGLISH_WORD.findall(question))
         if ru_count >= 3 and en_count < ru_count:
@@ -239,7 +193,6 @@ def extract_from_question(
                 source="question",
             ))
 
-    # Python version — "python" without a version specifier
     if _PYTHON_PATTERNS.search(question):
         assumptions.append(Assumption(
             run_id=run_id,
@@ -249,7 +202,6 @@ def extract_from_question(
             source="question",
         ))
 
-    # Run-command scope
     if _RUN_COMMAND_PATTERNS.search(question):
         assumptions.append(Assumption(
             run_id=run_id,
@@ -259,7 +211,6 @@ def extract_from_question(
             source="question",
         ))
 
-    # File without explicit path
     if _FILE_WITHOUT_PATH.search(question):
         assumptions.append(Assumption(
             run_id=run_id,
@@ -277,11 +228,7 @@ def extract_from_plan(
     question: str = "",
     run_id: str = "",
 ) -> list[Assumption]:
-    """Extract implicit assumptions from a planner's tool selection.
-
-    ``sources`` is the list of ``{"tool": ..., "arguments": ...}`` dicts
-    returned by ``LLMPlanner.plan()``.  Pure function — no I/O.
-    """
+    """Extract implicit assumptions from a planner's tool selection (``sources`` = list of {tool, arguments} dicts). Pure function."""
     assumptions: list[Assumption] = []
     seen_texts: set[str] = set()
 
@@ -302,7 +249,6 @@ def extract_from_plan(
                             source="planner",
                         ))
 
-        # Extra: file with .py extension → syntax assumption
         if "file_read" in tool_name:
             path_arg = str(args.get("path", "") or args.get("file", "") or "")
             if _PY_FILE_PATTERN.search(path_arg):
@@ -320,26 +266,16 @@ def extract_from_plan(
     return assumptions
 
 
-# ---------------------------------------------------------------------------
-# In-memory registry (one per agent run)
-# ---------------------------------------------------------------------------
 
 class AssumptionRegistry:
-    """Mutable in-memory store for a single agent run's assumptions.
-
-    Thread-safety: this object is created and consumed within one synchronous
-    ``AgentLoop.run()`` call so no locking is required.
-    """
+    """Mutable in-memory store for one run's assumptions (no locking: one synchronous run)."""
 
     def __init__(self, run_id: str = "") -> None:
         self.run_id = run_id
         self._items: list[Assumption] = []
-        # IDs loaded from the persistent store at run start (Layer 2→5 bridge).
-        # These are excluded from the end-of-run save_many call to avoid
-        # duplication in the JSONL file.
+        # Ids loaded from the persistent store at run start; excluded from the end-of-run save to avoid duplicates.
         self._restored_ids: set[str] = set()
 
-    # ---------- writes ----------
 
     def register(
         self,
@@ -364,11 +300,7 @@ class AssumptionRegistry:
         self._items.extend(assumptions)
 
     def restore_from_store(self, assumptions: list[Assumption]) -> None:
-        """Load assumptions that were previously persisted (Layer 2→5 bridge).
-
-        These are added to the registry but marked as *restored* so they are
-        not written to the store again at end-of-run.
-        """
+        """Load previously persisted assumptions, marked restored so they are not written again."""
         for a in assumptions:
             self._restored_ids.add(a.id)
         self._items.extend(assumptions)
@@ -380,13 +312,10 @@ class AssumptionRegistry:
         """
         for a in self._items:
             if a.id == assumption_id:
-                # Pydantic v2 — use model_copy to stay immutable-ish, or
-                # just set the field directly (model_config allows it).
                 object.__setattr__(a, "verified", verified)
                 return True
         return False
 
-    # ---------- reads ----------
 
     @property
     def assumptions(self) -> list[Assumption]:
@@ -394,10 +323,7 @@ class AssumptionRegistry:
 
     @property
     def new_assumptions(self) -> list[Assumption]:
-        """Assumptions that were NOT restored from the store — only new ones.
-
-        Use this for end-of-run persistence to avoid JSONL duplication.
-        """
+        """Assumptions not restored from the store, for end-of-run persistence."""
         return [a for a in self._items if a.id not in self._restored_ids]
 
     @property
@@ -408,14 +334,9 @@ class AssumptionRegistry:
     def __len__(self) -> int:
         return len(self._items)
 
-    # ---------- prompt block ----------
 
     def to_prompt_block(self) -> str:
-        """Render active assumptions as an XML block for the synthesizer.
-
-        The block is injected into the user prompt so the LLM can acknowledge
-        or caveat these assumptions in its answer.
-        """
+        """Render active assumptions as an XML block for the synthesizer prompt."""
         active = self.active
         if not active:
             return ""
@@ -425,7 +346,7 @@ class AssumptionRegistry:
             verified_tag = ""
             if a.verified is True:
                 verified_tag = " [confirmed]"
-            # Escape XML special chars to prevent tag injection into the LLM prompt.
+            # Escape XML special chars to prevent tag injection into the prompt.
             safe_text = html.escape(a.text, quote=False)
             lines.append(
                 f"- [{a.category}] {safe_text} (confidence={conf_pct}%){verified_tag}"
@@ -447,9 +368,6 @@ class AssumptionRegistry:
         ]
 
 
-# ---------------------------------------------------------------------------
-# Persistent store
-# ---------------------------------------------------------------------------
 
 class AssumptionStore:
     """Append-only JSONL store for Assumption objects across runs."""
@@ -457,10 +375,9 @@ class AssumptionStore:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        #: Rows the LAST read could not parse. Describes that read only.
+        #: Rows the LAST read could not parse; describes that read only.
         self.last_dropped_rows = 0
 
-    # ---------- writes ----------
 
     def save(self, assumption: Assumption) -> None:
         """Append one assumption. O(1) write."""
@@ -468,17 +385,7 @@ class AssumptionStore:
             append_state_jsonl_unlocked(self.path, [assumption.to_dict()])
 
     def save_many(self, assumptions: list[Assumption]) -> int:
-        """Append the assumptions that are NEW; returns how many were written.
-
-        Повтор той же (category, text, verified) моложе суток не пишется. Архив
-        отвечает «что предполагалось в последний раз», а не «сколько раз» (см.
-        `compact`), но чистка жила только в плановой уборке, которую кампания не
-        зовёт: замер 24.09 — 428 из 440 строк повторы, «the user expects a
-        russian language response» ×128. Чистить при записи, как Mem0 (NOOP для
-        уже известного); повтор раз в сутки — как repeat_interval Alertmanager,
-        чтобы неизменный факт не выпадал из `:assumptions`. Каждый ход по-прежнему
-        виден целиком в своём следе (событие `assumption_registered`).
-        """
+        """Append NEW assumptions; a repeat of the same (category, text, verified) younger than a day is skipped. Returns the number written."""
         if not assumptions:
             return 0
         with state_file_lock(self.path):
@@ -494,33 +401,10 @@ class AssumptionStore:
                 append_state_jsonl_unlocked(self.path, payloads)
         return len(payloads)
 
-    # ---------- hygiene ----------
 
     def compact(self, *, keep_last: int = 500, dry_run: bool = False) -> dict:
-        """Dedupe and cap the archive; the lifecycle ruling made this owed.
-
-        MIR-027's open half (operator ruling 2026-08-03: «сохранить — не
-        значит постоянно помнить»): after the auto-restore was removed the
-        store became a dormant archive — but it grew unbounded and collected
-        duplicates (the Layer-4 profile makes later turns re-extract the same
-        text; measured live: the language assumption saved twice in two
-        turns). One compaction rule, mirroring the persistent-store hygiene:
-
-        * duplicates share (category, text) — the NEWEST row wins, because
-          the archive answers «что предполагалось в последний раз», not
-          «сколько раз»;
-        * at most ``keep_last`` newest rows survive — dormant is bounded.
-
-        ``dry_run=True`` counts and reports without rewriting, exactly like
-        its siblings in ``run_maintenance_pass``. (Like every read in the
-        state-integrity layer — including plain status loads — it still lets
-        the reader quarantine malformed rows; dry-run disables compaction,
-        not the integrity invariant.)
-
-        Rows are always dicts (`decode_state_row` quarantines anything else),
-        but a row may lack usable `category`/`text` strings; such rows carry
-        no identity to dedupe on, so they are kept as unique rather than
-        silently merged over an empty-string fallback key (review round #282).
+        """Dedupe (newest row per (category, text) wins) and keep at most ``keep_last`` rows; ``dry_run`` only counts.
+        Rows without usable category/text strings are kept as unique rather than merged.
         """
         if keep_last < 0:
             raise ValueError(f"keep_last must be >= 0, got {keep_last}")
@@ -534,21 +418,21 @@ class AssumptionStore:
             scanned = len(rows)
             deduped: list[dict] = []
             seen: set[tuple[str, str]] = set()
-            for row in reversed(rows):        # newest first, newest wins
+            for row in reversed(rows):
                 category = row.get("category")
                 text = row.get("text")
                 if not (
                     isinstance(category, str) and category
                     and isinstance(text, str) and text
                 ):
-                    deduped.append(row)       # no usable identity — keep as unique
+                    deduped.append(row)
                     continue
                 key = (category, text)
                 if key in seen:
                     continue
                 seen.add(key)
                 deduped.append(row)
-            deduped.reverse()                 # restore chronological order
+            deduped.reverse()
             duplicates_removed = scanned - len(deduped)
             kept_rows = deduped[-keep_last:] if keep_last > 0 else []
             over_cap_removed = len(deduped) - len(kept_rows)
@@ -562,13 +446,10 @@ class AssumptionStore:
                 "dry_run": dry_run,
             }
 
-    # ---------- reads ----------
 
     def _load_all(self) -> list[Assumption]:
         if not self.path.exists():
-            # The counter describes THIS read, so the no-file path clears it
-            # too: a store that was rotated away must not keep reporting rows
-            # dropped by the read before it.
+            # The counter describes THIS read, so the no-file path clears it too.
             self.last_dropped_rows = 0
             return []
         rows = read_state_jsonl_unlocked(self.path)
@@ -578,11 +459,7 @@ class AssumptionStore:
             try:
                 result.append(Assumption.from_dict(row))
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # Skipping stays — one bad row must not sink the register — but
-                # silence does not: an assumption that cannot be parsed is an
-                # assumption nobody will ever be asked to confirm, and the
-                # caller sees a shorter list with no reason for it. Same shape
-                # as MIR-080 in the task queue.
+                # Skipping a bad row stays, but is counted so the caller sees why the list is shorter.
                 dropped += 1
                 logger.warning(
                     "assumption row dropped (%s): id=%s",

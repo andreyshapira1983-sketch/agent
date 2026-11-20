@@ -1,21 +1,4 @@
-"""Universal redaction layer (§7).
-
-Three surfaces MUST never receive raw secrets or sensitive PII:
-
-  1. JSONL trace logs   — `TraceLogger` runs every payload through `redact_payload`.
-  2. LLM prompts        — `LLMPlanner` and `AgentLoop._synthesize` run
-                          `redact_dlp_text` before calling `LLM.complete(...)`.
-  3. User-facing output — `AgentLoop.run` redacts the final answer string.
-
-The redactor is intentionally NON-reversible: once a secret is replaced
-with `[REDACTED:<kind>]`, the kernel does not keep a mapping back. The
-raw value only ever exists inside `SecretFinding.matched`, which lives
-on the stack and is discarded after the redaction call returns.
-
-Why not stream-level redaction? Because we want classification to see the
-raw text first (so `data_classifier` can decide DataClass.SECRET) and
-*then* call the redactor before anything leaves the kernel boundary.
-"""
+"""Universal, non-reversible redaction of secrets and PII for logs, LLM prompts and user-facing output."""
 from __future__ import annotations
 
 from typing import Any
@@ -37,21 +20,17 @@ def redact_text(text: str) -> tuple[str, list[SecretFinding]]:
     if not findings:
         return text, []
 
-    # Sort by start ascending, then end descending so the WIDEST match at
-    # each starting offset wins. We then replace right-to-left so earlier
-    # offsets are not invalidated by replacements that happen after them.
+    # widest match at each start offset wins; replace right-to-left so offsets stay valid
     findings_sorted = sorted(findings, key=lambda f: (f.start, -f.end))
     kept: list[SecretFinding] = []
     last_end = -1
     for f in findings_sorted:
-        # Skip a finding whose entire span is already covered by a wider
-        # match starting at the same or earlier position.
+        # skip a finding already covered by a wider match
         if f.start < last_end:
             continue
         kept.append(f)
         last_end = f.end
 
-    # Apply replacements right-to-left.
     out = text
     for f in sorted(kept, key=lambda f: f.start, reverse=True):
         out = out[: f.start] + _replacement(f.kind) + out[f.end :]
@@ -126,13 +105,7 @@ def redact_dlp_text(
 def redact_payload(obj: Any) -> Any:
     """Deep-walk a logging payload, redacting every string field.
 
-    Mapping keys are also read as evidence about their value. `redact_text`
-    already masks `password: hunter2`, because the scanner treats those
-    names as proof that what follows is a secret. Structured payloads are
-    the form the logger actually receives, and an opaque value there matches
-    no regex, so without the key it is indistinguishable from prose. Keys
-    themselves are never rewritten — they describe schema, and losing them
-    loses the log.
+    Mapping keys are also read as evidence about their value; keys themselves are never rewritten.
     """
     if isinstance(obj, str):
         red, _secret_findings, _pii_findings = redact_dlp_text(obj)
@@ -141,11 +114,7 @@ def redact_payload(obj: Any) -> Any:
         out_map: dict[Any, Any] = {}
         for key, value in obj.items():
             redacted = redact_payload(value)
-            # Fallback, never a replacement. Only mask by name when the value
-            # revealed nothing on its own, so a recognisable secret keeps its
-            # precise kind (`github-pat`) instead of degrading to a generic
-            # marker. Empty values are left alone: there is nothing to hide,
-            # and a false `[REDACTED]` would misreport the recorded state.
+            # fallback only: mask by name when the value revealed nothing, so recognisable secrets keep their kind; empty values stay
             if (
                 isinstance(value, str)
                 and value.strip()
@@ -158,19 +127,12 @@ def redact_payload(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         redacted = [redact_payload(x) for x in obj]
         return tuple(redacted) if isinstance(obj, tuple) else redacted
-    # H-34: множества и байты доходили до `logs/*.jsonl` СЫРЫМИ. Логгер их
-    # принимает — несериализуемое он приводит к строке, — а обход в них не
-    # заходил, и §7 объявляет при этом, что эти поверхности НИКОГДА не получают
-    # сырых секретов. Замер сквозной, по файлу, а не по коду.
+    # sets and bytes must not reach the logs raw
     if isinstance(obj, (set, frozenset)):
-        # Список, а не множество: после редакции два разных секрета дают одну и
-        # ту же метку, и множество молча потеряло бы один из элементов. В
-        # журнале лучше видеть две одинаковые метки, чем недосчитаться записи.
+        # a list, not a set: two different secrets redact to the same label and a set would drop one
         return [redact_payload(x) for x in sorted(obj, key=repr)]
     if isinstance(obj, (bytes, bytearray)):
-        # Тип меняется на строку намеренно: значение, которое нельзя показать
-        # безопасно, стоит меньше, чем показанное безопасно. Декодируется с
-        # заменой, потому что журналу нужен читаемый след, а не точный байт.
+        # decode with replacement: the log needs a readable trace, not exact bytes
         return redact_payload(bytes(obj).decode("utf-8", errors="replace"))
     return obj
 

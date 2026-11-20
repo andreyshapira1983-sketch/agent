@@ -1,24 +1,23 @@
-"""Отпечаток проверенного кода: какой именно код сейчас под руками."""
+"""Fingerprint of the verified code: which code is at hand right now."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 from typing import Any
 
-#: Ветка, с которой сверяемся. Локальная ссылка обновляется при
-#: `git fetch`/`git pull`, так что сеть здесь не нужна.
+#: Branch to compare with. The local ref updates on `git fetch`/`git pull`, so no network is needed.
 SHARED_REF = "refs/remotes/origin/main"
 
-#: Что считаем кодом при поиске несохранённых правок.
+#: What counts as code when looking for unsaved edits.
 _CODE_SUFFIX = ".py"
 
-#: Каталоги, в которые не заходим: чужое, сгенерированное, тяжёлое.
+#: Directories not entered: foreign, generated, heavy.
 _SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "__pycache__", "node_modules", ".mypy_cache",
     ".pytest_cache", ".ruff_cache", "htmlcov", "logs", "data",
 })
 
-#: Потолок обхода: отпечаток не имеет права стоить дороже самого прогона.
+#: Walk ceiling: the fingerprint must not cost more than the run itself.
 _MAX_FILES_SCANNED = 4000
 
 
@@ -30,7 +29,7 @@ def _read(path: Path) -> str | None:
 
 
 def _resolve_ref(git_dir: Path, ref: str) -> str | None:
-    """Хеш по имени ссылки: сначала отдельным файлом, потом packed-refs."""
+    """Hash by ref name: loose ref file first, then packed-refs."""
     direct = _read(git_dir / ref)
     if direct:
         return direct.split()[0]
@@ -47,19 +46,13 @@ def _resolve_ref(git_dir: Path, ref: str) -> str | None:
 
 
 def _files_newer_than_index(root: Path, index: Path) -> int | None:
-    """Сколько .py новее индекса — дешёвый признак несохранённых правок.
-
-    Это не `git status`: переименования, удаления и правки, уже добавленные
-    в индекс, сюда не попадают. Поле названо ровно тем, что измеряет.
-    """
+    """Count of .py files newer than the index: a cheap sign of unsaved edits (not `git status`; staged renames, deletions and edits are missed)."""
     try:
         index_mtime = index.stat().st_mtime
     except OSError:
         return None
     seen = newer = 0
-    # os.walk, а не rglob: пропускаемые каталоги отсекаются ДО спуска в них.
-    # rglob обходил .venv и node_modules целиком и лишь потом отбрасывал
-    # результат — отпечаток стоил дороже самого прогона (замечание ревью #301).
+    # os.walk, not rglob: skipped directories are pruned BEFORE descending (rglob walked .venv and node_modules whole).
     for current, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for name in files:
@@ -77,7 +70,7 @@ def _files_newer_than_index(root: Path, index: Path) -> int | None:
 
 
 def describe_code_state(root: Path | str) -> dict[str, Any]:
-    """Чем является код в ``root`` прямо сейчас."""
+    """What the code in ``root`` is right now."""
     path = Path(root).resolve()
     state: dict[str, Any] = {
         "workspace": str(path),
@@ -100,9 +93,7 @@ def describe_code_state(root: Path | str) -> dict[str, Any]:
 
     if head.startswith("ref:"):
         ref = head.split(":", 1)[1].strip()
-        # Полное имя после refs/heads/: у ветки `fix/introspection-routing`
-        # обрезка по последнему слэшу оставляла бы «routing» — отпечаток врал
-        # бы о том, где работали (замечание ревью #301).
+        # Full name after refs/heads/: cutting at the last slash would turn `fix/introspection-routing` into `routing`.
         state["branch"] = ref.removeprefix("refs/heads/")
         state["commit"] = _resolve_ref(git_dir, ref)
         if state["commit"] is None:

@@ -1,16 +1,6 @@
-"""Intent understanding — the translator between plain human language and the
-autonomous agent's actions.
+"""Intent understanding: translates plain human language into one of the agent's real actions, or plain conversation.
 
-1. **Grounded.** The model may only choose an ``action`` that is actually in
-the agent's real capability list (passed in from the kernel). An invented
-action is rejected. The truth of *what the agent can do* never comes from
-the model. 2. **Safe by default.** Malformed output, an ungrounded action,
-or a low-confidence guess all fall back to ``conversation`` — i.e. "just
-talk to the user", never a wrong command.
-
-This is Step 1: the translator itself. Wiring it into the loop (and
-shrinking the keyword router) is a later step; this module is additive and
-side-effect free — it only reads a message and returns a decision.
+Grounded: the model may only choose an ``action`` from the real capability list passed in; an invented action is rejected. Safe by default: malformed output, an ungrounded action or a low-confidence guess falls back to ``conversation``. Side-effect free: reads a message, returns a decision.
 """
 from __future__ import annotations
 
@@ -20,8 +10,7 @@ from typing import Any, Literal
 
 IntentKind = Literal["conversation", "action"]
 
-# Below this the model's action guess is treated as too weak to act on — talk
-# instead. A wrong command is worse than a plain conversational reply.
+# Below this confidence the action guess is too weak to act on; talk instead (a wrong command is worse than a plain reply).
 _MIN_ACTION_CONFIDENCE = 0.5
 
 
@@ -31,10 +20,7 @@ class IntentDecision:
     action: str | None
     confidence: float
     reasoning: str
-    # "model": a genuine, parseable verdict from the model.
-    # "fallback": we could not get a clear verdict (error / unparseable /
-    # ungrounded / low confidence) and defaulted to conversation. Callers that
-    # must not override deterministic behaviour on uncertainty check this.
+    # "model": a genuine, parseable verdict. "fallback": no clear verdict (error / unparseable / ungrounded / low confidence), defaulted to conversation; callers that must not override deterministic behaviour on uncertainty check this.
     source: Literal["model", "fallback"] = "model"
 
     @classmethod
@@ -66,7 +52,7 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     cleaned = text.strip()
-    # Strip ```json ... ``` fences if present.
+    # Strip ```json fences if present.
     if cleaned.startswith("```"):
         cleaned = cleaned.split("```", 2)
         cleaned = cleaned[1] if len(cleaned) >= 2 else text
@@ -114,11 +100,7 @@ def understand_intent(
         confidence = 0.0
     reasoning = str(obj.get("reasoning") or "")[:300]
 
-    # Only an EXPLICIT verdict is a genuine model signal (source="model") —
-    # callers may act on it. A missing/unknown kind, an ungrounded action, or a
-    # low-confidence guess is uncertainty (source="fallback"): callers must NOT
-    # override deterministic behaviour on those (an empty "{}" is not a
-    # "conversation" verdict).
+    # Only an EXPLICIT verdict is a genuine model signal (source="model"); a missing kind, ungrounded action or low confidence is uncertainty (source="fallback"). An empty "{}" is not a "conversation" verdict.
     if kind == "conversation":
         return IntentDecision(kind="conversation", action=None, confidence=confidence,
                               reasoning=reasoning or "model chose conversation", source="model")

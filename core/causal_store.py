@@ -1,4 +1,4 @@
-"""Наблюдения переживают ход — первая перекладина причинной лестницы."""
+"""Causal observation store: observations survive turns (first rung of the causal ladder)."""
 from __future__ import annotations
 
 import hashlib
@@ -11,14 +11,14 @@ from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
 
 def observation_fingerprint(observation: Observation) -> str:
-    """Что делает два наблюдения ОДНИМ поводом к расследованию."""
+    """What makes two observations ONE reason to investigate."""
     key = "|".join(sorted(observation.defect_signals))
     return "cobs_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
 @dataclass(frozen=True)
 class ObservationRecord:
-    """Наблюдение и его история повторений."""
+    """An observation and its repeat history."""
 
     fingerprint: str
     defect_signals: tuple[str, ...]
@@ -56,11 +56,9 @@ class ObservationRecord:
 
 
 class CausalObservationStore:
-    """Нижняя ступень лестницы на диске. Выше — ничего."""
+    """Bottom rung of the ladder on disk; nothing above it."""
 
-    #: Сколько эпизодов помнить на одну запись. Список нужен, чтобы позже
-    #: выбрать НЕЗАВИСИМЫЙ случай для проверки обобщения; хранить их все
-    #: незачем, а хранить один — значит лишить `GeneralizationTest` выбора.
+    #: How many episodes to remember per record: kept so a later INDEPENDENT case can be chosen for the generalization check; one alone would leave `GeneralizationTest` no choice.
     MAX_EPISODES: int = 12
 
     def __init__(self, path: Path | str):
@@ -70,7 +68,7 @@ class CausalObservationStore:
         return [ObservationRecord.from_dict(r) for r in read_state_jsonl(self.path)]
 
     def record(self, observation: Observation) -> ObservationRecord:
-        """Записать наблюдение, схлопнув его с прежними по отпечатку."""
+        """Record an observation, merging it with earlier ones by fingerprint."""
         now = datetime.now(timezone.utc).isoformat()
         fingerprint = observation_fingerprint(observation)
         records = self.load()
@@ -88,8 +86,7 @@ class CausalObservationStore:
                 occurrences=rec.occurrences + 1,
                 episode_ids=episodes,
                 last_seen=now,
-                # Свежая формулировка: старая описывала прошлый прогон, и
-                # читателю нужнее последняя, а история держится счётчиком.
+                # Keep the latest wording (the old one described a past run); history stays in the counter.
                 observed_mismatch=observation.observed_mismatch,
             )
             out.append(merged)

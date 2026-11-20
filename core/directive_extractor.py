@@ -1,44 +1,4 @@
-"""Turn instruction *text* into ranked ``Directive`` objects.
-
-``core.instruction_conflict_gate`` can decide whether two requirements
-contradict each other, but only if somebody hands it structured requirements.
-Nothing did — which made the gate a decider that could never fire. This module
-is the missing producer.
-
-The idea that makes deterministic extraction work
--------------------------------------------------
-
-Comparing two sentences for "do they contradict" is hopeless without a model.
-Comparing two *stances on a known axis* is trivial.
-
-So requirements are not extracted as free text. Each recognised sentence is
-mapped onto an **axis** — a decision that can only be settled one way — and to
-one **stance** on that axis. "Сохраняй порядок" and "отсортируй по имени" are
-two stances on the axis *порядок элементов*; they conflict because the axis
-allows only one. Two sources taking the *same* stance produce the same
-``demand`` label and therefore no conflict, however differently they are worded.
-
-The source's authority is not guessed from the text at all — it comes from
-*where the text arrived from*, which the caller always knows: a review comment
-is an ``advisor``, the task statement is a ``task_contract``, a test is a
-``test_expectation``.
-
-Honest boundary
----------------
-
-Recall is bounded by the axis registry: a contradiction on an axis nobody has
-described here is invisible to this module, and the gate will let the work
-proceed. That is a known, deliberate limit — the registry is meant to grow as
-real conflicts are met. It is *not* a general-purpose contradiction detector,
-and nothing downstream should present it as one.
-
-Design principles
------------------
-* No LLM calls, no I/O, mutates nothing — deterministic and O(n·axes).
-* Precision over recall: a sentence that matches nothing yields no directive,
-  because a false conflict blocks real work and teaches the operator to ignore
-  the gate.
-"""
+"""Turn instruction text into ranked ``Directive`` objects by mapping each sentence to a stance on a known axis."""
 from __future__ import annotations
 
 import re
@@ -47,9 +7,6 @@ from dataclasses import dataclass
 
 from core.instruction_conflict_gate import AuthorityLevel, Directive
 
-# ---------------------------------------------------------------------------
-# Axes
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Stance:
@@ -80,9 +37,7 @@ AXES: tuple[Axis, ...] = (
             Stance(
                 demand="сохранять стабильный порядок",
                 patterns=(
-                    # A qualifier usually sits between the two words
-                    # ("порядок вывода должен быть стабильным"), so allow a few
-                    # intervening tokens in both directions.
+                    # A qualifier often sits between the two words, so allow a few intervening tokens in both directions.
                     r"стабильн\w*\s+(?:\w+\s+){0,2}порядок",
                     r"порядок\w*\s+(?:\w+\s+){0,3}стабильн",
                     r"не\s+мен\w+\s+(?:\w+\s+){0,2}порядок",
@@ -196,8 +151,7 @@ AXES: tuple[Axis, ...] = (
             Stance(
                 demand="тесты не изменять",
                 patterns=(
-                    # The negation is part of the requirement here, so these
-                    # patterns consume it themselves — see ``_is_negated``.
+                    # Negation is part of the requirement here; these patterns consume it themselves (see ``_is_negated``).
                     r"не\s+(?:мен\w+|измен\w+|прав\w+|трог\w+)\s+\w*\s*тест\w*",
                     r"тест\w*\s+не\s+(?:мен\w+|измен\w+|прав\w+|трог\w+)",
                     r"do\s+not\s+(?:change|modify|touch)\s+the\s+tests?",
@@ -232,17 +186,10 @@ def known_subjects() -> tuple[str, ...]:
     return tuple(axis.subject for axis in AXES)
 
 
-# ---------------------------------------------------------------------------
-# Input
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SourceText:
-    """A block of instruction text, tagged with where it came from.
-
-    The authority level is structural — the caller knows whether this text is a
-    review comment or the task statement — so it is never inferred from wording.
-    """
+    """A block of instruction text tagged with its origin; authority comes from the origin, never from wording."""
 
     text: str
     source_level: AuthorityLevel
@@ -250,8 +197,7 @@ class SourceText:
     locator: str = ""
 
 
-# Sentence boundary: ".", "!", "?", ";" or a newline. Bullet lists are common in
-# review comments, so a line break ends a sentence even without punctuation.
+# Sentence boundary: . ! ? ; or a newline (bullets in review comments end a sentence without punctuation).
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
@@ -297,9 +243,6 @@ def _sentences(text: str) -> tuple[str, ...]:
     return tuple(" ".join(part.split()) for part in parts if part.strip())
 
 
-# ---------------------------------------------------------------------------
-# Extraction
-# ---------------------------------------------------------------------------
 
 def extract(sources: Iterable[SourceText]) -> tuple[Directive, ...]:
     """Extract ranked directives from tagged instruction text."""
@@ -309,13 +252,7 @@ def extract(sources: Iterable[SourceText]) -> tuple[Directive, ...]:
     for source in sources:
         for sentence in _sentences(source.text):
             for axis, stance, pattern in _COMPILED:
-                # Every occurrence, not just the first: in "не сортируй по
-                # имени, сортируй по дате" the opening match is negated while
-                # the second is a real demand, and stopping at the first would
-                # hide it. A negated occurrence is skipped rather than flipped
-                # to the opposite stance — it negates the wording, not the
-                # axis, and guessing which was meant would be the same
-                # confident invention this module exists to avoid.
+                # Every occurrence, not just the first; a negated match is skipped, not flipped to the opposite stance (it negates the wording, not the axis).
                 affirmed = any(
                     not _is_negated(sentence, m.start(), m.end())
                     for m in pattern.finditer(sentence)
@@ -351,11 +288,7 @@ def extract_from_task_and_review(
     task_locator: str = "",
     review_locator: str = "",
 ) -> tuple[Directive, ...]:
-    """The common shape: the task statement plus a review comment.
-
-    Exists so the frequent case does not require assembling ``SourceText``
-    objects at every call site.
-    """
+    """Task statement plus a review comment, the common case, without building ``SourceText`` objects at each call site."""
     return extract((
         SourceText(
             text=task_text,

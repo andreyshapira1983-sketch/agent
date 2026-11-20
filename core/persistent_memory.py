@@ -1,13 +1,8 @@
-"""Persistent Memory Record store (§4 — long-term, JSONL on disk).
+"""Persistent Memory Record store: long-term JSONL on disk.
 
-Minimal contract:
-  - append-only writes (one MemoryRecord per JSONL line)
-  - whole-file load on demand
-  - per-id delete + bulk delete
-  - corrupted lines are skipped, not fatal
-  - low-value records are ARCHIVED (not deleted) — see archive_record()
-  - expired records (ttl_seconds set and past) are evicted on load()
-"""
+    Append-only writes (one MemoryRecord per line), whole-file load on demand,
+    per-id and bulk delete, corrupted lines skipped, low-value records archived
+    (not deleted), expired records (ttl_seconds past) evicted on load()."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -15,8 +10,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-# Дверь записи самого агента (его словарь, его отказы) — в core/memory_door.py.
-# Имена реэкспортируются: инструмент memory_bank и тесты берут их отсюда.
+# The agent's own write door (its vocabulary, its refusals) is in core/memory_door.py.
+# Names are re-exported: the memory_bank tool and tests import them from here.
 from core.memory_door import (  # noqa: F401
     ACCEPTED_KINDS_TEXT,
     CONSENT_TAG_MAP,
@@ -34,10 +29,9 @@ from core.state_integrity import (
 
 
 def record_is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
-    """The one TTL rule for the store AND hygiene: ttl<=0 is already expired;
-    a TTL reaching past the calendar never expires. `timedelta` overflowed on
-    a huge TTL (10**15 s, or a date near 9999) and one such row made `load()`
-    raise — the whole long-term memory went unavailable (проверка 17.11, №2)."""
+    """The one TTL rule for the store AND hygiene: ttl<=0 is already expired; a TTL reaching past the calendar never expires.
+
+        `timedelta` overflowed on a huge TTL and one such row made `load()` raise."""
     if rec.ttl_seconds is None:
         return False
     try:
@@ -52,9 +46,7 @@ def record_is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
 class PersistentMemoryStore:
     """JSONL-backed list of MemoryRecords.
 
-    Active memory is loaded every cycle. Archive is never injected into
-    prompts automatically — it is a reference store for explicit recall.
-    """
+        Active memory is loaded every cycle. Archive is never injected into prompts automatically; it is for explicit recall."""
 
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -78,9 +70,7 @@ class PersistentMemoryStore:
         return len(payloads)
 
     def update(self, record: MemoryRecord) -> bool:
-        """Replace an existing record in-place (full rewrite). Returns True on
-        success.
-        """
+        """Replace an existing record in-place (full rewrite). Returns True on success."""
         with state_file_lock(self.path):
             records = self._active_unlocked()
             new_records = []
@@ -98,10 +88,7 @@ class PersistentMemoryStore:
     def touch_access(self, ids: Iterable[str], at: _dt.datetime) -> int:
         """Bump access stats on the CURRENT records, under one lock.
 
-        Replacing whole records from a copy read earlier (`update_many`) erased
-        any change written in between — a `superseded_by` came back as None
-        (проверка 16.11, серьёзная №11). Only the two access fields move here.
-        """
+            Only the two access fields move, so a concurrent `superseded_by` is not erased."""
         wanted = set(ids)
         if not wanted:
             return 0
@@ -124,11 +111,8 @@ class PersistentMemoryStore:
     def patch_many(self, changes: dict[str, dict[str, Any]]) -> int:
         """Change NAMED FIELDS of the CURRENT records, read and written under one lock.
 
-        `changes` maps record id → {field: value or fn(current_value) -> value}.
-        Replacing whole records from a copy read earlier (`update_many`) undid
-        whatever was written in between — a quarantine tag, a `superseded_by`,
-        an access count (проверка 17.11, серьёзная №3). Returns how many landed.
-        """
+            `changes` maps record id -> {field: value or fn(current_value) -> value}.
+            Returns how many landed."""
         if not changes:
             return 0
         with state_file_lock(self.path):
@@ -170,8 +154,7 @@ class PersistentMemoryStore:
 
     def archive_record(self, record_id: str) -> bool:
         """Move a record from active store to archive. Returns True if moved."""
-        # The active file stays locked across read, archive-append and rewrite:
-        # an append landing in that window used to be dropped by the rewrite.
+        # The active file stays locked across read, archive-append and rewrite: an append in that window would be dropped by the rewrite.
         with state_file_lock(self.path):
             records = self._active_unlocked()
             target = next((r for r in records if r.id == record_id), None)
@@ -191,8 +174,7 @@ class PersistentMemoryStore:
     def load(self) -> list[MemoryRecord]:
         """Full file scan — returns only LIVE (non-expired) records."""
         now = _dt.datetime.now(_dt.timezone.utc)
-        # One lock over read and eviction rewrite, for the same reason as
-        # `update`: an append landing between them would be overwritten.
+        # One lock over read and eviction rewrite, for the same reason as `update`.
         with state_file_lock(self.path):
             all_records = self._load_raw_unlocked()
             live = [rec for rec in all_records if not self._is_expired(rec, now)]
@@ -204,10 +186,7 @@ class PersistentMemoryStore:
     def _active_unlocked(self) -> list[MemoryRecord]:
         """Live (non-expired) records, read inside an already-held lock.
 
-        TTL eviction is deliberately NOT performed here: the caller is midway
-        through its own rewrite and will write the surviving set itself. A
-        second rewrite from inside would race with it.
-        """
+            TTL eviction is NOT performed here: the caller rewrites the surviving set itself, and a second rewrite would race with it."""
         now = _dt.datetime.now(_dt.timezone.utc)
         return [rec for rec in self._load_raw_unlocked() if not self._is_expired(rec, now)]
 
@@ -215,20 +194,11 @@ class PersistentMemoryStore:
     def _is_expired(rec: MemoryRecord, now: _dt.datetime) -> bool:
         """Has this record's TTL run out as of ``now``?
 
-        One predicate, two callers, and they are not interchangeable:
-        `active` reads and evicts, `_active_unlocked` reads inside a lock
-        its caller already holds and leaves the rewrite to that caller. They
-        must agree on WHICH records are alive, or a rewrite would preserve
-        rows the read path has already stopped returning — the store would
-        keep answering "gone" while never actually letting go.
-        """
+            `active` and `_active_unlocked` must agree on WHICH records are alive, or a rewrite would keep rows the read path already stopped returning."""
         return record_is_expired(rec, now)
 
     def _rewrite_unlocked(self, records: list[MemoryRecord]) -> None:
-        """Rewrite with `records`, keeping every stored row that does not
-        validate exactly as it was. A row from a newer version (say an unknown
-        `type`) used to vanish on the next rewrite of any other record, with
-        no quarantine and no log (проверка 16.11, серьёзная №10)."""
+        """Rewrite with `records`, keeping every stored row that does not validate exactly as it was (a row from a newer version must survive)."""
         unreadable = []
         for row in read_state_jsonl_unlocked(self.path) if self.path.exists() else []:
             try:
@@ -296,8 +266,7 @@ class PersistentMemoryStore:
     def delete(self, record_id: str) -> bool:
         """Returns True if a record was actually removed.
 
-        One lock over read and rewrite, for the same reason as `update`.
-        """
+            One lock over read and rewrite, for the same reason as `update`."""
         with state_file_lock(self.path):
             records = self._active_unlocked()
             keep = [r for r in records if r.id != record_id]
@@ -333,12 +302,9 @@ class PersistentMemoryStore:
 
 
     def search_archive(self, term: str, *, limit: int = 10) -> list[MemoryRecord]:
-        """Разбудить взглядом, не рукой (MIR-138): поиск по архиву, только чтение.
+        """Search the archive, read-only: a way to LOOK into archived memory, not to wake it.
 
-        86 % памяти жило недостижимым ни одной командой; «отодвинем подальше»
-        честно лишь пока из сна можно ЗАГЛЯНУТЬ. Возврат в активную память —
-        отдельная власть (MIR-156), не эта функция.
-        """
+            Returning a record to active memory is a separate authority, not this function."""
         needle = (term or "").strip().casefold()
         if not needle:
             return []

@@ -1,32 +1,4 @@
-"""Operator acknowledgement for advisory alerts — retire accepted signals.
-
-Some priority-intelligence alerts are *absorbing*: they never self-clear while
-a chosen policy holds. The canonical example is ``review_dry_run_stall`` — every
-dry-run tick only grows the streak, so the alert permanently wins the top spot
-and masks the next real action even after the operator has consciously decided
-"yes, staying dry-run is intentional right now".
-
-An **acknowledgement** lets the operator say exactly that: *I have seen this
-advisory signal and accept the current state*, so it should stop DOMINATING the
-recommendation — without ever deleting it. The signal is still computed and
-still reported; it is simply moved out of the top-pick race until either it is
-explicitly un-acknowledged, the acknowledgement expires, or (for stall) effects
-are actually enabled.
-
-Two hard safety rules keep this honest, not a mute button:
-
-* **Only advisory alerts can be acknowledged.** Objective breakages
-  (daemon down, tick error, failing/inconclusive tests — severity
-  ``critical``/``high``) are NEVER suppressible. You cannot acknowledge away a
-  real failure; you can only quiet a soft nudge.
-* **Acknowledgement is recorded, never hidden.** Every ack carries who, why and
-  when, persists as auditable runtime state, and the suppressed alerts are still
-  surfaced (as a note) by the selector's fallback.
-
-The suppression decision itself (:func:`active_acknowledged_actions`) is PURE —
-it takes acknowledgements + a clock and returns the set of currently-active
-acknowledged action names. Persistence lives in :class:`AlertAckStore`.
-"""
+"""Operator acknowledgement of advisory alerts: retire accepted signals without deleting them."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -36,8 +8,7 @@ from pathlib import Path
 from core.ids import new_id
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
-# Severities that an operator is allowed to acknowledge. Objective breakages
-# (critical/high) are deliberately EXCLUDED — they must never be suppressible.
+# Critical/high severities are excluded on purpose: real breakages must never be suppressible.
 _SUPPRESSIBLE_SEVERITIES = frozenset({"medium", "low"})
 
 
@@ -46,23 +17,13 @@ def _now_iso() -> str:
 
 
 def is_suppressible_severity(severity: str) -> bool:
-    """Whether an alert of this severity may be acknowledged at all.
-
-    Pure. ``critical`` and ``high`` always return ``False`` so a real breakage
-    can never be acknowledged away.
-    """
+    """Whether an alert of this severity may be acknowledged (never critical/high)."""
     return str(severity) in _SUPPRESSIBLE_SEVERITIES
 
 
 @dataclass(frozen=True)
 class AlertAck:
-    """A single operator acknowledgement of an advisory alert.
-
-    ``action`` is the :class:`~core.best_next_action.BestNextAction.action`
-    identifier (e.g. ``"review_dry_run_stall"``). ``expires_at`` is optional —
-    when set, the ack stops being active after that instant so a stale "I'll
-    look later" never silences the signal forever.
-    """
+    """A single operator acknowledgement of an advisory alert, optionally expiring."""
 
     action: str
     acknowledged_by: str = "operator"
@@ -72,12 +33,7 @@ class AlertAck:
     created_at: str = field(default_factory=_now_iso)
 
     def is_active(self, *, now: datetime | None = None) -> bool:
-        """Whether this acknowledgement is still in force at ``now``.
-
-        Pure. An ack with no ``expires_at`` is active indefinitely; one with a
-        malformed timestamp is treated as active (fail-open on the *display*
-        side is harmless — the signal is only quieted, never deleted).
-        """
+        """Whether this acknowledgement is still in force at ``now`` (malformed expiry counts as active)."""
         if not self.expires_at:
             return True
         moment = now or datetime.now(timezone.utc)
@@ -118,12 +74,7 @@ def active_acknowledged_actions(
     *,
     now: datetime | None = None,
 ) -> frozenset[str]:
-    """Return the set of action names currently acknowledged (and not expired).
-
-    Pure: no I/O, no mutation. Empty/None-action acks are ignored. This is the
-    only value :func:`core.best_next_action.select_best_next_action` needs to
-    apply suppression, keeping the selector itself free of persistence concerns.
-    """
+    """Return the set of action names currently acknowledged and not expired (pure)."""
     moment = now or datetime.now(timezone.utc)
     return frozenset(
         ack.action
@@ -134,12 +85,7 @@ def active_acknowledged_actions(
 
 @dataclass
 class AlertAckStore:
-    """Persistent, auditable store of operator acknowledgements.
-
-    Runtime state (gitignored, like the rest of ``data/*.jsonl``). Mirrors the
-    ``ApprovalInbox`` persistence convention: rows are wrapped in the
-    state-integrity envelope via ``read_state_jsonl``/``rewrite_state_jsonl``.
-    """
+    """Persistent, auditable store of operator acknowledgements (runtime state, state-integrity envelope)."""
 
     acks: list[AlertAck] = field(default_factory=list)
     path: Path | str | None = None
@@ -157,12 +103,7 @@ class AlertAckStore:
         reason: str = "",
         ttl_hours: float | None = None,
     ) -> AlertAck:
-        """Acknowledge ``action``, replacing any existing ack for it.
-
-        A fresh acknowledgement supersedes a prior one for the same action so
-        the operator's most recent decision (and any new TTL) wins, rather than
-        leaving stale duplicates to reason about.
-        """
+        """Acknowledge ``action``, replacing any existing ack for it."""
         action = str(action).strip()
         if not action:
             raise ValueError("action must be a non-empty alert identifier")

@@ -1,24 +1,9 @@
-"""Черновик, который противоречит своим же уликам, переписывается один раз.
+"""A draft that contradicts its own evidence is rewritten once before the answer.
 
-Разговор 2026-09-22, 11:52: агент написал «пробой это подтверждается:
-verified», а все три его пробы упали с TypeError (exit_code=1). Проверяющий
-пометил фразу [claim-refuted] — и она ушла человеку первой строкой. Причина
-в устройстве: опровержение клалось в историю провалов для СЛЕДУЮЩЕЙ попытки
-(`_replan_on_refuted_claims`), а после проверки следующей попытки нет —
-черновик уходил как был, только с пометкой.
-
-Здесь — проход Chain-of-Verification (Dhuliawala et al., 2023: черновик →
-проверка → исправленный ответ) и RARR (Gao et al., 2023: исследовать и
-переписать): до ответа черновик сверяется с той же цепочкой улик тем же
-детерминированным проверяющим; если опровергнутое есть, синтезатор один раз
-собирает ответ заново по ТЕМ ЖЕ уликам, получив дословно, что именно
-опровергнуто и чем. Остаётся черновик с меньшим числом опровержений.
-
-Удалять опровергнутые фразы механически нельзя: 2026-09-21 из пяти
-проверенных руками «опровержений» все пять оказались правдой (класс
-«слов нет в вырезке», с тех пор помечается отдельно). Поэтому решает модель
-по уликам, а итог снова проходит обычную проверку.
-"""
+    Chain-of-Verification / RARR style pass: the draft is re-checked against the
+    same evidence chain by the same deterministic verifier; if something is
+    refuted, the synthesizer rebuilds the answer once from the same evidence,
+    told exactly what was refuted. Refuted phrases are never removed mechanically."""
 from __future__ import annotations
 
 import re
@@ -36,12 +21,7 @@ _GREEN_CLAIM = re.compile(r"(verdict|вердикт)[^\n]{0,25}(green|зелён
 
 
 def _outcome_contradictions(st: Any, answer: str) -> list[Any]:
-    """Заявленный зелёный вердикт при красном последнем patch_check.
-
-    2026-09-22 16:03: агент написал «verdict: green, full_exit_code: 0», а
-    единственный patch_check хода был red; проверяющий засчитал «green», потому
-    что в выводе стояло «tests are not green» — совпадение слова, не смысла.
-    """
+    """A claimed green verdict while the last patch_check was red."""
     from types import SimpleNamespace
 
     checks = [a for a in (getattr(st, "artifacts", None) or {}).values()
@@ -68,7 +48,7 @@ def _check(loop: Any, st: Any, answer: str) -> Any:
 
 
 def revise_refuted_draft(loop: Any, st: Any, do_synthesize: Any) -> None:
-    """Сверить черновик до ответа и один раз переписать опровергнутое."""
+    """Check the draft before answering and rewrite the refuted parts once."""
     from core.replan import ReplanTrigger
     from core.synth_resilience import SynthAttempt
 

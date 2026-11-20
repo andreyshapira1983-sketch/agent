@@ -1,6 +1,4 @@
-"""Лексический ранжир BM25 (k1=1.2, b=0.75, IDF в форме Lucene) и его токены.
-
-Без поправки на длину длинные записи выигрывали любой вопрос."""
+"""BM25 lexical ranking (k1=1.2, b=0.75, Lucene-style IDF) and its tokenizer."""
 from __future__ import annotations
 
 import math
@@ -10,7 +8,7 @@ from collections.abc import Iterable
 
 from core.topic_tokens import STOPWORDS as _TOPIC_STOPWORDS
 
-#: Общий с `core/topic_tokens.py` словарь, чтобы подсистемы не расходились (MIR-008).
+#: Shared with core/topic_tokens.py so subsystems agree on stopwords.
 _STOPWORDS: frozenset[str] = _TOPIC_STOPWORDS
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
@@ -46,11 +44,7 @@ def term_counts(text: str, tags: Iterable[str]) -> Counter[str]:
 
 
 def _term_frequency(term: str, counts: Counter[str], prefixes: Counter[str]) -> int:
-    """Сколько раз слово вопроса встречается в записи.
-
-    Без точного совпадения засчитывается одно по первым четырём буквам
-    (русские окончания: «уроки» и «урок»).
-    """
+    """Count of the query term in the record; without an exact hit, 1 on a 4-letter prefix match (Russian endings)."""
     exact = counts.get(term, 0)
     if exact or len(term) < _PREFIX_LEN:
         return exact
@@ -58,7 +52,7 @@ def _term_frequency(term: str, counts: Counter[str], prefixes: Counter[str]) -> 
 
 
 def bm25_scores(q_tokens: set[str], docs: list[Counter[str]]) -> list[float]:
-    """BM25 каждой записи против вопроса; IDF считается по этому же хранилищу."""
+    """BM25 score of each doc against the query; IDF is computed over these docs."""
     n_docs = len(docs)
     if not n_docs or not q_tokens:
         return [0.0] * n_docs

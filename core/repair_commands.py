@@ -1,18 +1,4 @@
-"""Operator repair commands: propose, roll back, clean up backups.
-
-Census item B1. This logic lived in `core/loop_repair.py`, a mixin composed
-into `AgentLoop` — and the cycle never called it. Verified by call sites,
-not by docstrings: `cli/commands_repair.py`, `cli/commands_memory.py`,
-`cli/command_dispatch.py` and `core/self_repair.py` call it, and no phase of
-`_run_inner` does. It sat in the loop layer because the CLI reached it
-through the agent object.
-
-Dependencies arrive as ARGUMENTS, never as an agent object. A function
-taking `agent` and reaching into it with `getattr` would move the coupling
-rather than remove it, and that duck-typed seam is a defect this census
-already recorded elsewhere (`core/ingestion.py` finding
-`_remember_from_knowledge` by name).
-"""
+"""Operator repair commands (propose, roll back, clean up backups); dependencies arrive as ARGUMENTS, never as an agent object."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,14 +20,8 @@ def propose_repair(
 ):
     """Generate a guarded RepairProposal without applying it.
 
-    Routed through ``for_task``, not ``for_role``: rewriting a whole module
-    correctly is the hardest thing here, and ``for_role`` cannot escalate no
-    matter how large the target is. The tier is computed from the job (file
-    size, red tests) rather than from the request's wording, then passed as
-    ``force_tier`` — which the router still puts through the operator gate, so
-    this asks for the deep model and never grants it. With no
-    ``AGENT_DEEP_MAX_CALLS_PER_SESSION`` budget set, the ask is refused and the
-    behaviour is identical to before.
+    Routed through ``for_task`` with the tier computed from the job (file size, red tests) and passed as ``force_tier``;
+    the router still applies the operator gate, so this asks for the deep model and never grants it.
     """
     from core.deep_escalation import (
         OperatorEscalation,
@@ -57,19 +37,8 @@ def propose_repair(
             )
         )
     except OSError:
-        # Unreadable target is the generator's error to report, not ours;
-        # size 0 simply means "no case for the expensive model".
-        #
-        # Journal-silent on purpose, and A7 checked that rather than assuming
-        # it. Measured: a missing target reaches `_select_llm` and does lower
-        # the tier — a 20k file that would ask DEEP asks STANDARD instead — so
-        # the silence is not free. But the generator cannot read the file
-        # either, and it says so: `repair_proposal_result` carries
-        # `warnings: ['file_read failed: FileNotFoundError: ...']` and
-        # `status: tool_error`. The operator is not left with two causes and
-        # one picture, which is the test this item applies. Reporting here
-        # would duplicate that, and the cheaper tier is moot on a run that
-        # produced no proposal at all.
+        # An unreadable target is the generator's error to report (size 0 = no case for the expensive model);
+        # silent here on purpose: the generator reports `file_read failed` with status `tool_error`.
         _target_chars = 0
 
     def _select_llm(failing_tests: int):
@@ -82,9 +51,7 @@ def propose_repair(
             reason="high_value_repair",
             expected_output="minimal_patch_plan",
             budget_ok=deep_budget_ok(model_router.usage_ledger, limit=limit),
-            # Never true here. A human typing `--reason` is approving; an
-            # autonomous repair is not, and marking it approved would skip the
-            # budget check that makes this safe.
+            # Never true here: a human typing `--reason` is approving, an autonomous repair is not (approved would skip the budget check).
             operator_approved=False,
         )
         return model_router.for_task(
@@ -96,8 +63,7 @@ def propose_repair(
 
     return RepairProposalGenerator(
         workspace_root=workspace_root,
-        # Built from size alone, and only used if the generator never gets as
-        # far as the baseline (e.g. an unreadable target).
+        # Built from size alone; used only if the generator never reaches the baseline (e.g. unreadable target).
         llm=model_router.for_role(ModelRole.REPAIR_PROPOSAL),
         llm_selector=_select_llm,
         logger=log,
@@ -117,11 +83,7 @@ def rollback(
     plan_id: str | None = None,
     workspace_root: Path | None = None,
 ):
-    """Apply the most recent compensation plan (or one by id).
-
-    Mutates `compensation_log` in place — the caller owns that list, and the
-    popped plan must not come back on a second call.
-    """
+    """Apply the most recent compensation plan (or one by id), popping it from `compensation_log` in place (the caller owns that list)."""
     from core.compensation import CompensationReport, apply_compensation_plan
 
     if workspace_root is None:

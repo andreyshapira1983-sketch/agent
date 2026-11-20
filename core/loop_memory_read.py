@@ -1,8 +1,7 @@
-"""Чтение памяти циклом: долгая, опытная, сводка.
+"""Loop-side memory reads: long-term, experience, summary.
 
-Запись и право на неё — в `core/loop_memory_write.py`; отсюда пишутся только
-счётчики доступа, и то через тот же гейт.
-"""
+    Writes and write permission live in `core/loop_memory_write.py`; only access
+    counters are written here, through the same gate."""
 from __future__ import annotations
 
 import sys
@@ -25,7 +24,7 @@ _LESSON_FALLBACK_LIMIT = 5
 
 
 def _hint_field(text: Any, limit: int) -> str:
-    """Поле памяти в подсказке — данные: ‹ › вместо < >, одна строка (проверка 16.11, мелкая)."""
+    """A memory field in a hint is data: ‹ › instead of < >, single line."""
     return (
         str(text or "")[:limit]
         .replace("<", "‹").replace(">", "›")
@@ -34,11 +33,9 @@ def _hint_field(text: Any, limit: int) -> str:
 
 
 def _family_appendix(family: list[str]) -> str:
-    """Приложение к блоку опыта: продуктовые исходы тех же прогонов (MIR-184).
+    """Appendix to the experience block: product outcomes of the same runs.
 
-    Текст из памяти — данные: `<`/`>` заменены на ‹ ›, строк не больше пяти, каждая
-    обрезана — иначе запись закрывала блок и говорила как инструкция (проверка 16.11, средняя).
-    """
+        Memory text is data: `<`/`>` replaced by ‹ ›, at most five lines, each truncated, so a record cannot close the block or read as an instruction."""
     if not family:
         return ""
     lines = [
@@ -54,7 +51,7 @@ def _family_appendix(family: list[str]) -> str:
 
 
 def _with_family(block: str, family: list[str]) -> str:
-    """Приложение семьи — ВНУТРИ блока опыта, перед закрывающим тегом (проверка 16.11, средняя)."""
+    """Family appendix goes INSIDE the experience block, before the closing tag."""
     appendix = _family_appendix(family)
     close = "</agent_experience_memory>"
     if appendix and block.endswith(close):
@@ -89,7 +86,7 @@ def _merge_rejection_reasons(*reports: dict[str, int]) -> dict[str, int]:
 
 
 class AgentLoopMemoryRead:
-    """Выборка из памяти и её представление для промпта; члены под TYPE_CHECKING — контракт хоста."""
+    """Memory retrieval and its prompt representation; TYPE_CHECKING members are the host contract."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -100,7 +97,7 @@ class AgentLoopMemoryRead:
         knowledge_use_policy: Any
         last_role_context: Any
 
-        # Из соседних примесей (через MRO).
+        # From sibling mixins (via MRO).
         _durable_learning_suppressed: Any
         _file_read_workspace_root: Any
 
@@ -134,7 +131,7 @@ class AgentLoopMemoryRead:
         from core.self_knowledge import is_self_knowledge, self_knowledge_off_topic
 
         allowed = list(use_report.allowed)
-        if self_knowledge_off_topic(question):  # предметной задаче — предмет, не разборы себя
+        if self_knowledge_off_topic(question):  # on a subject task: the subject, not self-analysis
             allowed = [r for r in allowed if not is_self_knowledge(getattr(r, "content", ""))]
         off_topic = len(use_report.allowed) - len(allowed)
         given = getattr(self, "memory_given_to_goal", None) or frozenset()
@@ -186,27 +183,25 @@ class AgentLoopMemoryRead:
             from datetime import datetime
             from datetime import timezone as _tz
             _now_dt = datetime.now(_tz.utc)
-            # One rewrite total, and only the access fields of the CURRENT
-            # records move: replacing whole records from this earlier copy
-            # erased a `superseded_by` written meanwhile (проверка 16.11, №11).
+            # One rewrite total, and only the access fields of the CURRENT records move: replacing whole records from the earlier copy erased a concurrent `superseded_by`.
             self.persistent_store.touch_access([rec.id for rec in selected], _now_dt)
 
         return f"{MEMORY_OPEN_TAG}\n{formatted}\n{MEMORY_CLOSE_TAG}"
 
     def _question_salience(self) -> TokenSalience:
-        """Редкость слова по вопросам памяти опыта — НЕ по речи оператора (MIR-105)."""
+        """Word rarity over experience-memory questions, NOT over the operator's speech."""
         store = getattr(self, "episodic_store", None)
         if store is None:
             return FLAT
         try:
             return build_salience(ep.question for ep in store.load() if ep.question)
         except (OSError, ValueError) as exc:
-            # Без корпуса подбор считает штуками, но деградация видна в журнале.
+            # Without a corpus matching counts by pieces, but the degradation is visible in the journal.
             self.log.log("question_salience_unavailable", {"error": repr(exc)})
             return FLAT
 
     def _family_product_warnings(self, episodes: list) -> list[str]:
-        """Продуктовые исходы тех же прогонов для эпизодов-успехов (MIR-184); сбой — в журнал."""
+        """Product outcomes of the same runs for successful episodes; a failure goes to the journal."""
         if self.episodic_store is None or not episodes:
             return []
         try:
@@ -252,10 +247,7 @@ class AgentLoopMemoryRead:
         episodes = []
         readmitted = 0
         if self.episodic_store is not None:
-            # With report: only the store knows why it dropped an episode.
-            # The gate runs INSIDE the search, before the limit: filtering after
-            # a top-6 cut let six refused near-matches hide an admissible
-            # seventh for good (проверка 16.11, п. 3).
+            # With report: only the store knows why it dropped an episode. The gate runs INSIDE the search, before the limit, so refused near-matches cannot hide an admissible one.
             found = self.episodic_store.search_with_report(
                 question, limit=3, admit=_experience_rejection
             )
@@ -270,8 +262,7 @@ class AgentLoopMemoryRead:
             if "/" in w or w.endswith(".py")
         ]
         if self.episodic_store is not None and path_tokens:
-            # Сначала фильтр по пути, потом предел 5: обрезка до фильтра прятала
-            # шестой по свежести урок о файле (проверка 16.11, мелкая).
+            # Path filter first, then the limit of 5: cutting first hid the sixth-newest lesson about a file.
             lessons = [
                 lesson
                 for lesson in self.episodic_store.search_by_tags(["lesson"], limit=sys.maxsize)
@@ -309,14 +300,13 @@ class AgentLoopMemoryRead:
         self._last_episode_records = list(episodes)
         self._last_procedure_records = list(procedures)
 
-        # Re-ask detection. 0.40 — не рабочий порог: без измеренного качества
-        # кандидата он падает до 0.30 (MIR-024).
+        # Re-ask detection. 0.40 is not a working threshold: without measured candidate quality it drops to 0.30.
         _REPEAT_THRESHOLD = 0.40
         if self.episodic_store is not None:
             try:
                 repeat_ep, repeat_score = self.episodic_store.find_most_similar(
                     question, threshold=_REPEAT_THRESHOLD, admit=is_usage_eligible
-                )  # фильтр ДО выбора лучшего (проверка 16.11, средняя)
+                )  # filter BEFORE picking the best
                 # Feeds the fast path (a stored answer returned verbatim), so an
                 # ineligible match is dropped here, before hints can use it too.
                 if repeat_ep is not None and not is_usage_eligible(repeat_ep):
@@ -325,9 +315,7 @@ class AgentLoopMemoryRead:
                 self._last_best_similar_episode, self._last_best_similar_score = AgentLoopMemoryRead._fast_path_candidate(
                     self, question, repeat_ep, repeat_score, _REPEAT_THRESHOLD)
                 if repeat_ep is not None:
-                    # A lesson may be eligible with no measured evidence, so the
-                    # score can be None; `int(None * 100)` used to crash here and
-                    # the hint vanished silently (проверка 16.11, п. 1).
+                    # A lesson may be eligible with no measured evidence, so the score can be None; guard `int(None * 100)`.
                     score = repeat_ep.answer_quality_score
                     quality_pct = None if score is None else int(score * 100)
                     quality_note = (
@@ -353,7 +341,7 @@ class AgentLoopMemoryRead:
                         "WARNING: The user is asking a question that is very similar to a "
                         "previously answered one (Jaccard similarity "
                         f"{repeat_score:.2f} ≥ {_REPEAT_THRESHOLD}).\n"
-                        # id и outcome — тоже данные из памяти (проверка 17.11, средняя).
+                        # id and outcome are also data from memory.
                         f"Past episode: {_hint_field(repeat_ep.id, 120)}"
                         f" | outcome={_hint_field(repeat_ep.outcome, 40)}\n"
                         f"Past answer quality: {quality_note}\n"
@@ -377,7 +365,7 @@ class AgentLoopMemoryRead:
                     )
                     block = block + "\n\n" + hint if block else hint
             except Exception as exc:  # noqa: BLE001 — re-ask detection must never abort the main loop
-                # ...but a failure is journaled, not swallowed (проверка 16.11, п. 1).
+                # A failure is journaled, not swallowed.
                 self.log.log(
                     "repeat_question_detection_failed",
                     {"error": f"{type(exc).__name__}: {exc}"},
@@ -389,20 +377,17 @@ class AgentLoopMemoryRead:
     def _fast_path_candidate(self, question: str, best: Any, score: float, threshold: float) -> tuple[Any, float]:
         """The best match the fast path could actually REPLAY.
 
-        An eligible failed `lesson` is a good re-ask hint but used to hide a
-        replayable runner-up from the fast path (проверка 17.11, мелкая).
-        """
+        An eligible failed `lesson` is a good re-ask hint but must not hide a replayable runner-up."""
         replayable = getattr(self, "_fast_path_allows_replay", None)
         if best is None or not callable(replayable):
             return best, score
 
-        def servable(e: Any) -> bool:  # replayable AND its read files unchanged (17.11)
+        def servable(e: Any) -> bool:  # replayable AND its read files unchanged
             return replayable(e, 1.0) and not AgentLoopMemoryRead._stale_replay_inputs(self, e)
 
         if servable(best):
             return best, score
-        # The latest same ask acted, or its files changed: redo the work, never fall
-        # back to an older answer that skips the action (hunter, 17.11).
+        # The latest same ask acted, or its files changed: redo the work, never fall back to an older answer that skips the action.
         stale = AgentLoopMemoryRead._stale_replay_inputs(self, best)
         if set(getattr(best, "tools_used", ()) or ()) - READ_TOOLS or stale:
             if stale:
@@ -420,7 +405,7 @@ class AgentLoopMemoryRead:
         return stale_inputs(episode, root)
 
     def _code_checked(self, block: str, source: str) -> str:
-        """Ссылки памяти на код — сверены с кодом сейчас (core/code_citations.py)."""
+        """Memory code references checked against the code now (core/code_citations.py)."""
         from core.code_citations import annotate_lines
 
         root = self._file_read_workspace_root() if hasattr(self, "_file_read_workspace_root") else None
@@ -430,7 +415,7 @@ class AgentLoopMemoryRead:
         return block
 
     def _workflows_for(self, question: str) -> list:
-        """Шаблоны работы рода этого вопроса (core/workflow_memory.py); нет файла — нет шаблонов."""
+        """Work templates for this kind of question (core/workflow_memory.py); no file, no templates."""
         if self.procedural_store is None:
             return []
         from core.workflow_memory import FILE_NAME, WorkflowMemoryStore
@@ -438,11 +423,9 @@ class AgentLoopMemoryRead:
         return WorkflowMemoryStore(self.procedural_store.path.parent / FILE_NAME).for_question(question)
 
     def _procedures_unless_workflow(self, question: str) -> tuple[list, dict[str, int]]:
-        """Процедуры — только там, где у рода работы нет шаблона. Одно из двух, не оба.
+        """Procedures only where the work kind has no template; one of the two, not both.
 
-        Шаблон строится из тех же процедур, и вместе они показывают один опыт
-        дважды — это мешает сильнее, чем помогает каждый слой по отдельности.
-        """
+        The template is built from the same procedures, so showing both repeats the same experience."""
         if self.procedural_store is None:
             return [], {}
         workflows = self._workflows_for(question)
@@ -452,7 +435,7 @@ class AgentLoopMemoryRead:
         return found.procedures, found.rejected_by
 
     def _workflow_block(self, question: str) -> str:
-        """Шаблоны работы по AWM в подсказку; нет шаблонов — нет блока, ход как прежде."""
+        """Work templates (AWM) into the hint; no templates, no block."""
         from core.workflow_memory import format_workflows
 
         workflows = self._workflows_for(question)
@@ -481,9 +464,7 @@ class AgentLoopMemoryRead:
     def smart_memory_summary(self) -> dict[str, Any]:
         """Return local smart-memory counts for operator CLI commands.
 
-        Consolidation is computed on demand (MIR-044); `reports` is kept for
-        display compatibility and is one or zero.
-        """
+            Consolidation is computed on demand; `reports` is kept for display compatibility and is one or zero."""
         episodes = self.episodic_store.load() if self.episodic_store else []
         procedures = self.procedural_store.load() if self.procedural_store else []
         last_report = None
@@ -512,7 +493,7 @@ class AgentLoopMemoryRead:
                 },
             },
             "consolidation": {
-                "path": None,  # computed on demand (MIR-044); history archived
+                "path": None,  # computed on demand; history archived
                 "reports": len(reports),
                 "last_report": last_report,
             },

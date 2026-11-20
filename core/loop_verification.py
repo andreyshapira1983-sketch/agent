@@ -1,31 +1,4 @@
-"""Проверка черновика и сенсоры вокруг неё — вырезано из ``core/loop.py``.
-
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Пятый кусок раскола `core/loop.py` и третий — раскола `_run_inner`.
-
-Здесь проходит ПЕРВАЯ проверка черновика и три наблюдателя вокруг неё:
-расхождения подсистем (планировщик против верификатора), вектор уверенности
-и поддержка уликами. Все трое — телеметрия: журналируют и ничего не решают,
-поэтому сбой любого из них не имеет права уронить ход.
-
-Мягкий отказ — суть этого участка. Упавший верификатор НЕ означает «улик не
-хватило»: черновик сохраняется как есть, поднимается флаг `verifier_failure`,
-и дальше по цепочке решателей он отличает «проверка сломалась» от «проверка
-прошла и не подтвердила». Слить эти два случая — значит наказать ответ за
-поломку инструмента, который его судил.
-
-Дальше по коду цикла остаётся перепланирование по неразрешённым цитатам: оно
-перезапускает попытку целиком и потому держится почти за всё состояние
-прогона — этот кусок сюда не поехал сознательно.
-
-Тела перенесены символ в символ, что пинится AST-сверкой с историей в
-`tests/test_loop_verification_split.py`; добавки — только швы переноса,
-названные там поимённо.
-
-Класс подмешивается в ``AgentLoop``; состояние по-прежнему живёт на
-композированном цикле, а не здесь.
-"""
+"""First draft verification and the sensors around it (subsystem disagreement, confidence vector, evidence support); cut out of core/loop.py and mixed into AgentLoop. A verifier failure is a soft failure: the draft is kept and `verifier_failure` is raised, so a broken check is told apart from a check that did not confirm."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -41,12 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover — только для подписи
 
 
 class AgentLoopVerification:
-    """Первая проверка черновика: вердикт плюс телеметрия вокруг него.
-
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
-    """
+    """First draft check: verdict plus telemetry; the members are host-contract declarations (no assignments, so nothing is created or shadowed at runtime)."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -55,17 +23,12 @@ class AgentLoopVerification:
         last_role_context: Any
         last_source_ranking: Any
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as CALLABLE attributes: a stub function with an empty body is read by analyzers as a function without return (false E1111).
         _sensor_failed: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a sibling mixin via the MRO; the cross-module link must be written down.
         _file_read_workspace_root: Any
-        # Ставит `core/loop_synthesis.py`, сбрасывает за ход `core/loop.py`.
-        # Читалось через `getattr` с умолчанием, и умолчание превращало
-        # отсутствие связи в тихий вердикт по чужому правилу (A6).
+        # Set by core/loop_synthesis.py, reset per turn by core/loop.py; a getattr default would turn a missing link into a silent verdict by a foreign rule.
         _synthesis_expects_contract_headers: Any
 
     def _verify_draft(
@@ -80,19 +43,8 @@ class AgentLoopVerification:
         failure_history: list[ReplanTrigger],
         _disagreement_shadow: list[dict[str, Any]],
     ) -> tuple[VerificationReport, bool]:
-        """Вердикт по черновику и признак «верификатор упал».
-
-        Второй элемент — НЕ «не подтвердилось», а «проверка сломалась».
-        Вызывающий обязан различать их: на мягком отказе отчёт пустой, но
-        черновик цел, и наказывать ответ за это нельзя.
-
-        `_disagreement_shadow` меняется НА МЕСТЕ (теневой учёт S5), имя
-        сохранено как в цикле — перенос дословный.
-        """
-        # Швы переноса, названные в `tests/test_loop_verification_split.py`.
-        # Флаг заводился строкой выше вырезанного участка; импорты — теми же
-        # локальными, что и в цикле (там они локальны, и здесь тоже: перенос
-        # не место для смены момента импорта).
+        """Verdict on the draft and the "verifier failed" flag; the flag means the check broke, not "not confirmed", and the answer must not be punished for it. `_disagreement_shadow` is mutated IN PLACE (shadow S5)."""
+        # Transfer seams named in tests/test_loop_verification_split.py; imports stay local as in the loop.
         verifier_failure = False
         from core.verifier import verify as _verify
         from core.verifier_models import VerificationReport as _VRSoft
@@ -133,11 +85,7 @@ class AgentLoopVerification:
             )
         self.log.log("verification", report.to_log_payload())
 
-        # P1 — observational cross-subsystem audit. Compare planner
-        # outcome (steps done/failed, artifacts produced) against
-        # verifier verdict and emit a `subsystem_disagreement` event
-        # for each conflicting pair. Logging only — no behaviour
-        # change at this layer.
+        # P1: observational cross-subsystem audit; compare planner outcome with the verifier verdict and emit a `subsystem_disagreement` event per conflicting pair; logging only.
         _disagreements: list[dict] = []
         try:
             from core.subsystem_disagreement import detect_disagreements
@@ -150,10 +98,7 @@ class AgentLoopVerification:
             )
             for _ev in _disagreements:
                 self.log.log("subsystem_disagreement", _ev)
-                # Shadow accounting (operator ruling 2026-07-27): what a
-                # connected S5 would have done, recorded and never acted on.
-                # Severity decides the action: a full planner/verifier
-                # contradiction is an escalation, the rest is a replan.
+                # Shadow accounting: what a connected S5 would have done, never acted on; a full planner/verifier contradiction escalates, the rest is a replan.
                 _disagreement_shadow.append({
                     "kind": _ev.get("kind"),
                     "severity": _ev.get("severity"),
@@ -166,10 +111,7 @@ class AgentLoopVerification:
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
             self._sensor_failed("subsystem_disagreement", exc)
 
-        # P1/P2 — confidence vector. Decompose the scalar gate into
-        # three axes (evidence / coherence / relevance) so triage
-        # can target the right subsystem when something is off.
-        # Reported to the operator through the verification summary.
+        # P1/P2: confidence vector (evidence / coherence / relevance), reported through the verification summary.
         try:
             self.last_confidence_vector = None  # never a previous run's axes
             from core.confidence_vector import compute_vector
@@ -178,9 +120,7 @@ class AgentLoopVerification:
                 question=user_question, answer=draft_answer,
                 judged_relevance=self._judged_relevance(user_question, draft_answer),
             )
-            # Kept on the loop, not only logged: the summary reports the
-            # relevance axis. Reset per run in `loop.py` so a previous run's
-            # vector can never be shown beside this run's answer.
+            # Kept on the loop, not only logged: the summary reports the relevance axis; reset per run in `loop.py`.
             self.last_confidence_vector = _cv
             self.log.log("confidence_vector", _cv.to_log_payload())
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
@@ -197,15 +137,7 @@ class AgentLoopVerification:
         self.last_verification = report
         self.last_provenance = chain
 
-        # Evidence support — telemetry, never a gate (operator ruling
-        # 2026-07-27). Emitted on every verified turn, including the
-        # not-applicable ones: "this turn owed no evidence" is exactly the
-        # case the old `low_confidence_gate` reported as a zero score, and
-        # distinguishing it is the whole point of the rewrite.
-        #
-        # Applicability is asked with the SAME inputs the enforcing layer
-        # uses further down, so observer and enforcer cannot hold opposite
-        # opinions about whether evidence was owed on this turn.
+        # Evidence support is telemetry, never a gate; emitted on every verified turn including not-applicable ones. Applicability is asked with the same inputs as the enforcing layer, so observer and enforcer cannot disagree.
         try:
             self.last_evidence_support = None  # never a previous run's verdict
             _ev_expected = is_evidence_expected(
@@ -222,10 +154,7 @@ class AgentLoopVerification:
             _support = evaluate_evidence_support(
                 report, evidence_expected=_ev_expected
             )
-            # Kept on the loop, not only logged: the verification summary must
-            # read the same applicability verdict, or it reports «уверенность:
-            # нулевая» for a turn this very block ruled owed no evidence
-            # (measured live 2026-08-13 on a small-talk turn).
+            # Kept on the loop, not only logged: the verification summary must read the same applicability verdict, or it reports zero confidence for a turn that owed no evidence.
             self.last_evidence_support = _support
             self.log.log("evidence_support", _support.to_log_payload())
         except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
@@ -234,12 +163,7 @@ class AgentLoopVerification:
         return report, verifier_failure
 
     def _judged_relevance(self, question: str | None, answer: str | None) -> float | None:
-        """Оценка судьи относимости, если он включён; иначе None — счёт слов.
-
-        Судья идёт ролью `verifier` через маршрутизатор: его вызов попадает в
-        общий учёт расходов. Рядом в журнал — прежняя мера, чтобы расхождение
-        было видно на живых ходах (признак рецидива и цена — там же).
-        """
+        """Relevance judge score if enabled, else None (word count); the judge runs as role `verifier` through the router so its calls are in the cost accounting; the old measure is journaled beside it."""
         from core.relevance_judge import judge_enabled, judge_relevance
 
         router = getattr(self, "model_router", None)
@@ -265,9 +189,7 @@ class AgentLoopVerification:
         trace_id = str(getattr(log, "trace_id", "") or "") if log is not None else ""
         from core.entailment_scope import judge_for
 
-        # MIR-060, решение оператора 25.09: выведенное утверждение со ссылкой
-        # сверяется по смыслу дешёвой моделью, с лимитом на ответ. До этого
-        # проверка по смыслу существовала только в тестах — сюда модель не шла.
+        # A derived claim with a reference is checked by meaning with a cheap model, limited per answer.
         judge = judge_for(getattr(self, "model_router", None), log)
         root = self._file_read_workspace_root()
         if root is None:

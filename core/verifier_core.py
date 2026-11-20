@@ -54,19 +54,13 @@ from .verifier_utils import (
     truth_excerpt,
 )
 
-# Memory records whose provenance makes a citation to them independent
-# evidence. Only an explicit human write qualifies: the operator asserting a
-# fact is a source, whereas the agent's own auto-written record is a copy of
-# something it already said.
+# Memory records whose provenance makes a citation independent evidence: only an explicit human write qualifies (an agent auto-written record copies what it already said).
 
 
 def _memory_citation_is_independent(ev: Evidence) -> bool:
     """May a citation resolving to this evidence count as `verified`?
 
-    The rule lives in ONE place, `core.evidence.evidence_is_independent`, so
-    every road to `verified` (a citation, the union of two citations, an
-    uncited sentence matched by structure or by the model) asks the same
-    question (проверка 17.11, серьёзные №7–8).
+    The rule lives in ONE place, `core.evidence.evidence_is_independent`, so every road to `verified` asks the same question.
     """
     from core.evidence import evidence_is_independent
 
@@ -83,36 +77,14 @@ def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence |
     return None
 
 
-#: Причины, которые НЕ доказывают лжи: улика просто не подпирает утверждение.
-#:
-#: Замечание оператора 2026-09-21: «у него то восемь из двенадцати, то семь из
-#: десяти, и никогда десять из десяти — он никогда не уверен». Замер по чату
-#: того вечера: 53 ответа с хвостом проверки, ПОЛНЫХ ровно два, суммарно 377
-#: утверждений из 549. Клеймо `claim-refuted` стояло 37 раз; пять взятых
-#: наугад образцов проверены руками, и все пять оказались ИСТИННЫМИ докладами
-#: агента о собственной работе: «прогон завершился exit_code 1, passed 0,
-#: failed 2», «ворота одобрения вернули unavailable для file_write».
-#:
-#: Механизм: отличительные слова утверждения обязаны дословно встретиться в
-#: вырезке улики; агент ссылался на самое близкое, что у него было, улика по
-#: теме верная, а его точных слов в ней нет — и вердикт становился `refuted`.
-#: То есть честный доклад о своей неудаче получал клеймо лжи.
-#:
-#: Различение назвал сам агент, когда с ним об этом спорили:
-#: `absence_refuted_by_evidence` — настоящее опровержение (сказал «ничего
-#: нет», а улика показывает, что есть), и такие коды остаются ложью. А
-#: `cited_literal_absent` доказывает только одно — что слов нет в вырезке.
-#: Между «улика не содержит этих слов» и «утверждение ложно» лежит пропасть.
+#: Reasons that do NOT prove a lie: the evidence merely does not support the claim. A claim's distinctive words must occur verbatim in the evidence excerpt;
+#: an honest report citing the closest evidence would otherwise be stamped `refuted`. `absence_refuted_by_evidence` is a real refutation and stays a lie;
+#: `cited_literal_absent` proves only that the words are absent from the excerpt.
 _UNSUPPORTED_REASONS: frozenset[str] = frozenset({"cited_support_missing"})
 
 
 def _admitted_unverified(chunks: list[str]) -> int:
-    """Сколько строк ответ сам вынес в раздел «Unverified» («Не подтверждено»).
-
-    Раздел не-утвердительный, и в счёт утверждений он не идёт — но это
-    непроверенное, названное вслух, и уверенность обязана его видеть
-    (2026-09-21: «я не проверял X» и ниже «9 из 9, уверенность высокая»).
-    """
+    """How many lines the answer itself put under 'Unverified'; not claims, but named-unverified items the confidence must see."""
     section: str | None = None
     count = 0
     for text in chunks:
@@ -125,24 +97,16 @@ def _admitted_unverified(chunks: list[str]) -> int:
     return count
 
 
-#: «Не подтверждено: Ничего — всё измерено…» — это не непроверенный пункт.
-#: 2026-09-21, ответ «пересчитай функции»: такая строка засчитывалась, и хвост
-#: говорил «(1 — ответ сам назвал непроверенными)» при пустом разделе.
+#: 'Not confirmed: Nothing - all measured...' is not an unverified item; such a line must not be counted.
 _NOTHING_UNVERIFIED_RE = re.compile(
     r"^[\s\-•*]*(?:ничего|нет|none|nothing|n/a)\b", re.IGNORECASE)
 
 
 def _judge_uncited(chunk_text: str, chain: ProvenanceChain, chain_empty: bool,
                    has_dialogue_evidence: bool) -> tuple[str, str, list[str]]:
-    """Вердикт куска без ссылок: (вердикт, размеченный текст, id улик).
-
-    Вынесено из `verify` 2026-09-21 дословно: счётчики теперь считаются
-    по итоговым вердиктам (равенство проверено на всех 10 283 тестах).
-    """
+    """Verdict of an uncited chunk: (verdict, annotated text, evidence ids); extracted from `verify` verbatim, counters come from final verdicts."""
     matched_ids: list[str] = []
-    # `_find_structured_support` is tool_output-only by construction
-    # (kind filter in verifier_utils), so a user_explicit result is
-    # impossible here — no MIR-028 interception needed on this path.
+    # `_find_structured_support` is tool_output-only by construction, so a user_explicit result is impossible here.
     struct_ev = _find_structured_support(chunk_text, chain) if not chain_empty else None
     if struct_ev is not None:
         verdict = "verified"
@@ -155,11 +119,7 @@ def _judge_uncited(chunk_text: str, chain: ProvenanceChain, chain_empty: bool,
             else None
         )
         if dlg_ev is not None:
-            # A statement about this session's own exchange. The
-            # synthesizer routinely writes these without a citation
-            # ("Мой предыдущий ответ не отвечал на вопрос") and the
-            # bare `unverified` verdict is what fed the truncation
-            # that deleted a valid self-correction (issue #119).
+            # A statement about this session's own exchange; the synthesizer writes these uncited, and a bare `unverified` verdict fed the truncation that deleted a valid self-correction.
             verdict = "dialogue_supported"
             matched_ids.append(dlg_ev.id)
             annotated = chunk_text.rstrip() + " [dialogue-supported]"
@@ -173,29 +133,15 @@ def _gate_citation(
     chunk_text: str, c: Any, ev: Any, chunk_reason: ClaimReason | None, *,
     stat_claim: bool, stat_figures: Any,
 ) -> tuple[bool, ClaimReason | None]:
-    """Гейты над ОДНОЙ разрешённой ссылкой: (выдержала ли, причина).
-
-    Понижают `verified`, никогда его не создают. Вынесено из вердикта
-    куска 2026-09-21 дословно.
-    """
+    """Gates over ONE resolved citation: (held up, reason); they demote `verified`, never create it."""
     strict_ok = True
     if not _memory_citation_is_independent(ev):
-        # The citation resolves — the record exists and matches the
-        # id — but resolution is not verification. An agent-auto
-        # record is the agent's own earlier output; counting it as
-        # `verified` lets the agent confirm itself by having
-        # remembered something (MIR-046). Demoted to topic-only, so
-        # it still shows as supporting context but never as proof.
+        # The citation resolves, but resolution is not verification: an agent-auto record is the agent's own earlier output, so counting it `verified` lets the agent confirm itself.
+        # Demoted to topic-only: it shows as context, never as proof.
         strict_ok = False
-    # MIR-060 (b): the third content gate. The other two ask WHOSE
-    # evidence this is and whether a figure appears in it; this one
-    # COMPUTES. Where the claim is a sum, a count, a comparison or
-    # a multiple over `key=value` lines it is decided arithmetically
-    # and, when refuted, says so with its working — a stamp tells
-    # the agent it was wrong, this tells it what to change.
-    # Silent by construction on every shape it does not recognise,
-    # so it can only ever remove a false `verified`, never create
-    # one.
+    # Third content gate: the other two ask WHOSE evidence this is and whether a figure appears in it; this one COMPUTES. A claim that is a sum, count, comparison
+    # or multiple over `key=value` lines is decided arithmetically and a refutation shows its working. Silent on every shape it does not recognise,
+    # so it can only remove a false `verified`, never create one.
     arith = evaluate_claim_arithmetic(chunk_text, truth_excerpt(ev.excerpt or ""))
     if arith.refutes:
         strict_ok = False
@@ -204,34 +150,26 @@ def _gate_citation(
             actual=arith.actual, explanation=arith.explanation,
             computed_from=arith.computed_from,
         )
-    # MIR-060 (c): четвёртый гейт — отличительные литералы утверждения
-    # обязаны быть в улике. Тело в `verifier_utils.absent_literal_reason`.
+    # Fourth gate: the claim's distinctive literals must be in the evidence (body in `verifier_utils.absent_literal_reason`).
     _lit = absent_literal_reason(chunk_text, ev, c.prefix)
     if _lit is not None:
         strict_ok = False
         chunk_reason = chunk_reason or _lit
-    # MIR-060 (d): пятый гейт, обратное правило четвёртого —
-    # утверждение «этого там нет», опровергнутое собственной уликой.
+    # Fifth gate, the inverse of the fourth: a claim 'it is not there' refuted by its own evidence.
     _abs = absence_reason(chunk_text, ev, c.prefix)
     if _abs is not None:
         strict_ok = False
         chunk_reason = chunk_reason or _abs
-    # MIR-060 (f) / MIR-141: шестой гейт — цитата обязана быть ПРО
-    # это утверждение. Пятеро выше немы на прозе, потому что судят
-    # литералы код-образной формы; замер дал по оси темы J = 0.00.
-    # Шестой гейт, понижение БЕЗ обвинения:
-    # docs/CODE_NOTES.md, «A citation that is not about the claim».
-    # Уступает вычисляющему гейту: если он ПОДТВЕРДИЛ форму, кусок
-    # говорит об улике арифметически, и сравнение слов тут не судья.
+    # Sixth gate: the citation must be ABOUT the claim; the gates above are mute on prose (they judge code-shaped literals). Demotion WITHOUT accusation
+    # (docs/CODE_NOTES.md, 'A citation that is not about the claim'). Yields to the computing gate: if it CONFIRMED the shape, word comparison is not the judge.
     if arith.outcome != "supports" and off_topic_reason(
         chunk_text, ev, c.prefix
     ) is not None:
         strict_ok = False
-    # Девятый гейт: ссылка на улику, объявленную неверной, не может
-    # быть поддержкой. Понижение, не обвинение — маркер лексический.
+    # Ninth gate: a citation of evidence declared wrong cannot be support; demotion, not accusation (the marker is lexical).
     if denies_own_evidence_reason(chunk_text, ev, c.prefix) is not None:
         strict_ok = False
-    # Десятый гейт: дословный пересказ не вправе менять число.
+    # Tenth gate: a verbatim restatement must not change a number.
     _restated = restated_number_reason(chunk_text, ev, c.prefix)
     if _restated is not None:
         strict_ok = False
@@ -254,30 +192,19 @@ def _gate_citation(
 def _entailment_denied(
     chunk_text: str, chunk_evs: list[Any], matched_ids: list[str], llm: Any, *, stat_figures: Any,
 ) -> bool:
-    """Процитированное не влечёт утверждение — проверка по смыслу (MIR-060).
+    """The cited text does not entail the claim: a check by meaning (ALCE: a claim is confirmed if the cited passages ENTAIL it).
 
-    Отказ ведёт в «источник есть, утверждение не подтверждено» — НЕ в
-    «выдуманную ссылку»: та терминальна и уничтожает ответ, а здесь источник
-    есть и прочитан, он просто не подтверждает сказанного.
-
-    До 24.09 найденная ссылка сама была вердиктом: проверка по смыслу шла
-    лишь для утверждений, у которых ссылка НЕ нашлась. Замер 24.09: ответ
-    «второй свидетель op=office даёт улику» — теста не существовало — получил
-    «подтверждено 8 из 8» по ссылке на вывод patch_check. ALCE (Gao et al.,
-    2023): утверждение подтверждено, если процитированные отрывки его ВЛЕКУТ.
-    Числа уже сверены строже (гейт цифр) — для них не зовём. Нет модели или
-    нет вырезок — прежнее поведение.
+    A denial leads to 'source exists, claim not confirmed', NOT to a 'fabricated citation' (terminal, destroys the answer).
+    Numbers are checked more strictly by the digit gate, so they are not sent here. No model or no excerpts: previous behavior.
     """
     if llm is None or stat_figures or getattr(llm, "remaining", 1) <= 0:
         return False
     excerpts = [ev.excerpt for ev in chunk_evs if ev.id in matched_ids and getattr(ev, "excerpt", "")]
-    # 25.09, решение оператора: только выведенное и не решённое пересчётом.
+    # Only inferred claims not settled by recount (operator ruling).
     if not excerpts or not needs_entailment(chunk_text, excerpts):
         return False
     from .verifier_utils import _semantic_nli_check
-    # Окно шире, чем у поиска по всей цепочке (600): здесь смотрят только
-    # процитированные улики, а подтверждение в выводе инструмента часто стоит
-    # дальше первых сотен знаков — узкое окно ложно отказывало бы верному.
+    # Wider window than the whole-chain search (600): only cited evidence is examined, and confirmation in tool output often stands beyond the first hundreds of chars.
     return not _semantic_nli_check(chunk_text, "\n---\n".join(excerpts), llm, max_chars=6000)
 
 
@@ -285,10 +212,7 @@ def _judge_unmatched(
     chunk_text: str, cits: list[Any], chain: ProvenanceChain, *, chain_empty: bool,
     llm: Any, annotated: str,
 ) -> tuple[str, str, list[str], bool]:
-    """Ни одна ссылка куска не подтвердила его: последний шанс по структуре
-    вывода инструмента или по смыслу, иначе `cited_but_unmatched`.
-    Вынесено из вердикта куска 2026-09-21 дословно.
-    """
+    """No citation confirmed the chunk: last chance by tool-output structure or by meaning, else `cited_but_unmatched`; extracted from the chunk verdict verbatim."""
     matched_ids: list[str] = []
     memory_only = False
     # tool_output-only by construction — cannot return user_explicit.
@@ -323,14 +247,14 @@ def _judge_unmatched(
 
 
 def _relabel(annotated: str, pairs: list[tuple[str, str]]) -> str:
-    """Заменить сырые ссылки куска их метками вердикта."""
+    """Replace the chunk's raw citations with its verdict labels."""
     for raw, rewrite in pairs:
         annotated = annotated.replace(raw, rewrite)
     return annotated
 
 
 def _promote_topic_only(annotated: str, replacements: list[tuple[str, str]]) -> str:
-    """Ссылки, не выдержавшие порознь, подтверждены объединением: метка — verified."""
+    """Citations that did not hold separately are confirmed by the union: label verified."""
     return _relabel(annotated, [
         (raw, label.replace("[topic-only:", "[verified:", 1)) for raw, label in replacements])
 
@@ -338,19 +262,12 @@ def _promote_topic_only(annotated: str, replacements: list[tuple[str, str]]) -> 
 def _union_judgement(
     chunk_text: str, cits: list[Any], chunk_evs: list[Any], *, stat_claim: bool, stat_figures: Any,
 ) -> bool:
-    """Те же гейты — над ОБЪЕДИНЕНИЕМ процитированных улик.
+    """The same gates over the UNION of the cited evidence; called only when no single evidence held on its own.
 
-    24.09, живой прогон приёмки: «в DOCX 48 750, в скане 47 250 [file:a][file:b]»
-    — верно, но каждое число только в одной улике, а гейты судят улики порознь:
-    любое сравнение двух источников навсегда «не подтверждено». ALCE (Gao et
-    al., 2023): утверждение подтверждено, если его влечёт объединение
-    процитированного. Зовётся, только когда ни одна улика не выдержала одна;
-    не выдержало объединение — всё как раньше.
+    Cross-source comparisons (each number in only one source) would otherwise be 'unconfirmed' forever (ALCE: confirmed if the union entails it).
     """
     from dataclasses import replace
-    # Only INDEPENDENT evidence joins the union: the merged record used to
-    # inherit the first item's origin, so `[file:a][tool:memory_recall]`
-    # verified a fact found only in the agent's own memory (проверка 17.11, №7).
+    # Only INDEPENDENT evidence joins the union: the merged record used to inherit the first item's origin and verify a fact found only in the agent's own memory.
     unique = [ev for ev in {ev.id: ev for ev in chunk_evs}.values()
               if _memory_citation_is_independent(ev)]
     if len(unique) < 2 or not cits:
@@ -364,11 +281,7 @@ def _union_judgement(
 def _union_clears_literal(
     chunk_reason: ClaimReason | None, chunk_evs: list[Any], chain: ProvenanceChain,
 ) -> ClaimReason | None:
-    """R3 (2026-08-13, живой B3): литералы куска накрываются ОБЪЕДИНЕНИЕМ
-    процитированных улик (текст + адрес), а не каждой порознь — перекрёстное
-    утверждение цитирует два источника по половине. Снимает иск
-    `cited_literal_absent`, если объединение его накрывает.
-    """
+    """The chunk's literals are covered by the UNION of the cited evidence (text + address), not each one alone; lifts `cited_literal_absent` if the union covers it."""
     if (
         chunk_reason is not None
         and chunk_reason.code == "cited_literal_absent"
@@ -382,9 +295,7 @@ def _union_clears_literal(
 
 
 def _absence_proven(chunk_text: str, chunk_evs: list) -> bool:
-    """Отсутствие не утверждается — или доказано полным поиском названной области
-    или ответом сервера «здесь нет» на адрес, где назван предмет (исключения из
-    стены (e): ни отчёт поиска, ни 404 — не усечённая выдержка)."""
+    """Absence is not asserted, or is proven by a full search of the named area or a server 'not here' answer on an address naming the subject (neither a search report nor a 404 is a truncated excerpt)."""
     return (absence_certifiable(chunk_text, "") or absence_certified_by_search(chunk_text, chunk_evs)
             or absence_certified_by_not_found(chunk_text, chunk_evs))
 
@@ -393,12 +304,7 @@ def _judge_cited(
     chunk_text: str, cits: list[Any], chain: ProvenanceChain, *, chain_empty: bool,
     llm: Any, chunk_reason: ClaimReason | None, entail_llm: Any = None,
 ) -> tuple[str, str, list[str], ClaimReason | None, bool]:
-    """Вердикт куска со ссылками: (вердикт, размеченный текст, id улик,
-    причина, «только память без совпадения»).
-
-    Вынесено из `verify` 2026-09-21 дословно; счётчики — по итоговым
-    вердиктам в `verify`.
-    """
+    """Verdict of a cited chunk: (verdict, annotated text, evidence ids, reason, 'memory only without match'); extracted from `verify` verbatim."""
     chunk_evs: list[Any] = []
     matched_ids: list[str] = []
     annotated = chunk_text
@@ -424,11 +330,7 @@ def _judge_cited(
             continue
         ev = best_run_of_source(ev, chain, chunk_text)
         if getattr(ev, "kind", "") == "user_explicit":
-            # Operator ruling 2026-08-03 (MIR-028): a citation of the
-            # operator's own turn confirms the words were said — it is
-            # never `verified`, whatever the claim's shape (this also
-            # supersedes the stat-figure exemption for the `user`
-            # prefix below: the branch is intercepted here first).
+            # A citation of the operator's own turn confirms the words were said, never `verified`, whatever the claim's shape (intercepted here before the stat-figure exemption).
             any_user_asserted = True
             user_asserted_ids.append(ev.id)
             body_part = f":{c.body}" if c.body else ""
@@ -437,10 +339,7 @@ def _judge_cited(
             )
             continue
         if classify_evidence(ev) == "session_dialogue":
-            # The recording of the exchange proves what was SAID. It is
-            # never promoted to `verified`, and it credits only claims
-            # that are themselves about the exchange — a world claim
-            # citing [dialogue:…] stays unsupported (issue #119).
+            # The recording of the exchange proves what was SAID: never promoted to `verified`; it credits only claims about the exchange, and a world claim citing [dialogue:...] stays unsupported.
             body_part = f":{c.body}" if c.body else ""
             if is_dialogue_scoped_claim(chunk_text):
                 any_dialogue = True
@@ -471,51 +370,34 @@ def _judge_cited(
         any_matched, chunk_reason = True, None
         matched_ids.extend(e.id for e in chunk_evs if e.id not in matched_ids and _memory_citation_is_independent(e))
         annotated, topic_only_replacements = _promote_topic_only(annotated, topic_only_replacements), []
-    # R3: литералы накрываются объединением улик (см. _union_clears_literal).
+    # Literals are covered by the union of evidence (see _union_clears_literal).
     chunk_reason = _union_clears_literal(chunk_reason, chunk_evs, chain)
-    # MIR-060 (e): у утверждения об ОТСУТСТВИИ сертификата быть не
-    # может — гейт (d) его опровергает, этот не даёт подтвердить
-    # (docs/CODE_NOTES.md, «Absence was certified by a resolved citation»).
+    # A claim of ABSENCE cannot be certified: gate (d) refutes it, this one stops confirmation (docs/CODE_NOTES.md, 'Absence was certified by a resolved citation').
     _abs_uncert = any_matched and not _absence_proven(chunk_text, chunk_evs)
     if any_matched and not _abs_uncert and not (
         chunk_reason is not None and chunk_reason.code == "count_mismatch"
     ) and not _entailment_denied(chunk_text, chunk_evs, matched_ids, entail_llm or llm, stat_figures=stat_figures):
         verdict = "verified"
-        # Иск снят: другая из процитированных улик подтвердила кусок.
+        # Claim lifted: another cited evidence confirmed the chunk.
         chunk_reason = None
         annotated = _relabel(annotated, topic_only_replacements + dialogue_replacements + user_asserted_replacements)
-    elif any_matched and not _abs_uncert and chunk_reason is None:  # не влечёт: см. _entailment_denied
+    elif any_matched and not _abs_uncert and chunk_reason is None:  # not entailed: see _entailment_denied
         verdict = "topic_supported_but_claim_unverified"
         annotated = _relabel(annotated, topic_only_replacements).rstrip() + " [цитата-не-подтверждает]"
     elif _abs_uncert and chunk_reason is None:
-        # Ниже опровержения намеренно: опровергнутое — доказанная ложь,
-        # а это лишь несертифицируемое.
+        # Deliberately below refutation: refuted is proven falsehood, this is merely uncertifiable.
         verdict = "topic_supported_but_claim_unverified"
         annotated = annotated.rstrip() + " [absence-unverifiable]"
     elif chunk_reason is not None and chunk_reason.code in _UNSUPPORTED_REASONS:
-        # Та же полярность, применённая в ДРУГУЮ сторону: «в вырезке
-        # улики нет этих слов» — не разновидность доказанной лжи.
-        #
-        # И НЕ разновидность выдуманной ссылки. Первая редакция этой
-        # правки (2026-09-21, час спустя) увела такие куски в
-        # `cited_but_unmatched` — а `core/unsupported_claims.py`
-        # считает именно этот счётчик ФАБРИКАЦИЕЙ цитат, и фабрикация
-        # терминальна: ответ не отправляется вовсе. Живая цена: два
-        # ответа подряд уничтожены целиком, человек получил канцелярскую
-        # записку вместо работы, причём один раз — из-за ОДНОЙ ссылки
-        # на восемь утверждений.
-        #
-        # Разница существенная. Выдуманная ссылка НЕ РАЗРЕШАЕТСЯ НИ ВО
-        # ЧТО: источника нет. Здесь источник есть, он открыт и прочитан,
-        # в нём просто нет дословных слов утверждения. Первое — ложь о
-        # происхождении, второе — нехватка подпорки.
+        # Same polarity applied the other way: 'the excerpt lacks these words' is not proven falsehood and NOT a fabricated citation either: `core/unsupported_claims.py`
+        # counts `cited_but_unmatched` as FABRICATION, which is terminal (the answer is not sent). A fabricated citation resolves to nothing; here the source exists,
+        # was read, and just lacks the claim's literal words: a missing prop, not a lie about origin.
         verdict = "topic_supported_but_claim_unverified"
         annotated = _relabel(annotated, topic_only_replacements)
         annotated = annotated.rstrip() + " [улика-без-этих-слов]"
         chunk_reason = None
     elif chunk_reason is not None:
-        # Полярность: доказанная ложь — не разновидность «не подтверждено»
-        # (2026-08-12, docs/CODE_NOTES.md «REFUTED is a polarity»).
+        # Polarity: proven falsehood is not a kind of 'not confirmed' (docs/CODE_NOTES.md, 'REFUTED is a polarity').
         verdict = "refuted"
         annotated = _relabel(annotated, topic_only_replacements)
         annotated = annotated.rstrip() + " [claim-refuted]"
@@ -558,10 +440,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
     structural = memory_only_unmatched = 0
     has_dialogue_evidence = dialogue_evidence_present(chain)
     annotated_chunks: list[str] = []
-    # Index into ``annotated_chunks`` for each examined (non-structural) chunk,
-    # so the downgrade pass below can patch the exact rendered line instead of
-    # fuzzy string-matching (which silently failed when a claim began with its
-    # own citation).
+    # Index into ``annotated_chunks`` for each examined (non-structural) chunk, so the downgrade pass patches the exact rendered line instead of fuzzy matching.
     examined_annotated_idx: list[int] = []
     current_section: str | None = None
     for chunk_text in all_chunks_text:
@@ -580,13 +459,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             annotated_chunks.append(chunk_text)
             continue
         cits = parse_citations(chunk_text)
-        # R2 (2026-08-13) — заявленный счёт против собственного перечисления в
-        # скобках — с 2026-09-25 в ТЕНЕВОМ режиме, по слову оператора: пишется
-        # в журнал, на вердикт не влияет. Замер: 25 срабатываний на 1397
-        # проверках живых ответов, все 25 ложные (скобки вызова функции,
-        # пример, формула), 9 — и после шести заплаток. Сильное действие
-        # («ложь», перепланирование, переписывание черновика) требует
-        # измеренной точности; у R2 она 0 из 25.
+        # Declared count versus the answer's own parenthesised enumeration runs in SHADOW mode: logged, no effect on the verdict (strong actions need measured precision, and this one has none).
         _r2 = enumeration_count_reason(chunk_text)
         if _r2 is not None:
             shadow_count.append({**_r2.to_log_payload(),
@@ -634,10 +507,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
                 continue
             rebuilt_chunks.append(ch)
         examined_chunks = rebuilt_chunks
-    # Счёт — по итоговым вердиктам, после понижений (субагент, квитанция).
-    # Прежде десяток счётчиков правился по ходу в каждой ветке; равенство
-    # проверено на всех 10 283 тестах перед выносом судей, 2026-09-21.
-    # MIR-028: слова оператора — свой вердикт `user_asserted`, не `verified`.
+    # Counted from final verdicts, after demotions (subagent, receipt); operator words get their own verdict `user_asserted`, not `verified`.
     n = Counter(ch.verdict for ch in examined_chunks)
     verified, unverified, refuted = n["verified"], n["unverified"], n["refuted"]
     cited_unmatched, self_declared = n["cited_but_unmatched"], n["self_declared"]
@@ -658,8 +528,7 @@ def verify(*, answer: str, chain: ProvenanceChain, llm: Any = None, user_questio
             # support the answer does have is this session's own transcript.
             disclaimer = DISCLAIMER_SESSION_MEMORY
         elif user_asserted > 0:
-            # The only support is the operator's own words this turn — say
-            # exactly that (operator ruling, MIR-028).
+            # The only support is the operator's own words this turn; say exactly that.
             disclaimer = DISCLAIMER_USER_ASSERTED
         elif cited_unmatched > 0 and cited_unmatched == memory_only_unmatched:
             disclaimer = DISCLAIMER_SESSION_MEMORY

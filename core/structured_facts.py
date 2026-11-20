@@ -14,11 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Locale tables — kept small on purpose; we cover the calendar surface
-# the agent's tools actually emit (en + ru). Adding a locale = appending
-# tuples here, no other code changes needed.
-# ---------------------------------------------------------------------------
+# Locale tables (en + ru), kept small: the calendar surface the agent's tools emit; add a locale by appending tuples.
 
 _WEEKDAY_NAMES: dict[int, tuple[str, ...]] = {
     0: ("monday", "понедельник", "пн", "mon"),
@@ -57,12 +53,10 @@ _BOOL_FALSE_FORMS: frozenset[str] = frozenset({
     "false", "no", "fail", "failed", "error", "нет",
 })
 
-# Numbers shorter than 3 chars (0,1,2,…,99) match almost any prose
-# accidentally. Require ≥3 digits for numeric matches to count.
+# Numbers shorter than 3 digits match almost any prose by accident; require at least 3 digits.
 _MIN_NUMERIC_LEN = 3
 
-# Generic strings that appear in every tool output and carry no
-# identity. Filter them so a verbatim string fact must be meaningful.
+# Generic strings present in every tool output carry no identity; filtered so a verbatim string fact is meaningful.
 _STRING_STOPWORDS: frozenset[str] = frozenset({
     "true", "false", "none", "null", "ok", "success", "error", "yes", "no",
 })
@@ -70,9 +64,6 @@ _STRING_STOPWORDS: frozenset[str] = frozenset({
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 
-# ---------------------------------------------------------------------------
-# Data class
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class StructuredFacts:
@@ -100,9 +91,6 @@ class StructuredFacts:
         )
 
 
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
 
 def _parse_excerpt(excerpt: str) -> Any:
     """Best-effort parse of a tool output excerpt."""
@@ -218,9 +206,6 @@ def extract_facts(excerpt: str | Any) -> StructuredFacts:
     )
 
 
-# ---------------------------------------------------------------------------
-# Claim matching
-# ---------------------------------------------------------------------------
 
 def _word_in(needle: str, hay: str) -> bool:
     """Substring match with word-boundary on Unicode letter/digit edges.

@@ -12,8 +12,7 @@ from typing import Literal
 from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
 IssueStatus = Literal["open", "verified", "resolved"]
-#: Тяжесть, которую запись вправе объявить о себе. `critical` сюда НЕ входит
-#: намеренно: он принадлежит объективной неживости, которую видно снаружи.
+#: Severity a record may declare for itself; `critical` is excluded on purpose (reserved for objective deadness visible from outside).
 IssueSeverity = Literal["low", "medium", "high"]
 _ISSUE_SEVERITIES: frozenset[str] = frozenset({"low", "medium", "high"})
 DEFAULT_ISSUE_PATH = Path("data") / "self_improvement_issues.jsonl"
@@ -62,12 +61,7 @@ def failure_fingerprint(text: str) -> str:
     if "duplicate base class" in lowered or ("duplicate" in lowered and "mixin" in lowered):
         key = _DUPLICATE_MIXIN_KEY
     elif signals := _detector_signals(text):
-        # MIR-035: a detector-minted issue is identified by its SIGNAL CLASS,
-        # never by the turn's text. The old key hashed the full failure text —
-        # which embeds the campaign question — so one detector class on N
-        # questions minted N permanent open issues (13 copies of one signal
-        # pair measured live). The repair ladder repairs classes, not turns;
-        # instances accumulate as evidence on one issue instead.
+        # a detector-minted issue is identified by its signal class, never by the turn text, so one class on N questions is one issue with accumulating evidence
         key = "detector-class:" + ",".join(signals)
     else:
         key = re.sub(r"\b(?:ain|run|ep)_[a-f0-9]+\b", "<id>", lowered)
@@ -88,30 +82,10 @@ class SelfImprovementIssue:
     related_files: tuple[str, ...]
     related_error_text: str
     suggested_next_action: str
-    #: НИЖНЯЯ ГРАНИЦА числа срабатываний класса, а не точный счёт: он ведётся
-    #: с того момента, как поле появилось (2026-08-22), поэтому у записей
-    #: старше этой даты он занижен. Потребитель обязан показывать `>=`.
+    #: LOWER BOUND of class occurrences, not an exact count: counted only since the field existed, so older records undercount; consumers must show `>=`.
     occurrences: int = 1
-    #: Насколько дефект мешает РАБОТЕ, по суждению того, кто его завёл.
-    #:
-    #: Слово оператора 2026-09-20: «почини фильтр, пусть его собственные
-    #: дефекты проходят». Замер того вечера: 117 решений из 117 приняты по
-    #: операторской цели, НИ ОДНОГО по собственному реестру. Причина —
-    #: `_partition_by_subject` в `core/best_next_action.py`: кандидат остаётся
-    #: в гонке, только если у него критическая или высокая тяжесть, либо его
-    #: предмет совпадает с предметом цели, либо он пришёл из цели. А кандидату
-    #: из этого реестра тяжесть была ПРИБИТА как `medium`, поэтому всё, что
-    #: агент узнаёт о себе, выметалось любой целью, называющей другой файл.
-    #:
-    #: Дверь «объективная поломка не выметается» существовала и работала — её
-    #: заварили изнутри одной константой. Это поле её отпирает: запись сама
-    #: говорит, мешает она работе или только досаждает.
-    #:
-    #: Потолок `high` намеренный. `critical` остаётся за объективной
-    #: неживостью (демон упал, тик сломан) — тем, что видно снаружи и не
-    #: зависит от самооценки. Иначе самооценка стала бы способом всегда
-    #: объявлять себя главным делом, а цель потеряла бы то влияние, ради
-    #: которого фильтр и написан (MIR-162).
+    #: How much the defect hinders WORK, by the judgement of whoever filed it. Ceiling `high` on purpose: `critical` stays with objective deadness (daemon down, tick broken).
+    #: Lets the registry's own defects pass the subject filter in `_partition_by_subject` (`core/best_next_action.py`).
     severity: IssueSeverity = "medium"
 
     def to_dict(self) -> dict:
@@ -125,9 +99,7 @@ class SelfImprovementIssue:
         status = str(data.get("status") or "open")
         if status not in {"open", "verified", "resolved"}:
             status = "open"
-        # Незнакомое слово — не повод поверить записи на слово: неизвестная
-        # тяжесть читается как `medium`, то есть как прежнее поведение. Так же
-        # читается и `critical`: объявить себя аварией эта запись не вправе.
+        # an unknown word, and `critical`, read as `medium` (previous behaviour): a record may not declare an emergency
         severity = str(data.get("severity") or "medium").strip().casefold()
         if severity not in _ISSUE_SEVERITIES:
             severity = "medium"
@@ -263,15 +235,7 @@ class SelfImprovementIssueRegistry:
                 last_seen=max((current.last_seen, observed_at), key=_stamp),
                 evidence=tuple(dict.fromkeys((*current.evidence, *incoming.evidence)))[-8:],
                 related_error_text=incoming.related_error_text or current.related_error_text,
-                # MIR-035 audit: merging by class keeps the class but LOSES its
-                # magnitude — evidence is capped at 8, so a signal seen 50 times
-                # is indistinguishable from one seen 8. Recurrence is the whole
-                # reason a class is worth investigating, so it is counted.
-                # Counted only on a STRICTLY NEWER stamp, because the producer
-                # re-reads the last 7 days on every sweep: a naive +1 would
-                # count sweeps instead of failures. Two failures sharing one
-                # timestamp undercount by one — conservative on purpose, a
-                # sensor that inflates is worse than one that lags.
+                # evidence is capped at 8, so recurrence is counted; only on a STRICTLY NEWER stamp (the producer re-reads 7 days per sweep); same-stamp failures undercount by design
                 occurrences=current.occurrences + (1 if newer else 0),
             )
             issues[index] = merged
@@ -317,19 +281,12 @@ class SelfImprovementIssueRegistry:
         rewrite_state_jsonl(self.path, [issue.to_dict() for issue in issues])
 
 
-# Единственное место, где применяется закон свидетеля: `transition` — слепой
-# сеттер и доказанную починку от произвольного перехода отличить не может.
-# Проект охраны авторства агента (docs/CODE_NOTES.md, «The learning organ was
-# starved, not broken»).
+# The only place the witness law applies: `transition` is a blind setter and cannot tell a proven repair from an arbitrary move.
 _WITNESS_FIELDS = 3
 
 
 def _witness_runs(evidence: tuple[str, ...]) -> list[list[str]]:
-    """Только записи протокола `статус|время|метка`.
-
-    В улике лежит и сырой текст провала, положенный при заведении: разделителей
-    в нём нет, и разбор на нём падает.
-    """
+    """Only records of the protocol `status|time|label`; the raw failure text in the evidence has no separators and breaks parsing."""
     return [
         parts for parts in (entry.split("|") for entry in evidence)
         if len(parts) == _WITNESS_FIELDS
@@ -337,12 +294,9 @@ def _witness_runs(evidence: tuple[str, ...]) -> list[list[str]]:
 
 
 def close_proven_issue(registry: SelfImprovementIssueRegistry, fingerprint: str) -> bool:
-    """Закрыть проблему, если улика доказывает починку. Иначе не трогать.
+    """Close the issue if the evidence proves the repair; otherwise leave it.
 
-    Доказательством считаются ДВА прогона свидетеля: красный на объекте,
-    сломанном именно этой проблемой, и зелёный после починки. Свидетель,
-    зелёный на сломанном объекте, ничего не доказывает; чужой уже зелёный тест
-    красного прогона предъявить не может.
+    Proof is TWO witness runs: red on the object this issue broke, then green after the repair.
     """
     problem = None
     for item in registry.list():
@@ -367,15 +321,10 @@ def close_proven_issue(registry: SelfImprovementIssueRegistry, fingerprint: str)
 
 
 def retire_issue(registry, fingerprint, *, reason) -> bool:
-    """Retire an issue only via the operator CLI; the verdict line starts with retired-by-operator, which close_proven_issue cannot confuse with a witness label, and autonomous ticks have no path to this function.
+    """Retire an issue by fingerprint, appending a retired-by-operator evidence line; operator CLI only.
 
-    Retire an issue by fingerprint, appending a retired-by-operator evidence line.
-
-    Behavior:
-    1. If reason is empty after strip -> return False, change nothing.
-    2. If no issue with this fingerprint exists -> return False.
-    3. If the issue is already resolved -> return False, do not touch evidence.
-    4. Otherwise: transition to resolved, appending 'retired-by-operator|<ISO time>|<reason>' to the evidence. Return True.
+    Returns False (nothing changed) for an empty reason, an unknown fingerprint or an already resolved issue;
+    otherwise resolves it with 'retired-by-operator|<ISO time>|<reason>' and returns True.
     """
     if not reason.strip():
         return False

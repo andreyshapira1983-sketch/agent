@@ -1,15 +1,4 @@
-"""Project import/dependency map for self-build changes.
-
-* the Builder receives the list of symbols that are ACTUALLY imported
-elsewhere (with the importing files), so it knows what it must keep
-importable; * the Critic can veto a split that drops a symbol some other
-module really imports — naming the importer, not just the symbol; * the
-targeted-test selection can include the test files that import the target,
-so a break is caught by the lane instead of by a full-suite surprise.
-
-Pure standard library + AST; read-only; never raises out of the public
-helpers (best-effort: unparseable or unreadable files are skipped).
-"""
+"""Project import/dependency map for self-build changes: who imports which symbols of a target module (stdlib + AST, read-only, best-effort)."""
 from __future__ import annotations
 
 import ast

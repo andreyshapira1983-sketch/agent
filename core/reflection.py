@@ -21,19 +21,9 @@ def learning_grounding(
 ) -> dict[str, Any]:
     """Did the plan study the weak spots the diagnosis named, or other things?
 
-    Three kinds of name, and they are not the same failure:
-      * a real path that the plan studied      -> resolved
-      * a path-shaped name that is not a file  -> phantom
-      * a topic ("memory subsystem")           -> unresolvable BY SHAPE, so
-        no disk check can confirm or deny it
-
-    `status` is `targeted` (every named spot studied), `partial`,
-    `substituted` (the names were resolvable and the plan studied other
-    files), `invalid_diagnosis` (path-shaped names that are not files),
-    `unresolvable` (only topic-shaped names), `none`.
-
-    Judges the RECORD, not the policy: a fallback may still happen, it may
-    just not be written down as the thing it replaced (MIR-106).
+    A name is resolved (a real path the plan studied), phantom (path-shaped but not a file) or unresolvable by shape (a topic).
+    status: targeted | partial | substituted | invalid_diagnosis | unresolvable | none. Judges the RECORD, not the policy:
+    a fallback may happen but may not be recorded as the thing it replaced.
     """
     root = Path(workspace)
     named = [f.strip() for f in focus_areas if f and f.strip()]
@@ -61,37 +51,27 @@ def learning_grounding(
     }
 
 
-# ── Configuration ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class ReflectionConfig:
     """Tuning knobs for one reflection pass."""
 
-    # How many most-recent *.jsonl log files to scan.
     max_logs: int = 20
-    # Minimum occurrences of a pattern to surface it as actionable.
     min_occurrences: int = 2
-    # Cap on lessons saved to persistent memory per pass.
     max_lessons: int = 10
-    # Passed to LearningPlanner.plan() when a plan is generated.
     learning_limit: int = 10
 
 
-# ── Internal data structures ──────────────────────────────────────────────────
 
 @dataclass
 class ErrorPattern:
     """A recurring failure signal extracted from the agent's execution logs."""
 
-    # e.g. "tool_result_error", "replan_exhausted", "autonomous_task_failed", "error"
     event_type: str
     # Non-empty when event_type is "tool_result_error" — the tool that failed.
     tool_name: str
-    # First sample error message seen for this bucket.
     sample_message: str
-    # Total occurrences across all scanned log files.
     count: int
-    # Trace IDs of runs where this pattern appeared (capped at 5 for brevity).
     trace_ids: list[str]
 
     def to_dict(self) -> dict[str, Any]:
@@ -112,13 +92,9 @@ class Lesson:
     """A structured insight produced by the LLM from one or more error patterns."""
 
     id: str = field(default_factory=lambda: new_id("lesson"))
-    # One-sentence description of what the pattern reveals.
     insight: str = ""
-    # What the agent should do: study more / fix code / keep watching.
     action: LessonAction = "monitor"
-    # The file or module to focus on (e.g. "tools/web_fetch.py").
     focus_area: str = ""
-    # LLM-reported confidence that this lesson is meaningful.
     confidence: float = 0.5
     # The underlying pattern that triggered this lesson (may be None for global lessons).
     pattern: ErrorPattern | None = None
@@ -134,7 +110,6 @@ class Lesson:
         }
 
 
-# ── Report ────────────────────────────────────────────────────────────────────
 
 @dataclass
 class ReflectionReport:
@@ -147,9 +122,7 @@ class ReflectionReport:
     learning_plan: LearningPlan | None
     memory_records_saved: int
     warnings: list[str] = field(default_factory=list)
-    #: Studied the diagnosed weak spots, or other things instead — see
-    #: `learning_grounding`. A substitution may happen; it may not be recorded
-    #: as the thing it replaced (MIR-106).
+    #: Studied the diagnosed weak spots, or other things instead (see learning_grounding); a substitution may happen but may not be recorded as what it replaced.
     learning_grounding: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,16 +155,13 @@ class ReflectionReport:
         return "\n".join(lines)
 
 
-# ── Engine ────────────────────────────────────────────────────────────────────
 
-#: Похоже на адрес в репозитории, а не на название темы. Только для таких имён
-#: спрашивается диск: «general» или «memory subsystem» — не путь и проверке не
-#: подлежат.
+#: Looks like a repository address, not a topic name; only such names are checked against disk.
 _PATH_SHAPED_RE = re.compile(r"[\w./\\-]+\.(?:py|md|json|jsonl|toml|yaml|yml)|/")
 
 
 def _checked_focus_area(focus: str, action: str) -> tuple[str, str]:
-    """Урок не вправе указывать на файл, которого нет."""
+    """A lesson may not point at a file that does not exist."""
     focus = focus.strip()
     if not focus or not _PATH_SHAPED_RE.search(focus):
         return focus, action
@@ -218,17 +188,10 @@ class ReflectionEngine:
         self.llm = llm
         self.log_dir = Path(log_dir) if log_dir else self.workspace / "logs"
         self.logger = logger
-        # Operator brake: when True, lessons are still synthesised and
-        # surfaced in the report but NOT persisted to memory. This closes
-        # the side channel where reflection wrote 'agent-auto'-equivalent
-        # lessons straight to the store, bypassing the MemoryWritePolicy
-        # freeze that AGENT_FREEZE_AUTO_MEMORY installs for the rest of the
-        # agent. The caller wires this to the same operator brake (see
-        # AutonomousRuntime._run_reflection). Off by default so existing
-        # behaviour is unchanged.
+        # Operator brake: lessons are still synthesised and reported but NOT persisted, closing a side channel around the MemoryWritePolicy
+        # freeze (AGENT_FREEZE_AUTO_MEMORY); wired by AutonomousRuntime._run_reflection; off by default.
         self.freeze_writes = freeze_writes
 
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def reflect(self, config: ReflectionConfig | None = None) -> ReflectionReport:
         """Run one reflection pass. Returns a full report. Never raises."""
@@ -283,7 +246,6 @@ class ReflectionEngine:
         self._log("reflection_stop", report.to_dict())
         return report
 
-    # ── Step 1: load recent logs ──────────────────────────────────────────────
 
     def _load_recent_logs(
         self,
@@ -322,20 +284,13 @@ class ReflectionEngine:
 
         return all_events, len(files)
 
-    # ── Step 2: extract failure patterns ─────────────────────────────────────
 
     def _extract_patterns(
         self,
         events: list[dict[str, Any]],
         config: ReflectionConfig,
     ) -> list[ErrorPattern]:
-        """Bucket error events into (event_type, tool_name) counters.
-
-        Two-pass approach:
-          1. Index tool_call_id → tool_name so we can name tool failures.
-          2. Walk events and bucket by failure kind.
-        """
-        # Pass 1: build lookup from tool_call id to tool name.
+        """Bucket error events into (event_type, tool_name) counters: index tool_call_id to tool name first, then bucket by failure kind."""
         tc_to_tool: dict[str, str] = {}
         for ev in events:
             if ev.get("event") == "tool_call":
@@ -345,8 +300,6 @@ class ReflectionEngine:
                 if tc_id and tool_name:
                     tc_to_tool[tc_id] = tool_name
 
-        # Pass 2: accumulate failure buckets.
-        # key: (event_type_label, tool_name_or_empty)
         buckets: dict[tuple[str, str], dict[str, Any]] = {}
 
         for ev in events:
@@ -386,15 +339,8 @@ class ReflectionEngine:
                 key = ("error", code)
 
             elif event_type == "causal_observation":
-                # Собственные детекторы агента. До 2026-08-15 рефлексия их не
-                # видела: она считала только падения — ошибку инструмента,
-                # перепланирование, провал задачи, `error`. Живой замер того
-                # дня: 1318 событий просмотрено, 0 закономерностей, при том что
-                # `reasoning_action_mismatch` к тому часу сработал девять раз.
-                # Ничего не падало — и учиться было якобы не на чем.
-                # Каждый сигнал ведром отдельно: один ход поднимает несколько,
-                # и «mismatch девять раз» — не то же самое, что «девять ходов
-                # с каким-нибудь дефектом».
+                # The agent's own detectors, each signal in its own bucket (one turn raises several; "mismatch nine times" differs from
+                # "nine turns with some defect"); not only failures.
                 for signal in payload.get("defect_signals") or ():
                     label = str(signal)
                     bucket = buckets.setdefault(
@@ -435,7 +381,6 @@ class ReflectionEngine:
                 )
         return patterns
 
-    # ── Step 3: LLM synthesis ─────────────────────────────────────────────────
 
     _SYSTEM_PROMPT = (
         "You are the self-reflection module of an autonomous AI agent. "
@@ -481,9 +426,7 @@ class ReflectionEngine:
                 temperature=0.3,
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # `warnings` is returned to the caller and printed with the
-            # reflection result, so an empty lesson list always arrives next to
-            # the reason it is empty.
+            # warnings is returned and printed with the result, so an empty lesson list arrives with the reason.
             warnings.append(f"LLM call failed: {type(exc).__name__}: {exc}")
             return []
 
@@ -541,23 +484,17 @@ class ReflectionEngine:
             )
         return lessons
 
-    # ── Step 4: save lessons to persistent memory ─────────────────────────────
 
     def _save_lessons(self, lessons: list[Lesson]) -> int:
         """Persist lessons as episodic MemoryRecords. Returns count saved."""
         if not lessons:
             return 0
         if self.freeze_writes:
-            # Operator brake active: do not grow persistent memory. Lessons
-            # are still returned in the report (honest visibility) but none
-            # reach disk.
+            # Operator brake active: do not grow persistent memory; lessons are still returned in the report.
             self._log("reflection_writes_frozen", {"lessons_withheld": len(lessons)})
             return 0
-        # Block 4 (M7, 2026-09-03): reflection knocks on the same door as every
-        # other agent-auto write. Measured: 635 of 837 persistent records were
-        # reflection output, 625 written on one day, none policy-checked. Each
-        # lesson is an observation of one day of logs — that is its kind — and
-        # the write policy (consent, secrets, near-duplicates) decides.
+        # Reflection goes through the same write policy as every other agent-auto write (consent, secrets, near-duplicates);
+        # each lesson is an observation of one day of logs.
         from core.memory_policy import MemoryWritePolicy
 
         policy = MemoryWritePolicy()
@@ -567,8 +504,7 @@ class ReflectionEngine:
             existing = []
 
         def _text_view(rec: MemoryRecord) -> MemoryRecord:
-            # A lesson record stores a dict; the duplicate check compares
-            # prose, so it sees the insight, not the dict's punctuation.
+            # A lesson record stores a dict; the duplicate check compares prose so it sees the insight, not the dict's punctuation.
             body = rec.content
             if isinstance(body, dict) and isinstance(body.get("insight"), str):
                 return rec.model_copy(update={"content": body["insight"]})
@@ -612,7 +548,6 @@ class ReflectionEngine:
             return 0
         return self.persistent_memory.save_many(records)
 
-    # ── Step 5: generate a LearningPlan from the lessons ─────────────────────
 
     def _build_learning_plan(
         self,
@@ -621,11 +556,8 @@ class ReflectionEngine:
         warnings: list[str],
     ) -> LearningPlan | None:
         """Return a LearningPlan focused on the weak spots found, or None."""
-        # Only "learn_more" and "repair" actions warrant deeper ingestion — and
-        # only a weak spot that cites its evidence (MIR-106, 2026-09-25:
-        # reflection grounding, arXiv 2603.07670 §4.3). The evidence is the
-        # error pattern the lesson came from; it also becomes the BM25 query
-        # for the files to study (core/weak_spot_retrieval.py).
+        # Only "learn_more" and "repair" actions warrant deeper ingestion, and only a weak spot that cites its evidence; the evidence
+        # (the error pattern) also becomes the BM25 query for the files to study (core/weak_spot_retrieval.py).
         wanted = [
             lesson for lesson in lessons
             if lesson.action in ("learn_more", "repair") and lesson.focus_area
@@ -649,12 +581,10 @@ class ReflectionEngine:
                 evidence_query=" ".join(evidence_query(lesson) for lesson in grounded),
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Same channel as the lesson synthesiser above: `None` never
-            # travels without the sentence explaining it.
+            # Same channel as the lesson synthesiser: None never travels without the sentence explaining it.
             warnings.append(f"LearningPlanner failed: {type(exc).__name__}: {exc}")
             return None
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _log(self, event: str, payload: Any) -> None:
         if self.logger is not None:

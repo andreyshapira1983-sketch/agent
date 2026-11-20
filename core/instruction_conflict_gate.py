@@ -1,37 +1,5 @@
-"""Instruction Conflict Gate — турникет между уверенным приказом и ``git add``.
-
-The Clarification Gate (``core.clarification_gate``) stops the agent when it
-does not understand *what* to build. This gate stops it for the other reason:
-it understands both instructions perfectly well, and they contradict each other.
-
-The failure it prevents (operator's words):
-
-    Уверенность формулировки не создаёт полномочий.
-
-A reviewer says "sort by name"; the task contract says the order must be
-stable. Both sentences are clear, both sound authoritative, and an agent with
-no authority ranking obeys whichever arrived last — usually the reviewer —
-and silently breaks what the task required it to preserve.
-
-So this module does two things:
-
-* ranks instruction sources by authority (see ``docs/INSTRUCTION_AUTHORITY.md``);
-* on **any** detected conflict, blocks every state-mutating action and permits
-  exactly one: reporting the conflict to the operator.
-
-Note the "any". The ranking exists to *name* the priority in the report, never
-to let the agent resolve the contradiction on its own and proceed — deciding
-quietly is precisely the behaviour being blocked.
-
-Design principles
------------------
-* No LLM calls, no I/O, mutates nothing — deterministic and O(n log n).
-* Conservative in the safe direction: no directives, or directives about
-  different subjects, means PROCEED. Any single contradiction blocks.
-* Honest boundary: this module *decides*, it does not *enforce*. Callers must
-  consult it before writing. Parsing prose into (subject, demand) pairs is also
-  the caller's job.
-"""
+"""Instruction conflict gate: rank sources by authority; on any conflict block every state-mutating action except reporting it."""
+# The ranking only names the priority in the report; the agent never resolves a conflict itself. The module decides, callers enforce.
 from __future__ import annotations
 
 import re
@@ -39,17 +7,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# Authority ranking (docs/INSTRUCTION_AUTHORITY.md §2)
-# ---------------------------------------------------------------------------
 
 AuthorityLevel = Literal[
-    "operator",          # 1 — владелец системы
-    "task_contract",     # 2 — что задача явно требует/запрещает
-    "test_expectation",  # 3 — поведение, закреплённое зелёным тестом
-    "repo_invariant",    # 4 — доктрина и инварианты репозитория
-    "local_convention",  # 5 — стиль окружающего кода
-    "advisor",           # 6 — ревью, линтер, «так удобнее»
+    "operator",  # 1 owner of the system
+    "task_contract",  # 2 what the task explicitly requires or forbids
+    "test_expectation",  # 3 behaviour pinned by a green test
+    "repo_invariant",  # 4 repository doctrine and invariants
+    "local_convention",  # 5 style of surrounding code
+    "advisor",  # 6 review, linter, convenience
 ]
 
 # Lower number = higher authority. A lower level NEVER overrides a higher one.
@@ -71,14 +36,10 @@ _LEVEL_RU: dict[str, str] = {
     "advisor": "советчик (ревью/линтер)",
 }
 
-# Unknown levels are treated as the weakest possible source rather than
-# silently ranked first — an unrecognised label must never win an argument.
+# Unknown levels rank weakest: an unrecognised label must never win.
 _UNKNOWN_RANK = max(AUTHORITY_RANK.values()) + 1
 
 
-# ---------------------------------------------------------------------------
-# Action vocabulary
-# ---------------------------------------------------------------------------
 
 GateMode = Literal["proceed", "blocked"]
 AllowedAction = Literal["report_conflict"]
@@ -86,8 +47,7 @@ AllowedAction = Literal["report_conflict"]
 # The single action permitted while a conflict is open.
 ALLOWED_WHILE_CONFLICTED: AllowedAction = "report_conflict"
 
-# Everything that changes state. This is the turnstile: while a conflict is
-# open none of these may run, no matter how confident the instruction was.
+# Everything that changes state; none may run while a conflict is open.
 FORBIDDEN_WHILE_CONFLICTED: tuple[str, ...] = (
     "write_file",
     "create_file",
@@ -102,35 +62,23 @@ FORBIDDEN_WHILE_CONFLICTED: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Directives
-# ---------------------------------------------------------------------------
 
 def _normalize(text: str) -> str:
-    """Collapse whitespace, lowercase, drop trailing punctuation.
-
-    Only used for *comparison*; the original text is always what gets reported,
-    so normalisation can never quietly rewrite what a source actually said.
-    """
+    """Collapse whitespace, lowercase, drop trailing punctuation; for comparison only, the original text is reported."""
     flat = " ".join(str(text or "").split()).lower()
     return re.sub(r"[.,;:!?\s]+$", "", flat)
 
 
 @dataclass(frozen=True)
 class Directive:
-    """One requirement, and who is making it.
-
-    ``subject`` is what the requirement is *about* (the sort order, the network
-    access, the exception). Two directives conflict only when they share a
-    subject and demand different things of it.
-    """
+    """One requirement and who makes it; two directives conflict only when they share a subject and demand different things."""
 
     source_level: AuthorityLevel
-    source_name: str      # "код-ревью PR #214", "docs/AGENT_DOCTRINE.md"
-    subject: str          # "порядок вывода"
-    demand: str           # "сохранять стабильный порядок"
-    locator: str = ""     # file:line / URL, optional
-    quote: str = ""       # verbatim wording, optional but strongly preferred
+    source_name: str
+    subject: str
+    demand: str
+    locator: str = ""  # file:line / URL, optional
+    quote: str = ""  # verbatim wording, optional but preferred
 
     @property
     def rank(self) -> int:
@@ -158,9 +106,6 @@ class Directive:
         }
 
 
-# ---------------------------------------------------------------------------
-# Findings
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ConflictFinding:
@@ -194,9 +139,6 @@ class ConflictFinding:
         }
 
 
-# ---------------------------------------------------------------------------
-# Resolution procedure (docs/INSTRUCTION_AUTHORITY.md §4)
-# ---------------------------------------------------------------------------
 
 RESOLUTION_STEPS: tuple[str, ...] = (
     "привести дословно оба требования и их источники",
@@ -209,9 +151,6 @@ RESOLUTION_STEPS: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Outcome
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class InstructionConflictOutcome:
@@ -227,11 +166,7 @@ class InstructionConflictOutcome:
         return self.mode == "blocked"
 
     def is_forbidden(self, action: str) -> bool:
-        """True iff ``action`` must NOT run given this outcome.
-
-        In ``proceed`` mode nothing is forbidden — the gate never blocks work
-        that has no contradiction behind it.
-        """
+        """True iff action must not run given this outcome; in proceed mode nothing is forbidden."""
         return self.mode == "blocked" and action in self.forbidden_actions
 
     def report(self) -> str:
@@ -289,17 +224,9 @@ _PROCEED = InstructionConflictOutcome(
 )
 
 
-# ---------------------------------------------------------------------------
-# The gate
-# ---------------------------------------------------------------------------
 
 def evaluate(directives: Iterable[Directive]) -> InstructionConflictOutcome:
-    """Decide PROCEED vs BLOCKED for a set of requirements.
-
-    Two directives conflict when they share a subject and demand different
-    things of it. Requirements about different subjects are not a conflict —
-    they must simply both be satisfied.
-    """
+    """Decide PROCEED vs BLOCKED: directives conflict when they share a subject and demand different things."""
     findings = _find_conflicts(directives)
     if not findings:
         return _PROCEED
@@ -331,14 +258,13 @@ def _find_conflicts(
     for group in by_subject.values():
         if len(group) < 2:
             continue
-        # Strongest authority first; ties keep input order so the result is
-        # stable and reproducible for the same input.
+        # Strongest authority first; ties keep input order for a reproducible result.
         ranked = sorted(group, key=lambda item: item.rank)
         strongest = ranked[0]
         strongest_demand = _normalize(strongest.demand)
         for other in ranked[1:]:
             if _normalize(other.demand) == strongest_demand:
-                continue  # same requirement restated — not a conflict
+                continue  # same requirement restated
             findings.append(ConflictFinding(
                 subject=strongest.subject,
                 higher=strongest,
@@ -355,11 +281,7 @@ def reviewer_vs_contract(
     contract_source: str = "постановка задачи",
     reviewer_source: str = "код-ревью",
 ) -> InstructionConflictOutcome:
-    """Convenience for the most common shape: a reviewer contradicting the task.
-
-    Exists so the frequent case does not require assembling ``Directive``
-    objects by hand at every call site.
-    """
+    """Shortcut for the common shape: a reviewer contradicting the task."""
     return evaluate((
         Directive(
             source_level="task_contract",

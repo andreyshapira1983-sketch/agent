@@ -1,4 +1,4 @@
-"""Хранилище причинных утверждений выше первой ступени + выжимка уроков."""
+"""Store of causal claims above the first rung, plus distilled lesson cards for the planner."""
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +24,7 @@ _CLAIMS_FILENAME = "causal_claims.jsonl"
 
 @dataclass(frozen=True)
 class LessonCard:
-    """Выжимка урока для планировщика: как изменить следующее действие."""
+    """Lesson digest for the planner: how to change the next action."""
 
     rule: str
     scope: str
@@ -41,7 +41,7 @@ def _claims_path(workspace: str | Path) -> Path:
 
 
 def claim_key(claim: CausalClaim) -> str:
-    """Одно утверждение — одна строка: подъём меняет состояние, не личность."""
+    """One claim, one row: a climb step changes state, not identity."""
     raw = claim.observation.episode_id + "|" + "|".join(
         sorted(claim.observation.defect_signals)
     )
@@ -139,7 +139,7 @@ def save_claim(
     directive: str = "",
     machine_action: str = "",
 ) -> str:
-    """Записать/обновить утверждение. Возвращает его ключ."""
+    """Write or update a claim; returns its key."""
     path = _claims_path(workspace)
     key = claim_key(claim)
     rows = [r for r in read_state_jsonl(path) if r.get("key") != key]
@@ -148,7 +148,7 @@ def save_claim(
         "claim": claim_to_dict(claim),
         "directive": directive,
         "machine_action": machine_action,
-        "state": state_of(claim),  # денормализовано ДЛЯ ЧТЕНИЯ ЧЕЛОВЕКОМ; судит state_of
+        "state": state_of(claim),  # denormalised for human reading; `state_of` decides
     })
     rewrite_state_jsonl(path, rows)
     return key
@@ -157,7 +157,7 @@ def save_claim(
 def load_claims(
     workspace: str | Path,
 ) -> tuple[tuple[CausalClaim, dict[str, Any]], ...]:
-    """Все утверждения с их операционными полями (directive, machine_action)."""
+    """All claims with their operational fields (directive, machine_action)."""
     out: list[tuple[CausalClaim, dict[str, Any]]] = []
     for row in read_state_jsonl(_claims_path(workspace)):
         claim_row = row.get("claim")
@@ -173,10 +173,9 @@ def load_claims(
 
 
 def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
-    """ЕДИНСТВЕННАЯ дверь в планировщик: только состояние LESSON, выжимкой.
+    """The ONLY door into the planner: LESSON-state claims, as digests.
 
-    Всё промежуточное — гипотезы, недоказанные вмешательства, непроверенные
-    обобщения — остаётся видимым в хранилище и невидимым для планов.
+    Hypotheses, unproven interventions and unchecked generalisations stay visible in the store and invisible to plans.
     """
     cards: list[LessonCard] = []
     for claim, extra in load_claims(workspace):
@@ -186,8 +185,7 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
             rule=claim.generalized_rule,
             scope=claim.scope,
             directive=extra["directive"] or claim.generalized_rule,
-            # M2: a climb step's name in this field is provenance, not an
-            # action for the planner; only the consumed vocabulary passes.
+            # a climb step name here is provenance, not a planner action; only the consumed vocabulary passes
             machine_action=(
                 extra["machine_action"]
                 if extra["machine_action"] in LESSON_MACHINE_ACTIONS else ""
@@ -199,22 +197,12 @@ def distilled_lessons(workspace: str | Path) -> tuple[LessonCard, ...]:
     return tuple(cards)
 
 
-# --- Доставка уроков планировщику: авторство агента (груз 2а, 2026-08-29). ---
-# Его выбор (б): опровержения через load_claims, карточку не нагружаем.
-#: Machine actions a LESSON may carry — the names code actually CONSUMES
-#: (block 4, M2, 2026-09-03). The same store field also records which climb
-#: step last touched a claim (`run_claim_experiment`, …); those are
-#: provenance, not planner actions, and `distilled_lessons` does not pass
-#: them on. Consumers: `core.self_task_producer._lesson_prompt_parts`.
+#: Machine actions a LESSON may carry: the names code actually consumes (`core.self_task_producer._lesson_prompt_parts`); climb-step names are provenance and are not passed on.
 LESSON_MACHINE_ACTIONS: frozenset[str] = frozenset({"include_real_signatures"})
 
 
 def lesson_applies(lesson: LessonCard, *, question: str = "", file_hint: str = "") -> bool:
-    """Does this lesson belong in THIS plan? Unscoped call (no question, no
-    file) keeps every lesson — the pre-block-4 behaviour. With a question,
-    the lesson must share a word of its scope or a proven case with the
-    question or name the hinted file. Measured (M3): 347 of 359 injections
-    went into every planner turn regardless of scope."""
+    """Does this lesson belong in THIS plan? An unscoped call keeps every lesson; with a question, the lesson must share a scope word or proven case with it, or name the hinted file."""
     if not question and not file_hint:
         return True
     hint = str(file_hint or "").replace("\\", "/").strip().casefold()
@@ -233,11 +221,9 @@ def lesson_applies(lesson: LessonCard, *, question: str = "", file_hint: str = "
 
 
 def lesson_block_for_prompt(workspace, *, question: str = "", file_hint: str = "") -> str:
-    """Build a '## Lessons for planning' block from the causal claim store.
+    """Build a '## Lessons for planning' block from the causal claim store; empty when nothing applies.
 
-    Returns an empty string when the store is empty or nothing applies.
-    Each lesson is rendered as plain lines (not a table). Counter-evidence
-    lines are included only when the claim has non-empty refuted_by texts.
+    Counter-evidence lines appear only when the claim has non-empty refuted_by texts.
     """
     lessons = tuple(
         card for card in distilled_lessons(workspace)
@@ -255,12 +241,12 @@ def lesson_block_for_prompt(workspace, *, question: str = "", file_hint: str = "
         lines.append(f"  Scope: {lesson.scope}")
         lines.append(f"  Directive: {lesson.directive}")
         if lesson.machine_action:
-            # M2: the mechanical half of a lesson travels with the prose.
+            # the mechanical half of a lesson travels with the prose
             lines.append(f"  Machine action: {lesson.machine_action}")
         cases = ", ".join(lesson.cases) if lesson.cases else ""
         lines.append(f"  Cases: {cases}")
 
-        # Find the claim linked by key and collect its refuted_by texts.
+        # find the claim linked by key and collect its refuted_by texts
         claim = claim_by_key.get(lesson.key)
         refuted_by = []
         if claim is not None:

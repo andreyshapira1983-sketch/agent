@@ -1,49 +1,7 @@
-"""От замеченного отклонения до усвоенного правила — состояниями, не подписями.
+"""Causal lesson ladder: states from observed deviation to learned rule, advanced by evidence, never by author identity.
 
-РЕШЕНИЕ ОПЕРАТОРА 2026-08-11, второе и главное. Первая версия этого модуля
-ставила условием продвижения ЛИЧНОСТЬ автора: агенту запрещалось подтверждать
-себя. Это отвергнуто, и справедливо — тогда право на урок давала подпись, а не
-доказательство, и достаточно было завести «доверенного» автора, чтобы обойти
-всю защиту.
-
-Здесь автор не участвует в продвижении вовсе. Оператор, агент и внешний
-инженер — лишь возможные АВТОРЫ гипотез. Продвигает же три вещи: улики,
-причинное доказательство и проверка обобщения.
-
-## Состояния и почему их именно столько
-
-    OBSERVED     отклонение замечено; собирается машиной
-    EXPLAINED    названы КОНКУРИРУЮЩИЕ объяснения — минимум два
-    ATTRIBUTED   одно объяснение доказано вмешательством, соперники разобраны
-    GENERALIZED  правило проверено на СЛУЧАЕ, отличном от исходного
-    LESSON       право влиять на будущие планы
-    REFUTED      опровергнуто; остаётся видимым и обратно не поднимается
-
-Каждое состояние снимает ровно одну возможность ошибиться, и ни одно не
-снимает чужую. `EXPLAINED` бьёт по единственному объяснению, принятому потому,
-что другое не искали. `ATTRIBUTED` бьёт по корреляции, названной причиной.
-`GENERALIZED` бьёт по правилу, верному лишь там, где его нашли, — и это же
-единственная честная замена запрету самоподтверждения: проверять обобщение на
-породившем случае нельзя никому, включая оператора.
-
-## Инварианты
-
-  1. Состояния не перескакиваются: каждое требует предыдущего.
-  2. Автор не входит ни в одно условие продвижения.
-  3. Свидетельство обобщения обязано отличаться от исходного случая.
-  4. Причина доказывается ВМЕШАТЕЛЬСТВОМ, а не совпадением: названо, что
-     менялось и что при этом наблюдалось.
-  5. `retrieval_eligible` вычисляется, а не хранится: хранимый флаг рано или
-     поздно разойдётся с условием, его породившим.
-  6. Опровержение терминально — обратно поднимают новой гипотезой, а не
-     переписыванием старой.
-
-## Минимальная безопасная первая реализация
-
-Машина производит только `OBSERVED`. Всё выше требует принесённого
-свидетельства: соперничающих объяснений, записи вмешательства, случая для
-проверки обобщения. Ничего из этого нельзя вывести из сигнала детектора, и
-попытка была отвергнута накануне.
+States: OBSERVED -> EXPLAINED (>=2 competing explanations) -> ATTRIBUTED (proven by intervention) -> GENERALIZED (checked on a case other than the origin) -> LESSON; REFUTED is terminal.
+Invariants: no skipped states; the author is in no promotion condition; generalization evidence must differ from the origin case; `retrieval_eligible` is computed, not stored; refutation is terminal. The machine produces only OBSERVED.
 """
 from __future__ import annotations
 
@@ -54,8 +12,7 @@ CausalState = Literal[
     "OBSERVED", "EXPLAINED", "ATTRIBUTED", "GENERALIZED", "LESSON", "REFUTED"
 ]
 
-#: Возможные авторы гипотез. Список существует для ПРОВЕНАНСА и измерения
-#: точности авторов, и намеренно не участвует в продвижении.
+#: Possible authors of hypotheses. The list exists for PROVENANCE and measuring author accuracy and deliberately takes no part in promotion.
 CausalAuthor = Literal["operator", "agent", "external_engineer"]
 
 _ORDER: tuple[str, ...] = ("OBSERVED", "EXPLAINED", "ATTRIBUTED", "GENERALIZED", "LESSON")
@@ -63,7 +20,7 @@ _ORDER: tuple[str, ...] = ("OBSERVED", "EXPLAINED", "ATTRIBUTED", "GENERALIZED",
 
 @dataclass(frozen=True)
 class Observation:
-    """Замеченное отклонение. Единственное, что машина производит сама."""
+    """A noticed deviation; the only thing the machine produces by itself."""
 
     episode_id: str
     trace_id: str
@@ -83,11 +40,11 @@ class Observation:
 
 @dataclass(frozen=True)
 class Explanation:
-    """Одно из конкурирующих объяснений отклонения."""
+    """One of the competing explanations of a deviation."""
 
     statement: str
     author: CausalAuthor
-    #: Что наблюдалось бы, будь оно верным, — и чего не наблюдалось бы иначе.
+    #: What would be observed if it were true, and what would not be observed otherwise.
     predicts: str = ""
     refuted_by: str = ""
 
@@ -98,7 +55,7 @@ class Explanation:
 
 @dataclass(frozen=True)
 class Intervention:
-    """Доказательство причины вмешательством, а не совпадением."""
+    """Cause shown by intervention, not coincidence."""
 
     mutated: str
     predicted: str
@@ -114,7 +71,7 @@ class Intervention:
 
 @dataclass(frozen=True)
 class GeneralizationTest:
-    """Проверка правила на случае, отличном от исходного."""
+    """Check of the rule on a case other than the origin."""
 
     case_ref: str
     origin_ref: str
@@ -122,14 +79,14 @@ class GeneralizationTest:
 
     @property
     def independent(self) -> bool:
-        """Свидетельство обязано быть НЕ породившим случаем."""
+        """The evidence must NOT be the originating case."""
         a, b = self.case_ref.strip(), self.origin_ref.strip()
         return bool(a) and bool(b) and a != b
 
 
 @dataclass(frozen=True)
 class CausalClaim:
-    """Гипотеза о причине со всем, что для неё уже принесено."""
+    """A hypothesis about a cause with everything brought for it so far."""
 
     observation: Observation
     explanations: tuple[Explanation, ...] = ()
@@ -168,7 +125,7 @@ class CausalClaim:
 
 
 def blocking_reason(claim: CausalClaim) -> str:
-    """Чего не хватает для СЛЕДУЮЩЕГО состояния — одной причиной, поимённо."""
+    """What the NEXT state still lacks, as one named reason."""
     if claim.refuted_reason.strip():
         return ""
     alive = [e for e in claim.explanations if e.alive]
@@ -194,10 +151,7 @@ def blocking_reason(claim: CausalClaim) -> str:
          "проверка обобщения идёт по исходному случаю"),
         (gen is not None and not gen.held,
          "правило не выдержало проверку на новом случае"),
-        # Область — ПОСЛЕДНЯЯ ступень, и порядок здесь содержательный: честно
-        # назвать область можно только после того, как правило где-то ещё
-        # выдержало. Требовать её раньше — просить угадать границу, не увидев
-        # её. См. docs/CODE_NOTES.md, «The rung nobody could stand on».
+        # Scope is the LAST rung: it can be named honestly only after the rule held elsewhere.
         (not claim.scope.strip(),
          "не названа область применимости правила"),
     )
@@ -208,7 +162,7 @@ def blocking_reason(claim: CausalClaim) -> str:
 
 
 def state_of(claim: CausalClaim) -> CausalState:
-    """Состояние — функция от принесённого, а не от того, кто принёс."""
+    """State is a function of what was brought, not of who brought it."""
     if claim.refuted_reason.strip():
         return "REFUTED"
     reason = blocking_reason(claim)
@@ -225,13 +179,13 @@ def state_of(claim: CausalClaim) -> CausalState:
 
 
 def is_lesson(claim: CausalClaim) -> bool:
-    """Заслужило ли утверждение право влиять на будущие планы."""
+    """Whether the claim has earned the right to influence future plans."""
     return state_of(claim) == "LESSON"
 
 
 
 def proven_cases(claim: CausalClaim) -> tuple[str, ...]:
-    """Случаи, на которых правило показано. Больше их нет — остальное перенос."""
+    """Cases on which the rule is shown; the rest is transfer."""
     if claim.refuted_reason.strip():
         return ()
     gen = claim.generalization
@@ -243,36 +197,23 @@ def proven_cases(claim: CausalClaim) -> tuple[str, ...]:
 
 
 def applies_to(claim: CausalClaim, *, case_ref: str) -> bool:
-    """Проверен ли урок на ЭТОМ случае."""
+    """Whether the lesson has been checked on THIS case."""
     if not is_lesson(claim):
         return False
     return case_ref.strip() in proven_cases(claim)
 
 
 def claim_tags(claim: CausalClaim) -> tuple[str, ...]:
-    """`lesson` появляется ТОЛЬКО в конечном состоянии.
-
-    Промежуточные состояния остаются видимыми человеку и своими тегами, но путь
-    в планировщик им закрыт: `lesson` — единственный обход карантина.
-    """
+    """`lesson` appears ONLY in the final state; it is the sole bypass of the quarantine."""
     state = state_of(claim)
     if state == "LESSON":
         return ("lesson", "causal", "generalization-tested")
     return (f"causal:{state.lower()}", "unverified")
 
 
-#: Мостик остановки → нижняя перекладина причинной лестницы.
-#:
-#: Замер 2026-09-01: четыре самостоятельных запуска подряд не дали работы, и
-#: НИ ОДИН из отказов не попал в поток наблюдений — лестница объяснений не
-#: видела собственных стен агента и объясняла что угодно, кроме них. Журнал
-#: остановок это чинит только наполовину: он даёт подсказку выбору цели, но
-#: не даёт машине ПОВОД расследовать.
-#:
-#: Мостик отдельный, а не внутри `record_self_stop`: узкий орган по контракту
-#: оператора пишет ровно один журнал, и расширять его вторым адресом нельзя.
-#: Здесь наблюдение только СОБИРАЕТСЯ; записывает его существующий владелец
-#: потока — `CausalObservationStore`, тем же путём, что и все прочие.
+#: Bridge from a stop to the bottom rung of the causal ladder.
+#: 
+#: Separate from `record_self_stop`: that narrow organ writes exactly one journal by contract and must not get a second address. The observation is only ASSEMBLED here; the stream's existing owner, `CausalObservationStore`, writes it.
 _STOP_SIGNAL_PREFIX = "self_stop"
 
 
@@ -280,13 +221,9 @@ def observation_from_self_stop(
     *, kind: str, reason: str, signature: str, source: str,
     run_id: str = "", trace_id: str = "", episode_id: str = "",
 ) -> Observation | None:
-    """Наблюдение о собственной остановке — или None, если повода нет.
+    """Observation about the agent's own stop, or None when there is no cause.
 
-    Отпечаток наблюдения считается по `defect_signals`, поэтому сигналы здесь
-    строятся из СТАБИЛЬНЫХ частей стены (род и каноническая причина): та же
-    стена копит счётчик повторений вместо того, чтобы плодить записи. Без
-    источника наблюдения не бывает — это то же правило, что у журнала: улика
-    обязана указывать на первичное событие.
+    Signals are built from the STABLE parts of the wall (kind and canonical reason) so the same wall accumulates a repeat counter instead of new records.
     """
     kind = (kind or "").strip()
     reason = (reason or "").strip()
@@ -308,23 +245,13 @@ def observation_from_self_stop(
 
 
 def trace_log_path(trace_id: str) -> str:
-    """Журнал трассы по её номеру. Номер уже начинается с «trace_».
-
-    Кампания 2026-09-22: адрес склеивался как logs/trace_{trace_id}.jsonl и
-    выходил «logs/trace_trace_…» — такого файла нет. 38 наблюдений из 47
-    называли его, модель писала пробу по этому адресу, ворота рождения
-    убивали пару, и подъём падал «выжило 1» десятки циклов подряд.
-    """
+    """Trace log path from a trace id; the id already starts with "trace_", so do not prefix it again."""
     name = trace_id if trace_id.startswith("trace_") else f"trace_{trace_id}"
     return f"logs/{name}.jsonl"
 
 
 def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | None:
-    """Отклонение из эпизода: три выводимые вещи и ни одной невыводимой.
-
-    `None`, когда детекторы молчали: отклонений без сигнала этот сборщик не
-    видит и притворяться, что видит, не будет.
-    """
+    """Deviation from an episode, built only from derivable parts; `None` when the detectors were silent."""
     signals = tuple(getattr(episode, "defect_signals", None) or ())
     if not signals:
         return None
@@ -335,10 +262,7 @@ def observation_from_episode(episode: Any, *, trace_id: str) -> Observation | No
         run_id=str(getattr(episode, "run_id", "") or ""),
         defect_signals=signals,
         evidence_refs=tuple(getattr(episode, "source_labels", None) or ()),
-        # Адрес сигналов — в самом наблюдении. Суточный прогон 2026-09-19/20:
-        # 14 наблюдений из 15 не называли файла, агент по аналогии лез в
-        # data/charter_decisions.jsonl (там четыре поля и ни одного детектора) и
-        # 230 задач подряд честно отвечал «данных нет».
+        # The signals' address lives in the observation itself, so the agent does not guess a data file.
         observed_mismatch=(
             f"детекторы {', '.join(signals)} при завершении {completion}; "
             "объяснения не выдвинуты, причина не доказана. Сигналы записаны в "

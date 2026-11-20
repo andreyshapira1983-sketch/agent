@@ -1,9 +1,4 @@
-"""Release artifact hygiene checks.
-
-Runtime redaction protects prompts/logs/output. Release hygiene protects the
-package boundary: local secrets and developer artifacts must never be included
-in an archive handed to another person or machine.
-"""
+"""Release artifact hygiene checks: local secrets and developer artifacts must never ship in an archive handed to another person or machine."""
 from __future__ import annotations
 
 import os

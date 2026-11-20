@@ -1,31 +1,12 @@
-"""Болтовня без дела идёт коротким путём: без планировщика, без инструментов, без отчёта.
+"""Short path for idle chatter: no planner, no tools, no report.
 
-Слово оператора 24.09: «короткий путь для болтовни, чтобы шутка не запускала весь
-рабочий конвейер». Замер того же дня: на лёгкую реплику агент устраивал пять
-кругов поиска по журналам, собирал 55 улик и отвечал списком с пометками и
-строкой «Проверка: подтверждено 4 из 7».
+The dictionary path (`task_complexity.can_skip_planner`) recognises only a pure greeting; here a model CLASSIFIER decides.
+Error cost is asymmetric (chatter taken for work costs one planner call; work taken for chatter loses the tools), so:
+the same disqualifiers as the dictionary path run first without a model call; the model answers `social` only when no fact
+is needed; doubt, failure or an unparseable reply takes the normal path; an exhausted budget is not a classifier failure
+and propagates.
 
-Сегодняшний короткий путь (`task_complexity.can_skip_planner`) узнаёт только
-«чистое приветствие» по словарю, и словарь уже раз расширяли (MIR-020). Записка
-органа разговора (docs/audit/CONVERSATION_ORGAN_DESIGN.md, урок AIML/ALICE)
-запрещает растить его дальше: когда одной регулярки мало, орган сменяется
-КЛАССИФИКАТОРОМ, а не толстеет. Практика маршрутизаторов агентов та же: слой
-намерения («chit_chat» против задачи) стоит перед выбором инструментов.
-
-Цена ошибки несимметрична. Болтовня, принятая за дело, стоит лишь лишнего
-вызова планировщика. Дело, принятое за болтовню, теряет инструменты. Поэтому:
-  * сначала те же дисквалификаторы, что у словарного пути (подсказка файла,
-    слово-признак инструмента, живые данные, глубокая задача, длина) — без
-    вызова модели;
-  * модель отвечает «social» только когда для ответа не нужен ни один факт — ни
-    о мире, ни о файлах, ни о новостях, ни о делах и журналах самого агента;
-  * сомнение, сбой, неразборчивый ответ — обычный путь;
-  * исчерпанный бюджет — не сбой классификатора: остановка хода проходит насквозь.
-
-Работает только в разговоре с человеком: переключатель AGENT_SOCIAL_TURN_CLASSIFIER
-ставит мостик чата. Цели кампании болтовнёй не бывают, и лишний вызов модели на
-каждую короткую цель — чистый расход (первый прогон тестов бюджета это показал:
-вызов классификатора съедал ответ, расписанный планировщику).
+Only in conversation with a human (AGENT_SOCIAL_TURN_CLASSIFIER, set by the chat bridge): campaign goals are never chatter.
 """
 from __future__ import annotations
 
@@ -60,7 +41,7 @@ _JSON_RE = re.compile(r"\{[^{}]*\}")
 
 
 def is_social_turn(loop: Any, text: str, *, file_hint: str | None = None) -> bool:
-    """Реплика — чистая болтовня, которой не нужны ни планировщик, ни инструменты."""
+    """The utterance is pure chatter that needs neither planner nor tools."""
     if os.environ.get(ENV_FLAG, "").strip().lower() not in ("1", "on", "true", "yes"):
         return False
     if file_hint or not isinstance(text, str):
@@ -90,11 +71,11 @@ def is_social_turn(loop: Any, text: str, *, file_hint: str | None = None) -> boo
     if log is not None:
         log.log("social_turn_classified", {"social": social, "chars": len(stripped)})
     if social:
-        # Та же реплика не несёт хвоста «Проверка: …» (loop_response_deciders).
+        # The same utterance carries no "Check: ..." tail (loop_response_deciders).
         loop._social_question = stripped
     return social
 
 
 def is_marked_social(loop: Any, question: str) -> bool:
-    """Классификатор уже признал эту реплику болтовнёй в этом ходе."""
+    """The classifier already judged this utterance chatter in this turn."""
     return bool(question) and question.strip() == getattr(loop, "_social_question", None)

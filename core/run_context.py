@@ -1,14 +1,4 @@
-"""Run-scoped identity for one agent cycle.
-
-- ``task_id`` names a **logical task**. It survives a retry: if a queued
-task fails and is attempted again, both attempts carry the same task_id. -
-``run_id`` names **one attempt**. It is minted per `AgentLoop.run` call and
-is never reused.
-
-Deliberately NOT here: `TraceLogger.trace_id`. That is created once per
-agent in `build_agent`, so it identifies a *session*, not a run — every task
-drained by one autonomous agent shares it.
-"""
+"""Run-scoped identity and restrictions for one agent cycle (task_id spans retries, run_id is one attempt)."""
 from __future__ import annotations
 
 import time
@@ -22,27 +12,21 @@ from dataclasses import dataclass, field
 class RunContext:
     """Identity AND restrictions of the run currently executing here.
 
-    The restrictions are the run's own and cannot widen what the host allows:
-    every entry unions the blocked set and ORs the dry-run flag, so a nested or
-    concurrent run may narrow further and never loosen. Nothing is written back
-    onto the agent, which is what makes two overlapping runs independent — a
-    ContextVar is per-execution-context, so one run's exit cannot restore over
-    another run's restrictions.
+    Restrictions only narrow what the host allows: entries union the blocked set and OR the dry-run flag. Nothing is written onto the agent, and a ContextVar is per execution context, so overlapping runs stay independent.
     """
 
     run_id: str
     task_id: str | None = None
-    #: Tools this run may not call, ON TOP OF whatever the host already blocks.
+    # Tools this run may not call, on top of the host's blocks.
     blocked_tools: frozenset[str] = frozenset()
-    #: True when THIS run must simulate effects. The host may also demand it.
+    # True when THIS run must simulate effects; the host may also demand it.
     dry_run: bool = False
-    #: Absolute value the session cost counter may reach while this run is
-    #: active; None = no run-scoped cost bound. Consulted by the model-call
-    #: pre-flight gate, so the bound acts BEFORE the next spend (MIR-116).
+    # Absolute value the session cost counter may reach during this run; None = no bound.
+    # Consulted by the model-call pre-flight gate, so the bound acts before the next spend.
     cost_ceiling_units: int | None = None
-    #: Когда начался этот прогон (time.time()). По нему отличают порождённое
-    #: ходом от использованного им (W3C PROV: wasGeneratedBy / used). 0 — вне прогона.
-    #: В равенство не входит: время — не личность прогона.
+    # Run start time (time.time()), used to tell what a turn generated from what it used; 0 =
+    # outside a run.
+    # Not part of equality: time is not run identity.
     started_at: float = field(default=0.0, compare=False)
 
 
@@ -83,9 +67,7 @@ def identity_provenance(
 ) -> dict[str, str | None]:
     """The provenance edge binding one run to its session, log and memory.
 
-    Raises rather than emitting a half-empty edge: a record naming only one
-    side reads as a connection while proving nothing, which is worse than an
-    absent record because a consumer would trust it.
+    Raises rather than emitting a half-empty edge, which a consumer would trust while it proves nothing.
     """
     if not trace_id or not run_id:
         raise ValueError(
@@ -104,9 +86,7 @@ def identity_provenance(
 def run_scope(run_id: str, task_id: str | None = None) -> Iterator[RunContext]:
     """Bind run identity for the duration of the block.
 
-    Restrictions already in force are INHERITED: a run started inside a
-    narrowed scope stays narrowed, so entering a fresh identity can never be a
-    way to shed a limit.
+    Restrictions already in force are inherited, so a fresh identity cannot shed a limit.
     """
     outer = _RUN_CONTEXT.get()
     ctx = RunContext(
@@ -132,8 +112,7 @@ def run_restrictions(
 ) -> Iterator[RunContext]:
     """Narrow the current run for the duration of the block, never widen it.
 
-    `blocked_tools` is unioned and `dry_run` is ORed with whatever is already in
-    force, so this cannot be used to lift a restriction — including the host's.
+    `blocked_tools` is unioned and `dry_run` ORed with what is already in force, including the host's.
     """
     outer = _RUN_CONTEXT.get()
     ctx = RunContext(
@@ -156,11 +135,7 @@ def run_restrictions(
 def run_cost_envelope(*, allowed_total_units: int) -> Iterator[RunContext]:
     """Bound the session cost counter for the duration of the block.
 
-    `allowed_total_units` is the ABSOLUTE value the counter may reach — the
-    caller computes it as "current count + what this run may still spend". A
-    nested envelope takes the MINIMUM of its request and the ceiling already in
-    force, so like `blocked_tools` and `dry_run` the bound can be narrowed and
-    never lifted from inside.
+    `allowed_total_units` is the ABSOLUTE value the counter may reach (current count plus what this run may still spend); a nested envelope takes the minimum with the ceiling in force.
     """
     outer = _RUN_CONTEXT.get()
     requested = int(allowed_total_units)

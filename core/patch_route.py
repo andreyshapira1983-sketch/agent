@@ -1,22 +1,4 @@
-"""Самопочинка без человека в петле: дефект → правка → patch_check → свой код.
-
-Слово оператора 2026-09-22: «автомат — это когда он работает сам и зовёт меня
-только ради денег или настоящего решения». Замер того дня: за четыре дня из
-его заявок на правку дошли до кода две; цели «самоулучшения» кончались
-разборами и прозой, а путь применения ждал человека на каждой правке.
-
-Путь: драйв самоулучшения берёт открытый дефект из реестра (`defect_goal`);
-цель требует файл правки proposals/selffix/<дефект>/edits.txt и зелёный
-patch_check; после цели рантайм САМ прогоняет patch_check с полным набором
-(`settle_patch`) — агенту на слово не верит — и зелёную правку ставит штатный
-путь применения (ветка, свои тесты, откат при провале), после чего основная
-ветка перематывается на его коммит. Дефект закрывается с уликой-коммитом.
-
-Стены (прежние правила оператора, не одобрение каждой правки): правка не
-трогает деньги, ключи, выход наружу, политику, одобрения и сам этот путь
-(`_FORBIDDEN`); не больше `DAILY_CAP` правок в сутки; всё пишется в
-data/self_repair_log.jsonl — сводка для человека после факта.
-"""
+"""Self-repair without a human in the loop: defect, edit, patch_check, own code."""
 from __future__ import annotations
 
 import json
@@ -30,26 +12,26 @@ from core.control_files import CONTROL_RELPATHS
 from core.protected_paths import is_protected, path_key
 
 DAILY_CAP = 5
-#: Пометка дефекта, который правкой кода не закрывается (среда, доступ, деньги):
-#: его решает человек, и путь самопочинки такие пропускает.
+# Marker of a defect that a code edit does not close (environment, access, money): a human decides
+# it and the route skips it.
 OPERATOR_DECISION = "operator_decision"
 RETRY_AFTER = timedelta(hours=6)
 STATE_RELPATH = "data/patch_route_state.json"
 LOG_RELPATH = "data/self_repair_log.jsonl"
 _PATCH_RE = re.compile(r"proposals/selffix/[\w.\-]+/edits\.txt")
-#: Куда самопочинка не входит: деньги и бюджет, ключи и редактирование
-#: секретов, выход наружу, политика и одобрения, сам путь применения и этот
-#: модуль, сборка агента. Это префиксы имён СВЕРХ общего списка
-#: core/protected_paths.py: путь без человека уже, чем полоса с одобрением.
+# Where self-repair does not enter: money and budget, keys and secret editing, outside access,
+# policy and approvals, the apply route and this module, agent assembly.
+# Prefixes ON TOP of core/protected_paths.py: the route without a human is narrower than the lane
+# with approval.
 _FORBIDDEN = (
     "core/approval", "core/policy", "core/secret", "core/redaction", "core/dlp",
     "core/budget", "core/standing_grant", "core/self_apply", "core/patch_route",
     "core/actuation_gateway", "core/kill", "core/safe_vcs", "tools/web_", "tools/shell_exec",
     "tools/patch_check", "tools/run_tests", "app/", "cli/", ".env", ".git",
-    # Тормоза целиком (core/control_files.py): правка без человека не трогает
-    # ни их, ни модуль, который их перечисляет.
+    # The brakes as a whole (core/control_files.py): an edit without a human touches neither them
+    # nor the module that lists them.
     "core/control_files", "config/", *CONTROL_RELPATHS,
-    # Правило свидетеля «упал до правки» (red_before_fix): судья самой самоправки.
+    # The "red before fix" witness rule (red_before_fix): the judge of self-repair itself.
     "core/self_repair_utils",
 )
 _FORBIDDEN_KEYS = tuple(p.casefold() for p in _FORBIDDEN)
@@ -79,18 +61,14 @@ def _log(root: Path, event: dict[str, Any]) -> None:
         fh.write(json.dumps({"ts": _now().isoformat(), **event}, ensure_ascii=False) + "\n")
 
 
-#: Через сколько неизменный пропуск дефекта записывается в сводку снова.
+# After how long an unchanged defect skip is written to the summary again.
 SKIP_LOG_REPEAT = timedelta(hours=24)
 
 
 def _log_skip_once(root: Path, state: dict[str, Any], now: datetime, fingerprint: str, title: str) -> None:
-    """«Дефект без задачи пропущен» — один раз, а не на каждом цикле.
+    """"Defect without a task skipped": once, not on every cycle.
 
-    Сводка для человека получала ту же строку при каждом выборе цели: замер
-    24.09 — 396 из 408 строк data/self_repair_log.jsonl повторы, одна ×102.
-    Новая строка — только если пропуск новый, заголовок изменился или прошли
-    сутки (repeat_interval Alertmanager: неизменное повторять редко, изменение —
-    сразу). Сводку никто не пересчитывает, поэтому редкий повтор ничего не ломает.
+    A new line only if the skip is new, the title changed or a day passed (like Alertmanager's repeat_interval: repeat the unchanged rarely, a change at once).
     """
     seen = state.setdefault("skip_logged", {}).get(fingerprint) or {}
     try:
@@ -109,7 +87,7 @@ def _slug(fingerprint: str) -> str:
 
 
 def defect_goal(root: Path) -> Any:
-    """Цель: починить один открытый дефект реестра правкой с зелёным patch_check."""
+    """Goal: fix one open registry defect by an edit with a green patch_check."""
     from core.defect_intake import intake_observations
     from core.drive_goal import DriveGoal
     from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
@@ -117,27 +95,20 @@ def defect_goal(root: Path) -> Any:
     state, now = _state(root), _now()
 
     registry = SelfImprovementIssueRegistry(root / DEFAULT_ISSUE_PATH)
-    # Приём своих сигналов живёт здесь, а не в команде одобрения: проверка
-    # 2026-09-22 перед прогоном показала, что `sync_self_improvement_issue_registry`
-    # зовёт только cli/commands_approval.py, а в автомате кампании этот путь не
-    # проходит ни разу — починенный накануне корень был там мёртв.
+    # Intake of own signals lives here, not in the approval command:
+    # `sync_self_improvement_issue_registry` was called only by cli/commands_approval.py and never
+    # in the campaign automaton.
     try:
         intake_observations(root, registry)
-    except Exception as exc:  # noqa: BLE001 — приём не должен рушить выбор цели
+    except Exception as exc:  # noqa: BLE001 — intake must not break goal choice
         _log(root, {"event": "defect_intake_failed", "error": f"{type(exc).__name__}: {exc}"})
     for issue in registry.unresolved():
-        # Дефект среды (поставить пакет, дать доступ) правкой кода не
-        # закрывается: 2026-09-22 18:40 цикл ушёл на «в пробе нет numpy».
+        # An environment defect (install a package, grant access) is not closed by a code edit.
         if issue.action == OPERATOR_DECISION:
             continue
-        # Дефект без НАЗВАННОЙ задачи правкой не закрывается: цель выходит
-        # «Почини дефект X. Что делать: » — и агент, не зная, что менять,
-        # пишет отписку или мусор. Замер ночи на 2026-09-23: из шестнадцати
-        # открытых дефектов трое были без задачи, и ровно они дали ТРИ
-        # последние красные правки подряд («объяснил, почему не могу»,
-        # слипшиеся разделители на 305 КБ, тест поверх существующего файла).
-        # Такому дефекту сначала нужна формулировка — это работа человека
-        # или отдельного хода, а не слепая правка.
+        # A defect without a NAMED task is not closed by an edit: the goal would read "Fix defect X.
+        # What to do: " and the agent, not knowing what to change, writes an excuse or junk.
+        # Such a defect first needs a formulation: human work or a separate turn, not a blind edit.
         if not str(issue.suggested_next_action or "").strip():
             _log_skip_once(root, state, now, issue.fingerprint, (issue.title or "")[:120])
             continue
@@ -149,22 +120,15 @@ def defect_goal(root: Path) -> Any:
         state.setdefault("patch_to_defect", {})[patch] = issue.fingerprint
         _save_state(root, state)
         evidence = "; ".join(issue.evidence[:3])[:900]
-        # Его собственное решение по этому дефекту (core/own_decisions.py).
+        # Its own decision on this defect (core/own_decisions.py).
         from core.own_decisions import decision_line
 
         decided = decision_line(root, issue.fingerprint)
-        # «Меняется ровно 1 файл» — иначе ворота уточнения (core/loop_gates.py)
-        # отвечают вопросом вместо работы, а в автомате на вопрос никто не
-        # ответит: 2026-09-22 18:21 три цикла подряд ушли в clarify.
-        # Живой прогон в ночь на 2026-09-23 дал три красных подряд и два
-        # разных промаха, оба лечатся словом в задании:
-        #   * в файл правки легла ОТПИСКА — «шаг 1 не вернул точный текст строк
-        #     150-172, поэтому SEARCH собрать не могу». Это его же открытый
-        #     дефект «объяснил стену вместо того, чтобы её проверить»: не
-        #     хватило чтения — надо дочитать, а не объяснять;
-        #   * разделители слиплись в одну строку («<<<<<<< LINES 95-135 /
-        #     >>>>>>> REPLACE»), и 305 КБ содержимого ушли в мусор. Форма
-        #     показана дословно, чтобы её не приходилось угадывать.
+        # "Exactly 1 file changes": otherwise the clarification gate (core/loop_gates.py) answers
+        # with a question and nobody answers it in the automaton.
+        # Two failure modes are cured by a word in the task: an EXCUSE in the edit file (read more
+        # instead of explaining the wall) and delimiters glued into one line; the form is shown
+        # verbatim so it need not be guessed.
         goal = (f"Почини свой дефект «{issue.title}» ({issue.fingerprint}). Улики: {evidence}. "
                 f"Что сделать: {issue.suggested_next_action[:400]}. {decided}"
                 f"Меняется ровно 1 файл: {patch}. Все остальные файлы только читаются. "
@@ -185,18 +149,9 @@ def defect_goal(root: Path) -> Any:
 
 
 def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] | None:
-    """Вердикт цели самопочинки: правка настоящая или файл ради файла.
+    """Verdict of a self-repair goal: a real edit or a file for the file's sake.
 
-    Замер 2026-09-23, первая же живая цель после разблокировки: агент создал
-    `proposals/selffix/sii_5dab4ac83cc87892/edits.txt` с пустым каркасом
-    блоков — ни одной строки замены. Файловый судья сказал «verified», потому
-    что критерий требовал ровно «файл создан», а patch_check в ту же минуту
-    сказал «red: text outside blocks». Два прибора о той же работе, и наружу
-    шёл тот, который меряет не то.
-
-    Здесь вердикт ставит сам patch_check — без полного набора, без применения:
-    пустышка и неприменимая правка не проходят, а настоящая ещё встретит
-    полный набор в `settle_patch`. `None` — цель не про правку, судит обычный.
+    patch_check itself sets the verdict, without the full suite or applying; the full suite still meets a real edit in `settle_patch`. `None`: the goal is not about an edit, the ordinary judge decides.
     """
     match = _PATCH_RE.search(success_check or "")
     if not match:
@@ -209,7 +164,7 @@ def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] |
                 "artifacts_named": [rel], "artifacts_observed": []}
     try:
         check = PatchCheckTool(workspace_root=root).run(path=rel, full=False)
-    except Exception as exc:  # noqa: BLE001 — сломанный инструмент не судит
+    except Exception as exc:  # noqa: BLE001 — a broken tool does not judge
         return {"verdict": "unverifiable", "reason": f"patch_check не отработал: {exc}"[:200],
                 "artifacts_named": [rel], "artifacts_observed": [rel]}
     green = check.get("verdict") == "green"
@@ -224,17 +179,14 @@ def patch_goal_verdict(root: Path | str, success_check: str) -> dict[str, Any] |
     }
 
 
-#: Пометки, которыми тест выключают, не удаляя.
+# Marks by which a test is switched off without deleting it.
 _SILENCERS = ("pytest.mark.skip", "pytest.skip(", "pytest.mark.xfail", "@unittest.skip")
 
 
 def weakened_judges(root: Path, contents: dict[str, str]) -> list[str]:
-    """Существующие тесты, которые правка делает МЕНЬШЕ (2026-09-25).
+    """Existing tests that the edit makes SMALLER.
 
-    Путь без человека вправе добавлять тесты, но не ослаблять судей: меньше
-    `test_*`, меньше `assert` или новые skip/xfail. Darwin Gödel Machine
-    (Sakana, 2025): в части прогонов агент снял метки, по которым детектор
-    ловил подделку, и получил ложный «успех». Ослабление — решение человека.
+    The route without a human may add tests but not weaken judges: fewer `test_*`, fewer `assert` or new skip/xfail (Darwin Godel Machine, Sakana 2025: the agent removed the marks by which the detector caught forgery). Weakening is a human decision.
     """
     from core.self_apply_lane import _test_surface
 
@@ -252,20 +204,20 @@ def weakened_judges(root: Path, contents: dict[str, str]) -> list[str]:
 
 
 def _forbidden(paths: list[str]) -> list[str]:
-    """Пути правки, запретные для самопочинки; сличается приведённый путь, а не написание."""
+    """Edit paths forbidden to self-repair; the normalised path is compared, not the spelling."""
     return [p for p in paths
             if is_protected(p) or (path_key(p) or "").startswith(_FORBIDDEN_KEYS)]
 
 
 def _merge(root: Path, branch: str) -> str:
-    """Перемотать основную ветку на коммит пути применения (он сам не сливает)."""
+    """Fast-forward the main branch to the commit of the apply route (it does not merge itself)."""
     done = subprocess.run(["git", "-C", str(root), "merge", "--ff-only", branch],  # noqa: S603, S607
                           capture_output=True, text=True, check=False, timeout=120)
     return "" if done.returncode == 0 else (done.stderr or done.stdout).strip()[:300]
 
 
 def settle_patch(agent: Any, workspace: Path | str, success_check: str) -> dict[str, Any] | None:
-    """Прогнать правку цели и поставить её, если всё зелёное; None — это не цель правки."""
+    """Run the goal's edit and apply it if everything is green; None: not an edit goal."""
     from core.approval_inbox import ApprovalInbox
     from core.budget_kill_switch import BudgetKillSwitch, default_path
     from core.safe_vcs import SafeVCS
@@ -288,12 +240,12 @@ def settle_patch(agent: Any, workspace: Path | str, success_check: str) -> dict[
     if blocked:
         _log(root, {"patch": rel, "result": "forbidden", "files": blocked})
         return {"verdict": "missing", "reason": "правка трогает запретное: " + ", ".join(blocked)}
-    # Воспроизведение до правки (Agentless; «правдоподобная ≠ верная» в APR):
-    # дефект закрывается правкой КОДА, чей новый тест падал на старом коде.
-    # Правка одних тестов или без свидетеля код не чинит — её несут человеку.
+    # Reproduction before the edit (Agentless; "plausible is not correct" in APR): a defect is
+    # closed by a CODE edit whose new test failed on the old code.
+    # Tests-only edits or edits without a witness do not fix code; they are taken to a human.
     code_files = [p for p in check.get("files") or [] if not str(p).replace("\\", "/").startswith("tests/")]
-    # Одно правило с самопочинкой (core/self_repair_utils.red_before_fix): код 5
-    # «тестов нет» — не свидетель, хоть и не ноль.
+    # One rule with self-repair (core/self_repair_utils.red_before_fix): code 5 "no tests" is not a
+    # witness, though not zero.
     if not code_files or not red_before_fix({"timed_out": False, "exit_code": check.get("witness_exit_code")}):
         _log(root, {"patch": rel, "result": "no_witness", "files": check.get("files")})
         return {"verdict": "missing", "reason": "нет свидетеля: правка должна менять код и нести "

@@ -1,26 +1,4 @@
-"""Форма ответа, заданная человеком, — это и есть сдача работы.
-
-Замер 2026-09-25, GAIA (arXiv 2311.12983), первые 54 ответа полного прогона:
-в 17 (31 %) нет строки «FINAL ANSWER: …», которую вопрос требовал ПОСЛЕДНЕЙ.
-Причины три, и все наши:
-
-* свой контракт вывода (Conclusion … Safety) кончается разделом «Safety», а
-  просьба — «закончи ответ строкой»: модель выбирала контракт;
-* проверка дописывала в саму строку метки (`FINAL ANSWER: 34689 [unverified]`),
-  и ответ переставал быть тем, что просили;
-* ворота слабых улик переписывали тело целиком, и строка пропадала вместе с
-  догадками вокруг неё.
-
-Заказчик тоже задаёт форму («ответ одной строкой: СУММА: <число>»), поэтому
-это не подгонка под мерку. Путь — как в «Let Me Speak Freely?» (Tam и др.,
-EMNLP 2024 Industry, arXiv 2408.02442): рассуждать свободно, а в заданную форму
-переводить отдельным шагом (их «NL-to-Format»): жёсткая форма во время
-рассуждения ухудшает само рассуждение.
-
-Предупреждение при этом не теряется: снятая со строки метка «не проверено»
-становится строкой-оговоркой прямо над ней («Silence Is Endorsement»,
-arXiv 2609.20211 — без пометки непроверенное читается как проверенное).
-"""
+"""A human-requested answer shape is the deliverable: honor requested last-line formats (e.g. "FINAL ANSWER: ...") by finding the value, converting it in a separate step if needed, and putting the line last and clean, with a caveat line above it when the value is unverified."""
 from __future__ import annotations
 
 import re
@@ -29,9 +7,7 @@ from dataclasses import dataclass, field
 
 from core.warning_words import WARNING_KINDS
 
-#: «МЕТКА: [ЗАПОЛНИТЕЛЬ]» или «МЕТКА: <заполнитель>». Метка — заглавными (так
-#: пишут шаблоны); заполнитель в [] — заглавными, в <> — до пяти слов без цифр.
-#: Узко нарочно: «ERROR: [Errno 2]» из вставленного журнала — не шаблон.
+#: "LABEL: [FILLER]" or "LABEL: <filler>": label in capitals, filler in [] in capitals, in <> up to five words without digits; narrow on purpose ("ERROR: [Errno 2]" from a pasted log is no template).
 _TEMPLATE_RE = re.compile(
     r"(?<![\wА-Яа-яЁё])([A-ZА-ЯЁ][A-ZА-ЯЁ0-9 _-]{1,40}?)\s*[:：]\s*"
     r"(?:\[[A-ZА-ЯЁ][A-ZА-ЯЁ _-]*\]|<[^<>\d]{1,60}>)"
@@ -54,7 +30,7 @@ _VALUE_LINE_RE = re.compile(r"^[A-ZА-ЯЁ][A-ZА-ЯЁ0-9 _-]{1,40}[:：]\s*\S")
 
 
 def is_tail_line(line: str) -> bool:
-    """Строка хвоста `honor` — чтобы человеческая печать её не выбросила."""
+    """Tail line of `honor`, so human printing does not drop it."""
     return line.startswith((MISSING_PREFIX, UNCONFIRMED_PREFIX)) or bool(_VALUE_LINE_RE.match(line))
 
 
@@ -68,7 +44,7 @@ CONVERT_SYSTEM = (
 
 
 def requested_labels(question: str) -> tuple[str, ...]:
-    """Метки строк, которые человек потребовал в ответе, в порядке появления."""
+    """Labels of the lines the human required in the answer, in order of appearance."""
     out: list[str] = []
     for match in _TEMPLATE_RE.finditer(question or ""):
         label = " ".join(match.group(1).split())
@@ -78,8 +54,7 @@ def requested_labels(question: str) -> tuple[str, ...]:
 
 
 def _line_re(label: str) -> re.Pattern[str]:
-    # «Conclusion: FINAL ANSWER: 42» — строка внутри заголовка контракта; заголовок
-    # остаётся на месте (`_drop_line`), уходит только заданная строка.
+    # "Conclusion: FINAL ANSWER: 42": a line inside a contract header; the header stays (`_drop_line`), only the requested line goes.
     return re.compile(
         r"^(?P<head>[\s>*_`#-]*(?:conclusion\s*:)?[\s*_`]*)"
         + r"\s+".join(map(re.escape, label.split())) + r"[*_`]*\s*[:：]\s*(?P<value>.*)$",
@@ -98,7 +73,7 @@ def _clean(value: str) -> str:
 
 
 def _last_value(text: str, label: str) -> tuple[str, bool] | None:
-    """Значение последней строки «label: …» и была ли на ней метка-предупреждение."""
+    """Value of the last "label: ..." line and whether it carried a warning label."""
     found = list(_line_re(label).finditer(text or ""))
     for match in reversed(found):
         value = _clean(match.group("value"))
@@ -110,7 +85,7 @@ def _last_value(text: str, label: str) -> tuple[str, bool] | None:
 @dataclass
 class Honored:
     text: str
-    #: Откуда взята строка: answer | draft | converted | missing — для журнала.
+    #: Where the line came from: answer | draft | converted | missing (for the journal).
     origins: dict[str, str] = field(default_factory=dict)
 
 
@@ -121,12 +96,7 @@ def honor(
     draft: str = "",
     convert: Callable[[str, str], str] | None = None,
 ) -> Honored:
-    """Заданные строки — последними, чистыми, с оговоркой над ними, если нужна.
-
-    Порядок поиска значения: окончательный ответ → черновик синтеза (ворота
-    могли его вырезать) → один перевод отдельным шагом (`convert(label, text)`).
-    Строка не выдумывается: не нашлось значения — об этом сказано словами.
-    """
+    """Requested lines last, clean, with a caveat above them if needed. Value search order: final answer, synthesis draft (gates may have cut it), one separate-step conversion (`convert(label, text)`); the line is never invented, a missing value is said in words."""
     labels = requested_labels(question)
     if not labels or not answer:
         return Honored(answer)
@@ -135,24 +105,24 @@ def honor(
         got, origin = _last_value(answer, label), "answer"
         if got is None:
             got, origin = _last_value(draft, label), "draft"
-            got = (got[0], True) if got else None  # ворота это вырезали: не проверено
+            got = (got[0], True) if got else None  # the gate cut it: unverified
         if got is None and convert is not None:
             origin = "converted"
             try:
                 raw = convert(label, draft or answer)
-            except Exception:  # noqa: BLE001 — перевод не валит ответ; ниже скажем, что строки нет
+            except Exception:  # conversion never fails the answer; the missing line is stated below
                 raw = ""
             got = _last_value(raw, label) or ((_clean(raw), True) if raw.strip() else None)
             if got and (not got[0] or got[0].upper() == "NONE"):
                 got = None
         if got is None:
             origins[label] = "missing"
-            # Без двоеточия после метки: иначе сама оговорка читается как строка ответа.
+            # No colon after the label, or the caveat itself would read as an answer line.
             tail.append(f"{MISSING_PREFIX}«{label}» заполнить нечем: в ответе нет её значения.")
             continue
         origins[label] = origin
         body = _line_re(label).sub(_drop_line, body)
-        # Перевод только переписывает сказанное в ответе: его пометки остаются в теле.
+        # Conversion only rewrites what the answer said; its marks stay in the body.
         if got[1]:
             tail.append(f"{UNCONFIRMED_PREFIX}«{label}» не подтверждено источником этого хода.")
         tail.append(f"{label}: {got[0]}")
@@ -161,7 +131,7 @@ def honor(
 
 
 def llm_converter(llm: object, question: str) -> Callable[[str, str], str] | None:
-    """`convert` для `honor` поверх модели с `.complete(system=, user=, …)`."""
+    """`convert` for `honor` over a model with `.complete(system=, user=, ...)`."""
     complete = getattr(llm, "complete", None)
     if complete is None:
         return None

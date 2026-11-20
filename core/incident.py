@@ -1,25 +1,9 @@
-"""Incident Handling skeleton (§7 Security — Incident Handling / B-04 Safety).
+"""Incident handling skeleton: a structured incident record plus a small append-only store.
 
-The last brick of the CORE-0 Boundary Layer. When something goes wrong during
-autonomous operation (a tool keeps failing, the circuit breaker trips, the
-daemon heartbeat goes stale, a verification collapses), the agent should not
-just log a line and move on — it should open a structured **incident** that a
-human can later read, understand, and close.
-
-This is deliberately a *skeleton*: a minimal, honest record with the seven
-fields the operator specified, plus a small append-only store. It does NOT try
-to auto-remediate, page anyone, or run a postmortem. It captures the fact, its
-severity, what (if anything) was done to contain it, whether a human must look,
-and a place to write the lesson afterwards.
-
-Design principles (mirror core/alert_ack.py + core/approval_inbox.py)
----------------------------------------------------------------------
-* Pure record + thin persistence. No LLM, no network.
-* Append-mostly: incidents are opened, then their status/postmortem updated in
-  place. History is never silently deleted.
-* Persisted as runtime state (gitignored ``data/*.jsonl``) through the same
-  state-integrity envelope as the other stores.
-"""
+    Pure record and thin persistence: no LLM, no network, no auto-remediation.
+    Incidents are opened, then status/postmortem are updated in place; history is
+    never silently deleted. Persisted as gitignored runtime state through the
+    state-integrity envelope."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -46,16 +30,10 @@ def _now_iso() -> str:
 
 @dataclass(frozen=True)
 class Incident:
-    """A single structured incident record (the seven operator fields).
+    """A single structured incident record.
 
-    * ``trigger`` — what raised it (e.g. ``"circuit_breaker_open"``).
-    * ``affected_module`` — best-known blast radius (e.g. ``"core.loop"``).
-    * ``containment_action`` — what was done to limit damage, if anything
-      (e.g. ``"halted outbound tool calls"``); empty when nothing yet.
-    * ``human_escalation`` — whether a human must review. Forced ``True`` for
-      critical/high severity so a real breakage can never be auto-closed.
-    * ``postmortem_note`` — filled in after resolution; the lesson learned.
-    """
+    ``human_escalation`` is forced True for critical/high severity so a real
+    breakage can never be auto-closed."""
 
     severity: IncidentSeverity
     trigger: str
@@ -125,11 +103,7 @@ class Incident:
 
 
 def summarise_incidents(incidents: list[Incident]) -> str:
-    """One-line operator digest. PURE — no I/O.
-
-    e.g. ``"incidents: 5 total | open=2 escalated=1 resolved=2 | "
-    "by_severity: critical=1 high=1 medium=2 low=1 | needs_human=2"``.
-    """
+    """One-line operator digest. Pure, no I/O."""
     if not incidents:
         return "incidents: none recorded"
     by_status: dict[str, int] = {}
@@ -155,12 +129,7 @@ def summarise_incidents(incidents: list[Incident]) -> str:
 
 @dataclass
 class IncidentLog:
-    """Persistent, auditable append-mostly store of incidents.
-
-    Runtime state (gitignored, like the rest of ``data/*.jsonl``). Mirrors the
-    ``ApprovalInbox``/``AlertAckStore`` persistence convention via the
-    state-integrity envelope (``read_state_jsonl``/``rewrite_state_jsonl``).
-    """
+    """Persistent append-mostly store of incidents, via the state-integrity envelope."""
 
     incidents: list[Incident] = field(default_factory=list)
     path: Path | str | None = None
@@ -204,10 +173,8 @@ class IncidentLog:
     ) -> Incident | None:
         """Update an incident in place. Returns the new record, or None if absent.
 
-        ``resolved`` is only honoured for incidents that do not still owe a
-        human (or when the postmortem note is being set in the same call), so a
-        critical breakage cannot be silently closed without a note.
-        """
+        ``resolved`` is honoured only for incidents that no longer owe a human, or
+        when the postmortem note is set in the same call."""
         for i, inc in enumerate(self.incidents):
             if inc.id != incident_id:
                 continue
@@ -248,11 +215,7 @@ class IncidentLog:
         return summarise_incidents(self.incidents)
 
     def status_line(self) -> str:
-        """One line for the daemon status, or "" when nothing is open.
-
-        Block 7 (audit W1, 2026-09-03): `needing_human` and `summary` had no
-        production caller — an incident could be opened and never shown.
-        """
+        """One line for the daemon status, or "" when nothing is open."""
         opened = self.open_incidents()
         if not opened:
             return ""

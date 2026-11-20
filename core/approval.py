@@ -1,13 +1,4 @@
-"""Approval Providers (§7 Security, Policy & Autonomy Governance — Human
-Approval).
-
-PolicyGate decides whether an action carries enough risk that a human must
-authorise it (`escalate`). The Approval Provider is the surface that asks
-the human and brings back a typed `ApprovalDecision`.
-
-The loop is provider-agnostic: it never reads stdin itself, it never times
-out itself. All policy-on-human surface area lives here.
-"""
+"""Approval providers: ask a human to authorise escalated actions and return a typed ApprovalDecision."""
 from __future__ import annotations
 
 import sys
@@ -17,7 +8,7 @@ from typing import Literal, TextIO
 
 from core.models import ApprovalDecision, ApprovalRequest
 
-# Strings accepted from the user (case-insensitive). Anything else => abort.
+# Accepted user strings (case-insensitive); anything else aborts.
 _YES_TOKENS: frozenset[str] = frozenset({"y", "yes", "д", "да", "approve", "ok", "okay"})
 _NO_TOKENS: frozenset[str] = frozenset({"n", "no", "н", "нет", "deny", "cancel"})
 
@@ -41,28 +32,13 @@ _PREVIEW_LIMIT = 200
 
 
 def _preview_arguments(arguments: dict) -> tuple[str, str]:
-    """Render the arguments, and say plainly what the rendering hid.
-
-    Measured 2026-08-22 on a plausible `file_write`: 397 characters of
-    arguments, 199 shown, and `mode: overwrite` gone entirely — an operator
-    could approve an overwrite with the word never on screen. An ellipsis says
-    "something is missing"; it does not say "half of it, including the mode".
-
-    Returns `(preview, notice)`. The notice is empty when nothing was hidden,
-    because a preview that always warns teaches the reader to ignore it.
-
-    Deliberately NOT done here: reordering or ranking the arguments by
-    importance. Which argument matters most is a judgement, and inventing one
-    would place a developer's opinion between the agent and the human at
-    exactly the boundary this project is auditing.
-    """
+    """Render the arguments and report what the rendering hid; returns (preview, notice)."""
     full = str(arguments)
     if len(full) <= _PREVIEW_LIMIT:
         return full, ""
     preview = full[: _PREVIEW_LIMIT - 1] + "…"
     hidden = len(full) - (_PREVIEW_LIMIT - 1)
-    # A key counts as lost when its NAME is absent from the visible text: the
-    # reader has no way to know the argument was passed at all.
+    # A key counts as lost when its NAME is missing from the visible text: the reader cannot tell the argument was passed.
     lost = [str(key) for key in arguments if str(key) not in preview]
     notice = f"{hidden} characters hidden"
     if lost:
@@ -79,12 +55,7 @@ class ApprovalProvider(ABC):
 
 
 class CLIApprovalProvider(ApprovalProvider):
-    """Synchronous stdin/stderr prompt. Blocks until the user answers.
-
-    `input_fn` is injectable so tests can drive the prompt without touching
-    the real stdin; `out` is the stream the human-readable prompt is written
-    to (defaults to stderr so it never interferes with --ask output).
-    """
+    """Synchronous stdin/stderr prompt; blocks until the user answers. `input_fn` and `out` are injectable for tests."""
 
     def __init__(
         self,
@@ -119,8 +90,7 @@ class CLIApprovalProvider(ApprovalProvider):
             preview, notice = _preview_arguments(req.arguments)
             print(f"  arguments  : {preview}", file=self._out)
             if notice:
-                # On its own line and prefixed, so the operator reads it as the
-                # renderer speaking rather than as more of the request.
+                # Own prefixed line, so the operator reads it as the renderer speaking, not as part of the request.
                 print(f"  ! preview  : {notice}", file=self._out)
         if req.reasons:
             print(f"  reasons    : {'; '.join(req.reasons)}", file=self._out)
@@ -133,11 +103,7 @@ class CLIApprovalProvider(ApprovalProvider):
 
 
 class AutoApprover(ApprovalProvider):
-    """Deterministic provider for tests and `--auto-approve` smoke runs.
-
-    Pass `default` to choose the verdict (approve / deny / abort). Every
-    request is logged on `self.calls` so tests can assert what was asked.
-    """
+    """Deterministic provider for tests and `--auto-approve` runs; logs every request on `self.calls`."""
 
     def __init__(
         self,

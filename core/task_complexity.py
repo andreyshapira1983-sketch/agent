@@ -7,7 +7,6 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 
-# ── tier enum ─────────────────────────────────────────────────────────────────
 
 class ComplexityTier(StrEnum):
     LIGHT    = "light"
@@ -15,7 +14,6 @@ class ComplexityTier(StrEnum):
     DEEP     = "deep"
 
 
-# ── role-level overrides ──────────────────────────────────────────────────────
 
 # Model roles that are always LIGHT regardless of task text.
 _ALWAYS_LIGHT_ROLES: frozenset[str] = frozenset({
@@ -30,7 +28,6 @@ _NEVER_LIGHT_TASK_ROLES: frozenset[str] = frozenset({
 })
 
 
-# ── signals ───────────────────────────────────────────────────────────────────
 
 # Any of these substrings → DEEP tier. Substrings, not whole words, so Russian
 # stems ("архитектур") match every form.
@@ -100,9 +97,7 @@ _LIGHT_SIGNAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (signal, _compile_light_signal(signal)) for signal in sorted(_LIGHT_SIGNALS)
 )
 
-# ── вопрос о самом агенте ─────────────────────────────────────────────────────
-# Нужны оба условия: агента назвали (ты / себя / you) И спрашивают про него самого;
-# «покажи, что ты нашёл в файле» — про файл, не про него.
+# Question about the agent itself: both conditions are needed, the agent is named (ты / себя / you) AND asked about; "show what you found in the file" is about the file.
 _AGENT_NAMED_RE = re.compile(
     r"\b(?:ты|тебе|тебя|тобой|твой|твоя|твои|твоё|твое|своих|свои|себе|себя|"
     r"you|your|yourself)\b"
@@ -117,7 +112,7 @@ _AGENT_SUBJECT_RE = re.compile(
 
 
 def asks_about_the_agent(normalized: str) -> bool:
-    """Спрашивают ли у агента про него самого? Вход — текст в нижнем регистре."""
+    """Whether the agent is asked about itself; input is lower-cased text."""
     return bool(_AGENT_NAMED_RE.search(normalized) and _AGENT_SUBJECT_RE.search(normalized))
 
 
@@ -131,7 +126,6 @@ def matched_light_signals(text: str) -> list[str]:
     return [signal for signal, pattern in _LIGHT_SIGNAL_PATTERNS if pattern.search(normalized)]
 
 
-# ── public API ────────────────────────────────────────────────────────────────
 
 def assess_complexity(
     text: str,
@@ -164,7 +158,7 @@ def assess_complexity(
     if isinstance(task_role, str) and task_role in _NEVER_LIGHT_TASK_ROLES:
         return ComplexityTier.STANDARD
 
-    # Вопрос о самом агенте не бывает лёгким, даже короткий и с бытовым сигналом.
+    # A question about the agent itself is never light, even short and with an everyday signal.
     if asks_about_the_agent(normalized):
         return ComplexityTier.STANDARD
 
@@ -186,9 +180,7 @@ def tier_label(tier: ComplexityTier) -> str:
     }[tier]
 
 
-# ── live grounding signals ────────────────────────────────────────────────────
-# Time-sensitive keywords → the planner adds a web_search step. Broad on purpose:
-# a false positive costs one search, a false negative a stale answer.
+# Live grounding signals: time-sensitive keywords make the planner add a web_search step; broad on purpose (a false positive costs one search, a false negative a stale answer).
 
 _LIVE_GROUNDING_SIGNALS: frozenset[str] = frozenset({
     # ── English temporal / recency ──
@@ -226,9 +218,7 @@ def needs_live_grounding(text: str) -> bool:
     return any(sig in normalized for sig in _LIVE_GROUNDING_SIGNALS)
 
 
-# ── cheap-path planner gate ───────────────────────────────────────────────────
-# A missed skip costs one planner call; a wrong skip could drop a needed tool step.
-# So every gate below errs toward running the planner.
+# Cheap-path planner gate: a missed skip costs one planner call, a wrong skip could drop a needed tool step, so every gate errs toward running the planner.
 
 # Substrings hinting a tool may be needed; broad on purpose.
 _TOOL_SIGNALS: frozenset[str] = frozenset({
@@ -294,10 +284,7 @@ def _is_pure_greeting(normalized: str) -> bool:
 
 
 def tool_signal_present(normalized: str) -> bool:
-    """В реплике (уже в нижнем регистре) есть слово-признак инструмента.
-
-    Общий список для `can_skip_planner` и `core/social_turn.py`.
-    """
+    """The utterance (already lower-cased) has a tool-indicating word; shared by `can_skip_planner` and `core/social_turn.py`."""
     return any(sig in normalized for sig in _TOOL_SIGNALS)
 
 

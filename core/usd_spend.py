@@ -1,13 +1,6 @@
-"""Расход в долларах по журналу вызовов модели — и предел в час (план субботы, пункт з).
+"""Dollar spend from the model-call journal, and an hourly limit.
 
-До 24.09 стоимость писалась только в условных единицах (`cost_units`), и
-вопрос «сколько кампания тратит в час» требовал ручного пересчёта. Цены —
-официальная страница DeepSeek (api-docs.deepseek.com/quick_start/pricing),
-снятые 24.09.2026: доллары за 1 млн токенов в пиковые часы; вне пика — вдвое
-дешевле. Пик — 01:00–04:00 и 06:00–10:00 UTC в будни.
-
-Предел — необязательное `usd_per_hour` в `config/budget_limits.json`. Нет
-предела — поведение прежнее: только запись расхода в журнал кампании.
+Prices are DeepSeek's official page (api-docs.deepseek.com/quick_start/pricing) as of 24.09.2026: dollars per 1M tokens at peak, half off-peak (peak 01:00-04:00 and 06:00-10:00 UTC on weekdays). The limit is an optional `usd_per_hour` in `config/budget_limits.json`; without it the only effect is recording spend in the campaign journal.
 """
 from __future__ import annotations
 
@@ -19,16 +12,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-#: $ за 1 млн токенов В ПИК: (вход из кэша, вход без кэша, выход).
+#: $ per 1M tokens AT PEAK: (cached input, uncached input, output).
 PEAK_PRICES: dict[str, tuple[float, float, float]] = {
     "deepseek-flash": (0.006, 0.30, 1.20),
     "deepseek-v4-pro": (0.044, 1.32, 3.96),
 }
-#: Старые имена, которые DeepSeek направляет на Flash.
+#: Old model names that DeepSeek routes to Flash.
 ALIASES = {"deepseek-chat": "deepseek-flash", "deepseek-reasoner": "deepseek-flash",
            "deepseek-v4-flash": "deepseek-flash"}
-#: Модель без цены считается по самой дорогой известной ставке, без скидки вне
-#: пика. Это оценка, не её настоящая цена: настоящая может быть выше.
+#: A model without a price is counted at the most expensive known rate, with no off-peak discount: an estimate, the real price may be higher.
 FALLBACK_PRICES: tuple[float, float, float] = tuple(  # type: ignore[assignment]
     max(prices[i] for prices in PEAK_PRICES.values()) for i in range(3))
 _PEAK_HOURS = frozenset({1, 2, 3, 6, 7, 8, 9})
@@ -44,14 +36,14 @@ def is_peak(moment: datetime) -> bool:
 
 
 def _tokens(row: dict[str, Any]) -> tuple[int, int, int]:
-    """Токены вызова: (вход из кэша, вход без кэша, выход)."""
+    """Tokens of a call: (cached input, uncached input, output)."""
     hit = _count(row, "cache_hit_tokens")
     miss = _count(row, "cache_miss_tokens") or max(0, _count(row, "input_tokens") - hit)
     return hit, miss, _count(row, "output_tokens")
 
 
 def _count(row: dict[str, Any], name: str) -> int:
-    """Счётчик токенов из строки журнала; мусор — ValueError с именем поля."""
+    """Token counter from a journal row; garbage raises ValueError naming the field."""
     raw = row.get(name) or 0
     try:
         value = -1 if isinstance(raw, bool) else int(raw)
@@ -67,7 +59,7 @@ def _cost(tokens: tuple[int, int, int], prices: tuple[float, float, float]) -> f
 
 
 def row_usd(row: dict[str, Any]) -> float | None:
-    """Стоимость одного вызова в долларах; None — модель без известной цены."""
+    """Cost of one call in dollars; None for a model with no known price."""
     model = ALIASES.get(str(row.get("model") or ""), str(row.get("model") or ""))
     prices = PEAK_PRICES.get(model)
     if prices is None:
@@ -87,7 +79,7 @@ def _usage_path(workspace: Path) -> Path:
 
 
 def _usage_rows(workspace: Path, mark: str) -> list[dict[str, Any]]:
-    """Строки журнала с `completed_at` не раньше `mark`; нет журнала — пусто, не читается — ValueError."""
+    """Journal rows with `completed_at` not before `mark`; no journal gives empty, unreadable raises ValueError."""
     path = _usage_path(workspace)
     span = _TAIL_BYTES
     while True:
@@ -102,7 +94,7 @@ def _usage_rows(workspace: Path, mark: str) -> list[dict[str, Any]]:
             raise ValueError(
                 f"model usage journal is not readable, spend is unknown: {path}") from exc
         rows = []
-        for line in lines[1:] if span < size else lines:  # первая строка хвоста может быть обрезана
+        for line in lines[1:] if span < size else lines:  # the first line of the tail may be cut
             try:
                 raw = json.loads(line)
             except ValueError:
@@ -110,7 +102,7 @@ def _usage_rows(workspace: Path, mark: str) -> list[dict[str, Any]]:
             if isinstance(raw, dict):
                 rows.append(raw.get("payload", raw) if "_integrity" in raw else raw)
         stamps = [str(row.get("completed_at") or "") for row in rows]
-        # Хвост обязан дойти до строки старше `mark`, иначе бурный час недосчитан.
+        # The tail must reach a row older than `mark`, or a busy hour is undercounted.
         if span >= size or any(stamp and stamp < mark for stamp in stamps):
             return [row for row, stamp in zip(rows, stamps, strict=True) if stamp >= mark]
         span *= 2
@@ -118,7 +110,7 @@ def _usage_rows(workspace: Path, mark: str) -> list[dict[str, Any]]:
 
 def _counted_rows(
         workspace: Path, since: datetime) -> list[tuple[dict[str, Any], tuple[int, int, int]]]:
-    """Строки с момента `since` и их токены; мусор в счётчике — ValueError с файлом и полем."""
+    """Rows since `since` and their tokens; garbage in a counter raises ValueError with file and field."""
     counted = []
     for row in _usage_rows(workspace, since.astimezone(timezone.utc).isoformat()):
         try:
@@ -130,12 +122,12 @@ def _counted_rows(
 
 
 def usd_since(workspace: Path, since: datetime) -> float:
-    """Сколько долларов ушло на вызовы модели с момента `since` (UTC)."""
+    """Dollars spent on model calls since `since` (UTC)."""
     total = 0.0
     for row, tokens in _counted_rows(workspace, since):
         usd = row_usd(row)
         if usd is None:
-            # Модель без цены не бесплатна: оценка сверху, иначе предел её не видит.
+            # A model without a price is not free: an upper-bound estimate, or the limit would not see it.
             usd = _cost(tokens, FALLBACK_PRICES)
             if usd:
                 _warn_unpriced(_model_label(row))
@@ -144,7 +136,7 @@ def usd_since(workspace: Path, since: datetime) -> float:
 
 
 def unpriced_tokens_since(workspace: Path, since: datetime) -> dict[str, int]:
-    """Токены моделей без известной цены с момента `since`: модель -> токены."""
+    """Tokens of models without a known price since `since`: model -> tokens."""
     found: dict[str, int] = {}
     for row, tokens in _counted_rows(workspace, since):
         if row_usd(row) is None and sum(tokens):
@@ -153,7 +145,7 @@ def unpriced_tokens_since(workspace: Path, since: datetime) -> dict[str, int]:
 
 
 def unpriced_note(workspace: Path, since: datetime) -> str:
-    """Приписка к сообщению о расходе: токены, посчитанные оценкой, а не ценой; нет таких — пусто."""
+    """Suffix for a spend message: tokens counted by estimate, not price; empty if none."""
     found = unpriced_tokens_since(workspace, since)
     if not found:
         return ""
@@ -166,7 +158,7 @@ def _model_label(row: dict[str, Any]) -> str:
 
 
 def _warn_unpriced(model: str) -> None:
-    """Один раз за процесс на модель: её расход — оценка, не цена."""
+    """Once per process per model: its spend is an estimate, not a price."""
     if model in _WARNED_UNPRICED:
         return
     _WARNED_UNPRICED.add(model)
@@ -175,18 +167,16 @@ def _warn_unpriced(model: str) -> None:
 
 
 def usd_last_hour(workspace: Path, now: datetime | None = None) -> float:
-    """Сколько долларов ушло на вызовы модели за последний час."""
+    """Dollars spent on model calls in the last hour."""
     return usd_since(workspace, (now or datetime.now(timezone.utc)) - timedelta(hours=1))
 
 
-#: Предел одного хода, $: у предела ход не падает, а сдаёт сделанное. Замер 24.09
-#: по 105 ходам: медиана $0.04, 95-й процентиль $0.41, самый дорогой $1.08 — предел
-#: ловит только разгон. AGENT_TURN_MAX_USD; 0 — без предела.
+#: Per-turn limit, $: at the limit a turn does not fail but hands in what it has done; it only catches runaway spend. AGENT_TURN_MAX_USD; 0 means no limit.
 TURN_MAX_USD = 1.0
 
 
 def turn_usd_limit() -> float | None:
-    """Предел $ на ход; None — без предела (0). Отрицательное — ValueError, мусор — умолчание."""
+    """Per-turn dollar limit; None for no limit (0). Negative raises ValueError, garbage gives the default."""
     raw = (os.environ.get("AGENT_TURN_MAX_USD") or "").strip()
     if not raw:
         return TURN_MAX_USD
@@ -210,7 +200,7 @@ def _money(value: float) -> str:
 
 
 def usd_hour_refusal(workspace: Path, now: datetime | None = None) -> str | None:
-    """Отказ вызову модели: расход за час достиг `usd_per_hour`; None — можно, не читается — ValueError."""
+    """Refusal of a model call: hourly spend reached `usd_per_hour`; None means allowed, unreadable raises ValueError."""
     limit = usd_hour_limit(workspace)
     if limit is None:
         return None
@@ -223,7 +213,7 @@ def usd_hour_refusal(workspace: Path, now: datetime | None = None) -> str | None
 
 
 def usd_hour_limit(workspace: Path) -> float | None:
-    """Предел $ в час из config/budget_limits.json; нет файла, ключа или 0 — None, мусор — ValueError."""
+    """Hourly dollar limit from config/budget_limits.json; no file, key or 0 gives None, garbage raises ValueError."""
     path = Path(workspace) / "config" / "budget_limits.json"
     try:
         text = path.read_text(encoding="utf-8")
@@ -231,7 +221,7 @@ def usd_hour_limit(workspace: Path) -> float | None:
         return None
     except (OSError, ValueError) as exc:
         raise ValueError(f"budget config is not readable: {path}") from exc
-    # Испорченный файл — не «без предела»: так же отказывает core/budget_ledger.
+    # A corrupt file is not "no limit": core/budget_ledger refuses the same way.
     try:
         raw = json.loads(text).get("usd_per_hour")
     except ValueError as exc:

@@ -1,30 +1,4 @@
-"""Карточки прошлых ошибок: «эта ошибка уже была — вот что тогда помогло».
-
-Слово оператора 24.09: увидев у себя знакомую ошибку, агент должен пойти и
-посмотреть, как она решалась раньше. Замер того же дня по 446 ходам на
-сервере: 510 провалов шагов, 355 из них (70%) — подписи, встречавшиеся в
-других ходах. «No module named 'core'» — 32 раза в 14 ходах за четыре дня;
-внутри хода он выкручивался в 25 случаях из 32, а в следующем ходу ошибался
-заново. Выученное в ходе не переносилось: память доставалась один раз, в
-начале хода, по тексту вопроса (loop_context.py), рефлексия в кампании
-выключена, а в реестрах дефектов ни одна из 13 частых ошибок не упомянута.
-
-Устройство — по литературе: AutoGuide (arXiv 2403.08978) — урок вида «когда
-X — делай Y», достаётся по текущему состоянию, а не по задаче; ExpeL — уроки
-из пар провал/удача; ProactAgent (arXiv 2604.20572) — к памяти обращаются,
-когда она нужна, а не на каждом ходу.
-
-  * Подпись ошибки — последняя строка исключения или отказа, без чисел и
-    путей рабочей папки.
-  * Карточка рождается в конце хода из пары «провал → позже удача того же
-    инструмента»: одну строку урока пишет дешёвая модель; нет удачи — урока нет.
-  * При новом провале с той же подписью урок встаёт в причину сбоя
-    (ReplanTrigger.reason) или рядом с выводом в круге наблюдения — туда, где
-    его читает планировщик, и НЕ в улики.
-  * Показанную карточку судит среда: следующий вызов того же инструмента
-    удался — помогла, та же ошибка снова — нет. Урок, который не помогает,
-    снимается: устаревший урок сильнее всего вредит трудным задачам.
-"""
+"""Failure cards: when a known error recurs, show what helped last time. A card is born at turn end from a failure followed by a success of the same tool, one lesson line written by a cheap model; shown in the replan reason or the observation circle (not as evidence); judged by the next call of the same tool and retired if it does not help."""
 from __future__ import annotations
 
 import ast
@@ -64,7 +38,7 @@ class Card:
     tool: str
     error: str
     lesson: str | None = None
-    status: str = "unlearned"      # unlearned | active | retired | guard | rejected
+    status: str = "unlearned"
     created: str = ""
     last_seen: str = ""
     seen: int = 1
@@ -74,16 +48,11 @@ class Card:
     source_trace: str = ""
 
 
-# ── подпись ошибки ──────────────────────────────────────────────────────────
 
-#: Карточки, на которых модель может учиться. «guard» — отказ сторожа: после
-#: него удачный следующий вызов не лекарство, а часто обход (24.09 выучено
-#: «лимит голоса исчерпан — пиши в журнал дефектов» и «гейт блокирует
-#: __import__ — используй importlib.import_module»). «rejected» — урок
-#: отвергнут проверяющим и не учится заново.
+#: Cards the model may learn from. "guard" is a guard refusal: a later success is usually a bypass, not a cure; "rejected" lessons are not learned again.
 _LEARNABLE = frozenset({"unlearned", "retired"})
 
-#: Отказ защиты, а не поломка: запрет, лимит, «не замер, а действие».
+#: A protection refusal, not a breakage: ban, limit, "an action, not a measurement".
 _GUARD_RE = re.compile(
     r"PermissionError|refus|отказ|not allowed|bypass|budget spent|запрещ|"
     r"blocked by (?:the )?(?:injection|policy|guard|gate)|injection guard|"
@@ -92,28 +61,18 @@ _GUARD_RE = re.compile(
 
 
 def is_guard_refusal(text: str) -> bool:
-    """Ошибка — отказ сторожа: урок из неё не рождается."""
+    """The error is a guard refusal: no lesson is born from it."""
     return bool(_GUARD_RE.search(text or ""))
 
 
 def _untrusted(*parts: Any) -> bool:
-    """Does any of these texts carry what the injection guard flags?
-
-    The tool call is journaled with its RAW output before the guard runs, so a
-    call whose output the guard blocked still looked like the successful
-    «fix», its output went into the lesson prompt, and the lesson reached the
-    planner (проверка 16.11, серьёзная №1; дыра 07.10 открылась снова).
-    Fail-closed: a scanner error counts as untrusted."""
+    """Does any of these texts carry what the injection guard flags? Calls are journaled with RAW output before the guard runs, so blocked output could reach the lesson prompt; fail-closed: a scanner error counts as untrusted."""
     try:
         from core.injection_guard import scan_for_injection
 
         for part in parts:
             text = part if isinstance(part, str) else json.dumps(part, ensure_ascii=False, default=str)
-            # Only what the guard BLOCKS — the same bar the guard itself uses
-            # to withhold content. "suspicious" (an HTML comment, an emoji
-            # joiner, «override the default») would starve ordinary lessons.
-            # Bounded: the scanner is slow on huge text, and the lesson prompt
-            # sees at most the first few hundred characters anyway.
+            # Only what the guard BLOCKS (its own bar); "suspicious" would starve ordinary lessons. Bounded: the scanner is slow on huge text and the prompt sees only the first characters.
             if scan_for_injection((text or "")[:_SCAN_CHARS]).verdict == "blocked":
                 return True
     except Exception:  # noqa: BLE001 — fail-closed, reason above
@@ -125,19 +84,12 @@ _SCAN_CHARS = 20_000
 
 
 def failure_text(tool: str, output: Any, error: str | None = None) -> str | None:
-    """Текст провала шага; None — шаг удался.
-
-    Жёсткий провал несёт `error`. Мягкий — удачный вызов, в выводе которого
-    провал: красный patch_check, красные тесты, упавший опыт python_probe,
-    ненулевой код shell_exec.
-    """
+    """Failure text of a step; None means the step succeeded. Hard failure carries `error`; soft failure is a successful call whose output holds one (red patch_check or tests, failed python_probe, non-zero shell_exec code)."""
     if error:
         return str(error)
     if not isinstance(output, dict):
         return None
-    # Самая говорящая строка — последней: когда в тексте нет ни исключения, ни
-    # отказа, подпись берёт последнюю строку (замер 24.09: «exit_code=N» первой
-    # строкой слил все упавшие команды shell_exec в одну карточку).
+    # The most telling line goes last: with no exception or refusal the signature takes the last line (a leading "exit_code=N" merged all failed shell commands).
     if tool == "patch_check" and output.get("verdict") == "red":
         parts = [str(output.get("why") or ""), str(output.get("tests_output") or ""),
                  *reversed([str(e) for e in output.get("errors") or ()])]
@@ -145,10 +97,7 @@ def failure_text(tool: str, output: Any, error: str | None = None) -> str | None
     if tool == "run_tests" and (output.get("failed") or output.get("errors")):
         names = "\n".join(f"FAILED {n}" for n in output.get("failed_tests") or ())
         return f"{output.get('stdout_tail') or ''}\n{names}".strip()
-    # shell_exec сам судит свою команду (execution_status): его провал приходит
-    # жёстким путём. Удачный вызов с кодом 1 и пустым stderr — это grep без
-    # совпадений, ответ, а не ошибка (замер 24.09: 24 таких «провала» в одной
-    # карточке «exit_code=N»).
+    # shell_exec judges its own command (execution_status): its failure arrives the hard way; code 1 with empty stderr is a grep without matches, not an error.
     code = output.get("exit_code")
     if tool == "python_probe" and code not in (0, None):
         stderr = str(output.get("stderr") or "").strip()
@@ -157,12 +106,7 @@ def failure_text(tool: str, output: Any, error: str | None = None) -> str | None
 
 
 def failed_output_reason(output: Any) -> str:
-    """Причина сбоя, когда инструмент вернул провал без исключения.
-
-    До 24.09 такая причина была буквально «tool execution failed»: код выхода
-    и stderr упавшей команды shell_exec терялись, и планировщик переделывал
-    шаг вслепую (34 таких провала в следах сервера).
-    """
+    """Failure reason when a tool returned a failure without an exception (previously the code and stderr of failed shell_exec were lost)."""
     if isinstance(output, dict) and output.get("exit_code") not in (0, None):
         stderr = str(output.get("stderr") or "").strip()
         return f"tool execution failed: exit_code={output['exit_code']}" + (
@@ -171,13 +115,11 @@ def failed_output_reason(output: Any) -> str:
 
 
 def error_line(text: str) -> str:
-    """Строка, по которой ошибку узнают: исключение с сообщением, отказ, упавший
-    тест, иначе последняя строка вывода (не строка кода выхода)."""
+    """The line by which an error is recognised: exception with message, refusal, failed test, else the last output line (not the exit code line)."""
     lines = [ln.strip().removeprefix("E ").strip() for ln in text.splitlines() if ln.strip()]
     for pattern in (_EXC_RE, _REFUSAL_RE):
         found = [m.group(0) for ln in lines if (m := pattern.search(ln))]
-        # «TypeError» без сообщения — обрезанная сводка pytest; она сливала
-        # разные ошибки в одну карточку (замер 24.09: 31 провал под одним именем).
+        # A bare "TypeError" is a truncated pytest summary and merged different errors into one card.
         told = [f for f in found if ": " in f and len(f.split(": ", 1)[1]) > 3]
         if told or found:
             return (told or found)[-1]
@@ -189,8 +131,7 @@ def error_line(text: str) -> str:
 
 
 def signature(tool: str, text: str) -> str:
-    """Подпись: инструмент + строка ошибки без чисел, хешей, путей папки и
-    длинных цитат (длинная цитата — чужой текст, короткая — имя, её оставляем)."""
+    """Signature: tool plus error line without numbers, hashes, workspace paths and long quotes (long quote = foreign text, a short one is a name and stays)."""
     line = _WORKSPACE_RE.sub("", error_line(text))
     line = _LONG_QUOTE_RE.sub("'<…>'", line)
     line = _NUM_RE.sub("N", _HEX_RE.sub("H", _TMP_RE.sub("<tmp>", line)))
@@ -201,23 +142,21 @@ def _tokens(sig: str) -> set[str]:
     return set(re.findall(r"\w+", sig.lower()))
 
 
-# ── хранилище ───────────────────────────────────────────────────────────────
 
 class CardStore:
-    """Карточки в data/failure_cards.jsonl; первая строка — что уже разобрано."""
+    """Cards in data/failure_cards.jsonl; the first line records what is already reviewed."""
 
     def __init__(self, workspace: Path | str) -> None:
         self.path = Path(workspace) / CARDS_RELPATH
         self.cards, self.digested = _read_cards(self.path)
-        # Что было на диске при чтении: сохранение не воскрешает удалённое
-        # здесь и не затирает добавленное другим писателем (проверка 16.11, средняя).
+        # Snapshot of the disk at read time: saving neither resurrects deleted cards nor overwrites those added by another writer.
         self._loaded = set(self.cards)
         self._loaded_state = {k: _card_state(c) for k, c in self.cards.items()}
-        # Сбои вопроса модели за этот разбор (проверка 16.11, мелкая).
+        # Model-query failures during this review.
         self.lesson_errors: list[str] = []
 
     def find(self, tool: str, sig: str) -> Card | None:
-        """Та же подпись, иначе самая близкая по словам (≥ 0.6) у того же инструмента."""
+        """The same signature, else the closest by words (>= 0.6) for the same tool."""
         if sig in self.cards:
             return self.cards[sig]
         want, best, best_score = _tokens(sig), None, _SIMILAR
@@ -232,8 +171,7 @@ class CardStore:
 
     def save(self) -> None:
         with _cards_lock(self.path):
-            # Карточки, которые другой писатель добавил после нашего чтения,
-            # сохраняются: раньше последний save затирал их (проверка 16.11, средняя).
+            # Cards another writer added after our read are kept.
             disk_cards, disk_digested = _read_cards(self.path)
             for sig, card in disk_cards.items():
                 if sig not in self.cards and sig not in self._loaded:
@@ -241,11 +179,9 @@ class CardStore:
             for trace, n in disk_digested.items():
                 self.digested[trace] = max(n, self.digested.get(trace, 0))
             if len(self.cards) > MAX_CARDS:
-                # Отказ проверяющего и отказ сторожа не вытесняются первыми:
-                # иначе плохой урок выучивается снова (проверка 16.11, средняя).
+                # Reviewer and guard rejections are not evicted first, or a bad lesson would be learned again.
                 rank = {"rejected": 3, "active": 2, "guard": 2, "unlearned": 1, "retired": 0}
-                # A card new or changed in this save is not evicted by it (18.11),
-                # but a reviewer's rejection still outranks it.
+                # A card new or changed in this save is not evicted by it, but a reviewer's rejection still outranks it.
                 keep = sorted(self.cards.values(),
                               key=lambda c: (c.status == "rejected", self._fresh(c),
                                              rank.get(c.status, 0), c.seen, str(c.last_seen)),
@@ -273,8 +209,7 @@ _INT_FIELDS = ("seen", "hits", "misses", "asked")
 
 
 def _read_cards(path: Path) -> tuple[dict[str, Card], dict[str, int]]:
-    """Карточки и «разобрано» с диска; битая строка пропускается, а не роняет
-    показ урока (проверка 16.11, средняя)."""
+    """Cards and the reviewed marker from disk; a broken line is skipped instead of breaking lesson display."""
     cards: dict[str, Card] = {}
     digested: dict[str, int] = {}
     try:
@@ -307,9 +242,7 @@ _REQUIRED_STR = ("sig", "tool", "error")
 
 
 def _card_from_row(row: dict[str, Any]) -> Card | None:
-    """Карточка из строки с проверкой типа КАЖДОГО поля: чужой тип ронял показ,
-    учёбу и вытеснение (проверка 17.11, средняя). Нет строковых sig/tool/error —
-    строка пропускается; прочее чужое — к умолчанию."""
+    """Card from a row with a type check of EVERY field; without string sig/tool/error the row is skipped, other foreign values fall back to defaults."""
     if not all(isinstance(row.get(k), str) for k in _REQUIRED_STR):
         return None
     known: dict[str, Any] = {k: row[k] for k in _REQUIRED_STR}
@@ -326,7 +259,7 @@ def _card_from_row(row: dict[str, Any]) -> Card | None:
                 continue
         elif isinstance(value, str):
             known[name] = value
-        # нестроковое значение строкового поля (и lesson) — умолчание
+        # non-string value of a string field (and lesson): use the default
     return Card(**known)
 
 
@@ -339,7 +272,7 @@ def _lock_held(path: Path) -> bool:
 
 @contextmanager
 def _cards_lock(path: Path) -> Iterator[None]:
-    """Замок файла карточек; повторный вход в том же потоке не ждёт сам себя."""
+    """Lock of the cards file; re-entry in the same thread does not wait for itself."""
     from core.state_integrity import state_file_lock
 
     key = str(Path(path))
@@ -358,39 +291,32 @@ def _cards_lock(path: Path) -> Iterator[None]:
 
 
 def _tmp_name(path: Path) -> Path:
-    """Свой временный файл у каждого писателя: общий .tmp делили два хода."""
+    """Own temporary file per writer: a shared .tmp was used by two turns."""
     return path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:12]}.tmp")
 
 
-# ── показ в момент ошибки ───────────────────────────────────────────────────
 
 def note_for(workspace: Path | str, tool: str, text: str) -> str | None:
-    """Строка «прошлый опыт» для этой ошибки или None."""
+    """The "past experience" line for this error, or None."""
     card = CardStore(workspace).find(tool, signature(tool, text))
     if card is None or card.status != "active" or not card.lesson:
         return None
     if _untrusted(card.lesson):
-        # A lesson stored before this check may carry injected text: it is
-        # never shown to the planner (проверка 16.11, серьёзная №1).
+        # A lesson stored before this check may carry injected text: never shown to the planner.
         return None
     tally = f"встречалась {card.seen} раз"
     if card.hits + card.misses:
         tally += f"; урок помог {card.hits} из {card.hits + card.misses}"
-    # Урок мог называть код, которого больше нет (core/code_citations.py).
+    # The lesson may name code that no longer exists (core/code_citations.py).
     return f"ПРОШЛЫЙ ОПЫТ ({tally}): {annotate(workspace, card.lesson)}"
 
 
 def witness_note(workspace: Path | str, text: str) -> str | None:
-    """Что охраняет упавший тест — первые строки его описания из кода.
-
-    Описания тестов-свидетелей называют запись реестра (MIR-…, H-…) и причину:
-    так реестры доходят до агента в момент, когда он их задел.
-    """
+    """What a failed test guards: the first lines of its description from the code (witness tests name registry entries and reasons)."""
     m = _FAILED_TEST_RE.search(text or "")
     if m is None:
         return None
-    # Только файлы внутри <workspace>/tests/: «tests/../..» читал чужой файл
-    # (проверка 16.11, мелкая).
+    # Only files inside <workspace>/tests/: "tests/../.." must not read foreign files.
     try:
         tests_dir = (Path(workspace) / "tests").resolve()
         path = (Path(workspace) / m.group(1)).resolve()
@@ -412,16 +338,14 @@ def witness_note(workspace: Path | str, text: str) -> str | None:
 
 
 def _workspace(loop: Any) -> Path | None:
-    """Рабочая папка цикла. Нет её — карточек нет: запасной `Path.cwd()` писал
-    data/failure_cards.jsonl туда, где запущен процесс (тест в копии /root/verify,
-    2026-09-24)."""
+    """Workspace of the cycle; without one there are no cards (a Path.cwd() fallback wrote the file wherever the process ran)."""
     root = getattr(loop, "_file_read_workspace_root", None)
     found = root() if callable(root) else None
     return Path(found) if found else None
 
 
 def with_past_experience(loop: Any, trigger: Any) -> Any:
-    """Сбой шага с приложенным прошлым опытом (в причину — не в улики)."""
+    """Step failure with past experience attached (to the reason, not to evidence)."""
     if trigger is None:
         return trigger
     ws = _workspace(loop)
@@ -437,7 +361,7 @@ def with_past_experience(loop: Any, trigger: Any) -> Any:
 
 
 def experience_notes(loop: Any, artifacts: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Для круга наблюдения: метка шага → прошлый опыт по его мягкому провалу."""
+    """For the observation circle: step label -> past experience for its soft failure."""
     ws, out = _workspace(loop), {}
     if ws is None:
         return out
@@ -459,7 +383,6 @@ def _log(loop: Any, event: str, payload: dict[str, Any]) -> None:
         log.log(event, payload)
 
 
-# ── учёба в конце хода ──────────────────────────────────────────────────────
 
 _LESSON_SYSTEM = (
     "Ты пишешь урок для агента из его собственного опыта. Дан провалившийся "
@@ -474,8 +397,7 @@ _CODE_RE = re.compile(r"\b\d{3}\b")
 
 
 def _lesson_fits(lesson: str, error: str) -> bool:
-    """Урок не называет чужой код ошибки. Проверка 24.09 первых 57 уроков:
-    к ошибке 404 модель написала урок про 403 — такой урок учит не тому."""
+    """The lesson does not name a foreign error code (a lesson about 403 was written for 404)."""
     return all(code in error for code in _CODE_RE.findall(lesson))
 
 
@@ -492,7 +414,7 @@ def _ask_lesson(llm: Any, tool: str, error: str, failed: Any, fixed: Any, fixed_
 
 
 def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Вызовы инструментов хода по порядку: инструмент, аргументы, вывод, провал."""
+    """Tool calls of the turn in order: tool, arguments, output, failure."""
     calls: dict[str, tuple[str, Any]] = {}
     out: list[dict[str, Any]] = []
     for ev in events:
@@ -500,11 +422,7 @@ def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         if ev.get("event") == "tool_call":
             calls[str(p.get("id"))] = (str(p.get("tool_name") or ""), p.get("arguments"))
         elif ev.get("event") == "write_compose_failed":
-            # Текст записи не собрался — file_write даже не зван, но для агента
-            # это провал записи, и планировщик видит его как сбой file_write
-            # (loop_step_execution._compose_write_content). Живой замер 24.09:
-            # «в файл правки пошёл текст без блоков» трижды за один ход, и ни
-            # одной карточки — учёба смотрела только на вызовы инструментов.
+            # A write text that failed to compose never calls file_write, but for the agent it is a write failure (loop_step_execution._compose_write_content); learning must look at it too.
             out.append({"tool": "file_write", "args": {"path": p.get("path")}, "output": None,
                         "fail": f"текст записи не собрался: {p.get('error') or ''}",
                         "ts": str(ev.get("ts") or ""), "trace": str(ev.get("trace_id") or "")})
@@ -521,11 +439,9 @@ def turn_results(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: Any,
                       *, trace_id: str = "", max_new: int = MAX_NEW_PER_TURN) -> CardStore:
-    """Разобрать ход: посчитать повторы, рассудить показанные карточки, выучить новые."""
+    """Review a turn: count repeats, judge shown cards, learn new ones."""
     results = turn_results(events)
-    # Вопросы модели — без замка: замок на Windows ждёт ~10 с, а три вопроса
-    # дольше, и второй процесс падал. Ответы собираются на снимке, потом под
-    # замком файл читается заново, правится и пишется (проверка 16.11, мелкая).
+    # Model queries run without the lock (on Windows the lock waits ~10 s, three queries take longer); answers are gathered on a snapshot, then the file is re-read, edited and written under the lock.
     lessons: dict[int, str | None] = {}
     errors: list[str] = []
 
@@ -543,8 +459,7 @@ def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: 
     def answered(i: int, r: dict[str, Any], fixed: dict[str, Any]) -> tuple[bool, str | None]:
         return (i in lessons), lessons.get(i)
 
-    # Загрузка, правка и запись — под одним замком: тик и ход REPL теряли
-    # карточки друг друга (проверка 16.11, средняя).
+    # Load, edit and write under one lock: a tick and a REPL turn lost each other's cards.
     with _cards_lock(Path(workspace) / CARDS_RELPATH):
         store = CardStore(workspace)
         _learn_pass(store, results, answered, trace_id=trace_id, max_new=max_new)
@@ -555,8 +470,7 @@ def learn_from_events(workspace: Path | str, events: list[dict[str, Any]], llm: 
 
 def _learn_pass(store: CardStore, results: list[dict[str, Any]], lesson_for: Any,
                 *, trace_id: str, max_new: int) -> None:
-    """Один проход разбора по карточкам `store`; урок даёт `lesson_for(i, r, fixed)`
-    → (спрошено ли, урок)."""
+    """One review pass over the `store` cards; `lesson_for(i, r, fixed)` returns (asked, lesson)."""
     start = store.digested.get(trace_id, 0) if trace_id else 0
     asked = 0
     for i in range(start, len(results)):
@@ -581,10 +495,9 @@ def _learn_pass(store: CardStore, results: list[dict[str, Any]], lesson_for: Any
         card.seen += 1
         card.last_seen = r["ts"]
         fixed = next((x for x in later if not x["fail"]), None)
-        # Аргументы провалившегося вызова тоже идут в вопрос модели (проверка 17.11, средняя).
+        # The arguments of the failed call also go into the model query.
         if fixed is not None and _untrusted(r["fail"], r["args"], fixed["args"], fixed["output"]):
-            # Flagged material never becomes a lesson, not even as context
-            # for the model that writes one.
+            # Flagged material never becomes a lesson, not even as context for the model that writes one.
             fixed = None
         if (card.status in _LEARNABLE and not is_guard_refusal(r["fail"]) and fixed is not None
                 and card.asked < _MAX_ASKS and asked < max_new):
@@ -614,7 +527,7 @@ def read_events(path: Path | str) -> list[dict[str, Any]]:
 
 
 def learn_after_turn(loop: Any) -> None:
-    """Конец хода: выучить его провалы. Тормоз оператора на авто-память уважается."""
+    """Turn end: learn its failures; the operator's brake on auto-memory is respected."""
     policy = getattr(loop, "write_policy", None)
     if "agent-auto" in (getattr(policy, "frozen_sources", None) or ()):
         return
@@ -629,7 +542,7 @@ def learn_after_turn(loop: Any) -> None:
         llm = router.for_role(ModelRole.MEMORY_SUMMARY) if router is not None else None
         store = learn_from_events(ws, read_events(path), llm,
                                   trace_id=str(getattr(log, "trace_id", "") or ""))
-        # Урок не спросился — ход живёт, но причина в журнале (проверка 16.11, мелкая).
+        # A lesson was not asked for: the turn lives on, the reason goes to the journal.
         for err in store.lesson_errors:
             _log(loop, "failure_card_lesson_error", {"error": err})
     except Exception as exc:  # noqa: BLE001 — учёба не должна ронять ход; причина — в журнал

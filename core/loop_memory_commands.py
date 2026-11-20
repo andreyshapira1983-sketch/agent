@@ -1,19 +1,8 @@
-"""Операторские команды памяти: запомнить, забыть, показать.
+"""Operator memory commands: remember, forget, show.
 
-`core/loop_methods.py`, откуда это приехало, не было модулем: его сделал
-`core/incremental_splitter.py`, резавший `core/loop.py` по бюджету строк, а не
-по смыслу. Имя `methods` — это «остальное», и по нему нельзя было узнать, что
-внутри лежат пять несвязанных ответственностей.
-
-Это НЕ код цикла. Ни `_run_inner`, ни один из его этапов сюда не заходит —
-зовут отсюда CLI (`cli/command_dispatch.py`, `cli/commands_memory.py`) и
-самопочинка. Оно жило рядом с циклом лишь потому, что оттуда до него
-дотягивался CLI.
-
-`remember` — самый крупный метод: явное распоряжение оператора всё равно
-проходит политику записи, антидот эха и редакцию. Согласие оператора снимает
-вопрос «нужно ли это помнить», но не вопрос «можно ли это хранить».
-"""
+    Not loop code: called from the CLI and self-repair. `remember` still runs the
+    write policy, echo antidote and redaction: operator consent settles whether to
+    remember, not whether the text may be stored."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -25,12 +14,9 @@ from core.redaction import redact_dlp_text
 
 
 class AgentLoopMemoryCommands:
-    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле.
+    """Mixin for ``AgentLoop``; state lives on the composed loop.
 
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется.
-    """
+        Members below are host-contract declarations (no assignments)."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -53,25 +39,13 @@ class AgentLoopMemoryCommands:
     ) -> tuple[MemoryWriteDecision, MemoryRecord | None]:
         """Run a `:remember`-style write through the Write Policy.
 
-        `source` is required on purpose: it is the record's ORIGIN, and only
-        `user-explicit` later counts as independent evidence (MIR-150). A
-        default here would hand the human's voice to whoever forgot the field.
-
-        Returns the decision plus the saved record (or None on reject).
-        The store must be wired; otherwise a reject decision is returned.
-
-        `owner` flows into the Write Policy. Anything outside the first-
-        party whitelist needs a `cross-owner-consent` tag.
-
-        ``existing`` is an optional pre-loaded snapshot of the persistent
-        records used by the dedup gate. When a caller writes many records in
-        one pass (e.g. the knowledge pipeline attempting dozens of agent-auto
-        claims per cycle) it can load the store ONCE and pass the same list in,
-        avoiding a full store reload per write. When provided, any record saved
-        here is appended to it so later writes in the same pass still dedup
-        against it — matching the reload-every-time semantics exactly. When
-        ``None`` (the default) the store is loaded fresh, as before.
-        """
+            `source` is required on purpose: it is the record's ORIGIN, and only
+            `user-explicit` later counts as independent evidence.
+            Returns the decision plus the saved record (None on reject); the store
+            must be wired, else a reject decision is returned. `owner` outside the
+            first-party whitelist needs a `cross-owner-consent` tag.
+            ``existing`` is an optional pre-loaded snapshot for the dedup gate; saved
+            records are appended to it so later writes in the same pass still dedup."""
         if self.persistent_store is None:
             decision = MemoryWriteDecision(
                 "reject", ["persistent store not configured"]
@@ -80,25 +54,16 @@ class AgentLoopMemoryCommands:
             return decision, None
 
         tags = tags or []
-        # Dedup gate (MVP-10) needs the existing records. Load them once and
-        # pass into the policy so the policy stays a pure function. A caller
-        # may supply the snapshot (TD-019) to avoid reloading per write.
+        # Dedup gate needs the existing records; loaded once and passed in so the policy stays pure.
         existing = self.persistent_store.load() if existing is None else existing
-        # Echo gate (A1) needs the recent agent-auto write-log, time-windowed.
-        # Only consulted when a registry is wired; stays a pure input to the
-        # policy. `user-explicit` writes are never echo-guarded.
+        # Echo gate needs the recent agent-auto write-log (time-windowed); `user-explicit` writes are never echo-guarded.
         recent_writes: list[MemoryWriteEvent] = []
-        # `supersedes`: запись ЗАМЕНЯЕТ прежнюю по тому же вопросу, и та уходит
-        # в архив. Исправление почти дословно совпадает с ошибкой, и эхо его
-        # глушило (замер 2026-09-19, пятый прогон библиотеки: «Inflation →
-        # Recombination» отвергнуто как memory_echo_suspected, 0.85). Эхо-камеры
-        # здесь нет — после записи вывод по вопросу один.
+        # `supersedes`: the record REPLACES an earlier one on the same question, which is archived. The echo gate would block a correction that nearly repeats the error, so it is off here.
         if self.memory_write_registry is not None and not supersedes:
             try:
                 recent_writes = self.memory_write_registry.recent()
             except Exception as exc:  # noqa: BLE001 — a registry hiccup must never block a write
-                # ...but the echo gate is OFF for this write, and that is said
-                # (проверка 16.11, мелкая).
+                # The echo gate is OFF for this write, and that is said.
                 recent_writes = []
                 self.log.log("memory_echo_registry_read_failed",
                              {"error": f"{type(exc).__name__}: {exc}"})
@@ -125,9 +90,7 @@ class AgentLoopMemoryCommands:
             return decision, None
 
         safe_content, _secret_findings, pii_findings = redact_dlp_text(content.strip())
-        # Хранится редактированный текст, а политика сравнивала сырой — запись с
-        # PII никогда не узнавалась как дубль. Сверяем ту форму, что ляжет на
-        # диск (проверка 16.11, мелкая).
+        # The redacted text is what gets stored, so compare that form: a record with PII was never recognised as a duplicate.
         if safe_content.strip() != content.strip() and existing:
             from core.memory_hygiene import DEFAULT_DEDUP_THRESHOLD, find_duplicate
 
@@ -168,20 +131,13 @@ class AgentLoopMemoryCommands:
             content=safe_content.strip(),
             tags=tags,
             owner=owner,
-            # MIR-074 root fix: persist the origin. Without it every stored
-            # record read back as origin-less, and the MIR-046 independence
-            # rule demoted every memory citation to topic-only — measured as
-            # the all-history ZERO of verified memory citations.
+            # Persist the origin: without it every record reads back origin-less and memory citations are demoted to topic-only.
             source=source,
         )
         self.persistent_store.save(record)
-        # Keep a caller-supplied snapshot (TD-019) current so subsequent writes
-        # in the same pass dedup against this record, exactly as a fresh reload
-        # would have. Harmless when ``existing`` is a private freshly-loaded list.
+        # Keep a caller-supplied snapshot current so later writes in the same pass dedup against this record.
         existing.append(record)
-        # Record this agent-auto write in the rolling echo-log so the next
-        # cycle's echo gate can see it. Only agent-auto writes are logged —
-        # the registry exists to catch the agent echoing *itself*.
+        # Log this agent-auto write for the next cycle's echo gate; only agent-auto writes are logged.
         if (
             self.memory_write_registry is not None
             and (source or "").strip().lower() == "agent-auto"
@@ -197,7 +153,7 @@ class AgentLoopMemoryCommands:
                     )
                 )
             except Exception as exc:  # noqa: BLE001 — echo-log write must never abort the memory write
-                # ...но сбой пишется в журнал, а не глотается (проверка 16.11, мелкая).
+                # A failure is journaled, not swallowed.
                 self.log.log(
                     "memory_echo_registry_append_failed",
                     {"record_id": record.id, "error": f"{type(exc).__name__}: {exc}"},

@@ -1,11 +1,4 @@
-"""Правила человеческого разговора: судья исходящей реплики (ступень 1).
-
-Заказ оператора 2026-08-28: «не хватает второй половины человеческого
-разговора — если на "привет" приходит программа, это не язык». Судья чистый
-(ни LLM, ни сети): он смотрит на пару «что спросил человек → что собрался
-ответить агент» и выносит механический вердикт. Полная история и три ступени
-плана — docs/CODE_NOTES.md («The other half of the conversation»).
-"""
+"""Outgoing-reply judge (stage 1 of the human-conversation rules): pure, mechanical verdict on a (question, reply) pair."""
 from __future__ import annotations
 
 import re
@@ -13,9 +6,7 @@ from dataclasses import dataclass, field
 
 from core.word_overlap import jaccard as _jaccard
 
-# Регистр «малый разговор»: приветствия, благодарности, прощания, «как дела»
-# по-русски и по-английски. Слово целиком (\b), чтобы «приветствие судьи» не
-# считалось за «привет»; потолок длины — короткая фраза, не письмо.
+# Small-talk register: greetings, thanks, farewells, "how are you" in RU/EN; whole-word matches only.
 _SMALL_TALK_RE = re.compile(
     r"\b(привет|здравствуй(?:те)?|добрый\s+(?:день|вечер)|доброе\s+утро|"
     r"как\s+(?:дела|ты|вы|жизнь)|спасибо|благодарю|пока|до\s+свидания|"
@@ -23,8 +14,7 @@ _SMALL_TALK_RE = re.compile(
     r"how\s+are\s+you|thanks|thank\s+you|bye|goodbye)\b",
     re.IGNORECASE,
 )
-# Приметы «программы» в тексте, который читает человек: секции внутреннего
-# контракта, код-заборы, JSON-скобки в начале, трейсбек.
+# Markers of a "program" in text a human reads: internal contract sections, code fences, leading JSON braces, tracebacks.
 _TECHNICAL_MARKS_RE = re.compile(
     r"(^\s*(?:conclusion|facts|unverified|sources|confidence)\s*:|```|"
     r"^\s*[{\[]|traceback \(most recent call last\))",
@@ -34,23 +24,13 @@ _HUMAN_REPLY_MAX_LEN = 350
 
 _CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE)
 
-# Повтор: та же реплика, что уже уходила недавно, — НО в ответ на ДРУГОЙ
-# вопрос. Урок старого прототипа (таймерный Telegram-спам назван провалом):
-# слать одно и то же без спроса — шум. Граница второго экзаменатора
-# (2026-08-28): человек, повторивший вопрос, заслуживает свой ответ снова —
-# глушить его было бы ложным срабатыванием. Сравнение по множеству слов.
+# Repeat: the same reply sent recently in answer to a DIFFERENT question; a repeated question deserves its answer again. Compared as word sets.
 _REPEAT_JACCARD = 0.9
 _SAME_QUESTION_JACCARD = 0.5
 
 
 def _tokens(text: str) -> frozenset[str]:
-    """Слова ≥3 знаков ПЛЮС полярные коротышки из канонного словаря.
-
-    Находка второго экзаменатора 2026-08-28: правило длины молча резало «не»,
-    и «тест прошёл»/«тест не прошёл» совпадали множествами — судья глушил
-    именно изменение факта. Тот же класс уже чинился в topic_tokens; словарь
-    ОДИН на репозиторий — второй завёл бы болезнь двух словарей.
-    """
+    """Words of 3+ characters plus polarity short words from the canonical dictionary (so "не" is not dropped)."""
     from core.topic_tokens import _POLARITY_WORDS
 
     lowered = (text or "").lower()
@@ -61,15 +41,9 @@ def _tokens(text: str) -> frozenset[str]:
 
 
 def classify_register(incoming: str) -> str:
-    """«small_talk» — короткая человеческая фраза без дела; иначе «substantive».
+    """small_talk = short human phrase with no business, else substantive.
 
-    Болтовня признаётся ВЫЧЕТОМ: после удаления формул вежливости не должно
-    остаться ни одного содержательного знака. Порога длины у фразы нет
-    (константа 60 снята 2026-08-28 по оговорке Codex: вычет покрывает и
-    длинную чистую вежливость). Оставшаяся политика правила названа честно:
-    словарь формул — сам предмет правила; isalnum — ТОЖЕ выбранная граница
-    (его слова), но делегированная юникодному стандарту — лучшая доступная
-    форма выбора, а не его отсутствие.
+    Small talk is recognized by subtraction: after removing politeness formulas no substantive sign may remain; no length threshold.
     """
     text = (incoming or "").strip()
     if not text:
@@ -77,13 +51,8 @@ def classify_register(incoming: str) -> str:
     if not _SMALL_TALK_RE.search(text):
         return "substantive"
     remainder = _SMALL_TALK_RE.sub(" ", text)
-    # Дело признаётся по ЛЮБОМУ содержательному знаку в остатке: «PR?»,
-    # «C?», «γ?» — предмет разговора на любом письме (акронимная родня
-    # MIR-007; все границы — находки Codex, 2026-08-28). Цена ошибки
-    # асимметрична: дело-как-болтовня теряет улики ответа, болтовня-как-дело
-    # лишь оставляет полный ответ — довод действует до конца, поэтому нет ни
-    # порога длины, ни выбранного алфавита: содержательный знак — юникодная
-    # буква или цифра. Утечка («ну привет» получит полный ответ) принята.
+    # Business is any substantive sign (Unicode letter or digit) left over: "PR?", "C?", "γ?" count.
+    # Business-as-chatter loses answer evidence, chatter-as-business only keeps a full answer; the leak is accepted.
     if any(ch.isalnum() for ch in remainder):
         return "substantive"
     return "small_talk"
@@ -91,23 +60,17 @@ def classify_register(incoming: str) -> str:
 
 @dataclass(frozen=True)
 class ReplyJudgement:
-    """Вердикт судьи. ``verdict``: ok | trim | repeat_silence | silence.
-
-    ``human_reply`` заполнен только при trim — механически укороченная
-    человеческая форма (вывод без технических секций). ``reasons`` всегда
-    называют, какое правило сработало; пустые reasons значат «ok».
-    """
+    """Judge verdict: ok | trim | repeat_silence | silence; human_reply is set only for trim; reasons name the rule that fired."""
 
     verdict: str
     reasons: tuple[str, ...] = ()
     human_reply: str | None = None
-    #: Заметки-наблюдения (язык не совпал и т.п.): в журнал, не в поведение —
-    #: механической починки у них нет, чинить будет ступень 2 (LLM-переписка).
+    #: Observations (language mismatch etc.): logged, not acted on; there is no mechanical fix.
     observations: tuple[str, ...] = field(default=())
 
 
 def _conclusion_only(reply: str) -> str | None:
-    """Человеческое ядро ответа: строки Conclusion без остальных секций."""
+    """Human core of a reply: the Conclusion lines without the other sections."""
     lines: list[str] = []
     in_conclusion = False
     for raw in (reply or "").splitlines():
@@ -131,11 +94,9 @@ def judge_reply(
     reply: str,
     recent_exchanges: tuple[tuple[str, str], ...] = (),
 ) -> ReplyJudgement:
-    """Судья пары «вопрос человека → ответ агента». Чистый и детерминированный.
+    """Judge a (human question, agent reply) pair; pure and deterministic.
 
-    ``recent_exchanges`` — недавние пары (входящее, ответ): повтор ответа
-    глушится только когда ВХОДЯЩЕЕ было другим; на повторённый вопрос
-    повторённый ответ законен.
+    recent_exchanges are (incoming, reply) pairs; a repeated reply is silenced only when the incoming message differed.
     """
     text = (reply or "").strip()
     if not text:

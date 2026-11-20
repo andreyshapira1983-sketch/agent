@@ -1,13 +1,8 @@
-"""Сигналы неудач самоулучшения: откуда они берутся и куда уходят.
+"""Self-improvement failure signals: where they come from and where they go.
 
-Вынесено из core/self_build_memory.py: тот модуль ЗАПИСЫВАЕТ исходы попыток
-самосборки в эпизодическую память и вспоминает уроки по адресу, а здесь —
-ЧТЕНИЕ неудач из эпизодов и журналов logs/*.jsonl
-(`_recent_self_improvement_events`), вопросы к ним («есть ли свежая
-неудача», «какие не разрешены»), перенос в реестр проблем
-(`sync_self_improvement_issue_registry`, core/self_improvement_issues.py) и
-выбор действия, когда агенту никто ничего не поставил
-(`idle_self_direction`).
+Reads failures from episodes and logs/*.jsonl (`_recent_self_improvement_events`), answers questions about them, syncs them into the
+issue registry (`sync_self_improvement_issue_registry`, core/self_improvement_issues.py) and picks an action when nobody queued
+anything (`idle_self_direction`). The write side lives in core/self_build_memory.py.
 """
 from __future__ import annotations
 
@@ -51,22 +46,12 @@ def _recent_self_improvement_events(
                 term in lowered
                 for term in ("self-apply", "self-build", "self-split", "splitter", "mixin", "repair")
             )
-            # `outcome` is the structural fact; the wording is the author's
-            # choice. The table this replaced listed rolled_back / rollback /
-            # failed / rejected / duplicate base class / too many lines, so a
-            # self-build run that timed out, was refused by policy, or came
-            # back empty was lost — three such shapes measured 2026-08-15.
-            # `partial` counts: a repair that half-happened is exactly what a
-            # durable issue is for. Measured on the live store, this moves the
-            # admitted set 23 -> 42 of 200, and the registry collapses repeats
-            # by fingerprint, so it is a wider net rather than a flood.
+            # `outcome` is the structural fact; the wording is the author's choice. A repair that half-happened (`partial`)
+            # counts: that is exactly what a durable issue is for. The registry collapses repeats by fingerprint, so this is a
+            # wider net, not a flood.
             failed = getattr(episode, "outcome", "") != "success"
-            # The run's own detectors are a first-class route in, independent
-            # of the word table above. A word table decides intent from
-            # vocabulary, and a fabricated citation says none of these words:
-            # measured 2026-08-14, the agent invented four sources, its verifier
-            # caught it (`citation_fabricated`) and nothing durable recorded it,
-            # so the defect could never be counted and repetition never noticed.
+            # The run's own detectors are a first-class route in, independent of the word table: a fabricated citation says
+            # none of those words, and without this route nothing durable recorded it (`citation_fabricated`).
             signals = [str(s) for s in (getattr(episode, "defect_signals", None) or [])]
             detector_text = _detector_failure_text(signals, text)
             if detector_text is not None:
@@ -117,13 +102,10 @@ def has_fresh_self_improvement_failure(
     *,
     max_age_hours: int = 24,
 ) -> bool:
-    """Была ли СВЕЖАЯ неудача самоулучшения — скоропортящийся сигнал.
+    """Whether there was a FRESH self-improvement failure; a perishable signal.
 
-    Свежая собственная неудача обгоняет рутинный бэклог в выборе действия
-    (MIR-186): контекст поломки выветривается — живой зонд 2026-08-28
-    расходился с тиковым состоянием уже через 3,5 часа, — а измеренный
-    раскол подождёт до завтра. Сутки — окно, в котором трасса, дерево и
-    память ещё говорят об одном и том же.
+        A fresh own failure outranks the routine backlog when picking an action: the context of a breakage fades,
+        so the window is one day, in which trace, tree and memory still tell the same story.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, max_age_hours))
     return any(
@@ -167,9 +149,9 @@ _UNRELIABLE_DETECTOR_SIGNALS: frozenset[str] = frozenset({
 
 
 def _detector_failure_text(signals: list[str], text: str) -> str | None:
-    """Failure text for the durable registry, or None when nothing reliable
-    fired. Unreliable signals are dropped rather than carried — otherwise they
-    ride into the record on a reliable signal's coat-tails."""
+    """Failure text for the durable registry, or None when nothing reliable fired.
+        Unreliable signals are dropped, not carried on a reliable signal's coat-tails.
+    """
     reliable = [s for s in signals if s and s not in _UNRELIABLE_DETECTOR_SIGNALS]
     if not reliable:
         return None
@@ -184,8 +166,7 @@ def sync_self_improvement_issue_registry(
 ) -> SelfImprovementIssueRegistry:
     """Persist recent failures and apply only explicitly matching transitions."""
     registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
-    # Свой сбой становится дефектом, а не только наблюдением (2026-09-22:
-    # за день ни одной записи от агента при десятках срабатываний детекторов).
+    # An own failure becomes a defect, not only an observation.
     from core.defect_intake import intake_observations
 
     intake_observations(workspace, registry)

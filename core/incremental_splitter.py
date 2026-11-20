@@ -1,27 +1,4 @@
-"""Incremental splitter for oversized Python modules (junior-plan item #5).
-
-The one-shot LLM splitter rewrites the whole target file in a single model
-reply, which is bounded by the model's output-token ceiling -- a 4500-line
-module like ``core/loop.py`` can never fit. This module removes that ceiling
-by splitting *deterministically*:
-
-1. **function mode** -- moves a dependency-closed group of top-level
-functions (and the module constants only they use) into a new sibling
-module; the target re-exports every moved name so all existing import paths
-keep working (the hard rule learned from the verifier-split rollbacks). 2.
-**mixin mode** -- when the file is dominated by one huge class (the
-``AgentLoop`` case), moves self-contained methods into a mixin class in a
-new sibling module and adds the mixin to the class bases. Attribute access
-through ``self`` keeps working unchanged.
-
-* moved code may reference ONLY builtins, imported names, and other moved
-names -- never a name that stays behind (that would create a circular
-import); * methods using ``super()``, ``global``/``nonlocal``, or name-
-mangled ``__private`` attributes are never moved (their semantics are tied
-to the defining class/module); * both resulting files must parse; the target
-must actually shrink; every moved top-level name must remain importable from
-the target.
-"""
+"""Deterministic incremental splitter for oversized Python modules (function, mixin and dedup modes)."""
 from __future__ import annotations
 
 import ast
@@ -33,8 +10,7 @@ from typing import Any
 
 _BUILTIN_NAMES = frozenset(dir(_builtins_mod)) | {"__file__", "__name__", "__doc__"}
 
-# Per-step budget: one extraction should stay reviewable, not become a second
-# big-bang. Callers may lower it; raising it far defeats the "incremental" idea.
+# Per-step budget: keeps one extraction reviewable; raising it far defeats "incremental".
 DEFAULT_MAX_MOVE_LINES = 400
 
 # A class is "dominant" when it owns at least this share of the module's lines;
@@ -42,7 +18,6 @@ DEFAULT_MAX_MOVE_LINES = 400
 _DOMINANT_CLASS_RATIO = 0.5
 
 
-# ── data model ───────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -68,7 +43,6 @@ class SplitPlan:
     step: SplitStep | None = None
 
 
-# ── shared AST helpers ───────────────────────────────────────────────────────
 
 
 def _source_slice(lines: list[str], node: ast.stmt) -> str:
@@ -183,13 +157,9 @@ def _module_name(rel: str) -> str:
 def _pick_new_module_path(
     workspace: Path, target: str, suffix: str, *, numbered: bool = True,
 ) -> str | None:
-    """Имя нового модуля. Без нумерации — None, если такое имя уже занято.
+    """Name of the new module, unnumbered; None if the name is already taken.
 
-    Нумерация (`_methods2`) остаётся за режимом примесей: там номер идёт вместе
-    с уникальным именем базового класса, и порядок наслоения закреплён тестом.
-    В режиме функций счётчик называл модуль вместо смысла: 20.09 `episode_tools`
-    ушла в НОВЫЙ `core/smart_memory_helpers2.py`, когда `smart_memory_helpers.py`
-    уже держал её прямую родню. Отменено коммитом 24fb2d4.
+        Numbering (`_methods2`) stays with mixin mode, where the layering order is pinned by a test.
     """
     base = target.replace("\\", "/").removesuffix(".py")
     candidate = f"{base}_{suffix}.py"
@@ -211,13 +181,7 @@ _GENERIC_NAME_TOKENS = frozenset({
 
 
 def _meaningful_suffix(names: list[str]) -> str:
-    """Имя группы по её предмету: самое частое содержательное слово имён.
-
-    Слово должно встретиться хотя бы дважды и хотя бы в пятой части имён
-    (замер 2026-09-21 на доказанных группах живого кода: «claim» — 3 имени из
-    14 в core/knowledge_pipeline.py). Нет такого слова — «helpers», как было;
-    но нумерации в режиме функций больше нет (см. _pick_new_module_path).
-    """
+    """Name a group by its subject: the most frequent meaningful word of the names (at least twice and in a fifth of them); else 'helpers'."""
     counts: dict[str, int] = {}
     for name in names:
         words = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).strip("_").lower().split("_")
@@ -230,7 +194,7 @@ def _meaningful_suffix(names: list[str]) -> str:
 
 
 class _NoHome(Exception):
-    """План раскола есть, а честного имени для нового модуля нет."""
+    """A split plan exists but there is no honest name for the new module."""
 
 
 def _name_of(node: ast.stmt) -> str:
@@ -243,15 +207,9 @@ def _name_of(node: ast.stmt) -> str:
 def _cohesive_group(
     group: list[ast.stmt], names: set[str] | None, max_lines: int,
 ) -> list[ast.stmt]:
-    """ОДНА связная группа из переносимого, а не всё переносимое сразу.
+    """ONE cohesive group of the movable set, not everything movable at once.
 
-    `_movable_function_group` возвращает МАКСИМАЛЬНЫЙ набор всего, что можно
-    унести, не задев оставшееся, — объединение независимых мелочей. 21.09 план
-    для core/step_sanitizer.py вёз в один файл подставные URL, приведение int,
-    окно строк, метку shell и четыре санитайзера разных инструментов: общего у
-    них было только то, что они влезли в 338 строк. Здесь выбирается одна
-    компонента связности (по взаимным ссылкам); с доказательством — та, что
-    содержит доказанные имена, с замыканием по ссылкам, иначе — самая крупная.
+        Picks one connected component by mutual references: with a proof the one holding the proven names (closed over references), else the largest.
     """
     by_name = {_name_of(n): n for n in group}
     adjacent: dict[str, set[str]] = {k: set() for k in by_name}
@@ -274,10 +232,7 @@ def _cohesive_group(
     if names:
         chosen = component(set(names) & by_name.keys(), follow_users=False)
     else:
-        # Член больше бюджета одного шага сам не переедет — и не должен
-        # связывать группы. 21.09 в step_sanitizer всё склеивал `sanitize_step`
-        # (752 строки при бюджете 400): бюджет его отрезал, и уезжали несвязанные
-        # кучки, которые держались вместе только через того, кто остаётся дома.
+        # A member larger than one step's budget cannot move and must not glue groups together.
         hubs = {n for n, node in by_name.items()
                 if (node.end_lineno or node.lineno) - node.lineno + 1 > max_lines}
         for hub in hubs:
@@ -326,16 +281,10 @@ def _names_used_outside_imports(tree: ast.Module, src: str) -> set[str]:
 
 
 def prune_orphaned_imports(src: str) -> str:
-    """Drop top-level imports whose every bound name the module no longer
-    uses, and narrow those partly used — deterministic, AST-driven.
+    """Drop top-level imports whose bound names the module no longer uses, and narrow partly used ones.
 
-    Measured 2026-09-04 (lane, ain_8e92…, third rollback of one split): the
-    slice carried the moved functions' imports into the new module and left
-    them in the target too — 12 unused imports, and the lint-debt guard
-    (`tests/test_ruff_config.py`, a repo-wide count) rolled the apply back.
-    ``__future__`` imports and lines carrying ``noqa`` (re-exports) stay.
-    Unparseable input is returned unchanged: this is a tidy-up, never a
-    gate."""
+        ``__future__`` imports and lines carrying ``noqa`` (re-exports) stay; unparseable input is returned unchanged.
+    """
     try:
         tree = ast.parse(src)
     except (SyntaxError, ValueError):
@@ -376,11 +325,10 @@ def prune_orphaned_imports(src: str) -> str:
 
 
 def _lint_fix_imports(content: str, rel: str, workspace: Path) -> str:
-    """``ruff check --fix`` for the two import rules (I001 sort/format, F401
-    unused), fed through stdin under the workspace's own ruff config — the
-    exact judge the lint-debt guard applies later. Any failure (no ruff, a
-    non-zero exit other than «fixed», empty output) returns the text as it
-    came: a tidy-up, never a gate."""
+    """``ruff check --fix`` for the import rules (I001, F401) via stdin under the workspace's own ruff config.
+
+        Any failure returns the text unchanged: a tidy-up, never a gate.
+    """
     import shutil
     import subprocess  # nosec B404 — fixed argv, our own workspace
 
@@ -406,11 +354,10 @@ def _lint_fix_imports(content: str, rel: str, workspace: Path) -> str:
 
 
 def _sorted_import_slot(tree: ast.Module, module: str) -> int:
-    """1-based line AFTER which ``from <module> import …`` sits in the
-    isort order ruff's I001 expects among the first-party ``from`` imports:
-    before the first such import whose module name sorts later, else after
-    the last import (`_last_import_end`). Measured 2026-09-04: the re-export
-    appended after the block was «un-sorted» — one more finding per split."""
+    """1-based line AFTER which ``from <module> import ...`` sits in ruff's I001 isort order among first-party imports.
+
+        Before the first import whose module sorts later, else after the last import (`_last_import_end`).
+    """
     head = module.partition(".")[0]
     top_imports = [
         n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
@@ -445,7 +392,6 @@ def _last_import_end(tree: ast.Module) -> int:
     return last
 
 
-# ── function mode ────────────────────────────────────────────────────────────
 
 
 def _movable_function_group(
@@ -471,9 +417,7 @@ def _movable_function_group(
         if node is dominant_class:
             continue
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or (
-                # Класс едет, только если его назвало доказательство: 21.09 в
-                # core/knowledge_pipeline.py доказанный предмет «ClaimExtractor
-                # и 13 функций» разрезан — функции уехали, класс остался дома.
+                # A class moves only when the proof names it; otherwise its functions would leave while it stays home.
                 isinstance(node, ast.ClassDef) and node.name in classes):
             if not _uses_forbidden_scope(node):
                 candidates[node.name] = node
@@ -504,10 +448,7 @@ def _trim_to_budget(
 ) -> list[ast.stmt]:
     """Drop trailing members (reverse-dependency-safe) until under budget.
 
-    A member may only be dropped if no kept member references it; dropping from
-    the "most-depended-upon-last" end keeps the moved set closed. We iterate:
-    remove any member nobody else in the set references, largest first, until
-    the total fits.
+        A member may be dropped only if no kept member references it, largest first.
     """
 
     def total(nodes: list[ast.stmt]) -> int:
@@ -560,9 +501,7 @@ def _plan_function_split(
         return None
 
     moved_names = [_name_of(node) for node in group]
-    # Доказанный предмет едет ЦЕЛИКОМ или никак: половина предмета в новом
-    # файле и половина дома — не раскол по смыслу, а разрез (21.09,
-    # core/knowledge_pipeline.py: ClaimExtractor остался, его функции уехали).
+    # A proven subject moves WHOLE or not at all: half in the new file and half at home is a cut, not a split.
     if names and not set(names) <= set(moved_names):
         missing = ", ".join(sorted(set(names) - set(moved_names))[:6])
         raise _NoHome(f"the proven group does not move whole: {missing} would stay behind")
@@ -573,8 +512,7 @@ def _plan_function_split(
     refs -= set(moved_names)
     import_stmts = _needed_import_stmts(tree, lines, refs)
 
-    # Имя — по доказанному предмету, а не по тому, что прицепилось к нему
-    # (константы-зависимости): 21.09 «claim» по группе, «helpers» по перенесённому.
+    # Name by the proven subject, not by constants attached to it as dependencies.
     suffix = _meaningful_suffix(sorted(names) if names else moved_names)
     if names and suffix == "helpers":
         raise _NoHome(
@@ -642,7 +580,6 @@ def _plan_function_split(
     )
 
 
-# ── mixin mode ───────────────────────────────────────────────────────────────
 
 
 def _dominant_class(tree: ast.Module, total_lines: int) -> ast.ClassDef | None:
@@ -802,18 +739,14 @@ def _collapse_blank_runs(text: str) -> str:
     return "\n".join(out)
 
 
-# ── dedup mode ───────────────────────────────────────────────────────────────
 
 
 def _dedup_step(
     workspace: Path, target: str, src: str, tree: ast.Module, proof: Any,
 ) -> SplitStep:
-    """Свести дубль: убрать копию из `target`, взять её импортом у `proof.other`.
+    """Collapse a duplicate: drop the copy from `target` and import it from `proof.other`.
 
-    Правка, которую следует из доказательства «дубль», — не раскол: второй
-    модуль уже держит то же тело, рождать третий файл незачем. Копия
-    выбрасывается, только если тело в `other` по-прежнему то же (по AST, как
-    его сравнил core/split_proof.py); имя другое — берётся с псевдонимом.
+        The copy is dropped only if the body in `other` is still the same (by AST, as core/split_proof.py compared it); a different name is imported with an alias.
     """
     from core.split_proof import _shape
 
@@ -860,7 +793,6 @@ def _dedup_step(
     )
 
 
-# ── public API ───────────────────────────────────────────────────────────────
 
 
 def plan_incremental_split(
@@ -893,8 +825,7 @@ def plan_incremental_split(
     total_lines = src.count("\n") + 1
     dominant = _dominant_class(tree, total_lines)
 
-    # Доказательство правки (core/split_proof.py) решает, ЧТО делать: дубль
-    # сводится импортом, два предмета — выносится доказанная группа.
+    # The proof (core/split_proof.py) decides WHAT to do: a duplicate is collapsed by import, two subjects get the proven group extracted.
     try:
         if getattr(proof, "kind", None) == "dup":
             step = _dedup_step(ws, rel, src, tree, proof)
@@ -912,12 +843,8 @@ def plan_incremental_split(
             f"{rel!r} (every candidate references names that must stay)",
         )
 
-    # The same linter the lane's guard runs, on the same two files, BEFORE the
-    # self-checks (measured 2026-09-04, fifth rollback of one split: the new
-    # module carried whole import statements verbatim — six unused names —
-    # and both import blocks were un-sorted; the repo-wide lint-debt count
-    # rolled the apply back). Import-only rules; ruff absent = text unchanged.
-    if step.new_content:  # у сведения дубля второй модуль не меняется
+    # Run the lane's own linter on the same two files BEFORE the self-checks (import-only rules; ruff absent = text unchanged).
+    if step.new_content:  # for duplicate collapse the second module is unchanged
         step.new_content = _lint_fix_imports(
             prune_orphaned_imports(step.new_content), step.new_module, ws,
         )

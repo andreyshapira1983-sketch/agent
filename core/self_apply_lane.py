@@ -1,27 +1,13 @@
-"""Trusted low-risk self-apply lane (TD-023).
+"""Trusted low-risk self-apply lane.
 
-This closes the first *safe* self-build loop:
-
-    propose -> classify low-risk -> apply on a temp branch -> targeted tests
-    -> full pytest -> rollback (red) OR local commit (green)
-
-It is intentionally NOT general autonomous write access. The lane only touches a
-narrow allowlist of source/test/docs files, works exclusively on a dedicated
-temporary branch, never pushes, never merges to the base branch, and rolls the
-working tree back automatically the moment any test stage fails.
-
-Hard safety gates (checked before any file is touched, first trip wins):
-  0. contradicted instructions   -> status="conflict_block"
-  1. budget kill-switch active   -> status="budget_kill_switch"
-  2. hour budget near-exhaustion -> status="budget_wait"
-  3. pending approvals           -> status="approval_wait"
-  4. patch not classified low-risk / denylisted -> status="rejected"
-  5. target changed since proposal -> status="stale_proposal"
-  6. workspace not clean         -> status="rejected"
-
-The heavy dependencies (git, test runner) are injected so the whole lane is
-unit-testable with fakes — no real provider/network/LLM call ever happens here.
-"""
+    propose -> classify low-risk -> apply on a temp branch -> targeted tests ->
+    full pytest -> rollback (red) OR local commit (green). Touches only a narrow
+    allowlist, works on a dedicated temp branch, never pushes or merges, and rolls
+    back on any test failure. Gates (first trip wins): contradicted instructions
+    (conflict_block), budget kill-switch, hour budget (budget_wait), pending
+    approvals (approval_wait), not low-risk (rejected), stale target
+    (stale_proposal), unclean workspace (rejected). Git and the test runner are
+    injected, so no real provider or network call happens here."""
 from __future__ import annotations
 
 import ast
@@ -51,15 +37,10 @@ from core.self_repair_utils import _tests_passed as _tests_ok
 # Directories whose ``*.py`` files may be auto-applied in this lane.
 _ALLOWED_CODE_DIRS = ("core", "cli", "tools", "tests")
 
-#: Что самоправка агента не трогает никогда — один список на все её пути
-#: (core/protected_paths.py). Полоса не вправе даже ПРЕДЛАГАТЬ правку этих
-#: файлов (слово оператора 2026-09-25).
+#: What self-repair never touches: one list for all its paths (core/protected_paths.py). The lane may not even PROPOSE edits to those files.
 PROTECTED_CORE: frozenset[str] = PROTECTED_FILES
 
-# Explicit denylist — checked *before* the allowlist so a sensitive path can
-# never slip through even if it also happens to look allowlisted (e.g. a
-# ``.md`` file under ``.github``). Matching is by exact relative path or by a
-# path prefix / filename rule.
+# Explicit denylist, checked before the allowlist so a sensitive path never slips through (e.g. a `.md` under `.github`). Matching is by exact relative path, prefix or filename rule.
 _DENY_EXACT = frozenset(
     {
         "config/budget_limits.json",
@@ -67,29 +48,19 @@ _DENY_EXACT = frozenset(
         "config/model_catalog.json",
         "config/budget_limits.example.json",
         "config/model_registry.example.json",
-        # MIR-139/H-39 (слово оператора 2026-08-28): улики ПРОШЛОГО. Правка
-        # судьи меняет будущие вердикты и потому идёт с флагом и глазом
-        # человека; правка реестра/леджера меняет прошлые улики задним
-        # числом — подсудимый не правит материалы своего дела.
+        # Evidence of the PAST: a judge edit changes future verdicts (flagged for a human); a registry/ledger edit would change past evidence retroactively.
         "docs/audit/MASTER_ISSUE_REGISTRY.md",
         "docs/audit/HISTORICAL_FAILURE_LEDGER.md",
-        # Защищённое ядро (журнал исследований оператора 25.09, «Недостающие
-        # части пазла»: ошибка самомодификации не должна уметь сломать
-        # тормоза; исполнитель не оценивает сам себя). Главные правила,
-        # песочницы, сторож подмены инструкций и ПЛАНКИ, которыми его меряют.
+        # Protected core: main rules, sandboxes, the instruction-tamper guard and the benchmarks that measure the agent.
         *PROTECTED_CORE,
     }
 )
 
 
 def judge_touching_note(paths) -> str:
-    """«ПРАВИТ СУДЬЮ» — флаг для глаза оператора (MIR-139).
+    """"EDITS THE JUDGE": a flag for the operator's eye.
 
-    tests/ полосе не запрещены — новые тесты и есть главный продукт агента, —
-    но заявка, трогающая судей, обязана кричать об этом с первой строки:
-    самооценка через собственные тесты остаётся идеальной, пока реальность
-    падает (поле, июль 2026).
-    """
+        tests/ is allowed (new tests are the agent's main product), but a request touching judges must say so from the first line."""
     touched = sorted({
         str(p).replace("\\", "/")
         for p in paths
@@ -123,9 +94,7 @@ class FileChange:
 
     path: str
     content: str
-    #: Состояние файла в момент ПОДАЧИ предложения. Три различимых случая, а не
-    #: два: `base_checked=False` — не смотрели; `True` с пустым хешем — файла не
-    #: было; `True` с хешем — файл был таким. Зачем: MIR-168.
+    #: File state at the moment the proposal was MADE, three cases: `base_checked=False` not looked at; `True` with empty hash the file did not exist; `True` with a hash the file was that.
     base_sha256: str = ""
     base_checked: bool = False
 
@@ -139,10 +108,7 @@ class SelfApplyProposal:
     evidence: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ("tests",)
     test_pattern: str | None = None
-    #: The requirements this patch is answering, each tagged with the authority
-    #: of its source (see ``docs/INSTRUCTION_AUTHORITY.md``). When two of them
-    #: contradict each other the lane refuses to apply anything — an empty
-    #: tuple means "no contradiction was recorded" and the lane proceeds.
+    #: The requirements this patch answers, each tagged with its source authority (``docs/INSTRUCTION_AUTHORITY.md``). If two contradict, the lane applies nothing; an empty tuple means none recorded.
     directives: tuple[Directive, ...] = ()
 
     def __post_init__(self) -> None:
@@ -174,8 +140,7 @@ class SelfApplyReport:
     rejected_files: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     next_human_action: str = ""
-    #: Procedural-memory ids written when the lane refused on a conflict, so an
-    #: operator ruling can be attached to the exact stop it settles.
+    #: Procedural-memory ids written when the lane refused on a conflict, so an operator ruling can be attached to that stop.
     episode_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -236,17 +201,14 @@ def _is_allowed(rel: str) -> bool:
     return bool(lower.endswith(".md"))
 
 
-#: Каталоги, где живёт ПОЛИТИКА — то, что патч меняет по существу.
+#: Directories where POLICY lives: what a patch changes in substance.
 _POLICY_DIRS: tuple[str, ...] = ("core/", "cli/", "tools/", "app/", "api/")
 
 
 def _test_surface(source: str) -> tuple[int, int] | None:
-    """(тестов, проверок) в исходнике, или None, если его не разобрать.
+    """(tests, assertions) in the source, or None if it cannot be parsed.
 
-    Считаются функции с именем `test_*` (включая методы) и операторы `assert`.
-    Это грубая мерка судьи НАРОЧНО: её задача — заметить, что судья стал
-    меньше, а не оценить качество набора.
-    """
+        Counts `test_*` functions (including methods) and `assert` statements; a crude measure on purpose: it only has to notice that the judge became smaller."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -265,21 +227,9 @@ def _test_surface(source: str) -> tuple[int, int] | None:
 def judge_change_risks(
     files: tuple[FileChange, ...] | list[FileChange], *, workspace: Path,
 ) -> list[str]:
-    """Назвать риск, если патч меняет политику и ОСЛАБЛЯЕТ её судью одним актом.
+    """Name a risk if the patch changes policy and WEAKENS its judge in one act.
 
-    MIR-139. Поле разделяет не по «трогать тесты», а по «менять политику и её
-    судью одновременно»: честная работа тесты трогает — Stage A обязан сперва
-    написать ПАДАЮЩИЙ приёмочный тест, а починки правят существующие. Опасна
-    именно та половина, где судья становится МЕНЬШЕ, потому что добавленной
-    проверкой самооценку не поднять.
-
-    Это не второй судья и не ужесточение собственного набора — анти-требование
-    записи запрещает и то, и другое: более строгий самописный аршин остаётся
-    самописным. Решение остаётся у человека в ящике одобрений (§9); здесь
-    закрывается ровно то, чего ему не хватало — что судья изменился и куда.
-
-    Считать надо ДО применения патча: после него «до» уже негде взять.
-    """
+        Not "touching tests" but "changing policy and its judge at once"; the risky half is where the judge gets SMALLER. Not a second judge: the decision stays with a human in the approval inbox. Must be computed BEFORE the patch is applied."""
     changes = list(files)
     policy_touched = [
         rel for rel in (_normalize_rel(c.path) for c in changes)
@@ -295,7 +245,7 @@ def judge_change_risks(
             continue
         existing = Path(workspace) / rel
         if not existing.exists():
-            # Новый файл тестов — прибавка к судье, а не убавка.
+            # A new test file adds to the judge, it does not subtract.
             continue
         try:
             before_src = existing.read_text(encoding="utf-8")
@@ -380,9 +330,7 @@ def _failure_detail(result: Any) -> str:
         return ""
     parts: list[str] = []
     if result.get("timed_out"):
-        # Суточный прогон 2026-09-19: батарея из ~10 000 тестов упёрлась в
-        # лимит 900 с, а урок записал «full pytest failed» — будто правка
-        # что-то сломала. Не успевшая проверка — не проваленная.
+        # A battery of ~10 000 tests can hit the 900 s limit: a check that did not finish is not a failed check.
         parts.append("timed out — no verdict")
     failed_tests = result.get("failed_tests") or []
     if isinstance(failed_tests, (list, tuple)) and failed_tests:
@@ -401,18 +349,16 @@ def _failure_detail(result: Any) -> str:
 
 
 def file_base_sha256(text: str) -> str:
-    """Отметка состояния файла — одна формула на снятие и на сверку (MIR-168)."""
+    """File state mark: one formula for taking and for comparing."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _base_state_gate(
     workspace: Path, changes
 ) -> tuple[SelfApplyReport | None, list[str]]:
-    """Отказ, если файл уже не тот, плюс оговорка, если отметки не было.
+    """Refusal if the file is no longer the same, plus a caveat if no mark was taken.
 
-    Второе возвращаемое — не украшение: «отметку не снимали» не равно «отметка
-    сошлась», и непроверенное обязано называться непроверенным (MIR-168).
-    """
+        "No mark taken" is not "mark matched"; the unchecked must be called unchecked."""
     unverified = [] if all(c.base_checked for c in changes) else ["base_unverified"]
     stale = _stale_changes(workspace, changes)
     if not stale:
@@ -433,11 +379,9 @@ def _base_state_gate(
 
 
 def _stale_changes(workspace: Path, changes) -> list[str]:
-    """Пути, чей файл на диске уже не тот, на котором предложение построено.
+    """Paths whose file on disk differs from the one the proposal was built on.
 
-    Не сверяется молча то, чего не мерили: запись без отметки пропускается
-    здесь и объявляется отдельно. Замер и границы: MIR-168.
-    """
+        A record without a mark is skipped here and declared separately."""
     stale: list[str] = []
     for change in changes:
         if not change.base_checked:
@@ -446,8 +390,7 @@ def _stale_changes(workspace: Path, changes) -> list[str]:
         try:
             current = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            # Файла нет. Это совпадает с предложением только если его не было
-            # и в момент подачи.
+            # The file is gone: matches the proposal only if it did not exist at proposal time.
             if change.base_sha256:
                 stale.append(change.path)
             continue
@@ -456,10 +399,7 @@ def _stale_changes(workspace: Path, changes) -> list[str]:
     return stale
 
 
-#: Документы, которые КОД читает как власть или как маршрут. Документ здесь
-#: бывает не текстом, а решением: хартия выбирает агенту цели и лежит в той же
-#: папке, куда он пишет черновики. Правило «только создание» их и так не
-#: пропустит — запрет назван отдельно, чтобы не опираться на побочный эффект.
+#: Documents that CODE reads as authority or as a route (e.g. the charter picks the agent's goals). "Create only" would not pass them anyway; the ban is named explicitly.
 _AUTHORITY_DOCUMENTS: frozenset[str] = frozenset({
     "knowledge/doctrine/future/CORPORATE_MODEL.md",
     "knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md",
@@ -470,20 +410,9 @@ _AUTHORITY_DOCUMENTS: frozenset[str] = frozenset({
 
 
 def autonomous_execution_verdict(proposal: SelfApplyProposal) -> tuple[bool, str]:
-    """Можно ли применить это предложение БЕЗ человека, и если нет — почему.
+    """Can this proposal be applied WITHOUT a human, and if not, why.
 
-    Правило не даёт новых полномочий. Создавать файлы агент уже вправе через
-    `file_write` — без тестов и без отката; полоса делает то же самое с
-    прицельными тестами, полной батареей и откатом, то есть добавляет проверку
-    к уже разрешённому действию. Всё, что шире, остаётся за человеком.
-
-    Три условия, и каждое отсекает свой класс вреда: файла не должно было
-    существовать (перезапись необратима, I-1); это должен быть документ (новый
-    тест — это новый судья, а приёмка идёт той же батареей, MIR-139); и он не
-    должен быть документом, который код читает как власть.
-
-    Замер и отвергнутые варианты: MIR-173.
-    """
+        The rule grants no new authority: `file_write` may already create files; the lane adds targeted tests, the full battery and rollback. Three conditions: the file did not exist (overwrite is irreversible), it is a document (a new test is a new judge), and not a document the code reads as authority."""
     if not proposal.files:
         return False, "no files in the proposal"
     for change in proposal.files:
@@ -509,14 +438,14 @@ def _write_file(workspace: Path, rel: str, content: str) -> None:
 
 
 def _lane_lock_path(workspace: Path) -> Path:
-    """Файл замка полосы для этого дерева; лежит вне дерева, чтобы не пачкать его."""
+    """Lane lock file for this tree; lives outside the tree so it does not dirty it."""
     root = os.path.normcase(str(Path(workspace).resolve()))
     digest = hashlib.sha256(root.encode("utf-8")).hexdigest()[:16]
     return Path(tempfile.gettempdir()) / f"self_apply_lane_{digest}.lock"
 
 
 def _snapshot_own(workspace: Path, rels: list[str]) -> dict[str, bytes | None]:
-    """Содержимое файлов правки до записи; None — файла не было."""
+    """File contents before the edit; None means the file did not exist."""
     out: dict[str, bytes | None] = {}
     for rel in rels:
         path = Path(workspace) / rel
@@ -534,7 +463,7 @@ def _restore_own(workspace: Path, before: dict[str, bytes | None]) -> None:
 
 
 def _foreign_changes(vcs: Any, workspace: Path, own: set[str]) -> bool:
-    """Есть ли в дереве правки, которых полоса не делала; не узнать — значит есть."""
+    """Whether the tree has edits the lane did not make; if unknowable, there are."""
     reader = getattr(vcs, "status_porcelain", None)
     if reader is None:
         return False
@@ -550,7 +479,7 @@ def _foreign_changes(vcs: Any, workspace: Path, own: set[str]) -> bool:
             if entry not in own:
                 return True
             continue
-        # Неотслеженный каталог git показывает одной строкой: смотрим внутрь.
+        # git shows an untracked directory as one line: look inside.
         for path in (Path(workspace) / entry).rglob("*"):
             rel = path.relative_to(workspace).as_posix()
             if path.is_file() and "__pycache__" not in path.parts and rel not in own:
@@ -574,15 +503,7 @@ def _record_conflict_episodes(
 ) -> tuple[list[str], str]:
     """Bank the stop in procedural memory. Never raises.
 
-    The refusal is the safety-critical part; losing the episode is a memory
-    loss, not a safety failure, so a broken store must not turn a clean refusal
-    into an unhandled error.
-
-    Returns ``(episode_ids, risk_note)``. The note is non-empty only when the
-    write failed: an empty id list would otherwise be indistinguishable from
-    "no episode was needed", and the operator would have no way to know the
-    stop went unrecorded and needs re-banking.
-    """
+        Losing the episode is a memory loss, not a safety failure. Returns ``(episode_ids, risk_note)``; the note is non-empty only when the write failed, so an unrecorded stop is not mistaken for "no episode needed"."""
     try:
         episodes = episodes_from_outcome(
             conflict, context=context, now_iso=now_iso
@@ -647,15 +568,8 @@ def _run_self_apply_lane_locked(  # noqa: PLR0911 — flat: depth 2, all 15 retu
 ) -> SelfApplyReport:
     """Run the trusted low-risk self-apply loop end to end.
 
-    Returns a structured :class:`SelfApplyReport`. Never pushes, never merges,
-    never edits the base branch directly, and rolls back automatically on any
-    test failure or unexpected error.
-    """
-    # 0. contradicted instructions -------------------------------------------
-    # Checked before the budget gates on purpose: a patch answering two
-    # incompatible requirements must not be applied even when there is budget,
-    # no pending approval and the diff looks low-risk. The lane changes nothing
-    # and hands the contradiction back to the operator.
+        Returns a :class:`SelfApplyReport`. Never pushes, merges or edits the base branch directly; rolls back on any test failure or unexpected error."""
+    # 0. contradicted instructions. Checked before the budget gates on purpose: a patch answering two incompatible requirements is not applied even with budget; the contradiction goes back to the operator.
     conflict = evaluate_instruction_conflict(proposal.directives)
     if conflict.is_blocked:
         episode_ids, memory_risk = _record_conflict_episodes(
@@ -761,16 +675,14 @@ def _run_self_apply_lane_locked(  # noqa: PLR0911 — flat: depth 2, all 15 retu
         "acceptable."
     )
 
-    # MIR-139: мерка судьи снимается ЗДЕСЬ — после проверки чистого дерева и
-    # ДО применения патча. Позже «до» уже негде взять: на диске новое.
+    # The judge measure is taken HERE: after the clean-tree check and BEFORE the patch is applied, since afterwards the "before" is gone.
     judge_risks = judge_change_risks(proposal.files, workspace=Path(workspace))
 
     own_before = _snapshot_own(Path(workspace), files_changed)
 
     def _rollback() -> str:
         try:
-            # `reset --hard` и `clean -fd` стёрли бы и чужую правку, сделанную,
-            # пока шли тесты: при ней полоса возвращает только свои файлы.
+            # `reset --hard` and `clean -fd` would erase a foreign edit made while tests ran, so the lane restores only its own files.
             if _foreign_changes(vcs, Path(workspace), set(files_changed)):
                 _restore_own(Path(workspace), own_before)
                 vcs.checkout(original_branch)

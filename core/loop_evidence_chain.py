@@ -1,4 +1,4 @@
-"""Досборка цепочки улик — вырезано из ``core/loop.py`` дословно."""
+"""Evidence chain assembly, moved verbatim out of ``core/loop.py``."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,10 +22,7 @@ class CatalogueResult:
     knowledge: KnowledgePipelineResult
 
 
-#: Виды улик, которые НЕ приходят от инструментов: они уже были у агента до
-#: хода. Каталогизировать их незачем, и хуже — вредно: своя же память,
-#: записанная как новое знание, есть самоподтверждение (доктрина MIR-046 —
-#: собственная запись не независимый свидетель).
+#: Evidence kinds that do NOT come from tools: the agent already had them before the turn. Cataloguing them would be harmful: its own memory recorded as new knowledge is self-confirmation (an own record is not an independent witness).
 _NON_TOOL_EVIDENCE_KINDS: frozenset[str] = frozenset({
     "memory", "user_explicit", "session_dialogue", "llm_claim", "runtime",
     "sensor",  # his own roster/spend blocks: evidence for the verifier, not new knowledge
@@ -33,7 +30,7 @@ _NON_TOOL_EVIDENCE_KINDS: frozenset[str] = frozenset({
 
 
 def chain_has_tool_evidence(chain: Any) -> bool:
-    """Появилось ли на этом ходе хоть что-то, добытое инструментом."""
+    """Whether anything obtained by a tool appeared on this turn."""
     return any(
         getattr(ev, "kind", "") not in _NON_TOOL_EVIDENCE_KINDS
         for ev in getattr(chain, "evidences", ())
@@ -41,9 +38,9 @@ def chain_has_tool_evidence(chain: Any) -> bool:
 
 
 class AgentLoopEvidenceChain:
-    """Досборка цепочки: память, рабочие артефакты, диалог."""
+    """Chain top-up: memory, working artifacts, dialogue."""
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         registry: Any
         memory: Any
@@ -59,9 +56,7 @@ class AgentLoopEvidenceChain:
         last_self_analysis: Any
         _last_persistent_records: Any
 
-        # Объявляем ВЫЗЫВАЕМЫМ атрибутом: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as a CALLABLE attribute: a stub function with an empty body is read by analyzers as "no return" and every call is falsely flagged E1111.
         _sensor_failed: Any
         _knowledge_remember_batch: Any
         _unattended_run: Any
@@ -93,26 +88,21 @@ class AgentLoopEvidenceChain:
             auto_write_memory=(
                 self.knowledge_auto_write if may_knowledge else False
             ),
-            # Unattended runs demand corroboration; a human at the REPL can
-            # judge a single source themselves.
+            # Unattended runs demand corroboration; a human at the REPL can judge a single source.
             require_verified=self._unattended_run(),
-            # Ход не делает найденное в сети фактом памяти (два мира).
+            # The turn does not make web finds into memory facts (two worlds).
             admit_internet=False,
         )
         return CatalogueResult(ranking=ranking, knowledge=knowledge)
 
     def _fold_subagent_evidence(self, chain: ProvenanceChain) -> None:
         """The pages a subagent READ cross the boundary beside what it SAID.
-        Work order 1, pass 2 (2026-09-05): three subagents fetched real pages
-        (HTTP 429, an «unsupported» page, dynamic shells); the parent held only
-        their prose and a count, the verifier booked every claim about them
-        «subagent_asserted», and the honest negative report was suppressed.
-        The spawn tool stashes the child's external evidences; they are folded
-        here, once, with origin `subagent:<name>:<child trace>`."""
+
+        The spawn tool stashes the child's external evidences; they are folded here once, with origin `subagent:<name>:<child trace>`, so honest negative reports are not booked as "subagent_asserted" and suppressed.
+        """
         from core.evidence import Evidence
 
-        # No spawn tool in this registry: nothing to carry, nothing to journal
-        # (a lookup, not a swallowed failure — the silence ratchet counts those).
+        # No spawn tool in this registry: nothing to carry or journal (a lookup, not a swallowed failure).
         tool = next((t for t in self.registry.list() if t.name == "spawn_subagent"), None)
         if tool is None:
             return
@@ -132,11 +122,10 @@ class AgentLoopEvidenceChain:
             })
 
     def _fold_sensor_evidence(self, chain: ProvenanceChain, spend_block: str) -> None:
-        """Блоки собственных сенсоров (реестр моделей, зеркало трат) — улика с
-        цитатой `[sensor:<name>]`. Экзамен 2026-09-04, ход 3: 15 фактов из
-        <model_roster> судья счёл «утверждениями пользователя» и стёр ответ.
-        Отдельный метод, а не строки внутри `_fold_evidence_chain`: тот
-        перенесён дословно и сверяется с историей."""
+        """Blocks of the agent's own sensors (model roster, spend mirror) as evidence with citation `[sensor:<name>]`.
+
+        A separate method: `_fold_evidence_chain` is pinned verbatim to the split.
+        """
         if not spend_block or not spend_block.strip():
             return
         from core.evidence import evidence_from_sensor_block
@@ -144,7 +133,7 @@ class AgentLoopEvidenceChain:
         for name, block in _sensor_blocks(spend_block):
             try:
                 chain.add(evidence_from_sensor_block(name=name, content=block))
-            except Exception as exc:  # noqa: BLE001 — сборка цепочки не роняет ход; пропуск назван
+            except Exception as exc:  # noqa: BLE001 — chain assembly does not drop the turn; the skip is named
                 self.log.log("sensor_evidence_skipped", {"sensor": name, "error": repr(exc)[:200]})
 
     def _fold_evidence_chain(
@@ -153,22 +142,10 @@ class AgentLoopEvidenceChain:
         *,
         persistent_block: str,
     ) -> None:
-        """Досыпать в цепочку то, что пришло не через шаги плана."""
+        """Add to the chain what did not come through plan steps."""
         if persistent_block and self.persistent_store is not None:
-            # `persistent_block` was built from a small set of records
-            # in `_retrieve_persistent`; we replay that retrieval cheaply
-            # by re-asking the store for the keyword match.
-            #
-            # The guard is PER RECORD, not around the loop (MIR-061). With the
-            # try outside, one record that failed to convert abandoned the
-            # whole loop and every record after it vanished from the chain
-            # silently — measured at 1 of 5 arriving — while this comment
-            # claimed the loop completed normally. The verifier then judged the
-            # answer against a truncated chain, so citations that should have
-            # resolved came back `cited_but_unmatched` for a reason unrelated
-            # to the answer. The adjacent working-artifact loop below has
-            # always had the correct granularity; these two must not drift
-            # apart again.
+            # `persistent_block` was built from a small set of records in `_retrieve_persistent`; replay that retrieval by re-asking the store for the keyword match.
+            # The guard is PER RECORD, not around the loop: one failed conversion must not drop every record after it, or the verifier judges a truncated chain and citations come back `cited_but_unmatched`.
             for rec in self._last_persistent_records:
                 try:
                     chain.add(
@@ -180,10 +157,7 @@ class AgentLoopEvidenceChain:
                         )
                     )
                 except Exception as exc:  # noqa: BLE001
-                    # Defence-in-depth: chain assembly must NEVER abort the
-                    # run. But a dropped record is reported rather than
-                    # swallowed — silently, the truncation is indistinguishable
-                    # from an ordinary evidence shortfall.
+                    # Chain assembly must NEVER abort the run, but a dropped record is reported, since silent truncation looks like an ordinary evidence shortfall.
                     self.log.log(
                         "memory_evidence_skipped",
                         {
@@ -193,12 +167,7 @@ class AgentLoopEvidenceChain:
                         },
                     )
 
-        # MVP-14.1b — fold Working Memory (cached tool outputs from prior
-        # turns) into the chain so the Verifier can resolve [memory:…]
-        # citations that reference conversation-history artefacts.
-        # The LLM may generate citation bodies like `turn_3_test_results`;
-        # we expose the artefact label and turn index in source_id so the
-        # token-overlap fallback has material to work with.
+        # Fold Working Memory (cached tool outputs from prior turns) into the chain so the Verifier can resolve [memory:...] citations; artefact label and turn index go in source_id for the token-overlap fallback.
         if self.memory is not None:
             for _art in self.memory.artifacts.values():
                 try:
@@ -207,8 +176,7 @@ class AgentLoopEvidenceChain:
                     _output = _art.get("output")
                     if _output is None or not _label:
                         continue
-                    # Sanitise label for use in source_id: replace `:` with
-                    # `_` so it doesn't confuse the citation prefix parser.
+                    # Sanitise the label for source_id: replace `:` with `_` so the citation prefix parser is not confused.
                     _sid_label = _label.replace(":", "_")
                     chain.add(make_evidence(
                         kind="memory",
@@ -218,12 +186,10 @@ class AgentLoopEvidenceChain:
                         excerpt=str(_output)[:500],
                         confidence=0.85,
                     ))
-                except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
+                except Exception as exc:  # noqa: BLE001 — observing sensor: failure is journaled, the turn goes on
                     self._sensor_failed("working_memory_evidence", exc)
 
-        # Issue #119 — дословная запись обмена. Гейт «только самокоррекция»
-        # снят (прогон 2026-08-03: честная ссылка звалась выдумкой); держит
-        # verifier_core — `dialogue_supported` лишь чанку про сам обмен.
+        # Verbatim record of the exchange; the self-correction-only gate is gone, and verifier_core limits `dialogue_supported` to chunks about the exchange itself.
         _recent_turns = self.memory.recent_turns(3) if self.memory is not None else []
         if _recent_turns:
             _dialogue_added = 0
@@ -251,24 +217,19 @@ class AgentLoopEvidenceChain:
                 "dialogue_evidence_admitted",
                 {
                     "turns": _dialogue_added,
-                    # Причина всегда «история есть»; отметку самоанализа держим
-                    # отдельным полем — разбор прогонов различает ход-упрёк.
+                    # The reason is always "history exists"; the self-analysis mark is a separate field (run analysis tells a reproach turn apart).
                     "reason": "session_history_present",
                     "self_analysis": getattr(self.last_self_analysis, "is_self_analysis", False),
                 },
             )
 
-        # Store the chain on the agent so tests / future Verifier code
-        # can consult it after `run()` returns.
+        # Store the chain on the agent so tests / Verifier code can consult it after `run()` returns.
         self.last_provenance = chain
 
     def _mark_own_cached_evidence(self, chain: ProvenanceChain) -> None:
         """A cached result is as independent as the call that made it, no more.
 
-        A cached `memory_recall` or a read of the agent's own data/ became
-        «working memory» evidence that counted as independent proof. Kept apart
-        from `_fold_evidence_chain`, whose body is pinned verbatim to the split
-        (tests/test_loop_evidence_chain_split.py) (проверка 17.11).
+        A cached `memory_recall` or read of the agent's own data/ must not count as independent proof. Kept apart from `_fold_evidence_chain`, whose body is pinned verbatim (tests/test_loop_evidence_chain_split.py).
         """
         from dataclasses import replace
 
@@ -308,14 +269,8 @@ class AgentLoopEvidenceChain:
         may_knowledge: bool,
         may_source_registry: bool,
     ) -> tuple[bool, SourceRankingReport, Any]:
-        """Теневой вердикт сенсора, ранжирование источников и реестр."""
-        # MAST FM-3.1 — premature completion risk, keyword detector.
-        # RETAINED FOR SHADOW COMPARISON ONLY. It is no longer the source of
-        # truth: measured at 1/12 recall on phrasings that unambiguously demand
-        # a tool, and it fires on «объясни разницу…» because `разниц` is a
-        # diff-tool keyword. The obligation check that replaces it runs after
-        # composition, and this verdict is carried into its event so the two can
-        # be compared on real traffic.
+        """Shadow sensor verdict, source ranking and registry."""
+        # Keyword detector for premature completion, RETAINED FOR SHADOW COMPARISON ONLY: low recall (1/12) on phrasings that demand a tool. The obligation check that replaces it runs after composition; this verdict rides in its event for comparison.
         _premature_keyword_fired = False
         try:
             _pc = self._termination_guard.check_completion(
@@ -328,7 +283,7 @@ class AgentLoopEvidenceChain:
                 self.log.log(
                     "premature_completion_risk", _pc.to_log_payload()
                 )
-        except Exception as exc:  # noqa: BLE001 — наблюдательный сенсор: сбой журналируется, ход не ломается
+        except Exception as exc:  # noqa: BLE001 — observing sensor: failure is journaled, the turn goes on
             self._sensor_failed("premature_completion_risk", exc)
 
         self.log.log(
@@ -340,26 +295,8 @@ class AgentLoopEvidenceChain:
             },
         )
         if cheap_path_active and not chain_has_tool_evidence(chain):
-            # Cheap path: nothing was FETCHED this turn, so the knowledge
-            # pipeline and source-registry build have nothing new to catalog.
-            #
-            # H-05 (Therac-25 class, docs/audit/HISTORICAL_FAILURE_LEDGER.md).
-            # This used to read «the chain is empty (no tools ran)» and decide
-            # on the cheap-path flag alone. Measured end-to-end on the turn
-            # «привет» with one persistent record: the flag is set and the
-            # chain holds ONE `memory` evidence — memory is folded in
-            # (`_fold_evidence_chain`) BEFORE this decision. The premise was
-            # false while the behaviour was right, which is exactly the shape
-            # that killed the Therac patients: the machine's statement about
-            # itself diverged from what it was.
-            #
-            # Behaviour is deliberately unchanged. Running the pipeline over a
-            # memory-only chain would bank the agent's own record as new
-            # knowledge — self-confirmation, the doctrine MIR-046 states. What
-            # changed is that the condition now checks the thing it claims, so
-            # the two cannot drift apart silently.
-            # Ranked all the same: the event is what tells a reader the chain
-            # carried nothing new rather than went unexamined.
+            # Cheap path: nothing was FETCHED this turn, so the knowledge pipeline and source-registry build have nothing new to catalog.
+            # The condition checks what it claims (a memory-only chain is not new knowledge: running the pipeline would bank the agent's own record as knowledge, self-confirmation). Ranked all the same, so the event shows the chain carried nothing new rather than went unexamined.
             source_ranking = rank_chain(chain, question=user_question)
             self.last_source_ranking = source_ranking
             self.log.log("source_ranking", source_ranking.to_log_payload())
@@ -389,9 +326,7 @@ class AgentLoopEvidenceChain:
 
 
 def _sensor_blocks(text: str) -> list[tuple[str, str]]:
-    """Split the spend mirror text into its tagged blocks: `<model_roster>…`
-    becomes ("model_roster", …), `<spend_mirror>…` likewise; untagged text is
-    one block named «spend_mirror»."""
+    """Split the spend mirror text into tagged blocks: `<model_roster>...` becomes ("model_roster", ...); untagged text is one block named "spend_mirror"."""
     import re
 
     found = re.findall(r"<([a-z_]+)>(.*?)</\1>", text, flags=re.DOTALL)

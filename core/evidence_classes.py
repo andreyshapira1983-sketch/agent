@@ -1,26 +1,6 @@
-"""Evidence classes — *what kind* of support a claim actually needs (issue
-#119).
-
-``self_analysis`` The agent's reasoning *about* the two classes above. It is
-a deliverable, not a source, so it is never promoted to ``verified`` — but
-it is also not an unsupported world claim, and deleting it is a defect.
-
-* :func:`is_self_analysis_turn` — is the *turn* a conversational correction
-or a request to explain the agent's own previous reply? Requires a prior
-turn to exist, so it can never fire on the first message of a session. *
-:func:`is_dialogue_scoped_claim` — is this *chunk* a statement about the
-preceding interaction, as opposed to a claim about the world that happens to
-be phrased in the first person? Both a person marker and a dialogue-object
-marker are required, so "Я рекомендую купить X" stays an ordinary world
-claim and only "Мой предыдущий ответ не отвечал на вопрос" becomes dialogue-
-scoped.
-
-Under-crediting is the deliberately safe direction here: a self-analysis
-sentence this module fails to recognise is treated exactly as it was before,
-so the worst regression is the status quo. Over-crediting is what would let
-an unsupported world claim ride out on a first-person pronoun, which is why
-the second marker is mandatory.
-"""
+"""Evidence classes: what kind of support a claim needs, plus self-analysis and dialogue-scope detection."""
+# Under-crediting is the safe direction: unrecognised self-analysis is treated as before. The second marker
+# is mandatory so a world claim cannot ride out on a first-person pronoun.
 from __future__ import annotations
 
 import re
@@ -35,9 +15,7 @@ EvidenceClass = Literal[
     "generative",
 ]
 
-#: Evidence kinds (``core.evidence.EvidenceKind``) per class. ``llm_claim`` and
-#: ``unknown`` are deliberately absent: an ungrounded model assertion belongs to
-#: no evidence class and stays unsupported.
+#: Evidence kinds per class; llm_claim and unknown are absent on purpose: an ungrounded model assertion stays unsupported.
 _KIND_TO_CLASS: dict[str, EvidenceClass] = {
     "file": "external_world",
     "web_page": "external_world",
@@ -49,10 +27,7 @@ _KIND_TO_CLASS: dict[str, EvidenceClass] = {
     "memory": "external_world",
     "user_explicit": "external_world",
     "log_event": "trace",
-    # This run measuring itself. `trace`, not `external_world`: it says what
-    # the agent IS running on, never what is true outside it. Added 2026-08-14
-    # so a claim about the agent's own body can be verified instead of landing
-    # in the same "cannot be determined" as everything else about itself.
+    # This run measuring itself: "trace", not "external_world"; says what the agent runs on, not what is true outside.
     "runtime": "trace",
     # A block the loop read from its own journals: about this agent, never the world.
     "sensor": "trace",
@@ -61,27 +36,15 @@ _KIND_TO_CLASS: dict[str, EvidenceClass] = {
 
 
 def classify_evidence(ev: Any) -> EvidenceClass | None:
-    """Which class does this :class:`~core.evidence.Evidence` belong to?
-
-    ``None`` for kinds that support nothing on their own (``llm_claim``,
-    ``unknown``, or an unrecognised kind) — the caller must not treat those as
-    support of any class.
-    """
+    """Class of an Evidence, or None for kinds that support nothing on their own (llm_claim, unknown, unrecognised)."""
     kind = str(getattr(ev, "kind", "") or "")
     return _KIND_TO_CLASS.get(kind)
 
 
-# ── Turn classification ──────────────────────────────────────────────────────
 
-# The operator addressing the agent itself. Without one of these a sentence
-# about "an incorrect answer" is about someone else's answer — a server's, an
-# API's, a colleague's — and must not disable world-fact verification.
-#: Разбор СОБСТВЕННОЙ ОБРАБОТКИ ТЕКУЩЕГО хода. Два условия в одном образце, и
-#: оба обязательны: предмет — своя работа (поведение, обработка, маршрутизация,
-#: трасса, компоненты системы), и указатель — на ЭТО сообщение/прогон. Порознь
-#: они ловят обычные вопросы: «этот проект» — указатель без предмета, «проверь
-#: маршрутизацию» — предмет без указателя. Латиница отдельной ветвью: оператор
-#: пишет транслитом, и слепота к этому уже стоила подавленного ответа.
+# The operator addressing the agent itself; otherwise "an incorrect answer" is someone else's and must not disable world-fact verification.
+#: Analysis of the agent's own processing of the CURRENT turn: needs both a subject (own work) and a pointer (this message/run);
+#: Latin transliteration has its own branch.
 _CURRENT_RUN_INTROSPECTION_RE = re.compile(
     r"(?:"
     r"(?:сво[ей]|твоё|твое|твоей|твоего|твоя|твои)\s+"
@@ -114,7 +77,6 @@ _AGENT_ADDRESSED_RE = re.compile(
     r")(?:\W|$)"
 )
 
-# The operator saying the previous reply was wrong / must be fixed / explained.
 _CORRECTION_RE = re.compile(
     r"(?i)("
     r"не\s*правильн\w*|неправильн\w*|"
@@ -129,7 +91,6 @@ _CORRECTION_RE = re.compile(
     r")"
 )
 
-# The subject under discussion is the exchange itself, not the world.
 _DIALOGUE_OBJECT_RE = re.compile(
     r"(?i)("
     r"ответ\w*|отвеч\w*|вопрос\w*|спрос\w*|сказал\w*|"
@@ -139,7 +100,6 @@ _DIALOGUE_OBJECT_RE = re.compile(
     r")"
 )
 
-# First / second person marker inside a *claim* the agent wrote about itself.
 _CLAIM_PERSON_RE = re.compile(
     r"(?i)(?:^|\W)("
     r"я|мне|меня|мой|моя|моё|мое|мои|моего|моём|моем|"
@@ -169,29 +129,15 @@ def is_self_analysis_turn(
     *,
     has_prior_turn: bool,
 ) -> SelfAnalysisDecision:
-    """Is this turn a conversational correction / self-analysis request?
+    """Is this turn a conversational correction or self-analysis request?
 
-    Three conditions, all required:
-
-    1. a prior turn exists in this session (otherwise there is nothing to
-       analyse and no dialogue evidence to offer);
-    2. the operator addresses the agent in the second person;
-    3. the operator says something was wrong, or asks the agent to explain or
-       repair its own reply.
-
-    The exact live prompt from issue #119 — «плохо справился Ты не правильно
-    ответила некорректно тебе надо тебя починить …» — satisfies all three.
+    Requires a prior turn, a second-person address, and a statement that something was wrong or a request to explain/repair the reply.
     """
     text = (question or "").strip()
     if not text:
         return SelfAnalysisDecision(False, "empty_question")
 
-    # Вторая дорога, и у неё другая улика. Условие «нужен прошлый ход» верно
-    # для просьбы объяснить ПРОШЛЫЙ ответ, но разбор ТЕКУЩЕГО прогона опирается
-    # на `trace` — класс из этой же таксономии, существующий с первого
-    # сообщения. 2026-08-10 первый ход сессии просил разобрать обработку именно
-    # этого сообщения и был вырезан гейтом улик: спрашивали историю там, где
-    # улика лежала в журнале.
+    # Second road: analysis of the CURRENT run rests on trace evidence, which exists from the first message, so no prior turn is needed.
     own_run = _CURRENT_RUN_INTROSPECTION_RE.search(text)
     if own_run is not None:
         return SelfAnalysisDecision(
@@ -213,14 +159,7 @@ def is_self_analysis_turn(
 
 
 def is_dialogue_scoped_claim(text: str) -> bool:
-    """Is this claim a statement about the preceding interaction?
-
-    Scope is judged from the claim's own wording, never from a citation the
-    model attached to it. A model that writes ``[dialogue:turn_1]`` after
-    "the central bank rate is 21%" is asserting scope, not demonstrating it;
-    letting that token decide would hand any world claim the transcript's
-    support for the cost of one bracket.
-    """
+    """Is this claim about the preceding interaction? Judged from its own wording, never from a citation the model attached."""
     body = text or ""
     if not body.strip():
         return False

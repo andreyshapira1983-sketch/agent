@@ -1,28 +1,4 @@
-"""Судья относимости: отвечает ли ответ на заданный вопрос — по утверждениям.
-
-Прежняя мера (`core/confidence_vector.relevance_score`) — доля слов вопроса,
-встреченных в ответе. Длинный разговорный вопрос несёт десятки слов
-обращения («тебе», «сегодня», «значит»), и точный ответ получает 0.2–0.4.
-Замер 2026-09-21 на 126 ответах мостика: предупреждение «может отвечать не на
-заданный вопрос» — на 65 (52 %), справедливых около 16; и тот же порог
-закрывал этим ответам вход в опыт (`core/smart_memory.py`).
-
-Способ взят у DeepEval (AnswerRelevancy): модель выделяет утверждения ответа
-и о каждом говорит yes / no / idk — относится ли оно к тому, что спрошено;
-оценка = (yes + idk) / всего, «idk» не штрафуется. Тот же замер: ниже порога
-0.35 — 13 ответов, все 13 верно (7 встречных уточнений вместо работы, 2
-неотправленных черновика, 2 сбоя, 2 ответа на ПРЕДЫДУЩИЙ вопрос). Цена —
-один вызов модели на ответ.
-
-Нет оценки (None) — работает прежняя мера. Здесь None значит: выключен,
-пусто, ответ судьи не по форме. Сбой САМОГО вызова (поставщик недоступен)
-этот модуль не перехватывает — его ловит цикл
-(`core/loop_verification._judged_relevance`: журнал `sensor_failed`, None),
-чтобы сбой был виден, а не проглочен. Поправка по находке самого агента
-2026-09-22: прежний текст обещал здесь то, чего в этом файле нет.
-Включается `AGENT_RELEVANCE_JUDGE=1` (в `.env` рабочей папки); без него —
-ни одного вызова, как в тестах.
-"""
+"""Relevance judge: whether an answer addresses the asked question, claim by claim (yes / no / idk; score = (yes + idk) / total); None means no score (off, empty, malformed verdict) and the old measure applies. Enabled by AGENT_RELEVANCE_JUDGE=1, otherwise no calls."""
 from __future__ import annotations
 
 import json
@@ -30,8 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-#: Сколько текста вопроса и ответа видит судья. Ответы мостика — до ~8 000
-#: знаков; дальше обычно хвосты проверки, а не суть.
+#: How much question and answer text the judge sees; bridge answers run to ~8 000 chars and the rest is usually verification tails.
 _QUESTION_CHARS = 6_000
 _ANSWER_CHARS = 8_000
 _MAX_TOKENS = 3_000
@@ -65,7 +40,7 @@ def judge_enabled() -> bool:
 
 
 def parse_verdict(raw: str) -> RelevanceVerdict | None:
-    """Ответ судьи → оценка; всё, что не по форме, — None."""
+    """Judge reply -> score; anything malformed is None."""
     try:
         data = json.loads(raw or "")
     except json.JSONDecodeError:
@@ -87,7 +62,7 @@ def parse_verdict(raw: str) -> RelevanceVerdict | None:
 
 
 def judge_relevance(llm: Any, question: str | None, answer: str | None) -> RelevanceVerdict | None:
-    """Один вызов судьи. None — оценки нет (выключен, пусто, сбой, не по форме)."""
+    """One judge call; None means no score (off, empty, failure, malformed)."""
     if llm is None or not judge_enabled():
         return None
     question, answer = (question or "").strip(), (answer or "").strip()

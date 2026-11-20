@@ -1,14 +1,8 @@
-"""MVP-13.2 self-repair controller.
-
-The controller composes the already-safe primitives into one guarded repair
-transaction:
+"""Self-repair controller: one guarded repair transaction.
 
     diagnose -> diff -> approval -> write -> tests -> rollback on red
 
-It deliberately does not invent patches. A caller supplies a RepairProposal
-with the target path and proposed replacement content. A future planner can
-produce that proposal, but this module owns the safety envelope around
-applying it.
+It does not invent patches: a caller supplies a RepairProposal (target path, replacement content); this module owns the safety envelope around applying it.
 """
 
 from __future__ import annotations
@@ -155,13 +149,7 @@ class SelfRepairController:
             ),
         )
         report.steps.append(write.step)
-        # The write tool physically applies the change and registers its
-        # compensation plan *inside* `_call_tool`, which runs before this
-        # controller's own post-call validation gate (see `_execute_tool`).
-        # So a write that ultimately reports not-ok (e.g. output validation
-        # failed) may already have modified the file on disk. Resolve the
-        # registered plan first, and if one exists, roll it back on abort so
-        # a failed write never leaves an orphaned change behind.
+        # The write tool applies the change and registers its compensation plan inside `_call_tool`, BEFORE this controller's post-call validation gate, so a write reporting not-ok may already have changed the file. Resolve the registered plan first and roll it back on abort.
         report.compensation_plan_id = _new_compensation_plan_id(
             before_plan_ids,
             self.agent.compensation_log,
@@ -514,12 +502,7 @@ class SelfRepairController:
                     summary=content,
                     tools_used=("shell_exec", "run_tests"),
                     tags=("lesson", "bug-fix", "regression-guard"),
-                    # Settled here, at banking, like every other writer (MIR-057).
-                    # `_write_repair_lesson` only runs for `status == "repaired"`,
-                    # so the verdict is not a guess. Leaving it unset was not
-                    # neutral: `admit_for_storage` grants a `lesson`-tagged record
-                    # `usage_eligible=True` (MIR-042), so an unclassified repair
-                    # lesson gets replayed into prompts carrying no verdict at all.
+                    # Settled here at banking, like every other writer: `_write_repair_lesson` runs only for `status == "repaired"`. Leaving it unset was not neutral: `admit_for_storage` grants a `lesson` record `usage_eligible=True`, so an unclassified lesson would be replayed with no verdict.
                     completion_state="achieved",
                 )
                 self.agent.episodic_store.save(ep)
@@ -532,12 +515,7 @@ class SelfRepairController:
                 },
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # A confirmed repair already landed on disk; failing to persist the
-            # LESSON must not crash the repair flow, so we still swallow the
-            # exception here. But it must NOT be silent: a swallowed memory
-            # write means the agent quietly fails to learn from the repair and
-            # nobody ever finds out. Surface it as an error event so the loss is
-            # observable (telemetry / audit) instead of invisible.
+            # A confirmed repair already landed; failing to persist the LESSON must not crash the flow, so the exception is swallowed, but surfaced as an error event so the loss is observable.
             try:
                 self.agent.log.log(
                     "repair_lesson_save_failed",

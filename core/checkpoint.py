@@ -1,36 +1,4 @@
-"""§3.5 Checkpoint / Resume — durable mid-run state.
-
-A *checkpoint* is a single JSONL line written to
-``logs/checkpoints_<trace_id>.jsonl`` every time the agent loop crosses a
-named phase boundary.  On ``--resume <trace_id>`` the CLI loads the LAST
-checkpoint for that trace and uses it to fast-forward the loop past already-
-completed phases.
-
-Design constraints
-------------------
-* **Zero new dependencies** — stdlib + project's own ``core.ids``.
-* **Append-only** — we only write; reading uses the *last* record in the file
-  so partial writes (e.g. Ctrl+C mid-serialisation) are automatically ignored.
-* **Opaque payloads** — the ``data`` field is ``dict[str, Any]``; the loader
-  does not validate it beyond type-checking.  The loop owns interpretation.
-* **No sensitive data** — artifacts and tool outputs are stored as metadata
-  only (label + tool name + char count).  Raw output never goes to disk here;
-  that's the TraceLogger's job.
-
-Phases saved
-------------
-``observe``   — trace_id, question, file_hint written right after Observation.
-``plan``      — attempt number + list of step IDs (step tools and arg hashes).
-``act``       — per-step outcome: label, tool, chars, status (done/failed).
-``respond``   — final answer (text) + char count.
-``paused``    — resumable budget stop metadata.
-
-Recovery semantics
-------------------
-The ``CheckpointLoader`` replays only from the LAST ``respond`` checkpoint.
-If no ``respond`` was saved (crash during act), the loader returns ``None`` so
-the full cycle runs again — safer than partial-answer injection.
-"""
+"""Durable mid-run checkpoints: append-only JSONL per trace, and resume loading (replays only from the last `respond` checkpoint)."""
 from __future__ import annotations
 
 import json
@@ -46,7 +14,6 @@ from core.state_integrity import backup_state_file
 
 logger = logging.getLogger(__name__)
 
-# ── public phase constants ──────────────────────────────────────────────────
 
 PHASE_OBSERVE = "observe"
 PHASE_PLAN    = "plan"
@@ -57,7 +24,6 @@ PHASE_PAUSED  = "paused"
 _VALID_PHASES = {PHASE_OBSERVE, PHASE_PLAN, PHASE_ACT, PHASE_RESPOND, PHASE_PAUSED}
 
 
-# ── data model ───────────────────────────────────────────────────────────────
 
 @dataclass
 class CheckpointRecord:
@@ -91,12 +57,7 @@ class CheckpointRecord:
 
 @dataclass
 class ResumeContext:
-    """What the loop receives when --resume is used.
-
-    ``answer`` is set only when the *last* checkpoint phase is ``respond``
-    (i.e. the previous run completed synthesis). In that case the loop can
-    return the cached answer immediately without re-running the LLM.
-    """
+    """What the loop receives on --resume; `answer` is set only when the last checkpoint phase is `respond`."""
 
     trace_id: str
     last_phase: str
@@ -108,7 +69,6 @@ class ResumeContext:
     paused: dict[str, Any] | None = None
 
 
-# ── writer ───────────────────────────────────────────────────────────────────
 
 class CheckpointWriter:
     """Appends checkpoint records to ``<log_dir>/checkpoints_<trace_id>.jsonl``."""
@@ -188,11 +148,9 @@ class CheckpointWriter:
         return self.save(PHASE_PAUSED, data)
 
 
-# ── loader ───────────────────────────────────────────────────────────────────
 
 class CheckpointLoader:
-    """Reads the checkpoint file for a given ``trace_id`` and builds
-    a :class:`ResumeContext` from the last complete set of records."""
+    """Builds a :class:`ResumeContext` from the last complete set of records for a ``trace_id``."""
 
     def __init__(self, log_dir: Path) -> None:
         self._log_dir = log_dir
@@ -204,14 +162,9 @@ class CheckpointLoader:
         return self._path_for(trace_id).exists()
 
     def load(self, trace_id: str) -> ResumeContext | None:
-        """Return a ``ResumeContext`` or ``None`` if no usable checkpoint exists.
+        """Return a ``ResumeContext``, or ``None`` (safe full re-run) when no usable checkpoint exists.
 
-        Failure modes that return ``None`` (safe fallback = full re-run):
-        - file not found
-        - no OBSERVE record (can't reconstruct question)
-        - undecodable line anywhere but the end (corrupted file)
-
-        An undecodable LAST line is a write cut short; it is skipped.
+                An undecodable LAST line is a cut-short write and is skipped; one anywhere else means corruption.
         """
         path = self._path_for(trace_id)
         if not path.exists():
@@ -237,9 +190,7 @@ class CheckpointLoader:
         if not records:
             return None
 
-        # ── reconstruct ────────────────────────────────────────────────────
 
-        # OBSERVE gives us question + file_hint.
         observe_rec = next(
             (r for r in records if r.phase == PHASE_OBSERVE), None
         )
@@ -249,11 +200,9 @@ class CheckpointLoader:
         question: str = observe_rec.data.get("question", "")
         file_hint: str | None = observe_rec.data.get("file_hint")
 
-        # Last PLAN gives us the attempt number.
         plan_recs = [r for r in records if r.phase == PHASE_PLAN]
         attempt = plan_recs[-1].data.get("attempt", 1) if plan_recs else 1
 
-        # ACT records: label → last status for that label.
         artifacts: dict[str, dict[str, Any]] = {}
         for r in records:
             if r.phase == PHASE_ACT:
@@ -264,7 +213,6 @@ class CheckpointLoader:
                         "chars": r.data.get("chars", 0),
                     }
 
-        # Last RESPOND gives us the cached answer (full cycle completed).
         respond_recs = [r for r in records if r.phase == PHASE_RESPOND]
         answer: str | None = None
         if respond_recs:

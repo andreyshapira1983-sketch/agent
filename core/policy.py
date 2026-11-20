@@ -20,38 +20,19 @@ POLICY_ID = "mvp-default-policy"
 class PolicyGate:
     def __init__(self, registry: ToolRegistry):
         self.registry = registry
-        # Optional run-scoped block-list. Tools whose name is in this set are
-        # denied before any risk evaluation. The autonomous runtime uses this
-        # to forbid effect-producing tools (file_write, shell_exec) during a
-        # dry-run so the agent cannot litter the workspace with junk files
-        # (e.g. an install_coverage.bat) while merely "thinking out loud".
-        # Empty by default — interactive use is unaffected.
+        # Optional run-scoped block-list: tools named here are denied before any risk evaluation (the autonomous runtime forbids file_write, shell_exec in a dry-run). Empty by default.
         self.blocked_tools: frozenset[str] = frozenset()
-        # Optional run-scoped escalation list. Tools whose name is in this set
-        # have their `reversible` verdict PROMOTED to `escalate` — i.e. even a
-        # safe new-file write must be approved by a human before it runs. This
-        # is the "brake before the agent creates a file" gate: an operator
-        # script may write a diagnostic file directly (it never goes through
-        # this gate), but the agent/runtime loop must ask first. `irreversible`
-        # (overwrite) and `external` already escalate; this closes the
-        # remaining `reversible` (new-file) path. Empty by default so existing
-        # behaviour is unchanged.
+        # Optional run-scoped escalation list: tools named here have their `reversible` verdict PROMOTED to `escalate`, so even a safe new-file write needs human approval (operator scripts bypass this gate; the agent loop must ask). Empty by default.
         self.escalate_reversible_tools: frozenset[str] = frozenset()
-        # «Тревога» числом (core/pressure_gate.py): вызываемое, которое говорит,
-        # есть ли нажим (бюджет на исходе), и почему. Под нажимом ЛЮБОЕ
-        # обратимое действие ждёт человека. None — нажим не меряется.
+        # Pressure as a number (core/pressure_gate.py): a callable saying whether pressure exists (budget running out) and why; under pressure ANY reversible action waits for a human. None: not measured.
         self.pressure: Any = None
-        # Поток данных наружу (core/egress_flow.py): журнал хода — что просил
-        # человек и что прочитано. Задаёт цикл в начале хода; None — не меряется.
+        # Outbound data flow (core/egress_flow.py): the turn's journal of what the human asked and what was read. Set by the loop at turn start; None: not measured.
         self.egress: Any = None
 
     def _effective_blocked_tools(self) -> frozenset[str]:
         """The host's block set UNION the current run's own.
 
-        A run may forbid more than the host does and can never forbid less:
-        the union has no subtraction. Before this, a run narrowed the agent by
-        overwriting `blocked_tools` and putting it back in a `finally`, which
-        two overlapping runs turned into silent widening (MIR-114, proof 7).
+        A run may forbid more than the host and never less (no subtraction); overwriting `blocked_tools` and restoring it in a `finally` turned into silent widening with two overlapping runs.
         """
         from core.run_context import run_blocked_tools
 
@@ -101,16 +82,13 @@ class PolicyGate:
                 ],
             )
 
-        # «Только чтение» по адресу из прочитанного с частными данными в нём —
-        # это отправка наружу, а не чтение (CaMeL: смотреть, откуда пришли части вызова).
+        # "Read only" at an address taken from private data that was read is an outbound send, not a read (CaMeL: look at where the call's parts came from).
         leak = self.egress.leak(action.tool_name, action.parameters or {}) if self.egress is not None else None
         if leak:
             return PolicyDecision(policy_id=POLICY_ID, subject=tool.name, action="tool_call",
                                   decision="escalate", reasons=[leak])
 
-        # Argument-aware risk: e.g. file_write is `reversible` when the
-        # target is a new path but `irreversible` when it would overwrite.
-        # Tools that don't override risk_for fall back to their static risk.
+        # Argument-aware risk: e.g. file_write is `reversible` for a new path, `irreversible` when overwriting; tools without `risk_for` use their static risk.
         effective_risk = tool.risk_for(action.parameters or {})
 
         if effective_risk == "read_only":

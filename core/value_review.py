@@ -1,16 +1,7 @@
-"""TD-032 — human value-review verdicts for self-build / self-apply outcomes.
+"""TD-032: human value-review verdicts for self-build / self-apply outcomes.
 
-A technical lane outcome (``approved`` / ``committed_local`` / ``rolled_back``)
-proves a change was *accepted/applied*, not that it was *valuable*. The live
-self-build run committed a trivial comment-capitalization edit that passed tests
-yet was low value. This module captures a **human** verdict as a separate,
-append-only signal.
-
-Design constraints (capture-only PR):
-* Append-only ledger at ``data/value_reviews.jsonl`` (git-ignored, on disk only).
-* The effective verdict for an item is the *latest valid* review recorded.
-* The approval inbox is never mutated; registry scoring lives in the CLI (TD-033).
-* Notes are secret-redacted and length-truncated before they are persisted.
+A technical lane outcome (``approved`` / ``committed_local`` / ``rolled_back``) proves a change was accepted/applied, not that it was valuable; this module captures a **human** verdict as a separate append-only signal.
+Append-only ledger ``data/value_reviews.jsonl`` (git-ignored); the effective verdict for an item is the latest valid review; the approval inbox is never mutated; registry scoring lives in the CLI (TD-033); notes are secret-redacted and truncated before persisting.
 """
 from __future__ import annotations
 
@@ -30,7 +21,7 @@ ValueVerdict = Literal[
     "rejected_wrong_target",
 ]
 
-# The complete, closed set of verdicts. Anything else is rejected on write.
+# The complete, closed set of verdicts; anything else is rejected on write.
 VALID_VERDICTS: frozenset[str] = frozenset(
     {
         "accepted",
@@ -43,8 +34,7 @@ VALID_VERDICTS: frozenset[str] = frozenset(
 
 DEFAULT_LEDGER_PATH = Path("data") / "value_reviews.jsonl"
 
-# Notes are operator free-text; keep them short so the ledger never becomes a
-# dumping ground and no long secret survives even after redaction.
+# Notes are operator free text; kept short so the ledger is no dumping ground and no long secret survives redaction.
 MAX_NOTE_CHARS = 500
 _TRUNCATION_MARKER = "...[truncated]"
 
@@ -58,8 +48,7 @@ def _now_iso() -> str:
 
 
 def _sanitize_note(note: str | None) -> str:
-    """Redact secrets, then hard-truncate. Redaction runs first so a secret is
-    replaced by a placeholder before any length cut, never sliced in half."""
+    """Redact secrets, then hard-truncate (redaction first, so a secret is never sliced in half)."""
     if not note:
         return ""
     redacted, _findings = redact_text(str(note))
@@ -118,7 +107,6 @@ class ValueReviewLog:
     def for_workspace(cls, workspace: Path | str) -> ValueReviewLog:
         return cls(Path(workspace) / DEFAULT_LEDGER_PATH)
 
-    # ── read ────────────────────────────────────────────────────────────────
     def list(self) -> list[ValueReview]:
         """All valid reviews in write order. Missing/empty/corrupt file → []."""
         if self.path is None or not self.path.exists():
@@ -138,7 +126,6 @@ class ValueReviewLog:
             effective[review.item_id] = review
         return effective
 
-    # ── write ───────────────────────────────────────────────────────────────
     def append(
         self,
         item_id: str,
@@ -148,9 +135,7 @@ class ValueReviewLog:
         note: str = "",
         commit_hash: str | None = None,
     ) -> ValueReview:
-        """Validate + persist one review. Raises :class:`InvalidVerdictError`
-        (writing nothing) when ``verdict`` is not a known value. The note is
-        redacted and truncated before it touches disk."""
+        """Validate and persist one review; raises :class:`InvalidVerdictError` (writing nothing) for an unknown ``verdict``. The note is redacted and truncated before it touches disk."""
         if verdict not in VALID_VERDICTS:
             raise InvalidVerdictError(
                 f"invalid verdict {verdict!r}; expected one of "

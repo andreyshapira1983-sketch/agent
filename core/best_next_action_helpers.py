@@ -1,6 +1,4 @@
-"""Helpers extracted verbatim from ``core/best_next_action.py`` by the incremental
-splitter. The original module re-exports every name below, so all
-existing import paths keep working."""
+"""Helpers split out of ``core/best_next_action.py``; the original module re-exports every name."""
 
 from __future__ import annotations
 
@@ -17,27 +15,27 @@ _P_TESTS_FAIL = 80        # concrete failing tests: minimal repair is provable
 
 _P_TESTS_INCONCLUSIVE = 60  # timed-out/unknown: must not be read as healthy
 
-_P_ENGINEERING_TASK = 59  # the campaign goal asks for engineering work: the
+_P_ENGINEERING_TASK = 59  # the campaign goal asks for engineering work
 
-_P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft:
+_P_CHARTER_DOCUMENT = 58  # the campaign goal itself asks for a doctrine draft
 
-_P_EXTERNAL_STUDY = 57    # the goal asks to STUDY the outside world: above the
+_P_EXTERNAL_STUDY = 57    # the goal asks to study the outside world
 
-_P_OWN_ISSUE_NAMED = 59   # the goal names one of the agent's OWN registered
+_P_OWN_ISSUE_NAMED = 59   # the goal names one of the agent's own registered issues
 
 _P_SELF_IMPROVEMENT_FAILURE = 55  # recent rollback/rejection despite clean health
 
-_P_SELF_IMPROVEMENT_FAILURE_FRESH = 60  # a failure younger than a day is a
+_P_SELF_IMPROVEMENT_FAILURE_FRESH = 60  # a failure younger than a day
 
 _P_INBOX_DEBT = 50        # duplicate proposals accumulating into admin debt
 
-_P_CAUSAL_EXPERIMENT = 47  # claims with experiment specs: the intervention
+_P_CAUSAL_EXPERIMENT = 47  # claims with experiment specs
 
-_P_CAUSAL_DISCRIMINATE = 46  # claims with live probes: finishing an open
+_P_CAUSAL_DISCRIMINATE = 46  # claims with live probes
 
 _P_CAUSAL_CLIMB = 45      # unexplained self-failure observations: investigate
 
-_P_SPEC_BIRTH = 44      # marked claims without specs: the judge is exhausted
+_P_SPEC_BIRTH = 44      # marked claims without specs
 
 _P_DRY_RUN_STUCK = 40     # many dry-run ticks: never applied anything, ask why
 
@@ -70,10 +68,9 @@ _DRAFT_VERB_RE = re.compile(
 _DOC_NAME_RE = re.compile(r"[\w/.\-]+\.md\b")
 
 def doc_target_from_goal(goal: str) -> str:
-    """Repo-путь документа, который цель просит написать, или "".
+    """Repo path of the document the goal asks to write, or "".
 
-    Явный путь в цели сохраняется; голое имя едет в knowledge/doctrine/future/
-    — дом целевых (ещё не действующих) документов доктрины.
+    An explicit path is kept; a bare name goes to knowledge/doctrine/future/.
     """
     text = str(goal or "")
     if not _DRAFT_VERB_RE.search(text):
@@ -113,12 +110,9 @@ _SUBJECT_TOKEN_RE = re.compile(r"[\w.-]+(?:[/\\][\w.-]+)+")
 _COMMAND_TOKEN_RE = re.compile(r":[a-z][a-z0-9-]*")
 
 def resolve_goal_subject(text: str, *, exists, command_module=None) -> str | None:
-    """Артефакт, О КОТОРОМ цель, — по существованию, а не по суффиксу.
+    """The artifact the goal is ABOUT, decided by existence, not by suffix.
 
-    Два словаря, потому что агент пишет обоими: путь к файлу и имя команды.
-    Читать один означало объявлять «предмет не назван» там, где он назван точно
-    (MIR-174). `exists` и `command_module` внедряются, чтобы решающая таблица
-    осталась чистой функцией. Замер и границы: MIR-158, MIR-174.
+    Checks both file paths and command names; `exists` and `command_module` are injected to keep the table pure.
     """
     for raw in _SUBJECT_TOKEN_RE.findall(str(text or "")):
         token = raw.replace("\\", "/").strip("`'\",.;:()[]")
@@ -139,9 +133,9 @@ def _abs_path_exists(path: str) -> bool:
 
 
 def unresolved_goal_targets(text: str, *, exists, exists_abs=_abs_path_exists) -> tuple[str, ...]:
-    """Пути, названные целью и не существующие ни в рабочей области, ни на диске (MIR-161).
+    """Paths named by the goal that exist neither in the workspace nor on disk.
 
-    Путь с «/» в начале проверяется на диске как есть (прогон 26.09: модели в /root/models)."""
+    A leading "/" path is checked on disk as written."""
     source = str(text or "")
     out: list[str] = []
     for match in _SUBJECT_TOKEN_RE.finditer(source):
@@ -154,24 +148,10 @@ def unresolved_goal_targets(text: str, *, exists, exists_abs=_abs_path_exists) -
     return tuple(dict.fromkeys(out))
 
 def _named_target(text: str) -> str | None:
-    """Файл, названный в тексте цели, если он там назван.
+    """The file named in the goal text, if any, with backslashes normalised to "/".
 
-    Отдельная функция, а не второй разбор внутри решения: тот же `_PY_TARGET_RE`,
-    которым цель признаётся инженерной, отдаёт СОВПАДЕНИЕ, а не только «да».
-    Решение, принятое ПОТОМУ ЧТО файл назван, обязано этот файл унести.
-
-    Совпадение приводится к одному написанию разделителя, и это не косметика.
-    `_PY_TARGET_RE` обратный слэш ПРОПУСКАЕТ, а результат отсюда уходит сразу в
-    два места: в `target_path` (`core/best_next_action.py`) и в ключ разрешения
-    (`core.autonomous_runtime._effects_dedup_key`). Сырое совпадение ломало оба
-    — названный целью файл отвергался по несовпадению строк, а один и тот же
-    файл, написанный через `\\`, заводил ОТДЕЛЬНУЮ заявку на одобрение (ревизии
-    PR #342 и #343; замер — три разных ключа на пять написаний одного файла).
-    Тот же `.replace("\\\\", "/")` давно стоит в соседнем `resolve_goal_subject`:
-    в тексте цели обратный слэш — разделитель, а не имя.
-
-    Регистр здесь НЕ трогается: по этому пути потом открывают файл, а на POSIX
-    регистр значим. Кому нужна свёртка — складывает у себя.
+    The `_PY_TARGET_RE` match is reused so a decision made because a file is named carries that file.
+    Case is left untouched: the path is opened later and case matters on POSIX.
     """
     match = _PY_TARGET_RE.search(text or "")
     if match is None:
@@ -193,8 +173,7 @@ _GOAL_STOP_WORDS = frozenset({
 _OWN_ISSUE_MIN_SHARED_WORDS = 3
 
 def _goal_names_issue(goal: str, issue: dict) -> bool:
-    """Называет ли цель ЭТУ запись реестра: отпечаток, действие, файл — буквально;
-    заголовок — тремя содержательными словами."""
+    """Whether the goal names THIS registry entry: fingerprint, action or file literally; title by three content words."""
     text = str(goal or "")
     low = text.lower()
     if not low.strip():

@@ -1,20 +1,4 @@
-"""Ranker-to-output policy.
-
-The Verifier answers "did this citation resolve to evidence?".
-The Source Ranker answers "is that evidence strong enough for this type of
-question?".  This module is the bridge between the two: it applies ranker
-constraints to the user-facing answer after verification.
-
-Two kinds of output, kept apart on purpose:
-
-* **body edits** — a capped ``Confidence:`` line, realtime ``[verified:…]`` tags
-  downgraded. These are corrections *to the claims*, so they belong in the text
-  and are applied here.
-* **warnings** — prose *about* the answer. Reported in ``warnings`` and merged
-  into the ``Unverified:`` section by :class:`core.response_draft.ResponseDraft`
-  at composition time, not here: a caveat about a run outlives the claims it
-  was attached to, so it is composed onto whatever body survives.
-"""
+"""Ranker-to-output policy: apply source-ranker constraints to the answer after verification."""
 
 from __future__ import annotations
 
@@ -64,16 +48,15 @@ def apply_ranker_output_policy(
             for rank in ranking.ranks
             if rank.support_level == "insufficient_for_realtime"
         ]
-        # A realtime question without any direct live source cannot have high
-        # confidence, even if normal citation matching succeeded.
+        # A realtime question without a direct live source cannot have high confidence.
         if insufficient and not direct:
             confidence_ceiling = "low"
             warnings.append(_realtime_warning(question))
             updated, downgraded = _downgrade_realtime_verified_tags(updated)
             updated = _rewrite_confidence(updated, "low")
         elif direct:
-            # Direct-but-capped realtime evidence (for example stale or
-            # undated) can be useful, but still may not justify "high".
+            # Direct-but-capped realtime evidence (stale or undated) is useful but may not justify
+            # "high".
             ceiling = min(rank.confidence_ceiling for rank in direct)
             if ceiling <= 0.55:
                 confidence_ceiling = "medium"

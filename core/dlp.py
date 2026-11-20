@@ -7,13 +7,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DlpFinding:
-    """A single regex hit inside a piece of text (secrets and personal data).
+    """A single regex hit (secrets, personal data).
 
-    `matched` holds the raw bytes that triggered the match. Callers MUST
-    NOT log it — the raw value stays inside the kernel. The kernel passes
-    findings to the redactor, which replaces the span with a
-    `[REDACTED:<kind>]` token. `core.secret_scanner.SecretFinding` is this
-    same class under its old name.
+    `matched` holds the raw value and must never be logged; the redactor replaces the span with [REDACTED:<kind>].
+    core.secret_scanner.SecretFinding is this class under its old name.
     """
 
     kind: str
@@ -27,20 +24,11 @@ _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 # Require a leading plus to avoid false positives on versions, IDs, and dates.
 _PHONE_RE = re.compile(r"\+\d[\d\s\-()]{7,}\d")
 
-# Russian tax identification number (ИНН):
-#   10 digits for legal entities, 12 digits for individuals.
-#   Bare digit-runs cannot be the only signal — long unix timestamps,
-#   build numbers, hashes and ID values share that shape. We layer two
-#   gates on top of the boundary regex:
-#     (a) a Russian checksum so a random run of digits has ≤ 10% chance
-#         of being accepted (pure entropy on the last digit).
-#     (b) a context whitelist that suppresses the finding when the digit
-#         run is annotated as a timestamp / id / version / port / hash.
+# Russian tax number (ИНН), 10 or 12 digits. Bare digit runs are no signal, so two gates apply:
+# a checksum, and a context whitelist that suppresses timestamp/id/version/port/hash annotations.
 _INN_RE = re.compile(r"\b(?:\d{10}|\d{12})\b")
 
-# Tokens that, when neighbouring the digit run, indicate it is NOT an ИНН
-# but a timestamp, identifier, sequence number, or similar non-PII numeric.
-# Lowercase, matched as substrings of the surrounding ±32-char window.
+# Tokens near the digit run meaning "not an ИНН" (timestamp, id, sequence number); lowercase, substring match in a ±32-char window.
 _INN_CONTEXT_NEGATIVE_TOKENS: tuple[str, ...] = (
     "unix", "timestamp", "epoch", "ts:", "ts=", "'ts'", '"ts"',
     "millis", "nanos", "elapsed", "duration",
@@ -50,21 +38,14 @@ _INN_CONTEXT_NEGATIVE_TOKENS: tuple[str, ...] = (
     "phone", "tel:", "msisdn",
 )
 
-# Tokens that strongly signal the digit run IS an ИНН and override the
-# context-negative gate (e.g. an explicit "ИНН: ..." label still wins).
+# Tokens meaning the run IS an ИНН; they override the negative gate.
 _INN_CONTEXT_POSITIVE_TOKENS: tuple[str, ...] = (
     "инн", "inn", "tax id", "налогоплат",
 )
 
 
 def _inn_checksum_valid(digits: str) -> bool:
-    """Return True when *digits* satisfies the ФНС ИНН checksum.
-
-    For a 10-digit number the last digit must equal
-    ``(Σ d_i · w_i) mod 11 mod 10`` with w = (2,4,10,3,5,9,4,6,8).
-    For a 12-digit number two control digits are computed in turn.
-    Random digit runs (unix timestamps, hashes) pass with ≤10% probability.
-    """
+    """True when digits satisfy the ФНС ИНН checksum (10 digits: last digit; 12 digits: two control digits)."""
     n = len(digits)
     if n not in (10, 12):
         return False
@@ -80,9 +61,7 @@ def _inn_checksum_valid(digits: str) -> bool:
 
 
 def _inn_context_excluded(text: str, start: int, end: int) -> bool:
-    """Inspect the ±32-char window around the candidate match and decide
-    whether the surrounding text marks it as a non-ИНН numeric. Explicit
-    "ИНН"/"INN" tokens override the negative tokens."""
+    """True when the ±32-char window marks the match as a non-ИНН numeric; explicit ИНН/INN tokens override."""
     window_start = max(0, start - 32)
     window_end = min(len(text), end + 32)
     window = text[window_start:window_end].lower()
@@ -90,17 +69,12 @@ def _inn_context_excluded(text: str, start: int, end: int) -> bool:
         return False
     return any(tok in window for tok in _INN_CONTEXT_NEGATIVE_TOKENS)
 
-#: Дата ISO внутри «телефона» — верный признак, что это не телефон.
-#: Замер 2026-09-01: подписи планок вида «+29 (2026-08-31)» проходили под
-#: _PHONE_RE (скобки и дефис даты укладываются в класс символов) и уезжали
-#: в вывод как [REDACTED:pii-phone] — агент терял ВСЕ даты в своих подписях,
-#: и каждую приходилось восстанавливать вручную. Ведущий плюс, на который
-#: рассчитывал прежний комментарий, не спасает: подпись с него и начинается.
+#: An ISO date inside a "phone" means it is not a phone (labels like "+29 (2026-08-31)" would otherwise match _PHONE_RE).
 _DATE_INSIDE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _looks_like_a_dated_note(matched: str) -> bool:
-    """True, когда «телефон» несёт внутри календарную дату."""
+    """True when the "phone" contains a calendar date."""
     return bool(_DATE_INSIDE_RE.search(matched))
 
 
@@ -124,7 +98,7 @@ def scan_pii(text: str) -> list[DlpFinding]:
         for match in pattern.finditer(text):
             matched = match.group(0)
             if kind == "phone" and _looks_like_a_dated_note(matched):
-                # Датированная пометка, а не номер (см. _DATE_INSIDE_RE).
+                # Dated note, not a number (see _DATE_INSIDE_RE).
                 continue
             if kind == "inn":
                 # Two-stage filter to suppress timestamp/id false positives.

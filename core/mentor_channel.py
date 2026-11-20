@@ -1,20 +1,4 @@
-"""Канал наставника: вопросы к агенту с совещательной властью.
-
-Форма задана оператором 2026-08-27: «задавать ему вопросы и пытаться его
-учить, при этом не вмешиваясь в его работу». Поэтому канал несёт ВОПРОСЫ, а не
-ответы, и кладёт их туда, где агент выбирает себе цели, — с явно низшей
-властью: взять вопрос в работу или отклонить решает он, и отказ сам по себе
-сигнал наставнику.
-
-Граница невмешательства: наставник пишет ТОЛЬКО сюда (и в вердикты заявок с
-причинами). В память агента, в его состояние, в его прогон — никогда. Учёба
-идёт через его собственные органы: вопрос он прочтёт своим выбором целей.
-
-Писатель — `scripts/mentor_ask.py`: канал с читателем и без штатного писателя
-был бы механизмом, недостижимым ни одним действием (урок MIR-166).
-
-Замер и границы: MIR-178.
-"""
+"""Mentor channel: questions to the agent with advisory authority only."""
 from __future__ import annotations
 
 import json
@@ -26,14 +10,13 @@ from core.ids import new_id
 
 _REL_PATH = Path("data") / "mentor_questions.jsonl"
 
-#: Сколько открытых вопросов видит один выбор цели. Наставник, задающий
-#: двадцать вопросов разом, — это уже не наставник, а расписание.
+# How many open questions one goal choice sees.
 _MAX_OPEN = 3
 
 
 @dataclass(frozen=True)
 class MentorQuestion:
-    """Один вопрос наставника. Только вопрос — ответов канал не носит."""
+    """One mentor question; questions only, the channel carries no answers."""
 
     id: str
     ts: str
@@ -41,7 +24,7 @@ class MentorQuestion:
 
 
 def append_question(workspace: Path | str, question: str) -> MentorQuestion:
-    """Положить вопрос в канал. Пустой текст — отказ, а не пустая строка."""
+    """Put a question into the channel; empty text is a refusal, not an empty line."""
     text = str(question or "").strip()
     if not text:
         raise ValueError("a mentor question must carry text")
@@ -58,7 +41,7 @@ def append_question(workspace: Path | str, question: str) -> MentorQuestion:
 
 
 def open_questions(workspace: Path | str, limit: int = _MAX_OPEN) -> tuple[MentorQuestion, ...]:
-    """Последние вопросы канала; битый файл — тишина, не падение и не выдумка."""
+    """Latest channel questions; a broken file yields silence, not a crash."""
     path = Path(workspace) / _REL_PATH
     if not path.is_file():
         return ()
@@ -84,7 +67,7 @@ def open_questions(workspace: Path | str, limit: int = _MAX_OPEN) -> tuple[Mento
 
 
 def mentor_block(questions: tuple[MentorQuestion, ...], *, max_chars: int = 900) -> str:
-    """Блок для подсказки выбора цели. Власть названа в самом блоке."""
+    """Block for the goal-choice prompt; its authority is named inside the block."""
     if not questions:
         return ""
     parts = [

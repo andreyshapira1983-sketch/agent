@@ -1,22 +1,6 @@
 """Memory hygiene as operator and daemon commands: expire, dedupe, prune, archive.
 
-Census item B1. This lived in `core/loop_hygiene.py`, a mixin composed into
-`AgentLoop` — and the cycle never called it. Verified by call sites:
-`agent_tick.py` runs the whole pass, `cli/commands_memory.py` runs the
-individual steps, and no phase of `_run_inner` touches either. It sat in the
-loop layer because the daemon and the CLI reach it through the agent object.
-
-Per the operator's ruling, `agent` stays the single entry point —
-`agent.run_maintenance_pass()` still works and no caller changed — while the
-mixin stops owning the logic. Dependencies arrive as arguments, never as an
-agent to reach into.
-
-One thing deliberately did NOT move: the permission question. Whether a durable
-write is allowed at all is the agent's policy (`_durable_learning_suppressed`,
-the audit brake, the dry-run brake, the sink allowlist), and answering it here
-would put a second copy of that decision in a second place — the defect this
-census spent its time finding. The facade answers it and passes the verdict in
-as `suppressed_reason`.
+Dependencies arrive as arguments; the permission verdict stays with the agent facade and is passed in as `suppressed_reason`.
 """
 from __future__ import annotations
 
@@ -36,13 +20,9 @@ def run_maintenance_pass(
     workspace: Any = None,
     procedural_store: Any = None,
 ) -> dict:
-    """One bounded hygiene pass: expire → dedupe → prune episodes → archive.
+    """One bounded hygiene pass: expire, dedupe, prune episodes, archive; returns a delta report.
 
-    `summarise_persistent` is deliberately absent: it needs an LLM call, so
-    it is neither free nor deterministic, and it stays an operator action.
-
-    Returns a delta report — the only way an operator learns what ran while
-    nobody was watching.
+    `summarise_persistent` is absent on purpose: it needs an LLM call and stays an operator action.
     """
     if suppressed_reason is not None:
         log.log("maintenance_pass_skipped", {"reason": suppressed_reason})
@@ -60,7 +40,7 @@ def run_maintenance_pass(
         )
         report["deduped"] = len(getattr(dedup, "deleted", []) or [])
 
-        # MIR-128: опоры зачёта процедур считаются здесь же и не выносятся.
+        # anchors of procedure credit are counted here and not evicted
         protected = cited_episode_ids(procedural_store, episodic_store)
         report["episodes_protected_by_citation"] = len(protected)
         pruned = prune_episodic(
@@ -84,18 +64,14 @@ def run_maintenance_pass(
             compacted.get("over_cap_removed", 0)
         )
     except Exception as exc:  # noqa: BLE001
-        # Maintenance must never take the tick down with it: a corrupt state
-        # file is a reason to skip cleanup, not to stop working. Reported, not
-        # swallowed — the report carries the type back to the caller.
+        # maintenance must never take the tick down: skip cleanup, report the error type
         log.log(
             "maintenance_pass_error",
             {"error": type(exc).__name__, "detail": str(exc)[:200]},
         )
         report["error"] = type(exc).__name__
 
-    # Отдельный try: провал памяти не отменяет уборку диска, и наоборот.
-    # MIR-125: .bak-мусор разовых миграций удвоил data/ за пять дней, а метла
-    # ходила только за клавиатурой. dry_run (тень) считает и не удаляет.
+    # separate try: a memory failure does not cancel disk cleanup, and vice versa; dry_run counts without deleting
     if workspace is not None:
         try:
             from core.backup_cleanup import cleanup_backups
@@ -103,7 +79,7 @@ def run_maintenance_pass(
             sweep = cleanup_backups(workspace, dry_run=dry_run)
             report["backups_deleted"] = len(sweep.deleted)
             report["backups_kept"] = len(sweep.kept)
-        except Exception as exc:  # noqa: BLE001 — та же граница, что выше
+        except Exception as exc:  # noqa: BLE001 — same boundary as above
             log.log("backup_sweep_error", {"error": type(exc).__name__})
             report["backup_sweep_error"] = type(exc).__name__
 
@@ -113,14 +89,9 @@ def run_maintenance_pass(
 
 
 def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) -> None:
-    """MIR-074 (operator ruling): every pass explains itself in five points.
+    """Every pass explains itself in five points: what was set aside and why. Deterministic; must not break the pass.
 
-    «Что отодвинул и почему», not a bare counter dump. Deterministic; failure
-    must not break the pass.
-
-    The scoring rule quoted below lives in `core/memory_hygiene.py`. Prose and
-    rule in two places can drift, and the census recorded that; keeping the
-    words here is the lesser evil only while nothing checks them.
+    The scoring rule quoted below lives in `core/memory_hygiene.py`; the wording here is not checked against it.
     """
     try:
         scanned = 0
@@ -132,8 +103,7 @@ def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) ->
             + report.get("archived", 0)
         )
         mode = "сухой прогон (только счёт)" if dry_run else "боевой проход"
-        # «Ничего не уничтожено» говорилось и после удалений навсегда
-        # (проверка 16.11, средняя): спячка обратима, удаление — нет.
+        # dormancy is reversible, deletion is not: do not claim "nothing destroyed" after deletions
         deleted = sum(int(report.get(k, 0) or 0) for k in (
             "expired", "deduped", "episodes_pruned",
             "assumptions_duplicates_removed", "assumptions_over_cap_removed",
@@ -179,18 +149,18 @@ def _explain(*, log: Any, report: dict, persistent_store: Any, dry_run: bool) ->
             "hygiene_explained",
             {"full_text": full_text, "moved": moved, "dry_run": dry_run},
         )
-    except Exception as exc:  # noqa: BLE001 — вердикт не должен ронять проход
+    except Exception as exc:  # noqa: BLE001 — the verdict must not break the pass
         try:
             log.log(
                 "hygiene_explained_failed",
                 {"error_type": type(exc).__name__, "error": str(exc)[:300]},
             )
-        except Exception:  # noqa: BLE001, S110 — страховка вокруг журналирования
-            pass  # nosec B110 — последний рубеж: проход важнее записи о нём
+        except Exception:  # noqa: BLE001, S110 — guard around logging
+            pass  # nosec B110 — last resort: the pass matters more than its record
 
 
 def compact_assumptions(*, log: Any, assumption_store: Any, dry_run: bool = False) -> dict:
-    """Dedupe and cap the assumptions archive (MIR-027's open half)."""
+    """Dedupe and cap the assumptions archive."""
     if assumption_store is None:
         report = {
             "scanned": 0, "duplicates_removed": 0,
@@ -236,17 +206,14 @@ def dedupe_persistent(
     return report
 
 
-#: Потолок защиты опор: защита не смеет снова сжать окно — MIR-096 однажды
-#: видел 127 неизымаемых строк из 200. 60 = 30 % окна; новейшие цитируемые
-#: побеждают, улика старейших уходит, и зачёт следует за ней (MIR-058).
+#: Cap on protected anchors so protection cannot shrink the eviction window again: 60 = 30 % of it; newest cited win.
 _MAX_CITED_PROTECTED = 60
 
 
 def cited_episode_ids(procedural_store: Any, episodic_store: Any) -> frozenset[str]:
-    """Эпизоды-опоры зачёта процедур, существующие в хранилище (MIR-128).
+    """Episodes that anchor procedure credit and still exist in the store.
 
-    Механика без суждения: id из `source_episode_ids`, пересечённые с живыми
-    эпизодами, новейшие `_MAX_CITED_PROTECTED` по `created_at`.
+    Ids from `source_episode_ids` intersected with live episodes, newest `_MAX_CITED_PROTECTED` by `created_at`.
     """
     if procedural_store is None or episodic_store is None:
         return frozenset()
@@ -292,8 +259,7 @@ def prune_episodic(
 def dedupe_episodic(
     *, log: Any, episodic_store: Any, dry_run: bool = False, procedural_store: Any = None,
 ) -> list[str]:
-    """Keep one copy of each repeated episode; anchors of procedure credit stay
-    (MIR-128, same set prune gets — проверка 16.11, средняя)."""
+    """Keep one copy of each repeated episode; anchors of procedure credit stay (same set prune gets)."""
     if episodic_store is None:
         log.log("episodic_memory_dedupe",
                 {"dropped": 0, "dry_run": dry_run, "skipped_reason": "no store"})

@@ -23,33 +23,17 @@ class SourceRegistryStore:
     def save_registry(self, registry: SourceRegistry) -> dict[str, int]:
         """Persist a whole registry with a SINGLE file scan and one append.
 
-        The naive version called ``save_source``/``save_claim`` per record,
-        and each of those re-read (and re-encoded) the ENTIRE JSONL file to
-        check for duplicates. Ingesting M records into a store of N records
-        was therefore O(M*N) full-file reads — which, once the registry grew
-        into the thousands of claims, was slow enough to appear to hang.
-
-        Here we read the existing catalog exactly once under a single lock,
-        build in-memory dedup sets, decide which incoming records are new,
-        and append them all in one batch. Dedup semantics are preserved
-        bit-for-bit with the old per-record path:
-
-          * a source is "new" iff its id is not already present;
-          * a claim is "new" iff its ``_claim_key`` is not already present,
-            where — mirroring ``_load_claims_unlocked`` — an existing claim
-            only counts if its ``source_id`` is among the known sources
-            (existing sources plus every source in this registry, since the
-            old code appended all sources before checking any claim);
-          * duplicates WITHIN the incoming registry are collapsed the same
-            way the sequential appends collapsed them;
-          * a known claim whose status changed is appended again (the last
-            row wins on load), except that `suspect` is never lowered
-            (проверка 17.11, средняя).
-        """
+            Per-record saves re-read the entire JSONL for dedup (O(M*N)). Here the
+            catalog is read once under one lock, dedup sets are built in memory and
+            new records appended in one batch, with the same dedup semantics as the
+            per-record path: a source is new iff its id is absent; a claim is new iff
+            its ``_claim_key`` is absent (an existing claim counts only if its
+            ``source_id`` is a known source); duplicates within the incoming registry
+            collapse; a known claim whose status changed is appended again (last row
+            wins on load) but `suspect` is never lowered."""
         with state_file_lock(self.path):
             existing_source_ids: set[str] = set()
-            # (claim_key, source_id, status) — status kept so a change of it
-            # is stored (проверка 17.11, средняя).
+            # (claim_key, source_id, status): status kept so a change of it is stored.
             file_claim_keys: list[tuple[str, str, str]] = []
             for kind, payload in self._iter_records_unlocked():
                 if kind == "source":
@@ -74,12 +58,9 @@ class SourceRegistryStore:
                 new_rows.append({"kind": "source", "payload": source.to_dict()})
                 source_saved += 1
 
-            # Sources visible when filtering claims = everything now in the
-            # file (existing sources + all incoming sources are appended
-            # before any claim in the legacy path).
+            # Sources visible when filtering claims: everything now in the file (all sources are appended before any claim).
             combined_source_ids = existing_source_ids | {s.id for s in registry.sources}
-            # key -> stored status, the last row winning with `suspect`
-            # sticky, as in _load_claims_unlocked.
+            # key -> stored status, last row winning with `suspect` sticky, as in _load_claims_unlocked.
             stored_status: dict[str, str] = {}
             for key, source_id, status in file_claim_keys:
                 if source_id in combined_source_ids:
@@ -92,8 +73,7 @@ class SourceRegistryStore:
                     continue
                 new_rows.append({"kind": "claim", "payload": claim.to_dict()})
                 claim_saved += 1
-                # Only a claim whose source is known becomes visible to later
-                # dedup checks — matching _load_claims_unlocked's filter.
+                # Only a claim whose source is known becomes visible to later dedup checks (same filter as _load_claims_unlocked).
                 if claim.source_id in combined_source_ids:
                     stored_status[key] = _merged_status(stored_status.get(key), claim.status)
 
@@ -180,10 +160,7 @@ class SourceRegistryStore:
                 yield kind, payload
 
 
-#: Status strength: a later save may only RAISE it. A re-ingest that sees the
-#: claim with fewer witnesses (`extracted`) no longer erases a `verified`, and
-#: each claim can change at most four times, so the file cannot grow per save
-#: (проверка 17.11, вечер; `suspect` stays sticky as before).
+#: Status strength: a later save may only RAISE it. A re-ingest with fewer witnesses (`extracted`) does not erase a `verified`, and each claim changes at most four times, so the file cannot grow per save; `suspect` stays sticky.
 _STATUS_RANK = {"extracted": 0, "unverified": 1, "verified": 2, "conflicted": 3, "suspect": 4}
 
 

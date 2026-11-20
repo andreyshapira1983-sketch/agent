@@ -1,36 +1,13 @@
-"""Detect disagreements between cognitive subsystems on the same turn.
+"""Detect disagreements between cognitive subsystems on the same turn (pure function, logging only).
 
-A "disagreement" is when two subsystems produce contradictory verdicts
-about the same answer/turn. Examples:
-
-* The **planner** marked all steps `done` (i.e. the answer-assembly
-  pipeline reported success), but the **verifier** returned
-  ``fully_unverified=True`` — the answer was synthesised but no claim
-  resolved to a real source.
-* The **planner** chose tools to gather sources, but the **executor**
-  produced no artifacts (every tool call failed or was skipped).
-* A significant fraction of claims carry citations that the verifier
-  could not match (``cited_but_unmatched``) — the planner thought the
-  needed source was in scope but verification said otherwise.
-
-This module is a pure function: it takes already-computed subsystem
-outputs and returns zero or more event payloads. The `loop.py`
-integration logs each one as a ``subsystem_disagreement`` JSONL event
-right after verification, so operators can see "органы системы"
-contradicting each other in the trace.
-
-Logging only — no behaviour change. A future iteration may feed these
-events back into ReplanPolicy or the confidence vector.
+Examples: planner marked all steps done but the verifier returned ``fully_unverified``; planner chose tools but the executor produced no artifacts; a large share of citations the verifier could not match (``cited_but_unmatched``). Returns event payloads that `loop.py` logs as ``subsystem_disagreement`` right after verification. No behaviour change.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
 
-# Threshold for "partial" planner/verifier disagreement: when more than
-# this fraction of claim chunks carry citations the verifier could not
-# match, we count it as a disagreement event. Tuned conservatively so a
-# single broken citation in a long answer does not spam the trace.
+# Threshold for "partial" planner/verifier disagreement: more than this fraction of claim chunks with unmatched citations; conservative so one broken citation does not spam the trace.
 _PARTIAL_UNMATCH_THRESHOLD = 0.30
 
 
@@ -58,20 +35,11 @@ def detect_disagreements(
     report: Any,
     failure_history: Sequence[Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return zero or more `subsystem_disagreement` event payloads.
+    """Return zero or more `subsystem_disagreement` payloads (flat dicts for ``log.log``).
 
-    Each payload is a flat ``dict`` ready to pass to ``log.log``.
-
-    Cases v1:
-
-    * ``planner_vs_verifier_full``: planner reports all-done, verifier
-      reports ``fully_unverified``. Severity: ``high``.
-    * ``planner_vs_verifier_partial``: planner reports all-done, but
-      ``cited_but_unmatched_chunks / total_chunks > threshold``.
-      Severity: ``medium``.
-    * ``planner_vs_executor``: planner has steps but no artifact was
-      produced — every tool call failed or was skipped. Severity:
-      ``low`` (could be a legitimate general-knowledge answer).
+    * ``planner_vs_verifier_full``: all-done vs ``fully_unverified`` (severity ``high``).
+    * ``planner_vs_verifier_partial``: all-done but ``cited_but_unmatched_chunks / total_chunks > threshold`` (``medium``).
+    * ``planner_vs_executor``: steps planned but no artifact produced (``low``; may be a legitimate general-knowledge answer).
     """
     events: list[dict[str, Any]] = []
 
@@ -109,11 +77,7 @@ def detect_disagreements(
             "verifier_chain_was_empty": chain_empty,
         })
 
-        # Case 1: full planner/verifier disagreement.
-        # Suppress when the chain was empty AND no tools were chosen —
-        # that is a pure-prior-knowledge answer, not a disagreement
-        # (verifier honestly says "no source", planner honestly didn't
-        # plan one). The disclaimer pathway already covers it.
+        # Case 1: full planner/verifier disagreement. Suppressed when the chain was empty AND no tools were chosen (a pure-prior-knowledge answer; the disclaimer pathway covers it).
         if all_done and fully_unverified and total_chunks > 0:
             if not (chain_empty and artifacts_count == 0):
                 events.append({
@@ -163,13 +127,8 @@ def detect_disagreements(
     return events
 
 
-# ── plan vs evidence budget (MIR-073) ────────────────────────────────────────
 
-# A planned source keeping at most this fraction of its content after the
-# total-budget trim counts as STARVED: the planner said "this file is needed",
-# the allocator effectively discarded it. Measured incident: 50 of 12204
-# chars (0.4%) — the self-analysis question shares no keywords with code, so
-# the file the plan was built around arrived as a sliver.
+# A planned source keeping at most this fraction of its content after the total-budget trim counts as STARVED (the planner said the file is needed, the allocator effectively discarded it).
 _STARVED_KEEP_RATIO = 0.05
 
 
@@ -179,13 +138,7 @@ def detect_budget_starvation(
     planned_labels: Any,
     memory_label: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return `subsystem_disagreement` payloads for starved PLANNED sources.
-
-    ``trims`` is what `core.evidence_budget.total_trims` parsed back out of
-    the trimmed blocks: (label, kept_chars, original_chars). Pure function,
-    logging-only consumer — per the operator's sensor policy this observes
-    and never changes behaviour.
-    """
+    """Payloads for starved PLANNED sources; ``trims`` is (label, kept_chars, original_chars) parsed back by `core.evidence_budget.total_trims`. Pure, observes and never changes behaviour."""
     events: list[dict[str, Any]] = []
     for label, kept, original in trims:
         if memory_label is not None and label == memory_label:

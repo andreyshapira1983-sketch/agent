@@ -9,10 +9,7 @@ from pathlib import Path
 #: Location of the liveness record, relative to the workspace.
 HEARTBEAT_PATH = "data/daemon_heartbeat.json"
 
-# Expected wall-clock gap between ticks. The daemon is normally driven by Task
-# Scheduler every 30 minutes. If the newest heartbeat is older than
-# STALENESS_FACTOR * this interval, the daemon is considered stale (likely not
-# running) rather than merely idle. Override via AGENT_TICK_INTERVAL_SECONDS.
+# Expected gap between ticks (Task Scheduler, 30 min); a heartbeat older than STALENESS_FACTOR * this is stale (likely not running), not merely idle. Override via AGENT_TICK_INTERVAL_SECONDS.
 EXPECTED_TICK_INTERVAL_SECONDS = int(
     os.environ.get("AGENT_TICK_INTERVAL_SECONDS", "1800")
 )
@@ -24,11 +21,7 @@ def _now_iso() -> str:
 
 
 def write_heartbeat(workspace: Path, payload: dict) -> None:
-    """Persist the latest daemon liveness record (overwrites previous).
-
-    A single small JSON file gives O(1) staleness checks without scanning the
-    append-only tick log. Always stamped with the current time.
-    """
+    """Persist the latest daemon liveness record (overwrites the previous); one small JSON file gives O(1) staleness checks."""
     hb_path = Path(workspace) / HEARTBEAT_PATH
     hb_path.parent.mkdir(parents=True, exist_ok=True)
     record = {"ts": _now_iso(), **payload}
@@ -73,15 +66,10 @@ def is_stale(age_seconds: float | None) -> bool:
     return age_seconds > EXPECTED_TICK_INTERVAL_SECONDS * STALENESS_FACTOR
 
 
-#: Location of the append-only per-tick outcome journal, relative to the
-#: workspace. Owned here so writer (agent_tick._log_tick) and reader
-#: (error_tick_streak) share one path — two spellings would rot apart.
+#: Append-only per-tick outcome journal, relative to the workspace; owned here so writer (agent_tick._log_tick) and reader (error_tick_streak) share one path.
 TICK_LOG_RELPATH = Path("logs") / "daemon_tick.jsonl"
 
-#: Consecutive `tick_error` ticks that constitute a suspected crash loop.
-#: 3 on the 4-hour schedule = 12 hours of failing while the heartbeat stays
-#: fresh — the heartbeat is written BEFORE the tick's work, so a daemon that
-#: crashes every tick reports `alive` forever without this counter (MIR-135).
+#: Consecutive `tick_error` ticks that constitute a suspected crash loop. The heartbeat is written BEFORE the tick's work, so a daemon crashing every tick would report `alive` forever without this counter.
 CRASH_LOOP_THRESHOLD = 3
 
 
@@ -92,10 +80,7 @@ def tick_log_path(workspace: Path) -> Path:
 def error_tick_streak(workspace: Path) -> int:
     """Consecutive most-recent ticks that ended in `tick_error`.
 
-    `tick_complete` and `budget_kill_switch` reset the streak: the first is a
-    healthy tick, the second is deliberate throttling, not failure. A missing
-    journal is 0 — no record is not a crash loop — and a broken line is
-    skipped, not counted either way.
+    `tick_complete` and `budget_kill_switch` reset the streak (healthy / deliberate throttling). A missing journal is 0; a broken line is skipped.
     """
     path = tick_log_path(workspace)
     if not path.is_file():

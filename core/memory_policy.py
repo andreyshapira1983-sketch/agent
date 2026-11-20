@@ -27,9 +27,6 @@ if TYPE_CHECKING:
     from core.memory_echo_antibody import MemoryWriteEvent
 
 
-# ============================================================
-# Write Policy
-# ============================================================
 
 BLOCKED_TAGS: frozenset[str] = frozenset({"transient", "temporary", "do-not-save", "ephemeral"})
 
@@ -57,16 +54,15 @@ _PROVENANCE_LINE = re.compile(r"^(?:Источник|Источники):[^\n]*$
 
 
 def cut_keeping_provenance(text: str, limit: int) -> str:
-    """Укоротить запись до `limit`, сохранив её последнюю строку «Источник: …».
+    """Shorten a record to `limit`, keeping its last line ("Source: ...").
 
-    Строка источника стоит в конце записи, и простой срез отрезал её; поэтому
-    укорачивается середина.
+        The source line sits at the end and a plain slice cut it off, so the middle is shortened instead.
     """
     found = list(_PROVENANCE_LINE.finditer(text))
     tail = found[-1].group(0)[:200] if found else ""
     if not tail or len(tail) >= limit // 2:
         return text[: limit - 1].rstrip() + "…"
-    # Вопрос уступает первым: вывод и источник важнее его полного текста.
+    # The question yields first: the conclusion and the source matter more than its full text.
     lines = text[: found[-1].start()].rstrip().splitlines()
     lines = [ln[:90].rstrip() + "…" if ln.startswith("Вопрос:") and len(ln) > 91 else ln for ln in lines]
     head = "\n".join(lines)
@@ -184,10 +180,9 @@ class MemoryWritePolicy:
         if is_secret:
             return MemoryWriteDecision("reject", secret_reasons)
 
-        # Injection: text the guard would BLOCK from a prompt never becomes a
-        # memory the agent wrote — memory is injected into later prompts. The
-        # one gate every agent write passes (door, summary, remember, pipeline);
-        # a human's own record is their call (проверка 17.11, серьёзная №4).
+        # Injection: text the guard would BLOCK from a prompt never becomes a memory the agent wrote, since memory is
+        # injected into later prompts. One gate for every agent write (door, summary, remember, pipeline); a human's own
+        # record is their call.
         if (source or "").strip().lower() != "user-explicit" and _memory_injection(text):
             return MemoryWriteDecision(
                 "reject", ["text addresses the model's instructions (prompt injection)"])
@@ -270,9 +265,6 @@ class MemoryWritePolicy:
         return MemoryWriteDecision("save", reasons)
 
 
-# ============================================================
-# Retrieval Policy
-# ============================================================
 
 _BROAD_PROJECT_MEMORY_TOKENS: frozenset[str] = frozenset(
     {
@@ -376,7 +368,7 @@ def _recency(record: MemoryRecord, now: datetime) -> float:
 
 
 def _min_max(values: list[float]) -> list[float]:
-    """Нормировка в [0, 1], как у Generative Agents; все равны — все нули."""
+    """Normalise to [0, 1] as in Generative Agents; all equal means all zeros."""
     lo, hi = min(values), max(values)
     if hi <= lo:
         return [0.0] * len(values)
@@ -411,7 +403,7 @@ _TRANSCRIPT_PREFIXES: tuple[str, ...] = ("вопрос:", "question:")
 
 
 def _is_transcript(text: str) -> bool:
-    """Слепок одного обмена, а не урок; не штрафуется, но квотируется и не идёт в канал рода работы."""
+    """Snapshot of one exchange, not a lesson: not penalised, but quota-limited and kept out of the work-kind channel."""
     return (text or "").strip().lower().startswith(_TRANSCRIPT_PREFIXES)
 
 
@@ -447,7 +439,7 @@ class MemoryRetrievalPolicy:
     semantic_candidates: int = 3
 
     def _take_with_transcript_quota(self, scored: list) -> list[MemoryRecord]:
-        """Первые max_records по баллу, но слепков — не больше квоты."""
+        """First max_records by score, but at most the quota of transcripts."""
         out: list[MemoryRecord] = []
         transcripts = 0
         for _score, r in scored:
@@ -467,11 +459,10 @@ class MemoryRetrievalPolicy:
         q_kinds: frozenset[str],
         relevance: list[float] | None = None,
     ) -> list[MemoryRecord]:
-        """Дописывает к отобранному уроки того же рода работы (без слепков обменов).
+        """Append lessons of the same work kind to the selection (no exchange snapshots).
 
-        Порядок как у Generative Agents: нормированные релевантность + свежесть
-        с равными весами; одна свежесть отдавала места случайным свежим записям.
-        Без `relevance` — просто самые свежие.
+                Ordered as in Generative Agents: normalised relevance + recency with equal weights (recency alone gave
+                places to random fresh records). Without `relevance`, simply the freshest.
         """
         if not q_kinds or self.lessons_by_kind <= 0:
             return selected
@@ -489,7 +480,7 @@ class MemoryRetrievalPolicy:
         rel = _min_max([relevance[i] for i, _r in pool]) if relevance else [0.0] * len(pool)
         order = sorted(
             range(len(pool)),
-            # Ничья (при двух кандидатах 1+0 против 0+1) решается релевантностью, не датой.
+            # A tie (with two candidates, 1+0 vs 0+1) is settled by relevance, not by date.
             key=lambda k: (rel[k] + fresh[k], rel[k], pool[k][1].created_at),
             reverse=True,
         )
@@ -512,13 +503,13 @@ class MemoryRetrievalPolicy:
         below_threshold = 0
         scored: list[tuple[float, MemoryRecord]] = []
         q_kinds = work_kinds(question)
-        # Допуск — по числу общих слов (min_score); BM25 решает только порядок.
+        # Admission by the number of shared words (min_score); BM25 only orders.
         broad = is_broad_project_self_knowledge_question(question)
         texts = [r.content if isinstance(r.content, str) else str(r.content) for r in records]
         relevance = _bm25_scores(q_tokens, [
             _term_counts(t, r.tags or []) for t, r in zip(texts, records, strict=True)
         ])
-        # Смысл поверх слов; при выключенных эмбеддингах остаётся один BM25.
+        # Meaning on top of words; with embeddings off only BM25 remains.
         from core.memory_embeddings import fused_relevance, top_by_meaning
         relevance, semantic = fused_relevance(question, texts, relevance)
         by_meaning = frozenset() if broad else top_by_meaning(semantic, self.semantic_candidates)
@@ -571,8 +562,8 @@ class MemoryRetrievalPolicy:
         return "\n".join(lines)
 
 
-# Перевод строки в тексте записи рисовал в подсказке поддельную «- [mem_… | tags: …]»
-# строку (проверка 16.11, средняя): одна запись — одна строка, вложенный маркер обезврежен.
+# A newline in record text drew a forged "- [mem_... | tags: ...]" line in the prompt: one record, one line,
+# nested marker defused.
 _PROMPT_LINE_BREAK_RE = re.compile(r"\s*[\r\n\v\f\x1c-\x1e\x85  ]+\s*")
 #: Only what reads as a record START (`- [<id> |`, `- [mem_…`): a Markdown
 #: checklist «- [ ] todo» or «a - [b]» is ordinary content and stays as written.

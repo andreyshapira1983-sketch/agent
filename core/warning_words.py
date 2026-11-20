@@ -1,23 +1,14 @@
-"""Предупреждения проверки — человеческими словами у самого утверждения.
+"""Verification warnings in human words, next to the claim they qualify.
 
-24.09, чат оператора: в каждом ответе стояли `[topic-only:tool:python_probe]`,
-`[claim-figure-unverified]`, `[absence-unverifiable]` — метки для машины,
-показанные человеку. Вычистить их нельзя: это предупреждения (граница
-`_strip_verification_markers`, H-43), без них ответ увереннее, чем есть.
-
-Как показывать неуверенность, измерено: Kim, Liao и др., «I'm Not Sure,
-But...», FAccT 2024 (N=404) — высказанная словами неуверенность снижает
-излишнее согласие с системой и повышает точность людей. Поэтому метка не
-исчезает, а переводится: короткая оговорка на месте утверждения, источник
-(адрес страницы) сохраняется. Делается только на краю показа
-(`format_human_response`): в эпизоде и в разборе кампании метки остаются —
-по ним считают и ищут источники.
+Machine labels such as `[claim-figure-unverified]` are translated, not dropped (they are warnings: without them the answer looks
+more certain than it is): a short hedge in place, the source URL kept. Done only at the display edge (`format_human_response`);
+episodes and campaign review keep the labels for counting and source lookup.
 """
 from __future__ import annotations
 
 import re
 
-# Оговорка от первого лица и коротко, как сказал бы человек (оператор 26.09).
+# A short first-person hedge, as a human would say it.
 _RU = {
     "topic-only": "не проверял",
     "claim-figure-unverified": "число не сверял",
@@ -56,23 +47,21 @@ _LATIN_RE = re.compile(r"[a-z]", re.IGNORECASE)
 
 
 def _russian(text: str) -> bool:
-    """Русский, если кириллицы хотя бы треть от латиницы: пути и имена кода в
-    русском ответе латинские («Файл data/lesson_injections.jsonl не существует»)."""
+    """Russian if Cyrillic is at least a third of Latin: paths and code names in a Russian answer are Latin."""
     return 3 * len(_CYRILLIC_RE.findall(text)) >= len(_LATIN_RE.findall(text))
 
 
 def strip_warning_markers(text: str) -> tuple[str, int]:
-    """Снять метки-предупреждения целиком (разговор в чате); вернуть текст и их число."""
+    """Remove warning labels entirely (chat conversation); return the text and their count."""
     plain = _UNVERIFIED_BODY_RE.sub("", text or "")
     return _MARKER_RE.sub("", plain), len(_MARKER_RE.findall(plain))
 
 
 def humanize_warning_markers(text: str) -> str:
-    """Метки-предупреждения -> короткая оговорка в скобках; адрес источника остаётся."""
+    """Warning labels -> a short parenthesised hedge; the source address stays."""
     if "[" not in (text or ""):
         return text
-    # Язык — по тексту БЕЗ меток: в короткой строке латиница самих меток
-    # перевешивала русскую фразу.
+    # Language is judged on the text WITHOUT the labels: in a short line the labels' own Latin outweighed the Russian phrase.
     plain = _UNVERIFIED_BODY_RE.sub("", text)
     words = _RU if _russian(_MARKER_RE.sub("", plain)) else _EN
     seen_at_line: set[tuple[int, str]] = set()

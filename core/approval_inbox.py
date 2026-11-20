@@ -1,9 +1,4 @@
-"""Approval inbox for autonomous runtime decisions.
-
-The ordinary ApprovalProvider is synchronous: the loop asks now and waits.
-The autonomous runtime needs a second surface: collect items that a human can
-review later, while the unattended run stays stopped or dry-run only.
-"""
+"""Approval inbox: items a human reviews later while the unattended run stays stopped or dry-run."""
 from __future__ import annotations
 
 import hashlib
@@ -20,13 +15,7 @@ from core.state_integrity import read_state_jsonl, rewrite_state_jsonl
 
 
 def _content_id(data: dict) -> str:
-    """Постоянное имя строки, у которой своего нет.
-
-    2026-09-21: строке без `id` выдавался `new_id` — новый случайный при
-    каждом чтении. `set_status` перечитывает файл и получал уже другое имя:
-    «approval not found». Строка висела заявкой, и снять её штатно было
-    нельзя. Одна и та же строка — одно и то же имя.
-    """
+    """Stable id for a row that has none (a random `new_id` per read made `set_status` fail)."""
     digest = hashlib.sha256(
         json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     ).hexdigest()
@@ -35,16 +24,14 @@ def _content_id(data: dict) -> str:
 
 ApprovalInboxStatus = Literal["pending", "approved", "denied", "aborted", "executed"]
 ApprovalInboxRisk = Literal["read_only", "reversible", "irreversible", "external"]
-#: Правка кода полосой самоприменения (core/self_apply_bridge.SELF_APPLY_OPERATION;
-#: строкой, чтобы ящик не тянул полосу при импорте).
+#: Code edit by the self-apply lane (core/self_apply_bridge.SELF_APPLY_OPERATION), a string so the inbox does not import the lane.
 _SELF_APPLY_OPERATION = "self_apply_lane.run"
 logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = {"pending", "approved", "denied", "aborted", "executed"}
 _VALID_RISKS = {"read_only", "reversible", "irreversible", "external"}
 
-#: The only legal moves. A status missing from the keys is terminal: a verdict
-#: or an execution is a record, and a record that can be rewritten is not one.
+#: The only legal moves. A status missing from the keys is terminal: a verdict or an execution is a record, and a record that can be rewritten is not one.
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"approved", "denied", "aborted"}),
     "approved": frozenset({"executed", "aborted"}),
@@ -54,30 +41,18 @@ _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
 class ApprovalTransitionError(ValueError):
     """A status move the approval state machine does not allow."""
 
-# Canonical location of the approval inbox file, relative to the workspace root.
-# Single source of truth: agent_tick and the CLI health/approval commands import
-# this instead of re-declaring the path, so it can never drift between callers.
+# Canonical inbox file path relative to the workspace root; import it instead of re-declaring.
 DEFAULT_APPROVAL_INBOX_PATH = Path("data") / "approval_inbox.jsonl"
 
-# Default TTL for approval requests.  After this many hours without a human
-# decision the item is automatically aborted by expire_stale().
-# Prevents the inbox from accumulating stale items indefinitely when the
-# operator goes offline.
+# Default TTL in hours; stale pending items are aborted by expire_stale().
 _DEFAULT_TTL_HOURS: int = 24
 
-#: How long a DENIAL is remembered by dedup key (block 3, 2026-09-03, audit
-#: L10). Measured on the live inbox: the same doctrine draft re-filed three
-#: times after denial, the same split step (same digest) twice. Pending-only
-#: dedup made every denial a fresh start. Expert default, veto line: the
-#: operator may shorten it in one word; the window is the ONLY thing a
-#: byte-identical refile has to wait out, a revised one is never blocked.
+#: How long a DENIAL is remembered by dedup key; without it a pending-only dedup made every denial a fresh start. The window is the ONLY thing a byte-identical refile waits out; a revised one is never blocked.
 _DENIAL_MEMORY_HOURS: int = 168
 
-#: Payload keys that describe the refile itself, not the proposal, and are
-#: left out of the content fingerprint.
+#: Payload keys that describe the refile itself, not the proposal; left out of the content fingerprint.
 _REFILE_MARKER_KEYS = frozenset({"dedup_key", "revises", "prior_denial_reason"})
 
-# Slice 1b-a: map a durable status transition to an explicit receipt operation.
 _STATUS_RECEIPT_OPERATION: dict[str, str] = {
     "approved": "approval_inbox.approve",
     "denied": "approval_inbox.deny",
@@ -111,8 +86,7 @@ def _redact_durable_payload(payload: dict) -> dict:
 
 
 def _content_fingerprint(summary: str, payload: dict) -> str:
-    """What a proposal SAYS, minus the refile markers — equal for a byte-
-    identical refile, different for any revision of summary or content."""
+    """What a proposal says, minus refile markers: equal for a byte-identical refile, different for a revision."""
     import hashlib
     import json
 
@@ -157,15 +131,9 @@ class ApprovalInboxItem:
     reasons: tuple[str, ...] = ()
     payload: dict = field(default_factory=dict)
     requested_by: str = "autonomous_runtime"
-    #: WHO gave the verdict. `unattributed` is the honest default: assuming the
-    #: operator when nobody said so is how a record starts lying comfortably,
-    #: and this is the one field whose purpose is to support a claim about the
-    #: human (§9). A RECORD of who claimed the verdict, never authentication —
-    #: a caller saying "operator" is believed.
+    #: WHO gave the verdict. `unattributed` is the honest default. A RECORD of who claimed the verdict, never authentication: a caller saying "operator" is believed.
     decided_by: str = "unattributed"
-    #: The verdict's own words, kept ON the item (block 3, 2026-09-03): a
-    #: refile after denial must carry the reason it answers, and the outcomes
-    #: journal alone could not be read back by dedup key.
+    #: The verdict's own words, kept ON the item: a refile after denial must carry the reason it answers.
     decision_reason: str = ""
     expires_at: str | None = None
     id: str = field(default_factory=lambda: new_id("ain"))
@@ -232,29 +200,12 @@ class ApprovalInbox:
             self.items = self._load()
 
     def _sync(self) -> None:
-        """Re-read the file before every read or write (block 8, operator's
-        word 2026-09-03). A long campaign held the inbox in memory and rewrote
-        the file whole on each save, so an operator's verdict written from
-        outside was overwritten by the agent's next proposal; the grant and
-        the denial of that evening both needed the run stopped. Every mutation
-        in this process saves immediately, so disk is the truth and the
-        in-memory copy is a cache."""
+        """Re-read the file before every read or write; disk is the truth, memory is a cache."""
         if self.path is not None and Path(self.path).exists():
             self.items = self._load()
 
     def find_pending_by_dedup_key(self, dedup_key: str):
-        """Ожидающая заявка с этим ключом, или None.
-
-        Публичный способ спросить о СТОЛКНОВЕНИИ до того, как о нём соврут.
-        `add` при совпадении ключа возвращает существующую заявку и ничем не
-        отличает её от новой, поэтому вызывающий писал в журнал «предложено» и
-        называл длину СВОЕГО текста, тогда как в ящике лежал чужой
-        (F-1 в docs/audit/FIELD_CHECK_QUEUE.md).
-
-        Сама дедупликация не оспаривается: она заведена ради дела и
-        задокументирована выше. Здесь появляется только возможность узнать
-        правду.
-        """
+        """Pending item with this dedup key, or None."""
         return self._find_pending_by_dedup_key(dedup_key)
 
     def add(
@@ -269,10 +220,7 @@ class ApprovalInbox:
         dedup_key: str | None = None,
     ) -> ApprovalInboxItem:
         self._sync()
-        # Structural duplicate guard: if a dedup_key is supplied and an
-        # equivalent pending item already exists, return it instead of
-        # appending a near-identical row. This keeps the inbox drained of the
-        # repetitive proposed_task clusters the daemon used to accumulate.
+        # Structural duplicate guard: return an equivalent pending item instead of appending a near-copy.
         if dedup_key is not None:
             existing = self._find_pending_by_dedup_key(dedup_key)
             if existing is not None:
@@ -286,14 +234,8 @@ class ApprovalInbox:
         reasons = tuple(reasons)
         if dedup_key is not None:
             merged_payload.setdefault("dedup_key", dedup_key)
-            # Block 3 (L10): a denial is remembered, not forgotten with the
-            # pending row. The SAME content again is refused and the denied
-            # item returned (its status says so); a REVISION is admitted and
-            # carries the denial it answers, so the reviewer sees a refile.
-            # Only a proposal that CARRIES files is remembered: the same
-            # bytes again is the same proposal. A permission question
-            # (allow_effects, no files) may be asked again after a verdict —
-            # MIR-072's contract, kept.
+            # A denial is remembered: the same content is refused, a revision is admitted and carries the denial it answers.
+            # Only proposals with files are remembered; a permission question (allow_effects, no files) may be asked again.
             denied = (
                 self.recently_denied(dedup_key)
                 if _payload_targets(merged_payload) else None
@@ -324,20 +266,12 @@ class ApprovalInbox:
         return item
 
     def _find_pending_by_dedup_key(self, dedup_key: str) -> ApprovalInboxItem | None:
-        """Return a still-pending item carrying ``dedup_key``, if any.
-
-        Expired items are first swept by ``pending()`` so a stale duplicate
-        never blocks a fresh, legitimately re-proposed task.
-        """
+        """Still-pending item carrying ``dedup_key``, if any; expired items are swept first."""
         for item in self.pending():
             if item.payload.get("dedup_key") == dedup_key:
                 return item
         return None
 
-    # ── the commitments view (block 3, 2026-09-03) ───────────────────────
-    # The inbox already holds every commitment with its status; what was
-    # missing were readers that tell WAITING from EXHAUSTED and DENIED from
-    # NEVER SEEN. No second registry: one store, more honest questions.
 
     def find_by_dedup_key(
         self, dedup_key: str, *, statuses: tuple[str, ...] = ("pending",),
@@ -362,11 +296,7 @@ class ApprovalInbox:
     def pending_targets(
         self, *, operation: str | None = None,
     ) -> frozenset[str] | None:
-        """Files awaiting a human under pending/approved items.
-
-        ``None`` means «unknown»: some waiting item names no files, so a
-        caller must treat every file as waiting (the pre-block-3 behaviour).
-        """
+        """Files awaiting a human under pending/approved items; ``None`` means some waiting item names no files, so treat every file as waiting."""
         self._sync()
         out: set[str] = set()
         for item in self.items:
@@ -383,8 +313,7 @@ class ApprovalInbox:
     def recently_denied_targets(
         self, *, operation: str | None = None, hours: int = _DENIAL_MEMORY_HOURS,
     ) -> frozenset[str]:
-        """Files whose proposal a human denied within ``hours`` — a cooldown
-        set for producers, so a denial sends the hand elsewhere."""
+        """Files whose proposal a human denied within ``hours`` (cooldown set for producers)."""
         self._sync()
         out: set[str] = set()
         for item in self.items:
@@ -396,23 +325,13 @@ class ApprovalInbox:
         return frozenset(out)
 
     def expire_stale(self) -> int:
-        """Abort pending items whose ``expires_at`` timestamp has passed.
-
-        Scans ``self.items`` in-place and sets status to ``'aborted'`` for
-        every item that is still ``'pending'`` but whose deadline is in the
-        past.  Persists immediately if any items were changed.
-
-        Returns the number of items that were aborted.
-        """
+        """Abort pending items whose ``expires_at`` has passed; persist and return the number aborted."""
         self._sync()
         now = datetime.now(timezone.utc)
         expired = 0
         new_items: list[ApprovalInboxItem] = []
         for item in self.items:
-            # Одобренная, но не исполненная правка кода тоже снимается по сроку
-            # (план субботы ж, 24.09: заявка разреза step_sanitizer висела
-            # «одобренной» бессрочно и ожила, когда код снова совпал с основой).
-            # Постоянные разрешения держат свой срок сами (_grant_is_live).
+            # Approved but unexecuted code edits also expire; standing grants keep their own TTL (_grant_is_live).
             stale_patch = item.status == "approved" and item.operation == _SELF_APPLY_OPERATION
             if (item.status == "pending" or stale_patch) and item.expires_at:
                 try:
@@ -423,7 +342,7 @@ class ApprovalInbox:
                         item = replace(item, status="aborted", updated_at=_now_iso())
                         expired += 1
                 except (ValueError, TypeError):
-                    pass  # malformed timestamp — leave item untouched
+                    pass
             new_items.append(item)
         self.items = new_items
         if expired:
@@ -431,7 +350,7 @@ class ApprovalInbox:
         return expired
 
     def pending(self) -> list[ApprovalInboxItem]:
-        self.expire_stale()  # enforce TTL on every read
+        self.expire_stale()
         return [item for item in self.items if item.status == "pending"]
 
     def list(self, *, status: ApprovalInboxStatus | str | None = None) -> list[ApprovalInboxItem]:
@@ -448,22 +367,7 @@ class ApprovalInbox:
     def deny(
         self, item_id: str, *, reason: str = "", actor: str = "",
     ) -> ApprovalInboxItem:
-        """Refuse an item. The reason is REQUIRED, unlike on `approve`.
-
-        An approval says «yes, as proposed» — its content is the item itself.
-        A denial has no content anywhere except the reason: without it the
-        record says that something was wrong and never what. Measured
-        2026-08-23: work the agent chose for itself is denied at 55–60%
-        (`self_build_task.approve` 3 of 5, and not one ever executed), against
-        19% for permission to run work a human directed. That refusal rate IS
-        the gate nothing automated performs, and the verdict bridge
-        (`data/approval_outcomes.jsonl` → `core.charter_goal._recent_verdicts`)
-        already carries it back into goal selection. The channel existed and
-        could be silently emptied at the one moment it is for.
-
-        Raised BEFORE any status change, so a refused denial leaves the item
-        pending rather than half-decided.
-        """
+        """Refuse an item. The reason is REQUIRED; raised before any status change so a refused denial leaves the item pending."""
         if not str(reason or "").strip():
             raise ValueError(
                 "a denial must carry a reason — it is the only content the "
@@ -474,8 +378,7 @@ class ApprovalInbox:
     def _verdict(
         self, item_id: str, status: str, reason: str, actor: str,
     ) -> ApprovalInboxItem:
-        """One path for both verdicts, so the actor cannot be recorded on one
-        and forgotten on the other."""
+        """One path for both verdicts so the actor is recorded on both."""
         prior = self.get(item_id)
         item = self.set_status(
             item_id, status, decided_by=str(actor).strip() or "unattributed",
@@ -489,10 +392,7 @@ class ApprovalInbox:
     def _record_outcome(
         self, item: ApprovalInboxItem, verdict: str, reason: str,
     ) -> None:
-        """The verdict bridge (2026-08-19): a review outcome becomes state the
-        author's next selection can read; a write failure never blocks the
-        verdict itself. Lifecycle transitions (executed/aborted) stay out —
-        they are plumbing, not review."""
+        """Turn a review outcome into state the next goal selection can read; a write failure never blocks the verdict. Lifecycle moves stay out."""
         ws = self._receipt_workspace()
         if ws is None:
             return
@@ -509,14 +409,12 @@ class ApprovalInbox:
                 "verdict": verdict,
                 "reason": str(reason or ""),
                 "decided_by": item.decided_by,
-                # Block 3 (L10): the outcome names WHAT was judged, so a
-                # reader can match a verdict to a key or a file, not only
-                # to a summary string.
+                # The outcome names what was judged (key or file), not only a summary string.
                 "dedup_key": str(item.payload.get("dedup_key") or ""),
                 "targets": list(_payload_targets(item.payload))[:8],
             }])
-        except Exception:  # noqa: BLE001, S110 — мост не роняет вердикт;
-            pass           # недоставленная запись хуже, чем упавший approve? нет
+        except Exception:  # noqa: BLE001, S110 — the bridge must not drop the verdict
+            pass
 
     def abort(self, item_id: str) -> ApprovalInboxItem:
         return self.set_status(item_id, "aborted")
@@ -539,10 +437,7 @@ class ApprovalInbox:
         decided_by: str | None = None,
         decision_reason: str | None = None,
     ) -> ApprovalInboxItem:
-        """`decided_by` / `decision_reason` are written only by the verdict
-        path. Lifecycle moves (executed/aborted) leave them alone: they are
-        plumbing, not review, and stamping an actor on them would attribute a
-        verdict nobody gave."""
+        """`decided_by` / `decision_reason` are written only by the verdict path, not by lifecycle moves."""
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid approval status: {status}")
         self._sync()
@@ -550,8 +445,7 @@ class ApprovalInbox:
         out: list[ApprovalInboxItem] = []
         for item in self.items:
             if item.id == item_id:
-                # A retry repeating a live status (rule_approved_apply re-approves
-                # its own request) changes nothing: the first signature stands.
+                # A retry repeating a live status changes nothing: the first signature stands.
                 if status == item.status and status in _ALLOWED_TRANSITIONS:
                     return item
                 if status not in _ALLOWED_TRANSITIONS.get(item.status, frozenset()):
@@ -592,7 +486,7 @@ class ApprovalInbox:
         return p.parent
 
     def _emit_receipt(self, operation: str, item: ApprovalInboxItem) -> None:
-        """Append an approval transition receipt (slice 1b-a). Never raises."""
+        """Append an approval transition receipt. Never raises."""
         try:
             from core.tool_receipts import record_approval_receipt
 
@@ -600,15 +494,10 @@ class ApprovalInbox:
                 operation, item, workspace=self._receipt_workspace()
             )
         except Exception:  # noqa: BLE001, S110 — reason stated above
-            pass  # receipts must never break approval-inbox operations
+            pass  # receipts must never break inbox operations
 
     def digest(self, *, max_pending: int = 20) -> dict:
-        """Сводка для ЧЕЛОВЕКА: числа и заголовки, без тел заявок.
-
-        Отдельный вид, а не урезанный `snapshot`: на снимке с целыми записями
-        стоит распознавание дубликатов, и обеднить его значило бы выключить
-        распознавание. Замер и границы: MIR-167.
-        """
+        """Human-facing summary: counts and titles, no bodies."""
         pending = self.pending()
         by_operation: dict[str, int] = {}
         for item in pending:
@@ -627,8 +516,7 @@ class ApprovalInbox:
                 }
                 for item in pending[:max_pending]
             ],
-            # Обрезание объявляется: молчаливое «показано не всё» читается как
-            # «это всё», и оператор решает по неполному списку.
+            # Truncation is announced so a partial list is not read as complete.
             "pending_not_listed": max(0, len(pending) - max_pending),
         }
 
@@ -668,18 +556,8 @@ class ApprovalInbox:
 
 
 def close_answered_effects_requests(inbox: ApprovalInbox, grant_id: str) -> list[str]:
-    """Закрыть просьбы о разрешении на эффекты, на которые действующий
-    стоячий грант уже ответил. Возвращает их идентификаторы.
-
-    2026-09-20/21: грант продлили в 19:14, а шесть просьб `allow_effects`,
-    поданных в 19:00–19:10 именно из-за его истечения, висели сутки. Полоса
-    самоправки стоит при любой висящей заявке (правило закреплено тестом и не
-    меняется), и давно отвеченные просьбы держали её закрытой: 169 циклов,
-    ноль работы. Разбор: tests/test_a_grant_answers_the_requests_it_answers.py.
-
-    Статус `aborted`, не `approved`: одобренную просьбу следующий прогон с той
-    же целью подобрал бы как одноразовое разрешение. Заявки на правку кода не
-    трогаются — их решает человек.
+    """Close allow_effects requests already answered by a live standing grant (status `aborted`, not `approved`); return their ids.
+    Code-edit requests are left to the human.
     """
     closed: list[str] = []
     for item in inbox.pending():

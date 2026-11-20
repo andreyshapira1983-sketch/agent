@@ -1,9 +1,4 @@
-"""Live state-store recovery drill for operator readiness checks.
-
-The drill uses an isolated file under ``data/state_store_drills``. It never
-corrupts production state stores; it only proves that the shared integrity
-layer can quarantine bad rows and leave a valid active JSONL file behind.
-"""
+"""Live state-store recovery drill on an isolated file; proves the integrity layer quarantines bad rows without touching production stores."""
 from __future__ import annotations
 
 import json
@@ -141,9 +136,6 @@ def _active_file_integrity_ok(path: Path) -> bool:
         try:
             decode_state_row(line)
         except Exception:  # noqa: BLE001 — reason stated above
-            # `False` is not a swallowed failure, it is the answer: this
-            # function asks "does every row decode?", and a row that does not
-            # is precisely a negative. The caller reports the verdict; naming
-            # the row here would duplicate the drill's own output.
+            # False is the answer, not a swallowed failure: a row that does not decode is a negative.
             return False
     return True

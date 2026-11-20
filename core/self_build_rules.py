@@ -1,15 +1,4 @@
-"""Hard rules learned from self-build rollbacks.
-
-becomes the rule "symbol X must remain importable from core/verifier.py". On
-the next produce run for that target the Critic re-parses the proposed
-content and vetoes BEFORE apply if the symbol is neither defined nor re-
-exported — no LLM judgement involved, so the same rollback can never happen
-twice for the same symbol.
-
-Storage is one JSONL file (``data/self_build_rules.jsonl``) next to the
-other agent state stores; loading and recording are best-effort and never
-raise into the caller.
-"""
+"""Hard rules from self-build rollbacks: a symbol that failed to import must stay importable, enforced before apply."""
 from __future__ import annotations
 
 import json
@@ -19,10 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# Уроки с происхождением — отдельный журнал со своими воротами записи и своим
-# блокирующим читателем — живут в core/self_build_lessons.py. Здесь остаётся
-# мост `record_lessons_from_result`, который пишет и правила, и урок; имена
-# уроков реэкспортируются, чтобы прежние импорты отсюда не ломались.
+# lessons live in core/self_build_lessons.py; names are re-exported so old imports keep working
 from core.self_build_lessons import (  # noqa: F401
     LESSON_SINK,
     LESSONS_FILENAME,
@@ -183,22 +169,9 @@ def record_lessons_from_result(
     durable_writes: Any = None,
     log: Any = None,
 ) -> dict:
-    """Записать всё, чему учит один исход: узкие правила И урок с происхождением.
+    """Record the rules and the provenance lesson from one apply outcome; `durable_writes=None` means a human is at the keyboard.
 
-    Зовётся с ОБОИХ путей применения — из CLI и из автономного слива
-    (`core/rule_approved_apply.py`). До 2026-09-17 второй путь не звал ничего,
-    поэтому ни одна починка без человека за клавиатурой не превращалась в
-    знание: `record_rules_from_result` имела ровно одного вызывающего —
-    `cli/commands_self_apply.py`.
-
-    `durable_writes` — набор открытых стоков этого прогона, ровно тот, что у
-    сборки агента. `None` означает «человек за клавиатурой» и разрешает, как
-    правило 4 лестницы. Безнадзорное производство приходит сюда с набором без
-    стока урока и получает ОТКАЗ — записанный в журнал, а не молчаливый
-    (ревизия PR #333: запись урока обходила ту самую политику памяти, которую
-    полномочие песочницы открывает только для песочницы).
-
-    Best-effort по образцу соседа: сбой записи не вправе ронять применение.
+    Unattended callers without the lesson sink get a logged refusal. Best-effort: never raises.
     """
     added: dict[str, Any] = {"rules": 0, "lessons": 0}
     allowed, why = lesson_write_verdict(durable_writes)
@@ -209,7 +182,7 @@ def record_lessons_from_result(
                 log("lesson_write_refused", {
                     "sink": LESSON_SINK, "origin": origin, "reason": why,
                 })
-            except Exception:  # noqa: BLE001 — журнал не роняет применение
+            except Exception:  # noqa: BLE001 — logging must not break apply
                 pass
         return added
     try:
@@ -217,7 +190,7 @@ def record_lessons_from_result(
         lesson = lesson_from_apply_result(result, origin=origin, reason=reason)
         if lesson is not None and LessonStore(default_lessons_path(workspace)).add(lesson):
             added["lessons"] = 1
-    except Exception:  # noqa: BLE001 — запись опыта не вправе ронять вызывающего
+    except Exception:  # noqa: BLE001 — recording must not break the caller
         return added
     return added
 

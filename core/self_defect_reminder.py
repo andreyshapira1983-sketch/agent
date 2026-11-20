@@ -1,28 +1,6 @@
-"""Свои открытые записи о промахах — перед глазами в момент действия.
+"""Own open defect records, put before the agent's eyes at the moment of acting.
 
-Замер 2026-09-21. Агент ЗАПИСЫВАЕТ свои промахи точнее, чем их формулирует
-оператор. 20.09 в 22:00 он завёл в `data/self_improvement_issues.jsonl`:
-
-    «Explained a wall instead of testing it» — «three refusals narrated
-    instead of switching tools. The fix is to attempt the action first and
-    report the measured result.»
-
-Через десять часов он трижды запросил строки 361, 481 и 601 файла из 287
-строк и объявил чтение невозможным. Рядом лежали его же открытые записи о
-сломанной пробе («на этом измерительном приборе стоят все прочие решения») —
-и в разговоре он «обнаружил» это заново, как новость.
-
-Реестр читался, но только при ВЫБОРЕ работы (`core/campaign_io.py`). В тот
-момент, когда агент ДЕЙСТВУЕТ — планирует шаги или пишет «не могу», — его
-собственная запись лежала в ящике. Весь тот день её держали перед ним
-оператор и Claude; это и есть механизм, которого не было.
-
-Записи читаются как есть, а не через `SelfImprovementIssue.from_dict`: тот
-выбрасывает строки без `fingerprint` (так пропала самая первая запись о
-пробе) и теряет поля вне схемы — лекарство из записи выше лежит в
-`description`/`proposed_action`, которых схема не знает.
-
-Блок — контекст, не улика и не задание: то, что агент сам о себе записал.
+Records are read as written, not through `SelfImprovementIssue.from_dict` (it drops rows without `fingerprint` and fields outside the schema). The block is context, not evidence and not an assignment.
 """
 from __future__ import annotations
 
@@ -35,12 +13,12 @@ REGISTRY_RELPATH = Path("data") / "self_improvement_issues.jsonl"
 _MAX_ENTRIES = 8
 _MAX_LINE = 300
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
-#: Где агент пишет лекарство — в порядке, в каком его стоит показать.
+# Fields where the agent writes the remedy, in the order they are worth showing.
 _LESSON_FIELDS = (
     "proposed_action", "suggested_next_action", "description",
     "why_it_matters", "symptom", "reason",
 )
-#: Слова, которые реестр подставляет сам, когда агент лекарства не назвал.
+# Words the registry substitutes itself when the agent named no remedy.
 _BOILERPLATE = frozenset({
     "review the issue evidence and propose one small read-only fix",
 })
@@ -64,7 +42,7 @@ def _stamp(row: dict[str, Any]) -> str:
 
 
 def open_self_defects(workspace: Path | str | None) -> list[dict[str, Any]]:
-    """Открытые записи реестра, как агент их написал: сначала тяжёлые, потом свежие."""
+    """Open registry records as the agent wrote them: severe first, then fresh."""
     if workspace is None:
         return []
     path = Path(workspace) / REGISTRY_RELPATH
@@ -82,7 +60,7 @@ def open_self_defects(workspace: Path | str | None) -> list[dict[str, Any]]:
 
 
 def format_open_self_defects(rows: list[dict[str, Any]]) -> str:
-    """Блок для планировщика и синтезатора; пустой список — пустая строка."""
+    """Block for the planner and synthesizer; an empty list gives an empty string."""
     if not rows:
         return ""
     lines = [

@@ -16,9 +16,7 @@ QUARANTINE_TAGS = frozenset({
     "wrong",
     "obsolete",
     "superseded",
-    # A claim contradicted by another source stops being ordinary evidence
-    # until an operator resolves it (MIR-047). Listing it here means every
-    # retrieval site inherits the filter with no extra code.
+    # A claim contradicted by another source stops being ordinary evidence until an operator resolves it; listing it here makes every retrieval site inherit the filter.
     "conflicted",
     "temporary",
     "transient",
@@ -37,9 +35,7 @@ class KnowledgeUseDecision:
     decision: str
     reasons: tuple[str, ...]
     tags: tuple[str, ...] = ()
-    # Machine-readable companion to `reasons`. The prose is for a human
-    # reading one decision; aggregating a trace off it would mean parsing
-    # sentences, which is inferring a cause instead of being told it.
+    # Machine-readable companion to `reasons`, so traces aggregate by cause without parsing sentences.
     code: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -131,9 +127,7 @@ class KnowledgeUsePolicy:
             if tag_overlap:
                 reasons.append(f"role tag overlap: {sorted(tag_overlap)}")
 
-            # Allow when the question itself references one of the record's tags.
-            # This surfaces episodic/reflection records when the user asks about
-            # them by tag name (e.g. "reflection", "lesson").
+            # Allow when the question references one of the record's tags (surfaces episodic/reflection records by tag name).
             question_tag_match = q_tokens & tag_match_tokens
             if question_tag_match:
                 reasons.append(f"question matches tags: {sorted(question_tag_match)[:4]}")
@@ -143,9 +137,7 @@ class KnowledgeUsePolicy:
             if token_overlap:
                 reasons.append(f"question overlap: {sorted(token_overlap)[:8]}")
 
-            # First-party operator preferences are allowed broadly, but
-            # retrieval still does keyword scoring afterwards. This means
-            # they are candidates, not guaranteed prompt injection.
+            # Operator preferences are allowed broadly; keyword scoring still follows, so they are candidates, not guaranteed injection.
             if "preference" in tags_set:
                 reasons.append("operator preference candidate")
 

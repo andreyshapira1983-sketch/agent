@@ -1,17 +1,5 @@
-"""Approval -> trusted self-apply lane bridge (TD-024).
-
-It is deliberately *not*:
-
-* a daemon / scheduler / agent_tick hook (never auto-triggered), * a free-
-text patch executor (only a persisted, validated proposal is run), * a
-widening of ``shell_exec`` or the network surface (the lane still goes
-exclusively through :class:`core.safe_vcs.SafeVCS`, which has no push /
-fetch / pull / remote method at all).
-
-Only terminal lane statuses (``committed_local`` / ``rolled_back``) mark the
-inbox item executed; transient refusals (``budget_kill_switch`` /
-``budget_wait`` / ``approval_wait``) leave it approved so it can be retried.
-"""
+"""Approval -> trusted self-apply lane bridge: runs a persisted, validated inbox proposal through the lane (never auto-triggered, no free-text patches, no network)."""
+# Only terminal lane statuses (committed_local / rolled_back) mark the inbox item executed; transient refusals leave it approved for retry.
 from __future__ import annotations
 
 import base64
@@ -33,16 +21,13 @@ from core.self_apply_lane import (
 
 logger = logging.getLogger(__name__)
 
-# Only approval-inbox items carrying exactly this operation may be routed
-# through the self-apply lane. Anything else is refused.
+# Only inbox items with exactly this operation may be routed through the lane.
 SELF_APPLY_OPERATION = "self_apply_lane.run"
 
-# Lane statuses that terminally consume the approval (mark_executed). Transient
-# refusals are intentionally excluded so the operator can retry the same item.
+# Terminal lane statuses that consume the approval; transient refusals are excluded so the item can be retried.
 TERMINAL_LANE_STATUSES = frozenset({"committed_local", "rolled_back"})
 
-# Self-apply rollback is built into the lane (reset_hard + delete temp branch);
-# a proposal records this rather than an ad-hoc script.
+# Rollback is built into the lane (reset_hard + delete temp branch); a proposal records this rather than a script.
 DEFAULT_ROLLBACK = "self_apply_lane:reset_hard+delete_temp_branch"
 
 # Signature of the lane callable so tests can inject a fake.
@@ -64,12 +49,7 @@ def build_self_apply_payload(
     rollback: str = DEFAULT_ROLLBACK,
     workspace: Path | None = None,
 ) -> dict:
-    """Build a well-formed ``self_apply_lane.run`` inbox payload.
-
-    Each file entry must carry a non-empty ``path`` and full ``content`` (a
-    diff-only entry is rejected). Validating here means producers
-    (repair / supervisor / manual) and the runtime agree on one shape.
-    """
+    """Build a well-formed self_apply_lane.run inbox payload; each file needs a non-empty path and full content (diff-only is rejected)."""
     normalized = _stamp_base_state(_normalize_files(files), workspace)
     payload: dict[str, Any] = {
         "files": normalized,
@@ -84,11 +64,7 @@ def build_self_apply_payload(
 
 
 def _stamp_base_state(files: list[dict], workspace: Path | None) -> list[dict]:
-    """Записать, НА ЧЁМ построено предложение, пока пред-образ ещё под рукой.
-
-    Без рабочей папки отметка не ставится вовсе, и это отдельное состояние:
-    «не смотрели» — не то же самое, что «сошлось». Зачем: MIR-168.
-    """
+    """Record what the proposal is built on while the pre-image is at hand; without a workspace no mark is set ("not looked at" differs from "matched")."""
     if workspace is None:
         return files
     root = Path(workspace)
@@ -97,8 +73,7 @@ def _stamp_base_state(files: list[dict], workspace: Path | None) -> list[dict]:
         try:
             before = target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            # Файла нет (или он не текст) — пустой хеш при поднятом флаге и
-            # означает «в тот момент файла не было».
+            # No file (or not text): an empty hash with the flag raised means "the file did not exist then".
             entry["base_sha256"] = ""
         else:
             entry["base_sha256"] = file_base_sha256(before)
@@ -116,13 +91,8 @@ def _normalize_files(files: Any) -> list[dict]:
         path = entry.get("path")
         if not isinstance(path, str) or not path.strip():
             raise InvalidProposalError("file change missing a non-empty 'path'")
-        # A file change is SOURCE CODE the lane writes verbatim, but the durable
-        # inbox runs every payload through the DLP/secret redactor
-        # (approval_inbox._redact_durable_payload). That would corrupt code that
-        # legitimately contains example PII/secret-shaped text (e.g. an email in
-        # a test fixture). We therefore keep a redaction-inert base64 copy
-        # (``content_b64``) and treat it as authoritative when present, so the
-        # applied bytes always match what was proposed.
+        # File content is SOURCE CODE written verbatim, but the durable inbox runs payloads through the DLP redactor, which would corrupt
+        # code containing PII-shaped text; a redaction-inert base64 copy (content_b64) is authoritative when present.
         content: str | None = None
         b64 = entry.get("content_b64")
         if isinstance(b64, str) and b64.strip():
@@ -132,8 +102,7 @@ def _normalize_files(files: Any) -> list[dict]:
                 content = None
         if content is None:
             if "content" not in entry:
-                # Explicitly reject diff-only payloads: the lane overwrites whole
-                # files, so it needs the full post-image, never a unified diff.
+                # Diff-only payloads are rejected: the lane overwrites whole files and needs the full post-image.
                 if "diff" in entry:
                     raise InvalidProposalError(
                         f"diff-only change for {path!r} is not supported; full "
@@ -149,9 +118,7 @@ def _normalize_files(files: Any) -> list[dict]:
                 )
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         change = {"path": path, "content": content, "content_b64": encoded}
-        # Отметка состояния переносится, а не пересоздаётся: пересобрать её
-        # здесь значило бы снять хеш с СЕГОДНЯШНЕГО файла и объявить сходство
-        # там, где его никто не проверял (MIR-168).
+        # The state mark is carried over, not rebuilt: rebuilding would hash TODAY's file and declare a match nobody checked.
         if entry.get("base_checked"):
             change["base_sha256"] = str(entry.get("base_sha256") or "")
             change["base_checked"] = True
@@ -160,11 +127,7 @@ def _normalize_files(files: Any) -> list[dict]:
 
 
 def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
-    """Rebuild a :class:`SelfApplyProposal` from a persisted inbox payload.
-
-    Raises :class:`InvalidProposalError` when required fields are missing or a
-    file change is diff-only rather than full-content.
-    """
+    """Rebuild a SelfApplyProposal from a persisted payload; raises InvalidProposalError on missing fields or diff-only changes."""
     if not isinstance(payload, dict):
         raise InvalidProposalError("proposal payload must be an object")
     normalized = _normalize_files(payload.get("files"))
@@ -196,30 +159,15 @@ def rehydrate_proposal(payload: Any) -> SelfApplyProposal:
     )
 
 
-#: Authority levels a proposal payload may claim for itself. ``operator`` is
-#: excluded on purpose — only a human channel can confer operator authority,
-#: and a payload is machine-written.
+#: Authority levels a payload may claim; operator is excluded because only a human channel confers it.
 _PAYLOAD_DECLARABLE_LEVELS = frozenset(AUTHORITY_RANK) - {"operator"}
 
 
 def _directives_from_payload(payload: dict) -> tuple[Directive, ...]:
-    """Recover the requirements this patch is answering, with their authority.
+    """Recover the requirements this patch answers, with their authority.
 
-    Two channels, both optional:
-
-    * ``reason`` — the proposal's own statement of what it is doing, read as the
-      task contract;
-    * ``instructions`` — an explicit list of ``{level, source, text, locator}``
-      entries, which is how a review comment enters with the right (low)
-      authority rather than being mistaken for the task itself.
-
-    A payload may not claim ``operator``: it is written by the proposal
-    producer, not by the human. Without that restriction a producer could label
-    its own instruction ``operator``, and the conflict report and the stored
-    episode would then cite the operator as the source of something they never
-    said — the exact false authority claim ``docs/INSTRUCTION_AUTHORITY.md``
-    exists to prevent. Any level outside the declarable set, recognised or not,
-    is demoted to ``advisor``.
+    Channels: reason (read as the task contract) and instructions (list of {level, source, text, locator}). A payload may not claim
+    operator authority; any level outside the declarable set is demoted to advisor.
     """
     sources: list[SourceText] = []
 
@@ -360,10 +308,7 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
             ),
         )
 
-    # Gateway G3: single actuation door before ANY local mutation / SafeVCS op.
-    # Approval + validation + risk gates already passed above; the gateway adds
-    # the run-mode decision (simulate under dry-run) and is the choke where a
-    # future deny/block/escalate would stop a mutation. Fail closed on error.
+    # Gateway G3: single actuation door before ANY local mutation / SafeVCS op; adds the run-mode decision (simulate under dry-run). Fail closed on error.
     gw = _gateway_for(
         gateway,
         dry_run,
@@ -375,8 +320,7 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
         decision = gw.evaluate_self_apply(operation=SELF_APPLY_OPERATION)
         outcome = getattr(decision, "outcome", "deny")
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # Fail closed. Best-effort G4 error receipt — never let a receipt failure
-        # affect the fail-closed outcome.
+        # Fail closed; the best-effort G4 error receipt must never affect that outcome.
         _record_self_apply_gateway_error(workspace, item_id)
         return _refusal(
             proposal_id=item_id,
@@ -387,8 +331,7 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
             next_human_action="No changes were applied; resolve the gateway error and retry.",
         )
 
-    # G4: durable gateway decision receipt (kind="gateway"). Observation only —
-    # does not change the outcome handling below. Never raises.
+    # G4: durable gateway decision receipt; observation only, never raises.
     try:
         from core.tool_receipts import record_gateway_receipt
 
@@ -396,9 +339,7 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
             decision, workspace=workspace, refs={"proposal_id": item_id}
         )
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # A receipt missing from the audit trail of an EFFECTFUL operation is
-        # the gap the trail exists to close: the self-apply ran, and nothing
-        # durable says under which decision (MIR-077).
+        # A receipt missing from the audit trail of an effectful operation is the gap the trail exists to close.
         logger.warning(
             "self-apply gateway receipt not written for %s: %s: %s",
             item_id, type(exc).__name__, exc,
@@ -435,12 +376,7 @@ def run_approved_self_apply(  # noqa: PLR0913 — flat: depth 1, all 9 returns a
 
     result = {"proposal_id": item_id, "origin": _origin_of(item), **report.to_dict()}
 
-    # Only terminal statuses consume the approval; transient refusals leave the
-    # item approved so the operator can retry once budget/queue recovers.
-    # A7 (2026-09-03): «consumed» is not «applied». A commit is executed; a
-    # rollback is an attempt that reverted — it is aborted, so the value-review
-    # queue (which lists `executed` as "applied proposals") never asks a human
-    # to grade a change the suite discarded.
+    # Only terminal statuses consume the approval. A commit is executed; a rollback is aborted, so the value-review queue never asks a human to grade a discarded change.
     if report.status in TERMINAL_LANE_STATUSES:
         try:
             (inbox.mark_executed if report.status == "committed_local" else inbox.abort)(item_id)
@@ -459,8 +395,7 @@ def _note_unconsumed_approval(result: dict, item_id: str, exc: Exception) -> Non
 
 
 def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:
-    """Best-effort G4 receipt for a gateway exception. Never raises, never blocks
-    the fail-closed path (a receipt failure must not change behavior)."""
+    """Best-effort G4 receipt for a gateway exception; never raises, never blocks the fail-closed path."""
     try:
         from core.actuation_gateway import GatewayDecision
         from core.tool_receipts import record_gateway_receipt
@@ -476,10 +411,7 @@ def _record_self_apply_gateway_error(workspace: Path, item_id: str) -> None:
             refs={"proposal_id": item_id},
         )
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # This IS the fail-closed path: it exists to leave a receipt saying the
-        # gateway raised. Failing it silently produces the state it was written
-        # to prevent — an effectful operation refused with no record that it
-        # was even attempted (MIR-077).
+        # This IS the fail-closed path: failing silently here leaves a refused effectful operation with no record it was attempted.
         logger.warning(
             "fail-closed gateway receipt not written for %s: %s: %s",
             item_id, type(exc).__name__, exc,
@@ -512,12 +444,7 @@ def _gateway_for(
 
 
 def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
-    """Best-effort TD-031 ledger recording for a terminal lane outcome.
-
-    Guarded end to end: does nothing without a registry, only fires on terminal
-    statuses, strictly filters to producer-origin ``self_apply_lane.run`` items,
-    and swallows any registry write failure so the self-apply flow is untouched.
-    """
+    """Best-effort ledger recording for a terminal lane outcome; only producer-origin self_apply_lane.run items, registry write failures swallowed."""
     if registry is None:
         return
     if status not in TERMINAL_LANE_STATUSES:
@@ -531,9 +458,7 @@ def _record_lane_outcome(registry: Any, item: Any, status: str) -> None:
             return
         registry.apply_lane_outcome(getattr(item, "id", None), status)
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # The lane outcome is what stops the producer proposing the same target
-        # again. Losing it silently means the next cycle re-proposes work that
-        # has already been applied or refused (MIR-077).
+        # The lane outcome stops the producer re-proposing the same target; losing it silently means re-proposing applied or refused work.
         logger.warning(
             "self-apply lane outcome not recorded for %s: %s: %s",
             getattr(item, "id", "?"), type(exc).__name__, exc,

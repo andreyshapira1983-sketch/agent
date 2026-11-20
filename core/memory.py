@@ -1,18 +1,4 @@
-"""Working Memory (§4 Memory & Knowledge Governance — short-term, session-scoped).
-
-MVP-4 scope:
-  - Stores Turn objects (question, planner reasoning, tools used, answer).
-  - Caches tool artifacts by (tool, arguments) so the Executor can avoid
-    repeat I/O within one session.
-  - Exposes a `conversation_context()` block for injection into the planner
-    and synthesizer prompts.
-  - Strict bounds: max_turns + max_chars so the prompt cannot grow unbounded.
-
-Not in MVP-4 (intentional):
-  - Persistence across runs (that is MVP-5: Persistent Memory + Write Policy).
-  - Semantic / episodic / procedural memory.
-  - Embeddings, RAG, summarization of old turns.
-"""
+"""Working memory: short-term, session-scoped turn log and tool-artifact cache with strict bounds (max_turns, max_chars); no persistence."""
 from __future__ import annotations
 
 import json
@@ -74,12 +60,10 @@ class WorkingMemory:
         self.max_context_chars = max_context_chars
         self.max_context_tokens = max_context_tokens
         self.max_artifacts = max_artifacts
-        # Monotonic turn counter — survives bounded-retention trimming.
-        # Without this, dropping oldest turns reused indices.
+        # Monotonic turn counter; survives trimming, so dropped turns never reuse indices.
         self._next_turn_index: int = 1
         self._cache_lock = threading.Lock()  # serialises cache_store calls from parallel step threads
 
-    # ---------- turn log ----------
 
     def record_turn(
         self,
@@ -134,7 +118,6 @@ class WorkingMemory:
                 text = text[: effective_cap - 1].rstrip() + "…"
         return text
 
-    # ---------- artifact cache ----------
 
     @staticmethod
     def cache_key(tool_name: str, arguments: dict[str, Any]) -> str:
@@ -142,9 +125,7 @@ class WorkingMemory:
         try:
             payload = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
         except Exception:  # noqa: BLE001 — reason stated above
-            # A cache key only has to be stable and distinct, not readable.
-            # `repr` over sorted items is both, so an unserialisable argument
-            # costs nothing here — there is no failure to report.
+            # A cache key only has to be stable and distinct: `repr` over sorted items is both, and an unserialisable argument costs nothing.
             payload = repr(sorted(arguments.items()))
         return f"{tool_name}::{payload}"
 
@@ -153,7 +134,7 @@ class WorkingMemory:
         with self._cache_lock:
             entry = self.artifacts.get(key)
             if entry is not None:
-                # LRU: чтение — тоже использование (проверка 16.11, мелкая).
+                # LRU: a read counts as use.
                 self.artifacts[key] = self.artifacts.pop(key)
             return entry
 
@@ -167,16 +148,14 @@ class WorkingMemory:
     ) -> None:
         key = self.cache_key(tool_name, arguments)
         with self._cache_lock:
-            # Обновлённая запись уходит в конец, иначе вытеснялась первой
-            # (проверка 16.11, мелкая: LRU вместо порядка первой вставки).
+            # An updated entry moves to the end, otherwise it would be evicted first (LRU, not first-insertion order).
             self.artifacts.pop(key, None)
             self.artifacts[key] = {
                 "tool": tool_name,
                 "arguments": arguments,
                 "output": output,
                 "label": label,
-                # Отпечаток состояния, при котором результат верен
-                # (`core/cache_freshness.py`); None — из кэша не отдаётся.
+                # State fingerprint under which the result is valid (`core/cache_freshness.py`); None means never served from cache.
                 "stamp": stamp,
                 "turn_index": self._next_turn_index,  # belongs to the in-flight turn
                 "stored_at": _now().isoformat(),
@@ -186,7 +165,6 @@ class WorkingMemory:
                 oldest_key = next(iter(self.artifacts))
                 del self.artifacts[oldest_key]
 
-    # ---------- inspection / clearing ----------
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -206,9 +184,8 @@ class WorkingMemory:
     def clear(self) -> None:
         self.turns.clear()
         self.artifacts.clear()
-        # Счётчик ходов не сбрасывается: номера не повторяются (проверка 16.11, мелкая).
+        # The turn counter is not reset: numbers never repeat.
 
-    # ---------- compaction (Anthropic 2025 context engineering) ----------
 
     def compact_if_needed(
         self,
@@ -217,14 +194,10 @@ class WorkingMemory:
         keep_recent: int = 3,
         summarizer: Any = None,
     ) -> bool:
-        """Fold older turns into one summary Turn when count exceeds threshold.
+        """Fold older turns into one summary Turn when the count exceeds the threshold.
 
-        Default ``threshold`` falls back to ``self.max_turns - 1`` so
-        compaction kicks in BEFORE the silent drop-oldest logic in
-        ``record_turn`` would discard the gist of an early turn.
-
-        Returns True iff compaction took place. Safe to call after every
-        ``record_turn``; it's a no-op until the threshold is crossed.
+                ``threshold`` defaults to ``self.max_turns - 1`` so compaction runs BEFORE ``record_turn`` silently drops the oldest turn.
+                Returns True iff compaction happened; no-op until the threshold is crossed.
         """
         # Local import: keep core.memory free of optional deps and avoid
         # an import cycle at module-load time.

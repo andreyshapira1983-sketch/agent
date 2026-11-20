@@ -1,4 +1,4 @@
-"""Causal-provenance meter for lessons (read-only, no delivery organ here)."""
+"""Causal-provenance meter for lessons: read-only receipt chain, no delivery organ here."""
 from __future__ import annotations
 
 import json
@@ -8,14 +8,10 @@ from typing import Any
 
 from core.causal_claim_store import load_claims
 
-#: The delivery receipt the meter reads. Written by
-#: :func:`record_lesson_injections` at the moment lessons actually reach a
-#: prompt (today: the Stage A task builder in core/self_task_producer.py).
+#: Delivery receipt the meter reads; written by record_lesson_injections when lessons reach a prompt (the Stage A task builder in core/self_task_producer.py).
 INJECTION_JOURNAL = Path("data") / "lesson_injections.jsonl"
 
-#: Measurement records: {id, ts, lesson_key, instrument, outcome, detail}.
-#: Written by :func:`record_lesson_measurement` — the hand of whoever
-#: actually measured (today: the Stage A critic), never the injector.
+#: Measurement records {id, ts, lesson_key, instrument, outcome, detail}; written by record_lesson_measurement by whoever measured (the Stage A critic), never the injector.
 MEASUREMENT_STORE = Path("data") / "lesson_measurements.jsonl"
 
 _EPISODIC = Path("data") / "episodic_memory.jsonl"
@@ -79,8 +75,7 @@ def _resolve_measurement_ref(workspace: Path, ref: str, lesson_key: str) -> bool
     if kind == "episode" and ident:
         return _episode_exists(workspace, ident)
     if kind == "measurement" and ident:
-        # The record must exist AND belong to the traced lesson — a
-        # measurement of another lesson cannot be borrowed.
+        # The record must exist and belong to the traced lesson; another lesson's measurement cannot be borrowed.
         return any(
             str(row.get("id") or "") == ident
             and str(row.get("lesson_key") or "") == lesson_key
@@ -126,11 +121,7 @@ def record_lesson_measurement(
     outcome: str,
     detail: str = "",
 ) -> str:
-    """Append a measurement record + its receipt; returns the measurement id.
-
-    Written by the hand that measured (never the injector). The receipt row
-    carries measurement_ref so the meter can lift `measured` to PROVEN.
-    """
+    """Append a measurement record and its receipt; returns the measurement id. The receipt carries measurement_ref so the meter can lift `measured` to PROVEN."""
     import hashlib
     from datetime import datetime, timezone
 
@@ -206,8 +197,7 @@ def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> Provenanc
             f"{len(receipts)} delivery receipt(s) in the injection journal",
             tuple(str(r.get("run_id") or "?") for r in receipts)))
 
-    # 3-4. acted / measured — receipts first; the claim's own intervention
-    # prose is the claim testifying about itself, never above SELF_DECLARED.
+    # 3-4. acted / measured: receipts first; the claim's own intervention prose never rises above SELF_DECLARED.
     action_refs = tuple(
         str(r.get("action_ref")) for r in receipts if r.get("action_ref"))
     measurement_refs = tuple(
@@ -247,10 +237,7 @@ def trace_lesson_provenance(workspace: str | Path, lesson_key: str) -> Provenanc
             "measured", "ABSENT", "no receipt and no prose report any outcome"))
 
     missing = tuple(link.name for link in links if link.status != "PROVEN")
-    # Operator ruling 2026-08-17: a full chain of receipts proves PROVENANCE
-    # (exposure happened, an outcome was measured after it) — never EFFECT.
-    # The action could have been clean without the lesson; effect needs a
-    # differentiating experiment (lesson OFF vs ON on the same task class).
+    # A full receipt chain proves PROVENANCE (exposure, then a measured outcome), never EFFECT; effect needs a differentiating experiment (lesson OFF vs ON on the same task class).
     return ProvenanceReport(
         lesson_key=lesson_key,
         state=state_of(claim),

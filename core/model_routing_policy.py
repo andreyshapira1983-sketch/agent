@@ -1,29 +1,7 @@
-"""The agent's own routing policy: which model answers which role, and why.
-
-Operator's word, 2026-09-04 22:20: keys stay secrets and the agent never
-assigns roles to KEYS; within the allowed pool of providers he forms and
-updates the roles of MODELS himself, from observed quality, cost and task
-type; the choice is dynamic and explainable; the trusted router substitutes
-the credential; every route is journaled without secrets; and the role pins
-in .env are not the source of truth where a measurable policy can replace
-them.
-
-Prior art read before building (2026-09-04): RouteLLM (a trained
-win-predictor between a strong and a weak model — a learned router, no
-data of ours to train it on and the decision would not be the agent's),
-FrugalGPT (cascade + a quality estimator + a stop judge — the lesson taken
-is that quality is MEASURED after the fact, which `core/model_outcomes.py`
-already does per role and model), LiteLLM's router (policy as data with
-named strategies and fallbacks — the shape taken here: a record per role,
-the router reads it first, env pins second). What is deliberately not
-taken: any rule in code that picks the model for him. This module stores
-his decisions and validates their form; the ranking is his.
-
-Layering in `ModelRouter.route_for`: agent policy → env pins → registry
-selection policy → default. A policy record whose provider has lost its
-key falls through to the next layer (the roster names it), never to an
-uncredentialed call.
-"""
+"""The agent's own routing policy: which model answers which role and why; decisions are journaled without secrets."""
+# Layering in ModelRouter.route_for: agent policy -> env pins -> registry selection policy -> default. A record whose provider lost
+# its key falls through to the next layer, never to an uncredentialed call. This module stores the operator's decisions and
+# validates their form; it never ranks models in code.
 from __future__ import annotations
 
 import os
@@ -43,8 +21,7 @@ _KNOWN_ROLES: frozenset[str] = frozenset(
     {"planner", "synthesizer", "repair_proposal", "memory_summary", "verifier"}
 )
 
-#: A reason must explain, not leak: anything shaped like a credential is
-#: refused before it reaches a journal that the operator reads and pushes.
+#: A reason must explain, not leak: anything shaped like a credential is refused before it reaches the journal.
 _SECRET_RE = re.compile(
     r"(sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,}|hf_[A-Za-z0-9]{10,}|"
     r"ghp_[A-Za-z0-9]{10,}|xai-[A-Za-z0-9]{10,}|[A-Za-z0-9_-]{40,})"
@@ -84,10 +61,7 @@ class RoutingVerdict:
 
 
 def allowed_pool(env: dict[str, str] | None = None) -> tuple[str, ...]:
-    """Providers the agent may route to: every provider the router can build
-    a client for (its own credential table) whose credentials are present —
-    a key the operator never shows the agent, only counts. `AGENT_ROUTING_POOL`
-    (comma-separated) narrows the pool further; it never widens it."""
+    """Providers the agent may route to: those the router can build a client for whose credentials are present; AGENT_ROUTING_POOL only narrows it."""
     from core.model_router import _DEFAULT_PROVIDER_ENV
 
     env = dict(os.environ) if env is None else env
@@ -110,14 +84,11 @@ def _now() -> str:
 
 
 class RoutingPolicyStore:
-    """Append-only journal of routing decisions under the integrity envelope.
-    The newest record per role wins; a record with ``active=false`` releases
-    the role back to the env/registry layers."""
+    """Append-only journal of routing decisions under the integrity envelope; the newest record per role wins, active=false releases the role."""
 
     def __init__(self, path: Path | str = DEFAULT_ROUTING_POLICY_PATH):
         self.path = Path(path)
 
-    # ---------- reads ----------
 
     def _rows(self) -> list[dict[str, Any]]:
         if not self.path.is_file():
@@ -128,8 +99,7 @@ class RoutingPolicyStore:
             return []
 
     def version(self) -> tuple[int, int]:
-        """A cheap change stamp so a router can drop cached clients when the
-        policy moves underneath it (dynamic by construction, not by restart)."""
+        """Cheap change stamp so a router can drop cached clients when the policy moves."""
         try:
             st = self.path.stat()
         except OSError:
@@ -137,8 +107,7 @@ class RoutingPolicyStore:
         return (st.st_mtime_ns, st.st_size)
 
     def resolve(self, role: str) -> RoutingChoice | None:
-        """The active choice for ``role``, or None when the agent has not
-        spoken (or has released the role)."""
+        """The active choice for role, or None when none was made or it was released."""
         role = str(role or "").strip().lower()
         latest: dict[str, Any] | None = None
         for row in self._rows():
@@ -159,16 +128,13 @@ class RoutingPolicyStore:
         rows = [r for r in self._rows() if role is None or r.get("role") == role]
         return rows[-limit:]
 
-    # ---------- writes ----------
 
     def set_route(
         self, *, role: str, provider: str, model: str, reason: str,
         evidence: tuple[str, ...] | list[str] = (), set_by: str = "agent",
         env: dict[str, str] | None = None,
     ) -> RoutingVerdict:
-        """Record a decision after validating its FORM — role known, provider
-        in the allowed pool, model named, reason present and secret-free.
-        The substance (is this the right model) is not judged here."""
+        """Record a decision after validating its FORM (known role, provider in pool, model named, reason present and secret-free); substance is not judged."""
         role = str(role or "").strip().lower()
         provider = str(provider or "").strip().lower()
         model = str(model or "").strip()
@@ -227,14 +193,10 @@ class RoutingPolicyStore:
         return RoutingVerdict(True)
 
 
-# ---------- the router's two calls (kept here so the router file does not grow) ----------
 
 
 def agent_policy_route(store: Any, role_key: str) -> Any | None:
-    """The agent's own decision for this role as a `ModelRoute`, if he has
-    made one and its provider still has a key. A record whose provider lost
-    its credential falls through to the next layer — the roster names that —
-    never to an uncredentialed call. ``None`` = no decision applies."""
+    """The agent's own decision for this role as a ModelRoute if made and its provider still has a key, else None (falls through to the next layer)."""
     if store is None:
         return None
     from core.model_router import (
@@ -259,9 +221,7 @@ def agent_policy_route(store: Any, role_key: str) -> Any | None:
 def drop_clients_if_policy_moved(
     store: Any, last_stamp: tuple[int, int] | None, cache: dict[str, Any],
 ) -> tuple[int, int] | None:
-    """Dynamic by construction: when the policy file changes, the router's
-    cached per-role clients are dropped so the next call re-resolves.
-    Returns the stamp to remember."""
+    """Drop the router's cached per-role clients when the policy file changed; returns the stamp to remember."""
     if store is None:
         return last_stamp
     try:

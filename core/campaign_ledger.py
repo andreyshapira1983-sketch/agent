@@ -1,7 +1,4 @@
-"""Append-only campaign ledger: one record per cycle, plus loading and summarising the rows.
-
-Extracted from `core/campaign` by autonomous self-build module split.
-"""
+"""Append-only campaign ledger: one record per cycle, plus loading and summarising the rows."""
 from __future__ import annotations
 
 import json
@@ -28,24 +25,14 @@ class CampaignCycleRecord:
     proposal: str | None = None
     artifact: str | None = None
     next_check_at: str | None = None
-    #: ЧЕМ решение обосновано и КАК выбрано. Решение это знает
-    #: (`BestNextAction.grounds` / `.decided_by`) и до 2026-08-26 выбрасывало,
-    #: поэтому вопрос «вела ли цель работу» приходилось пересчитывать заново
-    #: по 267 циклам (MIR-163). `unrecorded` значит «не записано», а не
-    #: «основания не было».
+    #: What grounded the decision and how it was chosen; `unrecorded` means not recorded, not "no grounds".
     grounds: str = "unrecorded"
     decided_by: str = "unrecorded"
-    #: Слово исхода «работа была» (блок 3, L12, 2026-09-03). Читатель
-    #: `charter_goal._recent_goals` спрашивал это поле с 2026-09-02, а писатель
-    #: его не писал: 0 из 479 строк. `None` = строка старого формата.
+    #: Outcome word "work was done"; read by `charter_goal._recent_goals`; `None` = old-format row.
     work_done: bool | None = None
-    #: Критерий успеха цели этого цикла — дословно тот, с которым её выбрала
-    #: хартия. Без него запись цикла не позволяет ответить «сошлось ли», не
-    #: повторяя десятичасовой прогон (аудит автономности 2026-09-17).
-    #: Пустая строка = критерий не назван.
+    #: Success criterion of the cycle's goal, verbatim as the charter chose it; empty = not named.
     success_check: str = ""
-    #: Долларов на вызовы модели за последний час на момент записи (план
-    #: субботы з, 24.09; core/usd_spend.py). None — не посчитано.
+    #: Dollars spent on model calls in the last hour at write time (core/usd_spend.py); None = not computed.
     usd_last_hour: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,12 +114,9 @@ def load_ledger_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def spent_units_by_action(rows: list[dict[str, Any]]) -> dict[str, int]:
-    """Траты по сигнатуре действия за ВСЕ записанные запуски (MIR-149).
+    """Spend per action signature over ALL recorded runs; the basis of the cross-run ceiling.
 
-    Основание межзапускового потолка: память стража повторов живёт один запуск
-    (146 из 150 циклов патологической траектории были циклом №1 свежего
-    запуска), а леджер — единственная память, переживающая запуски. Нулевые
-    и битые строки не считаются: отсутствие цены — не цена.
+    The repeat guard's memory lives one run, the ledger survives runs. Zero and broken rows do not count.
     """
     spent: dict[str, int] = {}
     for row in rows:
@@ -147,14 +131,9 @@ def spent_units_by_action(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _row_was_useful(row: dict[str, Any]) -> bool:
-    """Полезен цикл, СДЕЛАВШИЙ работу, — той же меркой, что судит кампания.
+    """A cycle that DID work is useful, by the same measure the campaign judges with.
 
-    Раньше полезность считалась вычитанием «всё, кроме простоя, повтора и
-    исключения», и каждое падение шло в полезные. Замер живого реестра
-    владельца (ветка #349, 2026-09-18, перенесено 25.09): 160 строк,
-    объявлено `useful=144`, работу или продукт несут ВОСЕМЬ. Строки старше
-    поля `work_done` судит продукт — стереть их историю значило бы не
-    исправить счёт, а переписать прошлое.
+    Rows older than the `work_done` field are judged by their product; their history is not rewritten.
     """
     recorded = row.get("work_done")
     if isinstance(recorded, bool):

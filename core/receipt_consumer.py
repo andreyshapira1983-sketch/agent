@@ -1,4 +1,4 @@
-"""Tool receipts slice 1c — minimal consumer for verifier integration."""
+"""Minimal receipt consumer for verifier integration."""
 from __future__ import annotations
 
 from core.evidence import Evidence
@@ -10,7 +10,6 @@ from core.tool_receipts import (
 
 
 def operation_requires_receipt(operation: str) -> bool:
-    # Запись подтверждает утверждение, только если её квитанция есть в журнале.
     return operation in SLICE_1A_RECEIPT_TOOLS or operation in SLICE_G5B_EFFECT_RECEIPT_TOOLS
 
 

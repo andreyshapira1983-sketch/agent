@@ -1,7 +1,4 @@
-"""Ingestion result types: what a file, web or RSS ingest run reports back.
-
-Extracted from `core/ingestion` by autonomous self-build module split.
-"""
+"""Ingestion result types: what a file, web or RSS ingest run reports back."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

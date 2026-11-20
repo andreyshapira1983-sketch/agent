@@ -1,13 +1,4 @@
-"""Дверь записи в постоянную память — дверь самого агента (его устройство, его отказы).
-
-Вынесено из core/persistent_memory.py: там — хранилище записей (JSONL,
-загрузка, удаление, архив), здесь — решение, ЧТО агент вправе положить в
-него сам: словарь видов, фильтр «похоже на код», вызов политики записи с
-журналом недавних записей и подтверждение записи чтением.
-
-Contract: memory_door_write(store, policy, text, kind, provenance) -> mem_id | None.
-Conclusions pass, raw code / duplicates / frozen sources / unmapped kinds do not.
-"""
+"""Write door to persistent memory for the agent's own records: kind dictionary, code-likeness filter, write-policy call with the recent-writes log, and read-back confirmation. memory_door_write(store, policy, text, kind, provenance) -> mem_id | None; conclusions pass, raw code / duplicates / frozen sources / unmapped kinds do not."""
 from __future__ import annotations
 
 import logging
@@ -16,10 +7,7 @@ from pathlib import Path
 
 from core.models import MemoryRecord
 
-#: Знаки кода. Двоеточие — только без пробела после (`a:b`, `def f():`), скобка —
-#: только вплотную к имени (вызов `foo(`): 24.09 дверь отказывала короткому
-#: русскому выводу «…отдаёт две модели: deepseek-flash и deepseek-v4-pro.» —
-#: двоеточие после обобщения и скобка-пояснение — норма прозы.
+#: Code marks: a colon only without a following space (`a:b`, `def f():`), a parenthesis only right after a name (`foo(`); a colon after a generalisation or a parenthetical is normal prose.
 _CODE_PUNCT_RE = re.compile(r":(?!\s)|[=+\[\]{}<>]|\w\(|\)\s*:|->|;\s*$")
 _WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]{2,}")
 
@@ -48,21 +36,14 @@ CONSENT_TAG_MAP = {
     "[НАБЛЮДЕНИЕ, один день]": "insight",
 }
 
-#: Словарь двери — одной строкой, чтобы его можно было показать тому, кто в
-#: дверь стучится (замер 2026-09-03: шесть ходов, kind='lesson'/'reflection',
-#: ноль записей — дверь молчала о своих ключах).
+#: The door dictionary on one line so it can be shown to whoever knocks.
 ACCEPTED_KINDS_TEXT = "EXACTLY one of: " + ", ".join(repr(k) for k in (
     "[ВЫВОД, проверен боем]", "[ВЫВОД, замерен N раз]", "[НАБЛЮДЕНИЕ, один день]",
 ))
 
 
 def memory_door_verdict(store, policy, text, kind, provenance):
-    """(mem_id | None, reason) — отказ называет правило, которое сработало.
-
-    До 2026-09-03 дверь на отказ возвращала None без слова, и агент угадывал
-    причину (и угадывал неверно). Причина — для того, кто стучится; решение
-    двери не меняется.
-    """
+    """(mem_id | None, reason): a refusal names the rule that fired; the decision itself is unchanged."""
     text = (text or '').strip()
     kind = (kind or '').strip()
     provenance = (provenance or '').strip()
@@ -74,19 +55,12 @@ def memory_door_verdict(store, policy, text, kind, provenance):
     consent_tag = CONSENT_TAG_MAP.get(kind)
     if consent_tag is None:
         return None, f"unknown kind {kind!r}; the door accepts {ACCEPTED_KINDS_TEXT}"
-    # Provenance is free text from the caller, so it is NAMESPACED, never a
-    # bare tag: `provenance="sensitive-data-consent"` used to pass the PII gate
-    # and `"source-backed"` to dress an agent record as pipeline-verified
-    # (проверка 16.11, серьёзная №7).
+    # Provenance is free text from the caller, so it is NAMESPACED, never a bare tag, or a caller could pass the PII gate or dress a record as pipeline-verified.
     tags = [kind, f"provenance:{provenance}", consent_tag]
     if provenance.lower().startswith("memory:"):
-        # Authority change 2026-09-04: memory is not a source of memory — a
-        # record whose only evidence is another record is the self-echo the
-        # antibody exists to stop, one layer earlier.
+        # Memory is not a source of memory: a record whose only evidence is another record is the self-echo the antibody stops, one layer earlier.
         return None, "provenance 'memory:…' refused: a memory cannot be the source of a memory"
-    # Block 7 (audit W4, 2026-09-03): the door consulted the policy WITHOUT
-    # the recent-writes log, so the echo antibody never saw the agent's own
-    # door writes and `data/memory_writes.jsonl` was never fed by them.
+    # The policy is consulted WITH the recent-writes log, so the echo antibody sees the agent's own door writes.
     registry = _door_write_registry(store)
     recent = []
     echo_off = ""
@@ -94,8 +68,7 @@ def memory_door_verdict(store, policy, text, kind, provenance):
         try:
             recent = registry.recent()
         except Exception as exc:  # noqa: BLE001 — a registry hiccup must never block the door
-            # Дверь работает дальше, но выключенный фильтр эха больше не
-            # молчит: журнал, счётчик и текст отказа (проверка 16.11, средняя).
+            # The door keeps working, but a disabled echo filter is no longer silent: journal, counter and refusal text.
             recent = []
             echo_off = _note_echo_gate_failure("recent", exc)
     decision = policy.decide(
@@ -108,9 +81,7 @@ def memory_door_verdict(store, policy, text, kind, provenance):
         return None, f"write policy refused: {why}"
     record = MemoryRecord(content=text, type="semantic", tags=tags, owner="self", source="agent-auto")
     store.save(record)
-    # Authority change 2026-09-04: «stored» is said only after an independent
-    # readback finds the id on disk. A write that cannot be read back is not
-    # a memory, and the caller must not report DONE on it.
+    # "stored" is said only after an independent readback finds the id on disk; a write that cannot be read back is not a memory.
     try:
         found = any(getattr(r, "id", None) == record.id for r in store.load())
     except Exception:  # noqa: BLE001 — an unreadable store cannot confirm a write
@@ -129,8 +100,7 @@ def memory_door_verdict(store, policy, text, kind, provenance):
 
 _LOG = logging.getLogger(__name__)
 
-#: Сколько раз журнал эха не прочитался/не дописался и последняя причина
-#: (проверка 16.11, средняя): раньше это глоталось, и фильтр эха был выключен молча.
+#: How many times the echo log failed to read or append, and the last reason; previously swallowed, which disabled the echo filter silently.
 ECHO_GATE_FAILURES = {"count": 0, "last": ""}
 
 

@@ -1,16 +1,4 @@
-"""Договор конспекта: что обязано быть в следе учебной задачи, решает код.
-
-Оператор 2026-09-22 вечером: «ты чинишь симптомы». Так и было: критерий
-успеха придумывала та же модель, что делала работу, и каждая заплата
-закрывала одну лазейку — книга вместо работы (0630e28), шаблон вместо
-конспекта (47ee14e), «зелёный» вместо красного (3edca38). Пока проверку
-пишет исполнитель, он найдёт следующую.
-
-Здесь критерий задаёт КОД, одинаково для всех учебных задач, и проверяет
-машина: конспект обязан назвать источник (файл рабочей папки или ссылку),
-привести дословную цитату и показать проверку с числом. Модель предлагает
-только саму задачу.
-"""
+"""Note contract: code, not the model, decides what a study-task trace must contain (source, verbatim quote, check with a number)."""
 from __future__ import annotations
 
 import re
@@ -28,29 +16,16 @@ MIN_CHARS = 400
 
 
 def criterion(note_rel: str) -> str:
-    """Критерий успеха учебной задачи — один и тот же, пишет его код."""
+    """Success criterion of a study task: the same for all tasks, written by code."""
     return (f"Файл {note_rel} создан: источник (путь в рабочей папке или ссылка), "
             "дословная цитата и проверка с числом.")
 
 
 def contract_gaps(text: str, workspace: Path | str) -> list[str]:
-    """Чего не хватает В ЭТОМ ТЕКСТЕ по договору конспекта. Пусто — договор цел.
+    """What is missing IN THIS TEXT per the note contract; empty means the contract holds.
 
-    Вынесено из `settle_note` 2026-09-23, чтобы ОДИН критерий проверялся в двух
-    местах: при судействе цели и ДО записи файла. Замер того же дня: договор
-    проверялся только при судействе, и пустышка всё равно ложилась на диск —
-    40 конспектов из 127 (31%) содержат признание, что источник не читался,
-    цитаты нет и проверка не выполнялась. Цикл при этом помечен `empty`:
-    система знала, что работы не было, а файл лежал рядом с настоящими и со
-    стороны выглядел как «смотри, я сделал».
-
-    Отдельного списка оборотов («в выводах шагов отсутствует», «дословной
-    цитаты нет») здесь НЕТ и быть не должно: список заплат закрывает по одной
-    лазейке, а исполнитель находит следующую — тот самый упрёк оператора
-    2026-09-22 «ты чинишь симптомы». Договор один и тот же: назван источник,
-    приведена дословная цитата, показана проверка с числом. Конспект, который
-    признаётся, что источника не читал, проваливает его сам — не потому что
-    он так СКАЗАЛ, а потому что цитаты и проверки в нём нет.
+    One criterion checked in two places: when the goal is judged and BEFORE the file is written. There is deliberately no list of
+    phrasings: a note admitting it did not read the source fails because it has no quote or check.
     """
     from core.observation_round import unfilled_placeholders
 
@@ -72,7 +47,7 @@ def contract_gaps(text: str, workspace: Path | str) -> list[str]:
 
 
 def settle_note(workspace: Path | str, success_check: str) -> dict[str, Any] | None:
-    """Проверить конспект по договору; None — это не задача с конспектом."""
+    """Check a note against the contract; None means this is not a task with a note."""
 
     match = _NOTE_RE.search(success_check or "")
     if not match:

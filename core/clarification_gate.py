@@ -1,41 +1,24 @@
-"""Clarification Gate — режим переспроса (ask, don't build).
+"""Clarification Gate: deterministic, LLM-free switch between PROCEED and CLARIFY (ask, do not build) mode.
 
-* the single allowed action (ask a question / one diagnostic report / one
-minimal next step); * the forbidden actions (the "chaos" set that must NOT
-run while unclear); * the minimal clarifying questions to put to the
-operator.
-
-Design principles ----------------- * No LLM calls, no I/O, mutates nothing
-— deterministic and O(n). * Conservative: with zero signals it returns
-PROCEED (never blocks a clear task). Any one ambiguity/stuck signal switches
-to CLARIFY. * In CLARIFY mode it commits to exactly ONE allowed action so
-the agent cannot "do everything" — the whole point is to reduce chaos, not
-add to it.
+With no signals it proceeds; any one ambiguity/stuck signal switches to CLARIFY with exactly one allowed action.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# Action vocabulary
-# ---------------------------------------------------------------------------
 
 ClarificationMode = Literal["proceed", "clarify"]
 AllowedAction = Literal["ask_question", "diagnostic_report", "minimal_next_step"]
 
-# The ONLY actions permitted while the agent is in clarify mode. Exactly one of
-# these is chosen per outcome — never several at once.
+# The only actions permitted in clarify mode; exactly one is chosen per outcome.
 ALLOWED_IN_CLARIFY: tuple[AllowedAction, ...] = (
     "ask_question",
     "diagnostic_report",
     "minimal_next_step",
 )
 
-# The "chaos" set: expensive or state-mutating actions that must NOT run while
-# the goal/scope is unclear. These are precisely what a bad agent does when it
-# doesn't understand the task; the gate forbids them until the human narrows
-# the frame.
+# Expensive or state-mutating actions that must not run while the goal or scope is unclear.
 FORBIDDEN_IN_CLARIFY: tuple[str, ...] = (
     "spawn_subagent",
     "create_module",
@@ -45,17 +28,10 @@ FORBIDDEN_IN_CLARIFY: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Signals
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ClarificationSignals:
-    """The ambiguity / stuck signals that route the agent into clarify mode.
-
-    Every field defaults to ``False`` (the clear, safe-to-proceed case), so a
-    caller only sets the signals it actually observed.
-    """
+    """The ambiguity / stuck signals that route the agent into clarify mode; all default to False."""
 
     goal_too_broad: bool = False
     no_success_criterion: bool = False
@@ -73,9 +49,6 @@ class ClarificationSignals:
         return tuple(f.name for f in fields(self) if getattr(self, f.name))
 
 
-# ---------------------------------------------------------------------------
-# Outcome
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ClarificationOutcome:
@@ -91,17 +64,11 @@ class ClarificationOutcome:
         return self.mode == "clarify"
 
     def is_forbidden(self, action: str) -> bool:
-        """True iff ``action`` must NOT run given this outcome.
-
-        Only meaningful in clarify mode; in proceed mode nothing is forbidden.
-        """
+        """True iff ``action`` must NOT run given this outcome (clarify mode only)."""
         return self.mode == "clarify" and action in self.forbidden_actions
 
     def prompt(self) -> str:
-        """Render the operator-facing message for clarify mode.
-
-        Empty string in proceed mode (nothing to ask).
-        """
+        """Render the operator-facing message for clarify mode; empty string in proceed mode."""
         if self.mode != "clarify" or not self.questions:
             return ""
         lines = ["Я не могу безопасно продолжить. Уточни:"]
@@ -119,13 +86,8 @@ class ClarificationOutcome:
         }
 
 
-# ---------------------------------------------------------------------------
-# Question registry
-# ---------------------------------------------------------------------------
 
-# Canonical clarifying questions (operator's language). Each signal maps to the
-# minimal subset that resolves it; the union is taken in this stable order so
-# repeated signals never duplicate or reorder a question.
+# Canonical clarifying questions; each signal maps to the minimal subset, unioned in a stable order.
 _Q_WHAT = "Что именно нужно построить?"
 _Q_PURPOSE = "Для какой цели?"
 _Q_WHERE = "Где это должно работать (target file / source / окружение)?"
@@ -193,9 +155,6 @@ def _reason_for(signals: ClarificationSignals) -> str:
     return "ambiguous request"
 
 
-# ---------------------------------------------------------------------------
-# The gate
-# ---------------------------------------------------------------------------
 
 def evaluate(signals: ClarificationSignals) -> ClarificationOutcome:
     """Decide PROCEED vs CLARIFY for the given signals."""
@@ -210,9 +169,7 @@ def evaluate(signals: ClarificationSignals) -> ClarificationOutcome:
         )
 
     questions = _questions_for(signals)
-    # The single human action: ask. If somehow no concrete question maps (every
-    # mapped signal absent), fall back to a diagnostic report rather than ask an
-    # empty question.
+    # with no concrete question to ask, fall back to a diagnostic report
     allowed: AllowedAction = "ask_question" if questions else "diagnostic_report"
     return ClarificationOutcome(
         mode="clarify",
@@ -233,38 +190,21 @@ def for_loop_suspected(*, goal_too_broad: bool = False) -> ClarificationOutcome:
 
 
 def clarification_for_replan_exhausted() -> ClarificationOutcome:
-    """TD-032 slice 3 — ``replan_exhausted`` is stuck equivalence for ``loop_suspected``.
-
-    Shared by REPL, autonomous runtime, and daemon tick so unattended paths reuse
-    the same deterministic clarify semantics without new policy rules.
-    """
+    """``replan_exhausted`` is treated as ``loop_suspected``; shared by REPL, autonomous runtime and daemon tick."""
     return for_loop_suspected()
 
 
-#: Причины застревания вне рамки задачи: ссылка черновика без улики, арифметика
-#: над цитатой, источник, отвергнутый защитой от инъекций (страница о защите
-#: цитирует атаку). Уточнив «что строить», человек ни одну из них не снимет.
+#: Stuck causes outside the task frame; asking "what to build" cannot resolve any of them.
 _NOT_FRAME_CAUSES = frozenset({"unresolved_citation", "claim_refuted", "injection_blocked"})
 
 
 def frame_questions_help(
     failure_codes: tuple[str, ...] | list[str], *, gathered: bool = False, frame_clear: bool = False,
 ) -> bool:
-    """Поможет ли вопрос о рамке («что строить, где, критерий успеха»)?
+    """Whether a frame question (what to build, where, success criterion) can help.
 
-    Веб-экзамен 2026-09-19: в 4 заданиях из 9 («последняя версия rich на
-    PyPI», «номер RFC для HTTP/2») задача была определена полностью, застрял
-    сверщик ссылок черновика — а ответ начинался с «Уточни: что именно нужно
-    построить?». Вопрос человеку, на который у него нет ответа, — не
-    переспрос, а перекладывание. Без причин (неизвестно, почему застрял) —
-    спрашивать, как прежде.
-
-    Третий прогон того же дня, N04 («минимальный Python для ruff»): два круга
-    наблюдения съели бюджет, на третьем лаборатория честно отказалась ходить
-    в сеть (`tool_error`), и ответ «3.7» с открытой страницей PyPI и семью
-    подтверждёнными утверждениями начался с «что именно нужно построить?».
-    Рамка ясна (контракт без неясностей), и ход собрал улики — рамочный вопрос
-    ничего не прояснит. Ход, не собравший ничего, спрашивает по-прежнему.
+    False when the stuck causes are all outside the frame, or when the turn gathered evidence and the frame is clear.
+    Without known causes it asks as before.
     """
     if gathered and frame_clear:
         return False
@@ -272,18 +212,12 @@ def frame_questions_help(
     return not codes or not codes <= _NOT_FRAME_CAUSES
 
 
-# ── ask-back for unsupported self-analysis (MIR-075) ─────────────────────────
-
-# Fixed prefix: `format_human_response` buckets on it explicitly, the same
-# survival rule the MIR-069 verification tail needed — anything appended after
-# the Output Contract sections is otherwise dropped by the section walk.
+# Fixed prefix: `format_human_response` buckets on it so the ask-back survives the section walk.
 ASK_BACK_PREFIX = "Уточнение:"
 
 
 def build_self_analysis_ask_back() -> str:
-    """The deterministic ask-back for a self-analysis turn with ZERO verified
-    support (MIR-075).
-    """
+    """The deterministic ask-back for a self-analysis turn with zero verified support."""
     return (
         f"{ASK_BACK_PREFIX} я ответил рассуждением — без единой проверенной "
         "опоры, потому что понял вопрос как абстрактный, о моём устройстве "

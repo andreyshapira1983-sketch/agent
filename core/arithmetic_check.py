@@ -1,4 +1,4 @@
-"""An evidence-free arithmetic answer checked by computing the question's expression (operator, 2026-11-17)."""
+"""Check an evidence-free arithmetic answer by computing the question's expression."""
 from __future__ import annotations
 
 import ast
@@ -35,7 +35,7 @@ def _value(node: ast.AST) -> float:
 def _expression(question: str) -> str | None:
     """The single expression of a short «how much is …» question; anything ambiguous is None."""
     if re.search(r"\d,\d", question) or not _CUE.search(question):
-        return None  # decimal comma or thousands group: refused, never guessed (hunter, 17.11)
+        return None  # decimal comma or thousands group: refused, never guessed
     text = _TIMES.sub("*", question).replace("÷", "/").replace("^", "**").replace("−", "-")
     found = [m.group().strip(" .") for m in _EXPR.finditer(text)]
     found = [f for f in found if _HAS_OP.search(f)]

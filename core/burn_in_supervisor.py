@@ -1,8 +1,6 @@
-"""Принимающий: кто переводит проверенный кандидат в рабочее состояние опыта.
+"""Adopter: moves the experiment head to a verified candidate only after re-verification.
 
-Вынесен из полосы, чтобы самоизменяющийся код не принимал сам себя: голова опыта
-сдвигается только после перепроверки (полный SHA, предъявлен, ровно шаг, забор цел,
-батарея зелена в свежем дереве). Ветки, push и merge не трогаются (см. `_VERBS`).
+Separated from the lane so self-modifying code cannot adopt itself: full SHA, offered by the lane, exactly one step, fence intact, battery green in a fresh tree. Branches, push and merge are never touched (see `_VERBS`).
 """
 from __future__ import annotations
 
@@ -33,23 +31,18 @@ __all__ = [
     "offer_verified_commit",
 ]
 
-#: Забор принимающего — общий список core/protected_paths.py: в нём забор
-#: песочницы, сам принимающий (иначе одно принятое изменение этого файла
-#: отменило бы все прочие правила) и память опыта. Полоса делает `git add -A`,
-#: поэтому имена памяти опыта ещё и в `.gitignore`.
+#: The adopter's fence is the shared list in core/protected_paths.py: the sandbox fence, the adopter itself (or one adopted change to this file would cancel all other rules) and the experience memory. The lane runs `git add -A`, so the experience memory names are also in `.gitignore`.
 SUPERVISOR_FENCE: frozenset[str] = PROTECTED_FILES
 
-#: Заповедные деревья: сверка по префиксу. `.github/` — это судья (батарея и
-#: указания ревизору), а кандидат не вправе переписывать своего судью.
-#: Деревья общего списка (`PROTECTED_TREES`) сверяются вместе с этими.
+#: Fenced trees, matched by prefix. `.github/` is the judge (battery and reviewer instructions); a candidate may not rewrite its judge. Trees of the shared list (`PROTECTED_TREES`) are checked together with these.
 SUPERVISOR_FENCED_TREES: frozenset[str] = frozenset({
     ".github/",
 })
 
-#: Полное имя объекта git: сорок знаков, нижний регистр.
+#: Full git object name: forty chars, lower case.
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-#: Разрешённые глаголы git (список разрешённого): ни один вызов не достаёт до сети.
+#: Allowed git verbs (allowlist): no call reaches the network.
 _VERBS: frozenset[str] = frozenset({
     "cat-file", "diff", "rev-list", "rev-parse", "worktree",
 })
@@ -60,12 +53,12 @@ _ADOPTIONS_FILE = "state/burn_in_adoptions.jsonl"
 
 
 class SupervisorError(RuntimeError):
-    """Принимающий не смог даже спросить git. Отказ, а не исключение наружу."""
+    """The adopter could not even query git; a refusal, not an exception escaping."""
 
 
 @dataclass(frozen=True)
 class AdoptionVerdict:
-    """Исход одного решения. `accepted=False` всегда несёт названную причину."""
+    """Outcome of one decision; `accepted=False` always carries a named reason."""
 
     accepted: bool
     sha: str
@@ -84,7 +77,6 @@ class AdoptionVerdict:
         }
 
 
-# ── пути ─────────────────────────────────────────────────────────────────────
 
 def _head_file(repo: Path) -> Path:
     return Path(repo) / _HEAD_FILE
@@ -98,13 +90,12 @@ def adoption_log(repo: Path) -> Path:
     return Path(repo) / _ADOPTIONS_FILE
 
 
-# ── git ──────────────────────────────────────────────────────────────────────
 
 def _git(repo: Path, *args: str) -> str:
     verb = args[0] if args else ""
     if verb not in _VERBS:
         raise SupervisorError(f"отказано: 'git {verb}' не в списке разрешённых")
-    done = subprocess.run(  # noqa: S603 — argv, без оболочки; глаголы из _VERBS
+    done = subprocess.run(  # noqa: S603 — argv, no shell; verbs from _VERBS
         ["git", *args],
         cwd=str(repo),
         capture_output=True,
@@ -139,13 +130,11 @@ def _changed_paths(repo: Path, base: str, sha: str) -> list[str]:
     return [p.strip().replace("\\", "/") for p in out.splitlines() if p.strip()]
 
 
-# ── голова опыта ─────────────────────────────────────────────────────────────
 
 def experiment_head(repo: Path) -> str:
-    """SHA, из которого стартует следующий цикл: указатель опыта или голова репо.
+    """SHA the next cycle starts from: the experiment pointer or the repo head.
 
-    Отсутствующий файл — «опыт не начинался»; испорченный (в т.ч. байты) —
-    `SupervisorError`, иначе цепочка тихо откатилась бы к началу.
+    A missing file means the experiment has not started; a corrupt one (incl. bad bytes) raises `SupervisorError` so the chain never silently resets.
     """
     repo = Path(repo)
     path = _head_file(repo)
@@ -178,17 +167,16 @@ def experiment_head(repo: Path) -> str:
 
 
 def next_start_point(repo: Path) -> str:
-    """Имя для следующего цикла. Отдельное имя, потому что смысл другой."""
+    """Name for the next cycle (separate name, different meaning)."""
     return experiment_head(repo)
 
 
 def materialise_next_cycle(
     repo: Path, workspace: Path, *, sha: str | None = None
 ) -> str:
-    """Поставить свежее рабочее дерево следующего цикла на голову опыта.
+    """Put a fresh worktree of the next cycle on the experiment head.
 
-    Дерево заводит принимающий, поэтому код не выбирает себе коммит; `sha` —
-    лишь сверка. Голова читается под тем же замком, что и `worktree add`.
+    The adopter creates the tree, so code does not choose its commit; `sha` is only a cross-check. The head is read under the same lock as `worktree add`.
     """
     repo = Path(repo)
     workspace = Path(workspace).resolve()
@@ -218,7 +206,7 @@ def materialise_next_cycle(
 
 
 def _write_head(repo: Path, sha: str, *, previous: str) -> None:
-    """Атомарно заменить указатель головы: запись рядом, затем `os.replace`."""
+    """Atomically replace the head pointer: write beside, then `os.replace`."""
     path = _head_file(Path(repo))
     path.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(
@@ -240,7 +228,6 @@ def _append(path: Path, row: dict[str, Any]) -> None:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-# ── реестр предложений ───────────────────────────────────────────────────────
 
 def offer_verified_commit(
     repo: Path,
@@ -250,7 +237,7 @@ def offer_verified_commit(
     tests_run: Any = (),
     reason: str = "",
 ) -> bool:
-    """Сторона полосы: предъявить проверенный SHA; это не принятие и прав не даёт."""
+    """Lane side: offer a verified SHA; this is not adoption and grants no rights."""
     if not _SHA_RE.match(str(sha or "")):
         return False
     _append(offer_ledger(Path(repo)), {
@@ -268,7 +255,7 @@ def _was_offered(repo: Path, sha: str) -> bool:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
-        # `UnicodeDecodeError` — не `OSError`; умолчание и так «не предъявлен».
+        # `UnicodeDecodeError` is not `OSError`; the default is already "not offered".
         return False
     for line in lines:
         line = line.strip()
@@ -277,28 +264,25 @@ def _was_offered(repo: Path, sha: str) -> bool:
         try:
             row = json.loads(line)
         except ValueError:
-            # Испорченная строка не разрешает и не запрещает — читаем дальше.
+            # A corrupt row neither allows nor forbids; keep reading.
             continue
-        # Не словарь — тоже законный JSON; без проверки одна такая строка
-        # останавливала бы принятие навсегда.
+        # A non-dict is also valid JSON; without this check one such row would block adoption forever.
         if isinstance(row, dict) and row.get("sha") == sha:
             return True
     return False
 
 
-# ── решение ──────────────────────────────────────────────────────────────────
 
 def _fence_key(path: str) -> str:
-    """Один вид записи для сличения с забором.
+    """One normal form of a path for comparing with the fence.
 
-    Регистр складывается всегда, а не через `normcase` (на POSIX тождество):
-    лишний отказ дешевле кода за забором.
+    Case is always folded (not via `normcase`, identity on POSIX): an extra refusal is cheaper than code behind the fence.
     """
     return path_key(path) or str(path).replace("\\", "/").strip().strip('"').casefold()
 
 
 def _in_fenced_tree(key: str) -> bool:
-    """Лежит ли приведённый путь внутри заповедного дерева."""
+    """Whether the normalised path lies inside a fenced tree."""
     trees = (*SUPERVISOR_FENCED_TREES, *PROTECTED_TREES)
     return any((key + "/").startswith(t.casefold()) for t in trees)
 
@@ -308,7 +292,7 @@ def _default_guard() -> frozenset[str]:
 
 
 def _crosses_fence(path: str, guard: frozenset[str]) -> bool:
-    """Трогает ли путь кандидата забор: файл из списка или заповедное дерево."""
+    """Whether the candidate path touches the fence: a listed file or a fenced tree."""
     key = _fence_key(path)
     return key in guard or _in_fenced_tree(key)
 
@@ -320,11 +304,9 @@ def adopt_offer(
     battery: Callable[[Path], tuple[bool, str]],
     fence: Any = None,
 ) -> AdoptionVerdict:
-    """Единственный способ сдвинуть голову опыта.
+    """The only way to move the experiment head.
 
-    `battery(tree) -> (зелено, подробность)` запускается в свежем дереве на
-    кандидате. Решение целиком под замком, чтобы два кандидата от одной головы
-    не приняли оба.
+    `battery(tree) -> (green, detail)` runs in a fresh tree on the candidate. The whole decision is under the lock so two candidates from one head cannot both be adopted.
     """
     repo = Path(repo)
     with exclusive_file_lock(_head_file(repo).with_suffix(".lock")):
@@ -349,17 +331,17 @@ def _adopt_offer_locked(
         _append(adoption_log(repo), verdict.to_dict())
         return verdict
 
-    # 1. имя неподвижно
+    # 1. name is fixed
     if not _SHA_RE.match(str(sha or "")):
         return refuse("имя не является полным SHA: ссылка разрешается в разное")
     if not _commit_exists(repo, sha):
         return refuse("такого коммита в репозитории нет")
 
-    # 2. предъявлен полосой
+    # 2. offered by the lane
     if not _was_offered(repo, sha):
         return refuse("SHA не предъявлен полосой в реестре предложений")
 
-    # 3. это шаг от нынешней головы
+    # 3. one step from the current head
     parents = _parents(repo, sha)
     if parents != [previous]:
         return refuse(
@@ -368,7 +350,7 @@ def _adopt_offer_locked(
             parents=parents,
         )
 
-    # 4. забор цел
+    # 4. fence intact
     touched = _changed_paths(repo, previous, sha)
     if not touched:
         return refuse("кандидат ничего не меняет", changed=touched)
@@ -377,7 +359,7 @@ def _adopt_offer_locked(
         return refuse(f"кандидат трогает забор: {', '.join(crossed)}",
                       changed=touched, crossed=crossed)
 
-    # 5. батарея на самом кандидате
+    # 5. battery on the candidate itself
     ok, detail = _verify_in_fresh_worktree(repo, sha, battery)
     if not ok:
         return refuse("батарея на кандидате не зелена" + (f": {detail}" if detail else ""),
@@ -396,7 +378,7 @@ def _adopt_offer_locked(
 def _verify_in_fresh_worktree(
     repo: Path, sha: str, battery: Callable[[Path], tuple[bool, str]]
 ) -> tuple[bool, str]:
-    """Прогнать батарею в свежем дереве на кандидате; дерево убирается всегда."""
+    """Run the battery in a fresh tree on the candidate; the tree is always removed."""
     holder = Path(tempfile.mkdtemp(prefix="burn-in-verify-"))
     tree = holder / "tree"
     try:
@@ -407,7 +389,7 @@ def _verify_in_fresh_worktree(
     try:
         ok, detail = battery(tree)
         return bool(ok), str(detail or "")
-    except Exception as exc:  # noqa: BLE001 — сбой проверки не принимает
+    except Exception as exc:  # noqa: BLE001 — a failed check does not adopt
         return False, f"{type(exc).__name__}: {exc}"
     finally:
         try:

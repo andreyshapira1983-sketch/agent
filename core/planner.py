@@ -46,27 +46,12 @@ from core.run_context import run_blocked_tools
 from core.step_sanitizer import sanitize_step
 from tools.base import ToolRegistry
 
-# Output budget for a single planning call.
-#
-# The previous hard-coded 1024 was too tight for a multi-step JSON plan, and on
-# OpenAI reasoning models it was actively harmful: `max_completion_tokens`
-# covers internal reasoning first, so the entire budget could be spent thinking
-# and the API would return success with an EMPTY answer. The run log showed the
-# planner burning 1024 + 1024 tokens across an auto-continue round and parsing
-# zero characters both times.
-#
-# `core.llm` raises this further for reasoning models (see
-# `_REASONING_TOKEN_FLOOR`); the two floors compose, neither lowers the other.
+# Output budget for one planning call: OpenAI reasoning models spend `max_completion_tokens` on reasoning first and can return an EMPTY answer; `core.llm` raises the floor further (`_REASONING_TOKEN_FLOOR`).
 _PLAN_MAX_TOKENS_DEFAULT = 2048
 
 
 def _plan_max_tokens() -> int:
-    """Per-call planner output budget, overridable via ``AGENT_PLAN_MAX_TOKENS``.
-
-    Falls back to the default when the variable is missing, non-numeric, or
-    non-positive, so a malformed environment can never produce a zero budget
-    (which would guarantee an empty plan on every run).
-    """
+    """Per-call planner output budget, overridable via ``AGENT_PLAN_MAX_TOKENS``; a missing, non-numeric or non-positive value falls back to the default."""
     raw = os.getenv("AGENT_PLAN_MAX_TOKENS")
     if raw is None:
         return _PLAN_MAX_TOKENS_DEFAULT
@@ -83,38 +68,17 @@ class PlannerOutput:
     sources: list[dict[str, Any]]
     raw_response: str
     warnings: list[str] = field(default_factory=list)
-    # Tool names that the planner requested but were not in the registry.
-    # Non-empty means the LLM hallucinated a tool name; the plan was
-    # silently down-scoped.  Surfaced via a ``plan_tool_drop`` log event
-    # so operators can detect hallucination without digging through raw warnings.
+    # Tool names the planner requested that were not in the registry (hallucinated); surfaced via a ``plan_tool_drop`` log event.
     dropped_tools: list[str] = field(default_factory=list)
-    # Structured, human-readable JSON-parse diagnostics (TD-003). Populated by
-    # ``core.plan_parsing.parse_json`` so operators can see *why* an output failed to parse
-    # (brief reason, which stage broke, whether a JSON block was found, which
-    # fallback was chosen) plus a sanitised, length-limited preview of the raw
-    # output — without another LLM call and without leaking full secrets.
+    # Structured JSON-parse diagnostics from ``core.plan_parsing.parse_json``: why parsing failed, plus a sanitised, length-limited preview of the raw output.
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMPlanner:
     """Asks the LLM to choose tools. Validates and sanitises the result."""
 
-    # Self-documentation files the planner may read EVEN WITHOUT a
-    # `--file hint`. The allowlist is intentionally tiny:
-    #   * narrow scope (just project documentation),
-    #   * ASCII-only paths (so the existing identifier policy doesn't
-    #     fight us),
-    #   * read-only operation,
-    #   * answers exactly the "introspection" use case that motivated
-    #     this exception (see MVP-14.4.x notes).
-    # Any other file requires the user to pass `--file <path>`.
-    # README.md was deleted on 2026-08-06 (f6d071a) and this allowlist kept
-    # pointing at it for eight days: rule 11 planned `file_read README.md`,
-    # the read returned FileNotFoundError, and — because a failed read never
-    # enters the provenance chain — the agent could only answer "cannot be
-    # determined" to every question about itself. Measured live 2026-08-14.
-    # The successor is GENERATED from core/ and guarded against drift by
-    # scripts/agent_anatomy_check.py, so it cannot rot the same way unnoticed.
+    # Self-documentation files the planner may read even without `--file hint`; tiny allowlist: project documentation only, ASCII paths, read-only.
+    # The successor of README.md is generated from core/ and guarded by scripts/agent_anatomy_check.py.
     DEFAULT_SELF_DOCUMENTATION_PATHS: tuple[str, ...] = (
         "knowledge/generated/AGENT_ANATOMY.md", "tools/",
     )
@@ -126,20 +90,13 @@ class LLMPlanner:
         self_documentation_paths: tuple[str, ...] | None = None,
         workspace: str | None = None,
     ):
-        # workspace: None значит "адреса нет" — ни чтения уроков, ни квитанций.
-        # Хранилище называет runtime при сборке; библиотека без адреса молчит.
-        # Иначе каждый тест, строящий планировщик, писал бы в живые журналы.
+        # workspace None means "no address": no lesson reads and no receipts, so tests building a planner never write to live journals
         self.workspace = workspace
         self.llm = llm
         self.registry = registry
-        # Host-level tool names hidden from the planner surface (empty: the REPL
-        # sees all). The run's own block set lives in the run context and is
-        # read through `effective_hidden_tools` (MIR-114). Policy remains the
-        # defense-in-depth block at execution time.
+        # host-level hidden tool names (empty: the REPL sees all); the run's own set is read via `effective_hidden_tools`; policy blocks again at execution
         self.hidden_tools: frozenset[str] = frozenset()
-        # Defensive copy + validation: every entry must be a relative
-        # ASCII path with no traversal. If the caller passes garbage,
-        # we fall back to the default rather than crashing.
+        # defensive copy + validation: relative ASCII paths without traversal, else the default
         if self_documentation_paths is None:
             self.self_documentation_paths = self.DEFAULT_SELF_DOCUMENTATION_PATHS
         else:
@@ -154,15 +111,10 @@ class LLMPlanner:
                 and ":" not in p
             )
 
-    # Авторство агента, груз 2б 2026-08-29 (docs/CODE_NOTES.md).
     def lesson_block_for_prompt(self, question: str = "", file_hint: str | None = None) -> str:
-        """Return the distilled-lessons block for the planner prompt.
+        """Return the distilled-lessons block for the planner prompt; best-effort ("" on any failure).
 
-        Delivery is best-effort: any failure returns "" so that lesson
-        delivery can never crash planning. The injection receipt is written
-        on delivery, not on plan success. Block 4 (M3): with a question the
-        block is SCOPED — a lesson is delivered, and receipted, only where
-        it applies; an unscoped call keeps every lesson.
+        The injection receipt is written on delivery. With a question the block is scoped to lessons that apply; an unscoped call keeps every lesson.
         """
         try:
             if not self.workspace:
@@ -188,7 +140,7 @@ class LLMPlanner:
                       if lesson_applies(card, question=question, file_hint=hint)),
                 consumer="planner.plan",
             )
-        except Exception:  # noqa: BLE001 — доставка не роняет планирование
+        except Exception:  # noqa: BLE001 — delivery must not break planning
             return ""
         else:
             return "\n" + block
@@ -204,31 +156,24 @@ class LLMPlanner:
     ) -> PlannerOutput:
         """Ask the LLM for a plan.
 
-        `forbidden_actions` (MVP-12) is a tuple of (tool, args_json) pairs
-        the sanitiser must REJECT. Populated by `ReplanPolicy` for failures
-        whose budget has `requires_different_action=True` (approval_deny,
-        policy_blocked, etc.).
-
-        `llm` — optional per-call override (adaptive routing). When
-        provided, it replaces `self.llm` for this single call only.
+        `forbidden_actions` is a tuple of (tool, args_json) pairs the sanitiser must REJECT (set by `ReplanPolicy` for failures that require a different action).
+        `llm` optionally overrides `self.llm` for this call only (adaptive routing).
         """
         user_prompt = self._build_user_prompt(
             question, file_hint, history, failure_context
         )
-        # Kernel-side defense: redact credentials and sensitive PII before
-        # either can reach the LLM provider. Clean prompts pass through.
+        # redact credentials and sensitive PII before they reach the LLM provider
         from core.redaction import redact_dlp_text  # local import: avoid cycles
         safe_prompt, _secret_findings, _pii_findings = redact_dlp_text(user_prompt)
         _active_llm = llm if llm is not None else self.llm
-        # Inject dynamic host-tools block so the planner knows what is
-        # actually installed on this machine (from .env BLENDER_PATH etc.)
+        # dynamic host-tools block: what is actually installed on this machine
         host_block = _build_host_tools_block()
-        # Скрытые на этом пути инструменты не описываем — см. without_tool_blocks.
+        # tools hidden on this path are not described: see without_tool_blocks
         base_system = without_tool_blocks(
             PLANNER_SYSTEM, self.effective_hidden_tools(),
         )
         effective_system = base_system + host_block if host_block else base_system
-        effective_system += self.lesson_block_for_prompt(  # живой путь уроков
+        effective_system += self.lesson_block_for_prompt(
             question, file_hint,
         )
         raw = _active_llm.complete(
@@ -320,10 +265,7 @@ class LLMPlanner:
                 sources,
                 step_warnings,
             )
-        # Coverage enforcement: if the question is about test adequacy /
-        # coverage and the planner produced a run_tests step without
-        # coverage=True, inject it automatically so the synthesizer always
-        # gets real coverage data instead of just pass counts.
+        # coverage enforcement: a test-adequacy question with a run_tests step lacking coverage=True gets it injected
         _COVERAGE_KEYWORDS = (
             "хватает ли тест", "покрывают ли", "достаточно тест",
             "enough test", "test coverage", "coverage report",
@@ -345,29 +287,22 @@ class LLMPlanner:
             diagnostics=parse_diag,
         )
 
-    # ---------- prompt construction ----------
 
     def _confidence_sources_here(self, present=confidence_sources_present) -> bool:
-        """Маршрут — только там, где его файлы есть (`doc_routing`)."""
+        """The route applies only where its files exist (`doc_routing`)."""
         try:
             return present(getattr(self.registry.get("file_read"), "workspace_root", None))
         except KeyError:
             return True
 
     def effective_hidden_tools(self) -> frozenset[str]:
-        """The host's hidden set plus the current run's, each run its own (MIR-114)."""
+        """The host's hidden set plus the current run's, each run its own."""
         return frozenset(getattr(self, "hidden_tools", frozenset()) or ()) | run_blocked_tools()
 
     def _file_read_available(self) -> bool:
         """Whether a `file_read` step can actually run on this path.
 
-        Doc injection and the matching prompt directive must agree. Injection
-        was already gated on this; the directives were not, so on the
-        autonomous path (where `file_read` is hidden) the prompt still ordered
-        the model to "read docs/X first" while the registered-tools list and
-        the [UNAVAILABLE_TOOLS=...] block said it could not. That contradiction
-        is exactly the noisy policy_blocked replan the hidden-tools directive
-        exists to prevent, so the gate lives here once and both sides use it.
+        Doc injection and the prompt directive must agree: where `file_read` is hidden (autonomous path), the prompt must not order reading docs.
         """
         if "file_read" in self.effective_hidden_tools():
             return False
@@ -390,16 +325,13 @@ class LLMPlanner:
         tool_names = ", ".join(
             t.name for t in self.registry.list() if t.name not in hidden
         )
-        # Контракты аргументов (Д6, 2026-09-03): без них планировщик угадывал.
+        # argument contracts: without them the planner guessed
         _contracts = getattr(self.registry, "argument_contracts", lambda **_k: "")(hidden=frozenset(hidden))
         contracts_block = (
             f"tool argument contracts (use these names and values exactly):\n{_contracts}\n"
             if _contracts else ""
         )
-        # When tools are hidden for this path (autonomous goal path), do not
-        # merely omit them — the static system prompt still describes tools like
-        # spawn_subagent. Add an explicit directive so the planner never selects
-        # a run-scoped-blocked tool (avoids noisy policy_blocked replans).
+        # hidden tools are not merely omitted: an explicit directive stops the planner selecting a blocked tool (avoids noisy policy_blocked replans)
         if hidden:
             unavailable_block = (
                 f"[UNAVAILABLE_TOOLS={', '.join(sorted(hidden))} — these tools are "
@@ -438,9 +370,7 @@ class LLMPlanner:
                 "user explicitly asks for architecture/reference facts.]\n"
             )
         doctrine_docs_block = ""
-        # Every "read docs/X first" directive is gated on file_read actually
-        # being usable — an unreachable instruction only produces plans the
-        # policy layer then blocks.
+        # every "read docs/X first" directive is gated on file_read being usable
         docs_readable = self._file_read_available() and self._confidence_sources_here(doctrine_docs_present)
         if docs_readable and is_doctrine_corporate_question(question):
             doctrine_docs_block = (
@@ -496,10 +426,7 @@ class LLMPlanner:
                 "knowledge/generated/AGENT_ANATOMY.md or list_dir tools/ as "
                 "primary evidence for confidence-gate internals.]\n"
             )
-        # Replan context sits between history and question — close enough
-        # to the question to be salient, but separated from old turns so
-        # the model doesn't confuse "what I tried this cycle" with "what I
-        # discussed in a prior turn".
+        # replan context sits between history and question: salient, but separated from old turns
         replan_block = (
             f"{failure_context.rstrip()}\n\n" if failure_context.strip() else ""
         )
@@ -525,7 +452,6 @@ class LLMPlanner:
             f"Return your JSON plan now."
         )
 
-    # ---------- step validation ----------
 
     def _validate_steps(
         self,
@@ -550,22 +476,16 @@ class LLMPlanner:
                 warnings.append(f"step[{idx}]: missing tool name or arguments, dropped")
                 continue
 
-            # Unknown tool -> drop (do not let the planner widen the surface).
+            # unknown tool: drop (the planner must not widen the surface)
             try:
                 self.registry.get(tool_name)
             except KeyError:
                 warnings.append(f"step[{idx}]: tool '{tool_name}' not registered, dropped")
-                # Track hallucinated tool names separately so the caller can
-                # emit a structured log event (plan_tool_drop) without
-                # parsing free-text warning strings.
+                # tracked separately so the caller can emit a structured plan_tool_drop event
                 dropped_tools.append(tool_name)
                 continue
 
-            # MVP-12 forbidden-action gate. If the ReplanPolicy marked an
-            # earlier (tool, args) pair as no-retry (approval_deny,
-            # policy_blocked, etc.), the planner is not allowed to revive
-            # it even if the LLM tries again. Canonicalise args the same
-            # way ReplanPolicy did (sorted JSON keys).
+            # forbidden-action gate: a (tool, args) pair marked no-retry by ReplanPolicy cannot be revived; args canonicalised with sorted JSON keys
             try:
                 canonical_args = json.dumps(args, sort_keys=True, ensure_ascii=False)
             except TypeError:
@@ -584,11 +504,7 @@ class LLMPlanner:
             )
             if spec is None:
                 continue
-            # Планировщик обязан писать «rationale» к КАЖДОМУ шагу (см.
-            # core/planner_prompt.py), и до 2026-09-20 конвейер это поле
-            # выбрасывал: санитайзер пересобирает шаг из инструмента и
-            # аргументов. Дальше датчик согласованности пытался угадать довод
-            # по общей прозе и срабатывал на 54% ходов. Довод шага — у шага.
+            # the step's rationale is kept: the sanitiser rebuilds the step from tool and arguments and would drop it
             rationale = step.get("rationale") if isinstance(step, dict) else None
             if isinstance(rationale, str) and rationale.strip():
                 spec["rationale"] = rationale.strip()[:300]

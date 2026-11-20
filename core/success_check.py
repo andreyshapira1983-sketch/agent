@@ -1,75 +1,36 @@
-"""Критерий успеха: та его часть, которую можно наблюдать без модели.
-
-Зачем существует. Хартия требует от каждой цели `success_check` («цель без
-проверки — желание», core/charter_goal.py), но до аудита автономности
-2026-09-17 этот критерий нигде не применялся: `_pick_next_goal` отдавал наружу
-одну строку цели, а `_task_goal` объявлял задачу выполненной по единственному
-признаку — ответ модели не пуст. «Я создал файл» и созданный файл были для
-системы одним событием.
-
-Здесь НЕ появляется универсальный проверяющий. Критерий — свободный текст, и
-понять его целиком нельзя, не спросив ту же модель, чьё слово мы и проверяем.
-Поэтому берётся ровно наблюдаемая часть: НАЗВАННЫЕ в критерии пути. Их
-существование читается с диска — независимо от того, что сказал исполнитель.
-
-Три исхода, и третий назван словом намеренно:
-
-* ``verified``      — все названные следы найдены в мире;
-* ``missing``       — хотя бы один назван и не найден;
-* ``unverifiable``  — критерий не называет наблюдаемого следа.
-
-``unverifiable`` — не «да». Запись исполнения обязана отличать «сошлось» от
-«не проверяли»: незнание, выданное за проверку, хуже отсутствия проверки.
-"""
+"""Success criterion: the part of it observable without a model, i.e. the paths NAMED in the criterion, read from disk independently of the executor's word; verdicts ``verified`` / ``missing`` / ``unverifiable`` (unknown is not yes)."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import Any
 
-#: Путеподобный токен: основа со ЛАТИНСКИМИ буквами и расширение из букв.
-#: Кириллица исключена намеренно — «цель.Проверка» не путь, а конец фразы.
+#: Path-like token: a base with LATIN letters and an alphabetic extension; Cyrillic is excluded on purpose (a phrase end is not a path).
 _PATH_TOKEN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./\\-]*\.[A-Za-z][A-Za-z0-9]{0,7}")
 
-#: Обрамление, которое человек и модель ставят вокруг имени файла.
+#: Framing that humans and models put around a file name.
 _TRIM = " \t\"'`«»(),;:!?[]{}<>"
 
-#: Расширения, которые чаще встречаются как конец предложения или версия, чем
-#: как файл. Пустой по умолчанию: список-исключение — место, где проверка
-#: тихо перестаёт работать, поэтому он заводится только по замеру.
+#: Extensions more often a sentence end or version than a file. Empty by default: an exception list is where a check silently stops working, so entries come only from measurement.
 _IGNORED_SUFFIXES: frozenset[str] = frozenset()
 
-#: Утверждения о СОДЕРЖИМОМ, которые можно проверить без модели. Ровно две
-#: формы, и обе однозначны:
-#:   * `status=ready` — пара через знак равенства, без пробелов;
-#:   * `"status": "ready"` — кусок JSON, приведённый в критерии дословно.
-#: Двоеточие без кавычек НЕ берётся намеренно: «признак успеха: файл готов» —
-#: обычная фраза, и требовать её содержимого от файла значит выдумать критерий,
-#: которого никто не ставил. Ревизия PR #333 назвала дыру, а не попросила
-#: угадывать смысл свободного текста.
+#: Content claims checkable without a model, exactly two unambiguous forms: `status=ready` (pair with an equals sign, no spaces) and `"status": "ready"` (verbatim JSON piece).
+#: A colon without quotes is NOT taken on purpose: 'success sign: file ready' is an ordinary phrase.
 _KV_PLAIN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{0,63})=([A-Za-z0-9_.-]{1,64})")
 _KV_JSON = re.compile(
     r"[\"']([A-Za-z_][A-Za-z0-9_]{0,63})[\"']\s*:\s*[\"']([^\"']{1,64})[\"']"
 )
 
-#: Сколько байт файла читается ради проверки литерала. Критерий говорит о
-#: небольшом следе; читать гигабайт ради слова — способ уронить тик.
+#: Max bytes of a file read to check a literal; a criterion speaks of a small trace.
 _CONTENT_READ_LIMIT = 256 * 1024
 
-#: Третья наблюдаемая форма, для правки КОДА: `undefined:имя@путь.py` — «в
-#: этом модуле больше нет определения верхнего уровня с таким именем».
-#: Читается по AST, без модели. Зачем: до 2026-09-21 цель самоправки
-#: проверялась критерием «в data/approval_inbox.jsonl появилась новая заявка
-#: self_apply_lane.run». Он мерил бумажку, а не правку, и наблюдатель не мог
-#: проверить даже её: `self_apply_lane.run` читался как имя файла, файла нет —
-#: вердикт «missing» при любом исходе. Критерий не отличал сделанное от
-#: несделанного. След правки кода должен меняться только тогда, когда правка
-#: сделана.
+#: Third observable form, for CODE edits: `undefined:name@path.py` = 'this module no longer has a top-level definition with that name'; read by AST, no model.
+#: A code-edit trace must change only when the edit is done.
 _UNDEFINED = re.compile(r"\bundefined:([A-Za-z_][A-Za-z0-9_]{0,99})@([A-Za-z0-9_./\\-]+\.py)\b")
 
 
 def undefined_claims(success_check: str) -> tuple[tuple[str, str], ...]:
-    """Пары (имя, путь) из форм `undefined:имя@путь.py`, по порядку, без повторов."""
+    """(name, path) pairs from `undefined:name@path.py` forms, in order, without repeats."""
     out: list[tuple[str, str]] = []
     for match in _UNDEFINED.finditer(str(success_check or "")):
         pair = (match.group(1), match.group(2).replace("\\", "/"))
@@ -95,7 +56,7 @@ def _top_level_names(target: Path) -> set[str] | None:
 
 
 def content_claims(success_check: str) -> tuple[tuple[str, str], ...]:
-    """Пары «ключ, значение», названные критерием, без повторов."""
+    """(key, value) pairs named by the criterion, without repeats."""
     seen: list[tuple[str, str]] = []
     text = str(success_check or "")
     for pattern in (_KV_JSON, _KV_PLAIN):
@@ -107,17 +68,9 @@ def content_claims(success_check: str) -> tuple[tuple[str, str], ...]:
 
 
 def _claim_pattern(key: str, value: str) -> re.Pattern[str]:
-    """Пара, найденная в файле в любой из обычных записей.
+    """A pair found in a file in any usual notation (`status=ready` also matches `{"status": "ready"}` and `status: ready`).
 
-    `status=ready` обязано узнавать `{"status": "ready"}`, `status: ready` и
-    `status=ready`: критерий говорит об утверждении, а не о синтаксисе. Между
-    ключом и значением допускаются только разделители — так `status` и `ready`,
-    разбросанные по разным строкам, парой не считаются.
-
-    Границы по краям — ревизия PR #334. Без них `status=ready` засчитывался на
-    `{"status": "ready_to_fail"}` и на `{"my_status": "ready"}`. Первое хуже
-    второго: это ложное ПОДТВЕРЖДЕНИЕ, то есть критерий «готово» закрывался
-    файлом, буквально говорящим «готово провалиться».
+    Only separators may stand between key and value; edge boundaries stop `status=ready` matching `ready_to_fail` or `my_status`.
     """
     return re.compile(
         rf"(?<![\w.-])[\"']?{re.escape(key)}[\"']?\s*[:=]\s*"
@@ -127,12 +80,7 @@ def _claim_pattern(key: str, value: str) -> re.Pattern[str]:
 
 
 def _claims_met(target: Path, claims: tuple[tuple[str, str], ...]) -> tuple[bool, str]:
-    """Сошлись ли утверждения о содержимом. Нечитаемый файл — это «нет».
-
-    Fail-closed по смыслу ворот: «не смог прочитать» не вправе означать
-    «сошлось». Иначе двоичный или заблокированный файл снова превращает
-    вердикт в пересказ чужого слова.
-    """
+    """Whether content claims hold; an unreadable file is 'no' (fail-closed: 'could not read' must not mean 'holds')."""
     if not claims:
         return True, ""
     try:
@@ -150,12 +98,7 @@ def _claims_met(target: Path, claims: tuple[tuple[str, str], ...]) -> tuple[bool
 
 
 def _artifact_tokens(text: str) -> list[tuple[int, str]]:
-    """Путеподобные токены вместе с местом, где они названы.
-
-    Место нужно привязке утверждений: «result.json содержит status=ready»
-    ставит утверждение ПОСЛЕ своего следа, и это единственный признак
-    принадлежности, который есть в свободном тексте.
-    """
+    """Path-like tokens together with where they are named; the position binds claims to the trace that precedes them."""
     found: list[tuple[int, str]] = []
     for match in _PATH_TOKEN.finditer(str(text or "")):
         token = match.group(0).strip(_TRIM).replace("\\", "/")
@@ -168,12 +111,7 @@ def _artifact_tokens(text: str) -> list[tuple[int, str]]:
 
 
 def named_artifacts(success_check: str) -> tuple[str, ...]:
-    """Пути, НАЗВАННЫЕ в критерии успеха, в порядке появления, без повторов.
-
-    Токен считается путём, когда у него есть основа и буквенное расширение
-    (``result.json``, ``docs/notes/plan.md``). Версии и числа (``1.5``) не
-    проходят: расширение обязано начинаться с буквы.
-    """
+    """Paths NAMED in the success criterion, in order, without repeats; a token needs a base and an alphabetic extension (so ``1.5`` does not pass)."""
     seen: list[str] = []
     for _pos, token in _artifact_tokens(success_check):
         if token not in seen:
@@ -182,18 +120,9 @@ def named_artifacts(success_check: str) -> tuple[str, ...]:
 
 
 def claims_by_artifact(success_check: str) -> dict[str, tuple[tuple[str, str], ...]]:
-    """Какие утверждения о содержимом к какому следу относятся.
+    """Which content claims belong to which trace: a claim belongs to the last trace named BEFORE it; a claim before every trace goes to the first.
 
-    Ревизия PR #334: утверждения были общими и проверялись у КАЖДОГО
-    названного следа. Критерий «result.json содержит status=ready, и создан
-    log.txt» требовал `status=ready` ещё и от `log.txt` — ложный отказ, после
-    которого агент принимался чинить работающее.
-
-    Признак принадлежности один: утверждение относится к последнему следу,
-    названному ПЕРЕД ним. Утверждение, стоящее раньше всех следов («в
-    result.json должно быть status=ready» с обратным порядком слов не бывает,
-    но «status=ready должен появиться в result.json» бывает), достаётся
-    первому следу. Для критерия с одним следом поведение прежнее.
+    With one trace the behavior is unchanged.
     """
     text = str(success_check or "")
     tokens = _artifact_tokens(text)
@@ -214,11 +143,9 @@ def claims_by_artifact(success_check: str) -> dict[str, tuple[tuple[str, str], .
 
 
 def observe_success_check(success_check: str, workspace: Any) -> dict:
-    """Прочитать МИР и сказать, сошёлся ли критерий. Модель не спрашивается.
+    """Read the WORLD and say whether the criterion holds; no model is asked.
 
-    Возвращает словарь с полями ``verdict``, ``artifacts``, ``missing``,
-    ``observed`` — он же ложится в запись исполнения, чтобы «сошлось» можно
-    было перепроверить после прогона, не повторяя его.
+    Returns a dict with ``verdict``, ``artifacts``, ``missing``, ``observed``; it also goes into the execution record so 'held' can be rechecked after the run.
     """
     artifacts = named_artifacts(success_check)
     if not artifacts:
@@ -242,9 +169,7 @@ def observe_success_check(success_check: str, workspace: Any) -> dict:
     reasons: list[str] = []
     for relpath in artifacts:
         target = root / relpath
-        # Сдерживание раньше наблюдения: критерий не вправе РАСШИРЯТЬ область,
-        # в которую смотрит проверяющий. След, положенный снаружи копии, не
-        # засчитывает цель внутри неё (ревизия PR #333).
+        # Containment before observation: a criterion must not WIDEN the area the checker looks into; a trace outside the copy does not count for a goal inside it.
         try:
             resolved = target.resolve()
             escaped = root_resolved != resolved and root_resolved not in resolved.parents

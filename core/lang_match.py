@@ -1,26 +1,10 @@
-"""Language-aware term matching for question routing.
-
-* ``normalize_text`` — Unicode casefold + Russian ``ё`` -> ``е`` folding so
-"своё"/"свое" and "твоём"/"твоем" compare equal, plus whitespace collapse. *
-``tokenize`` — Unicode-aware word tokens (``\\w+``), so Cyrillic words are
-split on real boundaries (spaces, punctuation, hyphens) rather than by naive
-character search. * ``any_term_matches`` — matches a term as a *sequence of
-whole tokens*. Each term token must equal a text token, OR (only when the
-term token is at least ``STEM_MIN`` characters) be a prefix of it. The
-prefix rule is what lets a stem such as "репозитор" match
-"репозитории"/"репозитория"/"репозиторий" while the length floor stops a
-one/two-letter function word such as the preposition "с" or "в" from
-matching the *start* of a longer word like "своё" or "весь".
-"""
+"""Language-aware term matching: casefold with ё -> е, Unicode word tokens, and matching of a term as a run of whole tokens where long enough tokens may match as a stem prefix (inflection)."""
 from __future__ import annotations
 
 import re
 from functools import lru_cache
 
-# A term token shorter than this must match a whole text token exactly; only
-# longer tokens are treated as inflectional stems (prefix match). This is the
-# guard that keeps Russian one/two-letter prepositions ("с", "в", "на", "до")
-# and English glue words from matching inside a longer word.
+# A term token shorter than this must match a whole token; longer ones are stems (prefix match), so short prepositions ("с", "в", "на") cannot match inside longer words.
 STEM_MIN = 4
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
@@ -48,8 +32,6 @@ def _tokenize_term(term: str) -> tuple[str, ...]:
 def _token_matches(text_token: str, term_token: str) -> bool:
     if text_token == term_token:
         return True
-    # Inflectional stem: only allow a prefix match for sufficiently long term
-    # tokens, so short function words never match the start of a longer word.
     return len(term_token) >= STEM_MIN and text_token.startswith(term_token)
 
 

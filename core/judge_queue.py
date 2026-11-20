@@ -1,26 +1,9 @@
-"""Очередь на суд: итоговые решения агента судит Клод, вне хода и другой моделью.
+"""Judge queue: the agent's final decisions are judged by Claude, outside the turn and by a different model.
 
-Слово оператора 25.09: новых ключей нет, пока агент не заработал; судит
-Клод из сессии Claude Code, пока она включена. До сих пор каждое «сделано»
-судила та же семья моделей, что и работала (DeepSeek), а модель узнаёт
-свои тексты и завышает им оценку: Panickssery, Bowman, Feng, «LLM Evaluators
-Recognize and Favor Their Own Generations», NeurIPS 2024 (arXiv 2404.13076).
-Замер того же дня: из 10 последних «verified» целей ложных было 5.
-
-Поэтому:
-
-* агент кладёт в очередь ПОЛОЖИТЕЛЬНОЕ итоговое решение («цель достигнута»):
-  завышение живёт в «да», ложное «нет» стоит только повтора;
-* пока Клод не вынес решения, оно предварительное — в зачёт не идёт;
-* решения Клода лежат в отдельном журнале, который агент писать не может
-  (`core/control_files.CONTROL_RELPATHS`): суд, который подсудимый может
-  переписать, не суд;
-* согласие «предварительное против Клода» считается — это и есть мера того,
-  как часто ошибается собственный судья агента.
-
-Клод выносит решение командой `scripts/judge_queue.py rule …`, открыв сами
-файлы-улики: «проверь своими руками», а не по докладу.
-"""
+    The agent queues POSITIVE final decisions ("goal reached"); until Claude rules
+    they are provisional and do not count. Rulings live in a separate journal the
+    agent cannot write (`core/control_files.CONTROL_RELPATHS`). Claude rules via
+    `scripts/judge_queue.py rule ...` after opening the evidence files."""
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +19,7 @@ from core.state_integrity import (
 )
 
 QUEUE_RELPATH = "data/judge_queue.jsonl"
-#: Пишет только Клод (командой мимо инструментов агента) — тормоз оператора.
+#: Written only by Claude (command outside the agent's tools), an operator brake.
 RULINGS_RELPATH = "data/judge_rulings.jsonl"
 RULINGS = ("confirmed", "overturned", "unclear")
 
@@ -60,7 +43,7 @@ def _now() -> str:
 
 def submit(root: Path | str, *, kind: str, subject: str, provisional: str,
            evidence: list[str] | tuple[str, ...] = (), detail: str = "") -> str:
-    """Положить решение на суд; то же решение дважды не кладётся. Вернуть его id."""
+    """Queue a decision for judging; the same decision is not queued twice. Returns its id."""
     evidence = [str(e) for e in evidence]
     key = json.dumps([kind, subject, provisional, sorted(evidence)], ensure_ascii=False)
     item_id = "jq_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
@@ -82,7 +65,7 @@ def pending(root: Path | str) -> list[dict[str, Any]]:
 
 
 def rule(root: Path | str, item_id: str, verdict: str, reason: str, *, judge: str = "claude") -> dict[str, Any]:
-    """Вынести решение. Без причины, по неизвестному id или повторно — отказ."""
+    """Rule on a decision. Refused without a reason, for an unknown id, or repeated."""
     if verdict not in RULINGS:
         raise ValueError(f"verdict must be one of {RULINGS}")
     if not reason.strip():
@@ -97,12 +80,12 @@ def rule(root: Path | str, item_id: str, verdict: str, reason: str, *, judge: st
 
 
 def standing(root: Path | str, item_id: str) -> str:
-    """confirmed | overturned | unclear | provisional (ещё не судили)."""
+    """standing: confirmed | overturned | unclear | provisional (not yet judged)."""
     return str(rulings(root).get(item_id, {}).get("verdict") or "provisional")
 
 
 def agreement(root: Path | str) -> dict[str, dict[str, int]]:
-    """По роду решения: сколько подтверждено, отменено, неясно и ждёт суда."""
+    """By decision kind: how many are confirmed, overturned, unclear or awaiting judgment."""
     ruled = rulings(root)
     out: dict[str, dict[str, int]] = {}
     for item in _rows(Path(root) / QUEUE_RELPATH):

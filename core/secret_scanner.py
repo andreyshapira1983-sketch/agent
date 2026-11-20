@@ -1,51 +1,22 @@
-"""Secret Scanner — single source of truth for credential detection (§7).
+"""Single source of truth for credential detection (kernel security, not LLM).
 
-The architecture rule is: security belongs to the kernel, not to the LLM.
-This module is that kernel. Every other component that needs to know
-"is there a secret in this text?" must ask this module — not roll its own
-patterns.
-
-Used by:
-  - MemoryWritePolicy           refuses to persist any record containing a hit
-  - redaction.redact_text       masks hits inline before logs/prompts/output
-  - DataClassifier              elevates classification to DataClass.SECRET
-  - AgentLoop                   classifies tool outputs before they leave the loop
-
-Two detection layers, intentionally separate:
-
-  REGEX_RULES
-    Specific, high-confidence credential shapes (OpenAI keys, GitHub PATs,
-    AWS access keys, PEM blocks, `KEY=VALUE` style assignments, …).
-    These have precise spans — they can be redacted inline.
-
-  KEYWORD_RULES
-    Soft alarms. The text *talks about* credentials (e.g. "password", an
-    `Authorization:` header). The exact span of the secret value is
-    ambiguous, so these mark the whole document as "contains secret",
-    refuse memory writes, and bump classification — but do NOT drive
-    inline redaction.
-
-Adding a new pattern? Do it here, once. Every consumer picks it up for free.
+REGEX_RULES are precise credential shapes with redactable spans; KEYWORD_RULES are soft alarms that flag the whole text
+but do not drive inline redaction. Consumers: MemoryWritePolicy, redaction.redact_text, DataClassifier, AgentLoop.
+Add new patterns here, once.
 """
 from __future__ import annotations
 
 import re
 from typing import Final
 
-# Одна копия структуры находки — в core/dlp.py (заявка агента
-# proposals/2026-09-21_dedupe_secretfinding_into_dlp.md; кампания 2026-09-22
-# шесть раз подряд брала эту цель, а живой код менять не может). Имя
-# SecretFinding остаётся импортируемым отсюда: его берёт core/redaction.py.
+# The single copy of the finding structure lives in core/dlp.py; the name SecretFinding stays importable from here
+# because core/redaction.py uses it.
 from core.dlp import DlpFinding as SecretFinding
 
-# The set of KEY NAMES that make a value a credential. Single source of truth:
-# it feeds both the flat-text rule (`credential-assignment`, below) and the
-# structured-payload check (`is_credential_key`). Two hand-written copies would
-# drift, and a drifting copy is how `{"password": ...}` leaked while
-# `password: ...` was masked.
-#
-# Deliberately NOT a bare `token`: `max_tokens` is a model parameter, and
-# redacting it would blind the logs this layer exists to keep readable.
+# KEY NAMES that make a value a credential; feeds both the flat-text rule (`credential-assignment`) and the
+# structured-payload check (`is_credential_key`) so the two cannot drift.
+# 
+# Deliberately NOT a bare `token`: `max_tokens` is a model parameter, and redacting it would blind the logs.
 CREDENTIAL_KEY_NAMES: Final[str] = (
     r"api[_-]?key|apikey|secret[_-]?key|password|passwd|passphrase|"
     r"auth[_-]?token|private[_-]?key|access[_-]?token"
@@ -84,70 +55,53 @@ _QUOTED_VALUE: Final[str] = (
 )
 
 
-# Regex rules: (kind, compiled pattern). `kind` ends up in the redaction
-# token, e.g. `[REDACTED:openai-key]`, so keep it short, lowercase, kebab.
+# Regex rules: (kind, compiled pattern). `kind` ends up in the redaction token, e.g. `[REDACTED:openai-key]`:
+# keep it short, lowercase, kebab.
 REGEX_RULES: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
-    # Left boundary `(?<![A-Za-z0-9_-])` so "sk-" must START a token: without it
-    # the hyphen-in-class + unanchored pattern matched INSIDE ordinary words
-    # ("ta|sk-...", "ri|sk-...", "di|sk-...") + a hyphenated slug (CORE-13).
+    # Left boundary `(?<![A-Za-z0-9_-])` so "sk-" must START a token; without it the pattern matched inside ordinary
+    # words ("ta|sk-...", "ri|sk-...") and hyphenated slugs.
     ("anthropic-key",      re.compile(r"(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_\-]{20,}")),
     ("openai-key",         re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_\-]{20,}")),
     ("github-pat",         re.compile(r"(?<![A-Za-z0-9_-])ghp_[A-Za-z0-9]{20,}")),
-    # GitHub issues five more token shapes besides the classic `ghp_` PAT, and
-    # this repo drives `gh` — so any of them can surface in captured output.
-    # Fine-grained PATs carry `_` inside the body, hence the wider class.
+    # GitHub issues five more token shapes besides the classic `ghp_` PAT, and this repo drives `gh`, so any of them can
+    # surface in captured output. Fine-grained PATs carry `_` inside the body, hence the wider class.
     ("github-fine-grained-pat", re.compile(
         r"(?<![A-Za-z0-9_-])github_pat_[A-Za-z0-9_]{20,}"
     )),
-    # Body class is wider than the other GitHub rules: stateless installation
-    # tokens are `ghs_<app id>_<JWT>`, so underscores and the JWT's dots and
-    # dashes are part of the credential. Without them the rule matched only the
-    # token's head and the redaction left the JWT tail readable (PR #207
-    # review, CodeRabbit). Over-capture of a trailing sentence dot is the safe
-    # direction for a redactor.
+    # Body class is wider than the other GitHub rules: stateless installation tokens are `ghs_<app id>_<JWT>`, so
+    # underscores and the JWT's dots and dashes belong to the credential. Over-capturing a trailing sentence dot is the
+    # safe direction for a redactor.
     ("github-token",       re.compile(r"(?<![A-Za-z0-9_-])gh[osur]_[A-Za-z0-9_.\-]{20,}")),
     # Slack bot/user/app tokens share the `xox<letter>-` prefix.
     ("slack-token",        re.compile(r"(?<![A-Za-z0-9_-])xox[abeprs]-[A-Za-z0-9-]{10,}")),
-    # Incoming-webhook URLs are themselves the credential — no auth needed.
-    # Same left boundary as every other rule: without it a match could start
-    # inside a glued token ("...abchttps://..."), the one rule that differed.
+    # Incoming-webhook URLs are themselves the credential. Same left boundary as every other rule (a match could
+    # otherwise start inside a glued token).
     ("slack-webhook",      re.compile(
         r"(?<![A-Za-z0-9_-])https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{20,}"
     )),
-    # Google/Firebase API keys: fixed 39-char shape, distinctive enough alone.
-    # Both ends anchored — the length is exact, so 40+ same-class characters
-    # are some longer identifier that merely starts like a key, not a key.
+    # Google/Firebase API keys: fixed 39-char shape. Both ends anchored: 40+ same-class characters are a longer
+    # identifier that merely starts like a key.
     ("google-api-key",     re.compile(
         r"(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])"
     )),
     ("gitlab-pat",         re.compile(r"(?<![A-Za-z0-9_-])glpat-[A-Za-z0-9_-]{20,}")),
     ("npm-token",          re.compile(r"(?<![A-Za-z0-9_-])npm_[A-Za-z0-9]{20,}")),
-    # Stripe uses `_` after the prefix, so the `sk-` rule above never sees it.
-    # `sk` (secret) and `rk` (restricted) ONLY. `pk` (publishable) is public
-    # by design and appears in frontend configs and build manifests; every hit
-    # here feeds `contains_secret()` and the memory write policy, so flagging
-    # it quarantined innocent content (PR #207 review, Greptile P1 +
-    # CodeRabbit). `kk` was never a Stripe prefix — a leftover of the original
-    # character class.
+    # Stripe uses `_` after the prefix, so the `sk-` rule never sees it. `sk` (secret) and `rk` (restricted) ONLY:
+    # `pk` (publishable) is public by design and appears in frontend configs, and every hit here feeds
+    # `contains_secret()` and the memory write policy.
     ("stripe-key",         re.compile(
         r"(?<![A-Za-z0-9_-])[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"
     )),
     ("huggingface-token",  re.compile(r"(?<![A-Za-z0-9_-])hf_[A-Za-z0-9]{20,}")),
     ("aws-access-key",     re.compile(r"AKIA[0-9A-Z]{16}")),
-    # H-15 (Cloudbleed class, docs/audit/HISTORICAL_FAILURE_LEDGER.md).
-    # Измерено 2026-08-24: `AKIA…` ловился, а СЕКРЕТ рядом с ним проходил
-    # целиком — а публичен как раз идентификатор, опасна вторая половина.
-    # Ловится ПОМЕЧЕННАЯ форма (конфиги, дампы окружения); голый
-    # 40-символьный base64 без метки не ловится намеренно: он неотличим от
-    # хеша, и правило по одной длине давало бы ложные срабатывания на
-    # каждом sha и идентификаторе. Предел замерен и записан в журнале.
+    # Cloudbleed class (H-15). AWS secret access key next to an `AKIA...` id: the id is public, the second half is the
+    # danger. Only the LABELLED form (configs, environment dumps) is caught; a bare 40-char base64 is indistinguishable
+    # from a hash, and a length-only rule would fire on every sha and identifier.
     ("aws-secret-key",     re.compile(
         r"(?i)aws[_-]?secret[_-]?(?:access[_-]?)?key[\"']?\s*[=:]\s*"
         r"[\"']?[A-Za-z0-9/+=]{40}"
     )),
-    # Учётные данные ВНУТРИ адреса. Соседнее правило `mongodb-uri` знало
-    # эту форму, но только для одной схемы; `https://user:pass@host`
-    # не находился вовсе, хотя именно такие адреса агент и скачивает.
+    # Credentials INSIDE a URL (`https://user:pass@host`); the neighbouring `mongodb-uri` rule covers only one scheme.
     ("url-credentials",    re.compile(
         r"(?:https?|ftp|ssh|redis|postgres(?:ql)?|mysql|amqp)://"
         r"[^:/?#\s@]+:[^@/?#\s]+@"
@@ -195,19 +149,11 @@ KEYWORD_RULES: Final[tuple[str, ...]] = (
 
 
 def looks_like_secret_body(value: str) -> bool:
-    """True, когда строка — ТЕЛО секрета (случайный материал), а не имя/путь/фраза.
+    """True when the string is a secret BODY (random material), not a name, path or phrase.
 
-    Авторство агента (2026-08-29). Меряется уникальность символов: настоящий
-    ключ — шум без структуры, его символы взяты из широкого алфавита и почти
-    не повторяются, поэтому доля уникальных высока. Имена, пути и фразы
-    повторяют малый алфавит и несут словарные куски, и доля остаётся низкой.
-    Узкому алфавиту (hex) нужен свой порог: даже длинная шестнадцатеричная
-    строка повторяет всего 16 знаков и общей меры не достигнет никогда.
-
-    Замерено на 12 формах (5 настоящих секретов, 7 законных строк, включая
-    UUID и короткий git-sha) — 12/12. Первая мера того же автора (доля
-    НЕ-словарных символов) была опровергнута замером: у реальных ключей она
-    0.00–0.04, и правило пропустило бы их все.
+        Measures character uniqueness: a real key is structureless noise from a wide alphabet, so its share of unique
+        characters is high; names, paths and phrases reuse a small alphabet. A narrow alphabet (hex) needs its own
+        threshold: even a long hex string repeats only 16 symbols and never reaches the general one.
     """
     s = (value or "").strip()
     if not s:
@@ -246,15 +192,11 @@ _FLAG_VALUES: Final[frozenset[str]] = frozenset({"yes", "no", "on", "off", "0", 
 
 
 def _assignment_is_only_a_reference(text: str, match: re.Match[str]) -> bool:
-    """True, когда за именем доступа стоит ССЫЛКА, а не значение секрета.
+    """True when the credential name is followed by a REFERENCE, not a secret value.
 
-    `credential-assignment` ловит форму «имя = значение» и не смотрит, что
-    именно присвоено. Из-за этого блокировались обычный код (чтение значения
-    из окружения) и объявление функции с параметром-именем: агент не мог
-    записать ни план про доступы, ни код, работающий с ключами (замер
-    2026-08-29). Обратное направление — короткий настоящий пароль вроде
-    «password: hunter2» — обязано ловиться по-прежнему, поэтому пропускаются
-    ТОЛЬКО явные ссылочные формы, а не «всё короткое».
+        `credential-assignment` matches "name = value" without looking at what is assigned, which blocked ordinary code
+        (reading from the environment) and function declarations with a name parameter. Only explicit reference forms
+        are skipped, not "anything short": a short real password such as "password: hunter2" must still be caught.
     """
     value = match.group("value") or match.group("qvalue") or ""
     value = value.strip().strip("\"'` \t,;\\")
@@ -278,7 +220,7 @@ def scan(text: str) -> list[SecretFinding]:
     for kind, pat in REGEX_RULES:
         for m in pat.finditer(text):
             if kind == "credential-assignment" and _assignment_is_only_a_reference(text, m):
-                # Присваивание-ссылка (окружение, аннотация, имя) — не утечка.
+                # A reference assignment (environment, annotation, name) is not a leak.
                 continue
             findings.append(SecretFinding(kind=kind, start=m.start(), end=m.end(), matched=m.group(0)))
     return findings
@@ -293,20 +235,12 @@ def keyword_hits(text: str) -> list[str]:
 
 
 def contains_secret(text: str, *, include_keywords: bool = True) -> tuple[bool, list[str]]:
-    """High-level check: does this text contain ANY secret signal?
+    """High-level check: does this text contain ANY secret signal? Returns (flag, reasons).
 
-    Returns (flag, reasons). Reasons follow the format the existing
-    MemoryWritePolicy reasons used so existing audit consumers keep working:
-      - "matches secret pattern '<kind>'"
-      - "contains secret keyword '<kw>'"
-
-    ``include_keywords`` controls the soft KEYWORD layer. When False, only
-    the high-confidence REGEX rules (real credential *shapes* with a
-    redactable span) count. Callers that scan content originating inside
-    the trusted boundary — e.g. the agent's own logs, files and diffs —
-    pass False so that merely *mentioning* a credential word (``api_key``,
-    ``password``) does not mark their own evidence as a secret. Regex hits
-    are never suppressed, so real leaked keys are still caught.
+        Reasons keep the format MemoryWritePolicy used ("matches secret pattern '<kind>'", "contains secret keyword
+        '<kw>'") so audit consumers keep working. ``include_keywords=False`` counts only high-confidence REGEX shapes:
+        callers scanning content from inside the trusted boundary (own logs, files, diffs) pass it so that merely
+        mentioning a credential word does not mark their own evidence as secret. Regex hits are never suppressed.
     """
     reasons: list[str] = []
     for f in scan(text):

@@ -1,4 +1,4 @@
-"""Step repetition detector — addresses MAST FM-1.3 (step repetition, 15.7%)."""
+"""Step repetition detector: counts identical (tool, args) executions within a run."""
 
 from __future__ import annotations
 

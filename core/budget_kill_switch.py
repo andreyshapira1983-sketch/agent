@@ -1,23 +1,4 @@
-"""Persistent budget kill-switch for autonomous / daemon execution (TD-022).
-
-Autonomous runs must be *safe by default*. The persistent budget ledger
-(:mod:`core.budget_ledger`) already tracks hour/day spend, but it treats a
-missing or all-zero limit as *unlimited* — which is exactly the wrong
-default for an unattended daemon that can otherwise keep spending after the
-day budget is exhausted.
-
-1. **Budget-on-by-default.** In autonomous mode a conservative *day* limit
-is applied to the money/compute-heavy counters whenever no positive limit is
-configured, so "no config" never means "unlimited". 2. **Persistent kill-
-switch.** When a day-window counter reaches its effective limit the switch
-latches to a small JSON state file. Once latched it stays active across
-process restarts until an operator clears it, so repeated ticks cannot keep
-spending.
-
-The evaluation logic is a pure function so it is trivially testable; the
-:class:`BudgetKillSwitch` class only adds persistence (load / latch / clear)
-and a read-only status view.
-"""
+"""Persistent budget kill-switch for autonomous / daemon execution."""
 from __future__ import annotations
 
 import json
@@ -30,27 +11,24 @@ from typing import Any
 # Default location of the latched kill-switch state, relative to a workspace.
 KILL_SWITCH_PATH = "data/budget_kill_switch.json"
 
-# Conservative *day* limits applied to the expensive counters when autonomous
-# mode finds no positive configured limit. These are safety nets, not targets —
-# any positive value in config/budget_limits.json (or the AGENT_BUDGET_DAY_*
-# env overrides) takes precedence. Kept in line with the documented example
-# day budget so behaviour is predictable.
+# Conservative day limits for the expensive counters when autonomous mode finds no positive
+# configured limit.
+# Safety nets, not targets: config/budget_limits.json or AGENT_BUDGET_DAY_* env overrides win.
 CONSERVATIVE_DAY_LIMITS: dict[str, int] = {
     "llm_calls": 100,
     "model_tokens": 300_000,
     "model_cost_units": 500,
 }
 
-# The window the kill-switch guards. Day-level exhaustion is the hard stop; the
-# hour window remains handled by the existing ledger reserve/check path.
+# The window the kill-switch guards; the hour window stays with the ledger reserve/check path.
 _GUARDED_WINDOW = "day"
 
-# Machine-readable reason emitted when the switch is engaged. The daemon reuses
-# this verbatim as its heartbeat/report reason so operators can grep for it.
+# Machine-readable reason when the switch is engaged; the daemon reuses it verbatim so operators can
+# grep for it.
 REASON_ENGAGED = "budget_kill_switch"
 
-# `counter` of a latch that is on because its state file could not be read —
-# the stop names why, and `limit_source` carries the read error.
+# `counter` of a latch that is on because its state file could not be read; `limit_source` carries
+# the read error.
 UNREADABLE_COUNTER = "state_file_unreadable"
 
 
@@ -67,11 +45,7 @@ def _as_int(value: object) -> int:
 
 @dataclass
 class KillSwitchState:
-    """Snapshot of the kill-switch decision.
-
-    ``active`` is the only field the daemon must gate on; the remainder give an
-    operator the *why* (triggering counter, window, used/limit, when).
-    """
+    """Snapshot of the kill-switch decision; the daemon gates only on ``active``, the rest tells an operator why."""
 
     active: bool = False
     reason: str = ""
@@ -146,17 +120,11 @@ def evaluate_day_budget(
 ) -> KillSwitchState:
     """Pure decision: is the autonomous *day* budget exhausted?
 
-    A conservative default limit is applied to each expensive counter that lacks
-    a positive configured limit, so an all-zero / missing config never behaves
-    as unlimited in autonomous mode. The switch trips as soon as any guarded
-    counter's used amount reaches its effective limit. Counters are examined in
-    a stable order (configured expensive counters first) and the first trip
-    wins.
+    Expensive counters without a positive configured limit get a conservative default; the first counter (stable order) whose use reaches its limit trips the switch.
     """
     day = _day_counters(snapshot)
 
-    # Union of the guarded expensive counters and any explicitly-configured day
-    # counters, evaluated in a deterministic order.
+    # Guarded expensive counters plus explicitly configured day counters, in a deterministic order.
     ordered: list[str] = list(conservative_limits.keys())
     for name in sorted(day.keys()):
         if name not in ordered:
@@ -193,7 +161,7 @@ def default_path(workspace: Path) -> Path:
 
 @dataclass
 class BudgetKillSwitch:
-    """Persistence + latching around :func:`evaluate_day_budget`."""
+    """Persistence and latching around :func:`evaluate_day_budget`."""
 
     path: Path
     conservative_limits: Mapping[str, int] = field(
@@ -239,7 +207,7 @@ class BudgetKillSwitch:
         tmp.replace(self.path)  # atomic swap
 
     def clear(self) -> None:
-        """Operator reset — remove the latched state (no-op if absent); OSError if it stays."""
+        """Operator reset: remove the latched state (no-op if absent); OSError if it stays."""
         try:
             self.path.unlink()
         except FileNotFoundError:
@@ -251,10 +219,7 @@ class BudgetKillSwitch:
         *,
         now_iso: str | None = None,
     ) -> KillSwitchState:
-        """Read-only view: latched state if active, else a live evaluation.
-
-        Never writes, so it is safe for interactive status commands.
-        """
+        """Read-only view: latched state if active, else a live evaluation. Never writes."""
         latched = self.load()
         if latched.active:
             return latched

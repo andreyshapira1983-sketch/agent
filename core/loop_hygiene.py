@@ -1,16 +1,15 @@
-"""Фасад команд гигиены памяти на объекте агента."""
+"""Facade for the memory-hygiene commands on the agent object."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-# Точечная форма намеренно — см. `core/loop_repair.py`: сторож инвариантов
-# не видит `from core import X`, и модуль, импортированный только так,
-# числится осиротевшим.
+# Dotted import on purpose: the invariant guard (`core/loop_repair.py`) does not see `from core import X`,
+# so a module imported only that way counts as orphaned.
 import core.memory_hygiene_commands as hygiene
 
 
 class AgentLoopHygiene:
-    """Подмешивается в ``AgentLoop``; состояние живёт на композированном цикле."""
+    """Mixin for ``AgentLoop``; state lives on the composed loop."""
 
     if TYPE_CHECKING:  # pragma: no cover — только объявления
         log: Any
@@ -20,14 +19,13 @@ class AgentLoopHygiene:
 
         def _durable_learning_suppressed(self, sink: str) -> bool: ...
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a neighbouring mixin via the MRO; the cross-module link must be written down or it only shows at run time.
         model_router: Any
 
         def _file_read_workspace_root(self) -> Any: ...
 
     def _hygiene_suppressed_reason(self) -> str | None:
-        """Почему писать нельзя, или `None` если можно."""
+        """Why writing is not allowed, or `None` if it is."""
         if not self._durable_learning_suppressed("hygiene"):
             return None
         if getattr(self, "audit_read_only", False):
@@ -37,12 +35,12 @@ class AgentLoopHygiene:
         return "not_allowlisted"
 
     def _hygiene_apply_brake(self) -> str | None:
-        """Аудит или прогон всухую: ручная уборка только считает (MIR-045)."""
+        """Audit or dry run: manual cleanup only counts."""
         reason = self._hygiene_suppressed_reason()
         return reason if reason in {"audit_read_only", "dry_run_brake"} else None
 
     def run_maintenance_pass(self, *, dry_run: bool = True) -> dict:
-        """Фасад: проход живёт в `core/memory_hygiene_commands`."""
+        """Facade: the pass lives in `core/memory_hygiene_commands`."""
         return hygiene.run_maintenance_pass(
             log=self.log,
             persistent_store=self.persistent_store,
@@ -50,9 +48,9 @@ class AgentLoopHygiene:
             assumption_store=getattr(self, "assumption_store", None),
             suppressed_reason=self._hygiene_suppressed_reason(),
             dry_run=dry_run,
-            # MIR-125: проход метёт и .bak-мусор миграций; тень только считает.
+            # The pass also sweeps migration .bak litter; the shadow only counts.
             workspace=self._file_read_workspace_root(),
-            # MIR-128: уборка знает, на чём стоит зачёт процедур.
+            # Cleanup knows what procedure credit stands on.
             procedural_store=getattr(self, "procedural_store", None),
         )
 
@@ -94,8 +92,7 @@ class AgentLoopHygiene:
         staleness_threshold: float = 1.5,
         dry_run: bool = False,
     ) -> list[str]:
-        # Anchors of procedure credit are never pruned, on the CLI path too
-        # (MIR-128; проверка 16.11, средняя).
+        # Anchors of procedure credit are never pruned, on the CLI path too.
         procs = getattr(self, "procedural_store", None)
         keep = (hygiene.cited_episode_ids(procs, self.episodic_store)
                 if procs is not None and self.episodic_store is not None else frozenset())

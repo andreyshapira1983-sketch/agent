@@ -1,4 +1,4 @@
-"""Сборка ``AgentLoop`` — конструктор, вырезанный из ``core/loop.py`` дословно."""
+"""Construction of ``AgentLoop``: the constructor body moved verbatim out of ``core/loop.py``."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,7 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover — только для подписи
 
 
 class AgentLoopInit:
-    """Конструктор цикла: раскладка переданного по полям."""
+    """Loop constructor: lays out the passed arguments as fields."""
 
     def __init__(  # noqa: PLR0913, PLR0917 — flat: depth 2, no branching state to follow
         self,
@@ -73,53 +73,34 @@ class AgentLoopInit:
         odd_enabled: bool = True,
         cheap_path_enabled: bool = True,
         user_profile_store: UserProfileStore | None = None,
-        assumption_store: AssumptionStore | None = None,  # Layer 5
+        assumption_store: AssumptionStore | None = None,
         gateway_dry_run: bool = False,
         gateway_path: GatewayPath = "repl",
         experience_retrieval: bool = True,
         episodic_replay: bool = True,
         durable_writes: frozenset[str] | None = None,
-        # ДОБАВЛЕН В ХВОСТ СОЗНАТЕЛЬНО. Конструктор зовут позиционно; вставка
-        # в середину сдвинула бы всё после неё и молча подменила аргументы
-        # одного типа. В хвосте ни один прежний вызов не меняет смысла.
-        # Объявлено в `tests/test_loop_init_split.py` поимённо.
+        # Appended at the tail on purpose: the constructor is called positionally, so inserting mid-list would silently shift same-typed arguments.
         pending_clarification_path: Path | None = None,
-        causal_store: Any = None,  # тоже в хвост, причина выше
-        observe_before_answer: bool = False,  # в хвост; core/observation_round.py
+        causal_store: Any = None,
+        observe_before_answer: bool = False,
     ):
         self.registry = registry
         self.policy = policy
         self.gateway_dry_run = gateway_dry_run
         self.gateway_path = gateway_path
-        # ── Memory permissions (INSTANCE-scoped, fixed for this agent's life) ──
-        # Holding stores is not the same permission as reading them, replaying
-        # an answer from them, or writing durable state. These three keep those
-        # apart; they are set once at construction and there is deliberately no
-        # per-run API yet.
-        #   experience_retrieval — inject episodic/procedural memory into planning
-        #   episodic_replay      — allow the fast path to serve a stored answer
-        #   durable_writes       — which durable sinks this agent may write.
-        #                          None = all (interactive default); a frozenset
-        #                          is an ALLOWLIST and everything outside it is
-        #                          denied, including unknown sink names. The
-        #                          audit and dry-run brakes outrank it entirely
-        #                          (see `_durable_learning_suppressed`).
+        # Memory permissions, instance-scoped and fixed for this agent's life.
+        # experience_retrieval: inject episodic/procedural memory into planning.
+        # episodic_replay: let the fast path serve a stored answer.
+        # durable_writes: None = all sinks; a frozenset is an allowlist (unknown sinks denied).
+        # The audit and dry-run brakes outrank it (see `_durable_learning_suppressed`).
         self.experience_retrieval = experience_retrieval
         self.episodic_replay = episodic_replay
         self.durable_writes = durable_writes
         self.suppress_durable_learning_writes = False
-        # Audit / read-only execution brake. When True, the loop performs NO
-        # durable learning writes (episodic, procedural, consolidation, user
-        # profile, persistent access-stat bumps) and freezes 'agent-auto'
-        # persistent/semantic writes on the shared write policy. This is a
-        # deterministic operator control (see :audit) — set BEFORE planning so
-        # an investigation of memory cannot silently contaminate the store it
-        # is auditing. It is independent of `suppress_durable_learning_writes`
-        # (which the dry-run path save/restores) so an autonomous cycle cannot
-        # accidentally lift the audit brake mid-run.
+        # Audit / read-only brake: when True there are NO durable learning writes and 'agent-auto' persistent/semantic writes are frozen.
+        # Independent of `suppress_durable_learning_writes` (saved/restored by dry-run) so a cycle cannot lift it mid-run.
         self.audit_read_only = False
-        # Records whether *this* audit toggle installed the agent-auto freeze,
-        # so turning audit off never lifts an AGENT_FREEZE_AUTO_MEMORY env brake.
+        # Records whether this audit toggle installed the agent-auto freeze, so turning audit off never lifts an AGENT_FREEZE_AUTO_MEMORY env brake.
         self._audit_froze_agent_auto = False
         self.model_router = model_router or ModelRouter.single(llm)
         self.llm = self.model_router.for_role(ModelRole.SYNTHESIZER)
@@ -130,8 +111,7 @@ class AgentLoopInit:
         )
         self.memory = memory  # may be None for stateless one-shot use
         self.persistent_store = persistent_store
-        #: Where a clarification parks its question so a LATER PROCESS can
-        #: pick it up; instance state could not, measured 2026-08-09.
+        #: Where a clarification parks its question so a LATER PROCESS can pick it up.
         self.pending_clarification_path = pending_clarification_path
         self.retrieval_policy = retrieval_policy or MemoryRetrievalPolicy()
         self.write_policy = write_policy or MemoryWritePolicy()
@@ -147,15 +127,8 @@ class AgentLoopInit:
         self.knowledge_auto_write = bool(knowledge_auto_write)
         # When None, escalated actions are blocked outright (safe default).
         self.approval_provider = approval_provider
-        # MVP-12: replan policy decides per-FailureType budgets, advises
-        # the planner, and tracks forbidden (tool, args) pairs that must
-        # not be retried after approval_deny / policy_blocked etc.
-        #
-        # Backward compatibility: the older `max_replan_attempts` parameter
-        # is still honoured. If the caller supplied an explicit policy we
-        # use it as-is; otherwise we synthesise the default policy with the
-        # caller's global cap. Mismatch is an error — we refuse to silently
-        # ignore one of the two knobs.
+        # Replan policy: per-FailureType budgets, planner advice, forbidden (tool, args) pairs.
+        # The older `max_replan_attempts` is still honoured; an explicit policy that disagrees with it is an error.
         if max_replan_attempts < 1:
             raise ValueError(
                 f"max_replan_attempts must be >= 1, got {max_replan_attempts}"
@@ -181,113 +154,72 @@ class AgentLoopInit:
                     f"{replan_policy.max_total_replans})"
                 )
             self.replan_policy = replan_policy
-        # Keep the legacy attribute for any external code reading it.
         self.max_replan_attempts = self.replan_policy.max_total_replans
-        # MVP-11 Compensation registry. Every successful tool call that
-        # carries a non-noop CompensationPlan in its structured output
-        # gets appended here, LIFO. `rollback()` pops the last plan and
-        # applies it via `core.compensation.apply_compensation_plan`.
-        # Persistence is intentionally in-memory: rollback must be done
-        # WITHIN the session that produced the change (a future MVP can
-        # serialise the log if cross-session undo proves useful).
+        # Compensation registry (LIFO): successful tool calls with a non-noop CompensationPlan are appended; `rollback()` applies the last one.
+        # In-memory on purpose: rollback must happen within the session that made the change.
         from core.compensation import CompensationPlan  # avoid top-level cycle
 
         self._CompensationPlanCls = CompensationPlan
         self.compensation_log: list[CompensationPlan] = []
-        # Per-cycle scratch list, populated by `_execute_step` whenever a
-        # secret is found in a tool output. `run()` resets it on entry and
-        # passes it into the synthesizer so the answer can mention any
-        # redaction action it took.
+        # Per-cycle list of secrets found in tool outputs; reset by `run()`, passed to the synthesizer.
         self._cycle_findings: list[dict[str, Any]] | None = None
-        # Per-step scratch slot. `_execute_step` writes a `ReplanTrigger`
-        # into this every time it bails out with `None`. The parent loop
-        # in `run()` consumes it and clears it. Keeping it as instance
-        # state mirrors the `_cycle_findings` pattern and avoids
-        # restructuring the return type of `_execute_step`.
+        # Per-step slot where `_execute_step` stores a `ReplanTrigger` when it returns None; `run()` consumes and clears it.
         self._last_step_failure: ReplanTrigger | None = None
-        # Current attempt number — set by `run()` at the top of each
-        # iteration so `_execute_step` can stamp failure triggers with
-        # the right attempt index without taking a new parameter.
+        # Current attempt number, set by `run()` each iteration so `_execute_step` can stamp triggers.
         self._current_attempt: int = 1
-        # Synthesis streaming callback — set by `run()` when the caller
-        # passes `on_token`; read by `_synthesize()`. Reset to None at
-        # the end of each cycle so leaking across turns is impossible.
+        # Synthesis streaming callback set by `run()` from `on_token`; reset to None at the end of each cycle.
         self._stream_on_token: Any = None
-        # Set by the synthesizer resilience ladder when every synthesis attempt
-        # failed and the turn fell back to an honest degraded answer.
+        # Set when every synthesis attempt failed and the turn fell back to a degraded answer.
         self._last_synth_degraded: bool = False
-        # MVP-14.1 — provenance scratch state. `_retrieve_persistent`
-        # stashes the records it injected so `run()` can fold them into
-        # the Evidence chain. `last_provenance` is set at the end of
-        # each `run()` and exposed for tests / the upcoming Verifier.
+        # Provenance scratch state: records injected by `_retrieve_persistent`, folded into the Evidence chain; `last_provenance` is set at the end of `run()`.
         self._last_persistent_records: list[Any] = []
         self._last_episode_records: list[Any] = []
         self._last_procedure_records: list[Any] = []
         # Fast-path cache: best episodic match from the last _retrieve_experience_memory call.
-        # Keyed so run() can serve a cached answer without touching the LLM.
         self._last_best_similar_episode: Any = None  # EpisodeRecord | None
         self._last_best_similar_score: float = 0.0
-        # MAST FM-1.3 step-repetition tracker; replaced per `run()` call.
+        # Step-repetition tracker; replaced per `run()` call.
         self._step_repetition: StepRepetitionTracker = StepRepetitionTracker()
-        # MAST FM-1.5 / FM-3.1 termination guard; replaced per `run()` call.
+        # Termination guard; replaced per `run()` call.
         self._termination_guard: TerminationGuard = TerminationGuard()
         self.last_provenance: ProvenanceChain = ProvenanceChain()
         self.last_role_context: RoleContext = self.role_router.route("")
-        # MVP-14.4 — Verifier wiring. `verifier_enabled=False` skips the
-        # annotation pass; the draft answer is returned verbatim. Useful
-        # for legacy tests and for callers who want raw LLM output.
+        # `verifier_enabled=False` skips the annotation pass and returns the draft verbatim.
         self.verifier_enabled = bool(verifier_enabled)
-        # Layer 4 — User Profile store and last-known profile snapshot.
+        # User Profile store and last-known profile snapshot.
         self.user_profile_store = user_profile_store
         self.last_user_profile: UserProfile | None = None
-        # Layer 5 — Assumption Registry store and last-run snapshot.
+        # Assumption Registry store and last-run snapshot.
         self.assumption_store = assumption_store
         self.last_assumptions: AssumptionRegistry | None = None
         self._run_assumptions_current: AssumptionRegistry | None = None
-        # §3 Clarification Policy wiring. `clarification_enabled=False` skips
-        # the heuristic ambiguity check. Intended ONLY for integration tests
-        # that exercise the tool/approval layer with synthetic short questions.
+        # `clarification_enabled=False` skips the heuristic ambiguity check (integration tests only).
         self.clarification_enabled = bool(clarification_enabled)
-        # B-1 Clarification Gate wiring (режим переспроса). When the loop
-        # gets STUCK (replan exhausted == loop_suspected), switch to
-        # "ask, don't build": prepend the minimal clarifying questions to the
-        # honest failure answer so the operator can narrow the frame instead of
-        # the agent churning. `False` skips it for tests that assert on the bare
-        # exhaustion answer. Pure/deterministic — no LLM, no I/O.
+        # Clarification gate: when the loop is STUCK (replan exhausted), prepend minimal clarifying questions to the failure answer.
+        # `False` skips it. Deterministic, no LLM, no I/O.
         self.clarification_gate_enabled = bool(clarification_gate_enabled)
-        # TD-032 slice 3 — last run stuck signal for autonomous runtime parity.
+        # Last run stuck signal for autonomous runtime parity.
         self.last_replan_exhausted: bool = False
-        # Ворота ответили вопросом, не работой (Д1, 2026-09-03): рантайм читает.
+        # The gate answered with a question instead of work; the runtime reads this.
         self.last_answer_was_clarification: bool = False
-        # §7 Operational Design Domain (ODD / B-05) wiring. When enabled, an
-        # out-of-domain request is refused or escalated BEFORE any planning.
-        # `odd_enabled=False` skips the check for integration tests.
+        # Operational Design Domain check: when enabled, an out-of-domain request is refused or escalated BEFORE planning.
         self.odd_enabled = bool(odd_enabled)
-        # Cheap-path planner gate (TD — trivial no-tool input skips the planner
-        # LLM call and synthesises directly). `False` forces the planner to run
-        # for every input, preserving the pre-gate behaviour for tests/rollback.
+        # Cheap-path planner gate: trivial no-tool input skips the planner and synthesises directly; `False` forces the planner.
         self.cheap_path_enabled = bool(cheap_path_enabled)
-        # После успешного пакета шагов — ещё круг планирования с увиденным,
-        # а не сразу ответ (core/observation_round.py). Выключено по умолчанию.
+        # After a successful step batch, one more planning round with what was seen (core/observation_round.py). Off by default.
         self.observe_before_answer = bool(observe_before_answer)
         from core.verifier import VerificationReport as _VR
 
         self.last_verification: _VR | None = None
-        # Applicability verdict from `evaluate_evidence_support`, set beside
-        # the verification report each turn; the verification summary reads it
-        # so «нет улик» and «улики не требовались» stay distinguishable.
+        # Applicability verdict from `evaluate_evidence_support`; keeps "no evidence" and "evidence not required" distinguishable.
         self.last_evidence_support: Any = None
         self.last_referent_decision: ReferentDecision | None = None
-        # Issue #119 — was this turn a conversational correction / request to
-        # explain the agent's own previous reply? Decided per turn, exposed so
-        # tests and operators can see why dialogue evidence was (not) admitted.
+        # Whether this turn was a conversational correction / request to explain the agent's previous reply; decided per turn.
         self.last_self_analysis: SelfAnalysisDecision | None = None
-        # MVP-14.3/14.3x — trust metadata over the Evidence chain.
-        self.last_confidence_vector: Any = None  # читает запись памяти
-        # Source ranking is logged/exposed, and Ranker-to-Output Policy uses
-        # it to cap confidence for unsuitable realtime sources.
+        # Trust metadata over the Evidence chain.
+        self.last_confidence_vector: Any = None  # reads a memory record
+        # Source ranking is logged; the Ranker-to-Output Policy uses it to cap confidence for unsuitable realtime sources.
         self.last_source_ranking: SourceRankingReport | None = None
-        # Source registry is the catalog view over the same chain:
-        # source records plus first-pass claims extracted from Evidence.
+        # Source registry: catalog view over the same chain (source records plus first-pass claims).
         self.last_source_registry: SourceRegistry = SourceRegistry()
         self.last_knowledge_pipeline: KnowledgePipelineResult | None = None

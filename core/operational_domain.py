@@ -1,20 +1,4 @@
-"""Operational Design Domain detector (§7 Autonomy Governance — ODD / B-05).
-
-* REFUSE — the request is harmful / illegal; never act, even for a human. *
-ESCALATE — the request needs a human with authority/capability the agent
-does not have (physical world, real funds, regulated advice, authority over
-people). The agent stops and hands off.
-
-Design principles (mirrors core/clarification_policy.py)
--------------------------------------------------------- * No LLM calls, no
-I/O. Pure regex + heuristics, deterministic, O(n). * Conservative / high
-precision: default to ``in_domain`` (proceed). Only a strong, unambiguous
-out-of-domain signal flips the verdict, because a false positive here would
-refuse legitimate coding work. * A strong coding/simulation/test context
-bypass prevents misfires on normal requests like "напиши функцию, которая
-переводит деньги между счетами в тестовой БД" (that is code, not a real-
-world money transfer).
-"""
+"""Operational Design Domain detector: REFUSE harmful/illegal requests, ESCALATE ones needing human authority; pure regex, no LLM, no I/O."""
 from __future__ import annotations
 
 import re
@@ -83,8 +67,8 @@ _CODE_CONTEXT = re.compile(
 # ---------------------------------------------------------------------------
 
 _PHYSICAL_WORLD = re.compile(
-    # `\w*` по той же причине, что в `_REAL_MONEY`: без него `подвигай робот`
-    # ловилось, а `подвигай робота` — нет.
+    # `\w*` for the same reason as in `_REAL_MONEY`: without it a Russian accusative form slipped
+    # past.
     r"\b(поезжай|съезди|сходи|отвез[иь]|води\s+маши\w*|сядь\s+за\s+руль|"
     r"позвони\s+по\s+телефону|набери\s+номер|нажми\s+физическ\w*|"
     r"подвигай\s+робот\w*|управляй\s+робот\w*|drive\s+(the|a|my)\s+car|"
@@ -93,13 +77,9 @@ _PHYSICAL_WORLD = re.compile(
     re.IGNORECASE,
 )
 
-# Каждая усечённая русская основа несёт `\w*`, и это НЕ украшение. Основы
-# усечены ради словоформ, а закрывающая `\b` этого паттерна ровно словоформы и
-# отсекала: между `акци` и `и` двух словесных символов нет границы, поэтому
-# `купи акции` не ловилось, а `купи биткойн` ловилось. Замерено 2026-08-07: 20
-# форм из 20 проходили мимо, при том что английская половина блокировала свои
-# эквиваленты. `рубл\w*|руб\b` вместо `руб\w*` — иначе «переведи рубрику»
-# становится распоряжением деньгами.
+# Every truncated Russian stem carries `\w*`: the closing `\b` would otherwise cut off inflected
+# forms.
+# `рубл\w*|руб\b` instead of `руб\w*`, so that a word like "рубрика" is not a money order.
 _REAL_MONEY = re.compile(
     r"\b(переведи\s+(деньги|\d+|средства|сумм\w*|\$|рубл\w*|руб\b|евро|доллар\w*)|"
     r"оплати\s+(счёт|счет|заказ|картой|со\s+счёта)|сделай\s+платёж|"
@@ -121,8 +101,7 @@ _REGULATED_ADVICE = re.compile(
 )
 
 _AUTHORITY_OVER_PEOPLE = re.compile(
-    # `соглашен` без `\w*` не ловило ни одного реального написания: слово
-    # существует только как «соглашение/соглашения/соглашению».
+    # `соглашен` without `\w*` matched no real spelling; the word exists only as an inflected form.
     r"\b(уволь\s+|прими\s+на\s+работу|подпиши\s+(контракт\w*|договор\w*|соглашен\w*)|"
     r"fire\s+(him|her|them|the\s+employee)|hire\s+(him|her|them)|"
     r"sign\s+the\s+(contract|agreement)\s+on\s+(my|his|her|their)\s+behalf)\b",
@@ -163,14 +142,8 @@ _BLOCK_THRESHOLD = 0.75
 def check_operational_domain(text: str) -> DomainResult:
     """Evaluate whether *text* lies inside the agent's operational domain.
 
-    Returns a :class:`DomainResult`:
-    - ``verdict="in_domain"``, ``action="proceed"`` — normal case, plan as usual.
-    - ``verdict="out_of_domain"``, ``action="refuse"`` — harmful/illegal; the
-      agent must never act.
-    - ``verdict="out_of_domain"``, ``action="escalate"`` — the task needs a
-      human with capability/authority the agent does not have; hand off.
-
-    Pure function — no I/O, no LLM, deterministic.
+    Returns a :class:`DomainResult`: in_domain/proceed (normal), out_of_domain/refuse (harmful or illegal), out_of_domain/escalate (needs a human with authority; hand off).
+    Pure function: no I/O, no LLM, deterministic.
     """
     # Guard: non-string or empty input is trivially in-domain.
     if not isinstance(text, str) or not text.strip():

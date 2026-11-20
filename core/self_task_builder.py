@@ -1,19 +1,11 @@
-"""Stage B of the coding-skill ladder (roadmap Ступень 1): write code to make a
-HUMAN-APPROVED, FROZEN acceptance test pass.
+"""Stage B of the coding-skill ladder: write code that makes a HUMAN-APPROVED, FROZEN acceptance test pass.
 
-The existing self-apply lane then applies the change on a temp branch, runs
-the targeted test plus the full suite, and auto-rolls-back on any failure.
-Stage B therefore never applies anything itself and never mutates the frozen
-test — it only proposes an implementation for the already-blessed yardstick.
-
-* consumes only an APPROVED ``self_build_task.approve`` item (no free-text);
-* the implementation target is fixed to the file the task named — no LLM
-target; * the frozen test is read via
-:func:`core.self_task_producer.decode_frozen_test` so a redaction-mangled
-preview is never fed to the builder or the lane; * deterministic gates first
-(kill-switch, budget, dirty tree); * every failure is a hard veto that
-creates NO self-apply item.
-"""
+    The self-apply lane applies the change; Stage B never applies anything and
+    never mutates the frozen test. It consumes only an APPROVED
+    ``self_build_task.approve`` item, the target is the file the task named, the
+    frozen test is read via :func:`core.self_task_producer.decode_frozen_test`,
+    deterministic gates run first, and every failure is a hard veto that creates
+    NO self-apply item."""
 from __future__ import annotations
 
 import ast
@@ -41,8 +33,7 @@ from core.self_build_supervisor import (
 )
 from core.self_task_producer import SELF_TASK_OPERATION, decode_frozen_test
 
-# Origin stamped on every Stage-B self-apply proposal so provenance is auditable
-# and distinct from the split-oriented self-build producer.
+# Origin stamped on every Stage-B self-apply proposal, distinct from the split-oriented producer.
 TASK_BUILD_ORIGIN = "subagent_self_task_builder"
 
 
@@ -59,10 +50,7 @@ def _impl_builder_generate(
 ) -> RoleOutput:
     """Generate the FULL new content of ``impl_path`` so ``frozen_test`` passes.
 
-    The frozen test is authoritative and MUST NOT be modified. Both the current
-    file and the test are routed through the injection guard because they are
-    untrusted text from the model/disk.
-    """
+        The frozen test is authoritative and MUST NOT be modified. Current file and test are routed through the injection guard as untrusted text."""
     safe_current, inj = prepare_untrusted_text_for_llm(
         current_content or "",
         source_label=f"self_task_impl:{impl_path}",
@@ -134,9 +122,7 @@ def _impl_critic_review(
 ) -> RoleOutput:
     """Cheap pre-filter before a human sees the proposal.
 
-    The real gate is the self-apply lane actually running the frozen test plus
-    the full suite; this only rejects obvious garbage so we never publish it.
-    """
+        The real gate is the lane running the frozen test and the full suite; this only rejects obvious garbage."""
     veto: list[str] = []
     content = build.get("content") or ""
     confidence = float(build.get("confidence") or 0.0)
@@ -155,12 +141,7 @@ def _impl_critic_review(
         except SyntaxError as exc:
             veto.append(f"implementation does not parse: {exc.msg}")
         else:
-            # The attribute subtype, measured three times on this very file
-            # (meas_8fd5b4e5 / be27ac23 / df15479b): an invented field —
-            # `claim.state`, latterly wrapped in .value/.name fallbacks that
-            # return empty on real data. Stage A and self-build carried the
-            # sieve; this critic did not, so the third phantom shipped with
-            # veto_reasons=[]. Doubt stays silence: the sieve only subtracts.
+            # Attribute-subtype sieve: rejects an invented field (e.g. `claim.state`, even wrapped in .value/.name fallbacks). Stage A and self-build have it. Doubt stays silence: the sieve only subtracts.
             from core.attribute_sieve import phantom_attribute_reason
 
             attr_reason = phantom_attribute_reason(content)
@@ -247,12 +228,7 @@ def build_coding_task(
 ) -> ProducerReport:
     """Stage B: implement one approved coding task and propose it to the lane.
 
-    Never writes code to disk, never applies a patch, creates at most one
-    ``self_apply_lane.run`` inbox item. ``status`` is one of:
-    ``budget_kill_switch`` / ``budget_wait`` / ``dirty_tree_wait`` /
-    ``not_found`` / ``wrong_operation`` / ``not_approved`` / ``invalid_task`` /
-    ``build_veto`` / ``proposed``.
-    """
+        Never writes code to disk or applies a patch; creates at most one ``self_apply_lane.run`` inbox item. ``status`` is one of: ``budget_kill_switch`` / ``budget_wait`` / ``dirty_tree_wait`` / ``not_found`` / ``wrong_operation`` / ``not_approved`` / ``invalid_task`` / ``build_veto`` / ``proposed``."""
     gates: list[str] = []
 
     # ── gate 1: budget kill-switch ──────────────────────────────────────────

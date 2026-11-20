@@ -12,8 +12,7 @@ class CircuitBreakerConfig:
     max_failures: int = 2
     max_consecutive_failures: int = 2
     max_budget_denials: int = 1
-    # Number of check() calls while open before entering half-open.
-    # Provides a deterministic, call-count-based cooldown.
+    # check() calls while open before entering half-open (deterministic cooldown).
     cooldown_checks: int = 3
 
 
@@ -39,8 +38,7 @@ class CircuitBreaker:
     consecutive_failures: int = 0
     budget_denials: int = 0
     opened_reason: str = ""
-    # Counts check() calls received while in the open state.
-    # When this reaches config.cooldown_checks the circuit enters half-open.
+    # check() calls seen while open; at config.cooldown_checks the circuit goes half-open.
     _open_check_count: int = 0
 
     def check(self) -> CircuitDecision:
@@ -48,7 +46,6 @@ class CircuitBreaker:
             return CircuitDecision(True, "closed", "closed")
         if self.state == "half-open":
             return CircuitDecision(True, "half-open", "half-open: probe allowed")
-        # state == "open"
         self._open_check_count += 1
         if self._open_check_count >= self.config.cooldown_checks:
             self.state = "half-open"
@@ -58,27 +55,21 @@ class CircuitBreaker:
 
     def record_success(self) -> CircuitDecision:
         if self.state == "half-open":
-            # Probe succeeded — close the circuit.
             self.state = "closed"
             self.consecutive_failures = 0
             self._open_check_count = 0
             return CircuitDecision(True, "closed", "half-open probe succeeded: circuit closed")
         if self.state == "open":
-            # Success signal while open doesn't affect the cooldown countdown.
             return CircuitDecision(False, "open", self.opened_reason)
-        # closed
         self.consecutive_failures = 0
         return CircuitDecision(True, "closed", "closed")
 
     def record_failure(self, reason: str) -> CircuitDecision:
         if self.state == "half-open":
-            # Probe failed — reopen and reset the cooldown counter.
             self._open_check_count = 0
             return self._open(f"half-open probe failed: {reason}")
         if self.state == "open":
-            # Already open; additional failures don't change state.
             return CircuitDecision(False, "open", self.opened_reason)
-        # closed
         self.failures += 1
         self.consecutive_failures += 1
         if self.failures >= self.config.max_failures:

@@ -1,10 +1,9 @@
-"""Прочитанное — не конец хода: после успешного пакета шагов решает планировщик.
+"""Reading is not the end of a turn: after a successful step batch the planner decides.
 
-Аргументы шагов фиксируются до исполнения, поэтому «прочитай — посчитай — запиши»
-требует ещё круга: планировщик видит выводы и даёт пустой план или недостающие шаги.
-Круги кончаются пустым планом, датчиком застревания, долларовым пределом или
-`round_failsafe`; бюджет ошибок считает только круги со сбоями.
-"""
+    Step arguments are fixed before execution, so read-compute-write needs another
+    round: the planner sees the outputs and returns an empty plan or the missing
+    steps. Rounds end on an empty plan, the stuck sensor, the dollar limit or
+    `round_failsafe`; the error budget counts only rounds with failures."""
 from __future__ import annotations
 
 import json
@@ -16,10 +15,10 @@ from typing import Any
 from core.failure_cards import error_line, experience_notes, failure_text
 from core.replan import VERBATIM_ADVICE_TAG, ReplanTrigger
 
-#: Предел показа планировщику; синтезатор всё равно получает полные артефакты.
+#: Limit on what the planner is shown; the synthesizer still gets full artifacts.
 _PER_OUTPUT_CHARS = 6000
 _TOTAL_CHARS = 16000
-#: Результаты действий видны всегда: у них свой предел, чтения его не трогают.
+#: Action results are always shown under their own limit; reads do not affect it.
 _ACTION_TOTAL_CHARS = 12000
 _ACTION_TOOLS = frozenset({
     "patch_check", "run_tests", "python_probe", "file_write", "shell_exec",
@@ -39,14 +38,13 @@ def _as_text(output: Any) -> str:
 def _clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
-    # Пометка говорит, что обрезан лишь показ: иначе планировщик перечитывает
-    # окнами уже прочитанный целиком файл.
+    # The mark says only the display is cut; otherwise the planner re-reads a fully read file in windows.
     return (f"{text[:limit]}\n[preview only: {limit} of {len(text)} chars shown here; "
             "the FULL output is already in your evidence for the answer — do NOT re-read it]")
 
 
 def _written_contents(plan: Any) -> list[str]:
-    """Что именно легло в файлы — дословно, а не внутри экранированных аргументов."""
+    """What actually went into files, verbatim, not inside escaped arguments."""
     out: list[str] = []
     budget = _PER_OUTPUT_CHARS
     for step in getattr(plan, "steps", None) or []:
@@ -57,7 +55,7 @@ def _written_contents(plan: Any) -> list[str]:
             continue
         shown = _clip(content, budget)
         budget -= len(shown)
-        # «ALREADY happened» — иначе агент читает показ как приглашение переписать.
+        # "ALREADY happened": otherwise the agent reads the display as an invitation to rewrite.
         out += [(f"Exact content written to {path} by step {step.order} "
                  f"({len(content)} chars) — this write ALREADY happened; do not write "
                  "it again unless it is wrong:"),
@@ -69,7 +67,7 @@ def _written_contents(plan: Any) -> list[str]:
 
 
 def _referenced_steps(steps: list[Any]) -> set[str]:
-    """Номера и id шагов, на вывод которых ссылаются аргументы других шагов."""
+    """Numbers and ids of steps whose output is referenced by arguments of other steps."""
     found: set[str] = set()
     for step in steps:
         args = json.dumps((getattr(step, "action_spec", None) or {}).get("arguments") or {},
@@ -81,20 +79,18 @@ def _referenced_steps(steps: list[Any]) -> set[str]:
 def reuse_already_read(
     st: Any, attempt_artifacts: dict[str, dict[str, Any]], log: Any,
 ) -> list[Any]:
-    """Шаги плана к исполнению; уже прочитанное в этом ходе — из артефактов.
+    """Plan steps to execute; anything already read this turn comes from artifacts.
 
-    Повторное чтение (или окно файла, прочитанного целиком) не исполняется,
-    а берётся в `attempt_artifacts`.
-    """
+        A repeated read (or a window of a fully read file) is not executed but taken from `attempt_artifacts`."""
     artifacts = st.artifacts
     run: list[Any] = []
     reused: dict[str, dict[str, Any]] = {}
-    # Чтение, на которое ссылается {{step:N.output}}, исполняется: вывод нужен ссылке.
+    # A read referenced by {{step:N.output}} is executed: the reference needs its output.
     wanted = _referenced_steps(st.plan.steps)
     for step in st.plan.steps:
         spec = getattr(step, "action_spec", None) or {}
         label = str(spec.get("source_label") or "")
-        whole = ":".join(label.split(":")[:2])  # file:путь без окна :a-b
+        whole = ":".join(label.split(":")[:2])  # file:path without the :a-b window
         if {str(getattr(step, "order", "")), str(getattr(step, "id", ""))} & wanted:
             run.append(step)
             continue
@@ -112,12 +108,9 @@ def reuse_already_read(
 
 
 def defer_blind_writes(loop: Any, steps: list[Any], log: Any) -> list[Any]:
-    """Запись своего текста, стоящая после свежего чтения того же пакета, ждёт круга.
+    """A write of own text placed after a fresh read in the same batch waits for a round.
 
-    Такой текст сочинён до того, как чтение вернулось. Откладывается первая слепая
-    запись и всё после неё; запись по ссылке или до чтения не трогается.
-    Без круга наблюдения ничего не откладывается — отложенное бы потерялось.
-    """
+        Such text was composed before the read returned. The first blind write and everything after it is deferred; writes by reference or before the read are untouched. Without an observation round nothing is deferred."""
     from core.step_references import has_step_reference
 
     only_reads = getattr(loop, "_step_only_reads", None)
@@ -126,7 +119,7 @@ def defer_blind_writes(loop: Any, steps: list[Any], log: Any) -> list[Any]:
     first_read = min((s.order for s in steps if only_reads(s)), default=None)
     if first_read is None:
         return steps
-    # Запись с write_instruction собирает текст при исполнении — её не откладываем.
+    # A write with write_instruction composes its text at execution time, so it is not deferred.
     blind = [s for s in steps
              if s.order > first_read
              and (s.action_spec or {}).get("tool_name") == "file_write"
@@ -146,13 +139,12 @@ def defer_blind_writes(loop: Any, steps: list[Any], log: Any) -> list[Any]:
 
 
 def steps_to_run(loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> list[Any]:
-    """Шаги пакета к исполнению: без уже прочитанного и без слепых записей.
+    """Batch steps to execute: without already-read steps and blind writes.
 
-    На последнем круге запись не откладывается: отложенное пропало бы.
-    """
+        On the last round a write is not deferred: it would be lost."""
     steps = reuse_already_read(st, attempt_artifacts, loop.log.log)
     policy = getattr(loop, "replan_policy", None)
-    # Откладываем раз за ход: иначе каждое новое чтение отодвигает запись до конца.
+    # Defer once per turn: otherwise every new read pushes the write back to the end.
     if getattr(st, "writes_deferred_once", False) or (
             policy is not None and st.attempt >= round_failsafe(loop)):
         return steps
@@ -166,10 +158,9 @@ def format_observations(
     plan: Any, artifacts: dict[str, dict[str, Any]], earlier: Sequence[str] = (),
     notes: dict[str, str] | None = None, failed: Sequence[ReplanTrigger] = (),
 ) -> str:
-    """Блок для планировщика: какие шаги уже выполнены и что они вернули.
+    """Block for the planner: which steps are done and what they returned.
 
-    Копировать из выводов можно; считать — только через python_probe.
-    """
+        Copying from outputs is allowed; computing only through python_probe."""
     ran = ("The previous plan ran WITHOUT errors." if not failed else
            "The previous plan ran, but these steps came back RED: "
            + "; ".join(f"{t.step_id} ({t.tool_name}): {t.reason}" for t in failed) + ".")
@@ -195,13 +186,12 @@ def format_observations(
             path = (spec.get("arguments") or {}).get("path", "")
             lines.append(f"  {step.order}. {spec.get('tool_name')} {path}")
     if earlier:
-        # Без этого круг видит лишь последний пакет и перечитывает прежнее.
+        # Without this a round sees only the last batch and re-reads earlier ones.
         lines.append("Already read in EARLIER rounds — in your evidence, do NOT read again: "
                      + ", ".join(earlier))
     lines += _written_contents(plan)
     lines.append("Outputs:")
-    # Результаты ДЕЙСТВИЙ — первыми и со своим пределом, чтобы чтения не
-    # съедали весь показ и вердикт patch_check/python_probe не пропадал.
+    # ACTION results come first under their own limit so reads cannot eat the whole display and the patch_check/python_probe verdict is not lost.
     actions = [(label, meta) for label, meta in artifacts.items()
                if meta.get("tool") in _ACTION_TOOLS]
     reads = [(label, meta) for label, meta in artifacts.items()
@@ -231,36 +221,33 @@ def format_observations(
     return "\n".join(lines)
 
 
-#: Заготовка из текста просьбы, перенесённая в результат вместо значения:
-#: «(стр. N)», «ГГГГ-ММ», «<значение>» — агент переписал образец формата.
+#: A template taken from the request text and carried into the result instead of a value: "(стр. N)", "YYYY-MM", "<value>".
 _PLACEHOLDER_RE = re.compile(
     r"(?:\bстр\.?|\bстраниц\w*|\bpage|\bp\.|№)\s*[NX]\b"
     r"|\b[NX]\s+(?:шаг\w*|раз\b|строк\w*|страниц\w*|steps?\b|times\b)"
     r"|ГГГГ-ММ|YYYY-MM|<(?:число|значение|номер|value|number|N)>"
-    # «(заполняется после чтения …)» — каркас, записанный до нужного чтения.
+    # "(заполняется после чтения ...)": a skeleton written before the needed read.
     r"|\((?:будет\s+)?заполн\w*[^)]*\)|\((?:to\s+be\s+filled|TBD|TODO)\b[^)]*\)"
 )
 
 
 def unfilled_placeholders(content: str) -> list[str]:
-    """Заготовки, оставшиеся в записанном тексте вместо значений."""
+    """Placeholders left in written text instead of values."""
     return sorted({m.group(0) for m in _PLACEHOLDER_RE.finditer(content or "")})
 
 
-#: Сколько одинаковых кругов подряд — петля, а не работа.
+#: How many identical rounds in a row make a loop rather than work.
 _STUCK_ROUNDS = 3
-#: Одно действие с тем же результатом — столько раз за ход, и круги кончаются.
-#: Ловит петлю, которую датчик кругов не видит: соседние шаги в кругах разные.
+#: One action with the same result this many times per turn ends the rounds; catches loops the round sensor misses.
 _SAME_ACTION_STOP = 4
 _SAME_ACTION_WARN = 2
 
-#: Предохранитель, не бюджет: останавливают пустой план и датчик застревания.
-#: Переопределяется AGENT_MAX_ROUNDS.
+#: A failsafe, not a budget: the empty plan and the stuck sensor stop rounds. Overridden by AGENT_MAX_ROUNDS.
 ROUND_FAILSAFE = 20
 
 
 def round_failsafe(loop: Any) -> int:
-    """Последний допустимый круг хода; не меньше бюджета перепланирования."""
+    """Last allowed round of a turn; not less than the replan budget."""
     own = getattr(loop, "max_observation_rounds", None)
     try:
         value = int(own or os.environ.get("AGENT_MAX_ROUNDS") or ROUND_FAILSAFE)
@@ -270,7 +257,7 @@ def round_failsafe(loop: Any) -> int:
 
 
 def _turn_spend(loop: Any) -> tuple[float, float | None]:
-    """Потрачено этим ходом и предел хода, $. Нет прогона или рабочей папки — не меряем."""
+    """Spent by this turn and the turn limit, $. No run or workspace: not measured."""
     from datetime import datetime, timezone
 
     from core.run_context import current_run
@@ -285,10 +272,9 @@ def _turn_spend(loop: Any) -> tuple[float, float | None]:
 
 
 def charged_attempts(loop: Any, attempt: int, failure_history: Sequence[Any]) -> int:
-    """Сколько попыток списать с бюджета ошибок: круги со сбоями, а не все круги.
+    """How many attempts to charge to the error budget: rounds with failures, not all rounds.
 
-    На предохранителе списываются все круги, чтобы ход не шёл вечно.
-    """
+        On the failsafe all rounds are charged so the turn cannot go on forever."""
     if attempt >= round_failsafe(loop):
         return max(attempt, loop.replan_policy.max_total_replans)
     failed = {getattr(t, "attempt", 0) for t in failure_history if getattr(t, "attempt", 0) <= attempt}
@@ -296,14 +282,14 @@ def charged_attempts(loop: Any, attempt: int, failure_history: Sequence[Any]) ->
 
 
 def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> str:
-    """Что круг сделал и что получил — чтобы узнать повтор один в один."""
+    """What the round did and received, to recognise an exact repeat."""
     import hashlib
 
     steps = [json.dumps({"tool": (s.action_spec or {}).get("tool_name"),
                          "args": (s.action_spec or {}).get("arguments")},
                         ensure_ascii=False, sort_keys=True, default=str)
              for s in getattr(st.plan, "steps", None) or [] if getattr(s, "status", "") != "deferred"]
-    # Время прогона и имена временных папок меняются от круга к кругу и прятали бы повтор.
+    # Run time and temp dir names change between rounds and would hide a repeat.
     noise = re.compile(r"\d+(?:\.\d+)?s\b|\(\d+:\d\d:\d\d\)|patch_check_\w+|latency_ms\W+\d+")
     outs = [f"{k}={noise.sub('', _as_text((v or {}).get('output'))[:4000])}"
             for k, v in sorted(attempt_artifacts.items())]
@@ -311,7 +297,7 @@ def _round_signature(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> s
 
 
 def _action_repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> tuple[int, str]:
-    """Худший повтор ОДНОГО действия с тем же результатом за ход: (раз, что за действие)."""
+    """Worst repeat of ONE action with the same result in a turn: (count, which action)."""
     import hashlib
 
     counts = getattr(st, "action_repeats", None)
@@ -335,7 +321,7 @@ def _action_repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> tu
 
 
 def _repeats(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> int:
-    """Сколько последних кругов подряд совпадают с этим (1 — повтора нет)."""
+    """How many latest rounds in a row equal this one (1 means no repeat)."""
     history = getattr(st, "round_signatures", None)
     if history is None:
         history = []
@@ -353,7 +339,7 @@ _RUFF_CODE_RE = re.compile(r"^([A-Z]{1,4}\d{3,4}) ", re.MULTILINE)
 
 
 def soft_failures(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> list[ReplanTrigger]:
-    """Удачный вызов с провалом внутри (красная проверка, красные тесты) — тоже сбой."""
+    """A successful call with a failure inside (red check, red tests) is also a failure."""
     specs = {str((s.action_spec or {}).get("source_label") or ""): s.action_spec or {}
              for s in getattr(st.plan, "steps", None) or []}
     found: list[ReplanTrigger] = []
@@ -362,7 +348,7 @@ def soft_failures(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> list
         text = failure_text(tool, output)
         if text is None:
             continue
-        # Замечания ruff в текст провала не входят, а без них не найти, как их решают.
+        # ruff remarks are not part of the failure text, but without them one cannot find how they are solved.
         ruff = str(output.get("ruff") or "") if isinstance(output, dict) else ""
         codes = sorted(set(_RUFF_CODE_RE.findall(ruff)))
         reason = error_line(text) + (f"; ruff: {', '.join(codes)}" if codes else "")
@@ -374,7 +360,7 @@ def soft_failures(st: Any, attempt_artifacts: dict[str, dict[str, Any]]) -> list
 
 
 def _look_it_up_first(st: Any, failed: list[ReplanTrigger]) -> str:
-    """Совет, когда тот же инструмент красный второй круг подряд: найти решение, а не править вслепую."""
+    """Advice when the same tool is red a second round in a row: look up the solution instead of fixing blindly."""
     for trig in failed:
         rounds = {t.attempt for t in st.failure_history
                   if t.code == "verify_failed" and t.tool_name == trig.tool_name}
@@ -390,16 +376,14 @@ def _look_it_up_first(st: Any, failed: list[ReplanTrigger]) -> str:
 def continue_after_observation(
     loop: Any, st: Any, attempt_artifacts: dict[str, dict[str, Any]]
 ) -> bool:
-    """Вернуть True, если после успешного пакета нужен ещё один круг планирования.
+    """Return True if another planning round is needed after a successful batch.
 
-    «Сделано» решает планировщик следующего круга пустым планом.
-    """
+        "Done" is decided by the next round's planner returning an empty plan."""
     if not getattr(loop, "observe_before_answer", False) or not attempt_artifacts:
         return False
     failed = soft_failures(st, attempt_artifacts)
     st.failure_history.extend(failed)
-    # Удачная запись — не повод завершать ход: это обрывало работу на полпути;
-    # от записи по кругу защищают датчики застревания ниже.
+    # A successful write is not a reason to end the turn (it cut work short); the stuck sensors below guard against write loops.
     limit = round_failsafe(loop)
     if st.attempt >= limit:
         loop.log.log("observation_round_skipped", {
@@ -440,7 +424,7 @@ def continue_after_observation(
                     "Running them again will change nothing. Do the step that changes the outcome "
                     "(for example, rewrite the file the check complained about), or return an empty "
                     "plan and say what blocks you.\n\n" + warnings)
-    # После тега: предупреждение перед ним снимало дословный показ (отступы портили файлы).
+    # After the tag: a warning before it suppressed the verbatim display (indentation broke files).
     if warnings:
         block = f"{VERBATIM_ADVICE_TAG}\n{warnings.rstrip()}\n{block.removeprefix(VERBATIM_ADVICE_TAG).lstrip()}"
     st.advice_for_planner = block
@@ -455,7 +439,7 @@ def continue_after_observation(
 
 
 def _usd_since_or_cap(root: Any, since: Any, cap: float) -> float:
-    """Доллары хода; журнал расхода не читается — предел считается исчерпанным, а не ноль."""
+    """Dollars of the turn; if the spend log cannot be read the limit counts as exhausted, not zero."""
     from core.usd_spend import usd_since
 
     try:

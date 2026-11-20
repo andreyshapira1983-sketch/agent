@@ -1,8 +1,4 @@
-"""Evidence Budget — caps context sent to the synthesizer LLM.
-
-A per-artifact limit keeps the paragraphs most relevant to the question; a total
-limit trims the largest block first, except demoted blocks (memory), which pay first.
-"""
+"""Evidence budget: caps context sent to the synthesizer (per-artifact excerpting, total trim with demoted blocks paying first)."""
 from __future__ import annotations
 
 import os
@@ -10,10 +6,8 @@ import re
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 
-# ── configurable limits ────────────────────────────────────────────────────────
 
-# 100 000 знаков ≈ 30 k токенов: самый большой модуль агента доходит до
-# синтезатора целиком, иначе ответ не видит прочитанного.
+# ~100 000 chars is ~30k tokens: the largest agent module reaches the synthesizer whole.
 EVIDENCE_FILE_CHARS:  int = 96_000   # per-artifact ceiling
 EVIDENCE_TOTAL_CHARS: int = 100_000  # total ceiling across all artifacts
 
@@ -47,7 +41,6 @@ def _total_chars() -> int:
         return EVIDENCE_TOTAL_CHARS
 
 
-# ── keyword extraction ────────────────────────────────────────────────────────
 
 _STOPWORDS: frozenset[str] = frozenset({
     "a", "an", "the", "is", "it", "in", "on", "at", "of", "to", "and",
@@ -70,7 +63,6 @@ def _keywords(text: str) -> frozenset[str]:
     )
 
 
-# ── paragraph splitter ────────────────────────────────────────────────────────
 
 def _split_paragraphs(text: str) -> list[str]:
     """Split *text* into chunks at blank lines and Markdown headers; drop empty chunks."""
@@ -98,18 +90,15 @@ def _split_paragraphs(text: str) -> list[str]:
     return [p for p in paras if p.strip()]
 
 
-# ── the notice grammar ───────────────────────────────────────────────────────
 
-#: Every trimmer notice shares one shape — an ellipsis welded to a bracket — so a new
-#: notice is caught by shape, not a blacklist (MIR-097). Unclosed: a notice cut in half.
+#: Every trimmer notice has one shape (an ellipsis welded to a bracket), so new notices are caught by shape, not a blacklist. Unclosed: a notice cut in half.
 _FRAMEWORK_NOTICE_RE = re.compile(
     r"(?:\.\.\.|…)\[[^\[\]\n]{0,200}(?:\]|$)"   # ...[NOTICE]  or cut-off ...[NOTI
     r"|\[\.\.\.[^\[\]\n]{0,200}\]"              # [... N sections omitted ...]
 )
 
 
-#: Никогда не наша метка: число («...[1998]») и один символ («...[и]»). «...[typing]»
-#: от «...[truncated]» не отличить — ложное срабатывание лишь отвергает утверждение.
+#: Never our label: a number ('...[1998]') or one character. '...[typing]' cannot be told from '...[truncated]'; a false hit only rejects the claim.
 _NOT_A_NOTICE_RE = re.compile(r"^(?:\d+|.)$")
 
 
@@ -123,10 +112,8 @@ def carries_framework_notice(text: str) -> bool:
     return False
 
 
-# ── intent-aware extraction ───────────────────────────────────────────────────
 
-#: Appended to every trim notice: told only THAT content was cut, the model guessed
-#: from the fragment; a "grep, don't guess" hint fixes that.
+#: Appended to every trim notice so the model greps instead of guessing from the fragment.
 _TEACH_RECOVERY = (
     "; NOT the whole file — to find what is missing, run grep -n via "
     "shell_exec, then read that exact window"
@@ -134,7 +121,7 @@ _TEACH_RECOVERY = (
 
 
 def _render_sections(paras: list[str], selected: set[int]) -> str:
-    """Selected paragraphs in document order plus gap notices; measured whole, since a cut section can read as another fact."""
+    """Selected paragraphs in document order plus gap notices, measured whole."""
     parts: list[str] = []
     prev = -1
     for idx in sorted(selected):
@@ -209,7 +196,6 @@ def extract_relevant(text: str, *, question: str, budget: int) -> str:
     return body + notice
 
 
-# ── total budget across all artifacts ─────────────────────────────────────────
 
 def _trim_notice(new_len: int, old_len: int, budget: int) -> str:
     """The notice appended to a block trimmed by the total budget."""
@@ -275,9 +261,7 @@ def apply_total_budget(
     # Upper bound on notice length; over-reserving only makes a trim slightly deeper.
     _NOTICE_OVERHEAD = 120
 
-    # Pass 1 keeps non-demoted blocks at a fair share, so the overflow cascades instead
-    # of sinking the largest block (the file just read) to the floor (MIR-073).
-    # Pass 2 uses the absolute floor for everyone.
+    # Pass 1 keeps non-demoted blocks at a fair share so overflow cascades; pass 2 uses the absolute floor for everyone.
     _fair_min = max(_MIN_CONTENT, budget // (2 * max(1, len(blocks))))
 
     # A bare string would iterate as one-letter labels and demote nothing.
@@ -342,12 +326,10 @@ def apply_total_budget(
         if sum(sizes) <= budget:
             break
 
-    # Все блоки на нижней границе, а сумма всё ещё больше бюджета: флаг не
-    # должен говорить «всё уместилось нетронутым» (проверка 16.11, мелкая).
+    # All blocks at the floor yet over budget: the flag must not claim everything fit untouched.
     return result, was_trimmed or sum(sizes) > budget
 
 
-# ── convenience: apply per-artifact limit ────────────────────────────────────
 
 def budget_file_content(
     content: str, *, question: str = "", self_documentation: bool = False,
@@ -363,7 +345,6 @@ def budget_file_content(
     return extract_relevant(content, question=question, budget=limit)
 
 
-# ── The long-term-memory block: shared vocabulary with its builder ──────────
 # Shared with the block's builder (loop_methods2 imports these); this module is a leaf.
 MEMORY_OPEN_TAG: str = "<long_term_memory>"
 MEMORY_CLOSE_TAG: str = "</long_term_memory>"
@@ -403,11 +384,8 @@ def rebuild_trimmed_memory(
 ) -> tuple[str, set[str]]:
     """Rebuild a char-sliced `<long_term_memory>` block from whole records.
 
-    The cut length comes from the budget's notice and record boundaries from
-    *record_lines* (the ``(id, line)`` pairs the block was built from) — re-deriving
-    either by scanning or pattern proved wrong. Only records whose whole line fits
-    survive. Returns ``("", set())`` when none does or the block cannot be accounted
-    for (fail closed).
+    Cut length comes from the budget's notice, record boundaries from *record_lines* (``(id, line)`` pairs); only records whose whole line fits survive.
+    Returns ``("", set())`` when none does or the block cannot be accounted for (fail closed).
     """
     # A drop notice is accounted-for content: keep it, or "dropped" reads as "never existed".
     drop = _DROP_NOTICE_RE.search(trimmed)

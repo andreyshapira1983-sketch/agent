@@ -1,25 +1,11 @@
-"""The agent's eye on its own models: which providers exist, which have a key,
-which roles they serve, whether they are healthy, what they cost, what was
-spent today and how much of the day's ceiling is left.
-
-Measured 2026-09-04 (operator's word «ставь глаз первым»): nothing in the
-unattended context named a provider or a model; the only sensor the agent had
-for its keys was a failure — a provider answering «no balance» three times and
-the router moving on silently. Three keys were configured; he could not see
-one. This module only SHOWS what the router, the catalog and the ledgers
-already know. It never decides, never switches, never prints a key value.
-"""
+"""The agent's view of its own models: providers, keys, roles, health, cost, today's spend and remaining ceiling; read-only, never decides, switches or prints a key value."""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
 from typing import Any
 
-#: Providers the roster reports on, in a stable order. Every key the
-#: operator keeps in .env is listed, whether or not the code can call it:
-#: the operator's complaint (2026-09-04) was «he has four keys and sees one»,
-#: and a roster that listed only the router's providers would have repeated
-#: that blindness. A key without a client is reported as such.
+#: Providers the roster reports on, in stable order: every key kept in .env is listed whether or not the code can call it; a key without a client is reported as such.
 ROSTER_PROVIDERS: tuple[str, ...] = (
     "openai", "anthropic", "deepseek", "huggingface", "local", "google",
 )
@@ -35,15 +21,13 @@ _KEY_ENV: dict[str, tuple[str, ...]] = {
 
 
 def _key_present(provider: str, env: dict[str, str]) -> bool:
-    """Case-insensitive on the name (the operator's .env spells one key
-    `Google_API_KEY`; Windows reads it either way, a plain dict does not)."""
+    """Case-insensitive on the name (Windows reads `Google_API_KEY` either way, a plain dict does not)."""
     wanted = {name.lower() for name in _KEY_ENV[provider]}
     return any((value or "").strip() for key, value in env.items() if key.lower() in wanted)
 
 
 def _has_door(provider: str) -> bool:
-    """Whether the router can build a client for this provider at all — read
-    from the router's own credential table, not restated here."""
+    """Whether the router can build a client for this provider, read from the router's own credential table."""
     try:
         from core.model_router import _DEFAULT_PROVIDER_ENV
     except Exception:  # noqa: BLE001 — no router table: no door can be claimed
@@ -104,9 +88,7 @@ def _provider_rows(usage_ledger: Any, provider: str) -> list[dict]:
 
 
 def _active_routes(routing_policy: Any, env: dict[str, str]) -> list[dict[str, Any]]:
-    """Who answers each role and by whose word: his policy record, the env
-    pin, or the default layers. Facts for his next decision, never the
-    decision (operator's word 2026-09-04 22:20)."""
+    """Who answers each role and by whose word (policy record, env pin or default layers): facts, never the decision."""
     # The roster's short labels versus the router's role names: a decision is
     # recorded under the router's name, so it is resolved and shown by it.
     canonical = {"repair": "repair_proposal", "memory": "memory_summary"}
@@ -140,8 +122,7 @@ def _active_routes(routing_policy: Any, env: dict[str, str]) -> list[dict[str, A
 
 
 def _measured_outcomes(workspace: Any) -> list[dict[str, Any]]:
-    """Verified share per role/model from his own episodes — the quality
-    axis he was asked to route by. Fewer than MIN_RUNS runs is noise."""
+    """Verified share per role/model from episodes; fewer than MIN_RUNS runs is noise."""
     if workspace is None:
         return []
     try:
@@ -166,8 +147,7 @@ def model_roster(
     routing_policy: Any = None,
     workspace: Any = None,
 ) -> dict[str, Any]:
-    """The roster as data. Every field is read from existing state; a missing
-    source is reported as such, never as a healthy default."""
+    """The roster as data; every field is read from existing state and a missing source is reported as such, never as a healthy default."""
     env = dict(os.environ) if env is None else env
     moment = now or datetime.now(timezone.utc)
     today = _today(moment)
@@ -196,8 +176,7 @@ def model_roster(
             "key_present": _key_present(provider, env),
             "door": _has_door(provider),
             "roles": _roles_for(provider, env),
-            # Без ключа «healthy» врёт: здоровье здесь = «не было сбоев», а у
-            # невызванного их не бывает (24.09, пять поставщиков без ключа).
+            # Without a key 'healthy' lies: health means 'no failures', and an uncalled provider has none.
             "health": ("no key" if not _key_present(provider, env) and provider != "local"
                        else "unknown" if not health_known
                        else ("unhealthy" if health else "healthy")),

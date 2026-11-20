@@ -1,14 +1,6 @@
-"""Controlled document/code ingestion.
+"""Controlled local ingestion: files -> evidence chain -> source registry -> claims -> conflict check -> optional gated memory write.
 
-This is the bridge between "answer from one file hint" and "learn from a
-curated source set":
-
-    local file(s) -> Evidence chain -> Source Registry -> claims
-    -> conflict check -> optional persistent memory write
-
-The layer is intentionally local and deterministic. It never calls an LLM,
-never writes source text verbatim into memory, and keeps memory writes gated by
-the existing KnowledgePipeline + MemoryWritePolicy.
+Deterministic: no LLM, no verbatim source text written into memory; writes stay behind KnowledgePipeline + MemoryWritePolicy.
 """
 from __future__ import annotations
 
@@ -19,14 +11,9 @@ from typing import Any
 from core.evidence import ProvenanceChain, evidence_from_tool_result, make_evidence
 from core.ingestion_reports import IngestReport, RssIngestReport, WebIngestReport
 from core.ingestion_utils import (  # noqa: F401 -- шов импорта
-    # Шов: имя принадлежит `core/ingestion_utils`, но
-    # `core/learning_planner.py` берёт его ОТСЮДА. Подавление на строке
-    # выше — не косметика: автоправка ruff уже удалила это имя как
-    # неиспользуемое (2026-08-05), и `learning_planner` перестал
-    # импортироваться совсем. Тот же класс, что §24 блокнота.
-    #
-    # Пояснение стоит ВНУТРИ скобок: комментарий между импортами isort
-    # читает как разрыв блока и требует пересортировки без конца.
+    # Seam: the name belongs to `core/ingestion_utils`, but `core/learning_planner.py` imports it from HERE.
+    # The suppression on the line above is load-bearing (ruff autofix removed the name as unused once).
+    # Keep the explanation INSIDE the parentheses: isort reads a comment between imports as a block break.
     SKIP_DIR_NAMES,
     TEXT_EXTENSIONS,
     _candidate_urls,
@@ -403,14 +390,8 @@ def ingest_files(
 def _require_verified_for(agent: Any, explicit: bool | None) -> bool:
     """Whether a claim needs a second source before it may enter memory.
 
-    Answered from WHO DRIVES THE RUN, never from which entry point was used.
-    `agent._unattended_run()` reads `gateway_path`: `repl` is a human who can
-    judge a single source, `daemon` and `runtime` are nobody.
-
-    An explicit argument still wins, for a caller that genuinely knows better.
-    `None` means "not stated" and is resolved here — a default of `False` in a
-    signature is a decision made by whoever typed the signature, on behalf of
-    every caller, without knowing who would be running.
+        Decided by WHO DRIVES THE RUN (`agent._unattended_run()` reads `gateway_path`: `repl` is a human, `daemon` and `runtime` are nobody), not by entry point.
+        An explicit argument wins; `None` means "not stated" and is resolved here.
     """
     if explicit is not None:
         return bool(explicit)
@@ -419,22 +400,11 @@ def _require_verified_for(agent: Any, explicit: bool | None) -> bool:
 
 
 def _chunks_for(text: str, *, is_python: bool, max_chunks_per_file: int) -> list[str]:
-    """One file's worth of claims, under one budget said in two units.
+    """One file's worth of claims under one budget expressed in two units.
 
-    Source files are read for what they SAY about themselves, not sliced by
-    blank line like prose. A live learning run on 2026-08-05 turned five test
-    files into 34 "claims", the first being `_touch(tmp_path / "core" / ...)`
-    — scaffolding, not knowledge, and only `auto_write_memory=False` kept it
-    out of long-term memory.
-
-    The caller's number counts PROSE chunks, and `_chunk_text` splits anything
-    past `CHUNK_CHARS`, so `n` there is `n * CHUNK_CHARS` characters at worst.
-    A docstring has no such ceiling, which is why the first attempt at this —
-    a flat `8` for `.py` — measured nothing: across `core/*.py` it OVERSHOT
-    the project budget on 69 of 181 files (one docstring runs to 3788
-    characters) while holding `:ingest-source` to half of the 16 chunks that
-    mode asks for. Counting items cannot express a budget when the items have
-    no size, so the Python side is given the budget itself.
+        Source files are read for what they SAY about themselves, not sliced by blank line like prose.
+        The caller's number counts PROSE chunks (each up to `CHUNK_CHARS`), but a docstring has no such
+        ceiling, so the Python side is given the character budget itself.
     """
     if is_python:
         return _chunk_python(text, max_chars=max_chunks_per_file * CHUNK_CHARS)
@@ -459,12 +429,8 @@ def _ingest_paths(
         write_memory = bool(auto_write_memory)
     if dry_run:
         write_memory = False
-    # Self-ingest of the workspace's own tree (``:ingest-project``) is
-    # evidence-only: it builds the source registry to answer the CURRENT
-    # question. It must NEVER mass-persist code/docstring fragments as long-term
-    # "facts" — that floods memory with thousands of mid-sentence source chunks
-    # (retrieval distractors) that are re-derivable from the code itself. A
-    # caller wanting to learn one specific document uses ``:ingest-source``.
+    # Self-ingest of the workspace tree (``:ingest-project``) is evidence-only: it must NEVER mass-persist
+    # code/docstring fragments as long-term facts (retrieval distractors). Use ``:ingest-source`` for one document.
     if mode == "project":
         write_memory = False
 
@@ -499,9 +465,7 @@ def _ingest_paths(
             _skip(report, path, workspace, "not valid UTF-8")
             continue
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # `_skip` records the path AND the typed reason in the report; the
-            # narrower `UnicodeDecodeError` above says the same thing in
-            # plainer words for the case that actually happens most.
+            # `_skip` records the path AND the typed reason in the report.
             _skip(report, path, workspace, f"{type(exc).__name__}: {exc}")
             continue
 

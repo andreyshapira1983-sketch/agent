@@ -1,13 +1,4 @@
-"""Stage A: propose a grounded coding task plus its FAILING acceptance test,
-and drop exactly one ``self_build_task.approve`` item for a human.
-
-Writes no implementation code, applies nothing, invents no target. A human
-blesses the yardstick before any implementation exists; every failure is a
-hard veto that creates no inbox item. Stage B (core/self_task_builder.py)
-runs only after that blessing, against the FROZEN test. Why it is built
-this way: docs/CODE_NOTES.md, "The ladder opens to the organs it was built
-for".
-"""
+"""Stage A: propose a grounded coding task plus its FAILING acceptance test and drop exactly one ``self_build_task.approve`` item for a human; writes no implementation code, every failure is a hard veto."""
 from __future__ import annotations
 
 import ast
@@ -42,18 +33,15 @@ SELF_TASK_OPERATION = "self_build_task.approve"
 
 TASK_PRODUCER_ORIGIN = "subagent_self_task_producer"
 
-#: Signal classes Stage A may take work from. `oversized_module` is excluded BY
-#: NAME, not by oversight: its target is `split:<path>` and its work belongs to
-#: the self-build producer. `code_todo` was erased 2026-08-28 by operator
-#: ruling (a human-typed marker is the retired push model, MIR-183); rationale
-#: for the rest: tests/test_stage_a_takes_self_measured_work.py.
+#: Signal classes Stage A may take work from. `oversized_module` is excluded BY NAME (its work belongs to the self-build producer),
+#: and so is `code_todo` (a human-typed marker is the retired push model); rationale: tests/test_stage_a_takes_self_measured_work.py.
 _SELECTABLE_SIGNAL_SOURCES: frozenset[str] = frozenset({
     "architecture_audit",
 })
 
 
 def _selectable_signal_sources() -> frozenset[str]:
-    """Классы сигналов, из которых Stage A вправе взять кандидата."""
+    """Signal classes Stage A may take a candidate from."""
     return _SELECTABLE_SIGNAL_SOURCES
 
 
@@ -75,12 +63,9 @@ def _is_diagnosis_target_allowed(target: str) -> bool:
 
 
 def _target_gate_for(source_kind: str) -> Callable[[str], bool]:
-    """Диагнозу и аудиту открыты органы ядра (решение оператора 2026-08-15);
-    неизвестному источнику — консервативные ворота низкого риска.
-    """
+    """Core organs are open to a diagnosis and an audit; an unknown source gets the conservative low-risk gate."""
     if source_kind in ("verified_diagnosis", "architecture_audit"):
-        # Self-analysis lives in the organs, so an audit finding gets the
-        # diagnosis-grade gate for the identical reason recorded there.
+        # Self-analysis lives in the organs, so an audit finding gets the diagnosis-grade gate.
         return _is_diagnosis_target_allowed
     return _is_self_build_target_allowed
 
@@ -125,17 +110,10 @@ def _field(obj: Any, name: str) -> str:
 
 
 def _unresolved_task(inbox: Any) -> Any | None:
-    """The unfinished Stage-A item ITSELF (not a yes/no), so the refusal can
-    name its blocker. Unfinished means `pending` OR `approved`-but-unexecuted.
-    Why the object and not a flag: docs/CODE_NOTES.md, «The wall that would
-    not say its name».
-    """
+    """The unfinished Stage-A item ITSELF (not a yes/no), so the refusal can name its blocker; unfinished = `pending` OR `approved`-but-unexecuted."""
     try:
         items = inbox.list()
-    # An unreadable inbox means "no pending item found", which is the
-    # CONSERVATIVE answer here: the caller uses it to decide whether a
-    # proposal already exists, and answering "none" makes it check the
-    # other gates rather than skip them.
+    # An unreadable inbox means 'no pending item found', the CONSERVATIVE answer: the caller then checks the other gates rather than skipping them.
     except Exception:  # noqa: BLE001
         return None
     for item in items:
@@ -146,12 +124,9 @@ def _unresolved_task(inbox: Any) -> Any | None:
     return None
 
 
-# ── the task builder (LLM) ──────────────────────────────────────────────────
 
 
-#: How each source's evidence is presented to the model, keyed by `source_kind`.
-#: The frame must name the evidence for what it is: feeding a diagnosis to the
-#: model disguised as a "TODO comment" is a lie to the model.
+#: How each source's evidence is presented to the model, keyed by `source_kind`; the frame must name the evidence for what it is.
 _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
     "verified_diagnosis": (
         (
@@ -175,16 +150,14 @@ _SOURCE_FRAMES: dict[str, tuple[str, str]] = {
 
 
 def _signature_block(impl_path: str, *, max_lines: int = 40) -> str:
-    """Real signatures of the target module's public callables, read from the
-    running code via `inspect`. Any doubt is silence: honest block or none.
-    """
+    """Real signatures of the target module's public callables, read via `inspect`; any doubt is silence."""
     import importlib
     import inspect
 
     dotted = impl_path.replace("\\", "/").removesuffix(".py").replace("/", ".")
     try:
         module = importlib.import_module(dotted)
-    except Exception:  # noqa: BLE001 — сомнение = молчание
+    except Exception:  # noqa: BLE001 — doubt means silence
         return ""
     lines: list[str] = []
     for name in sorted(vars(module)):
@@ -192,8 +165,7 @@ def _signature_block(impl_path: str, *, max_lines: int = 40) -> str:
             continue
         obj = getattr(module, name)
         origin = str(getattr(obj, "__module__", "") or "")
-        # Свои реэкспорты — часть API поверхности модуля (RepairProposal живёт в
-        # self_repair_models и реэкспортирован в self_repair); чужое — шум.
+        # A module's own re-exports are part of its API surface (RepairProposal lives in self_repair_models, re-exported by self_repair); foreign names are noise.
         own = origin == dotted or origin.split(".", 1)[0] in (
             "core", "tools", "cli", "app",
         )
@@ -310,7 +282,6 @@ def _task_builder_generate(
     )
 
 
-# ── the task critic (anti-garbage) ──────────────────────────────────────────
 
 
 _MEANINGLESS_ASSERTS = ("assert true", "assert 1", "assert 1 == 1", "assert not false")
@@ -372,8 +343,7 @@ def _vacuous_assert_reason(tree: ast.AST) -> str | None:
 
 _PHANTOM_SIGNAL = "phantom_signature_kwargs"
 _PHANTOM_REASON_MARK = "that the real signature does not accept"
-#: The attribute subtype of the same class (2026-08-17): an invented field
-#: instead of an invented kwarg. Both count as recurrence for the lesson.
+#: The attribute subtype of the same class: an invented field instead of an invented kwarg; both count as recurrence for the lesson.
 _PHANTOM_ATTR_MARK = "does not exist on"
 _PARSE_FAIL_MARK = "test does not parse"
 
@@ -429,8 +399,8 @@ def _phantom_kwargs_reason(tree: ast.AST) -> str | None:
                     imported[alias.asname or alias.name] = getattr(
                         mod, alias.name, None
                     )
-                except Exception:  # noqa: BLE001, S112 — сомнение = молчание:
-                    continue      # сито вычитает мусор, не блокирует на неуверенности
+                except Exception:  # noqa: BLE001, S112 — doubt means silence:
+                    continue      # the sieve subtracts garbage, it does not block on uncertainty
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
             continue
@@ -467,7 +437,7 @@ def _diagnosis_linkage_reason(test_content: str, quote: str) -> str | None:
         if len(m.group(0)) > 3
     }
     if not carriers:
-        return None  # диагнозу нечем связаться — судить не о чем
+        return None  # nothing in the diagnosis to link to: nothing to judge
     if any(c in test_content for c in carriers):
         return None
     sample = ", ".join(sorted(carriers)[:4])
@@ -523,15 +493,13 @@ def _task_critic_review(
         except SyntaxError as exc:
             veto.append(f"test does not parse: {exc.msg}")
         if tree is not None:
-            # Three structural checks (AST + real signatures) after a live item
-            # slipped the string sieve: CODE_NOTES, «The critic that read strings».
+            # Three structural checks (AST + real signatures) after a live item slipped the string sieve.
             from core.attribute_sieve import phantom_attribute_reason
 
             for reason in (
                 _vacuous_assert_reason(tree),
                 _phantom_kwargs_reason(tree),
-                # The attribute subtype, measured 2026-08-17: invented
-                # claim.state rode past the kwargs sieve twice.
+                # The attribute subtype: an invented claim.state rode past the kwargs sieve twice.
                 phantom_attribute_reason(test_content),
                 _diagnosis_linkage_reason(test_content, quote)
                 if source_kind == "verified_diagnosis" else None,
@@ -563,7 +531,6 @@ def _task_critic_review(
     )
 
 
-# ── the reporter ────────────────────────────────────────────────────────────
 
 
 def _task_reporter_publish(
@@ -573,10 +540,7 @@ def _task_reporter_publish(
     impl_path = build["impl_path"]
     test_path = build["test_path"]
     test_content = build["test_content"]
-    # A frozen test is source code that must survive the inbox's DLP redactor
-    # byte-for-byte, yet may legitimately contain example PII. Hence an exact
-    # base64 copy (redaction-inert) plus a human-readable preview that may be
-    # scrubbed. Story: docs/CODE_NOTES.md, "The test the redactor ate".
+    # A frozen test must survive the inbox's DLP redactor byte-for-byte yet may contain example PII: hence an exact base64 copy plus a scrubbable preview.
     test_content_b64 = base64.b64encode(test_content.encode("utf-8")).decode("ascii")
     payload = {
         "task_title": build.get("task_title") or "",
@@ -611,7 +575,6 @@ def _task_reporter_publish(
     )
 
 
-# ── orchestration ───────────────────────────────────────────────────────────
 
 
 def produce_coding_task(
@@ -634,7 +597,7 @@ def produce_coding_task(
     """
     gates: list[str] = []
 
-    # ── gate 1: budget kill-switch ──────────────────────────────────────────
+    # Gate 1: budget kill-switch.
     if kill_switch is not None and getattr(kill_switch, "active", False):
         return ProducerReport(
             status="budget_kill_switch",
@@ -644,7 +607,7 @@ def produce_coding_task(
         )
     gates.append("kill_switch")
 
-    # ── gate 2: hour budget near-exhaustion ─────────────────────────────────
+    # Gate 2: hour budget near-exhaustion.
     if budget_snapshot is not None:
         headroom = hour_budget_headroom(budget_snapshot)
         near, reasons = is_budget_near_exhaustion(headroom)
@@ -657,7 +620,7 @@ def produce_coding_task(
             )
     gates.append("budget")
 
-    # ── gate 3: a Stage-A task already waits for a human ─────────────────────
+    # Gate 3: a Stage-A task already waits for a human.
     blocking_task = _unresolved_task(inbox)
     if blocking_task is not None:
         _id, _status = getattr(blocking_task, "id", "?"), getattr(blocking_task, "status", "?")
@@ -673,7 +636,7 @@ def produce_coding_task(
         )
     gates.append("task")
 
-    # ── gate 4: dirty working tree ──────────────────────────────────────────
+    # Gate 4: dirty working tree.
     if vcs is not None and not vcs.is_clean():
         return ProducerReport(
             status="dirty_tree_wait",
@@ -686,7 +649,7 @@ def produce_coding_task(
     reader = file_reader or _default_file_reader(workspace)
     roles: list[RoleOutput] = []
 
-    # ── selector: one grounded self-measured candidate ──────────────────────
+    # Selector: one grounded self-measured candidate.
     selector = task_selector or _default_task_selector(workspace)
     try:
         candidate = selector()
@@ -702,8 +665,7 @@ def produce_coding_task(
             role_outputs=roles,
             next_human_action="No grounded coding-task candidate this run.",
         )
-    # Слово кандидата о своём источнике сильнее дефолта вызывающего (MIR-183):
-    # улика не приходит к модели в чужом костюме, чужой источник — на воротах.
+    # The candidate's own word about its source beats the caller's default: evidence must not reach the model in a foreign costume.
     source_kind = _field(candidate, "signal_source") or source_kind
     impl_path = _field(candidate, "target_path").replace("\\", "/")
     quote = _field(candidate, "problem_quote")
@@ -728,7 +690,7 @@ def produce_coding_task(
     current_content = reader(impl_path) or ""
     evidence = [f"{source_kind}: {evidence_ref}", f"quote: {quote}"]
 
-    # ── task builder ────────────────────────────────────────────────────────
+    # Task builder.
     lessons = distilled_lessons(workspace)
     builder = _task_builder_generate(
         llm,
@@ -755,7 +717,7 @@ def produce_coding_task(
             next_human_action="Task author failed; no approval created.",
         )
 
-    # ── task critic ─────────────────────────────────────────────────────────
+    # Task critic.
     critic = _task_critic_review(
         builder.data, grounded_target=impl_path, reader=reader,
         confidence_threshold=confidence_threshold,
@@ -774,7 +736,7 @@ def produce_coding_task(
             next_human_action="Task critic vetoed the candidate; no approval created.",
         )
 
-    # ── reporter ────────────────────────────────────────────────────────────
+    # Reporter.
     reporter = _task_reporter_publish(inbox, builder.data, evidence, evidence_ref)
     roles.append(reporter)
     approval_id = reporter.data["approval_id"]

@@ -1,34 +1,18 @@
-"""Текст записи собирается в момент исполнения, а не при планировании.
-
-Корень, названный оператором 2026-09-22: аргументы шагов фиксируются планом,
-поэтому текст файла сочиняется ДО того, как чтения вернулись, — отсюда
-«тест импортировал несуществующую функцию» (10:45), «правка по памяти»
-(14:37) и конспект-болванка (17:02). Откладывание записи на следующий круг
-(`core/observation_round.defer_blind_writes`) было подпоркой: оно тратило
-круги и не отменяло самого сочинения вслепую.
-
-Здесь план может назвать не текст, а ЗАДАНИЕ на текст:
-`file_write(path=..., write_instruction="...")`. Текст собирается перед самим
-вызовом инструмента — уже по выводам шагов, исполненных в этом же пакете.
-Пустой или шаблонный ответ не пишется: шаг проваливается с названной
-причиной, как неразрешённая ссылка.
-"""
+"""Compose file text at execution time, not at planning: a plan may carry a write_instruction instead of the text."""
 from __future__ import annotations
 
 import re
 from pathlib import Path
 from typing import Any
 
-#: Сколько вывода одного шага уходит в сборку текста. Было 4000 и 20000:
-#: 24.09 писатель правки не видел конца compose_content (строка ~130 файла
-#: в 18 тыс. знаков) и не мог вставить туда вызов — не видел места.
+# How much of one step's output goes into composing the text.
 _PER_OUTPUT_CHARS = 12000
 _TOTAL_CHARS = 48000
-#: Чтения, которые писатель помнит весь ход, а не только текущий план.
+# Reads the writer remembers for the whole turn, not only the current plan.
 _READ_TOOLS = frozenset({"file_read", "find_in_files", "list_dir", "read_logs",
                          "diff_file", "convert_file", "python_probe"})
 _REMEMBERED_READS = 12
-#: Файл правки для patch_check и признаки того, что в нём блоки, а не слова.
+# Edit file for patch_check and markers showing it holds blocks, not words.
 _EDITS_NAME = "edits.txt"
 _FILE_LINE = re.compile(r"^FILE:\s*\S", re.MULTILINE)
 _BLOCK_LINE = re.compile(r"^<<<<<<< (?:SEARCH|LINES \d+-\d+)", re.MULTILINE)
@@ -52,17 +36,15 @@ _SYSTEM = (
 )
 
 
-#: Потолок ответа модели на один файл. Файл правки для patch_check или
-#: конспект укладываются с запасом; больше — почти всегда зацикливание.
+# Ceiling of the model reply for one file; more is almost always a loop.
 _WRITE_MAX_TOKENS = 6000
-#: Кусок из стольких строк, повторённый столько раз подряд или вразброс, —
-#: зацикливание, а не текст.
+# A chunk of this many lines repeated this many times in a row or scattered is a loop, not text.
 _RUNAWAY_BLOCK_LINES = 4
 _RUNAWAY_REPEATS = 4
 
 
 def _was_truncated(llm: Any) -> bool:
-    """Оборван ли последний ответ на пределе (у маршрутизатора — у его модели)."""
+    """Whether the last reply was cut off at the limit (for a router, at its model's limit)."""
     for obj in (llm, getattr(llm, "_llm", None)):
         if obj is not None and getattr(obj, "last_answer_was_truncated", False) is True:
             return True
@@ -70,7 +52,7 @@ def _was_truncated(llm: Any) -> bool:
 
 
 def _runaway_block(text: str) -> int | None:
-    """Сколько раз повторён самый частый непустой кусок из нескольких строк, если это зацикливание."""
+    """How many times the most frequent non-empty multi-line chunk repeats, if that is a loop."""
     lines = [ln for ln in text.splitlines() if ln.strip()]
     step = _RUNAWAY_BLOCK_LINES
     if len(lines) < step * _RUNAWAY_REPEATS:
@@ -102,14 +84,14 @@ def _outputs_block(done: list[tuple[Any, dict[str, Any] | None, Any]]) -> str:
 
 
 def _writer_llm(loop: Any) -> Any:
-    """Модель для сборки текста: синтезатор, иначе та, что есть у цикла."""
+    """Model for composing the text: the synthesizer, else the loop's own."""
     router = getattr(loop, "model_router", None)
     if router is not None:
         try:
             from core.models import ModelRole
 
             routed = router.for_role(ModelRole.SYNTHESIZER)
-        except Exception:  # noqa: BLE001 — нет маршрута роли: пишем тем, что есть
+        except Exception:  # noqa: BLE001 — no role route: write with what we have
             routed = None
         if routed is not None:
             return routed
@@ -117,7 +99,7 @@ def _writer_llm(loop: Any) -> Any:
 
 
 def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] | None, Any]]) -> str:
-    """Собрать текст файла по заданию шага и выводам уже исполненных шагов."""
+    """Compose file text from the step's instruction and the outputs of steps already executed."""
     from core.placeholder_text import looks_like_unfilled_content
 
     spec = step.action_spec or {}
@@ -132,10 +114,8 @@ def compose_content(loop: Any, step: Any, done: list[tuple[Any, dict[str, Any] |
             + (_EDITS_FORM if _is_edits(path) else "") + _current_edits(loop, path) + "\n\n"
             + (f"Выводы шагов этого хода:\n{outputs}" if outputs
                else "В этом ходе шаги ещё ничего не вернули."))
-    # Предел и БЕЗ продолжения. Замер 2026-09-24: дважды за ночь модель
-    # зациклилась на одном блоке правки, а обёртка честно «продолжила» её
-    # четыре раза с растущим бюджетом — 159k токенов на вход, 116 736 на
-    # выход, $0.58 за вызов и edits.txt на 568 КБ из сотен повторов.
+    # A limit and NO continuation: continuing a looping reply multiplied tokens and produced a huge
+    # edits file.
     text = str(llm.complete(system=_SYSTEM, user=user, max_tokens=_WRITE_MAX_TOKENS,
                             temperature=0.2, allow_continuation=False) or "").strip()
     if text.startswith("```"):
@@ -182,12 +162,7 @@ def _current_edits(loop: Any, path: str) -> str:
 
 
 def _refuse_edits_without_blocks(path: str, text: str) -> None:
-    """В файл правки идут только блоки: отказ словами — провал шага, не содержимое.
-
-    24.09: из шести записей edits.txt за 50 секунд три были текстом отказа
-    («нужные строки не прочитаны», «Файл не найден.») — и затирали прошлую,
-    почти готовую правку.
-    """
+    """Only blocks go into the edit file: a refusal in words fails the step and is not content."""
     if _is_edits(path) and not (_FILE_LINE.search(text) and _BLOCK_LINE.search(text)):
         raise RuntimeError(
             "в файл правки пошёл текст без блоков (FILE: и <<<<<<< SEARCH или LINES a-b) — "
@@ -195,9 +170,7 @@ def _refuse_edits_without_blocks(path: str, text: str) -> None:
 
 
 def remember_read(loop: Any, step: Any, outcome: Any) -> None:
-    """Запомнить вывод чтения на весь ход (след = ход): после перепланирования
-    писатель его видит. 24.09 после каждого перепланирования писатель писал
-    «нужные строки не прочитаны» — прочитанное в прошлом круге для него исчезало."""
+    """Remember a read's output for the whole turn (trace = turn), so the writer still sees it after a replan."""
     spec = getattr(step, "action_spec", None) or {}
     if spec.get("tool_name") not in _READ_TOOLS or not isinstance(outcome, dict):
         return
@@ -213,7 +186,7 @@ def remember_read(loop: Any, step: Any, outcome: Any) -> None:
 
 
 def _with_earlier_reads(loop: Any, done: list[Any]) -> list[Any]:
-    """Выводы текущего плана, затем — чтения прошлых кругов этого же хода."""
+    """Outputs of the current plan, then reads from earlier rounds of the same turn."""
     store = getattr(loop, "_writer_reads", None)
     turn = str(getattr(getattr(loop, "log", None), "trace_id", "") or "")
     if not store or store[0] != turn:
@@ -223,16 +196,10 @@ def _with_earlier_reads(loop: Any, done: list[Any]) -> list[Any]:
 
 
 def _refuse_note_without_its_contract(loop: Any, path: str, text: str) -> None:
-    """Конспект без источника, цитаты и проверки не становится файлом.
+    """A note without source, quote and check does not become a file.
 
-    Тот же договор, что судит цель (`core.note_contract`), только спрошенный
-    ДО записи. Замер 2026-09-23: договор проверялся лишь при судействе, и
-    пустышка всё равно ложилась на диск — 40 конспектов из 127 (31%). Цикл
-    помечен `empty`, система знает, что работы не было, а файл лежит рядом с
-    настоящими.
-
-    Отказ НАЗЫВАЕТ, чего не хватает: провал без причины агент разгадывает
-    сам и разгадывает неверно. Пустая правка проваливается так же.
+    The same contract that judges the goal (`core.note_contract`), asked BEFORE the write.
+    The refusal NAMES what is missing; an empty edit fails the same way.
     """
     from core.note_contract import NOTES_DIR, contract_gaps
 
@@ -243,7 +210,7 @@ def _refuse_note_without_its_contract(loop: Any, path: str, text: str) -> None:
     if callable(getter):
         try:
             root = getter()
-        except Exception:  # noqa: BLE001 — недоступный корень не запирает запись
+        except Exception:  # noqa: BLE001 — an unreachable root must not lock the write
             root = None
     if root is None:
         return

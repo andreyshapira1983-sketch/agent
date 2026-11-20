@@ -46,109 +46,38 @@ from core.tool_receipts import ReceiptPath, receipt_context
 logger = logging.getLogger(__name__)
 
 
-# Rotated per 10-min bucket so successive auto-run ticks study different
-# subtrees and reflect over different log windows instead of repeating the
-# same input. Stateless: derived from wall clock.
+# Rotated per 10-min bucket so successive ticks study different subtrees; stateless, derived from wall clock.
 _LEARN_ROOT_ROTATION: tuple[str, ...] = (".", "core", "tools", "tests", "scripts")
 _REFLECTION_LOG_WINDOWS: tuple[int, ...] = (20, 40, 30, 60)
 _PYTEST_EXIT_MEANING = {2: "interrupted", 3: "internal error", 4: "usage error", 5: "no tests collected"}
 
-# Tools that must NOT run during a goal task when the operator disabled tests
-# (include_tests=False, e.g. :work-session or :auto-run --no-tests). Gating the
-# dedicated "tests" task is not enough: the planner can still select run_tests
-# while executing the goal via the parent AgentLoop. Blocking it run-scoped
-# makes the planner replan onto a path that honors --no-tests. This is not an
-# effect-only block; it enforces operator intent, so it is logged separately.
+# Tools blocked run-scoped during a goal task when tests are disabled (include_tests=False); enforces operator intent, logged separately.
 _NO_TESTS_BLOCKED_TOOLS: frozenset[str] = frozenset({"run_tests"})
 
-# Tools that must NOT run on the unattended autonomous / daemon goal path,
-# regardless of dry-run. These enforce Stage-0 posture that the free planner
-# would otherwise violate on the goal task:
-#   - spawn_subagent: the subagent runner is Stage 6, never unattended — an
-#     auto-run / daemon goal must not spawn child agents.
-#   - network egress: ЧТЕНИЕ веба (web_search / web_fetch) открыто с
-#     2026-09-01 по слову оператора — агент сам потянулся за чужим решением
-#     своей же проблемы, и ключ висел не на той двери. Остальной выход наружу
-#     (rss_fetch / semantic_scholar_search) закрыт: их никто не просил, и одни
-#     ворота за раз.
-# Applied via PolicyGate.blocked_tools exactly like _NO_TESTS_BLOCKED_TOOLS:
-# run-scoped and always restored. The interactive REPL path is unaffected.
+# Tools that must NOT run on the unattended goal path regardless of dry-run (applied via PolicyGate.blocked_tools, run-scoped, always restored; the REPL is unaffected).
+# spawn_subagent is never unattended; web reading (web_search / web_fetch) is open, other network egress stays closed.
 _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
     {
         "spawn_subagent",
-        # find_in_files, python_probe, rss_fetch ВЫШЛИ
-        # отсюда — 2026-09-19, слово оператора перед суточным прогоном: «разрешения у него будут все». Суточный прогон стоял на разборе собственных модулей:
-        # библиотека (math_study/, knowledge_library/) лежала в рабочей папке, а
-        # искать по ней и считать было нечем. Все четыре не меняют мир: поиск по
-        # файлам, лаборатория без сети над копиями, чтение лент.
-        # semantic_scholar_search остаётся: он — единственный подопытный узкой
-        # разблокировки на прогон (_UNBLOCKABLE_TOOLS); открыть его навсегда
-        # значило бы оставить тот механизм без предмета. Статьи доступны вебом.
+        # find_in_files, python_probe and rss_fetch are open: they do not change the world.
+        # semantic_scholar_search stays blocked: it is the only subject of the narrow per-run unblock (_UNBLOCKABLE_TOOLS).
         "semantic_scholar_search",
-        # web_search / web_fetch БОЛЬШЕ НЕ ЗДЕСЬ — решение оператора 2026-09-01,
-        # дословно: «разреши ему смотреть в интернет, когда он сам захотел».
-        #
-        # Замер, вызвавший решение. Впервые увидев свои открытые дела, агент
-        # взял целью собственный дефект («передача значения между шагами») и
-        # САМ потянулся за чужим решением: планировщик выбрал web_search с
-        # запросом "step-to-step value-passing contract tool output arguments
-        # defect". Ворота отказали — потому что чтение веба открывалось не по
-        # намерению агента, а по ФОРМУЛИРОВКЕ цели (глагол изучения плюс слово
-        # про веб). Ключ висел на другой двери: инициатива была, доступа не
-        # было.
-        #
-        # Открыто ровно чтение и ровно два инструмента. Оба не меняют мир:
-        # поиск и выкачка страницы. Всё, что приходит снаружи, остаётся
-        # ГИПОТЕЗОЙ с источником — это уже правило дома, а не новая уступка;
-        # защита от инъекций и классификация данных стоят на прежнем месте.
-        # memory_bank: вердикт агента 2026-08-31 (unattended_verdict.md, BLOCKED):
-        # «память — то, что я потом читаю как истину; чтение не фильтруется» —
-        # самоотравление перевешивает ценность автономного банкования, пока
-        # нет фильтра на чтении. Его собственное решение о его же памяти.
-        # memory_bank LEFT THIS SET on 2026-09-04 by the operator's word («Надо»)
-        # — an authority change, not a bug fix. He closed the door to his own
-        # unattended self on 09-01 (4321bc4); 0 writes in 267 cycles followed:
-        # the policy's effect, not a defect. The door keeps its walls: three
-        # kinds, provenance required, the write policy (secrets, duplicates,
-        # echo), a readback before «stored», no memory as a source of memory,
-        # a per-process ceiling (tools/memory_bank.py); self-written records
-        # stay low-trust (MIR-074). Retrieval is a separate change.
-        # journal_append ВЫШЕЛ отсюда 2026-09-23 словом оператора: «открой
-        # стены, то есть журнал, чтобы он мог позвать человека». Смена
-        # ПОЛНОМОЧИЙ, не починка дефекта — тот же прецедент, что у memory_bank
-        # 2026-09-04. Закрывал его сам агент 2026-09-01
-        # (append_tool_design.md ред.2): «реестр — тоже то, что я потом читаю
-        # как истину; он кормит выбиратель кампании».
-        #
-        # Стены двери остаются и одна добавлена: путь внутри data/, отказ на
-        # чужое состояние, проверка формы известного журнала, запрет
-        # заготовок-пустышек — и СУТОЧНЫЙ ПОТОЛОК ГОЛОСА, 5 обращений к
-        # человеку (tools/journal_append.VOICE_CALLS_PER_DAY). Потолок открыт
-        # вместе с дверью, а не после: замеры внимания дают восстановление
-        # после прерывания около 23 минут, и «умное» прерывание стоит столько
-        # же, сколько глупое. Считается по самому файлу — перезапуск процесса
-        # не обнуляет чужое внимание.
+        # web_search / web_fetch are open (reading only); inbound content stays a hypothesis with a source.
+        # memory_bank and journal_append are open by operator decision; their doors keep walls (provenance, write policy, readback,
+        # per-process ceiling, daily voice cap tools/journal_append.VOICE_CALLS_PER_DAY).
     }
 )
 
 
-#: Что вообще МОЖНО разблокировать целевому прогону явным полем конфига
-#: (учебное действие под стоячим грантом, решение оператора 2026-08-16).
-#: spawn_subagent и python_probe этим полем не разблокируемы по построению —
-#: им нужны собственные ворота.
-#:
-#: 2026-09-01: web_search/web_fetch ушли отсюда не потому, что запрещены, а
-#: потому что открыты ВСЕГДА (слово оператора). Разблокировать осталось поиск
-#: научных работ — то же чтение внешнего мира, и учебное действие открывает
-#: его той же дверью. Поле не бездействует: механизм узкой, НЕ переживающей
-#: прогон разблокировки обязан оставаться проверяемым живым инструментом.
+#: What an explicit config field may unblock for a goal run (learning action under a standing grant).
+#: spawn_subagent and python_probe need their own gates; semantic_scholar_search remains so the narrow per-run unblock stays exercised.
 _UNBLOCKABLE_TOOLS: frozenset[str] = frozenset({"semantic_scholar_search"})
 
 
 def _goal_block_set(
     *, unblock_tools: frozenset[str], include_tests: bool,
 ) -> frozenset[str]:
-    """Список блокировок целевого пути с учётом узкой разблокировки."""
+    """Goal-path block list with the narrow unblock applied."""
     tests_block = _NO_TESTS_BLOCKED_TOOLS if not include_tests else frozenset()
     allowed = _UNBLOCKABLE_TOOLS & unblock_tools
     return (_AUTONOMOUS_GOAL_BLOCKED_TOOLS - allowed) | tests_block
@@ -158,12 +87,10 @@ def _rotation_index(modulus: int, *, bucket_seconds: int = 600) -> int:
     return int(time.time() // bucket_seconds) % max(modulus, 1)
 
 
-#: Журнал потребления стоячих грантов: одна строка — один пропущенный прогон.
+#: Standing-grant usage journal: one line per permitted run.
 _STANDING_USAGE_FILE = "standing_grant_usage.jsonl"
 
-#: Why an effectful run has no permission. Both gates are named because both
-#: were checked: docs/CODE_NOTES.md, «The request that described a stage that
-#: ended».
+#: Why an effectful run has no permission; both gates are named because both were checked.
 _NO_PERMISSION_REASONS: tuple[str, ...] = (
     "no per-run approval is pending or executed for this goal",
     "no standing grant is active (absent, expired, or spent for today)",
@@ -175,12 +102,9 @@ def _standing_usage_path(workspace: Any) -> Path:
 
 
 def record_standing_grant_use(workspace: Any, grant_id: str) -> None:
-    """Одна строка журнала на одно полномочие, выданное стоячим грантом.
+    """One journal line per authority issued by a standing grant.
 
-    Публичная намеренно: потребителей гранта двое (этот рантайм и
-    `core.rule_approved_apply`), а журнал расхода — один. Аудит автономности
-    2026-09-17 нашёл второго потребителя, который спрашивал грант и не
-    записывал ничего: дневной потолок держался только на одном пути.
+    Public because the grant has two consumers (this runtime and `core.rule_approved_apply`) and one usage journal.
     """
     from core.state_integrity import append_state_jsonl
 
@@ -192,12 +116,12 @@ def record_standing_grant_use(workspace: Any, grant_id: str) -> None:
     }])
 
 
-#: Прежнее внутреннее имя: на него ссылаются рантайм и тесты гранта.
+#: Former internal name; the runtime and grant tests refer to it.
 _record_standing_use = record_standing_grant_use
 
 
 def _standing_runs_today_unlocked(path: Path, grant_id: str) -> int:
-    """Счёт расхода за сегодня БЕЗ взятия замка: для вызова изнутри замка."""
+    """Today's usage count WITHOUT taking the lock: for calls from inside the lock."""
     from core.state_integrity import read_state_jsonl_unlocked
 
     if not path.is_file():
@@ -213,16 +137,10 @@ def _standing_runs_today_unlocked(path: Path, grant_id: str) -> int:
 def reserve_standing_grant_use(
     workspace: Any, grant_id: str, *, max_per_day: int
 ) -> bool:
-    """Занять одну единицу дневного потолка — или отказать. Неразделимо.
+    """Take one unit of the daily cap, or refuse; indivisible.
 
-    Ревизия PR #333: пары «спросить остаток → записать расход» недостаточно.
-    Два слива, идущие одновременно, оба видят `remaining=1` и оба проходят, а
-    `run_tick` к этому месту замок задачи уже отпустил. Потолок, который можно
-    превысить, сговорившись во времени, — не потолок.
-
-    Поэтому решение и запись живут под ОДНИМ замком того же файла, которым
-    пользуется `append_state_jsonl`. Отказ — это отказ: вызывающий не вправе
-    применять ничего, а не «применить и потом уточнить».
+    Decision and write live under ONE lock of the file `append_state_jsonl` uses, so concurrent consumers cannot both pass `remaining=1`.
+    A refusal means apply nothing.
     """
     from core.file_lock import exclusive_file_lock
     from core.state_integrity import append_state_jsonl_unlocked, state_lock_path
@@ -242,7 +160,7 @@ def reserve_standing_grant_use(
 
 
 def standing_runs_today(workspace: Any, grant_id: str) -> int:
-    """Сколько прогонов этот грант пропустил сегодня (UTC). Журнал — истина."""
+    """How many runs this grant allowed today (UTC); the journal is the truth."""
     from core.file_lock import exclusive_file_lock
     from core.state_integrity import state_lock_path
 
@@ -254,13 +172,7 @@ def standing_runs_today(workspace: Any, grant_id: str) -> int:
 
 
 # --- Proposal hygiene: canonical signature + token-Jaccard semantic dedup ---
-#
-# sha256(description) only catches verbatim repeats. Sonnet rewords the same
-# idea every tick, so the inbox accumulates near-duplicates. Below we extract
-# a canonical token set per proposal and reject new proposals whose tokens
-# overlap an existing same-kind proposal at >= _PROPOSAL_JACCARD_THRESHOLD.
-# Kind is part of the signature: a "learn" claim-distribution and a "goal"
-# claim-distribution stay separate (they imply different work).
+# A new proposal whose canonical token set overlaps a same-kind proposal at >= _PROPOSAL_JACCARD_THRESHOLD is rejected; kind is part of the signature.
 
 
 
@@ -272,13 +184,10 @@ def standing_runs_today(workspace: Any, grant_id: str) -> int:
 
 
 
-# The data carriers moved to core/autonomous_runtime_types on 2026-08-22
-# (operator: a file too large to read through produces mistakes). Re-exported
-# here so every existing import keeps working — a relocation, not an
-# interface change. Explanation: docs/CODE_NOTES.md.
-from core.autonomous_runtime_types import (  # noqa: E402 — kept where the
-    AutonomousQueuedTaskReport,  # definitions used to live, so reading order
-    AutonomousQueueRunReport,  # is unchanged for anyone walking this file
+# The data carriers live in core/autonomous_runtime_types; re-exported so existing imports keep working.
+from core.autonomous_runtime_types import (  # noqa: E402
+    AutonomousQueuedTaskReport,
+    AutonomousQueueRunReport,
     AutonomousRunReport,
     AutonomousRunStatus,
     AutonomousRuntimeConfig,
@@ -288,10 +197,7 @@ from core.autonomous_runtime_types import (  # noqa: E402 — kept where the
     AutonomousTaskStatus,
 )
 
-#: Re-exported ON PURPOSE: every existing `from core.autonomous_runtime import
-#: AutonomousTask` keeps working, so the move is a relocation and not an
-#: interface change. Named here so a linter's "unused import" is answered by
-#: the code rather than by a suppression comment.
+#: Re-exported on purpose (a relocation, not an interface change); named here so the linter's unused-import is answered by code.
 __all__ = [
     "AutonomousQueueRunReport",
     "AutonomousQueuedTaskReport",
@@ -307,24 +213,10 @@ __all__ = [
 
 
 def _grant_is_live(expires_at: str | None, now: datetime) -> bool:
-    """Действует ли ОДОБРЕННОЕ разрешение по своему сроку.
+    """Whether an APPROVED permission is still within its term.
 
-    H-41 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Разрешение на НЕОБРАТИМЫЕ
-    эффекты искалось среди `list(status="approved")`, а этот читатель истёкшие
-    не отсекает: `expire_stale` трогает только `pending`. Замер 2026-08-24 —
-    заявка со сроком, прошедшим тридцать дней назад, невидима для `pending()` и
-    полностью видима здесь, то есть продолжает разрешать.
-
-    Смысл поля не выдуман: сосед по файлу, `_active_standing_grant`, уже читает
-    `expires_at` у одобренной заявки как срок действия гранта и пропускает
-    истёкшие. Два механизма разрешения расходились ровно на защите; здесь
-    второй приводится к первому.
-
-    Отсутствие срока — по-прежнему «бессрочно»: так ведёт себя разрешение,
-    заведённое без даты, и менять ЭТО значило бы вводить политику, а политика
-    о необратимом принадлежит оператору. Нечитаемая отметка — отказ: пропустить
-    необратимое действие по непрочитанному сроку хуже, чем попросить новое
-    одобрение.
+    `expire_stale` touches only `pending`, so approved requests are checked here, as `_active_standing_grant` does.
+    No term still means unlimited (policy on irreversible effects belongs to the operator); an unreadable stamp is a refusal.
     """
     if not expires_at:
         return True
@@ -338,10 +230,7 @@ def _grant_is_live(expires_at: str | None, now: datetime) -> bool:
 
 
 def active_standing_grant(approval_inbox, workspace, *, log=None):
-    """Одна проверка гранта на весь проект: вторая разошлась бы с первой.
-
-    Вынесена, чтобы тик спрашивал о том же разрешении (класс H-26 аудита).
-    """
+    """One grant check for the whole project, so the tick asks about the same permission."""
     now = datetime.now(timezone.utc)
     for item in approval_inbox.list(status="approved"):
         if item.operation != "autonomous_runtime.standing_grant":
@@ -364,11 +253,7 @@ def active_standing_grant(approval_inbox, workspace, *, log=None):
 
 
 def standing_grant_remaining_runs(workspace: Any, grant: Any) -> int:
-    """Сколько полномочий у этого гранта ОСТАЛОСЬ на сегодня.
-
-    Потолок один на всех потребителей, поэтому остаток считается из общего
-    журнала расхода, а не из счётчика вызывающего.
-    """
+    """How many authorities this grant has LEFT today, from the shared usage journal (one cap for all consumers)."""
     cap = int((getattr(grant, "payload", None) or {}).get("max_runs_per_day") or 0)
     if cap <= 0:
         return 0
@@ -419,21 +304,12 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             try:
                 task_queue.mark_running(task.id)
             except TaskAlreadyClaimed:
-                # The list was read once, up front; by the time we reach a task
-                # in the tail another consumer may have taken it. Skipping is
-                # the correct outcome, and it is journaled rather than silent.
+                # the list was read once; another consumer may have taken this task: skip, and journal it
                 self._log("task_claim_lost", {"task_id": task.id})
                 continue
             try:
-                # The heartbeat is what lets startup recovery tell a killed
-                # process from a slow one (MIR-040); without it a long run and
-                # an abandoned row are the same observation.
-                # `task_id` is bound as a default, NOT read from `task`: the
-                # heartbeat runs on a background thread and `__exit__` joins it
-                # with a bounded timeout, so this callback can still fire after
-                # the loop has advanced. A closure over the loop variable would
-                # then blame whichever task is current — sending a reader to the
-                # wrong task for a failure that belongs to this one.
+                # the heartbeat lets startup recovery tell a killed process from a slow one; `task_id` is bound as a default,
+                # NOT read from `task`, because the callback can fire after the loop advanced
                 with task_heartbeat(
                     task_queue,
                     task.id,
@@ -470,9 +346,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 status=run_report.status,
                 stop_reason=run_report.stop_reason,
                 report=run_report.to_dict(),
-                # A2 (2026-09-03): исход, не жизненный цикл — но только когда
-                # прогону БЫЛО что делать: проход здоровья (status/learn) без
-                # рабочих задач честно «done», а не «без работы».
+                # outcome, not lifecycle, but only when the run HAD work to do
                 work_done=(
                     run_report.semantic_result()[1]
                     if any(t.task.kind in ("goal", "propose", "tests") for t in run_report.tasks)
@@ -538,28 +412,18 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             "include_tests": config.include_tests,
         })
 
-        # Прежде чем просить — спросить, не дано ли уже: «да» оператора никто
-        # не читал, и каждый прогон заводил новую заявку с тем же ключом.
-        # Разрешение ОДНОРАЗОВОЕ (executed) — право §9 остаётся у человека.
-        # docs/CODE_NOTES.md, «The approval nobody read».
+        # before asking, check whether a permission is already granted; an approved permission is ONE-TIME (executed), the §9 right stays with the human
         if not config.dry_run and not config.effects_approved:
             granted = self._granted_effects_approval(config)
             if granted is not None:
                 config = replace(config, effects_approved=True)
                 self.approval_inbox.mark_executed(granted.id)
                 self._log("autonomous_effects_granted", {"approval_id": granted.id})
-        # Стоячий грант: одно «да» на неделю питает автомат в стенах —
-        # дневной лимит прогонов, срок, журнал потребления; права §9 целы.
-        # Грант НЕ помечается executed: он живёт до истечения или отзыва.
-        # Зачем: docs/CODE_NOTES.md, «One yes a week».
+        # standing grant: one yes a week feeds the automaton within walls (daily run cap, term, usage journal); it is NOT marked executed
         if not config.dry_run and not config.effects_approved:
             standing = self._active_standing_grant()
             if standing is not None:
-                # Занять единицу и ТОЛЬКО потом разрешать эффекты: между
-                # вопросом «есть ли остаток» и записью расхода помещается
-                # второй потребитель (ревизия PR #333). Отказ здесь означает,
-                # что потолок исчерпан кем-то другим за то же мгновение, и
-                # прогон честно уходит к следующим воротам.
+                # take the unit and only then permit effects: a second consumer fits between the remaining check and the usage write
                 cap = int((standing.payload or {}).get("max_runs_per_day") or 0)
                 if reserve_standing_grant_use(
                     self.workspace, standing.id, max_per_day=cap
@@ -591,26 +455,15 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                     "limit": config.limit,
                     "include_tests": config.include_tests,
                     "learning_limit": config.learning_limit,
-                    # Без этих двух одобренный прогон терял ЦЕЛЬ и вырождался
-                    # в health-pass: docs/CODE_NOTES.md, «The approved goal
-                    # that never ran».
+                    # without these two an approved run lost its GOAL and degraded to a health pass
                     "include_goal": config.include_goal,
                     "include_proposals": config.include_proposals,
                 },
-                # MIR-072 (measured live 2026-08-03): sixteen `:work-session`
-                # retries piled up sixteen identical pending items because this
-                # call site never consulted the inbox's own duplicate guard.
-                # Same goal → same pending request; a decided item stops
-                # deduping, so a new run may ask again. The key is a HASH of
-                # the goal, not the raw text: the stored payload is redacted,
-                # so a raw-text key would stop matching exactly when the goal
-                # carries a secret (review round #284), and long/sensitive goal
-                # text has no business living inside a durable key.
+                # the dedup key is a HASH of the goal, not raw text: stored payloads are redacted, and sensitive goal text must not live in a durable key; a decided item stops deduping
                 dedup_key=self._effects_dedup_key(config.goal),
             )
             if item.id not in _pending_before:
-                # A dedup hit adds nothing and must not burn request budget
-                # (review round #284).
+                # a dedup hit adds nothing and must not burn request budget
                 budget.reserve(
                     "approval_requests", reason="non-dry-run runtime approval"
                 )
@@ -649,8 +502,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 if report.status == "failed":
                     circuit.record_failure(report.summary)
                 elif report.status == "done" and task.kind not in ("status", "learn"):
-                    # A8 (2026-09-03): вопрос ворот и служебная проба — не успех;
-                    # прерыватель кормится только РАБОЧИМИ задачами.
+                    # a gate question and the state probe are not success; the breaker is fed only by WORK tasks
                     circuit.record_success()
 
         circuit_decision = circuit.check()
@@ -686,13 +538,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         stop_reason: str,
         tasks: list[AutonomousTaskReport],
     ) -> None:
-        """Open a structured incident when the run is halted by the circuit.
-
-        A circuit-open stop is a real safety event: it must leave a durable,
-        human-readable trace instead of just a log line. Best-effort and
-        de-duplicated (one open incident per trigger/module at a time) so the
-        daemon never spams the log, and never raises back into the run path.
-        """
+        """Open a structured incident when the circuit halts the run; best-effort, de-duplicated, never raises into the run path."""
         log = self.incident_log
         if log is None:
             return
@@ -702,9 +548,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             failed = sum(1 for t in tasks if t.status == "failed")
             for inc in log.open_incidents():
                 if inc.trigger == trigger and inc.affected_module == affected:
-                    # Block 7 (audit W1, 2026-09-03): a repeat stop used to
-                    # vanish here — one open incident silenced every later
-                    # one and nothing ever resolved it. The record now grows.
+                    # a repeat stop must not vanish: the incident record grows
                     note = (inc.postmortem_note + "; " if inc.postmortem_note else "")
                     log.update(inc.id, postmortem_note=(
                         note + f"recurred {datetime.now(timezone.utc).isoformat()}: "
@@ -732,10 +576,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 },
             )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # This method exists to leave a record that the run halted. Failing
-            # it silently produces exactly the state it was written to prevent:
-            # a halt with no incident, indistinguishable from a clean stop
-            # (MIR-077).
+            # failing silently here would leave a halt with no incident
             self._log(
                 "incident_record_failed",
                 {
@@ -780,11 +621,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             if task.kind == "propose":
                 return self._task_propose(task, config, budget)
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Not silence: the failure leaves as the task's own report — status
-            # `failed`, the exception type in the summary AND in `details`,
-            # which `run_task_queue` writes to the queue row and `_log`s as
-            # `autonomous_task_end`. Broad on purpose: one task must not take
-            # the whole unattended run down with it.
+            # not silence: the failure leaves as the task's own report; broad on purpose, one task must not take down the whole run
             return AutonomousTaskReport(
                 task,
                 "failed",
@@ -866,9 +703,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         passed = int(output.get("passed", 0) or 0)
         timed_out = bool(output.get("timed_out"))
         exit_code = output.get("exit_code")
-        # A timed-out run (or one with no exit code) did NOT actually establish
-        # health: passed=0/failed=0 only means "we never finished", not "green".
-        # Report it as inconclusive so downstream never reads it as success.
+        # a timed-out run (or no exit code) established nothing: report inconclusive, never success
         if timed_out or exit_code is None:
             status: AutonomousTaskStatus = "inconclusive"
             summary = (
@@ -894,9 +729,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 "failed": output.get("failed", 0),
                 "errors": output.get("errors", 0),
                 "failed_tests": output.get("failed_tests", []),
-                # Какой код проверялся. Инструмент это возвращает (PR #301), а
-                # отчёт выбрасывал — и автономный путь, где агент судит о себе
-                # сам, оставался без ответа на «упало у меня или в проекте».
+                # which code was checked: the tool returns it and the report must keep it
                 "code_state": output.get("code_state"),
             },
         )
@@ -952,10 +785,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             try:
                 web_fetches = len(by_kind("web_page"))
             except Exception as exc:  # noqa: BLE001 — reason stated above
-                # 0 stays, because the caller wants an int — but a 0 that means
-                # "counted none" and a 0 that means "could not count" read the
-                # same in the run report, and the operator has no way to tell
-                # them apart. The event is what separates them (MIR-077).
+                # 0 stays (an int is expected), but "counted none" and "could not count" are told apart only by the event
                 web_fetches = 0
                 self._log(
                     "usage_counter_failed",
@@ -984,9 +814,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         try:
             return len(list_persistent())
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # Same shape as `_usage_counters`: "the store holds 0 records" and
-            # "the store could not be read" are different facts and used to
-            # produce the same number in the report (MIR-077).
+            # "the store holds 0 records" and "could not be read" are different facts
             self._log(
                 "memory_count_failed",
                 {"error_type": type(exc).__name__, "error": str(exc)[:200]},
@@ -997,7 +825,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         return gateway_path_from_receipt(self.receipt_path)
 
     def _gate_question_report(self, task: AutonomousTask, answer: str) -> AutonomousTaskReport:
-        """Отчёт о ходе, на котором петля ответила вопросом, а не работой."""
+        """Report for a turn where the loop answered with a question, not work."""
         question = str(answer or "")
         self._log(
             "clarification_gate",
@@ -1018,18 +846,10 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
     def _task_goal(self, task: AutonomousTask, config: AutonomousRuntimeConfig) -> AutonomousTaskReport:
         """Run task.description as a user question through the parent AgentLoop.
 
-        Dry-run effect blocking is handled by the actuation gateway
-        (``gateway_dry_run`` on the parent loop) — not ``policy.blocked_tools``.
-
-        Posture blocks always apply on this unattended path: ``spawn_subagent``
-        and network egress (see ``_AUTONOMOUS_GOAL_BLOCKED_TOOLS``). When tests
-        are disabled (include_tests=False), ``run_tests`` is also blocked so the
-        planner cannot run tests against operator intent (e.g. :work-session or
-        :auto-run --no-tests).
-
-        Gateway and policy blocks are run-scoped and always restored, even on error.
+        Dry-run blocking is handled by the actuation gateway; posture blocks (``_AUTONOMOUS_GOAL_BLOCKED_TOOLS``) always apply,
+        plus ``run_tests`` when tests are disabled. Gateway and policy blocks are run-scoped and always restored, even on error.
         """
-        self._goal_started_at = time.time() - 2.0  # mtime в Linux грубее time.time()
+        self._goal_started_at = time.time() - 2.0  # mtime on Linux is coarser than time.time()
         policy = getattr(self.agent, "policy", None)
         has_block_support = policy is not None and hasattr(policy, "blocked_tools")
         to_block = _goal_block_set(
@@ -1071,14 +891,9 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             if not config.dry_run
             else ()
         )
-        # Чего именно касаются висящие заявки. Пустое множество означает «не
-        # знаю» и оставляет запрет общим — соразмерность не должна превращаться
-        # в лазейку, когда ящик нечитаем (core/gateway_consult.approval_paths).
+        # what the pending requests touch; an empty set means unknown and keeps the ban general
         self.agent.gateway_approval_paths = approval_paths(self.approval_inbox)
-        # The planner-visible tool surface is pruned by the same run context
-        # below: `Planner.effective_hidden_tools` reads the run's block set, so
-        # the planner does not even *propose* a blocked tool, and a neighbouring
-        # run's cleanup cannot widen it mid-run (MIR-114).
+        # the planner-visible tool surface is pruned by the same run context (`effective_hidden_tools`); a neighbouring run's cleanup cannot widen it mid-run
         self._log(
             "autonomous_goal_gateway",
             {
@@ -1090,23 +905,13 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             },
         )
         try:
-            # NOTE: no task_id yet. By this point the RuntimeTask (which has
-            # the id, see run_task_queue) has been reduced to an AutonomousTask
-            # carrying only kind+description. Threading the queue's task id
-            # across that boundary belongs to the autonomous write-back step,
-            # where it is actually consumed.
-            #
-            # The run's own narrowing lives in the run context, not on the
-            # agent: `run_restrictions` unions the block set and ORs dry-run
-            # with whatever is already in force, so this task cannot lift a
-            # host limit and cannot have its own lifted by a neighbouring run
-            # finishing (MIR-114, proofs 6 and 7).
+            # no task_id here: the RuntimeTask was reduced to kind+description; the run's own narrowing lives in the run context
+            # (`run_restrictions`), so this task cannot lift a host limit nor have its own lifted by a neighbouring run
             with run_restrictions(
                 blocked_tools=to_block if block else frozenset(),
                 dry_run=bool(config.dry_run),
             ):
-                # Флаг ворот — свойство ОДНОГО прогона: наследовать его от
-                # прошлого хода значило бы красить настоящий ответ в вопрос.
+                # the gate flag belongs to ONE run: inheriting it would paint a real answer as a question
                 self.agent.last_answer_was_clarification = False
                 answer = self.agent.run(user_question=task.description)
         finally:
@@ -1116,10 +921,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             self.agent.gateway_readiness_blockers = previous_gateway_readiness_blockers
             self.agent.gateway_check_readiness = previous_gateway_check_readiness
             self.agent.suppress_durable_learning_writes = previous_suppress_learning_writes
-        # Вопрос с ворот петли — не работа (Д1, замер 2026-09-03: «Я не могу
-        # безопасно продолжить. Уточни: …» уходил как done → completed/useful).
-        # Та же форма отчёта, что у ветки replan_exhausted ниже: статус
-        # «clarify», вопрос в details['clarification'].
+        # a loop-gate question is not work: status "clarify", question in details['clarification'], same shape as the replan_exhausted branch below
         if bool(getattr(self.agent, "last_answer_was_clarification", False)):
             return self._gate_question_report(task, answer)
         replan_exhausted = bool(getattr(self.agent, "last_replan_exhausted", False))
@@ -1149,27 +951,19 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                 },
             )
         if not str(answer or "").strip():
-            # A9 (2026-09-03): пустой ответ замечался («(no answer)») и всё
-            # равно уезжал как done. Ничего не сделано — «inconclusive».
+            # an empty answer is "inconclusive", not done
             return AutonomousTaskReport(task, "inconclusive", "(no answer)", {"answer": answer})
         return self._settle_goal_answer(task, answer, config)
 
     def _settle_goal_answer(
         self, task: AutonomousTask, answer: str, config: AutonomousRuntimeConfig
     ) -> AutonomousTaskReport:
-        """Решить исход цели по миру, а не по тексту ответа.
+        """Decide the goal outcome by the world, not by the answer text.
 
-        Ответ — не выполнение (аудит автономности 2026-09-17, находка 5). До
-        этой проверки единственным признаком «сделано» был непустой текст от
-        модели: «я создал файл» и созданный файл были одним событием.
-
-        Универсального проверяющего здесь нет и быть не может: критерий —
-        свободный текст. Наблюдается ровно та его часть, которую можно
-        прочесть с диска, не спрашивая ту же модель (core/success_check.py).
-        Исход «unverifiable» сохраняет прежнее поведение и НАЗЫВАЕТ его:
-        «не проверяли» — не «сошлось».
+        The success criterion is free text; only the part readable from disk is observed (core/success_check.py).
+        'unverifiable' keeps the previous behaviour and names it: not checked is not met.
         """
-        # След старше начала цели работой не был (`core/campaign_verdict.py`).
+        # a trace older than the goal start was not work (`core/campaign_verdict.py`)
         observation = against_start(observe_success_check(config.goal_success_check, self.workspace),
                                     self.workspace, getattr(self, "_goal_started_at", None))
         observation.update(settle_patch(self.agent, self.workspace, config.goal_success_check)
@@ -1207,18 +1001,14 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
 
     def _active_standing_grant(self):
-        """Действующий стоячий грант с остатком на сегодня, или None."""
+        """The active standing grant with a remainder for today, or None."""
         return active_standing_grant(
             self.approval_inbox, self.workspace, log=self._log
         )
 
 
     def _granted_effects_approval(self, config: AutonomousRuntimeConfig):
-        """Одобренное разрешение ДЛЯ ЭТОЙ ЖЕ цели, или None.
-
-        Сверка по тому же ключу, которым заявка заводится: одобрение цели A не
-        разрешает цель B. Берётся самое старое подходящее.
-        """
+        """The approved permission for THIS same goal, or None; matched by the key the request is filed under, oldest first."""
         key = self._effects_dedup_key(config.goal)
         now = datetime.now(timezone.utc)
         return next(
@@ -1231,21 +1021,14 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
 
     @staticmethod
     def _effects_dedup_key(goal: str) -> str:
-        """Один ключ на ПРЕДМЕТ цели, а не на её формулировку.
+        """One key per SUBJECT of the goal, not per wording; a goal without a file keys as before.
 
-        Прогон 2026-09-17 завёл восемь заявок об одном и том же за сто секунд:
-        ключ был хэшем ТЕКСТА, а текст цели хартия пишет моделью заново каждый
-        цикл — MIR-072 в новом платье. Уступка названа вслух: предмет шире
-        фразы, два замысла об одном файле делят одно право, и ограничена она
-        тем, что это право УРОВНЯ ПРОГОНА — заплата ниже просит отдельного
-        одобрения `self_apply_lane.run`. Цель без файла ключуется как раньше.
-        Регистр складывается ТОЛЬКО здесь: `_named_target` кормит `target_path`,
-        по которому файл открывают, и свёртка там сломала бы POSIX (ревизия
-        #343). Замер: tests/test_a_permission_outlives_the_wording_of_its_goal.py
+        The permission is run-level (a patch below still needs `self_apply_lane.run` approval).
+        Case is folded ONLY here: `_named_target` feeds `target_path`, which is opened, and folding there would break POSIX.
         """
         from core.best_next_action_helpers import _named_target
 
-        subject = _named_target(core := (goal or "").split("\n\n", 1)[0])  # приписки кампании идут после пустой строки
+        subject = _named_target(core := (goal or "").split("\n\n", 1)[0])  # campaign notes follow a blank line
         basis = f"subject:{subject.casefold()}" if subject else core
         digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
         return f"autonomous_runtime.allow_effects:{digest}"
@@ -1274,12 +1057,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             return None
         log = getattr(self.agent, "log", None)
         log_dir = getattr(log, "log_dir", None) if log is not None else None
-        # Honour the same operator brake the rest of the agent uses: when
-        # AGENT_FREEZE_AUTO_MEMORY froze 'agent-auto' writes, reflection's
-        # auto-generated lessons (which are agent-initiated memory growth)
-        # must be frozen too — otherwise they slip past the freeze straight
-        # into the persistent store. Derived from the live write policy so
-        # the runtime never re-reads the environment.
+        # honour the operator brake: when AGENT_FREEZE_AUTO_MEMORY froze 'agent-auto' writes, reflection lessons are frozen too (derived from the live write policy)
         write_policy = getattr(self.agent, "write_policy", None)
         frozen_sources = getattr(write_policy, "frozen_sources", frozenset())
         freeze_writes = config.dry_run or "agent-auto" in frozen_sources
@@ -1300,8 +1078,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
         )
         try:
             result = engine.reflect(rotated_reflection)
-            # ── Consume the LearningPlan: ingest the files the reflection engine
-            # identified as weak spots so the agent actually studies them.
+            # consume the LearningPlan: ingest the files the reflection engine named as weak spots
             if result.learning_plan and result.learning_plan.source_paths:
                 try:
                     ingest = ingest_files(
@@ -1324,10 +1101,7 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
                             "claims": ingest.claim_count,
                             "conflicts": ingest.conflicts,
                             "dry_run": config.dry_run,
-                            # A count of ingested files says nothing about
-                            # whether the diagnosed weak spot was the thing
-                            # studied. `grounding` carries that distinction so
-                            # a substitution cannot read as success (MIR-106).
+                            # `grounding` separates "weak spot studied" from a mere ingested-file count, so a substitution cannot read as success
                             "grounding": grounding.get("status", "none"),
                             "unmet_targets": unmet or None,
                         },
@@ -1356,19 +1130,12 @@ class AutonomousRuntime(AutonomousRuntimeProposals):
             log.log(event, payload)
 
 
-#: Queue kinds the runtime can execute. `resume_checkpoint` is here because the
-#: budget guard writes one expressly for the unattended path; leaving it out
-#: meant the queue held rows nothing could ever run.
+#: Queue kinds the runtime can execute; `resume_checkpoint` is here because the budget guard writes one for the unattended path.
 _RUNNABLE_TASK_KINDS: frozenset[str] = frozenset({"auto_run", "resume_checkpoint"})
 
 
 def _config_from_task(task: RuntimeTask) -> AutonomousRuntimeConfig:
-    """Turn a claimed queue row into a run configuration.
-
-    A `resume_checkpoint` runs as a RE-RUN of its goal, not a state-exact
-    resume: exact resumption is the human `--resume` path. Why both, and why
-    refusing the kind was a dead end: docs/CODE_NOTES.md, "Rows nothing frees".
-    """
+    """Turn a claimed queue row into a run configuration; a `resume_checkpoint` runs as a RE-RUN of its goal (exact resumption is the human `--resume` path)."""
     if task.kind not in _RUNNABLE_TASK_KINDS:
         raise ValueError(f"unsupported runtime task kind: {task.kind}")
     return AutonomousRuntimeConfig(
@@ -1377,11 +1144,7 @@ def _config_from_task(task: RuntimeTask) -> AutonomousRuntimeConfig:
         limit=task.limit,
         include_tests=task.include_tests,
         learning_limit=task.learning_limit,
-        # MIR-068 (operator's autonomy grant, 2026-08-03): a queued goal must
-        # EXECUTE, not be carried and silently dropped — the tick used to
-        # report `completed` while only status+learn ran. One wire, two locks
-        # untouched: `_build_queue` still refuses a goal task for the default
-        # "project health" placeholder, and `_task_goal` still applies the
-        # unattended posture blocks, gateway dry-run and the agent-runs budget.
+        # a queued goal must EXECUTE, not be carried and dropped; `_build_queue` still refuses the default placeholder goal and
+        # `_task_goal` still applies posture blocks, gateway dry-run and the agent-runs budget
         include_goal=True,
     )

@@ -1,31 +1,4 @@
-"""Live Model Discovery + Provider Catalog diff — read-only / dry-run
-(TD-011/012).
-
-This module is deliberately conservative. It exposes:
-
-* :func:`build_discovery_audit` — a purely LOCAL, no-network snapshot of
-provider discovery readiness (which providers are supported, have a live
-fetcher, and have credentials configured) plus what the current on-disk
-catalog knows. It never touches the network and never writes anything. This
-backs the ``:model-discovery-audit`` command.
-
-* :func:`build_discovery_report` — a DRY-RUN discovery: it queries the model
-lists of the providers that can be queried, classifies them, and diffs the
-result against the current ``config/model_catalog.json``. It performs real
-provider metadata calls (non-inference, but still network) ONLY for
-providers that are supported, have a fetcher, and have credentials. It NEVER
-writes the catalog. This backs ``:provider-catalog-refresh --dry-run``.
-
-Hard limits (by design, enforced here): - no catalog write (discovery is
-read-only; refresh/write stays in :func:`core.model_catalog.refresh_catalog`
-/ the ``:refresh-models`` command); - no registry overwrite; - no automatic
-model switching; - no self-update; - no LLM inference calls; - no secrets in
-any output (only env-var NAMES and booleans are surfaced).
-
-Querying a provider's model list is metadata-only / non-inference, but it is
-still an external provider call and is only ever made from the explicit dry-
-run path, never from the audit path or a normal run.
-"""
+"""Model discovery and provider-catalog diff: a local no-network audit and a dry-run discovery that never writes the catalog, switches models or surfaces secrets."""
 from __future__ import annotations
 
 import os
@@ -128,7 +101,7 @@ class DiscoveryReport:
     current_catalog_updated_at: str | None = None
     warnings: tuple[str, ...] = ()
 
-    # ── derived buckets (one provider may appear in exactly one) ─────────────
+    # Derived buckets: one provider appears in exactly one.
     @property
     def queried(self) -> tuple[str, ...]:
         return tuple(p.name for p in self.providers if p.status == STATUS_QUERIED)
@@ -327,10 +300,7 @@ def build_discovery_report(
 ) -> DiscoveryReport:
     """DRY-RUN discovery: query queryable providers and diff, WITHOUT writing.
 
-    Only providers that are supported, have a live fetcher, and have credentials
-    are actually contacted (a metadata-only, non-inference provider call). Every
-    other provider is reported with an explanatory status and never contacted.
-    The catalog on disk is never modified.
+    Only supported providers with a fetcher and credentials are contacted (metadata-only); others get an explanatory status. The catalog on disk is never modified.
     """
     requested = {p.lower() for p in providers} if providers else None
     current = mc._load_catalog()

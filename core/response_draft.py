@@ -1,57 +1,8 @@
-"""The answer under construction — an object the deciders contribute to.
+"""The answer under construction: deciders contribute a claim-bearing ``body`` and claim-free notices.
 
-Until now the response was a plain `str` that every post-synthesis decider
-mutated in turn, and the last writer won. That is how three subsystems could
-each report `applied: true` while only one of them reached the operator.
-Measured on the real loop, default configuration: a `replan_exhausted` turn
-whose evidence was thin produced
-
-* `output_policy applied=True` — a warning that the verdict is unreliable
-  because the replan budget ran out,
-* `clarification_gate` — three concrete questions, the gate's whole purpose
-  being that *when the loop is stuck, the mature response is to ASK*,
-* `answer_enforcement outcome=insufficient_evidence applied=True` — which
-  rebuilt the answer from scratch,
-
-and the 426 characters the operator received contained none of the first two.
-They were not overruled. They were overwritten, because they were bytes in the
-same variable as the claims.
-
-The fix is to stop pretending those are the same thing. A response has two
-kinds of content, and only one of them is a claim:
-
-``body``
-    The claim-bearing text. Deciders may rewrite it wholesale — that is what
-    low-evidence truncation legitimately does, and what it is *for*.
-
-``notice``
-    Something a decider says *about* the answer: a clarifying question, a
-    caveat, a scope note. It is not a claim, it is never evidence, and no
-    verdict about the claims can make it untrue. Truncating the claims must
-    leave it standing.
-
-Three notice channels, matching the places the loop puts them:
-
-``prepend``          rendered above the body, in registration order, so the
-                     first-registered ends up closest to the body — which
-                     reproduces the existing nesting exactly.
-``unverified_note``  merged into the Output Contract's ``Unverified:`` section
-                     of whatever body survives, via the same helper
-                     ``core.output_policy`` has always used.
-``append``           rendered below the body (MIR-069: the five-point
-                     verification tail). Below, because it is a statement
-                     about the claims and must read after them — and in this
-                     ledger, because a body rewrite must not delete it.
-
-Composition happens once, at the end, in :meth:`ResponseDraft.render`. That is
-the single arbitration point the cycle did not have: before, "who wins" was
-decided by the order of statements in a 4000-line function; now it is decided by
-what kind of content each decider produced.
-
-The draft also keeps the ledger. :meth:`ResponseDraft.to_log_payload` reports
-every contribution and whether it survived into the rendered text, so a
-contribution that goes missing is visible in the journal instead of having to be
-found by reading the code — which is how this defect was found.
+Notice channels: ``prepend`` (above the body, registration order), ``unverified_note`` (merged into
+the ``Unverified:`` section) and ``append`` (below the body). Notices survive body rewrites;
+:meth:`ResponseDraft.render` composes once and :meth:`ResponseDraft.to_log_payload` records the ledger.
 """
 from __future__ import annotations
 
@@ -177,9 +128,7 @@ class ResponseDraft:
                 text = f"{text}\n\n{notice.text}"
         for notice in self.notices:
             if notice.channel == "prepend":
-                # Prepending in registration order leaves the first-registered
-                # notice closest to the body, which is the nesting the loop
-                # produced when each call site prepended in turn.
+                # registration order leaves the first-registered notice closest to the body
                 text = f"{notice.text}\n\n{text}"
         return text
 

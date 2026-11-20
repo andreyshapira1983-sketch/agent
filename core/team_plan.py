@@ -1,10 +1,4 @@
-"""Dry-run multi-agent team planning.
-
-This is the first layer of the multi-agent organisation model. It does not run
-subagents. It creates bounded contracts that answer: which role is useful, why,
-what may it do, what must it return, what budget does it get, and who verifies
-the result.
-"""
+"""Dry-run multi-agent team planning: first layer of the multi-agent model. Does not run subagents; creates bounded contracts (which role, why, what it may do, what it must return, its budget, who verifies)."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -58,8 +52,7 @@ class SubagentContract:
         overlap = set(self.allowed_tools) & set(self.forbidden_tools)
         if overlap:
             raise ValueError("subagent tool cannot be both allowed and forbidden")
-        # Unknown *tools* are already refused above. The role that picks the
-        # model was the last free string here that nothing checked.
+        # Unknown *tools* are refused above; the role that picks the model was the last unchecked free string.
         ensure_known_model_role(self.model_role)
 
     def to_dict(self) -> dict[str, Any]:

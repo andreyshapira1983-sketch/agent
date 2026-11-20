@@ -1,10 +1,4 @@
-"""Файл прогресса цели человека: заход читает его первым и дописывает в конце.
-
-Заходы кампании — смены без памяти: 26.09 три часа заходов на «подключи модели» перечитывали
-одни и те же образцы, а начатая правка proposals/selffix/local_models_tools/edits.txt стояла;
-в разговоре, где ему назвали сделанное и следующий шаг, она переписалась за 2 минуты.
-Приём — файл прогресса между сессиями (Anthropic, «Effective harnesses for long-running agents»).
-"""
+"""Progress file of a human's goal: a pass reads it first and appends to it at the end."""
 from __future__ import annotations
 
 import hashlib
@@ -67,7 +61,7 @@ def _on_disk(root: Path, rel: str) -> str:
 
 
 class PassProgress:
-    """Один заход на цель человека: подсказка из прошлых заходов и запись этого."""
+    """One pass on a human's goal: a hint from earlier passes and the record of this one."""
 
     def __init__(self, agent: Any, workspace: Any, goal: str) -> None:
         self.agent, self.goal = agent, goal
@@ -97,7 +91,7 @@ class PassProgress:
             if found and found.group(1) not in written:
                 written.append(found.group(1))
         text = " ".join(str(answer or "").split())
-        text = text[text.find("Conclusion:"):] if "Conclusion:" in text else text  # без шапки «Evidence scope»
+        text = text[text.find("Conclusion:"):] if "Conclusion:" in text else text  # without the "Evidence scope" header
         text = _MEMORY_CITATION.sub("", text)
         recalled = [str(getattr(r, "id", "")) for r in getattr(self.agent, "_last_persistent_records", None) or ()]
         self.agent.memory_given_to_goal = frozenset()
@@ -109,7 +103,7 @@ class PassProgress:
 
 
 def start_pass(agent: Any, workspace: Any, config: Any, action: Any) -> PassProgress | None:
-    """Файл ведётся только для захода на цель человека (своя цель агента сменяется драйвами)."""
+    """The file is kept only for passes on a human's goal (the agent's own goal changes with drives)."""
     if getattr(action, "action", "") != "pursue_goal" or getattr(config, "goal_is_self", False):
         if agent is not None:
             agent.memory_given_to_goal = frozenset()

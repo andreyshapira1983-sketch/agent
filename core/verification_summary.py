@@ -1,12 +1,4 @@
-"""MIR-069, phase 1 — the five-point verification explanation.
-
-* only ``verified`` counts as confirmed; * ``user_asserted`` and
-``dialogue_supported`` are named in point 4 as NOT externally confirmed —
-support by the operator's words or this session's transcript is stated as
-exactly that, never upgraded; * a report with nothing examined produces no
-answer tail (the existing disclaimers already speak for that case) but still
-explains itself for the journal.
-"""
+"""Five-point verification explanation: only ``verified`` counts as confirmed; ``user_asserted`` and ``dialogue_supported`` are named in point 4 as NOT externally confirmed; a report with nothing examined has no answer tail but still explains itself for the journal."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,7 +7,7 @@ from typing import Any
 from core.evidence import ProvenanceChain
 from core.verifier_models import VerificationReport
 
-#: The shared five-point vocabulary (first used by the MIR-070 daemon probe).
+#: The shared five-point vocabulary (also used by the daemon probe).
 FIVE_POINT_MARKERS: tuple[str, str, str, str, str] = (
     "Проверял:",
     "Способ:",
@@ -24,9 +16,7 @@ FIVE_POINT_MARKERS: tuple[str, str, str, str, str] = (
     "Уверенность:",
 )
 
-#: Russian wording for every verdict the verifier assigns. A guard test scrapes
-#: `core/verifier_core.py` and fails if a verdict appears there without a line
-#: here — an explanation that omits a bucket lies by omission.
+#: Russian wording for every verdict the verifier assigns; a guard test scrapes `core/verifier_core.py` and fails if a verdict appears there without a line here.
 _VERDICT_RU: dict[str, str] = {
     "verified": "подтверждено сверкой цитаты с сохранённым выводом инструмента",
     "unverified": "без какого-либо подтверждения",
@@ -52,20 +42,9 @@ _VERDICT_RU: dict[str, str] = {
     ),
 }
 
-#: Verdicts that stay OUT of point 4: `verified` is the confirmed bucket,
-#: `structural` lines are not claims at all.
-#:
-#: `dialogue_supported` ВЫШЕЛ отсюда 2026-09-23. Общая почва (common ground),
-#: установленная в разговоре, — законная опора для дальнейшего, и система это
-#: УЖЕ признаёт в двух местах: `core.evidence_support.compute_evidence_support`
-#: держит её в числителе, и ворота обрезки тоже (issue #119). А отчёт наказывал
-#: её ДВАЖДЫ: исключал из числителя и записывал в пробелы. Замер: агент выбрал
-#: заказ верно — брать разбор PDF, не брать корректуру иврита, которую уже
-#: провалил на деле, — а внизу стояло «подтверждено 0 из 8, уверенность
-#: нулевая», потому что все опоры были из разговора.
-#:
-#: `user_asserted` остаётся пробелом по решению оператора 2026-08-03 (MIR-028):
-#: слова человека подтверждают, что было сказано, а не что это правда.
+#: Verdicts that stay OUT of point 4: `verified` is the confirmed bucket, `structural` lines are not claims.
+#: `dialogue_supported` is not a gap: common ground established in the conversation is legitimate support (counted in the numerator by
+#: `core.evidence_support.compute_evidence_support` and by the truncation gate). `user_asserted` stays a gap: the human's words confirm what was said, not that it is true.
 _NOT_A_GAP: frozenset[str] = frozenset(
     {"verified", "dialogue_supported", "structural"}
 )
@@ -73,9 +52,7 @@ _NOT_A_GAP: frozenset[str] = frozenset(
 #: How many matched sources point 3 lists before summarising the rest.
 _MAX_NAMED_SOURCES = 5
 
-#: The fixed prefix of the compact answer tail. `format_human_response`
-#: buckets on it explicitly — measured live (2026-08-03): without that, the
-#: Output Contract strip dropped the tail between `render()` and the print.
+#: Fixed prefix of the compact answer tail; `format_human_response` buckets on it explicitly, otherwise the Output Contract strip drops the tail.
 TAIL_PREFIX = "Проверка:"
 
 
@@ -139,12 +116,7 @@ def _gap_counts(report: VerificationReport) -> list[tuple[str, int]]:
 
 
 def _tail_notes(report: VerificationReport, admitted: int) -> tuple[str, str]:
-    """Приписки хвоста: названное непроверенным и опора на запись разговора.
-
-    Опора на реплики разговора — не внешнее подтверждение (MIR-028), но и не
-    пустота: 2026-09-21 на «помнишь разговор?» хвост «0 из 11, нулевая» читался
-    как ответ без опоры, хотя стоял на записи беседы.
-    """
+    """Tail notes: what was named unverified and support from the conversation record (not external confirmation, but not emptiness either)."""
     named = f" ({admitted} — ответ сам назвал непроверенными)" if admitted else ""
     dialogue = int(getattr(report, "dialogue_supported_chunks", 0) or 0)
     heard = (
@@ -157,11 +129,7 @@ def _tail_notes(report: VerificationReport, admitted: int) -> tuple[str, str]:
 def _gaps_with_admitted(
     report: VerificationReport, examined: int,
 ) -> tuple[list[tuple[str, int]], int]:
-    """Пробелы вместе с тем, что ответ сам вынес в «Не подтверждено».
-
-    Названное непроверенным — тоже непроверенное, и счёт обязан его видеть
-    (2026-09-21: «я не проверял X» над «9 из 9, уверенность высокая»).
-    """
+    """Gaps together with what the answer itself put under 'Not confirmed'; a named-unverified item is unverified too and the count must see it."""
     gaps = _gap_counts(report)
     admitted = getattr(report, "admitted_unverified_chunks", 0) if examined else 0
     if admitted:
@@ -169,13 +137,8 @@ def _gaps_with_admitted(
     return gaps, admitted
 
 
-#: Below this, the tail says the answer may not be addressing the question.
-#: NOT an operator-set number. Chosen from measurement: two production runs on
-#: 2026-08-09 answered a question that had not been asked and scored 0.051 and
-#: 0.231, while an on-topic pair scores 1.000 and an off-topic one 0.000 on the
-#: same metric. The gap is wide because the score is token overlap, so the
-#: threshold sits well above the observed failures and well below a real answer.
-#: Raise or lower it on evidence, not on taste.
+#: Below this, the tail says the answer may not be addressing the question. Chosen from measurement, not an operator number: failed production runs scored
+#: 0.051 and 0.231, an on-topic pair 1.000, an off-topic one 0.000 (token overlap), so it sits well above the failures and well below a real answer. Change it on evidence.
 _LOW_RELEVANCE = 0.35
 
 
@@ -187,16 +150,12 @@ def build_verification_summary(
     *,
     rejected_draft: bool = False,
 ) -> VerificationSummary:
-    """Compose the five points from the verifier's own numbers. Pure.
+    """Compose the five points from the verifier's own numbers (pure).
 
-    ``vector`` is the three-axis confidence diagnosis. It is optional
-    because the summary predates it and must still build without one, and it
-    is REPORTED RATHER THAN MERGED: citation integrity and task relevance
-    answer different questions, and folding them into a single word would
-    destroy the very information this argument exists to carry.
+    ``vector`` is the optional three-axis confidence diagnosis, REPORTED RATHER THAN MERGED: citation integrity and task relevance answer different questions.
     """
     examined = sum(1 for c in report.chunks if c.verdict != "structural")
-    # Опора на разговор — в числителе, как у ворот (основание: `_NOT_A_GAP`).
+    # Support from the conversation counts in the numerator, as at the gate (see `_NOT_A_GAP`).
     verified = report.verified_chunks + int(
         getattr(report, "dialogue_supported_chunks", 0) or 0
     )
@@ -209,7 +168,7 @@ def build_verification_summary(
         )
     )
 
-    # (1) Что проверял.
+    # (1) What was examined.
     if examined == 0:
         checked = (
             "ни одного утверждения — ответ не содержал проверяемых утверждений"
@@ -219,7 +178,7 @@ def build_verification_summary(
         subject = "отклонённого черновика" if rejected_draft else "ответа"
         checked = f"{examined} утверждений {subject}, каждое отдельно"
 
-    # (2) Каким способом.
+    # (2) By what method.
     if examined == 0:
         method = "проверка не проводилась — сверять было нечего"
     else:
@@ -235,15 +194,13 @@ def build_verification_summary(
             )
         method = "; ".join(parts)
 
-    # (3) На каком доказательстве.
+    # (3) On what evidence.
     sources: list[str] = []
     if chain is not None and chain.evidences:
         by_id = {ev.id: ev for ev in chain.evidences}
         seen: set[str] = set()
         for chunk in report.chunks:
-            # Опора на разговор тоже НАЗЫВАЕТСЯ: до 2026-09-23 перебирались
-            # только `verified`, и ответ, стоящий на общей почве, не называл
-            # ни одного доказательства — «совпадений с источниками нет».
+            # Support from the conversation is also NAMED, otherwise an answer standing on common ground names no evidence.
             if chunk.verdict not in ("verified", "dialogue_supported"):
                 continue
             for ev_id in chunk.matched_evidence_ids:
@@ -263,7 +220,7 @@ def build_verification_summary(
     else:
         evidence = "совпадений утверждений с источниками цепочки нет"
 
-    # (4) Что осталось непроверенным.
+    # (4) What stayed unverified.
     gaps, admitted = _gaps_with_admitted(report, examined)
     if examined == 0:
         unverified = "весь ответ — он не проверялся"
@@ -275,11 +232,10 @@ def build_verification_summary(
             for verdict, count in gaps
         )
 
-    # (5) Насколько уверен.
+    # (5) How confident.
     word, confidence = _confidence_wording(verified, examined + admitted)
     if no_evidence_owed and examined > 0:
-        # «Нулевая уверенность» — приговор для хода, который был должен улики
-        # и не принёс. Ход, который улик не был должен, приговора не заслужил.
+        # 'Zero confidence' is a verdict for a turn that owed evidence and brought none; a turn that owed none does not deserve it.
         confidence = (
             "не применимо — внешнее подтверждение на этом ходе не требовалось"
         )
@@ -304,17 +260,13 @@ def build_verification_summary(
         )
 
     if tail:
-        # Применимость спрашивается ДО значения: между разными системами письма
-        # покрытие слов не измеряет соответствие задаче, и низкое число там —
-        # факт о клавиатуре, а не об ответе (замер 2026-08-10). Ось ортогональна
-        # уликам, поэтому предупреждение живёт и в хвосте «не требовалось».
+        # Applicability is asked BEFORE the value: across different writing systems word coverage does not measure fit to the task, so a low number says something about the keyboard.
+        # The axis is orthogonal to evidence, so the warning also lives in the 'not required' tail.
         _relevance = getattr(vector, "relevance_score", None)
         if not getattr(vector, "relevance_applicable", True):
             _relevance = None
-        # `verified != examined` — полное подтверждение снимает прокси: ответ
-        # построен на уликах, взятых под этот вопрос. Частичного мало; почему,
-        # чем мерялось и какой промах остался: docs/CODE_NOTES.md, «The measure
-        # punished being answered».
+        # Full confirmation (`verified == examined`) lifts the proxy: the answer is built on evidence taken for this question; partial is not enough
+        # (docs/CODE_NOTES.md, 'The measure punished being answered').
         if (_relevance is not None and _relevance < _LOW_RELEVANCE
                 and verified != examined):
             subject = "черновик" if rejected_draft else "ответ"

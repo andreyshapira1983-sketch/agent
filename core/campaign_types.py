@@ -1,40 +1,22 @@
-"""Campaign value types: configuration, per-action outcome, and the result of a finished campaign.
-
-Extracted from `core/campaign` by autonomous self-build module split.
-"""
+"""Campaign value types: configuration, per-action outcome, and the result of a finished campaign."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
 
-#: `kw_only` не украшение. Ревизия PR #333: `success_check` встал ВТОРЫМ
-#: полем, и любой позиционный вызывающий с этого дня молча получал
-#: критерий успеха там, где передавал что-то другое. Порядок полей у
-#: растущей настройки — не договор, и притворяться договором он не
-#: должен: пусть ошибка будет громкой, а не тихой.
+#: `kw_only`: field order of a growing config is not a contract, so a positional call must fail loudly.
 @dataclass(frozen=True, kw_only=True)
 class CampaignConfig:
     goal: str = "project health"
-    #: Критерий успеха цели — дословно тот, с которым её выбрала хартия.
-    #: Пустая строка значит «критерий не назван», и это честное состояние:
-    #: четыре точки входа задают цель строкой без всякой проверки.
+    #: Success criterion of the goal, verbatim as chosen by the charter; empty means 'no criterion named'.
     success_check: str = ""
     max_cycles: int = 24
     max_llm_calls: int = 100
     max_cost_units: int = 0
     max_idle_streak: int = 3
-    #: Гасит РУКИ, а не приборы. Спрашивают его в `core/campaign_io.py` ровно
-    #: производители эффектов (`propose_engineering_task`,
-    #: `draft_doctrine_document`, `study_external_source` — все под
-    #: `and not config.dry_run`): сухой прогон не рождает заявок, черновиков и
-    #: правок мира. Журналы прогона — `data/campaign_ledger.jsonl` и
-    #: `data/campaign_verdicts.jsonl` — пишутся ВСЕГДА: это показания, а не
-    #: эффекты, и молчать они обязаны вместе. Повод сказать это словами:
-    #: ревизия PR #351 прочла флаг как «не писать на диск», потому что поле
-    #: молчало, и границу приходилось восстанавливать по местам вызова.
-    #: Свидетель: tests/test_a_campaign_judges_its_own_goal.py::
-    #: test_a_dry_campaign_records_its_verdict_beside_its_ledger.
+    #: Silences the HANDS, not the instruments: only effect producers consult it (core/campaign_io.py); the run journals
+    #: (data/campaign_ledger.jsonl, data/campaign_verdicts.jsonl) are ALWAYS written.
     dry_run: bool = True
     report_every: int = 1
     idle_recheck_seconds: int = 600
@@ -42,52 +24,19 @@ class CampaignConfig:
     cycle_pause_seconds: int = 0
     max_consecutive_errors: int = 3
     max_unproductive_streak: int = 0
-    #: Сколько раз за процесс агент вправе сменить исчерпанную цель; 0 — без
-    #: потолка. По умолчанию прежние 12 (core/campaign.py). Суточный прогон
-    #: 2026-09-19: потолок был выбран за час с небольшим, и дальше кампания
-    #: засыпала до «перемены мира» — оператор: «мне не надо, чтобы он спал».
+    #: Max goal switches per process; 0 means no ceiling. Default 12 (core/campaign.py).
     max_goal_switches: int = 12
-    #: Когда меню действий не даёт цели ничего допустимого, выполнить САМУ цель
-    #: (один заход агента на цель) вместо простоя. Суточный прогон 2026-09-19:
-    #: 9 из 27 циклов — «нечего делать» при конкретной выбранной им цели
-    #: («прочитай best_next_action.py и запиши…»): цель была фильтром меню, а не
-    #: заданием. По умолчанию выключено — прежнее поведение.
+    #: When the action menu offers the goal nothing allowed, run the goal itself (one agent pass) instead of idling. Off by default.
     pursue_goal_when_idle: bool = False
-    #: Цель — задание, а не фильтр меню: каждый цикл с целью делает САМУ цель
-    #: (один заход), меню спрашивается только о настоящей поломке
-    #: (critical/high). Замер суток 2026-09-19: 301 из 471 цикла выбрала таблица
-    #: приоритетов по записям о прошлых провалах, мимо цели; эти действия дали
-    #: 15/207 и 0/77, а заход на саму цель — 15/20. Разбор своих провалов
-    #: приходит задачей от драйвов (uncertainty, maintenance_need), наравне с
-    #: предметом. После захода цель отработана — следующий цикл её сменит.
+    #: The goal is a task, not a menu filter: each cycle with a goal runs the goal itself (one pass); the menu is asked only
+    #: about a real breakage (critical/high). After the pass the goal is done and the next cycle switches it.
     goal_first: bool = False
-    #: Цель выбрал САМ агент (драйвы, хартия), а не назвал человек. Ставится
-    #: там же, где цель добывается, потому что только там правда известна:
-    #: файл `logs/campaign_goal_source.txt` пишет ЗАПУСКАЮЩИЙ скрипт, то есть
-    #: он снаружи и ему можно соврать (вопрос агента, 2026-09-21).
+    #: The agent chose the goal itself (drives, charter), not a human; set where the goal is obtained because only there is it known.
     goal_is_self: bool = False
-    #: Имя действия, которым делается ЭТА цель (режим goal_first). Пусто —
-    #: заход агента на цель (pursue_goal). Драйв «непонятного» ставит сюда
-    #: `explain_causal_observation`: наблюдение закрывается заявкой с
-    #: конкурирующими объяснениями, а прозаический разбор не закрывал ничего —
-    #: одно и то же наблюдение возвращалось 230 раз за сутки (2026-09-20).
+    #: Action name that carries THIS goal (goal_first mode); empty means an agent pass on the goal (pursue_goal).
     goal_action: str = ""
-    #: Межзапусковый потолок трат на ОДНУ сигнатуру действия (MIR-149).
-    #: 400 = два дневных прогона гранта; число одобрено оператором 2026-08-27.
-    #: Превышение — не молчаливое исполнение, а вопрос ему (result="cost_cap").
-    #: 400 -> 1200 (2026-09-01, слово оператора «подними потолок»): счётчик
-    #: копится за ВСЕ запуски и не имеет окна, поэтому 411 единиц, потраченных
-    #: за неделю на `propose_engineering_task`, сделали действие мёртвым
-    #: навсегда — четыре самостоятельных запуска подряд не дали работы.
-    #: Поднято втрое, а не сброшено: история трат остаётся видимой, и стена
-    #: вернётся, когда действие снова начнёт жечь бюджет впустую. Настоящее
-    #: лекарство — окно (траты за N суток) — НЕ вводится: это смена политики,
-    #: а не её исполнение, и требует отдельного слова оператора.
-    #: 1200 -> 0 (2026-09-01, слово оператора «счётчик вообще должны снять»):
-    #: межзапусковый потолок ВЫКЛЮЧЕН на время длинного прогона. Механизм цел
-    #: и включается одним числом; выключен он потому, что за сутки не поймал
-    #: ни одной опасной траты, зато четырежды остановил работу до её начала.
-    #: Дневной и прогонный бюджеты (max_llm_calls, max_cost_units) остаются.
+    #: Cross-run spend ceiling per action signature; 0 = off. Exceeding it is a question to the operator (result="cost_cap").
+    #: The counter has no window; the daily and per-run budgets (max_llm_calls, max_cost_units) stay in force.
     max_cost_units_per_signature: int = 0
 
     def __post_init__(self) -> None:
@@ -122,25 +71,19 @@ class CampaignActionOutcome:
     cost_units_spent: int = 0
     proposal: str | None = None
     artifact: str | None = None
-    #: Слово производителя «работа сделана» — для исходов без продукта
-    #: (MIR-117, норма A). Продукт говорит сам за себя через did_work.
+    #: The producer's word 'work done' for outcomes without a product; a product speaks for itself via did_work.
     work_done: bool = False
-    # предмет шага - отпечаток наблюдения у объяснителя, ключ заявки у суда;
-    # пустая строка у действий без предмета (WEAVE ЗАЗОР 1, авторство агента)
+    # Step subject: observation fingerprint for the explainer, claim key for the court; empty for subject-less actions.
     subject: str = ""
 
     @property
     def did_work(self) -> bool:
-        """Работа сделана: продукт существует или производитель сказал сам."""
+        """Work is done: a product exists or the producer said so."""
         return self.work_done or self.proposal is not None or self.artifact is not None
 
     @property
     def ran(self) -> bool:
-        """Попытка была: что-то потрачено или что-то сделано.
-
-        Отказ до старта (0 трат, 0 продукта) попыткой НЕ является — банить его
-        подпись значило бы лгать «прежний проход не снял сигнал» (MIR-117).
-        """
+        """An attempt was made: something was spent or done; a refusal before start is NOT an attempt."""
         return self.did_work or self.llm_calls_spent > 0 or self.cost_units_spent > 0
 
 
@@ -153,8 +96,7 @@ class CampaignResult:
     records: list[Any] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     clarification: dict[str, Any] | None = None
-    #: Вердикт по СОБСТВЕННОМУ критерию цели (core/campaign_verdict.py).
-    #: `None` = не судили: так выглядит результат, собранный не кампанией.
+    #: Verdict on the goal's OWN criterion (core/campaign_verdict.py); `None` = not judged.
     success_verdict: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -184,15 +126,12 @@ class CampaignResult:
                 f"proposals={self.totals.get('proposals', 0)}  "
                 f"artifacts={self.totals.get('artifacts', 0)}  "
                 f"goal_drove={self.totals.get('goal_drove_cycles', 0)}  "
-                # Цена полезного цикла — всегда видимое зеркало трат (MIR-177).
-                # «-» при нуле полезных: неопределённость не ноль и не бесконечность.
+                # Cost of a useful cycle is always a visible mirror of spend; '-' at zero useful cycles.
                 f"units_per_useful="
                 f"{round(self.totals.get('cost_units', 0) / u, 1) if (u := self.totals.get('useful_cycles', 0)) else '-'}"
             ),
         ]
-        # Вердикт по цели стоит ВЫШЕ циклов: `status=completed` у прогона,
-        # который цели не достиг, формально верен («смена отработана»), а
-        # человеку читается как успех.
+        # The goal verdict ranks ABOVE cycles: `status=completed` for a run that missed its goal would read as success.
         if self.success_verdict:
             from core.campaign_verdict import verdict_summary_line
             lines.append(verdict_summary_line(self.success_verdict))

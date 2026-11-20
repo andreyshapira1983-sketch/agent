@@ -1,11 +1,4 @@
-"""Deterministic mapper from abstract backlog items to concrete self-build
-targets.
-
-* known patterns only; * project-owned local evidence only; * no LLM,
-network, git, writes, approvals, scheduler, or runtime state access; *
-missing/broken evidence returns ``unknown`` / ``no_target`` instead of
-raising.
-"""
+"""Deterministic mapper from abstract backlog items to concrete self-build targets; local evidence only, no LLM, network or writes."""
 from __future__ import annotations
 
 import re
@@ -19,19 +12,10 @@ from core.self_apply_lane import FileChange, classify_patch_risk
 MODEL_DISCOVERY_TARGET = "core/model_discovery.py"
 MODEL_DISCOVERY_TEST_TARGET = "tests/test_model_discovery.py"
 
-# Oversized-module organ emits ``split:<rel>`` abstract targets. The prefix is
-# duplicated as a module constant here so the mapper does not depend on the
-# signal module (avoids an import cycle) while staying a single source of truth.
+# Prefix of the oversized-module signal, duplicated here to avoid an import cycle with the signal module.
 SPLIT_TARGET_PREFIX = "split:"
 
-# Upper line budget for a single-pass (one model reply) module split. The Builder
-# must emit the shrunk target plus all new sibling modules in one JSON reply,
-# which is capped by the provider's output-token ceiling (~16k for the default
-# model). ~1500 lines is the realistic edge of what fits in one reply: smaller
-# oversized modules can be split, while 2000+ line files (planner.py, loop.py)
-# truncate and fail — and the selector is worst-first, so too high a cap makes
-# the agent fixate on the biggest impossible file and burn tokens. The true fix
-# for the giants is still an incremental/multi-pass split lane.
+# Line budget for a single-pass module split (one model reply, bounded by the output-token ceiling); larger files truncate and fail, and the worst-first selector would fixate on them.
 SPLIT_ONE_SHOT_MAX_LINES = 1500
 
 _MODEL_DISCOVERY_RULE = "td_011_012_model_discovery"
@@ -78,7 +62,7 @@ class MappedBacklogCandidate:
 class TargetMappingResult:
     """Outcome of a deterministic target-mapping attempt."""
 
-    decision: str  # concrete | mapped | no_target | unknown
+    decision: str
     reason: str
     candidate: MappedBacklogCandidate | None = None
     target_path: str | None = None
@@ -94,7 +78,7 @@ class TargetMappingResult:
 class _ReadResult:
     rel_path: str
     text: str
-    status: str  # known | missing | broken
+    status: str
 
 
 def map_backlog_candidate(
@@ -139,14 +123,7 @@ def map_backlog_candidate(
 def _map_split_candidate(
     candidate: Any, target: str, *, workspace: str | Path
 ) -> TargetMappingResult:
-    """Map an oversized-module ``split:<rel>`` signal to its concrete .py file.
-
-    A split target becomes *actionable* only when the underlying module really
-    exists, is a low-risk editable ``.py`` file, and is not a critical/denied
-    path. Critical modules (e.g. ``core/loop.py``) still resolve here so the
-    ranking is honest, but the producer's Manager critical-gate blocks the
-    actual edit — mirroring the report-only contract for the riskiest files.
-    """
+    """Map an oversized-module ``split:<rel>`` signal to its .py file; critical modules still resolve (honest ranking) but the Manager critical-gate blocks the edit."""
     rel = target[len(SPLIT_TARGET_PREFIX):].strip().replace("\\", "/")
     if not rel:
         return TargetMappingResult(
@@ -171,21 +148,7 @@ def _map_split_candidate(
             f"split target {rel!r} does not exist ({read.status})",
             target_path=target,
         )
-    # One-shot feasibility guard: the Builder rewrites the shrunk target PLUS the
-    # new sibling modules in a SINGLE model reply, which is bounded by the model's
-    # output-token ceiling. A module far above this line budget cannot be split in
-    # one pass (the reply truncates and parses to nothing), so it stays
-    # report-only — like a critical file — until an incremental splitter exists.
-    # Прежде здесь стоял отказ для файлов длиннее SPLIT_ONE_SHOT_MAX_LINES со
-    # словами «needs an incremental splitter» — написанный, КОГДА расщепителя не
-    # было. Он давно есть: затвор масштаба производителя (>900 строк,
-    # `_split_target_too_large`) сам маршрутизирует к
-    # `_deterministic_split_report`, и это закреплено тестом «Site 2». Отказ
-    # делал ту ветку недостижимой — картограф говорил «нет того, что уже есть»,
-    # и за одни сутки безнадзорной работы это стоило 234 единицы на циклы со
-    # структурно невозможным продуктом (MIR-179). Теперь картограф отдаёт
-    # конкретный файл, а КАК его колоть — одним выстрелом или инкрементально —
-    # решает производитель по своему затвору масштаба.
+    # No refusal for files above SPLIT_ONE_SHOT_MAX_LINES: the producer's scale gate decides between one-shot and incremental split.
     mapped = _copy_candidate(candidate, target_path=rel, mapping_rule="split_module")
     return TargetMappingResult(
         "mapped",

@@ -1,34 +1,15 @@
-"""Subagent role performance ledger (TD-028).
+"""Subagent role performance ledger.
 
-A small, persistent read/write registry that records how the self-build
-producer's role-level subagents — Manager, Researcher, Builder, Critic, Reporter
-— perform over time, so the central agent can begin *managing a corporation of
-agents*.
-
-Scope of this module (deliberately narrow):
-
-* It RECORDS and REPORTS role performance only. It never hires/fires: the
-  ``recommendation`` field (keep / watch / pause / retire) is **advisory** and is
-  NEVER used to change a role's stored ``status``. There is no auto-pause,
-  auto-retire, or model-routing change here.
-* It performs no LLM/provider/network/git work and never applies, commits, or
-  pushes anything. It only reads/writes a single JSON file under ``data/``.
-* Writes are best-effort: callers wrap ``record_*`` so a registry write failure
-  can never break the producer or the daemon tick.
-
-Decision mapping (TD-028 clarification 4/5/6):
-
-* manager  ``selected``  -> success        ``no_target`` -> neutral (not failure)
-* researcher ``gathered`` -> success
-* builder  ``built``     -> success        ``failed``    -> failure
-* critic   ``pass``      -> success        ``veto``      -> useful veto (NOT a
-  failure; it increases the Critic's trust/usefulness).
-* reporter ``published`` -> success
-
-A Critic veto also marks the vetoed Builder output (``outputs_vetoed``) so that
-repeated vetoed Builder outputs can move the Builder's *recommendation* toward
-watch/pause/retire — but, again, only the recommendation, never the status.
-"""
+    A small persistent registry recording how the self-build producer's roles
+    (Manager, Researcher, Builder, Critic, Reporter) perform over time. It only
+    RECORDS and REPORTS: ``recommendation`` (keep / watch / pause / retire) is
+    advisory and never changes a role's stored ``status``. No LLM, network or git
+    work; one JSON file under ``data/``. Writes are best-effort (callers wrap
+    ``record_*``). Decisions: manager selected / researcher gathered / builder
+    built / critic pass / reporter published = success; manager no_target =
+    neutral; builder failed = failure; critic veto = useful veto (raises Critic
+    trust) and marks ``outputs_vetoed`` on the Builder, which can move only its
+    recommendation."""
 from __future__ import annotations
 
 import json
@@ -41,12 +22,10 @@ from typing import Any
 from core.subagent_contract import CanonicalSubagentContract
 from core.subagent_contract_audit import ContractAuditReport, SubagentExecutionReceipt
 
-# Persistent ledger location (gitignored ``data/`` tree). One small JSON file
-# keyed by role id; atomic tmp+replace on write.
+# Persistent ledger location (gitignored ``data/``): one small JSON file keyed by role id; atomic tmp+replace on write.
 REGISTRY_PATH = "data/subagent_registry.json"
 
-# The producer's role-level subagents. Treated as ROLES for now (TD-028
-# clarification 1), not yet fully independent persistent agents.
+# The producer's role-level subagents, treated as ROLES, not independent persistent agents.
 DEFAULT_ROLES: tuple[str, ...] = (
     "manager",
     "researcher",
@@ -58,18 +37,14 @@ DEFAULT_ROLES: tuple[str, ...] = (
 VALID_STATUSES: tuple[str, ...] = ("active", "paused", "retired")
 VALID_RECOMMENDATIONS: tuple[str, ...] = ("keep", "watch", "pause", "retire")
 
-# TD-031 canonical, narrow lane-outcome attribution. One role per outcome; do NOT
-# credit all roles. ``reporter`` published the item that got approved; ``builder``
-# owns the file content that either committed or had to be rolled back.
+# Narrow lane-outcome attribution: one role per outcome, never all. ``reporter`` published the approved item; ``builder`` owns the file content that committed or was rolled back.
 LANE_OUTCOME_ROLE: dict[str, str] = {
     "approved": "reporter",
     "committed_local": "builder",
     "rolled_back": "builder",
 }
 
-# TD-033 canonical human value-review attribution. Each verdict blames/credits
-# exactly one role. ``accepted`` is confirmed value for the built change; each
-# ``rejected_*`` points at the role most responsible for that failure mode.
+# Human value-review attribution: each verdict credits/blames exactly one role. ``accepted`` is confirmed value; each ``rejected_*`` points at the most responsible role.
 VERDICT_ROLE: dict[str, str] = {
     "accepted": "builder",
     "rejected_low_value": "builder",
@@ -78,30 +53,13 @@ VERDICT_ROLE: dict[str, str] = {
     "rejected_risky": "critic",
 }
 
-# Advisory recommendation thresholds. Conservative by design; they only shape the
-# ``recommendation`` string and never the stored ``status``.
+# Advisory recommendation thresholds, conservative; they shape only the ``recommendation`` string.
 _MIN_JUDGED_FOR_RECOMMENDATION = 5
 _TRUST_KEEP = 0.70
 _TRUST_WATCH = 0.40
 _TRUST_PAUSE = 0.20
 
-# TD-031 amendment — technical success is NOT confirmed value.
-#
-# A self-apply lane outcome tells us the change was *technically* accepted:
-#   - approved        : a human clicked approve in the inbox
-#   - committed_local : the patch applied and the test suite passed locally
-#   - rolled_back     : the lane reverted the change
-# None of these prove the change was *worth making*. The live self-build
-# experiment produced a ``committed_local`` proposal for core/redaction.py that
-# passed tests yet was only a comment-capitalization edit dressed up as a
-# "robustness improvement" — humans rejected it as low value. So technical
-# outcomes get a small reliability nudge in usefulness, never a full value point.
-#
-# ``confirmed_value`` (a human-accepted / value-reviewed outcome, TD-033) is the
-# separate, full-weight positive signal that a technical success actually
-# delivered value; ``value_rejected`` is its full-weight negative. Both are owned
-# exclusively by :meth:`SubagentRegistry.reconcile_value_reviews` (a projection of
-# the TD-032 value-review ledger) — no other code path increments them.
+# Technical success is NOT confirmed value. Lane outcomes (approved, committed_local, rolled_back) show a change was technically accepted, not that it was worth making, so they give only a small reliability nudge to usefulness. ``confirmed_value`` and ``value_rejected`` (human value reviews) are the full-weight signals, owned exclusively by :meth:`SubagentRegistry.reconcile_value_reviews`.
 _TECHNICAL_SUCCESS_WEIGHT = 0.25
 
 
@@ -138,9 +96,7 @@ class RoleRecord:
     proposals_approved: int = 0
     committed_local: int = 0
     rolled_back: int = 0
-    # TD-033 human value-review counters. Owned exclusively by
-    # ``reconcile_value_reviews`` (projection of the value-review ledger); no
-    # other method increments them, so they never double-count.
+    # Human value-review counters, owned exclusively by ``reconcile_value_reviews`` so they never double-count.
     confirmed_value: int = 0
     value_rejected: int = 0
     cost_units: float = 0.0
@@ -206,10 +162,7 @@ class RoleRecord:
 class ContractRunRecord:
     """Version-separated runtime counters for one canonical contract.
 
-    These counters are deliberately independent from :class:`RoleRecord` so a
-    future caller can reconcile verified value exactly once instead of
-    accidentally double-counting an execution as role reputation.
-    """
+        Independent from :class:`RoleRecord` so verified value is reconciled exactly once and an execution is not double-counted as role reputation."""
 
     contract_id: str
     schema_version: int
@@ -304,24 +257,7 @@ def _trust_score(rec: RoleRecord) -> float:
 def _usefulness_score(rec: RoleRecord) -> float:
     """Value delivered per invocation (0..1, capped).
 
-    Positive signals, deliberately weighted differently:
-
-    * **Confirmed value** (full weight): human ``accepted`` value reviews
-      (``confirmed_value``, TD-033). This is the only signal that a change was
-      actually *worth making*, so it carries full weight.
-    * **Producer-stage value** (full weight): proposals created and Critic
-      vetoes. These reflect the pipeline doing its judgement work up front and
-      do not depend on any downstream execution being *good*.
-    * **Technical success** (``_TECHNICAL_SUCCESS_WEIGHT``, a small nudge):
-      ``approved`` (``proposals_approved``) and ``committed_local``. These prove
-      a change was technically accepted/applied, NOT that it was valuable — so
-      they must not by themselves push a role to high usefulness. See the
-      ``_TECHNICAL_SUCCESS_WEIGHT`` note for the redaction.py evidence.
-
-    ``rolled_back`` and human ``value_rejected`` reviews both subtract at full
-    weight (wasted work / a change humans judged not worth making). Normalised by
-    invocations so a role that adds value on most runs trends toward 1.0.
-    """
+        Full weight: human-confirmed value, and producer-stage value (proposals created, Critic vetoes). Small nudge (``_TECHNICAL_SUCCESS_WEIGHT``): ``approved`` and ``committed_local``. ``rolled_back`` and human ``value_rejected`` subtract at full weight. Normalised by invocations."""
     if rec.invocations <= 0:
         return 0.0
     producer_stage_value = rec.proposals_created + rec.vetoes
@@ -339,7 +275,7 @@ def _usefulness_score(rec: RoleRecord) -> float:
 
 
 def _recommendation(rec: RoleRecord) -> str:
-    """Advisory only — NEVER changes ``status`` (TD-028 clarification 7)."""
+    """Advisory only: NEVER changes ``status``."""
     judged = (
         rec.successes
         + rec.vetoes
@@ -366,8 +302,7 @@ def _recompute(rec: RoleRecord) -> None:
     rec.recommendation = _recommendation(rec)
 
 
-# Per-role decision -> outcome bucket. ``None`` means "neutral" (counted as an
-# invocation but neither success nor failure).
+# Per-role decision -> outcome bucket; ``None`` is neutral (an invocation, neither success nor failure).
 _DECISION_OUTCOME: dict[str, dict[str, str | None]] = {
     "manager": {"selected": "success", "no_target": None},
     "researcher": {"gathered": "success"},
@@ -380,10 +315,7 @@ _DECISION_OUTCOME: dict[str, dict[str, str | None]] = {
 class SubagentRegistry:
     """In-memory ledger of role performance, backed by a single JSON file.
 
-    Load with :meth:`load`, feed it ``ProducerReport``-shaped results with
-    :meth:`record_report`, and read a snapshot with :meth:`status_report`. All
-    write helpers persist atomically and never raise on a corrupt/missing file.
-    """
+        Load with :meth:`load`, feed ``ProducerReport``-shaped results to :meth:`record_report`, read a snapshot with :meth:`status_report`. Writes are atomic and never raise on a corrupt/missing file."""
 
     def __init__(
         self,
@@ -394,9 +326,7 @@ class SubagentRegistry:
     ):
         self.workspace = Path(workspace)
         self.roles: dict[str, RoleRecord] = roles if roles is not None else {}
-        # Persistent dedup set for TD-031 lane outcomes. Keyed
-        # ``f"{item_id}:{role_id}:{outcome}"`` so re-firing a hook (or a restart)
-        # never double-counts, and future multi-role crediting stays safe.
+        # Persistent dedup set for lane outcomes, keyed ``f"{item_id}:{role_id}:{outcome}"``, so a re-fired hook or restart never double-counts.
         self.applied_outcomes: set[str] = applied_outcomes if applied_outcomes is not None else set()
         self.contract_runs: dict[str, ContractRunRecord] = (
             contract_runs if contract_runs is not None else {}
@@ -433,7 +363,7 @@ class SubagentRegistry:
                             rec = RoleRecord.from_dict({**data, "role_id": role_id})
                             _recompute(rec)
                             roles[role_id] = rec
-                # Tolerant-load: older ledgers have no ``applied_outcomes`` key.
+                # Tolerant load: older ledgers have no ``applied_outcomes`` key.
                 raw_applied = raw.get("applied_outcomes", []) if isinstance(raw, dict) else []
                 if isinstance(raw_applied, list):
                     applied = {str(k) for k in raw_applied}
@@ -454,8 +384,7 @@ class SubagentRegistry:
         return cls(workspace, roles, applied, contract_runs)
 
     def save(self) -> None:
-        """Persist atomically (tmp + replace). Best-effort; may raise on IO —
-        callers wrap this so a write failure never breaks producer/daemon."""
+        """Persist atomically (tmp + replace). Best-effort; may raise on IO, callers wrap it."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "updated_at": _now_iso(),
@@ -537,10 +466,9 @@ class SubagentRegistry:
         return True
 
     def record_report(self, report: Any, *, save: bool = True) -> bool:
-        """Record one producer run's role outcomes. Returns True if anything was
-        recorded. Accepts a ``ProducerReport`` (or its ``to_dict()``) and only
-        touches roles that actually ran, so gate-wait results (no roles) are a
-        no-op. Never raises on shape surprises."""
+        """Record one producer run's role outcomes. Returns True if anything was recorded.
+
+            Accepts a ``ProducerReport`` (or its ``to_dict()``) and touches only roles that ran; gate-wait results are a no-op. Never raises on shape surprises."""
         data = report.to_dict() if hasattr(report, "to_dict") else dict(report or {})
         role_outputs = data.get("roles") or data.get("role_outputs") or []
         if not role_outputs:
@@ -577,8 +505,7 @@ class SubagentRegistry:
             self._role("reporter").proposals_created += 1
             touched.add("reporter")
         elif status == "critic_veto" and builder_ran:
-            # The Builder's output was rejected downstream; attribute it so
-            # repeated vetoed outputs can move the Builder's *recommendation*.
+            # The Builder's output was rejected downstream; attribute it so repeated vetoes can move the Builder's recommendation.
             self._role("builder").outputs_vetoed += 1
             touched.add("builder")
 
@@ -591,7 +518,7 @@ class SubagentRegistry:
     def record_lane_outcome(
         self, role_id: str, outcome: str, *, save: bool = True
     ) -> bool:
-        """Link a downstream self-apply lane outcome to a role (TD-023/TD-024)."""
+        """Link a downstream self-apply lane outcome to a role."""
         rec = self._role(role_id)
         if outcome == "approved":
             rec.proposals_approved += 1
@@ -610,15 +537,9 @@ class SubagentRegistry:
     def apply_lane_outcome(
         self, item_id: str, outcome: str, *, save: bool = True
     ) -> bool:
-        """Record a lane/approval outcome for the approval item ``item_id`` (TD-031).
+        """Record a lane/approval outcome for the approval item ``item_id``.
 
-        Resolves the canonical crediting role via :data:`LANE_OUTCOME_ROLE`
-        (``approved``->reporter, ``committed_local``/``rolled_back``->builder),
-        then delegates to :meth:`record_lane_outcome`. Persistent dedup keyed
-        ``f"{item_id}:{role_id}:{outcome}"`` makes it idempotent across re-fired
-        hooks and restarts. Returns ``True`` only when it newly recorded. Never
-        mutates role ``status``.
-        """
+            Resolves the crediting role via :data:`LANE_OUTCOME_ROLE` (``approved``->reporter, ``committed_local``/``rolled_back``->builder) and delegates to :meth:`record_lane_outcome`. Idempotent through the persistent dedup key. Returns ``True`` only when newly recorded. Never mutates ``status``."""
         role_id = LANE_OUTCOME_ROLE.get(outcome)
         if role_id is None:
             return False
@@ -635,14 +556,9 @@ class SubagentRegistry:
     def reconcile_value_reviews(
         self, effective: Mapping[str, str], *, save: bool = True
     ) -> bool:
-        """Project the TD-032 value-review ledger onto role scoring (TD-033).
+        """Project the value-review ledger onto role scoring.
 
-        Verdicts map to roles via :data:`VERDICT_ROLE`: ``accepted`` credits
-        ``confirmed_value``; every ``rejected_*`` adds to that role's
-        ``value_rejected``. Unknown verdicts are ignored. Only
-        counters/scores/ recommendation change — role ``status`` is never
-        mutated.
-        """
+            Verdicts map to roles via :data:`VERDICT_ROLE`: ``accepted`` credits ``confirmed_value``, every ``rejected_*`` adds to that role's ``value_rejected``; unknown verdicts are ignored. Only counters, scores and recommendation change."""
         for rec in self.roles.values():
             rec.confirmed_value = 0
             rec.value_rejected = 0

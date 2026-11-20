@@ -1,40 +1,4 @@
-"""Вердикт кампании: сошёлся ли ЕЁ критерий, и записан ли этот факт.
-
-Зачем существует. `core/success_check.py` читает мир и говорит, найдены ли
-названные критерием следы. Он был подключён к одиночной задаче
-(`core/autonomous_runtime`) и НЕ подключён к кампании: `core/campaign.py`
-вёз `success_check` в каждой строке реестра и ни разу по нему не судил.
-Поэтому слова «достигнуто» в системе не существовало, и страж повторов
-(`charter_goal._recent_goals`) запирал тему по факту «был цикл с работой» —
-единственному факту, который вообще был записан.
-
-Почему здесь появляется ЧЕТВЁРТОЕ слово. Замер живого реестра владельца
-(232 строки, 31 несовпадающий критерий) перед правкой: 27 критериев →
-`unverifiable`, 4 → `verified`, и все четыре ложны. Критерий гласил
-«существует проверенная заявка, перечисляющая, что выделить из
-core/smart_memory.py»; судья находил в мире `core/smart_memory.py` — файл,
-лежащий там годами, — и объявлял цель достигнутой, тогда как заявок в той
-кампании было ноль. Судья не различал ПРЕДМЕТ разговора и ПРОДУКТ работы.
-
-Подключить его как есть значило бы записать в вечный журнал четыре ложных
-«достигнуто». Разделитель наблюдаем и не требует модели: след, который
-старше начала кампании, об этой кампании не свидетельствует.
-
-* ``verified``     — все следы найдены И хотя бы один моложе начала прогона;
-* ``preexisting``  — все найдены, но все старше прогона (НЕ успех);
-* ``missing``      — хотя бы один назван и не найден;
-* ``unverifiable`` — наблюдаемого следа не названо (в том числе когда
-                     критерия не назвали вовсе: четыре точки входа задают
-                     цель строкой, и 63 строки живого реестра пришли без него);
-* ``unmet``        — свежие следы есть, но по СОДЕРЖАНИЮ критерий не выполнен
-                     (core/goal_content_judge.py, 2026-09-25: судья читает
-                     продукт, каждое «да» — с цитатой, найденной в файле).
-
-Чего здесь НЕТ намеренно. Никто на этот вердикт пока не опирается: страж
-повторов не меняется. Сначала факт должен существовать и быть проверяемым.
-Опираться на только что заведённое поле, у которого ещё нет истории, — это
-тот же прыжок через доказательство, из-за которого появился `preexisting`.
-"""
+"""Campaign verdict: whether the campaign's own criterion converged, and the recorded fact. Words: verified (all traces found, at least one newer than the run start), preexisting (all older than the run), missing, unverifiable (no observable trace named), unmet (fresh traces but content judge says no). Nothing relies on the verdict yet."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,12 +7,10 @@ from typing import Any
 from core.state_integrity import append_state_jsonl_unlocked, state_file_lock
 from core.success_check import observe_success_check
 
-#: Единственный путь журнала. Второй писатель со своим путём — та же болезнь,
-#: из-за которой читателю остановок пришлось сворачивать чужие строки.
+#: The only journal path; a second writer with its own path would break readers that merge the lines.
 VERDICT_RELPATH = "data/campaign_verdicts.jsonl"
 
-#: Слова вердикта. Список закрыт: незнание, выданное за проверку, обязано
-#: называться отдельно от проверки.
+#: Verdict words; the list is closed so that ignorance is named separately from verification.
 VERDICTS = ("verified", "preexisting", "missing", "unverifiable", "unmet")
 
 _UNSTATED = "критерий не назван: цель поставлена без проверки"
@@ -57,11 +19,7 @@ _UNSTATED = "критерий не назван: цель поставлена �
 def _fresh_traces(
     named: tuple[str, ...] | list[str], workspace: Any, since: float | None,
 ) -> list[str]:
-    """Следы, изменившиеся НЕ РАНЬШЕ начала прогона.
-
-    Без `since` (начало неизвестно) свежим не считается ничего: выдумать
-    свежесть хуже, чем её не знать.
-    """
+    """Traces modified no earlier than the run start; without `since` nothing counts as fresh."""
     if since is None:
         return []
     root = Path(workspace or ".")
@@ -77,7 +35,7 @@ def _fresh_traces(
 
 
 def _unfilled(paths: list[str], workspace: Any) -> list[str]:
-    """Незаполненные места шаблона в свежих следах (core.observation_round)."""
+    """Unfilled template slots in fresh traces (core.observation_round)."""
     from core.observation_round import unfilled_placeholders
 
     holes: list[str] = []
@@ -91,20 +49,13 @@ def _unfilled(paths: list[str], workspace: Any) -> list[str]:
 
 
 def against_start(observation: dict[str, Any], workspace: Any, since: float | None) -> dict[str, Any]:
-    """Вердикт цели с учётом начала: все следы старше начала — «preexisting».
-
-    Кампания 2026-09-22, цикл 1: критерий «в книге Тонга найдено уравнение»
-    называл ВХОДНУЮ книгу (лежит с 15.09), и её существование засчиталось как
-    выполненная цель — ответ был о другом, уравнения в нём нет. Судья кампании
-    этот закон уже держал (`judge_campaign`), судья отдельной цели — нет.
-    """
+    """Goal verdict relative to the start: all traces older than the start -> preexisting."""
     if observation.get("verdict") != "verified" or since is None:
         return observation
     fresh = _fresh_traces([str(a) for a in observation.get("artifacts") or ()], workspace, since)
     holes = _unfilled(fresh, workspace)
     if holes:
-        # 2026-09-22 17:02: конспект data/notes/… был болванкой — «(заполняется по
-        # прочитанному разделу)», «(правило из книги)» — и засчитан по факту файла.
+        # A stub note with placeholder text must not count just because the file exists.
         return {**observation, "verdict": "missing",
                 "reason": "след — незаполненный шаблон: " + "; ".join(holes[:3])}
     if fresh:
@@ -117,12 +68,9 @@ def against_start(observation: dict[str, Any], workspace: Any, since: float | No
 def judge_campaign(
     *, goal: str, success_check: str, workspace: Any, since: float | None = None, llm: Any = None,
 ) -> dict[str, Any]:
-    """Сказать, сошёлся ли критерий кампании, и чем это наблюдается."""
+    """Say whether the campaign criterion converged, and by what it is observed."""
     check = str(success_check or "").strip()
-    # Цель самопочинки судит сам patch_check, а не наличие файла: 2026-09-23
-    # первая живая правка была пустым каркасом блоков — файловый судья сказал
-    # «verified», patch_check в ту же минуту сказал «red». Прибор, меряющий
-    # не то, наружу не идёт (core/patch_route.patch_goal_verdict).
+    # A self-repair goal is judged by patch_check, not by file presence (core/patch_route.patch_goal_verdict).
     from core.patch_route import patch_goal_verdict
 
     special = patch_goal_verdict(workspace, check)
@@ -155,9 +103,7 @@ def judge_campaign(
         else:
             verdict, reason = _content(check, fresh, workspace, llm, verdict, reason)
     if not check:
-        # Непоставленный критерий и поставленный, но непроверяемый, дают одно
-        # слово `unverifiable` — и это правда: проверить нечем. Но причина у
-        # них разная, и человеку она нужна разная.
+        # An unset and an unverifiable criterion both give `unverifiable`, but the human needs the reasons told apart.
         reason = _UNSTATED
     return {
         "goal": str(goal or ""),
@@ -172,7 +118,7 @@ def judge_campaign(
 
 def _content(check: str, fresh: list[str], workspace: Any, llm: Any,
              verdict: str, reason: str) -> tuple[str, str]:
-    """Свежий след прочитан судьёй содержания; без модели вердикт прежний."""
+    """Fresh trace read by the content judge; without a model the verdict stays as it was."""
     from core.goal_content_judge import judge_content
 
     content = judge_content(check, fresh, workspace, llm)
@@ -182,11 +128,7 @@ def _content(check: str, fresh: list[str], workspace: Any, llm: Any,
 
 
 def record_campaign_verdict(workspace: Any, verdict: dict[str, Any]) -> dict[str, Any]:
-    """Положить вердикт в свой журнал. Реестр циклов не трогается.
-
-    Его читатели (`_recent_goals`, `spent_units_by_action`, `summarise_ledger`)
-    считают «строка = цикл», и строка не-цикла сломала бы каждого из них.
-    """
+    """Append the verdict to its own journal; the cycle registry is untouched because its readers count one line per cycle."""
     if verdict.get("verdict") == "verified":
         verdict = {**verdict, "judge_item": _to_judge(workspace, verdict)}
     path = Path(workspace or ".") / VERDICT_RELPATH
@@ -197,7 +139,7 @@ def record_campaign_verdict(workspace: Any, verdict: dict[str, Any]) -> dict[str
 
 
 def _to_judge(workspace: Any, verdict: dict[str, Any]) -> str:
-    """«Достигнуто» — Клоду на суд (core/judge_queue.py); до его решения это не зачёт."""
+    """Send an "achieved" verdict to Claude for judgment (core/judge_queue.py); it does not count until decided."""
     from core.judge_queue import submit
 
     try:
@@ -206,7 +148,7 @@ def _to_judge(workspace: Any, verdict: dict[str, Any]) -> str:
                       detail=f"success_check: {verdict.get('success_check') or ''}; "
                              f"reason: {verdict.get('reason') or ''}")
     except OSError:
-        return ""  # очередь недоступна — вердикт остаётся без суда, то есть не в зачёт
+        return ""  # queue unavailable: the verdict stays unjudged, i.e. does not count
 
 
 def judge_and_record(
@@ -214,13 +156,7 @@ def judge_and_record(
     stop_reason: str = "", cycles_run: int = 0, proposals: int = 0, artifacts: int = 0,
     llm: Any = None,
 ) -> tuple[dict[str, Any], str]:
-    """Судить цель, назвать прогон и положить вердикт в журнал.
-
-    Возвращает вердикт и текст ошибки записи (пустой, если записалось).
-    Незаписанный вердикт НЕ валит прогон: работа кампании уже сделана, и
-    терять её из-за недоступного файла — хуже, чем потерять вердикт. Но
-    молчать об этом нельзя, поэтому ошибка возвращается наружу.
-    """
+    """Judge the goal, name the run and journal the verdict; returns the verdict and the write error (empty on success). A failed write does not fail the run, but the error is returned."""
     try:
         since = started_at.timestamp()
     except (AttributeError, OverflowError, OSError, ValueError):
@@ -228,8 +164,7 @@ def judge_and_record(
     verdict = judge_campaign(
         goal=goal, success_check=success_check, workspace=workspace, since=since, llm=llm,
     )
-    # Чей это вердикт: без прогона его нельзя ни перепроверить, ни привязать
-    # к строкам реестра. Считает судья, называет прогон.
+    # Name the run: without it the verdict cannot be rechecked or tied to registry rows.
     verdict.update({
         "stop_reason": str(stop_reason or ""),
         "cycles_run": int(cycles_run),
@@ -253,7 +188,7 @@ def _isoformat(moment: Any) -> str:
 
 
 def verdict_summary_line(verdict: dict[str, Any]) -> str:
-    """Строка для человека: слово вердикта и то, чем оно наблюдается."""
+    """Human line: the verdict word and what it is observed by."""
     word = str(verdict.get("verdict") or "unverifiable")
     missing = verdict.get("missing_traces") or []
     fresh = verdict.get("fresh_traces") or []

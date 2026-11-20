@@ -1,4 +1,4 @@
-"""Одно утверждение, объявленное и Фактом, и Непроверенным — в одном ответе."""
+"""Detects one claim declared both as Fact and as Unverified in the same answer."""
 from __future__ import annotations
 
 import re
@@ -15,9 +15,9 @@ _SECTION_RE = re.compile(
 #: не берутся — совпадение «система» ничего не значит. SHA обязан содержать
 #: hex-букву (иначе дата — SHA), путь — кончаться расширением (не `.json.bak`).
 _SUBJECT_RE = re.compile(
-    r"\b(?:[a-z]+_[0-9a-f]{6,}"          # идентификаторы: run_…, mem_…, sess_…
+    r"\b(?:[a-z]+_[0-9a-f]{6,}"  # identifiers: run_..., mem_..., sess_...
     r"|(?=[0-9]*[a-f])[0-9a-f]{7,40}\b"  # SHA
-    r"|[\w./\\-]+\.(?:py|md|json|jsonl|txt|cmd|toml|yaml|yml)(?![\w-]|\.\w)"  # пути
+    r"|[\w./\\-]+\.(?:py|md|json|jsonl|txt|cmd|toml|yaml|yml)(?![\w-]|\.\w)"  # paths
     r"|\d+(?:[.,]\d+)?\s*(?:событ\w*|строк\w*|тест\w*|байт\w*|events?|lines?|tests?)"
     r")",
     re.IGNORECASE,
@@ -41,7 +41,7 @@ _BOUNDARY_RE = re.compile(
 
 @dataclass(frozen=True)
 class Contradiction:
-    """Предмет, утверждённый в одной секции и снятый в другой."""
+    """A subject asserted in one section and withdrawn in another."""
 
     subject: str
     asserted_in: str
@@ -56,7 +56,7 @@ class Contradiction:
 
 
 def _sections(answer: str) -> dict[str, str]:
-    """Текст ответа, разложенный по заголовкам контракта вывода."""
+    """Answer text split by the output-contract headings."""
     marks = list(_SECTION_RE.finditer(answer))
     out: dict[str, str] = {}
     for i, mark in enumerate(marks):
@@ -89,7 +89,7 @@ _OBJECT_SPLIT_RE = re.compile(r"""[\s=,()"':]+""")
 
 
 def _objects(line: str) -> set[str]:
-    """Буквальные объекты строки, разобранные до отдельных имён."""
+    """Literal objects of a line, split into individual names."""
     out: set[str] = set()
     for m in _OBJECT_RE.finditer(line):
         for piece in _OBJECT_SPLIT_RE.split(m.group(0).strip("`").lower()):
@@ -99,16 +99,11 @@ def _objects(line: str) -> set[str]:
 
 
 def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
-    """Суждение, утверждённое в Conclusion/Facts и снятое в Unverified.
-
-    Сверяются пары строк: утверждающая строка без отрицания, отрицающая — с
-    отрицанием и без нового буквального объекта (новый объект — новое
-    суждение, а не снятие). Имя в обоих разделах само по себе ничего не снимает.
-    """
+    """A claim asserted in Conclusion/Facts and withdrawn in Unverified (a new literal object is a new claim, not a withdrawal)."""
     if not answer:
         return ()
     sections = _sections(answer)
-    # Именная строка («Точное содержимое X») — открытый вопрос, а не снятие.
+    # A bare name line ("exact contents of X") is an open question, not a withdrawal.
     denied_lines = [
         ln for ln in sections.get("unverified", "").splitlines()
         if ln.strip() and _NEGATION_RE.search(ln) and not _BOUNDARY_RE.search(ln)
@@ -122,14 +117,14 @@ def contradicted_claims(answer: str | None) -> tuple[Contradiction, ...]:
         for asserted in sections.get(name, "").splitlines():
             if not asserted.strip() or _NEGATION_RE.search(asserted):
                 continue
-            # Среди предметов строки, не подстрокой: `report.json` ≠ `report.json.bak`.
+            # Match among the line's subjects, not as a substring: `report.json` != `report.json.bak`.
             subjects = _subjects(asserted)
             if not subjects:
                 continue
             allowed = _objects(asserted) | subjects
             for denial in denied_lines:
                 if _objects(denial) - allowed:
-                    continue  # отрицание о другом: оно назвало новый объект
+                    continue  # negation about something else: it named a new object
                 for subject in sorted(subjects & _subjects(denial)):
                     if subject in seen:
                         continue
@@ -164,11 +159,7 @@ def _identifiers(line: str) -> set[str]:
 
 
 def headline_contradicts_facts(answer: str | None) -> tuple[Contradiction, ...]:
-    """Заголовок утверждает наличие того, чьё отсутствие называют факты ответа.
-
-    Сигнал только наблюдающий (не в `DISQUALIFYING_DEFECT_SIGNALS`), пока не
-    откалиброван на живых ответах.
-    """
+    """Headline asserts the presence of what the answer's facts say is absent."""
     if not answer:
         return ()
     sections = _sections(answer)
@@ -209,7 +200,7 @@ _FIRST_PERSON_WRITE_RE = re.compile(
 
 
 def _claims_a_write_now(head: str) -> bool:
-    """True, когда вывод докладывает о записи, сделанной В ЭТОМ ХОДЕ."""
+    """True when the output reports a write made in THIS turn."""
     if _FIRST_PERSON_WRITE_RE.search(head):
         return True
     if not _CLAIMS_WRITE_RE.search(head):
@@ -238,17 +229,13 @@ _DENIES_ACTION_RE = re.compile(
 
 
 def _report_head(answer: str) -> str:
-    """Вывод ответа: раздел Conclusion, иначе первый абзац (с учётом `\\r\\n`)."""
+    """Answer output: the Conclusion section, else the first paragraph (CRLF-aware)."""
     return (_sections(answer).get("conclusion")
             or re.split(r"\r?\n[ \t]*\r?\n", answer, maxsplit=1)[0])
 
 
 def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str | None:
-    """Строка-поправка, когда доклад о действиях расходится с тем, что выполнено.
-
-    Сверяется только ВЫВОД (первый абзац / Conclusion): там доклад, который
-    читают. Возвращает None, если расхождения нет.
-    """
+    """Correction line when the action report disagrees with what was executed (checks only the output: first paragraph / Conclusion); None if consistent."""
     head = _report_head(answer or "")
     if (not executed_tools and (_CLAIMS_ACTION_RE.search(head) or _claims_a_write_now(head))
             and not (_DENIES_ACTION_RE.search(head) or _DENIES_WRITE_RE.search(head))):
@@ -265,8 +252,7 @@ def action_report_mismatch(answer: str | None, executed_tools: list[str]) -> str
                 "(file_write / journal_append / memory_bank) — утверждение «не записал» "
                 "в выводе неверно.")
     if writes > 0:
-        # Факт записи — всегда, без разбора слов: переформулировок отрицания
-        # бесконечно, журнал — один.
+        # A write is a fact regardless of wording: negation phrasings are unbounded, the journal is one.
         made = ", ".join(sorted({t for t in executed_tools if t in _WRITING_TOOLS}))
         return f"ℹ️ По журналу хода: записей в этом ходе: {writes} ({made})."
     return None

@@ -1,4 +1,4 @@
-"""Уборка резервных копий `.bak.<ts>` из рабочего каталога."""
+"""Cleanup of `.bak.<ts>` backup files in the workspace."""
 from __future__ import annotations
 
 import re
@@ -10,21 +10,16 @@ from pathlib import Path
 # Captures group 1 = the target filename, group 2 = the timestamp.
 BACKUP_NAME_RE = re.compile(r"^(?P<target>.+)\.bak\.(?P<ts>\d{8}T\d{6}Z)$")
 
-# Живые семьи имён по перемеру 2026-08-27 (MIR-125): разовые миграции пишут
-# три ДРУГИХ формата, и ни один не узнавался — data/ удвоился их мусором.
-# Порядок важен: формы с меткой времени раньше бессрочной. Возраст бессрочной
-# берётся из mtime файла. Неузнанное имя по-прежнему не трогается.
+# Migrations write three more name formats. Timestamped forms must match before the undated one, whose age comes from mtime.
 _BACKUP_NAME_RES: tuple[re.Pattern[str], ...] = (
     BACKUP_NAME_RE,                                                  # t.bak.<ts>
     re.compile(r"^(?P<target>.+)\.(?P<ts>\d{8}T\d{6}Z)\.bak$"),      # t.<ts>.bak
     re.compile(                                                      # t.pre-<slug>-<ts>.bak
         r"^(?P<target>.+)\.pre-[A-Za-z0-9_-]+-(?P<ts>\d{8}T\d{6}Z)\.bak$"),
-    re.compile(r"^(?P<target>.+)\.pre-[A-Za-z0-9_.-]+\.bak$"),       # t.pre-<slug>.bak (без метки)
+    re.compile(r"^(?P<target>.+)\.pre-[A-Za-z0-9_.-]+\.bak$"),  # t.pre-<slug>.bak (no timestamp)
 )
 
-# Retention defaults — conservative on purpose. Even a very old single
-# backup is preserved by the `keep_last` floor, because a sole backup is
-# usually the most valuable kind.
+# Conservative defaults: the `keep_last` floor preserves even a very old sole backup.
 DEFAULT_KEEP_LAST = 3
 
 DEFAULT_MAX_AGE_DAYS = 14
@@ -65,7 +60,7 @@ def _parse_backup_ts(stem: str) -> datetime | None:
         return None
 
 def _candidate_from_name(path: Path) -> BackupCandidate | None:
-    """Узнать файл по одной из живых семей имён; неузнанное — None."""
+    """Match a file against the known backup name families; None if unrecognised."""
     for pattern in _BACKUP_NAME_RES:
         m = pattern.match(path.name)
         if not m:
@@ -85,11 +80,7 @@ def _candidate_from_name(path: Path) -> BackupCandidate | None:
 
 
 def _scan_backups(workspace_root: Path) -> list[BackupCandidate]:
-    """Walk the workspace and collect every backup file we recognise.
-
-    Files whose name doesn't parse as a known backup family are ignored —
-    we never touch a file we don't fully understand.
-    """
+    """Walk the workspace and collect every recognised backup file; unparsable names are ignored."""
     out: list[BackupCandidate] = []
     if not workspace_root.exists():
         return out
@@ -114,16 +105,9 @@ def cleanup_backups(
 ) -> BackupCleanupReport:
     """Remove old `.bak.<ts>` files; never touch the active file itself.
 
-    Retention rule — a backup is DELETED only when BOTH hold:
-      - more than `keep_last` newer backups exist for the same target
-      - the backup is older than `max_age_days`
-
-    The newest `keep_last` backups per target are always kept regardless
-    of age. The cleanest backup is sometimes the only one — so a sole
-    survivor is never removed.
-
-    `dry_run=True` returns the same report but performs no deletions.
-    """
+    A backup is deleted only when more than `keep_last` newer backups exist for
+    the same target AND it is older than `max_age_days`. `dry_run=True` reports
+    without deleting."""
     if keep_last < 0:
         raise ValueError(f"keep_last must be >= 0, got {keep_last}")
     if max_age_days < 0:

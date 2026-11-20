@@ -1,19 +1,6 @@
 """Priority intelligence: choose the single most important next action.
 
-A bounded-autonomy agent is only useful if it is *initiative inside a safe
-corridor*: it must notice problems, connect signals, and surface the **one**
-action that matters most right now — with evidence, a risk estimate, and an
-honest account of what it does **not** know. It must NOT spray ten
-speculative proposals every tick.
-
-* it reads structured signals (passed in) and returns one recommendation; *
-it performs no I/O, mutates nothing, and never executes the action; * it
-always returns exactly one :class:`BestNextAction` — even "just observe" —
-so the agent is forced to commit to a single priority and justify it.
-
-The selection is deterministic: every candidate carries a fixed priority
-score and the highest score wins. Ties resolve by score then by a stable
-order, so the same signals always yield the same advice.
+Pure and deterministic: reads structured signals, always returns exactly one :class:`BestNextAction` (even "just observe"), performs no I/O and never executes it. Candidates carry fixed priority scores; the highest wins, ties keep a stable order.
 """
 from __future__ import annotations
 
@@ -71,39 +58,30 @@ from core.self_improvement_issues import (
     suppress_generic_issue_duplicates,
 )
 
-# Priority scores. Higher wins. Chosen so the ordering is obvious and stable:
-# if the daemon is not even ticking, nothing else can be trusted; a hard tick
-# error outranks a test failure; a test failure outranks softer hygiene work.
-                          # road charter -> backlog (2026-08-19); outranks the
-                          # document so a goal naming both builds, not writes.
-#   above the durable-issue habit (55) — live 2026-08-15 the head chose "draft
-#   the contract" and the hands did habitual repair — below health alarms (60+)
-#   repair habit (55), below the doc goal (58) — a request to write is more
-#   concrete than a request to read
-                          # defects: the hands follow the head (Д3, 2026-09-03);
-                          # ties with the engineering task, which is admitted
-                          # first and therefore wins when both apply
-#   PERISHABLE signal: its trace, tree and memory still agree (the 2026-08-28
-#   live probe drifted from tick state in 3.5h), while a measured backlog
-#   split keeps until tomorrow — so fresh own pain outranks the routine (59).
-#   Ties with health at 60 resolve to health: it is admitted first (MIR-186).
-                          # rung is the deepest — prove causes first
-                          # investigation outranks starting a new one
-                          # own defects before admin debt (MIR-096, slice 1)
-                        # there, and only a born experiment can move the claim
-                        # (agent's wiring answer, birth_action; weight chain
-                        # 47 exp > 46 judge > 45 explain > 44 birth > 40 stuck)
+# Priority scores, higher wins: a daemon that is not ticking outranks everything, a hard tick error
+# outranks a test failure, a test failure outranks softer hygiene work.
+                          # road charter -> backlog; outranks the document goal so a goal naming
+                          # both builds, not writes.
+# above the durable-issue habit (55), below health alarms (60+); below the doc goal (58): a request
+# to write is more concrete than one to read.
+                          # defects: the hands follow the head; ties with the engineering task,
+                          # which is admitted first and wins.
+# PERISHABLE signal: fresh own pain outranks the routine (59); ties with health at 60 resolve to
+# health, admitted first.
+                          # rung is the deepest, prove causes first; investigation outranks starting
+                          # a new one; own defects before admin debt.
+                        # only a born experiment can move the claim; weight chain 47 exp > 46 judge
+                        # > 45 explain > 44 birth > 40 stuck.
 
 
-# Thresholds (deliberately conservative — advice, not automation).
+# Thresholds (deliberately conservative: advice, not automation).
 
-# Severities an operator may acknowledge away (see core.alert_ack). Objective
-# breakages (critical/high) are intentionally excluded — never suppressible.
+# Severities an operator may acknowledge away (see core.alert_ack); critical/high are never
+# suppressible.
 
-# The advisory alert actions (exactly the medium/low candidates below) that an
-# operator is allowed to acknowledge. Kept as an explicit registry so the REPL
-# can validate an ack request from the action NAME alone, before any signals
-# are gathered. Critical/high actions are deliberately absent.
+# Advisory alert actions (the medium/low candidates below) an operator may acknowledge.
+# An explicit registry so the REPL can validate an ack from the action NAME alone; critical/high are
+# absent.
 
 
 @dataclass(frozen=True)
@@ -117,35 +95,19 @@ class BestNextAction:
     unknowns: tuple[str, ...] = ()
     risk: str = "read_only"
     recommended_command: str | None = None
-    #: Объект, НАЗВАННЫЙ в основании решения, когда основание его называет.
-    #: H-20 (binding drift) в docs/audit/HISTORICAL_FAILURE_LEDGER.md:
-    #: обязательство может пережить перерыв и при этом потерять связь с
-    #: конкретным предметом. Здесь так и было — `_PY_TARGET_RE` находил имя
-    #: файла, по нему цель признавалась инженерной, и совпадение
-    #: ВЫБРАСЫВАЛОСЬ: имя оставалось только внутри `evidence`, дословным
-    #: эхом текста цели, откуда потребителю его не взять. `None` значит
-    #: «основание не называло объекта», а не «объект неизвестен».
+    # Object NAMED in the grounds of the decision, when the grounds name one.
+    # `None` means the grounds named no object, not that it is unknown.
     target_path: str | None = None
     confidence: float = 0.0
-    #: HOW this action was selected — a fact derived at the selection site, not
-    #: a judgement. One of `no_candidate` (nothing was admissible),
-    #: `sole_candidate` (one was active, so no selection occurred) or
-    #: `priority_table` (two or more competed and the developer's `_P_*`
-    #: literals picked the winner). Deliberately no `agent_deliberation` value:
-    #: the census measured zero agent-owned decision boundaries, and a label
-    #: without a mechanism behind it is ceremony (MIR-117, MIR-119).
+    # HOW this action was selected, derived at the selection site: `no_candidate`, `sole_candidate`
+    # (no selection occurred) or `priority_table` (two or more competed).
+    # No `agent_deliberation` value: no agent-owned decision boundary exists.
     decided_by: str = "unrecorded"
-    #: WHERE the grounds came from — derived from which input the candidate
-    #: read, so it is a fact rather than an assignment. `operator_goal` (the
-    #: operator's own text), `observed_state` (live signals) or
-    #: `retained_record` (durable state carried from earlier runs). The third
-    #: is what makes "did experience change this decision" answerable at all,
-    #: and what lets a post-mortem separate the agent's own grounds from ones
-    #: a human supplied (MIR-117, the human-deferred-authorship path).
+    # WHERE the grounds came from, derived from the input the candidate read: `operator_goal`,
+    # `observed_state` (live signals) or `retained_record` (durable state from earlier runs).
     grounds: str = "unrecorded"
-    #: How many candidates were still in the race when the winner was taken —
-    #: the count describes the race that happened, so a suppressed candidate is
-    #: not counted as a competitor.
+    # How many candidates were still in the race when the winner was taken; a suppressed candidate
+    # is not a competitor.
     candidates_considered: int = 0
 
     def to_dict(self) -> dict:
@@ -166,11 +128,11 @@ class BestNextAction:
         }
 
 
-#: Глагол черновика + имя .md в цели — иначе цель не документная.
+# Draft verb plus a .md name in the goal; otherwise the goal is not a document goal.
 
 
-#: Учебная цель: глагол изучения + внешний мир. Решение оператора 2026-08-16
-#: («строй автомат»): чтение внешнего мира — законная работа кампании.
+# Study goal: a study verb plus the outside world; reading the outside world is legitimate campaign
+# work.
 
 
 def _candidate_external_study(goal: str) -> BestNextAction | None:
@@ -197,22 +159,17 @@ def _candidate_external_study(goal: str) -> BestNextAction | None:
     )
 
 
-#: Инженерная цель хартии: слова о бэклоге/расколе/падающем тесте/разрыве.
-#: Структурная половина (три словарных промаха за 2026-08-19): цель, которая
-#: НАЗЫВАЕТ .py-файл и говорит об инженерном действии над ним, — инженерная,
-#: какими бы словами её ни сформулировала модель.
+# Charter engineering goal: words about backlog/split/failing test/gap.
+# Structural half: a goal that NAMES a .py file and speaks of an engineering action on it is
+# engineering whatever its wording.
 
 
-#: Токен, похожий на путь: минимум один разделитель каталогов. Голое слово
-#: путём не считается — иначе предметом цели становилась бы любая фраза.
-#: Второй словарь предметов: имя команды. Живой пример из ленты — цель
-#: «Trace `:team-run` sharing of models…», у которой предмет назван точно, а
-#: путеподобных токенов нет ни одного (MIR-174).
+# A path-like token has at least one directory separator; a bare word is not a path.
+# Second subject vocabulary: a command name (`:team-run`) when the goal names no path-like token.
 
 
 def _candidate_engineering_task(goal: str) -> BestNextAction | None:
-    """Дорога от хартии к бэклогу (2026-08-19): цель, просящая инженерную
-    работу, рождает self-build/Stage A ЗАЯВКУ — язык и провод, не права."""
+    """Road from charter to backlog: a goal asking for engineering work births a self-build/Stage A request (language and wiring, not rights)."""
     text = str(goal or "")
     if not _is_engineering_goal(text):
         return None
@@ -256,15 +213,15 @@ def _candidate_charter_document(goal: str) -> BestNextAction | None:
     )
 
 
-#: Слова цели, по которым она может назвать запись реестра дефектов: не короче
-#: четырёх букв и не служебные. Порог совпадений — три РАЗНЫХ содержательных
-#: слова заголовка либо буквальное совпадение отпечатка/действия/файла.
+# Goal words by which it may name a defect-registry record: at least four letters and not a stop
+# word.
+# Threshold: three DIFFERENT content words of the title or a literal match of
+# fingerprint/action/file.
 
 
-#: Конкретная вещь, названная целью: идентификатор записи/эпизода/прогона —
-#: слово с подчёркиванием или дефисом и хвостом из шести и более шестнадцатеричных
-#: знаков (`ep-run-run_fc8125…`, `sii_5423bb16…`, `run_7394…`). Пути файлов сюда
-#: не входят — их разрешает `resolve_goal_subject`.
+# A concrete thing named by the goal: a record/episode/run identifier (a word with underscore or
+# hyphen and a tail of six or more hex characters).
+# File paths are resolved by `resolve_goal_subject`.
 
 
 def _habit_shadowed_by_goal(
@@ -273,12 +230,9 @@ def _habit_shadowed_by_goal(
     improvement: BestNextAction | None,
     issues: tuple[dict, ...],
 ) -> bool:
-    """Отводится ли привычка реестра под этой целью.
+    """Whether the registry habit is set aside under this goal.
 
-    Да — когда цель назвала другую запись реестра, или конкретный идентификатор,
-    которого текст записи не содержит, и при этом не назвала предмет (файл)
-    самой записи. Нет — когда цели нет или она общая. Замер 2026-09-03: три
-    прогона подряд отдавали цель про свой дефект самой свежей чужой записи.
+    Yes when the goal named another registry record, or a concrete identifier the record text lacks, and did not name the record's own subject (file). No when there is no goal or it is general.
     """
     text = str(goal or "")
     if improvement is None or not text.strip():
@@ -303,14 +257,9 @@ def _habit_shadowed_by_goal(
 def _candidate_own_issue_named_by_goal(
     goal: str, issues: tuple[dict, ...],
 ) -> BestNextAction | None:
-    """Цель, называющая собственный дефект, получает руки ЭТОГО дефекта.
+    """A goal naming an own defect gets the hands of THAT defect.
 
-    Замер 2026-09-03 (три прогона подряд): голова выбирала свой дефект из
-    реестра — ремонт парсера, свидетель встречного вопроса, — а руки брали
-    самую свежую ЧУЖУЮ запись, потому что генераторов по цели было три
-    (инженерная задача, документ, внешнее чтение) и цель класса
-    «расследовать/починить свой дефект» давала ноль кандидатов. Основание —
-    в цели (operator_goal), поэтому сужение по предмету его не отводит.
+    Goal generators (engineering task, document, outside reading) gave zero candidates for "investigate/fix own defect", so the hands took the newest foreign record. The grounds are in the goal (operator_goal), so subject narrowing does not set it aside.
     """
     for raw in issues:
         issue = SelfImprovementIssue.from_dict(raw).to_dict()
@@ -319,8 +268,7 @@ def _candidate_own_issue_named_by_goal(
         if not _goal_names_issue(goal, issue):
             continue
         files = [str(f) for f in issue.get("related_files") or () if str(f)]
-        # Предметом становится файл, который назвала ЦЕЛЬ, а не первый в списке
-        # (та же ошибка привязки, что MIR-160, только по другой дороге).
+        # The subject becomes the file the GOAL named, not the first in the list.
         named_file = next((f for f in files if f.lower() in str(goal).lower()), None)
         evidence = [f"goal names durable issue {issue.get('fingerprint')}"]
         evidence.extend(str(e)[:300] for e in (issue.get("evidence") or ())[:3])
@@ -349,17 +297,16 @@ def _candidate_goal_names_missing(
     goal_names_missing: tuple[str, ...] | None,
     active: list[BestNextAction],
 ) -> BestNextAction | None:
-    """Названный отказ, когда цель зовёт то, чего в рабочей области нет.
+    """A named refusal when the goal calls for something absent from the workspace.
 
-    Замер, отвергнутые варианты и границы: MIR-161 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Молчание здесь означало бы работу по чужому делу под именем этой цели.
+    Silence would mean work on someone else's matter under this goal's name.
     """
     if goal_subject or not goal_names_missing:
         return None
     if _DRAFT_VERB_RE.search(str(goal or "")):
-        return None  # цель просит СОЗДАТЬ файл — это законно
+        return None  # the goal asks to CREATE a file, which is legitimate
     if [c for c in active if c.severity in ("critical", "high")]:
-        return None  # поломка сильнее цели всегда
+        return None  # a breakage always outranks a goal
     names = ", ".join(goal_names_missing[:3])
     return BestNextAction(
         action="observe",
@@ -380,39 +327,21 @@ def _candidate_goal_names_missing(
     )
 
 
-#: Основания, означающие «это пришло от ЦЕЛИ». Их два, потому что цель
-#: бывает двух происхождений, и путать их — врать в отчёте.
-#:
-#: До 2026-09-21 различия не было: `grounds` у всякой цели равнялось
-#: `operator_goal`, кто бы её ни выбрал. Живой замер того вечера: оператор не
-#: ставил ни одной цели, а в сводке значилось «117 решений из 117 по
-#: операторской цели». Купился не только он — купился и читатель журналов,
-#: который эту сводку ему пересказал.
-#:
-#: Метка не косметическая, и её двух читателей нашёл сам агент, задав
-#: единственный за вечер вопрос: «а читается ли поле обратно?».
-#: `_partition_by_subject` освобождает по ней кандидата от сужения по
-#: предмету — то есть собственная цель агента получала защиту,
-#: предназначенную слову человека. `core/campaign.py` считает по ней, сколько
-#: циклов вела цель, — то есть сводка приписывала человеку то, чего он не
-#: ставил.
-#:
-#: Освобождение от сужения по предмету оставлено ОБОИМ видам нарочно:
-#: отнимать ли его у самовыбранной цели — отдельное решение, и протащить
-#: его молча внутри переименования значило бы спрятать от оператора ровно
-#: то, что он просил показать.
+# Grounds meaning "this came from a GOAL". There are two because a goal has two origins and
+# confusing them lies in reports.
+# `_partition_by_subject` exempts such a candidate from subject narrowing and `core/campaign.py`
+# counts goal cycles by it.
+# The exemption is kept for BOTH kinds on purpose: taking it away from a self-chosen goal is a
+# separate decision.
 GOAL_GROUNDS: frozenset[str] = frozenset({"operator_goal", "self_goal"})
 
 
 def _partition_by_subject(
     active: list[BestNextAction], goal_subject: str,
 ) -> tuple[list[BestNextAction], list[BestNextAction], list[BestNextAction]]:
-    """Разложить кандидатов на «по предмету», «про другой», «предмет неизвестен».
+    """Split candidates into "by subject", "about another" and "subject unknown".
 
-    Замер, отвергнутые варианты и границы: MIR-162 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Третий класс существует потому, что «не знаю, про что» — не то же самое,
-    что «знаю, что про другое»; сваливать их в одну кучу значит выдавать
-    незнание за знание.
+    The third class exists because "do not know what about" is not "know it is about another".
     """
     on: list[BestNextAction] = []
     off: list[BestNextAction] = []
@@ -421,7 +350,7 @@ def _partition_by_subject(
         if (
             candidate.severity in ("critical", "high")
             or candidate.target_path == goal_subject
-            or candidate.grounds in GOAL_GROUNDS  # оба вида цели; см. GOAL_GROUNDS
+            or candidate.grounds in GOAL_GROUNDS  # both kinds of goal; see GOAL_GROUNDS
         ):
             on.append(candidate)
         elif candidate.target_path is None:
@@ -433,16 +362,15 @@ def _partition_by_subject(
 
 def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns are guard clauses
     *,
-    #: Цель выбрал САМ агент, а не назвал человек; см. `GOAL_GROUNDS`.
+    # The goal was chosen by the agent itself, not named by a human; see `GOAL_GROUNDS`.
     goal_is_self: bool = False,
     goal: str = "",
-    #: Артефакт, О КОТОРОМ цель, — разрешает ВЫЗЫВАЮЩИЙ (`resolve_goal_subject`),
-    #: потому что разрешение требует файловой системы, а таблица решений чистая.
-    #: `None` значит «цель предмета не назвала», и тогда она ничего не сужает.
+    # The artifact the goal is ABOUT is resolved by the CALLER (`resolve_goal_subject`), since
+    # resolution needs the file system.
+    # `None` means the goal named no subject, so it narrows nothing.
     goal_subject: str | None = None,
-    #: Пути, названные целью и НЕ существующие. Разрешает вызывающий
-    #: (`unresolved_goal_targets`) — отказ разрешения не должен быть
-    #: неотличим от отсутствия имени (MIR-161).
+    # Paths the goal named that do NOT exist, resolved by the caller (`unresolved_goal_targets`), so
+    # a failed resolution is distinguishable from no name.
     goal_names_missing: tuple[str, ...] | None = None,
     result_status: str = "none",
     tests_health: str = "none",
@@ -468,29 +396,21 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
 ) -> BestNextAction:
     """Pick the single most important next action from the current signals.
 
-    ``acknowledged`` is the set of action names the operator has accepted
-    (see :mod:`core.alert_ack`). An acknowledged candidate is removed from
-    the top-pick race ONLY when its severity is suppressible
-    (``medium``/``low``) — objective breakages (``critical``/``high``) are
-    never silenced, so you can never acknowledge away a real failure.
-    Suppressed alerts are not deleted: when nothing else is pressing they
-    are surfaced by the ``observe`` fallback.
+    ``acknowledged`` is the set of action names the operator accepted (see :mod:`core.alert_ack`).
+    An acknowledged candidate leaves the race ONLY when its severity is suppressible (``medium``/``low``); suppressed alerts surface through the ``observe`` fallback.
     """
     candidates: list[BestNextAction] = []
 
     exhausted = frozenset(exhausted_actions or ())
 
     def admit(candidate: BestNextAction | None, grounds: str) -> None:
-        """Tag the candidate with WHERE its grounds came from, at the one place
-        where the input it read is visible. Derived, never assigned: a
-        generator taking `goal` rests on the operator's text, one taking live
-        signals on observation, one reading the durable registry on records
-        carried from earlier runs."""
-        # Насыщенное потолком действие не допускается в гонку (вердикт агента,
-        # CEILING_VERDICT путь (а)): знание о потолке рождается в кампании и
-        # едет сюда сборщиком. Критические кандидаты (демон упал, тик сломан)
-        # фильтру не подлежат ПО ПОСТРОЕНИЮ: в exhausted_actions попадают
-        # только предметные имена из action_steps кампании.
+        """Tag the candidate with WHERE its grounds came from, at the one place where the input it read is visible.
+        Derived, never assigned.
+        """
+        # A ceiling-saturated action is not admitted to the race: ceiling knowledge is born in the
+        # campaign and passed by the collector.
+        # Critical candidates are exempt by construction: `exhausted_actions` holds only campaign
+        # subject names.
         if candidate is not None and candidate.action in exhausted:
             return
         if candidate is not None:
@@ -511,10 +431,8 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(_candidate_tests(tests_health, result_status, failed_tests),
           "observed_state")
 
-    # Both branches read state carried from EARLIER runs — the durable issue
-    # registry, or recent failures reconstructed from episodes. That is a
-    # different provenance from a live signal, and it is the one that makes the
-    # memory-influence question answerable later.
+    # Both branches read state from EARLIER runs (durable issue registry or failures rebuilt from
+    # episodes): a different provenance from a live signal.
     improvement = _candidate_open_self_improvement_issue(
         open_self_improvement_issues, subject=goal_subject, exhausted=exhausted,
     )
@@ -524,13 +442,12 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             fresh=fresh_self_improvement_failure,
         )
     elif fresh_self_improvement_failure:
-        # L4 (2026-09-03): скоропортящийся сигнал (60) был заперт за непустым
-        # реестром и не срабатывал никогда. Свежий провал участвует в гонке
-        # рядом с записью реестра и выигрывает у неё по приоритету.
+        # A perishable signal (60) must race alongside a registry record and beat it by priority,
+        # not be locked behind a non-empty registry.
         admit(_candidate_self_improvement_failure(
             recent_self_improvement_failures, fresh=True,
         ), "retained_record")
-    # Отрицательная сторона Д3 — см. `_habit_shadowed_by_goal`.
+    # Negative side of the hands-follow-head rule: see `_habit_shadowed_by_goal`.
     habit_shadowed: list[BestNextAction] = []
     if _habit_shadowed_by_goal(goal, goal_subject, improvement,
                                open_self_improvement_issues):
@@ -539,8 +456,7 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(improvement, "retained_record")
 
     admit(_candidate_inbox_debt(triage), "observed_state")
-    # Наблюдения о СОБСТВЕННЫХ провалах, не покрытые объяснениями, — состояние,
-    # накопленное прежними прогонами (канал MIR-096).
+    # Observations of OWN failures not covered by explanations: state accumulated by earlier runs.
     admit(_candidate_experimentable_claim(experimentable_claims_count),
           "retained_record")
     admit(_candidate_discriminable_claim(discriminable_claims_count),
@@ -551,20 +467,17 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
     admit(_candidate_dry_run_stuck(dry_run_streak), "observed_state")
     admit(_candidate_inbox_backlog(triage, inbox_pending), "observed_state")
 
-    # Partition: an acknowledged advisory alert (medium/low) leaves the race so
-    # the next genuine action surfaces. A critical/high candidate is NEVER
-    # suppressible even if its name was acknowledged.
+    # Partition: an acknowledged advisory alert (medium/low) leaves the race; a critical/high
+    # candidate is NEVER suppressible.
     active = [c for c in candidates if not _is_suppressed(c, acknowledged)]
     suppressed = [c for c in candidates if _is_suppressed(c, acknowledged)]
     off_subject: list[BestNextAction] = []
     unknown_subject: list[BestNextAction] = []
 
-    # Цель СУЖАЕТ допустимое, а не просто добавляет кандидата. Без этого её
-    # влияние было нулевым: живой прогон 2026-08-25 выбрал цель про
-    # `core/subagent_registry`, её генераторы не дали ни одного кандидата, и
-    # `max(priority)` отдал цикл единственному оставшемуся делу про ЧУЖОЙ файл.
-    # Объективная поломка (critical/high) под сужение не попадает никогда:
-    # иначе цель стала бы способом отвести взгляд от сломанных тестов.
+    # The goal NARROWS what is admissible, not just adds a candidate; otherwise its influence was
+    # zero.
+    # An objective breakage (critical/high) is never narrowed away, or a goal would become a way to
+    # look past failing tests.
     missing = _candidate_goal_names_missing(
         goal, goal_subject, goal_names_missing, active,
     )
@@ -583,10 +496,8 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             off_subject=off_subject, unknown_subject=unknown_subject,
             goal_subject=goal_subject,
         )
-        # Основание простоя — ФАКТ о том, кто его вызвал. Если гонку опустошила
-        # ЦЕЛЬ (отвела всех по предмету), основанием стоит она, иначе — живые
-        # сигналы. Иначе цикл, где именно цель всё и отвела, считался бы как
-        # «цель не вела работу», и новый счётчик (MIR-163) врал бы о себе.
+        # The idle reason is a FACT about who caused it: if the GOAL emptied the race it is the
+        # grounds, otherwise live signals.
         emptied_by_goal = bool(off_subject or unknown_subject)
         return replace(
             fallback,
@@ -595,14 +506,11 @@ def select_best_next_action(  # noqa: PLR0913 — flat: depth 1, all 2 returns a
             grounds=goal_grounds if emptied_by_goal else "observed_state",
         )
 
-    # Deterministic: highest priority wins; ties keep first-appended (which is
-    # already the intended severity order above).
+    # Deterministic: highest priority wins; ties keep first-appended (the intended severity order
+    # above).
     winner = max(active, key=lambda c: c.priority)
-    # Provenance recorded HERE because this is where the selection happens, and
-    # it is derived rather than asserted: one active candidate means no choice
-    # was made at all; two or more means the developer's `_P_*` numbers settled
-    # it. Writing that down is what lets a later post-mortem tell the agent's
-    # mistake from a developer's (MIR-117, the first of three empty axes).
+    # Provenance is recorded HERE and derived, not asserted: one active candidate means no choice
+    # was made, two or more means the `_P_*` numbers settled it.
     return replace(
         winner,
         decided_by="sole_candidate" if len(active) == 1 else "priority_table",
@@ -819,12 +727,8 @@ def _candidate_open_self_improvement_issue(
         SelfImprovementIssue.from_dict(issue) for issue in issues
     ))
     if subject:
-        # Предмет цели ВЫБИРАЕТ запись, а не отсеивает выбранную. Живой замер
-        # 2026-08-26: из 29 открытых дефектов решению предлагался ровно один —
-        # первый по порядку ЗАПИСИ В ФАЙЛ, — поэтому цель про
-        # `core/loop_synthesis.py` уходила в простой, хотя открытый дефект
-        # ровно про этот файл лежал в том же бэклоге (MIR-160). Сортировка
-        # устойчива: не совпавшие сохраняют прежний порядок.
+        # The goal's subject SELECTS a record rather than filtering the chosen one; the sort is
+        # stable, so non-matching records keep their order.
         dominant.sort(
             key=lambda m: 0 if subject in (m.to_dict().get("related_files") or ()) else 1
         )
@@ -833,41 +737,26 @@ def _candidate_open_self_improvement_issue(
         status = str(issue.get("status") or "open")
         if status == "resolved":
             continue
-        # L2 (2026-09-03): дело, чьё действие в этом прогоне уже исчерпано,
-        # уступает следующему — иначе первая запись закрывала все остальные.
+        # A case whose action is already exhausted in this run yields to the next, otherwise the
+        # first record would shadow all others.
         if str(issue.get("action") or "improve_failure_to_idea_pipeline") in exhausted:
             continue
         fingerprint = str(issue.get("fingerprint") or "unknown")
         raw_evidence = issue.get("evidence") or ()
-        # MIR-035 audit: the class merge caps evidence at 8, so the samples
-        # alone cannot say whether this fired 8 times or 80. Recurrence is the
-        # reason a class earns an investigation, so the count travels with it.
-        # НИЖНЯЯ ГРАНИЦА, а не точный счёт. H-11 (Knight Capital, 2012):
-        # старое состояние, прочитанное новым кодом, получает умолчание, и
-        # умолчание УТВЕРЖДАЕТ про прошлое то, чего в нём не было. Замер живого
-        # хранилища: 25 записей, заведённых до появления счётчика, приходят с
-        # `occurrences=1` — притом что MIR-035 измерил 13 копий одного
-        # сигнального класса. Счёт ведётся с момента, когда поле появилось, и
-        # для таких рядов он занижен по построению. Знак `>=` говорит ровно это.
+        # The class merge caps evidence at 8, so samples alone cannot say whether this fired 8 or 80
+        # times; the count travels with the candidate.
+        # A LOWER BOUND, not an exact count: records created before the counter existed arrive with
+        # `occurrences=1`, so the `>=` sign says exactly this.
         seen = max(1, int(issue.get("occurrences") or 1))
         evidence = [f"durable issue {fingerprint} status={status} seen>={seen}x"]
         evidence.extend(str(item)[:300] for item in raw_evidence if str(item).strip())
         files = [str(item) for item in issue.get("related_files") or () if str(item)]
         if files:
             evidence.append("related files: " + ", ".join(files))
-        # Тяжесть берётся У ЗАПИСИ, а не прибивается здесь. Слово оператора
-        # 2026-09-20: «почини фильтр, пусть его собственные дефекты проходят».
-        # Замер: 117 решений из 117 по операторской цели, ноль по этому
-        # реестру, — потому что `_partition_by_subject` ниже оставляет в гонке
-        # только критическое, высокое, совпавшее с предметом цели или
-        # пришедшее из цели, а здесь стояла константа `medium`. Дверь для
-        # объективной помехи была, и её заварили одной строкой.
-        #
-        # Словарь записи закрыт на `high` (`IssueSeverity`), и `critical`
-        # сюда не приходит: авария — то, что видно снаружи, а не то, что
-        # запись сама о себе думает. Незнакомое слово читается как `medium`,
-        # то есть как прежнее поведение, поэтому старые записи не меняют
-        # своего веса ни на грамм.
+        # Severity is taken FROM the record, not nailed down here, so a goal's own defects can pass
+        # `_partition_by_subject`.
+        # The record vocabulary stops at `high`; `critical` never comes from a record. An unknown
+        # word reads as `medium`, so old records keep their weight.
         severity = str(issue.get("severity") or "medium")
         if severity not in {"low", "medium", "high"}:
             severity = "medium"
@@ -886,14 +775,10 @@ def _candidate_open_self_improvement_issue(
             ),
             risk="read_only",
             recommended_command=str(issue.get("suggested_next_action") or "") or None,
-            # Предмет, названный самой записью, УНОСИТСЯ, а не оседает в тексте
-            # улики: без него решение нельзя сопоставить с предметом цели, и
-            # ровно так дефект побеждал цель, которая была про другой файл
-            # (H-20, MIR-158).
-            # Предметом решения становится ФАЙЛ, ПО КОТОРОМУ совпало, а не
-            # первый из списка: запись дефекта часто называет несколько, и
-            # привязка к первому отвергала цель про второй (замер 2026-08-26 на
-            # живом бэклоге: `core/evidence_budget.py` уходил в простой).
+            # The subject named by the record itself is CARRIED, not left in the evidence text, so a
+            # decision can be matched with the goal's subject.
+            # The subject is the FILE matched on, not the first in the list: a record often names
+            # several.
             target_path=(
                 subject if subject and subject in files
                 else (files[0] if files else None)
@@ -904,7 +789,7 @@ def _candidate_open_self_improvement_issue(
 
 
 def _candidate_experimentable_claim(count: int) -> BestNextAction | None:
-    """Заявки со спецификациями вмешательства (MIR-096, слайс 3)."""
+    """Requests with intervention specs."""
     try:
         pending = int(count)
     except (TypeError, ValueError):
@@ -926,7 +811,7 @@ def _candidate_experimentable_claim(count: int) -> BestNextAction | None:
 
 
 def _candidate_spec_birth(count: int) -> BestNextAction | None:
-    """Помеченные «ждёт эксперимента» заявки без спецификаций (проект агента)."""
+    """Requests marked "awaits experiment" without specs."""
     try:
         pending = int(count)
     except (TypeError, ValueError):
@@ -948,7 +833,7 @@ def _candidate_spec_birth(count: int) -> BestNextAction | None:
 
 
 def _candidate_discriminable_claim(count: int) -> BestNextAction | None:
-    """Заявки с живыми пробами ждут различения (MIR-096, слайс 2)."""
+    """Requests with live probes awaiting discrimination."""
     try:
         pending = int(count)
     except (TypeError, ValueError):
@@ -970,7 +855,7 @@ def _candidate_discriminable_claim(count: int) -> BestNextAction | None:
 
 
 def _candidate_unexplained_observation(count: int) -> BestNextAction | None:
-    """Наблюдения о собственных провалах без объяснений (MIR-096, слайс 1)."""
+    """Observations of own failures without explanations."""
     try:
         naked = int(count)
     except (TypeError, ValueError):
@@ -1058,16 +943,15 @@ def _candidate_observe(
     ]
     unknowns = ["whether a problem exists that no current signal exposes"]
     if off_subject or unknown_subject:
-        # Отдельная причина, а не общий мешок: отведённое ПО ПРЕДМЕТУ никто не
-        # подтверждал, и назвать его подтверждённым значило бы соврать
-        # оператору о причине простоя (MIR-158).
+        # A separate reason, not a general bag: what was set aside BY SUBJECT was never confirmed,
+        # so calling it confirmed would lie about the idle reason.
         subject = goal_subject or "the goal"
         parts: list[str] = []
         if off_subject:
             parts.append(f"{len(off_subject)} about another subject")
         if unknown_subject:
-            # «Предмет неизвестен» — не «предмет другой». На живых данных это
-            # большинство: 21 запись дефектов из 29 не называет файла вовсе.
+            # "Subject unknown" is not "subject other": on live data that is the majority (most
+            # defect records name no file).
             parts.append(f"{len(unknown_subject)} naming no subject at all")
         reason = (
             f"Nothing admissible for the chosen goal ({subject}): "

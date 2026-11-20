@@ -1,24 +1,4 @@
-"""Проверка ответа и перепланирование по неразрешённым цитатам.
-
-Правило оператора: «ни один файл кода не длиннее 2000 строк» и «разбирай
-большие файлы на компактные подключаемые модули — не дублируя и не искажая».
-Одиннадцатый кусок раскола `core/loop.py` — и второй, который переезжает не
-дословно, а под объявленной подстановкой (первым был цикл попыток).
-
-Суть участка: черновик проверяется, и если модель сослалась на URL, которого
-в цепочке улик нет (вердикт `cited_but_unmatched`), это считается структурным
-сбоем `unresolved_citation` и подаётся в ТУ ЖЕ `ReplanPolicy`, что управляет
-сбоями инструментов. Планировщику прямо говорят, какие адреса добыть; после
-`web_fetch` исходный черновик перепроверяется на обогащённой цепочке — второй
-синтез не нужен, потому что черновик уже цитирует эти адреса.
-
-Почему состояние, а не параметры: участок держится за 21 run-локаль, потому
-что перепланирование перезапускает попытку целиком — со своим планом,
-исполнением и каталогизацией. `ruff.toml` этого же репозитория ставит
-`max-args = 12`; список на 21 позицию был бы тем же клубком в подписи.
-
-Класс подмешивается в ``AgentLoop``; `VerifyState` — состояние ОДНОГО прогона.
-"""
+"""Answer verification and re-planning on unresolved citations."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,14 +16,12 @@ from core.source_ranker import SourceRankingReport
 
 @dataclass
 class VerifyState:
-    """То, что проверка и перепланирование по цитатам носят с собой.
+    """What verification and citation re-planning carry along.
 
-    Имена полей совпадают с прежними локальными именами `_run_inner` — это
-    условие проверяемости переноса: подстановка `имя -> st.имя` механическая,
-    и тест сверяет её с историей.
+    Field names equal the old `_run_inner` locals, so the `name -> st.name` substitution stays mechanical and a test checks it against history.
     """
 
-    # ── Вход: за участок не меняется ─────────────────────────────────────
+    # ── Input: does not change during the section ──
     draft_answer: str
     user_question: str
     file_hint: str | None
@@ -62,33 +40,30 @@ class VerifyState:
     _disagreement_shadow: list[dict[str, Any]]
     _cp: Any
 
-    # ── Выход: это читают ПОСЛЕ участка ──────────────────────────────────
-    #: Текст, доехавший до решателей черновика. При выключенном верификаторе
-    #: это черновик как есть, иначе — размеченный отчётом.
+    # ── Output: read AFTER the section ──
+    # Text that reached the draft deciders: the draft as is when the verifier is off, otherwise
+    # marked by the report.
     answer: str = ""
     planner_out: PlannerOutput | None = None
     replan_exhausted: bool = False
-    #: НЕ «не подтвердилось», а «проверка сломалась». Ниже по цепочке
-    #: решателей эти два случая обязаны различаться.
+    # NOT "did not confirm" but "verification broke": the decider chain below must tell them apart.
     verifier_failure: bool = False
 
-    #: Ради чего вызывающий смотрит в состояние после участка. Объявлено, а
-    #: не оставлено комментарием: молчаливая потеря выхода — самый тихий
-    #: способ сломать такой перенос, и тест держит распаковку по этому списку.
+    # What the caller reads from the state after the section. Declared, not left as a comment: a
+    # silent loss of an output is the quietest way to break this move, and a test holds the
+    # unpacking to this list.
     OUTPUTS: ClassVar[frozenset[str]] = frozenset({
         "answer", "planner_out", "replan_exhausted", "verifier_failure",
     })
 
 
 class AgentLoopVerifyReplan:
-    """Проверка ответа и перепланирование по неразрешённым цитатам.
+    """Answer verification and re-planning on unresolved citations.
 
-    Члены ниже — объявления контракта хоста (``AgentLoop`` их создаёт в
-    ``__init__``); присваиваний нет, поэтому во время выполнения ничего не
-    создаётся и не затеняется. Тот же приём, что в ``loop_step_execution``.
+    Members below are declarations of the host contract (``AgentLoop`` creates them in ``__init__``); no assignments, so nothing is created or shadowed at run time.
     """
 
-    if TYPE_CHECKING:  # pragma: no cover — только объявления
+    if TYPE_CHECKING:  # pragma: no cover — declarations only
         log: Any
         planner: Any
         replan_policy: Any
@@ -99,46 +74,31 @@ class AgentLoopVerifyReplan:
         last_knowledge_pipeline: Any
         _current_attempt: int
 
-        # Объявляем ВЫЗЫВАЕМЫМИ атрибутами: заглушка-функция с пустым телом
-        # читается анализаторами как «функция без return», и каждый вызов
-        # ложно помечается E1111.
+        # Declared as CALLABLE attributes: a stub function with an empty body is read by analysers
+        # as "function without return" and every call is falsely flagged E1111.
         _verify_draft: Any
         _build_plan: Any
         _quarantine_conflicted_memory: Any
 
-        # Берётся у соседней примеси: работает через MRO, но связь между
-        # модулями обязана быть записана, иначе её видно только на прогоне.
+        # Taken from a neighbouring mixin through the MRO; the link between modules must be written
+        # down.
         _execute_steps_parallel: Any
         _executed_tools: Any
         _save_budget_pause_checkpoint: Any
         _verification_receipt_kwargs: Any
-        # Ставит `core/loop_synthesis.py`, сбрасывает за ход `core/loop.py`.
-        # Читалось через `getattr` с умолчанием, и умолчание превращало
-        # отсутствие связи в тихий вердикт по чужому правилу (A6).
+        # Set by `core/loop_synthesis.py`, reset per turn by `core/loop.py`; reading through
+        # `getattr` with a default turned a missing link into a silent verdict by someone else's
+        # rule.
         _synthesis_expects_contract_headers: Any
-        # Пять объявлений отсюда ушли вместе с выносом сердцевины
-        # каталогизации (B3): `knowledge_pipeline`, `knowledge_auto_write`,
-        # `source_registry_store`, `_knowledge_remember_batch` и
-        # `_unattended_run` теперь нужны только ей. Сторож проводки это и
-        # показал — вынос убрал связь, а не переставил вызов.
+        # Five declarations left with the extraction of the cataloguing core: `knowledge_pipeline`,
+        # `knowledge_auto_write`, `source_registry_store`, `_knowledge_remember_batch` and
+        # `_unattended_run` are now needed only by it.
         _catalogue_chain: Any
 
     def _replan_on_refuted_claims(self, report: Any, st: VerifyState) -> None:
-        """Rung 4 of the ladder — carry the WHY into the next attempt.
+        """Rung 4 of the ladder: carry the WHY of a refuted claim into the next attempt.
 
-        A refuted claim knows `expected`, `actual` and the numbers behind them.
-        Unless that reaches the next attempt it is a correct diagnosis in a
-        chart the patient never reads, which is the failure mode the operator
-        named when direction (b) was chosen.
-
-        It travels the road `unresolved_citation` already uses: a
-        `ReplanTrigger` whose `reason` is copied into `<replan_context>`
-        verbatim, and a budget carrying `requires_different_action`, so the
-        sanitiser REFUSES a repeat rather than merely advising against one —
-        the `web_empty` lesson, where prose advice was never enforcement.
-
-        One trigger for the whole draft, not one per claim: the next attempt
-        needs the corrections, not a flood of them.
+        Travels the road `unresolved_citation` uses: a `ReplanTrigger` whose `reason` is copied verbatim into `<replan_context>`, with `requires_different_action` so the sanitiser REFUSES a repeat. One trigger for the whole draft.
         """
         refuted = [c for c in report.chunks if getattr(c, "reason", None)]
         if not refuted:
@@ -158,8 +118,8 @@ class AgentLoopVerifyReplan:
             ),
             attempt=st.attempt,
         ))
-        # Имя общее: гейтов, дающих `ClaimReason`, четыре, и различают их не
-        # вывеской, а полем `code`. См. tests/test_refutation_event_names_its_gate.
+        # The name is shared: four gates give a `ClaimReason`, told apart by the `code` field
+        # (tests/test_refutation_event_names_its_gate).
         self.log.log("claims_refuted_by_content", {
             "count": len(refuted),
             "reasons": [c.reason.to_log_payload() for c in refuted[:5]],
@@ -170,11 +130,9 @@ class AgentLoopVerifyReplan:
         unresolved_urls: list[str],
         iteration: int,
     ) -> dict[str, Any]:
-        """Один альтернативный шаг после терминального fetch/no-op.
+        """One alternative step after a terminal fetch/no-op.
 
-        Основной verify-replan требует ``web_fetch`` каждого URL. Если весь
-        план исчерпан без улик, один ``web_search`` — иной вид действия —
-        получает шанс найти доступный источник до капитуляции синтеза.
+        The main verify-replan requires ``web_fetch`` of every URL. If the plan is exhausted without evidence, one ``web_search`` (a different kind of action) gets a chance to find an available source before synthesis gives up.
         """
         return {
             "tool": "web_search",
@@ -186,11 +144,9 @@ class AgentLoopVerifyReplan:
         }
 
     def _verify_and_settle_answer(self, st: VerifyState) -> None:
-        """Довести черновик до текста, который увидят решатели.
+        """Bring the draft to the text the deciders will see.
 
-        Ничего не возвращает: результат лежит в `st` — сам текст, последний
-        вывод планировщика, признак исчерпанного перепланирования и флаг
-        поломки верификатора.
+        Returns nothing: the result lies in `st` (the text, the planner's last output, the exhausted-replan flag and the verifier-broke flag).
         """
         if self.verifier_enabled:
             from core.verifier import (
@@ -200,9 +156,9 @@ class AgentLoopVerifyReplan:
                 verify as _verify,
             )
 
-            # Кусок 5 разбора `_run_inner`: проверка и сенсоры вокруг неё
-            # живут в `core/loop_verification.py`. Второй элемент — «проверка
-            # сломалась», а не «не подтвердилось»; ниже они не смешиваются.
+            # Verification and its sensors live in `core/loop_verification.py`.
+            # The second element is "verification broke", not "did not confirm"; they are never
+            # mixed below.
             report, st.verifier_failure = self._verify_draft(
                 st.draft_answer,
                 chain=st.chain,
@@ -225,9 +181,8 @@ class AgentLoopVerifyReplan:
                 if not unresolved_urls:
                     break
                 if verify_replan_attempt >= VERIFY_REPLAN_HARD_CAP:
-                    # Hard cap — это исчерпание перепланирования, а не
-                    # успешное разрешение цитат. Сохраняем тот же выходной
-                    # сигнал, что и ветка ReplanPolicy ниже.
+                    # The hard cap is replan exhaustion, not a successful citation resolution; same
+                    # output signal as the ReplanPolicy branch below.
                     st.replan_exhausted = True
                     self.log.log(
                         "verify_replan_capped",
@@ -276,13 +231,9 @@ class AgentLoopVerifyReplan:
                     )
                     break
 
-                # Build the planner advice. We surface `unresolved_citation`
-                # advice FIRST (the new failure dominates) and then append
-                # an explicit URL list the planner must convert into
-                # web_fetch steps. The base `decision.advice_for_planner`
-                # is composed over all FailureTypes seen so far, in
-                # FailureType-declaration order, so it might bury the
-                # critical fetch instruction — we prepend ours explicitly.
+                # Planner advice: `unresolved_citation` advice goes FIRST, then an explicit URL list
+                # the planner must convert into web_fetch steps; the base advice follows FailureType
+                # order and might bury the fetch instruction.
                 base_advice = (
                     self.replan_policy.budgets["unresolved_citation"].advice
                 )
@@ -314,8 +265,8 @@ class AgentLoopVerifyReplan:
                     },
                 )
 
-                # Bump the public attempt counter so `respond.attempts_used`
-                # reflects the verify-driven re-plans honestly.
+                # Bump the public attempt counter so `respond.attempts_used` reflects verify-driven
+                # re-plans.
                 self._current_attempt = st.attempt + verify_replan_attempt
 
                 self.log.log(
@@ -347,10 +298,8 @@ class AgentLoopVerifyReplan:
                         history=st.planner_history,
                         failure_context=failure_context,
                         forbidden_actions=decision.forbidden_actions,
-                        # Keep the complexity-escalated planner model on verify
-                        # re-plans; without this the re-plan silently dropped to
-                        # the default tier a "deep" question was escalated away
-                        # from.
+                        # Keep the complexity-escalated planner model on verify re-plans; otherwise
+                        # the re-plan dropped to the default tier.
                         llm=st._task_planner_llm,
                     )
                 except ModelBudgetExceeded as exc:
@@ -391,18 +340,16 @@ class AgentLoopVerifyReplan:
                     phase="verify",
                 )
 
-                # Execute the new steps. We tolerate sanitiser/policy drops
-                # and per-step failures — if NOTHING gets fetched we'll
-                # just exit on the next loop iteration when re-verify
-                # still finds the same unresolved URLs. No infinite loop
-                # because the hard cap + per-type budget both bound us.
+                # Execute the new steps, tolerating sanitiser/policy drops and per-step failures; if
+                # nothing is fetched we exit on the next iteration (the hard cap and per-type budget
+                # bound the loop).
                 def execute_verify_steps(steps: list[Any]) -> int:
                     added = 0
                     for step, outcome, trigger in self._execute_steps_parallel(steps):
                         if outcome is None:
                             step.status = "failed"
-                            # Drain the scratch trigger so it does not leak into
-                            # a later policy decision with a misleading code.
+                            # Drain the scratch trigger so it does not leak into a later policy
+                            # decision with a misleading code.
                             if trigger is not None:
                                 st.failure_history.append(trigger)
                             continue
@@ -446,10 +393,8 @@ class AgentLoopVerifyReplan:
                     added_evidence += execute_verify_steps(fallback_plan.steps)
 
 
-                # Re-verify the ORIGINAL draft against the enriched chain.
-                # The draft already cites these URLs (that's why they
-                # were unresolved); now the chain has the web_page
-                # evidence so `match_citation` will resolve them.
+                # Re-verify the ORIGINAL draft against the enriched chain: it already cites these
+                # URLs, and now the chain has the web_page evidence.
                 try:
                     report = _verify(
                         answer=st.draft_answer,
@@ -483,8 +428,8 @@ class AgentLoopVerifyReplan:
                 self.last_verification = report
                 self.last_provenance = st.chain
 
-                # Re-emit the chain snapshot so callers / log consumers
-                # see the enriched provenance after each fetch round.
+                # Re-emit the chain snapshot so log consumers see the enriched provenance after each
+                # fetch round.
                 self.log.log(
                     "evidence_collected",
                     {
@@ -494,10 +439,8 @@ class AgentLoopVerifyReplan:
                         "chain": st.chain.to_log_payload(),
                     },
                 )
-                # The shared core (census B3). Everything below it is this
-                # caller's own: the run state it writes into, the `phase` and
-                # `iteration` stamps, and the quarantine — none of which the
-                # other caller does.
+                # The shared core. Everything below is this caller's own: the run state, the `phase`
+                # and `iteration` stamps, and the quarantine.
                 catalogued = self._catalogue_chain(
                     st.chain,
                     question=st.user_question,
@@ -536,9 +479,8 @@ class AgentLoopVerifyReplan:
                     },
                 )
 
-                # Ровно один альтернативный шаг был выполнен. Независимо от
-                # его результата следующий исход — финальная разметка текущего
-                # черновика, а не повторная генерация fallback-шага.
+                # Exactly one alternative step was done: regardless of its result the next outcome
+                # is the final marking of the current draft, not another fallback step.
                 if fallback_executed:
                     self.log.log(
                         "verify_replan_terminal_fallback_settled",
@@ -549,10 +491,8 @@ class AgentLoopVerifyReplan:
                     )
                     break
 
-                # If the fetch round added zero evidence, re-verify will
-                # produce the same unresolved list — exit instead of
-                # looping back to a planner call that has nothing new
-                # to work with.
+                # If the fetch round added no evidence, re-verify gives the same unresolved list:
+                # exit instead of calling the planner with nothing new.
                 if added_evidence == 0:
                     self.log.log(
                         "verify_replan_noop",

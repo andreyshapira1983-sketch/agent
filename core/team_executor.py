@@ -1,11 +1,4 @@
-"""Executor for bounded subagent contracts.
-
-Supports two modes:
-- dry_run=True  (default) — walks the plan and reserves/validates contracts
-  without spawning any sub-agents.  Safe for inspection and testing.
-- dry_run=False — requires a SubAgentRunner injected via the constructor.
-  Runs each contract in plan order, blocking on approval_required items.
-"""
+"""Executor for bounded subagent contracts: dry-run (default) walks the plan and validates contracts; real mode needs an injected SubAgentRunner and blocks on approval_required items."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -303,11 +296,8 @@ class TeamExecutor:
                             audit_report=getattr(result, "contract_audit", None),
                         )
                 except Exception as exc:  # noqa: BLE001 — reason stated above
-                    # Not silence: the typed reason becomes the step's summary,
-                    # goes into `warnings`, flips the plan to `blocked`, and is
-                    # recorded against the contract via `_record_contract_run`.
-                    # Broad on purpose — one contract must not abort the team
-                    # run, and every failure mode ends in the same four writes.
+                    # Not silence: the typed reason becomes the step summary, goes into `warnings`, flips the plan to `blocked` and is recorded against the contract;
+                    # broad on purpose, one contract must not abort the team run.
                     step_status = "error"
                     answer = ""
                     summary = f"error: {type(exc).__name__}: {exc}"
@@ -361,9 +351,7 @@ class TeamExecutor:
                     audit_report=audit_report,
                 )
         except Exception as exc:  # noqa: BLE001 — reason stated above
-            # The registry write is bookkeeping ABOUT a run that already
-            # happened; losing it must not turn a completed contract into a
-            # failed one. The typed reason goes to the caller's `warnings`.
+            # The registry write is bookkeeping about a run that already happened; losing it must not fail a completed contract. The typed reason goes to `warnings`.
             warnings.append(
                 "contract registry write failed: "
                 f"{type(exc).__name__}: {exc}"

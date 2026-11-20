@@ -1,67 +1,24 @@
-"""Сверка нового вывода с памятью ПЕРЕД записью — фаза обновления Mem0.
+"""Reconcile a new conclusion with memory BEFORE writing it (Mem0 update phase).
 
-Источник: Chhikara et al., «Mem0: Building Production-Ready AI Agents with
-Scalable Long-Term Memory», arXiv 2504.19413, раздел 3.1 и Алгоритм 1
-(приложение B). Для каждого нового факта достаются top-s похожих записей, и
-МОДЕЛЬ выбирает одну из четырёх операций:
-
-- ADD — равнозначной записи нет, пишется новая;
-- UPDATE — новый дополняет прежний; они СЛИВАЮТСЯ в один вывод под прежним
-  вопросом (так в исходниках Mem0, mem0/configs/prompts.py: «Likes cheese
-  pizza» + «Loves chicken pizza» -> «Loves cheese and chicken pizza»; статья
-  пишет «заменить более богатым», но код сливает — и только слияние не теряет
-  знания, когда модель склеит двух близких соседей);
-- DELETE — новый противоречит прежнему; прежний убирается;
-- NOOP — это уже есть в памяти.
-
-Зачем, замер 2026-09-23 на живой памяти: двенадцать записей об одной и той же
-теореме Нётер у Тонга, одиннадцать о лексическом анализе у Могенсена, семь
-разборов одного случая. Дубль-сторож при записи (`memory_hygiene`, похожесть
-текста не ниже 0.85) пропустил все: выводы об одном факте, написанные разными
-словами, до 0.85 не дотягивают. Структурный ключ (`learned_conclusion`) ловит
-повтор только когда в вопросе назван термин в скобках или кавычках. Порог
-похожести решить этого не может в принципе: противоречие похоже на исходник
-сильнее, чем пересказ, и предельная точность любого порога — 0.67 (замерено в
-литературе, см. `learned_conclusion.question_key`). Поэтому, как у Mem0,
-похожесть лишь ОТБИРАЕТ кандидатов (здесь — BM25 из `memory_policy`), а
-решает модель.
-
-Заодно — заголовок вместо письма (ReasoningBank, arXiv 2509.25140: в память
-кладётся выжимка с кратким заголовком, а не сырой обмен). Замер того же дня:
-у 15 записей «вопросом» стояло письмо или объявление о вакансии, обрезанное
-на 300-м знаке, и оно служило ключом записи.
-
-Живой прогон 2026-09-23 на настоящей модели (DeepSeek, как у агента): из 20
-архивных повторов узнано 19 (все 11 о Нётер); из 20 контрольных разных
-вопросов к одной книге 16 — ADD, а 4 раза UPDATE — две пары близких соседей в
-одном разделе (инвариант и псевдокод Дейкстры; волны на поверхности и мелкая
-вода), в обе стороны. Первая редакция ЗАМЕНЯЛА прежнюю запись более богатой —
-и эти 4 случая стёрли бы знание; слияние сохранило в слитых текстах 205 из 208
-чисел обеих записей (разделы, страницы, строки, формулы). Отсюда слияние. Ещё
-одна потеря первой редакции: модели показывались первые 700 знаков записи, и
-хвост терялся при слиянии («стр. 24» в конце записи о Нётер) — теперь запись
-показывается целиком.
-
-Всё обратимо: «убрать» значит перенести в архив. Сбой модели, пустой или
-неразборчивый ответ, ссылка на несуществующую запись — это ADD, как было до
-правки: вывод не теряется никогда.
-"""
+    The model picks one operation per new fact, given BM25-selected similar records:
+    ADD (no equivalent), UPDATE (merge into one conclusion under the old question),
+    DELETE (contradiction; the old one is archived), NOOP (already present).
+    Everything is reversible; any model failure or unusable answer means ADD."""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Any
 
-#: Сколько похожих выводов показывать модели (s в Алгоритме 1 Mem0).
+#: How many similar conclusions to show the model (s in Mem0's Algorithm 1).
 TOP_S = 5
-#: Длиннее — это не вопрос, а письмо или вставленный текст: просить заголовок.
+#: Longer than this is a pasted letter, not a question: ask for a title.
 LONG_QUESTION_CHARS = 200
-#: Предел заголовка.
+#: Title length limit.
 MAX_TITLE_CHARS = 160
-#: Запись показывается модели целиком: хвост, срезанный на 700 знаках, при
-#: слиянии терялся (живой прогон: «стр. 24» в конце записи о Нётер).
+#: A record is shown to the model whole: a tail cut at 700 chars was lost on merge.
 _PREVIEW_CHARS = 1300
-#: Предел слитого вывода: два вывода по 600 знаков.
+#: Merged conclusion limit: two conclusions of 600 chars.
 MAX_MERGED_CHARS = 1200
 _OPERATIONS = ("ADD", "UPDATE", "DELETE", "NOOP")
 
@@ -79,7 +36,7 @@ Answer with ONE JSON object only:
 
 @dataclass(frozen=True)
 class Consolidation:
-    """Решение по новому выводу."""
+    """Decision on a new conclusion."""
 
     operation: str               # ADD | UPDATE | DELETE | NOOP
     target_id: str | None = None
@@ -89,7 +46,7 @@ class Consolidation:
 
 
 def similar_conclusions(content: str, records: list[Any], top_s: int = TOP_S) -> list[Any]:
-    """До top_s прежних ВЫВОДОВ, похожих на новый, по BM25; только с общими словами."""
+    """Up to top_s earlier CONCLUSIONS similar to the new one, by BM25; only those sharing words."""
     from core.bm25 import bm25_scores, term_counts, tokens
 
     pool = [r for r in records if "conclusion" in (getattr(r, "tags", None) or [])]
@@ -99,7 +56,7 @@ def similar_conclusions(content: str, records: list[Any], top_s: int = TOP_S) ->
 
     texts = [_without_sources(str(r.content)) for r in pool]
     lexical = bm25_scores(tokens(_without_sources(content)), [term_counts(t, []) for t in texts])
-    # Mem0 достаёт top-s похожих по векторам; без смысла — по общим словам.
+    # Mem0 picks by vectors; without meaning, pick by shared words.
     fused, semantic = fused_relevance(_without_sources(content), texts, lexical)
     ranked = sorted(range(len(pool)), key=lambda i: -fused[i])
     return [pool[i] for i in ranked if semantic is not None or lexical[i] > 0][:top_s]
@@ -116,8 +73,8 @@ def needs_title(question: str) -> bool:
 
 
 def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Consolidation:
-    """Спросить модель; любой сбой — ADD."""
-    # None или не-строка в вопросе роняли split (проверка 17.11, средняя).
+    """Ask the model; any failure means ADD."""
+    # A None or non-string question used to crash split.
     question = question if isinstance(question, str) else ("" if question is None else str(question))
     long_q = needs_title(question)
     if llm is None or (not similar and not long_q):
@@ -145,7 +102,7 @@ def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Co
         return Consolidation("ADD", title=title, reason="unreadable model answer")
     target = data.get("target")
     ids = {r.id for r in similar}
-    # Список/словарь в target давал TypeError вместо ADD (проверка 17.11, средняя).
+    # A list or dict in target used to raise TypeError instead of ADD.
     if op != "ADD" and (not isinstance(target, str) or target not in ids):
         return Consolidation("ADD", title=title, reason=f"{op} named no known record ({target!r})")
     merged = " ".join(str(data.get("merged") or "").split())[:MAX_MERGED_CHARS] or None
@@ -157,33 +114,21 @@ def consolidate(llm: Any, content: str, question: str, similar: list[Any]) -> Co
     )
 
 
-#: Ворота слияния — «Useful Memories Become Faulty» (arXiv 2605.12978): память,
-#: которую модель непрерывно переписывает, сначала полезнее, потом хуже, чем
-#: без памяти; корень — шаг слияния, не опыт. Рецепт: сырое хранить как улику,
-#: слияние пропускать через ворота, а не запускать после каждого хода.
-#: Замер 2026-09-25 на сервере: 8 слияний (UPDATE), удалений 0, все 8 — один
-#: и тот же вопрос, уточнённый. Номер цели и раньше сверялся с показанными
-#: кандидатами (consolidate выше); не проверялось, что слитое не потеряло знаний.
-#:
-#: Мерка ворот — та, которой этот модуль был принят 23.09: слияние сохранило
-#: 205 из 208 чисел обеих записей (разделы, страницы, строки, формулы). Слитый
-#: текст, потерявший хоть одно число старой или новой записи, не пишется —
-#: обе записи остаются рядом. Первая редакция ворот сравнивала СЛОВА вопросов
-#: и остановила каноническое слияние («формулировка теоремы Нётер у Тонга» +
-#: «пример теоремы Нётер у Тонга»: 2 общих основы из 11) — словами предмет не
-#: определить, это делает модель; ворота проверяют, что она ничего не выронила.
+#: Merge gate: rewriting memory continuously degrades it (arXiv 2605.12978), so merges pass a gate.
+#: A merged text that lost any number (sections, pages, lines, formulas) of the old or new record is not written; both records stay.
+#: Words of the questions are not compared: the model decides the subject, the gate checks that nothing was dropped.
 _NUMBER = re.compile(r"\d+(?:[.,:/-]\d+)*")
 _NESTED = re.compile(r"^\s*Вопрос:.*?Вывод:\s*", re.DOTALL)
 
 
 def _numbers(text: str) -> set[str]:
-    """Числа ВЫВОДА: строка «Вопрос: …» по замыслу берётся у прежней записи."""
+    """Numbers of the CONCLUSION: the "Вопрос: ..." line is taken from the old record by design."""
     body = "\n".join(ln for ln in _without_sources(text or "").splitlines() if not ln.startswith("Вопрос:"))
     return set(_NUMBER.findall(body))
 
 
 def gate(decision: Consolidation, new_content: str, candidates: list[Any]) -> Consolidation:
-    """UPDATE — только над показанным кандидатом и без потери чисел; иначе ADD."""
+    """UPDATE only over a shown candidate and without losing numbers; otherwise ADD."""
     if decision.operation not in ("UPDATE", "DELETE"):
         return decision
     target = next((r for r in candidates if getattr(r, "id", None) == decision.target_id), None)
@@ -199,12 +144,9 @@ def gate(decision: Consolidation, new_content: str, candidates: list[Any]) -> Co
 
 
 def merged_content(new_content: str, target_content: str, merged: str) -> str:
-    """Слитая запись: вопрос прежней записи, слитый вывод, источники обеих.
+    """Merged record: the old record's question, the merged conclusion, sources of both.
 
-    Вопрос берётся у прежней записи, чтобы её ключ не поплыл. Модель порой
-    повторяет в слитом выводе «Вопрос: … Вывод: …», и при каждом слиянии
-    вложенность росла (живая память 2026-09-25) — такие головы срезаются.
-    """
+        The question comes from the old record so its key does not drift; nested "Вопрос: ... Вывод: ..." heads the model repeats are stripped."""
     while _NESTED.match(merged or ""):
         merged = _NESTED.sub("", merged, count=1)
     def line(content: str, prefix: str) -> str:
@@ -222,7 +164,7 @@ def merged_content(new_content: str, target_content: str, merged: str) -> str:
 
 
 def with_title(content: str, title: str | None) -> str:
-    """Заменить строку «Вопрос: …» заголовком; остальное как было."""
+    """Replace the "Вопрос: ..." line with a title; the rest unchanged."""
     if not title:
         return content
     head, sep, rest = (content or "").partition("\n")

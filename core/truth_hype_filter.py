@@ -1,27 +1,4 @@
-"""Truth/Hype Filter — the first LEARNING antibody (правда vs шумиха).
-
-The operator's formula: the agent must not merely INGEST text, it must judge
-whether a piece of content carries substantive, checkable information ("truth")
-or is empty marketing / hype ("шумиха") that should never become long-term
-knowledge.
-
-    Сначала научить и ПРОВЕРИТЬ, что усвоено — а не просто проглотить.
-
-This module is a pure, deterministic POLICY. Given a piece of text it returns a
-verdict (``substantive`` | ``hype``) plus the hype/substance signals it
-observed. No LLM, no I/O, mutates nothing — O(n) over the text.
-
-Design principles
------------------
-* No LLM calls, no I/O — regex + counting heuristics, deterministic and O(n).
-* Conservative: ordinary factual text is ``substantive``. A ``hype`` verdict
-  requires BOTH a clear excess of promotional language AND a lack of concrete,
-  checkable substance (numbers, named entities, sources, causal structure).
-  This asymmetry means the filter never silently drops real information just
-  because it reads confidently — it only flags content that is loud yet empty.
-* The filter only DECIDES (substantive/hype) + explains. It never rewrites or
-  deletes text; callers (e.g. the knowledge write policy) act on the verdict.
-"""
+"""Truth/hype filter: a pure deterministic policy classifying text as `substantive` or `hype` (with signals); `hype` needs both a clear excess of promotional language and a lack of checkable substance, so real information is never dropped for sounding confident. It only decides and explains; callers act on the verdict."""
 from __future__ import annotations
 
 import re
@@ -31,13 +8,8 @@ from typing import Literal
 TruthHypeVerdict = Literal["substantive", "hype"]
 
 
-# ---------------------------------------------------------------------------
-# Lexicons
-# ---------------------------------------------------------------------------
 
-# Promotional / marketing terms (EN + RU). Matched case-insensitively as whole
-# phrases. Curated to avoid ordinary technical words — every entry is something
-# that signals salesmanship rather than information.
+# Promotional / marketing terms (EN + RU), matched case-insensitively as whole phrases; curated to avoid ordinary technical words.
 _HYPE_TERMS: tuple[str, ...] = (
     # English
     "revolutionary", "revolutionize", "revolutionise", "game-changing",
@@ -87,16 +59,12 @@ _CAUSAL = re.compile(
     re.IGNORECASE,
 )
 
-# Thresholds (deterministic). A verdict of "hype" requires the hype score to
-# clear the bar AND the substance score to stay at/under the floor.
+# Deterministic thresholds: "hype" needs the hype score above the bar AND the substance score at or under the floor.
 _HYPE_THRESHOLD = 0.34
 _SUBSTANCE_FLOOR = 0.25
 _MAX_SCAN_CHARS = 4096   # ReDoS / cost guard
 
 
-# ---------------------------------------------------------------------------
-# Signals
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class TruthHypeSignals:
@@ -137,9 +105,6 @@ class TruthHypeSignals:
         }
 
 
-# ---------------------------------------------------------------------------
-# Outcome
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class TruthHypeOutcome:
@@ -167,9 +132,6 @@ class TruthHypeOutcome:
         }
 
 
-# ---------------------------------------------------------------------------
-# Extraction + scoring
-# ---------------------------------------------------------------------------
 
 def _extract_signals(text: str) -> TruthHypeSignals:
     lowered = text.casefold()
@@ -199,14 +161,13 @@ def _hype_score(signals: TruthHypeSignals) -> float:
     hype terms scores high while a long technical text with one stray buzzword
     does not."""
     words = max(signals.word_count, 1)
-    # Weighted promotional load: named hype terms dominate, superlatives and
-    # exclamations add lesser pressure.
+    # Weighted promotional load: named hype terms dominate, superlatives and exclamations add less.
     load = (
         2.0 * len(signals.hype_terms)
         + 1.0 * signals.superlative_count
         + 0.5 * signals.exclamation_count
     )
-    # Normalise per ~12 words so density (not raw length) drives the score.
+    # Normalise per ~12 words so density, not raw length, drives the score.
     density = load / (words / 12.0 + 1.0)
     return max(0.0, min(1.0, density))
 
@@ -240,18 +201,9 @@ def _reasons(signals: TruthHypeSignals, hype: float, substance: float) -> tuple[
     return tuple(out)
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def evaluate(text: str) -> TruthHypeOutcome:
-    """Classify *text* as ``substantive`` or ``hype``.
-
-    Pure and deterministic — no LLM, no I/O. Empty / non-string input is
-    treated as ``substantive`` (nothing to flag). A ``hype`` verdict requires
-    BOTH a high promotional density AND a low substance score, so confidently
-    written but checkable text is never dropped.
-    """
+    """Classify *text* as ``substantive`` or ``hype``; empty or non-string input is substantive; hype needs both high promotional density and low substance."""
     if not isinstance(text, str) or not text.strip():
         return TruthHypeOutcome(
             verdict="substantive",

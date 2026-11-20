@@ -5,9 +5,7 @@ import inspect
 import os
 from typing import Any
 
-# Реестр моделей, тратящих бюджет вывода на рассуждение, — отдельный хранимый
-# орган (core/reasoning_roster.py). Клиент его читает и пополняет; имена
-# реэкспортируются, потому что точки входа и тесты берут их отсюда.
+# Registry of models that spend output budget on reasoning (core/reasoning_roster.py); read and extended here, names re-exported for entry points and tests.
 from core.reasoning_roster import (  # noqa: F401
     ROSTER_RELPATH,
     _roster_key,
@@ -30,9 +28,7 @@ def _default_model(provider: str) -> str:
     if override:
         return override
     if provider == "deepseek":
-        # Официальные имена на 2026-09-24 (GET /models и страница Models &
-        # Pricing): deepseek-flash и deepseek-v4-pro. «deepseek-chat» из списка
-        # моделей исчез и живёт лишь псевдонимом Flash — его могут снять в любой день.
+        # Official names: deepseek-flash and deepseek-v4-pro; "deepseek-chat" survives only as a Flash alias and may be removed any day.
         return "deepseek-flash"
     if provider == "openai":
         return "gpt-4o-mini"
@@ -46,28 +42,12 @@ def _default_model(provider: str) -> str:
 DEFAULT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "2048"))
 
 
-# Provider stop/finish reasons that mean "I ran out of output budget mid-answer"
-# rather than "I finished naturally". When we see one of these we can ask the
-# model to continue where it left off instead of returning a truncated answer.
+# Provider stop/finish reasons meaning the output budget ran out mid-answer; the model can be asked to continue instead of returning a truncated answer.
 _TRUNCATION_REASONS = frozenset({"max_tokens", "length"})
 
-# OpenAI reasoning models ("o-series" and gpt-5+) spend `max_completion_tokens`
-# on INTERNAL reasoning first and only then on visible output. A budget sized
-# for the answer alone can therefore be consumed entirely by reasoning, and the
-# API still returns success — with `content=None` and `finish_reason='length'`.
-#
-# Observed in production: the planner asked for 1024 tokens, got 0 characters
-# back, auto-continued once with the same 1024, got 0 characters again, and
-# reported `json_decode_error` on an answer that never existed (1024 + 1024 =
-# the 2048 output_tokens recorded in the run log).
-#
-# So for these models the requested budget is a FLOOR, not the whole story:
-# raise it so reasoning has room and the answer still fits. Applies only to
-# reasoning models; every other model keeps its exact requested budget.
-#
-# Parsed defensively: a malformed value must degrade to the default, never
-# raise at import time and take the process down. Same contract as
-# `_max_continuations()` below and `_plan_max_tokens()` in core/planner.py.
+# OpenAI reasoning models (o-series, gpt-5+) spend max_completion_tokens on internal reasoning first, so a budget sized for the answer
+# alone can return content=None with finish_reason='length'. For these models the requested budget is a FLOOR, raised so reasoning and
+# answer fit; other models keep the exact budget. Parsed defensively: a malformed value degrades to the default, never raises at import.
 def _reasoning_token_floor() -> int:
     try:
         return int(str(os.getenv("AGENT_REASONING_TOKEN_FLOOR", "8192")).strip())
@@ -82,19 +62,13 @@ _REASONING_EFFORT_LEVELS = frozenset({"minimal", "low", "medium", "high", "max"}
 
 
 def _reasoning_effort_kwargs() -> dict[str, str]:
-    """`reasoning_effort` kwargs for gpt-5+/o-series calls, from the operator's
-    AGENT_OPENAI_REASONING_EFFORT. Unset or invalid → {} (provider default);
-    read per call so an exam session can flip it without a process restart."""
+    """reasoning_effort kwargs for gpt-5+/o-series calls from AGENT_OPENAI_REASONING_EFFORT; unset or invalid gives {}; read per call (no restart)."""
     level = (os.getenv("AGENT_OPENAI_REASONING_EFFORT", "") or "").strip().lower()
     return {"reasoning_effort": level} if level in _REASONING_EFFORT_LEVELS else {}
 
 
 def accepted_flags(fn: Any, flags: dict[str, bool]) -> dict[str, bool]:
-    """The subset of *flags* that *fn* can take as keywords.
-
-    Asked of the signature, not of a failed call: retrying on TypeError would
-    re-send a paid request whenever the provider itself raised TypeError.
-    """
+    """The subset of flags that fn can take as keywords; asked of the signature because retrying on TypeError would re-send a paid request."""
     if not flags:
         return flags
     try:
@@ -106,34 +80,20 @@ def accepted_flags(fn: Any, flags: dict[str, bool]) -> dict[str, bool]:
     return {name: value for name, value in flags.items() if name in params}
 
 
-# Providers whose chat API has `response_format={"type": "json_object"}`.
-# DeepSeek: api-docs.deepseek.com/guides/json_mode — valid JSON when the prompt
-# says "json" and shows the shape; may occasionally return EMPTY content
-# (parse_json names that `empty_model_output`, not a decode error).
-# Measured 2026-09-19..21: 9 of 2176 planner replies did not parse — unescaped
-# quotes in quoted code, raw newlines inside strings, a bad `\` escape, text
-# after the object — and each one left the turn with no tools at all.
+# Providers whose chat API has response_format={"type": "json_object"}. DeepSeek needs "json" and the shape in the prompt and may return
+# EMPTY content (parse_json names that empty_model_output).
 _JSON_MODE_PROVIDERS = frozenset({"deepseek", "openai"})
 
 
 def _deepseek_thinking_kwargs() -> dict[str, Any]:
-    """Режим размышления DeepSeek из AGENT_DEEPSEEK_THINKING (enabled/disabled).
-
-    С 2026-09 у DeepSeek две модели (deepseek-flash, deepseek-v4-pro), и обе по
-    умолчанию думают; старые имена deepseek-chat/-reasoner — псевдонимы Flash
-    без/с размышлением (живой запрос 2026-09-19). Размышление тратит тот же
-    max_tokens, что и ответ. Не задано или мусор → {} (умолчание поставщика);
-    читается на каждый вызов, как AGENT_OPENAI_REASONING_EFFORT.
-    """
+    """DeepSeek thinking mode from AGENT_DEEPSEEK_THINKING (enabled/disabled); both current models think by default and thinking spends the same
+    max_tokens as the answer; unset or invalid gives {}; read per call."""
     mode = (os.getenv("AGENT_DEEPSEEK_THINKING", "") or "").strip().lower()
     return {"extra_body": {"thinking": {"type": mode}}} if mode in {"enabled", "disabled"} else {}
 
 
-# How far a continuation round may escalate the per-leg budget when the
-# previous leg came back empty. Bounded so a model that never answers cannot
-# drive unbounded spend; `AGENT_MAX_CONTINUATIONS` is the other backstop.
-# Clamped at 1 so a zero or negative value cannot collapse the ceiling below
-# the starting budget and disable continuation as a side effect.
+# How far a continuation round may escalate the per-leg budget when the previous leg came back empty; bounded so a silent model cannot
+# drive unbounded spend (AGENT_MAX_CONTINUATIONS is the other backstop); clamped at 1.
 def _continue_escalation_cap() -> int:
     try:
         return max(1, int(str(os.getenv("AGENT_CONTINUE_ESCALATION_CAP", "4")).strip()))
@@ -145,10 +105,7 @@ _CONTINUE_ESCALATION_CAP = _continue_escalation_cap()
 
 
 def _auto_continue_enabled() -> bool:
-    """Whether truncated answers are auto-continued. Defaults to ON.
-
-    Disable with ``AGENT_AUTO_CONTINUE=0`` (or false/no/off).
-    """
+    """Whether truncated answers are auto-continued (default on; disable with AGENT_AUTO_CONTINUE=0/false/no/off)."""
     value = os.getenv("AGENT_AUTO_CONTINUE")
     if value is None:
         return True
@@ -156,11 +113,7 @@ def _auto_continue_enabled() -> bool:
 
 
 def _max_continuations() -> int:
-    """Max follow-up rounds when an answer is truncated (default 4).
-
-    A value of 0 disables continuation. Bounded so a misbehaving model can
-    never loop forever; the budget governor is the other backstop.
-    """
+    """Max follow-up rounds when an answer is truncated (default 4; 0 disables); bounded so a misbehaving model cannot loop forever."""
     raw = os.getenv("AGENT_MAX_CONTINUATIONS", "4")
     try:
         return max(0, int(str(raw).strip()))
@@ -168,8 +121,7 @@ def _max_continuations() -> int:
         return 4
 
 
-# Instruction appended for OpenAI-compatible continuation turns. Anthropic does
-# not need this — it continues an assistant prefill natively.
+# Instruction appended for OpenAI-compatible continuation turns; Anthropic continues an assistant prefill natively.
 _CONTINUE_INSTRUCTION = (
     "Continue the previous response exactly where it stopped. "
     "Output only the continuation — no repetition of earlier text, no preamble, "
@@ -184,35 +136,22 @@ class LLM:
         self.provider = (provider or _provider()).lower().strip()
         self.model = model or _default_model(self.provider)
         self._client = self._build_client()
-        # Usage counters — incremented by `complete()` after every
-        # successful call. Reset via `reset_usage()` between audit
-        # scenarios. Counters NEVER throw — when the provider doesn't
-        # report `usage` they simply stay flat.
+        # Usage counters, incremented by complete() after every successful call and reset via reset_usage(); they never throw (flat when the provider reports no usage).
         self.call_count: int = 0
         self.input_tokens: int = 0
         self.output_tokens: int = 0
-        # `last_usage` carries the most recent per-call payload so an
-        # audit can attribute spend to a specific scenario without
-        # diffing the counters by hand.
+        # last_usage: the most recent per-call payload, so an audit can attribute spend to a scenario.
         self.last_usage: dict[str, int | None] = {
             "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
-            # Сколько входа взято из кэша промпта у поставщика, сколько мимо.
-            # None (а не 0) значит НЕ ИЗМЕРЕНО: у нуля и у отсутствия замера
-            # разный смысл, и путать их — тот самый прибор, который врёт.
+            # Prompt-cache input tokens from the provider; None means NOT MEASURED, which differs from 0.
             "cache_hit_tokens": None, "cache_miss_tokens": None,
         }
-        #: Whether the last answer stopped on the token limit rather than
-        #: finishing. A caller that declined continuation needs this to tell a
-        #: short answer from a broken one.
+        #: Whether the last answer stopped on the token limit; lets a caller that declined continuation tell a short answer from a broken one.
         self.last_answer_was_truncated: bool = False
 
-    # ------------------------------------------------------------------
-    # Usage helpers
-    # ------------------------------------------------------------------
 
     def reset_usage(self) -> None:
-        """Zero every counter. Used by the audit harness between
-        scenarios so per-question budgets are independent."""
+        """Zero every counter (the audit harness calls it between scenarios)."""
         self.call_count = 0
         self.input_tokens = 0
         self.output_tokens = 0
@@ -234,11 +173,7 @@ class LLM:
 
     @staticmethod
     def _opt_tokens(value: Any) -> int | None:
-        """Число токенов или None, когда поставщик его не сообщил.
-
-        None и 0 здесь РАЗНЫЕ: None — «не измерено», 0 — «измерено, в кэш
-        не попало ничего». Сплющить их в 0 значит построить прибор, который
-        показывает слово вместо мира."""
+        """Token count, or None when the provider did not report it (None = not measured, 0 = measured and nothing cached)."""
         if value is None:
             return None
         try:
@@ -250,12 +185,7 @@ class LLM:
     def _agg_cache(
         hit: int | None, miss: int | None, leg: dict[str, Any]
     ) -> tuple[int | None, int | None]:
-        """Сложить числа кэша отрезка с накопленными.
-
-        Молчащий отрезок НЕ обнуляет накопленное и не превращается в ноль:
-        None означает «не измерено», и сумма остаётся None, пока хоть один
-        отрезок не принесёт настоящее число.
-        """
+        """Add a leg's cache numbers to the running totals; a silent leg does not reset them, and the sum stays None until some leg reports a real number."""
         def _add(acc: int | None, key: str) -> int | None:
             value = LLM._opt_tokens(leg.get(key))
             if value is None:
@@ -270,9 +200,7 @@ class LLM:
         cache_hit: Any = None,
         cache_miss: Any = None,
     ) -> None:
-        """Internal: bump counters after a successful call. Bad inputs
-        (negative or non-int) become 0 — usage tracking must NEVER
-        crash a real API call."""
+        """Internal: bump counters after a successful call; bad inputs become 0 (usage tracking must never crash a call)."""
         try:
             in_int = max(0, int(in_tok))
             out_int = max(0, int(out_tok))
@@ -304,8 +232,7 @@ class LLM:
                 api_key=os.getenv("HF_TOKEN"),
             )
         if self.provider == "deepseek":
-            # OpenAI-совместимый API; счёт пополнен оператором 2026-08-28
-            # ($5, баланс проверен живым запросом) — эксперимент оси цены.
+            # OpenAI-compatible API (price-axis experiment).
             from openai import OpenAI
             return OpenAI(
                 base_url="https://api.deepseek.com",
@@ -346,30 +273,18 @@ class LLM:
         allow_continuation: bool = True,
         json_object: bool = False,
     ) -> str:
-        """Send a single-turn prompt and return the text response.
-
-        ``json_object=True`` asks a provider that has a JSON mode to return a
-        syntactically valid JSON object (see `_JSON_MODE_PROVIDERS`); elsewhere
-        the flag changes nothing and the caller still parses what it gets.
-        """
+        """Send a single-turn prompt and return the text; json_object=True asks a provider with a JSON mode for a valid JSON object (see _JSON_MODE_PROVIDERS), elsewhere it changes nothing."""
         text, stop_reason = self._complete_once(
             system, user, max_tokens, temperature, prior=None,
             json_object=json_object,
         )
         self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
-        # Truncated with nothing to show: the whole budget went to internal
-        # reasoning. That is the BEHAVIOUR, and it is what the roster records —
-        # a name table recognises one generation and ages into a bug the moment
-        # the provider ships the next (see `_is_o_series` below, where that
-        # rule is written and applied to one provider out of six).
+        # Truncated with nothing to show: the whole budget went to internal reasoning. That behaviour, not a name table, is what the roster records.
         if not text and self.last_answer_was_truncated:
             remember_reasoning_model(self.provider, self.model, spent=max_tokens)
         if not allow_continuation:
             return text if self.provider == "mock" else text.strip()
-        # The per-leg provider calls now return RAW text (no .strip()) so that
-        # whitespace at a truncation boundary is preserved when legs are
-        # concatenated below. Trimming happens once, centrally, on the final
-        # answer. Mock text is returned verbatim to keep its deterministic shape.
+        # Per-leg provider calls return RAW text so whitespace at a truncation boundary survives concatenation; trimming happens once on the final answer. Mock text is verbatim.
         if self.provider == "mock":
             return text
         if not _auto_continue_enabled():
@@ -382,40 +297,19 @@ class LLM:
         combined = text
         agg_in = int(self.last_usage.get("input_tokens", 0))
         agg_out = int(self.last_usage.get("output_tokens", 0))
-        # Кэш по всей цепочке продолжений. None, пока НИ ОДИН отрезок не
-        # сообщил чисел: иначе цепочка из молчащих отрезков выглядела бы как
-        # измеренный ноль. Это ровно то место, где первая правка 2026-09-23
-        # теряла замер — тесты были зелёные, а живой вызов отдавал None.
+        # Cache over the whole continuation chain: None until some leg reports numbers, else silent legs would look like a measured zero.
         agg_hit, agg_miss = self._agg_cache(None, None, self.last_usage)
         rounds = 0
-        # Budget used for the NEXT leg. Reissuing an identical request after a
-        # leg that was truncated *and* returned nothing is guaranteed to fail
-        # the same way — the whole budget went to internal reasoning. So when a
-        # leg produces no text, escalate before retrying instead of repeating.
-        #
-        # Seeded from the EFFECTIVE budget, not the requested one: for reasoning
-        # models `_complete_openai_compatible` silently lifts the request to
-        # `_REASONING_TOKEN_FLOOR`. Doubling from the smaller requested number
-        # would re-send byte-identical calls until the doubling finally overtook
-        # that floor — paying repeatedly for the same failed request and then
-        # hitting the ceiling without ever exceeding what leg 1 already spent.
+        # Budget for the NEXT leg: after a truncated leg that returned nothing, an identical request fails the same way, so escalate.
+        # Seeded from the EFFECTIVE budget (reasoning models are lifted to _REASONING_TOKEN_FLOOR), else identical calls repeat until doubling overtakes the floor.
         round_budget = self._effective_budget(max_tokens)
         budget_ceiling = max(round_budget, round_budget * _CONTINUE_ESCALATION_CAP)
         last_leg_empty = not text
         while stop_reason in _TRUNCATION_REASONS and rounds < max_rounds:
-            # Escalate on EVERY truncated leg, not only on an empty one. A leg
-            # that wrote text and still hit the ceiling proved the same thing
-            # an empty leg proves — this budget cannot finish the answer — and
-            # re-asking at the identical number re-sends the WHOLE prompt for
-            # nothing. Measured live 2026-09-17: one synthesizer answer spent
-            # 5 x 2048 output tokens (every leg, still cut) and was billed
-            # 80 810 input tokens for a prompt worth ~11 000, because the flat
-            # budget bought five legs that could never reach the end. The
-            # answer's completion marker sits at the end, so it never arrived
-            # either — the cost and the "parse=missing" verdict are one defect.
+            # Escalate on EVERY truncated leg, not only an empty one: a leg that wrote text and still hit the ceiling proves the budget cannot
+            # finish the answer, and re-asking at the same number re-sends the whole prompt for nothing.
             if last_leg_empty and round_budget >= budget_ceiling:
-                # Already at the ceiling and still nothing came back.
-                # Stop paying for a request that cannot succeed.
+                # Already at the ceiling and still nothing came back: stop paying.
                 break
             round_budget = min(round_budget * 2, budget_ceiling)
             rounds += 1
@@ -429,12 +323,10 @@ class LLM:
             if cont_text:
                 combined += cont_text
             elif stop_reason not in _TRUNCATION_REASONS:
-                # Empty and NOT truncated: the model genuinely has nothing more
-                # to add. Escalating would not help.
+                # Empty and NOT truncated: the model has nothing more to add; escalating would not help.
                 break
 
-        # Expose the aggregate usage of the whole continuation chain so the
-        # budget wrapper records one honest total instead of just the last leg.
+        # Expose the aggregate usage of the whole continuation chain so the budget wrapper records one honest total.
         self.last_usage = {
             "input_tokens": agg_in,
             "output_tokens": agg_out,
@@ -442,8 +334,7 @@ class LLM:
             "cache_hit_tokens": agg_hit,
             "cache_miss_tokens": agg_miss,
         }
-        # Still truncated here means the rounds ran out, not that the model
-        # finished — the caller is holding an answer that stops mid-sentence.
+        # Still truncated here means the rounds ran out, not that the model finished: the caller holds an answer that stops mid-sentence.
         self.last_answer_was_truncated = stop_reason in _TRUNCATION_REASONS
         return combined.strip()
 
@@ -457,11 +348,7 @@ class LLM:
         prior: str | None,
         json_object: bool = False,
     ) -> tuple[str, str]:
-        """One provider call. Returns ``(text, stop_reason)``.
-
-        When *prior* is set this is a continuation round: the partial answer so
-        far is supplied so the provider resumes instead of restarting.
-        """
+        """One provider call; returns (text, stop_reason); with prior set it is a continuation round that resumes the partial answer."""
         if self.provider == "anthropic":
             return self._complete_anthropic(system, user, max_tokens, temperature, prior)
         if self.provider in {"openai", "deepseek", "huggingface", "local"}:
@@ -479,9 +366,7 @@ class LLM:
         temperature: float = 0.7,
         on_token: Any | None = None,
     ) -> str:
-        """Stream a single-turn prompt, invoking *on_token(text)* for each
-        token chunk.
-        """
+        """Stream a single-turn prompt, invoking on_token(text) for each token chunk."""
         if self.provider == "anthropic":
             return self._stream_anthropic(system, user, max_tokens, temperature, on_token)
         if self.provider in {"openai", "local"}:
@@ -574,26 +459,11 @@ class LLM:
 
     @staticmethod
     def _anthropic_generation(model: str) -> int | None:
-        """The Claude generation in *model*, or None when the name predates it.
+        """The Claude generation in model, or None when the name predates it.
 
-        Read as a NUMBER and compared, the way `_is_o_series` below reads the
-        GPT major version — never spelled as a literal digit. A generation
-        written into code recognises exactly one generation and ages into a bug
-        the moment the provider ships the next: that is the same defect the
-        model catalog exists to prevent, one layer down. Nothing here needs
-        editing for gen 6.
-
-        Anthropic changed the ordering at gen-4, and the two schemes must be
-        told apart before any number can be read as a generation:
-
-            gen-3 and earlier:  claude-<generation>-<minor>-<family>-<date>
-            gen-4 and later:    claude-<family>-<generation>[-<minor>][-<date>]
-
-        Requiring LETTERS where the family belongs is what distinguishes them.
-        A looser `\\w+` matches "3" in "claude-3-5-sonnet" and then reads the
-        MINOR version 5 as the generation, turning the oldest models into the
-        newest. So the gen-3 shapes return None here rather than a number, and
-        each caller decides what that means for its own rule.
+        Read as a number and compared, never spelled as a literal digit (a literal ages into a bug on the next generation).
+        Gen-3 names (claude-<gen>-<minor>-<family>-<date>) return None; gen-4+ names are claude-<family>-<gen>[-<minor>][-<date>];
+        letters are required where the family belongs, else the minor version would be read as the generation.
         """
         import re
         match = re.search(r"claude-[a-z]+-(\d+)", model.casefold())
@@ -601,25 +471,13 @@ class LLM:
 
     @classmethod
     def _anthropic_supports_temperature(cls, model: str) -> bool:
-        """Whether *model* still accepts `temperature`. Generation 4 dropped it.
-
-        Sending it anyway is answered with HTTP 400 — the whole call lost, not
-        degraded. Pre-gen-4 names (no generation to read) still accept it.
-        """
+        """Whether model still accepts temperature (generation 4 dropped it; sending it gives HTTP 400)."""
         generation = cls._anthropic_generation(model)
         return generation is None or generation < 4
 
     @classmethod
     def _anthropic_supports_prefill(cls, model: str) -> bool:
-        """Whether *model* accepts a trailing assistant message to continue
-        from.
-
-        Anthropic's native prefill — end the conversation on a partial
-        assistant turn and let the model resume it — is how `complete`
-        continues a reply cut off at `max_tokens`. Generation 5 rejects it:
-        the request must end with a user message, and sending one anyway
-        costs the whole call.
-        """
+        """Whether model accepts a trailing assistant message to continue from (native prefill); generation 5 rejects it and the request must end with a user message."""
         generation = cls._anthropic_generation(model)
         return generation is None or generation < 5
 
@@ -633,24 +491,15 @@ class LLM:
     ) -> tuple[str, str]:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
-            # The partial answer goes back either way, or the model restarts
-            # instead of resuming. What differs is whether it is the LAST
-            # message, and that decides both points below.
+            # The partial answer goes back either way, or the model restarts. Trailing whitespace is rejected only on a trailing assistant turn
             needs_closing_turn = not self._anthropic_supports_prefill(self.model)
-            # Trailing whitespace is rejected only on a trailing assistant turn
-            # — that is what makes it a prefill. Once a user turn follows, the
-            # partial answer is ordinary history and its boundary whitespace has
-            # to survive: `complete` deliberately keeps the legs unstripped so a
-            # continuation is not glued on at the wrong place, and trimming here
-            # would throw that away at the one point it matters. The
-            # OpenAI-compatible path below sends `prior` raw for the same reason.
+            # (a prefill); once a user turn follows, boundary whitespace must survive so the continuation is glued at the right place.
             messages.append({
                 "role": "assistant",
                 "content": prior if needs_closing_turn else prior.rstrip(),
             })
             if needs_closing_turn:
-                # These models reject a trailing assistant turn outright, so ask
-                # for the continuation explicitly instead of prefilling it.
+                # These models reject a trailing assistant turn, so ask for the continuation explicitly.
                 messages.append({"role": "user", "content": _CONTINUE_INSTRUCTION})
         kwargs: dict = {
             "model": self.model,
@@ -671,12 +520,7 @@ class LLM:
 
     @staticmethod
     def _is_o_series(model: str) -> bool:
-        """OpenAI models that require max_completion_tokens instead of max_tokens.
-
-        Includes:
-        - o-series reasoning models (o1, o3, o4, o3-mini, o4-mini …)
-        - GPT-5+ generation (gpt-5.x, gpt-5-…) which share the same API surface
-        """
+        """OpenAI models that require max_completion_tokens: o-series reasoning models and GPT-5+."""
         import re
         m = model.casefold()
         # o-series: o1, o3, o4, o1-mini, o3-mini, o4-mini, …
@@ -687,24 +531,14 @@ class LLM:
         return bool(match and int(match.group(1)) >= 5)
 
     def _reasoning_budget(self, max_tokens: int) -> int:
-        """Effective token budget for an OpenAI reasoning model.
-
-        Never lowers a caller's budget: a caller that already asked for more
-        than the floor keeps its own, larger value.
-        """
+        """Effective token budget for an OpenAI reasoning model; never lowers the caller's budget."""
         floor = _REASONING_TOKEN_FLOOR
         if floor <= 0:
             return max_tokens
         return max(max_tokens, floor)
 
     def _reasons_internally(self) -> bool:
-        """Does this model spend the output budget on thinking before speaking?
-
-        Two routes in, and the order matters: the name table answers instantly
-        for models it happens to know, and the roster answers for every model
-        that has ever proved it by going silent — including the ones released
-        after this code was written.
-        """
+        """Does this model spend the output budget on thinking before speaking? The name table answers for known models; the roster for every model that ever proved it by going silent."""
         if self.provider in {"openai", "huggingface", "local"} and self._is_o_series(self.model):
             return True
         return is_known_reasoning_model(self.provider, self.model)
@@ -754,8 +588,7 @@ class LLM:
         else:
             response = self._client.chat.completions.create(
                 model=model,
-                # Пол для модели из реестра думающих — с первого запроса: иначе
-                # запрос с малым бюджетом заведомо пуст и оплачивается дважды.
+                # Floor for a model from the thinking roster from the first request, else a small budget is empty and paid twice.
                 max_tokens=self._effective_budget(max_tokens),
                 temperature=temperature,
                 messages=messages,
@@ -765,9 +598,7 @@ class LLM:
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "prompt_tokens", 0) if usage is not None else 0
         out_tok = getattr(usage, "completion_tokens", 0) if usage is not None else 0
-        # Кэш промпта: DeepSeek (и совместимые) присылают эти поля рядом с
-        # prompt_tokens. Без них 84% входа выглядят как полная цена, и расход
-        # завышается втрое — проверено 2026-09-23.
+        # Prompt cache: DeepSeek (and compatibles) send these fields beside prompt_tokens; without them cached input looks like full price and spend is overstated.
         cache_hit = getattr(usage, "prompt_cache_hit_tokens", None) if usage is not None else None
         cache_miss = getattr(usage, "prompt_cache_miss_tokens", None) if usage is not None else None
         self._record_usage(in_tok, out_tok, cache_hit, cache_miss)
@@ -776,16 +607,8 @@ class LLM:
         return (choice.message.content or ""), finish_reason
 
     def _complete_mock(self, system: str, user: str, max_tokens: int) -> str:
-        """Deterministic offline stub.
-
-        Two modes (detected from the system prompt):
-          - Planner mode: emit a JSON plan picked by simple keyword heuristics.
-            Lets the full LLM-planning loop be tested with no API key.
-          - Synthesis mode: emit a structured echo so the rest of the loop
-            can be verified without any external LLM.
-        """
-        # Cheap deterministic "tokens": approximate as 1/4 char to give
-        # the audit harness non-zero numbers in mock mode.
+        """Deterministic offline stub: planner mode (keyword-heuristic JSON plan) or synthesis mode (structured echo); no API key needed."""
+        # Cheap deterministic "tokens" (1/4 char) so the audit harness gets non-zero numbers in mock mode.
         in_tok = (len(system) + len(user)) // 4
         if "PLANNER_MODE" in system or "the planner of an autonomous agent" in system:
             text = self._mock_plan(user)

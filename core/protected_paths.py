@@ -1,55 +1,49 @@
-"""Что самоправка агента не трогает никогда: один список и одно сличение путей.
-
-Список — объединение четырёх прежних (полоса самоприменения, путь починки по
-дефектам, производитель самосборки, принимающий burn-in): строже любого из них.
-"""
+"""Paths that agent self-repair never touches: one list and one path comparison."""
 from __future__ import annotations
 
 from core.control_files import CONTROL_RELPATHS
 
 __all__ = ["PROTECTED_FILES", "PROTECTED_TREES", "is_protected", "path_key"]
 
-#: Файлы по точному пути от корня репозитория.
+#: Files by exact path from the repo root.
 PROTECTED_FILES: frozenset[str] = frozenset({
-    # Главные правила, песочницы, сторож подмены инструкций и планки, которыми меряют агента.
+    # Main rules, sandboxes, the instruction-tamper guard and the benchmarks that measure the agent.
     "core/root_principles.py", "core/governance.py", "core/injection_guard.py",
     "tools/python_probe.py", "tools/convert_file.py",
     "tests/test_capability_baseline.py", "tests/capability_tasks.py",
     "scripts/capability_baseline.py", "scripts/check_function_length_baseline.py",
     "scripts/check_ceo_file_baseline.py", "tests/test_ruff_config.py",
-    # Тормоза и ворота одобрения: расход, список тормозов, политика, ящик одобрений.
+    # Brakes and approval gates: spend, brake list, policy, approval inbox.
     "core/budget_kill_switch.py", "core/budget_governor.py", "core/budget_ledger.py",
     "core/usd_spend.py", "core/control_files.py", "core/policy.py", "core/approval.py",
     "core/approval_inbox.py", "core/actuation_gateway.py", "core/rule_approved_apply.py",
-    # Пути самоправки, их судья, их руки в git и этот список.
+    # Self-repair paths, their judge, their git hands and this list.
     "core/self_apply_lane.py", "core/self_apply_bridge.py", "core/patch_route.py",
     "core/self_repair_utils.py", "core/self_build_producer.py", "core/safe_vcs.py",
     "core/protected_paths.py",
-    # Органы, без которых агент не стартует, и его доктрина. `core/loop.py`,
-    # `core/model_usage.py` и `docs/COGNITIVE_CORE.md` закрыты только производителю
-    # самосборки (CRITICAL_DENY): полосе по диагнозу они открыты нарочно.
+    # Organs without which the agent does not start, and its doctrine. `core/loop.py`, `core/model_usage.py` and `docs/COGNITIVE_CORE.md` are closed only to the self-build producer (CRITICAL_DENY); the diagnosis lane may touch them.
     "main.py", "core/autonomous_runtime.py",
     "AGENT_DOCTRINE.md", "docs/AGENT_DOCTRINE.md",
-    # Принимающий burn-in, его песочница, запуск и память опыта.
+    # The adopting burn-in, its sandbox, launch and experience memory.
     "core/burn_in_supervisor.py", "core/burn_in_sandbox.py",
     "scripts/burn_in_supervisor.py", "scripts/autonomous_repair.py",
     "scripts/install_daemon.ps1",
     "state/burn_in_head.json", "state/burn_in_offers.jsonl",
     "state/burn_in_adoptions.jsonl", "config/burn_in_sandbox.json",
-    # Что git считает мусором: правка открыла бы `git add -A` дорогу к памяти опыта.
+    # What git treats as junk: editing it would open `git add -A` to experience memory.
     ".gitignore",
-    # Файлы-тормоза оператора.
+    # Operator brake files.
     *CONTROL_RELPATHS,
 })
 
-#: Деревья целиком: сверка по префиксу.
+#: Whole trees: compared by prefix.
 PROTECTED_TREES: tuple[str, ...] = ("config/", ".github/", ".git/", "secrets/", ".venv/")
 
 
 def path_key(path: object) -> str | None:
-    """Путь от корня в одном виде для сличения; None — пустой, абсолютный или выходит из корня."""
+    """Root-relative path in one form for comparison; None if empty, absolute or escaping the root."""
     raw = str(path).strip().strip('"').replace("\\", "/")
-    # Двоеточие — диск или поток NTFS (`file.py::$DATA`): оба не путь внутри корня.
+    # A colon means a drive or an NTFS stream (`file.py::$DATA`): neither is a path inside the root.
     if not raw or raw.startswith("/") or ":" in raw:
         return None
     parts: list[str] = []
@@ -59,11 +53,11 @@ def path_key(path: object) -> str | None:
                 return None
             parts.pop()
             continue
-        # Windows отбрасывает хвостовые точки и пробелы имени: `x.py.` — тот же файл.
+        # Windows drops trailing dots and spaces from names: `x.py.` is the same file.
         seg = seg.rstrip(" .")
         if seg:
             parts.append(seg)
-    # Регистр складывается всегда: лишний отказ дешевле правки за забором.
+    # Case is always folded: an extra refusal is cheaper than an edit behind the fence.
     return "/".join(parts).casefold() or None
 
 
@@ -72,7 +66,7 @@ _TREE_KEYS: tuple[str, ...] = tuple(t.casefold() for t in PROTECTED_TREES)
 
 
 def is_protected(path: object) -> bool:
-    """Запретен ли путь для самоправки; путь, выходящий из корня, запретен тоже."""
+    """Whether the path is forbidden to self-repair; a path escaping the root is forbidden too."""
     if not str(path).strip():
         return False
     key = path_key(path)

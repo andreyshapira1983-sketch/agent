@@ -24,7 +24,7 @@ from core.run_context import identity_provenance, run_scope
 
 if TYPE_CHECKING:
     from core.approval_inbox import ApprovalInbox
-# Ре-экспорт: тесты и соседи импортируют эти имена как `from core.loop import …`.
+# Re-exports: tests and neighbours import these names as `from core.loop import ...`.
 from core.answer_format import (  # noqa: F401 -- re-exported
     _ANSWER_CITATION_RE,
     _VERIF_MARKER_RE,
@@ -57,9 +57,8 @@ from core.loop_response_deciders import AgentLoopResponseDeciders
 from core.loop_run_tail import AgentLoopRunTail
 from core.loop_sensor import AgentLoopSensor
 
-# Шов импорта: имена живут в `core/loop_step_execution`, берут их отсюда. Без
-# директивы ruff снимет импорт; её код тут словами не пишем — ruff читает его везде.
-from core.loop_step_execution import (  # noqa: F401 -- шов импорта
+# Import seam: the names live in `core/loop_step_execution` and are taken from here; without the ruff directive the import would be stripped.
+from core.loop_step_execution import (  # noqa: F401 -- import seam
     _TOOL_SOURCE_HINTS,
     _TRUSTED_INTERNAL_TOOLS,
     AgentLoopStepExecution,
@@ -74,8 +73,8 @@ from core.models import (
 from core.planner import PlannerOutput
 from core.replan import DEFAULT_MAX_REPLAN_ATTEMPTS  # noqa: F401 -- re-exported
 
-# `ReplanCode` (алиас FailureType) импортируют отсюда (tests/test_replan_audit.py).
-from core.replan import FailureType as ReplanCode  # noqa: F401 — шов импорта
+# `ReplanCode` (alias FailureType) is imported from here (tests/test_replan_audit.py).
+from core.replan import FailureType as ReplanCode  # noqa: F401 — import seam
 from core.smart_memory import (
     effective_completion,
     episode_tools,
@@ -115,12 +114,11 @@ class AgentLoop(
 ):
     """Runs one agent cycle: LLM planner picks tools, Executor runs them, Synthesizer answers."""
 
-    #: Навешивается снаружи и лениво (`cli/commands_approval.py`).
+    #: Attached from outside, lazily (`cli/commands_approval.py`).
     approval_inbox: ApprovalInbox | None = None
 
-    # `__init__` приходит по MRO из `core/loop_init.py`.
+    # `__init__` comes via MRO from `core/loop_init.py`.
 
-    # ---------- public entry point ----------
 
     def run(
         self,
@@ -137,7 +135,7 @@ class AgentLoop(
         task_id: id of the logical task; survives a retry, unlike the run id.
         """
         with run_scope(new_id("run"), task_id) as _ctx:
-            # Ребро происхождения — ПЕРВЫМ событием: иначе не сказать, чей это журнал.
+            # The provenance edge is the FIRST event, or the journal's owner is unknown.
             _trace_id = str(getattr(self.log, "trace_id", "") or "")
             if _trace_id:
                 self.log.log("run_identity", identity_provenance(
@@ -147,11 +145,10 @@ class AgentLoop(
                     session_id=getattr(self.memory, "session_id", None),
                 ))
             else:
-                # Полуребро запрещено, но молчать нельзя: иначе «связи нет» и
-                # «связь не записали» неразличимы.
+                # A half-edge is forbidden but silence is not: otherwise "no link" and "link not recorded" look the same.
                 self.log.log("run_identity_unavailable",
                              {"run_id": _ctx.run_id, "missing": "trace_id"})
-            # Журнал потока данных наружу — новый на каждый ход.
+            # Outbound data-flow journal: new every turn.
             self.policy.egress = EgressLedger(user_question)
             try:
                 return self._run_inner(
@@ -161,8 +158,7 @@ class AgentLoop(
                     deep_escalation=deep_escalation,
                 )
             except (KeyboardInterrupt, CancelledError):
-                # Cancellation is a control signal: record it and re-raise. Named
-                # explicitly so SystemExit/MemoryError are not reinterpreted.
+                # Cancellation is a control signal: record and re-raise; named explicitly so SystemExit/MemoryError are not reinterpreted.
                 self._record_aborted_episode(user_question, reason="cancelled")
                 raise
             except Exception as exc:
@@ -173,7 +169,7 @@ class AgentLoop(
 
     # Minimum quality for serving a stored answer instead of running a cycle.
     _REPLAY_MIN_QUALITY = 0.70
-    # Operator 17.11: lower for an answer whose every file is hash-checked unchanged.
+    # Lower for an answer whose every file is hash-checked unchanged.
     _REPLAY_MIN_QUALITY_HASHED = 0.60
     # Jaccard overlap below which the stored question is not the same ask.
     _REPLAY_MIN_SIMILARITY = 0.85
@@ -187,7 +183,7 @@ class AgentLoop(
             and effective_completion(episode) == "achieved"
             and AgentLoop._quality_allows_replay(episode)
             and getattr(episode, "full_answer", "")
-            # Reads only, and checkable ones (operator 17.11): core/replay_freshness.py.
+            # Reads only, and checkable ones: core/replay_freshness.py.
             and tools_allow_replay(episode)
         )
 
@@ -211,15 +207,12 @@ class AgentLoop(
         # On self so _synthesize() gets it without a signature change.
         self._stream_on_token = on_token
         self._cycle_findings = []
-        # Tools that ACTUALLY ran, in order: procedure attribution (MIR-049) is
-        # judged from this, not from the plan.
+        # Tools that ACTUALLY ran, in order: procedure attribution is judged from this, not from the plan.
         self._executed_tools = []
-        # Sensor verdicts about this run ITSELF; reset per cycle, or an inherited
-        # fault is banked against the wrong episode.
+        # Sensor verdicts about this run ITSELF; reset per cycle, or an inherited fault is banked against the wrong episode.
         self._defect_signals = []
         self._self_defects_block = ""
-        # Per-cycle, or a turn whose synthesis broke early inherits the
-        # previous turn's contract verdict.
+        # Per-cycle, or a turn whose synthesis broke early inherits the previous contract verdict.
         self._synthesis_expects_contract_headers = True
         self.last_replan_exhausted = self.last_answer_was_clarification = False
         self.last_source_ranking = None
@@ -243,8 +236,7 @@ class AgentLoop(
             _cp=_cp,
         )
 
-        # 2a. Completion contract (MIR-067), derived before any tool runs so the work
-        # cannot shape its criterion. A LOCAL, never an attribute: it must not outlive the run.
+        # 2a. Completion contract, derived before any tool runs so the work cannot shape its criterion. A LOCAL, never an attribute: it must not outlive the run.
         completion_contract = attach_checklist(
             self, derive_completion_contract(user_question, file_hint=file_hint), user_question
         )
@@ -256,14 +248,13 @@ class AgentLoop(
         if _decided is not None:
             return _decided
 
-        # Never re-gated on a resumed run: the trigger lives in the ORIGINAL
-        # text, which no longer changes, so asking again can only ask forever.
+        # Never re-gated on a resumed run: the trigger lives in the ORIGINAL text, so asking again would ask forever.
         _decided = None if _resumed else (self._prior_step_gate(user_question) or self._contract_ambiguity_gate(completion_contract) or self._clarification_gate(user_question))
         if _decided is not None:
             self._park_clarification(user_question)  # what it asked ABOUT
             return _decided
 
-        # Memory retrieval — read-only injection into prompts
+        # Memory retrieval: read-only injection into prompts
         (
             history,
             local_critique_active,
@@ -281,8 +272,7 @@ class AgentLoop(
         if _decided is not None:
             return self._noted_replay(_decided)
 
-        # Planner sees long-term memory so it can skip redundant tool calls. Role
-        # stays out of `history`: `<conversation_history>` is only real prior dialogue.
+        # Planner sees long-term memory so it can skip redundant tool calls; the role stays out of `history` (`<conversation_history>` is real dialogue only).
         planner_history = "\n\n".join(
             p for p in (persistent_block, experience_block, spend_block, history) if p.strip()
         )
@@ -292,7 +282,7 @@ class AgentLoop(
             workspace_root=self._file_read_workspace_root(),
             log=self.log.log,
         )
-        # Ворота возвращают ответ, если решили ход, иначе None; выходит вызывающий.
+        # The gate returns an answer if it decided the turn, else None; the caller exits.
         _decided = self._multi_file_refusal(
             multi_file, user_question=user_question, file_hint=file_hint, goal=goal,
         )
@@ -310,21 +300,20 @@ class AgentLoop(
         # re-planning loop (`_run_attempt_loop`).
         failure_history: list[ReplanTrigger] = []
         artifacts: dict[str, dict[str, Any]] = {}
-        # Surfaces looping planners across attempts (MAST FM-1.3).
+        # Surfaces looping planners across attempts.
         self._step_repetition = StepRepetitionTracker()
-        # Per-run termination guard (MAST FM-1.5, FM-3.1).
+        # Per-run termination guard.
         self._termination_guard = TerminationGuard()
         # Typed Evidence chain, built alongside `artifacts` for synthesizer and Verifier.
         chain: ProvenanceChain = ProvenanceChain()
         planner_out: PlannerOutput | None = None
         plan: Plan | None = None
         replan_exhausted = False
-        # S2 shadow: stagnation, reported at the end of the run; never stops anything.
+        # Shadow: stagnation, reported at run end; never stops anything.
         _stagnation_shadow: dict[str, Any] | None = None
-        # S5 shadow: every disagreement seen this run, for the same purpose.
+        # Shadow: every disagreement seen this run, for the same purpose.
         _disagreement_shadow: list[dict[str, Any]] = []
-        # True only for a trivial no-tool turn: trims synthesis context, forces the
-        # LIGHT tier, skips the knowledge pipeline and memory consolidation.
+        # True only for a trivial no-tool turn: trims synthesis context, forces the LIGHT tier, skips the knowledge pipeline and memory consolidation.
         cheap_path_active = False
         # From the previous attempt's policy.decide(); empty on the first attempt.
         advice_for_planner: str = ""
@@ -365,18 +354,16 @@ class AgentLoop(
         cheap_path_active = _attempt_state.cheap_path_active
         _stagnation_shadow = _attempt_state._stagnation_shadow
 
-        # planner_out and plan are guaranteed set here (the for loop ran at
-        # least once because max_replan_attempts >= 1 is enforced in __init__).
+        # planner_out and plan are set here (the loop ran at least once: max_replan_attempts >= 1 is enforced in __init__).
         assert planner_out is not None and plan is not None  # noqa: S101 — type narrowing, guarded above
 
-        # Tool evidence was added per step; fold in subagent, sensor, memory and
-        # user-directive evidence so the Verifier sees one uniform chain.
+        # Fold in subagent, sensor, memory and user-directive evidence so the Verifier sees one uniform chain.
         self._fold_subagent_evidence(chain)
         self._fold_sensor_evidence(chain, spend_block)
         self._fold_evidence_chain(chain, persistent_block=persistent_block)
         self._mark_own_cached_evidence(chain)
 
-        # Первое значение — теневой вердикт: едет в событие ниже, здесь ничего не решает.
+        # First value is the shadow verdict: goes into the event below, decides nothing here.
         (
             _premature_keyword_fired,
             source_ranking,
@@ -390,9 +377,7 @@ class AgentLoop(
             may_source_registry=may_source_registry,
         )
 
-        # 7. Respond. Even on replan exhaustion the synthesizer writes an Output
-        # Contract reply, explaining honestly what was tried.
-        # Current-run assumptions reach _synthesize via the instance.
+        # 7. Respond. Even on replan exhaustion the synthesizer writes an Output Contract reply explaining what was tried.
         self._run_assumptions_current = _run_assumptions
         _synth_state = SynthesisState(
             goal=goal,
@@ -415,8 +400,7 @@ class AgentLoop(
         draft_answer = _synth_state.draft_answer
         _declared = _synth_state._declared
 
-        # 7.5 Verifier: marks claims [verified:…] / [unverified]. A [web:URL] cite with
-        # no matching evidence replans to fetch it, then re-verifies the same draft.
+        # 7.5 Verifier: marks claims [verified:...] / [unverified]. A [web:URL] cite with no matching evidence replans to fetch it, then re-verifies the same draft.
         _verify_state = VerifyState(
             draft_answer=draft_answer,
             user_question=user_question,
@@ -444,8 +428,7 @@ class AgentLoop(
         replan_exhausted = _verify_state.replan_exhausted
         verifier_failure = _verify_state.verifier_failure
 
-        # From here the response is a DRAFT: deciders rewrite claims (`set_body`) or
-        # attach notices (`add_notice`); composition happens once, at `render()`.
+        # From here the response is a DRAFT: deciders rewrite claims (`set_body`) or attach notices (`add_notice`); composition happens once, at `render()`.
         draft = self._build_response_draft(
             answer,
             user_question=user_question,
@@ -457,17 +440,14 @@ class AgentLoop(
             failure_history=failure_history,
         )
 
-        # ── Compose ─────────────────────────────────────────────────────────
-        # The single arbitration point: no decider outranks another by running later;
-        # the journal ledger shows any contribution that did not survive.
+        # Compose: the single arbitration point; no decider outranks another by running later, and the journal ledger shows any contribution that did not survive.
         answer = draft.render()
         self.log.log("response_composed", draft.to_log_payload(answer))
 
-        # Strip internal verification markers before user-facing output.
-        # Must happen AFTER output_policy which needs [verified:...] markers.
+        # Strip internal verification markers before user-facing output; must happen AFTER output_policy, which needs them.
         answer = self._honor_requested_format(_strip_verification_markers(answer), user_question, draft_answer, _task_synth_llm)
 
-        # Наблюдательно: вердикт в журнал, ход не меняется.
+        # Observational: verdict to the journal, the turn is unchanged.
         self._check_completion_obligations(
             answer,
             user_question=user_question,
@@ -480,8 +460,7 @@ class AgentLoop(
             _premature_keyword_fired=_premature_keyword_fired,
         )
 
-        # Defence-in-depth: redact once more on the way out, so a hallucinated
-        # credential or PII cannot bypass the kernel; the episode gets the same text.
+        # Defence-in-depth: redact once more on the way out; the episode gets the same text.
         answer, verification, weak_chunks = self._finalize_run_tail(
             answer,
             user_question=user_question,
@@ -496,9 +475,7 @@ class AgentLoop(
             _cp=_cp,
         )
 
-        # ── Bank the episode LAST ────────────────────────────────────────────
-        # An early `success` could not be corrected later (idempotency by run_id).
-        # No outer permission gate: each of the three sinks is gated inside.
+        # Bank the episode LAST: an early `success` could not be corrected (idempotency by run_id). Each of the three sinks is gated inside.
         self._record_experience_memory(
             goal_description=goal.description,
             question=user_question,
@@ -511,12 +488,11 @@ class AgentLoop(
             replan_exhausted=replan_exhausted,
             # Set by either verifier soft-fail site (initial or replan).
             verifier_failure=verifier_failure,
-            # Run-local: the verdict of the synthesis attempt that produced
-            # THIS answer, or None when the ladder degraded.
+            # Run-local: the verdict of the synthesis attempt that produced THIS answer, or None when the ladder degraded.
             declared_completion=_declared["value"],
         )
 
-        # Clear streaming callback so it cannot leak into the next turn.
+        # Clear the streaming callback so it cannot leak into the next turn.
         self._stream_on_token = None
         self.last_replan_exhausted = bool(replan_exhausted)
         return answer

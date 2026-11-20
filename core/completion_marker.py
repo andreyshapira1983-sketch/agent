@@ -1,9 +1,4 @@
-"""An attempt-bound channel for the synthesizer's completion declaration.
-
-Only a terminal line bearing the CURRENT attempt's nonce is read. Per
-attempt rather than per run, so a marker copied out of a retried attempt
-cannot validate against the one that was actually banked.
-"""
+"""Attempt-bound channel for the synthesizer's completion declaration."""
 from __future__ import annotations
 
 import re
@@ -11,17 +6,10 @@ import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-# Anchored to the END of the text, and matched against the ORIGINAL string so
-# the body can be recovered by offset rather than rebuilt.
-#
-# Rebuilding via `splitlines()` + `"\n".join()` + `rstrip()` was the first
-# implementation and it silently rewrote the user's answer: CRLF became LF,
-# trailing spaces vanished, and a blank line before the marker was eaten. A
-# parser that edits bytes it was not asked to edit is a bug the user can see.
-#
-# The leading group consumes exactly ONE newline — the one that terminates the
-# body's last line — or matches the start of the text when the marker is all
-# there is. Everything before that offset is returned untouched.
+# Anchored to the END of the text and matched against the ORIGINAL string, so the body is
+# recovered by offset, not rebuilt.
+# The leading group consumes exactly one newline (the one ending the body's last line) or matches
+# the text start.
 _TERMINAL_MARKER_RE = re.compile(
     r"(?:\r\n|\n|\A)"
     r"\[\[agent\.completion:([0-9a-f]{8,64}):([A-Za-z_]{1,40})\]\]"
@@ -31,10 +19,8 @@ _TERMINAL_MARKER_RE = re.compile(
 _SANITISE_RE = re.compile(r"[^a-z0-9_-]+")
 _MAX_TOKEN_CHARS = 32
 
-# Parse outcomes. Deliberately three, not two: "no marker at all" and "our
-# marker carrying something we do not recognise" call for different reactions —
-# the first is a model that ignored the instruction, the second is a model that
-# followed it and invented a verdict.
+# Parse outcomes are three, not two: no marker at all (instruction ignored) differs from our
+# marker with an unknown token (verdict invented).
 STATUS_OK = "ok"
 STATUS_MISSING = "missing"
 STATUS_UNPARSED = "unparsed"
@@ -44,9 +30,7 @@ STATUS_UNPARSED = "unparsed"
 class MarkerParse:
     """What the answer declared, and the text with our line removed.
 
-    `detail` is bounded and sanitised, and is only set for `unparsed`:
-    either `wrong_nonce` or the offending token. The nonce itself never
-    appears here — it is a secret of the run and must not reach a log.
+    `detail` is bounded, sanitised, set only for `unparsed`; the nonce never appears here.
     """
 
     declared: str | None
@@ -87,8 +71,7 @@ def marker_instruction(nonce: str, valid_tokens: Iterable[str] | None = None) ->
     )
 
 
-# Only used when a caller does not supply its own vocabulary, so the
-# instruction text can still be rendered in isolation (docs, tests).
+# Used only when a caller supplies no vocabulary, so the instruction can be rendered in isolation.
 _DEFAULT_TOKENS = frozenset(
     {"achieved", "partially_achieved", "blocked", "refused", "failed"}
 )
@@ -99,25 +82,8 @@ def parse_completion_marker(
 ) -> MarkerParse:
     """Read and strip our terminal marker; leave everything else untouched.
 
-    1. Only a TERMINAL marker is considered — nothing but whitespace may
-    follow it. A marker in the middle of an answer is content: quoted,
-    explained, or part of an example. Rewriting the middle of a user's
-    answer is not something a parser should ever do. 2. The nonce must be
-    the current attempt's. A wrong one is somebody else's line: a stale
-    attempt, an echo, or a guess. It is reported, never obeyed, and never
-    deleted. 3. A line carrying OUR nonce is ours, so it is stripped even
-    when the token is unrecognised — otherwise a model typo would print the
-    run's nonce to the user and into stored memory.
-
-    **Byte contract for the returned body.** Removal is done by slicing the
-    ORIGINAL string, never by re-joining parsed lines, so the prefix comes
-    back byte-for-byte: CRLF stays CRLF, trailing spaces survive, and blank
-    lines are preserved. Exactly one newline is consumed — the one that ends
-    the body's last line and introduces the marker. So
-    `"body\\n\\n<marker>"` returns `"body\\n"`, keeping the blank line the
-    author wrote. When nothing is stripped, the very same string object is
-    returned.
-    """
+    Only a terminal marker counts; the nonce must be the current attempt's (a wrong one is reported, never obeyed or deleted); a line with OUR nonce is stripped even if the token is unknown.
+    The body is returned byte-for-byte by slicing the original string; exactly one newline is consumed, and an unchanged text is returned as the same object."""
     if not text:
         return MarkerParse(declared=None, text=text, status=STATUS_MISSING)
 
@@ -127,7 +93,7 @@ def parse_completion_marker(
 
     found_nonce, raw_token = match.group(1), match.group(2)
     if not nonce or found_nonce != nonce:
-        # Not ours. Report it, keep the text exactly as written.
+        # Not ours: report it, keep the text as written.
         return MarkerParse(
             declared=None, text=text, status=STATUS_UNPARSED, detail="wrong_nonce"
         )

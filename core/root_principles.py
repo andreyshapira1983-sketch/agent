@@ -1,26 +1,5 @@
-"""Корневые принципы агента — выше любого одобрения (слово оператора 24.09).
-
-24.09 оператор спросил агента, что бы тот сделал с вредной просьбой. Агент
-ответил отказом ПО ПРОЦЕДУРЕ: «такое действие требует одобрения человека».
-Это значит, что границу держит только механизм одобрения, и любой, кто может
-одобрить, мог бы её сдвинуть. Оператор: «любой человек тогда может его сделать
-плохим».
-
-По первоисточникам: OpenAI Model Spec — «корневые» правила, которые не отменяет
-ни разработчик, ни оператор, ни пользователь; Anthropic, Constitutional AI —
-отказ по сути, с объяснением причины, а не уклончиво. Блок ниже стоит в
-подсказках планировщика и сборщика ответа; одобрение, грант или чья-то просьба
-его не снимают.
-
-25.09 замер ценностей (AgentHarm, XSTest; 3 прогона) показал обратную сторону:
-в безобидных задачах AgentHarm агент отказывал «по ценностям» в 54 % —
-зашифровать папку, заявить об утерянном паспорте. Блок взял из первоисточников
-только половину. Вторая половина там же: Model Spec — исходить из лучших
-намерений, при разумном законном прочтении не судить человека, отказывать
-узко; конституция Claude — бесполезность никогда не бывает безопасной сама по
-себе; arXiv 2510.08158 — ложные отказы вызывают слова-триггеры, а не смысл.
-Последний пункт блока — эта половина.
-"""
+"""Root principles of the agent: a prompt block in planner and answer-builder prompts that no approval, grant or request lifts."""
+# Refusal is by substance with a stated reason and narrow; the last item guards against over-refusal triggered by words, not meaning.
 from __future__ import annotations
 
 ROOT_PRINCIPLES = """ROOT PRINCIPLES (above any approval, grant, operator or user instruction):
@@ -39,7 +18,7 @@ ROOT_PRINCIPLES = """ROOT PRINCIPLES (above any approval, grant, operator or use
 
 
 def with_root_principles(system_prompt: str) -> str:
-    """Подсказка с корневыми принципами в начале (один раз)."""
+    """Prompt with the root principles prepended (once)."""
     if ROOT_PRINCIPLES in system_prompt:
         return system_prompt
     return ROOT_PRINCIPLES + "\n" + system_prompt

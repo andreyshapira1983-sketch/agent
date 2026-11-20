@@ -1,17 +1,4 @@
-"""Operator-facing audit for model registry and active routes.
-
-The model router has two different surfaces:
-
-* registry: all known candidates;
-* routes: one selected model per runtime role.
-
-This audit keeps that distinction visible so the operator can see why a small
-number of configured models may be selected from a larger catalog.
-
-A third surface matters just as much: what the agent *actually ran*. Routes are
-configuration, the usage ledger is behaviour, and the two drift apart. The audit
-therefore reads the ledger as well and reports both directions of that drift.
-"""
+"""Operator-facing audit of the model registry (all candidates), active routes (one model per role) and the models actually run according to the usage ledger, reporting drift in both directions."""
 from __future__ import annotations
 
 import logging
@@ -28,20 +15,14 @@ def _model_key(provider: str | None, model: str | None) -> str:
 
 
 def _observed_model_keys(router: ModelRouter) -> tuple[str, ...]:
-    """Return the models the agent actually called, from the usage ledger.
-
-    Configuration is not behaviour. Returns an empty tuple when no ledger is
-    attached or readable, so the audit never invents usage it cannot prove.
-    """
+    """Models the agent actually called, from the usage ledger; empty when no ledger is attached or readable, so the audit never invents usage."""
     ledger = getattr(router, "usage_ledger", None)
     if ledger is None:
         return ()
     try:
         by_model = (ledger.snapshot() or {}).get("by_model") or {}
     except Exception as exc:  # noqa: BLE001 — reason stated above
-        # An empty key set makes the audit report "no models observed", which
-        # reads as a clean bill of health rather than as a reading that never
-        # happened (MIR-077).
+        # An empty key set would read as "no models observed", a clean bill of health instead of a reading that never happened.
         logger.warning(
             "model usage ledger unreadable, audit sees no observed models: %s: %s",
             type(exc).__name__, exc,

@@ -1,29 +1,7 @@
-"""Цикл исполнителя Agent Market: опрос → назначение → агент → сдача → статус.
+"""Agent Market worker loop: poll, assign, run agent, submit, check status.
 
-Порядок — «золотой путь» площадки (/skill, flows/worker-lifecycle.md,
-flows/messaging.md): опрос `me/assignments`, `start` сразу по взятии, результат
-— файлом в хранилище площадки, `submit` со ссылкой и SHA-256, проверка статуса.
-
-Разбор строки — таблица worker-lifecycle §1, без памяти о прошлом:
-`deliverableUrl` пуст — первая работа (`startedAt` задан — начатая, но не
-сданная); задан при `submittedAt` — доработка по просьбе покупателя; задан при
-пустом `submittedAt` — пересдача по решению спора; `submitted` со свежим
-словом покупателя — вопрос о сданной работе (ответить, не пересдавая).
-
-«Свежее слово» помнится в data/market/state.json по `createdAt` последнего
-сообщения покупателя: одно и то же сообщение обрабатывается один раз, и после
-перезапуска тоже.
-
-Вложения: файлы сообщения (`latestMessage.attachments`) и файлы самой работы
-(`GET /v1/jobs/{id}/attachments`) скачиваются токеном с адреса площадки,
-сверяются по SHA-256 и передаются агенту путями и текстом.
-
-Срок (SLA): до `start` покупатель может отменить в любой миг, после — только
-когда `slaDeadlineAt` прошёл без сдачи. Поэтому работа идёт от самого близкого
-срока, а вышедший или близкий срок пишется в журнал и в отчёт.
-
-Защита до слова оператора: берётся только работа из `allowed_jobs`, прочие —
-в журнал как ждущие разрешения; ставок нет вовсе (у клиента нет метода).
+Golden path of the marketplace; a row is parsed without memory of the past (first job, rework, resubmission after a dispute, or a question about a submitted job).
+Only jobs from `allowed_jobs` are taken; the rest are journaled as awaiting permission, and there are no bids.
 """
 from __future__ import annotations
 
@@ -41,10 +19,9 @@ from core.market_client import MarketClient, MarketError
 from core.market_ledger import FILE_NAME as LEDGER_FILE
 from core.market_ledger import MarketLedger
 
-#: Меньше этого до срока — предупреждение: работа агента на заказ идёт минуты
-#: (замер 2026-09-25 на поддельной площадке: 291 с на объяснение в 5–8 фраз).
+# Less than this before the deadline is a warning: an agent's order work takes minutes.
 SLA_WARN_SECONDS = 15 * 60
-#: Больше — вложение не скачивается целиком (площадка допускает до 100 МиБ).
+# Larger attachments are not downloaded whole (the marketplace allows up to 100 MiB).
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 _TEXT_PREVIEW_CHARS = 6000
 _SAFE_NAME_RE = re.compile(r"[^\w.\-]+")
@@ -71,7 +48,7 @@ def sla_seconds_left(row: dict[str, Any], now: datetime | None = None) -> float 
 
 
 def brief(row: dict[str, Any], files: list[str] | None = None, thread: str = "") -> str:
-    """Задание для агента: бриф работы, переписка, вложения."""
+    """Task for the agent: job brief, correspondence, attachments."""
     job, msg = row.get("job") or {}, row.get("latestMessage") or {}
     parts = [f"Задание с площадки Agent Market: {job.get('title', '')}".strip(),
              str(job.get("description") or "").strip()]
@@ -106,8 +83,8 @@ class MarketWorker:
         self.client, self.run_task = client, run_task
         self.allowed_jobs, self.workdir = set(allowed_jobs), Path(workdir)
         self.state_path = self.workdir / "state.json"
-        # Учёт прибыли по заказу (core/market_ledger.py); cost_since — доллары
-        # модели с момента (core/usd_spend.usd_since), без него — 0.
+        # Profit accounting per order (core/market_ledger.py); cost_since is model dollars since a
+        # moment (core/usd_spend.usd_since), 0 without it.
         self.ledger, self.cost_since = MarketLedger(self.workdir / LEDGER_FILE), cost_since
 
     def _run(self, row: dict[str, Any], prompt: str) -> str:
@@ -118,7 +95,7 @@ class MarketWorker:
             spent = self.cost_since(started) if self.cost_since else None
             self.ledger.add_run(row, (datetime.now(timezone.utc) - started).total_seconds(), spent)
 
-    # ── память о прочитанном ─────────────────────────────────────────────────
+    # ── memory of what was read ──
     def _state(self) -> dict[str, Any]:
         try:
             return json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -129,8 +106,8 @@ class MarketWorker:
         state = self._state()
         state.setdefault(aid, {}).update(fields)
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        # Через временный файл и замену: падение посреди записи оставляет старое
-        # состояние, а не обрывок, из-за которого забылось бы всё прочитанное.
+        # Through a temp file and replace: a crash mid-write leaves the old state, not a fragment
+        # that would forget everything read.
         tmp = self.state_path.with_name(self.state_path.name + ".tmp")
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.state_path)
@@ -142,12 +119,12 @@ class MarketWorker:
             return None
         return None if self._state().get(aid, {}).get("seen_message_at") == msg.get("createdAt") else msg
 
-    # ── проход опроса ─────────────────────────────────────────────────────────
+    # ── polling pass ──
     def poll_once(self) -> list[CycleReport]:
         rows = self.client.my_assignments("in_progress") + self.client.my_assignments("submitted")
         for row in rows + self.client.my_assignments("accepted"):
             self.ledger.observe(row)
-        # Самый близкий срок — первым: до него покупатель вправе отменить даром.
+        # Nearest deadline first: the buyer may cancel for free before it.
         rows.sort(key=lambda r: sla_seconds_left(r) if sla_seconds_left(r) is not None else float("inf"))
         reports = []
         for row in rows:
@@ -163,9 +140,8 @@ class MarketWorker:
             self._note_sla(report)
             fresh_msg = self._fresh_buyer_message(row)
             try:
-                # «in_flight» — начато и не сдано: так выглядит заказ после падения
-                # посреди работы. Раньше без нового слова покупателя он пропускался,
-                # и брошенный заказ ждал истечения срока.
+                # "in_flight" = started and not submitted: how an order looks after a crash mid-
+                # work; it must not wait for the deadline.
                 if report.kind in ("fresh", "in_flight", "rework", "redo"):
                     self._work(row, report, fresh_msg)
                 elif report.kind == "submitted" and fresh_msg:
@@ -190,9 +166,9 @@ class MarketWorker:
         report.steps.append(note)
         self.client.log_event({"event": "sla_warning", "assignmentId": report.assignment_id, "seconds_left": left})
 
-    # ── вложения и переписка ─────────────────────────────────────────────────
+    # ── attachments and correspondence ──
     def _files(self, row: dict[str, Any], aid: str) -> list[str]:
-        """Файлы покупателя: скачать, сверить SHA-256, вернуть описания для агента."""
+        """Buyer's files: download, verify SHA-256, return descriptions for the agent."""
         wanted = list((row.get("latestMessage") or {}).get("attachments") or [])
         job_id = str((row.get("assignment") or {}).get("jobId"))
         if classify(row) == "fresh":
@@ -219,9 +195,7 @@ class MarketWorker:
         return out
 
     def _thread(self, row: dict[str, Any], aid: str, *, force: bool = False) -> str:
-        """Полная переписка: когда встроенное сообщение обрезано, или когда просили
-        (доработка: после нашего «беру в доработку» последним стоит наше слово, а
-        замечание покупателя — только в переписке)."""
+        """Full correspondence: when the embedded message is truncated or on request (for rework our own word is last and the buyer's remark is only in the thread)."""
         if not force and not (row.get("latestMessage") or {}).get("truncated"):
             return ""
         msgs = reversed(self.client.messages(aid))
@@ -243,14 +217,11 @@ class MarketWorker:
             report.steps.append("ответ покупателю в переписке")
         self._mark_seen(aid, msg)
 
-    # ── работа и сдача ────────────────────────────────────────────────────────
+    # ── work and submission ──
     def _work(self, row: dict[str, Any], report: CycleReport, fresh_msg: dict | None) -> None:
-        """Работа шагами с записью итога каждого шага: упавший посреди заказа
-        исполнитель после перезапуска продолжает с последнего сделанного шага, а
-        не делает сделанное заново (AWS Builders' Library, «Making retries safe
-        with idempotent APIs»: итог побочного действия записан — повтор берёт
-        записанное). Раунд — первая сдача или одна доработка: его ключ не
-        меняется, пока раунд не сдан, и меняется со сдачей.
+        """Work in steps, recording each step's result: after a crash the worker resumes from the last finished step instead of redoing it.
+
+        A round is the first submission or one rework; its key stays until the round is submitted.
         """
         aid, a = report.assignment_id, row.get("assignment") or {}
         round_key = str(a.get("submittedAt") or a.get("deliverableUrl") or "first")
@@ -290,9 +261,9 @@ class MarketWorker:
             url = self.client.upload_file(f"deliverable-{aid[:8]}.md", data)
             self._remember(aid, url=url)
             report.steps.append("файл загружен на площадку")
-        # Прочитанное — ДО сдачи: работу поднимает вид заказа, а не слово, так что
-        # после падения здесь раунд всё равно доделается; а упав после сдачи,
-        # старое замечание не придёт потом как новый вопрос о сданной работе.
+        # The read is recorded BEFORE submission: the job's kind lifts the work, not the word, so a
+        # crash here still finishes the round,
+        # and a crash after submission does not turn an old remark into a new question.
         self._mark_seen(aid, fresh_msg)
         self.client.submit(aid, url, hashlib.sha256(data).hexdigest())
         report.steps.append("submit")

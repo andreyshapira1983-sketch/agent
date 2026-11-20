@@ -1,4 +1,4 @@
-"""Что агент знает о себе ИЗМЕРЕНИЕМ, а не из подсказки."""
+"""What the agent knows about itself by MEASUREMENT, not from a prompt hint."""
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -6,22 +6,16 @@ from contextvars import ContextVar
 from types import MappingProxyType
 from typing import Any
 
-#: То, что блок ПОКАЗАЛ модели в этом прогоне, — чтобы верификатор принимал
-#: ровно те поля, на которые подсказка разрешает ссылаться `[runtime:<поле>]`.
-#: Замер 2026-09-19 (одна задача пять раз подряд): блок печатал run_id,
-#: хранилища и durable_writes, а пул улик знал только пять полей процесса;
-#: «(run_id=…) [runtime:run_id]» вырезалось как выдуманная ссылка, и верный
-#: эпизод терял допуск в опыт за то, что сделал, как велели.
+#: What the block SHOWED the model in this run, so the verifier accepts exactly the fields `[runtime:<field>]` may cite.
 _SHOWN: ContextVar[Mapping[str, str]] = ContextVar("runtime_self_shown", default=MappingProxyType({}))
 
 
 def shown_facts(run_id: str) -> dict[str, str]:
-    """Поля, показанные блоком в прогоне `run_id`; чужой прогон — пусто."""
+    """Fields shown by the block in run `run_id`; another run gives empty."""
     facts = _SHOWN.get()
     return dict(facts) if run_id and facts.get("run_id") == run_id else {}
 
-#: Порядок фиксирован: читателю нужен один и тот же список от хода к ходу,
-#: иначе «органа не назвали» и «органа не было» опять сольются.
+#: Order is fixed so the reader gets the same list every turn ("organ not named" vs "no organ" must stay distinct).
 _ORGAN_ORDER: tuple[str, ...] = (
     "working_memory",
     "persistent_store",
@@ -34,7 +28,7 @@ _ORGAN_ORDER: tuple[str, ...] = (
 
 
 def process_facts() -> dict[str, str]:
-    """Чем агент ИСПОЛНЯЕТСЯ — измеренное, не выведенное."""
+    """What the agent RUNS on: measured, not derived."""
     import os
     import platform
     import sys
@@ -57,10 +51,9 @@ def runtime_self_block(
     durable_writes: Iterable[str] | None,
     tools: Iterable[str] | None = None,
 ) -> str:
-    """Факты о текущем исполнении, пригодные для проверки по журналу.
+    """Facts about the current execution, checkable against the journal.
 
-    Пустая строка, если идентичность прогона неизвестна: выдумывать её — то
-    же самое, что выдумывать личность, только мельче.
+    Empty string when the run identity is unknown: inventing it is inventing a personality, only smaller.
     """
     if not trace_id or not run_id:
         _SHOWN.set({})
@@ -74,8 +67,7 @@ def runtime_self_block(
         f"  run_id={run_id} trace_id={trace_id} session_id={session_id or 'нет'}",
     ]
 
-    # Тело — перед органами: «на чём я исполняюсь» первичнее, чем «что ко мне
-    # подключено». Цитируется как [runtime:<поле>].
+    # body before organs: "what I run on" is primary to "what is attached to me"; cited as [runtime:<field>]
     for key, value in process_facts().items():
         lines.append(f"  {key}: {value}")
 
@@ -87,20 +79,14 @@ def runtime_self_block(
         lines.append(f"  {organ}: {state}")
         shown[organ] = state
 
-    # `None` — присутственная сессия, где разрешены ВСЕ приёмники (контракт
-    # app/bootstrap.build_agent). До 2026-09-03 вывеска печатала его как «ничего
-    # не разрешено», и агент в разговоре не собирал даже вызов memory_bank:
-    # дверь была открыта, вывеска — закрыта.
+    # `None` = attended session where ALL sinks are allowed (app/bootstrap.build_agent contract); it must not print as "nothing allowed"
     if durable_writes is None:
         writes = "все приёмники (присутственная сессия)"
     else:
         allowed = sorted(str(w) for w in durable_writes)
         writes = ", ".join(allowed) if allowed else "ничего не разрешено"
     lines.append(f"  durable_writes: {writes}")
-    # Замер 2026-09-19 (рабочий экзамен): на «справишься ли ты отправить письмо»
-    # и «берёшься ли разослать 200 писем» агент отвечал «да» — список своих
-    # инструментов он видел только в планировщике. Действие без инструмента
-    # (почта, звонок, оплата) — «нет», и это теперь измеренный факт о себе.
+    # an action without a tool (mail, call, payment) is "no": a measured fact about itself
     if tools is not None:
         shown["tools"] = ", ".join(sorted(tools)) or "нет"
         lines.append(f"  tools: {shown['tools']}")

@@ -1,26 +1,8 @@
-"""Read-only parsers for grounded self-build backlog signals (TD-036, Phase 1).
+"""Read-only, pure parsers for grounded self-build backlog signals.
 
-Every function here is pure and deterministic: it takes already-loaded text (or
-already-loaded value reviews) and returns structured :class:`SignalRecord`s, each
-carrying a ``problem_quote`` that is an *exact substring* of its source and an
-``evidence_ref`` that points at the source line. Nothing here reads the network,
-calls an LLM, touches git, or writes any file.
-
-Phase 1 sources (closed set):
-
-* **TECH_DEBT.md** — entries whose status is not Done (``Partial`` / deferred /
-  empty status). The entry *title* is human-authored, so it is used verbatim as
-  the grounded ``problem_quote``.
-* **knowledge/generated/AGENT_ANATOMY.md** — the "Candidate follow-ups (TD-030+)" advisory list.
-  The bold heading of each numbered item is used verbatim as the quote. These
-  numbers are advisory text only, never treated as executable TD ids.
-* **docs/proposals/self-build-grounded-target-coverage-proposal.md** — the
-  TD-038 slice 2 Approach D pilot signal for ``docs/self_build.md`` only.
-* **data/value_reviews.jsonl** — used ONLY as an anti-repeat / penalty signal:
-  a target whose latest human verdict rejected it should not be re-proposed.
-
-Deliberately conservative: only the stable, unambiguous shape of each source is
-parsed. Anything ambiguous is skipped rather than guessed at.
+Each :class:`SignalRecord` carries a ``problem_quote`` that is an exact substring of its source and an ``evidence_ref`` pointing at the source line.
+Sources: TECH_DEBT.md (open entries), the AGENT_ANATOMY.md candidate follow-ups, the self-build docs proposal pilot, and
+data/value_reviews.jsonl (anti-repeat penalty only). Conservative: ambiguous shapes are skipped, never guessed.
 """
 from __future__ import annotations
 
@@ -100,8 +82,7 @@ def open_tech_debt(tech_debt_text: str) -> list[SignalRecord]:
         title = line.strip()
         if not _TD_TITLE_RE.match(title):
             continue
-        # The status is the first ``Статус:`` line within a few lines below the
-        # title; collect its value plus any immediately-following bullet lines.
+        # status = first ``Статус:`` line a few lines below the title, plus immediately-following bullet lines
         status_parts: list[str] = []
         j = i + 1
         found_status = False
@@ -169,8 +150,7 @@ def anatomy_candidates(anatomy_text: str) -> list[SignalRecord]:
                 signal_source="anatomy",
                 target_path=target,
                 evidence_ref=f"knowledge/generated/AGENT_ANATOMY.md:{i + 1}",
-                # The heading is a substring of the raw line (which includes the
-                # surrounding ``**``), so it is trivially traceable to source.
+                # the heading is a substring of the raw line, so it is traceable to source
                 problem_quote=heading,
             )
         )
@@ -208,10 +188,7 @@ def self_build_docs_candidate(proposal_text: str) -> list[SignalRecord]:
     return []
 
 
-# ── Architecture-audit signal (TD-036 follow-up) ──────────────────────────────
-# Source constant for backlog signals derived from the agent's own architecture
-# audit (core.architecture_audit.audit_architecture). This is what lets the agent
-# find its own work from self-analysis instead of only human-written docs.
+# Source constant for backlog signals derived from the agent's own architecture audit (core.architecture_audit.audit_architecture).
 ARCHITECTURE_AUDIT_SOURCE = "architecture_audit"
 
 
@@ -219,15 +196,7 @@ def _select_audit_target(
     evidence_files: list[str],
     exists: Callable[[str], bool] | None,
 ) -> str:
-    """Pick the concrete target for an audit gap.
-
-    A gap's check is green only when *all* its evidence files exist, so the most
-    actionable target is the first one that is still MISSING. When an ``exists``
-    predicate is supplied we return that first-missing file; otherwise (or if all
-    files already exist) we fall back to the first evidence file. This is what
-    lets the agent go after ``README.md`` instead of re-targeting an
-    already-present ``AGENT_DOCTRINE.md``.
-    """
+    """Pick the concrete target for an audit gap: the first MISSING evidence file when an `exists` predicate is given, else the first evidence file."""
     if not evidence_files:
         return ""
     if exists is not None:
@@ -246,13 +215,9 @@ def architecture_audit_candidates(
     *,
     exists: Callable[[str], bool] | None = None,
 ) -> tuple[list[SignalRecord], str]:
-    """Turn an architecture audit's priority gaps into grounded backlog
-    signals.
+    """Turn an architecture audit's priority gaps into grounded backlog signals.
 
-    ``exists`` is an optional ``(rel_path) -> bool`` predicate (kept
-    injectable so the function stays pure/testable). Gaps without a usable
-    title are skipped. Best-effort per-gap: a malformed gap entry is skipped
-    rather than raising, so a bad audit never breaks the backlog.
+    `exists` is an optional ``(rel_path) -> bool`` predicate (injectable to stay pure). Gaps without a usable title, or malformed, are skipped.
     """
     records: list[SignalRecord] = []
     quotes: list[str] = []
@@ -288,48 +253,21 @@ def architecture_audit_candidates(
     return records, "\n".join(quotes)
 
 
-# The code_todo organ (scanning the tree for TODO/FIXME/XXX comment markers)
-# lived here until 2026-08-28 and was erased by operator ruling: a marker a
-# person typed is the retired "human assigns — agent executes" model, not a
-# self-measured signal. History: MIR-183 in docs/audit/MASTER_ISSUE_REGISTRY.md.
 
 OVERSIZED_MODULE_SOURCE = "oversized_module"
 
-# A module past this many lines is a "split me" advisory. The threshold is a soft
-# structural budget, not a hard rule: it only surfaces the file for a human to
-# consider splitting into focused modules. Bounded like the code-TODO organ so a
-# repo full of large files cannot flood the backlog.
+# A module past this many lines is a "split me" advisory: a soft structural budget that only surfaces the file for a human to consider.
 _OVERSIZED_MODULE_MIN_LINES = 800
 _MAX_OVERSIZED_RECORDS = 25
 
-#: Функция длиннее этого — та, которую НЕЛЬЗЯ прочесть и найти в ней проблему.
-#: Слово оператора 2026-09-23, договор о дроблении: «файл делится, когда в нём
-#: лишние функции, которые к нему не относятся, либо когда он так велик, что
-#: его не прочесть и не увидеть, где беда; маленький файл легче наблюдать».
-#:
-#: Замер, которым договор проверен. Механизм предложил разделить
-#: core/loop_step_execution.py (1158 строк) — вынести восемь методов по 25-32
-#: строки. Все двенадцать методов файла относятся к исполнению шага, чужого
-#: в нём нет; линейка файлов его не сторожит (потолок 2000). А `_execute_step`
-#: на 566 строк — ровно то, что прочесть нельзя, — оставался нетронутым.
-#: Правило мерило файл, а не содержимое: двадцать файлов core/ длиннее 800
-#: строк стали кандидатами разом, и агент дробил бы их по очереди, вынося
-#: отовсюду мелочь. Мерить надо то, из-за чего дробят.
+#: A function longer than this is one that cannot be read to find a problem in it; the split rule measures what makes people split, not file length.
 _UNREADABLE_FUNCTION_LINES = 200
 
 
 def _code_line_count(content: str) -> tuple[int, bool]:
     """Lines that carry code, and whether the module parsed.
 
-    MIR-099: this sensor used to count TOTAL lines, and 5 of its 10 live
-    verdicts flipped when prose was excluded — its first self-chosen proposal
-    targeted a module of 870 lines with only 602 of code. The census rule,
-    applied verbatim: a docstring line or a pure-comment line is prose; a line
-    carrying code plus a trailing comment is CODE. The 275-module census also
-    showed the errors were one-directional (zero modules under the limit in
-    total but over it in code), so counting code removes noise and cannot
-    newly miss anything. On a syntax error the caller falls back to the total
-    — the sensor must not go blind on an unparseable module.
+    A docstring line or pure-comment line is prose; a code line with a trailing comment is code. On a syntax error the caller falls back to the total.
     """
     import ast
     import io
@@ -357,13 +295,7 @@ def _code_line_count(content: str) -> tuple[int, bool]:
                 if at - 1 < len(lines) and lines[at - 1].strip().startswith("#"):
                     prose.add(at)
             elif tok.type == tokenize.STRING:
-                # A multi-line literal that is NOT a docstring is payload, not
-                # explanation: an embedded prompt, SQL or template is bulk the
-                # module carries. Counting only its FIRST line made
-                # `core/planner_prompt.py` read as 8 code lines of 553 —
-                # measured while auditing this sensor's own closure, and it is
-                # a false-NEGATIVE channel: the old total-lines counter would
-                # have flagged such a module and this one would not.
+                # a multi-line literal that is not a docstring is payload (prompt, SQL, template) and counts line by line
                 for line in range(tok.start[0], tok.end[0] + 1):
                     code_lines.add(line)
             elif tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
@@ -373,21 +305,14 @@ def _code_line_count(content: str) -> tuple[int, bool]:
         return 0, False
     return len(code_lines - prose), True
 
-# The emitted target is deliberately abstract (``split:<file>``) so that this
-# module stays a pure detector: it names a structural property, not a file to
-# edit. Resolving it to a concrete module and deciding whether that module may
-# be touched belongs to core/backlog_target_mapper.py and the Manager's
-# critical gate, not here.
+# The emitted target is abstract (``split:<file>``): resolving it to a module belongs to core/backlog_target_mapper.py and the Manager's critical gate.
 _OVERSIZED_TARGET_PREFIX = "split:"
 
 
 def _longest_function(content: str) -> tuple[str, int, int]:
-    """Самая длинная функция модуля: имя, число строк и где она начинается.
+    """The longest function of the module: name, line count and start line.
 
-    Метод класса называется вместе с классом (`Класс.метод`), иначе читающий
-    не найдёт `_execute_step` среди одноимённых. Немой разбор — не повод
-    объявить файл здоровым и не повод его дробить: нечитаемый для машины
-    модуль возвращает пустое имя и ноль строк, и сигнала не будет.
+    A method is named with its class (`Class.method`); an unparseable module returns an empty name and zero lines (no signal).
     """
     import ast
 
@@ -416,17 +341,10 @@ def _longest_function(content: str) -> tuple[str, int, int]:
 def oversized_module_candidates(
     files: Iterable[tuple[str, str]],
 ) -> tuple[list[SignalRecord], str]:
-    """Turn oversized source modules into grounded, report-only backlog
-    signals.
+    """Turn oversized source modules into grounded, report-only backlog signals; performs NO IO.
 
-    ``files`` is an iterable of ``(rel_path, content)`` pairs already read
-    by the caller (this function performs NO IO, so it stays
-    pure/deterministic and unit-testable). Every file whose line count is at
-    or above :data:`_OVERSIZED_MODULE_MIN_LINES` becomes one
-    :class:`SignalRecord` whose ``target_path`` is the abstract
-    ``split:<rel_path>`` (report-only — see
-    :data:`_OVERSIZED_TARGET_PREFIX`), ``evidence_ref`` is ``<rel_path>:1``,
-    and ``problem_quote`` states the concrete line count.
+    `files` is an iterable of ``(rel_path, content)``; each file at or above :data:`_OVERSIZED_MODULE_MIN_LINES` yields a
+    :class:`SignalRecord` with target ``split:<rel_path>``, ``evidence_ref`` ``<rel_path>:1`` and the line count as quote.
     """
     measured: list[tuple[int, int, str, str]] = []
     seen: set[str] = set()
@@ -436,9 +354,7 @@ def oversized_module_candidates(
             continue
         seen.add(rel)
         total = content.count("\n") + 1 if content else 0
-        # Повод дробить — не длина файла, а функция, которую нельзя прочесть.
-        # Файл без такой функции читается, и беду в нём видно: дробить его
-        # значит двигать мелочь и множить файлы без смысловой границы.
+        # the reason to split is an unreadable function, not file length
         name, size, at = _longest_function(content)
         if size >= _UNREADABLE_FUNCTION_LINES:
             measured.append((size, total, rel, name, at))
@@ -462,12 +378,10 @@ def oversized_module_candidates(
             SignalRecord(
                 signal_source=OVERSIZED_MODULE_SOURCE,
                 target_path=f"{_OVERSIZED_TARGET_PREFIX}{rel}",
-                # Улика ведёт к САМОЙ функции, а не к первой строке файла:
-                # читающий должен открыть то, из-за чего дробят.
+                # the evidence points at the function itself, not the first line of the file
                 evidence_ref=f"{rel}:{at}",
                 problem_quote=quote,
-                # Worst-first: the biggest module gets the largest bump so it
-                # ranks ahead of its peers while staying below the next tier.
+                # worst-first: the biggest module gets the largest bump but stays below the next tier
                 rank_hint=(count - index) * 0.001,
             )
         )
@@ -481,17 +395,9 @@ SPLIT_PROOF_SOURCE = "split_proof"
 def split_proof_candidates(
     proofs: Iterable[tuple[str, Any]],
 ) -> tuple[list[SignalRecord], str]:
-    """Модули с ДОКАЗАТЕЛЬСТВОМ из core/split_proof.py — работа для рук.
+    """Modules with PROOF from core/split_proof.py: work for the hands.
 
-    Эпизод 2026-09-21: драйв нашёл настоящий дубль в core/task_queue.py и
-    поставил цель, а руки (`_default_grounded_selector`) ответили «no grounded
-    backlog candidate»: весь бэклог был семью записями «файл большой», и ни
-    одной доказанной. Доказательство доходило до головы и не доходило до рук.
-
-    ``proofs`` — пары ``(rel, proof)`` уже в порядке силы; без IO. Цель —
-    тот же абстрактный ``split:<rel>``, что у размера: отображение в файл и
-    решение, КАК править (свести дубль или вынести предмет), остаются за
-    картографом и производителем.
+    `proofs` are ``(rel, proof)`` pairs already in order of strength; no IO. The target is the abstract ``split:<rel>``.
     """
     items = [(str(rel).replace("\\", "/").strip(), proof) for rel, proof in proofs]
     items = [(rel, proof) for rel, proof in items if rel and proof is not None]
@@ -516,11 +422,7 @@ def value_review_penalties(
 ) -> ValuePenalties:
     """Derive suppress/penalize target sets from human value reviews.
 
-    ``reviews`` is an iterable of objects with ``item_id`` and ``verdict``
-    (e.g. :class:`core.value_review.ValueReview`). A review contributes only
-    when its ``item_id`` resolves to a target via ``item_target_map`` (best-
-    effort: with no map, no penalties are produced, and value_reviews is
-    never mutated).
+    `reviews` have ``item_id`` and ``verdict``; a review counts only when ``item_id`` resolves via ``item_target_map`` (no map, no penalties). Never mutates value_reviews.
     """
     if not item_target_map:
         return ValuePenalties.empty()

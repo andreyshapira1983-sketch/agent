@@ -1,8 +1,4 @@
-"""What must EXIST or have CHANGED when this request is done (MIR-067).
-
-Derived from the request BEFORE the work; an unmet obligation forbids `achieved`.
-A duty that cannot be read unambiguously becomes an ambiguity to ask, never a guess.
-"""
+"""Completion contract: what must EXIST or have CHANGED when a request is done, derived before the work; an unreadable duty becomes an ambiguity to ask, never a guess."""
 from __future__ import annotations
 
 import re
@@ -15,8 +11,7 @@ from core.lang_match import normalize_text
 DeliverableKind = Literal["file_exists", "file_modified", "tests_green"]
 
 #: How each deliverable is checked; part of the contract, so "verified" is explicit.
-# `tests_green`, not `tests_pass`: bandit reads names ending in "pass" as
-# credentials (B105), and the repo carries no suppressions.
+# `tests_green`, not `tests_pass`: bandit reads names ending in "pass" as credentials (B105).
 VERIFICATION_METHODS: dict[DeliverableKind, str] = {
     "file_exists": "a successful write artifact targets the path",
     "file_modified": "a successful write artifact targets the path",
@@ -44,8 +39,7 @@ _READ_STEMS: tuple[str, ...] = (
 # Explicit operator-declared change-sets override incidental path mentions;
 # read from the full request, before demanding_text() and the mixed-request check.
 _EXPLICIT_CHANGE_TARGET_DECLARATIONS: dict[str, re.Pattern[str]] = {
-    # Начало предложения, а не только строки; захват — до конца предложения,
-    # чтобы соседнее «Файл Y — только прочитать» не попало в изменяемые.
+    # Sentence start, not just line start; capture runs to sentence end so an adjacent 'read only' file stays out.
     "ru": re.compile(
         '(?:^|(?<=[.!?]\\s))[ \\t]*(?:менять|меняется|меняем|изменить|изменяется|изменя(?:ть|йте))\\s*:?\\s*(?:ровно\\s+(?:один|одну|\\d+)\\s+(?:файл|файла|файлов)\\s*[-—:]?\\s*)?(?P<targets>(?:(?![.!?]\\s)[^\\n;])+)',
         re.IGNORECASE | re.MULTILINE,
@@ -80,8 +74,7 @@ _TESTS_PASS_RE = re.compile(
 )
 
 
-#: Классы затребованного, которые извлекатель распознаёт, но проверять не умеет.
-#: Ошибка здесь лишь помечает границу покрытия, а не выдумывает обязательство.
+#: Requested classes the extractor recognizes but cannot verify; marks the coverage boundary.
 _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("report_sections", re.compile(
         r"(отчита\w*|отчёт\w*|отчет\w*|доложи)\s+(отдельно|по\s+раздел|разделами)"
@@ -110,8 +103,7 @@ _UNSUPPORTED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-#: Единица задания, названная ЗАГОЛОВКОМ: `## 3. …`, `### B. …`, `# U01 — …`.
-#: Идентификатор оператора сохраняется дословно; упоминание в прозе — не единица.
+#: A work unit named by a HEADING (`## 3. …`, `### B. …`, `# U01 — …`); identifier kept verbatim; prose mentions are not units.
 _REQUESTED_UNIT_RE = re.compile(
     r"^\s{0,3}#{1,4}\s*("
     r"(?:\d{1,2}|[A-Z])\.\s+\S.*?"
@@ -123,7 +115,7 @@ _REQUESTED_UNIT_RE = re.compile(
 
 @dataclass(frozen=True)
 class RequestedUnit:
-    """Названный оператором раздел работы или отчёта."""
+    """A section of work or report named by the operator."""
 
     title: str
     identifier: str = ""
@@ -132,14 +124,13 @@ class RequestedUnit:
         return {"title": self.title, "identifier": self.identifier}
 
 
-#: Метка в начале заголовка (`U01`, `R7`, `3`, `B`) — по ней сверяется адресованность.
+#: Label at the start of a heading (`U01`, `R7`, `3`, `B`), used to check addressing.
 _UNIT_LABEL_RE = re.compile(
     r"^([A-Za-z\u0410-\u042f\u0430-\u044f]{0,4}\d{1,3}|[A-Z])\s*[.\u2014\u2013:-]"
 )
 
 
-#: Строка «S1 — Ключи» без `#` (вставка теряет решётку) — единица, но только
-#: когда таких строк две и больше: одиночная — проза (R1).
+#: A `S1 — Keys` line without `#` (paste loses the hash) is a unit only when there are two or more such lines.
 _PLAIN_UNIT_RE = re.compile(
     r"^\s{0,3}((?:[A-Za-zА-Яа-я]{1,4}\d{1,3})"
     r"\s*[—–:-]\s+\S.*?)\s*$",
@@ -148,7 +139,7 @@ _PLAIN_UNIT_RE = re.compile(
 
 
 def requested_units(text: str) -> tuple[RequestedUnit, ...]:
-    """Единицы задания в порядке их появления, без повторов."""
+    """Units of the request in order of appearance, without repeats."""
     units = _units_from(_REQUESTED_UNIT_RE, text)
     if units:
         return units
@@ -172,7 +163,7 @@ def _units_from(pattern: re.Pattern[str], text: str) -> tuple[RequestedUnit, ...
 
 
 def _units_without_body(text: str) -> tuple[str, ...]:
-    """Идентификаторы единиц, за строкой которых нет ни одной строки задания."""
+    """Identifiers of units with no request line after their heading."""
     if not requested_units(text):
         return ()
     lines = (text or "").splitlines()
@@ -196,12 +187,11 @@ def _units_without_body(text: str) -> tuple[str, ...]:
 
 
 def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
-    """Названные единицы, следа которых в ответе нет."""
+    """Named units with no trace in the answer."""
     body = (answer or "").casefold()
     missing: list[str] = []
     for unit in getattr(contract, "requested_units", ()) or ():
-        # Односимвольная метка («C») совпала бы с любой буквой — для неё
-        # остаётся сверка по заголовку.
+        # A one-character label ('C') would match any letter, so it is checked by heading only.
         ident = (unit.identifier or "").casefold()
         if len(ident) >= 2 and ident in body:
             continue
@@ -213,7 +203,7 @@ def unaddressed_units(contract: Any, answer: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class UnsupportedDeliverable:
-    """Затребованное, которое извлекатель видит и НЕ умеет проверять."""
+    """A requested item the extractor sees but cannot verify."""
 
     kind: str
     evidence: str
@@ -247,14 +237,14 @@ class CompletionContract:
     obligations: tuple[ContractObligation, ...] = ()
     ambiguities: tuple[str, ...] = ()
     unsupported_deliverables: tuple[UnsupportedDeliverable, ...] = ()
-    #: Единицы, названные оператором заголовками (предметы, а не классы).
+    #: Units named by the operator as headings (subjects, not classes).
     requested_units: tuple[RequestedUnit, ...] = ()
-    #: Чек-лист поручения (core/request_checklist.py); None — не составлен.
+    #: Checklist of the assignment (core/request_checklist.py); None if not built.
     checklist: Any = None
 
     @property
     def coverage(self) -> str:
-        """`complete`, пока извлекатель не встретил ничего вне своей области."""
+        """`complete` until the extractor met something outside its scope."""
         return "partial" if self.unsupported_deliverables else "complete"
 
     @property
@@ -279,37 +269,32 @@ def _mentions_read(tokens: tuple[str, ...]) -> bool:
     return any(tok.startswith(stem) for tok in tokens for stem in _READ_STEMS)
 
 
-#: Прошедшее время и второе лицо будущего («добавил», «added», «напишешь») —
-#: рассказ или условие, а не поручение. Хвостовая пунктуация («добавил,») допускается.
+#: Past tense and future second person ('added', 'you will write') are narration or condition, not an order; trailing punctuation allowed.
 _NOT_AN_ORDER_RE = re.compile(
     r"(?:"
-    r"л|ла|ло|ли|ed"          # прошедшее: «добавил», «added»
-    r"|ешь|ёшь|ишь|ашь"      # второе лицо будущего: «напишешь»
+    r"л|ла|ло|ли|ed"          # past tense
+    r"|ешь|ёшь|ишь|ашь"      # future second person
     r")[^\w]*$"
 )
-#: Прежнее имя. Основные правила — приказ стоит в форме приказа
-#: (`_ORDER_TAIL_RE`) и называет свой предмет (`_orders_a_path`).
+#: Former name of `_NOT_AN_ORDER_RE`.
 _PAST_TENSE_RE = _NOT_AN_ORDER_RE
 
-#: Имя из кода или данных, а не слово речи: `added_at`, `evidence_kind=source`,
-#: `core/loop.py`, `remove()` — иначе имя поля читается как приказ.
+#: A code/data name, not a word of speech (`added_at`, `core/loop.py`, `remove()`), so it is not read as an order.
 _IS_A_NAME_RE = re.compile(r"[_/\\=(]|\d")
 
-#: Хвост после стебля в форме приказа: повелительное («исправь», «исправьте»)
-#: или инфинитив («добавить»). У латиницы приказ — сам стебель, хвост пуст.
+#: Tail after the stem in order form: imperative or infinitive; for Latin the stem itself is the order, tail empty.
 _ORDER_TAIL_RE = re.compile(
-    r"^(?:|и|ь|й|ай|ей|уй)(?:те)?$"           # повелительное
-    r"|^(?:ть|ти|ить|ать|ять|еть|уть|овать|ивать|ывать)$"  # инфинитив
+    r"^(?:|и|ь|й|ай|ей|уй)(?:те)?$"           # imperative
+    r"|^(?:ть|ти|ить|ать|ять|еть|уть|овать|ивать|ывать)$"  # infinitive
 )
 _TAIL_PUNCT_RE = re.compile(r"[^\w]+$")
 
-#: Границы предложения. Точка — конец только перед пробелом или концом текста,
-#: иначе `core/loop.py` разрезался бы и путь пропадал.
+#: Sentence boundaries; a dot ends one only before whitespace or end of text, so `core/loop.py` stays whole.
 _SENTENCE_SPLIT_RE = re.compile(r"[.!?;]+(?=\s|$)|\n+")
 
 
 def _orders_a_path(demanding: str) -> bool:
-    """Распоряжается ли просьба ФАЙЛОМ: глагол письма стоит в предложении с путём."""
+    """Whether the request orders a FILE: a writing verb stands in a sentence with a path."""
     parts = [p for p in _SENTENCE_SPLIT_RE.split(demanding or "") if p.strip()]
     near = " . ".join(p for p in parts if paths_mentioned(p))
     if not near:
@@ -318,10 +303,9 @@ def _orders_a_path(demanding: str) -> bool:
 
 
 def _written_paths_only(named: list[str], demanding: str) -> list[str]:
-    """Оставить в долгу только пути из предложений с глаголом записи.
+    """Keep only paths from sentences with a write verb; if only some paths are written, the rest are reads.
 
-    Если такие предложения называют лишь часть путей, прочие — чтение. Когда
-    чтение и запись в одном предложении, подмножества нет и путь остаётся к вопросу.
+    With read and write in one sentence there is no subset and the path stays open to a question.
     """
     if len(named) <= 1:
         return named
@@ -330,7 +314,7 @@ def _written_paths_only(named: list[str], demanding: str) -> list[str]:
 
 
 def _ordered_paths(demanding: str) -> list[str]:
-    """Пути, названные в предложениях с глаголом записи (порядок — как в просьбе)."""
+    """Paths named in sentences with a write verb, in request order."""
     out: list[str] = []
     for part in _SENTENCE_SPLIT_RE.split(demanding or ""):
         paths = paths_mentioned(part) if part.strip() else ()
@@ -340,7 +324,7 @@ def _ordered_paths(demanding: str) -> list[str]:
 
 
 def _in_order_form(tok: str, stem: str) -> bool:
-    """Стоит ли слово в форме распоряжения, а не названия или рассказа."""
+    """Whether the word is in order form, not a title or narration."""
     tail = _TAIL_PUNCT_RE.sub("", tok[len(stem):])
     if stem.isascii():
         return not tail
@@ -358,7 +342,7 @@ def _action_for(tokens: tuple[str, ...]) -> str:
             for tok in tokens for stem in stems
         )
 
-    # Долг создаёт только распоряжение — строгость формы нужна лишь там.
+    # Only an order creates a duty, so strictness matters only here.
     if _hit(_MODIFY_STEMS, strict=True):
         return "modify"
     if _hit(_CREATE_STEMS, strict=True):
@@ -368,10 +352,9 @@ def _action_for(tokens: tuple[str, ...]) -> str:
     return "unknown"
 
 
-#: Кому просьба отдаёт выбор, не называя его: «ему», «клиенту», «заказчику».
+#: Who the request leaves the choice to without naming them ('him', 'the client').
 _THIRD = r"(?:ему|ей|им|клиенту|заказчику|пользователю|him|her|them|the\s+client|the\s+customer)"
-#: Формат отдан на усмотрение третьего лица: «в нужном ему формате», «как
-#: клиенту удобно», «in the format the client needs».
+#: Format left to a third party's discretion ('in the format the client needs').
 _DEFERRED_FORMAT_RE = re.compile(
     rf"(?:нужн|удобн|подходящ)\w*\s+{_THIRD}\s+(?:формат|вид)"
     rf"|(?:формат|вид)\w*,?\s+(?:который|какой|что)\s+{_THIRD}\s+(?:нуж|удоб|подход)"
@@ -380,7 +363,7 @@ _DEFERRED_FORMAT_RE = re.compile(
     rf"|(?:format|form)\s+(?:that\s+)?{_THIRD}\s+(?:needs?|wants?|prefers?)",
     re.IGNORECASE,
 )
-#: Отправка третьему лицу без адреса и канала: «отправь ему», «send it to the client».
+#: Sending to a third party without address or channel ('send it to the client').
 _DEFERRED_SEND_RE = re.compile(
     rf"(?:отправ|пришл|перешл|отошл)\w*\s+(?:\w+\s+)?{_THIRD}\b|send\s+(?:it\s+)?to\s+{_THIRD}\b",
     re.IGNORECASE,
@@ -389,10 +372,9 @@ _ADDRESS_RE = re.compile(r"@|https?://|на\s+адрес|по\s+адресу|в\
 
 
 def _deferred_choices(demanding: str) -> list[str]:
-    """Выбор, который просьба отдаёт неназванному человеку, — вопрос, а не догадка.
+    """A choice the request leaves to an unnamed person is a question, not a guess.
 
-    Правило узкое намеренно: только прямая отсылка к предпочтению третьего лица.
-    Текст неясности — готовый вопрос заказчику, ворота показывают его как есть.
+    Deliberately narrow: only a direct reference to a third party's preference; the ambiguity text is a ready question for the customer.
     """
     out: list[str] = []
     if _DEFERRED_FORMAT_RE.search(demanding):
@@ -404,8 +386,7 @@ def _deferred_choices(demanding: str) -> list[str]:
     return out
 
 
-#: Закавыченный кусок просьбы вместе с глаголом письма перед ним: без фразы
-#: «напиши» всё равно читалось бы как «создай».
+#: A quoted piece of the request with the write verb before it; without that verb 'write' would read as 'create'.
 _QUOTED_SPAN_RE = re.compile(
     r"(?:\b(?:напиш|напис|скаж|ответ|отвеч|укаж|пиши|write|say|reply|answer|"
     r"state|print)\w*\s+(?:что\s+|это\s+)?)?"
@@ -415,9 +396,9 @@ _QUOTED_SPAN_RE = re.compile(
 
 
 def _without_quoted_prose(text: str) -> str:
-    """Просьба без закавыченных ФРАЗ; закавыченные имена файлов остаются.
+    """The request without quoted PHRASES; quoted file names stay.
 
-    «Напиши «данных нет»» — речь, «создай файл «report.md»» — работа.
+    'Write "no data"' is speech, 'create file "report.md"' is work.
     """
     def keep(match: re.Match[str]) -> str:
         quoted = match.group(1)
@@ -436,13 +417,11 @@ def derive_completion_contract(
     Blind to plan, artifacts and answer by signature; anything unclear becomes an ambiguity.
     """
     text = question or ""
-    # Долги — только из требующих предложений: `Do not create X` не долг.
-    # Сам запрет остаётся в `unsupported_deliverables` (по полному тексту).
+    # Duties come only from demanding sentences (`Do not create X` is no duty); the prohibition stays in `unsupported_deliverables`.
     demanding = _without_quoted_prose(demanding_text(text))
     tokens = tuple(normalize_text(demanding).split())
     action = _action_for(tokens)
-    # Распоряжение называет свой предмет: если ни один путь не стоит в
-    # предложении с глаголом письма, просьба про чтение.
+    # An order names its subject: if no path stands in a sentence with a write verb, the request is about reading.
     if (
         action in {"create", "modify"}
         and paths_mentioned(demanding)
@@ -462,8 +441,8 @@ def derive_completion_contract(
     else:
         named = list(paths_mentioned(demanding))
 
-    # Read + change over MORE THAN ONE path cannot be attributed ("прочитай A.py
-    # и исправь B.py"); an invented duty would block `achieved`. One path is safe.
+    # Read + change over MORE THAN ONE path cannot be attributed ("read A.py
+    # and fix B.py"); an invented duty would block `achieved`. One path is safe.
     if not declared_change_set and action in {"create", "modify"}:
         named = _written_paths_only(named, demanding)
     if (
@@ -499,8 +478,7 @@ def derive_completion_contract(
                 derived_from=path,
             ))
 
-    # No "change verb without a target" ambiguity: it was wrong every time —
-    # the target lived in prose. Such a request yields an empty contract instead.
+    # No 'change verb without a target' ambiguity; such a request yields an empty contract.
 
     if _TESTS_PASS_RE.search(demanding):
         obligations.append(ContractObligation(
@@ -512,7 +490,7 @@ def derive_completion_contract(
 
     ambiguities.extend(_deferred_choices(demanding))
 
-    # Единица без содержания (обрезанная вставка) — вопрос оператору (R1).
+    # A unit without content (truncated paste) is a question to the operator.
     for ident in _units_without_body(text):
         ambiguities.append(
             f"единица «{ident}» объявлена, но не содержит задания — "
@@ -523,13 +501,12 @@ def derive_completion_contract(
         obligations=tuple(obligations),
         ambiguities=tuple(ambiguities),
         unsupported_deliverables=_unsupported_in(text),
-        # По ПОЛНОМУ тексту: единицей бывает и запрещающий раздел.
+        # From the FULL text: a prohibiting section can be a unit too.
         requested_units=requested_units(text),
     )
 
 
-#: Запрещающее предложение. Маркер стоит ПЕРЕД глаголом, иначе «создай файл,
-#: если он не существует» прочиталось бы как запрет.
+#: A prohibiting clause. The marker stands BEFORE the verb, else 'create the file if it does not exist' would read as a prohibition.
 _PROHIBITING_CLAUSE_RE = re.compile(
     r"^\s*(?:"
     r"(?:do\s+not|don't|never)"
@@ -540,13 +517,13 @@ _PROHIBITING_CLAUSE_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Границы предложений и однородных частей: «сделай A; не трогай B».
-# Якорь на самом тире, а не `\s+—`: иначе стена пробелов даёт квадратичное время.
+#: Boundaries of sentences and homogeneous parts ('do A; do not touch B').
+# Anchored on the dash itself, not `\s+—`: a wall of spaces would give quadratic time.
 _CLAUSE_SPLIT_RE = re.compile(r"(?:(?<=[.!?;\n])\s+|(?<=\s)—\s+)")
 
 
 def demanding_text(text: str) -> str:
-    """Текст без запрещающих предложений — из него и читаются долги."""
+    """Text without prohibiting sentences; duties are read from it."""
     kept = [
         part.strip() for part in _CLAUSE_SPLIT_RE.split(text or "")
         if part.strip() and not _PROHIBITING_CLAUSE_RE.match(part.strip())
@@ -555,7 +532,7 @@ def demanding_text(text: str) -> str:
 
 
 def _unsupported_in(text: str) -> tuple[UnsupportedDeliverable, ...]:
-    """Затребованное, которое видно в тексте и непроверяемо этим модулем."""
+    """Requested items visible in the text but not verifiable by this module."""
     found: list[UnsupportedDeliverable] = []
     for kind, pattern in _UNSUPPORTED_PATTERNS:
         match = pattern.search(text)

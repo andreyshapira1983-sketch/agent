@@ -1,23 +1,4 @@
-"""Claim-level answer enforcement (critique plan PR3) — long-answer truncation
-is always on, while `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` gates only the claim-
-level short path.
-
-Feature flag ``AGENT_ENFORCE_UNSUPPORTED_CLAIMS``: ``off`` (default) |
-``shadow`` | ``on``. It is the rollout switch for the **new claim-level
-short path only**, not a master switch for enforcement. Precisely:
-
-=============================== ==========================================
-path gated by the flag? ===============================
-========================================== ``insufficient_evidence`` **No —
-always on.** Long-answer truncation returns ``applied=True`` whatever the
-mode, and the loop writes that answer back. This predates PR3.
-``unsupported_world_claims`` **Yes.** ``applied = mode == "on"``; ``shadow``
-reports ``would_change_answer``. ``verifier_failure`` / Keeping the draft is
-unconditional (the ``malformed_report`` function returns before any
-truncation); only the explanatory note appended to the answer is flag-gated.
-``local_critique_preserved`` No — invariant. ===============================
-==========================================
-"""
+"""Claim-level answer enforcement: long-answer truncation is always on, while the `AGENT_ENFORCE_UNSUPPORTED_CLAIMS` flag (off | shadow | on) gates only the claim-level short path."""
 from __future__ import annotations
 
 import os
@@ -46,8 +27,8 @@ EnforcementOutcome = Literal[
     "citation_excised",
 ]
 
-# Categorical / absolute phrasing that should not ship as bare world fact
-# without non-user evidence (short answers the ≥8 chunk gate misses).
+# Categorical / absolute phrasing that should not ship as bare world fact without non-user evidence
+# (short answers the >=8 chunk gate misses).
 _CATEGORICAL_RE = re.compile(
     r"(?i)\b("
     r"definitely|certainly|always|never|guaranteed|proven|"
@@ -79,8 +60,8 @@ class EnforcementResult:
     mode: str = "off"
     notes: tuple[str, ...] = field(default_factory=tuple)
     low_evidence_payload: dict[str, Any] | None = None
-    #: Предметы, утверждённые и снятые в одном ответе. Отдельным полем, а не
-    #: строкой в `notes`: потребитель обучения обязан читать их машинно.
+    # Subjects asserted and removed in one answer; a separate field because the learning consumer
+    # must read them by machine.
     contradictions: tuple[Any, ...] = field(default_factory=tuple)
 
     def to_log_payload(self) -> dict[str, Any]:
@@ -164,14 +145,10 @@ def _count_categorical_unsupported(report: Any) -> int:
     n = 0
     for c in chunks:
         verdict = getattr(c, "verdict", "") or ""
-        # `dialogue_supported` joins the exempt set: a categorical statement
-        # about the agent's own previous reply ("я всегда отвечаю по вопросу")
-        # is backed by the transcript, and hedging it would reintroduce the
-        # issue #119 defect through the short path.
-        # `user_asserted` is deliberately NOT exempt (operator ruling
-        # 2026-08-03, MIR-028): a categorical world claim supported only by
-        # the operator's own words is unconfirmed content, and hedging it is
-        # exactly the honesty the ruling requires.
+        # `dialogue_supported` is exempt: a categorical statement about the agent's own previous
+        # reply is backed by the transcript.
+        # `user_asserted` is deliberately NOT exempt: a categorical world claim backed only by the
+        # operator's own words is unconfirmed.
         if verdict in (
             "verified", "self_declared", "structural", "dialogue_supported"
         ):
@@ -197,15 +174,14 @@ def apply_answer_enforcement(
     contract: Any | None = None,
     blocked_attempts: int = 0,
 ) -> EnforcementResult:
-    """Рубеж принятия ответа: прежние исходы плюс очная ставка разделов.
+    """Answer acceptance boundary: the earlier outcomes plus a confrontation of sections.
 
-    ``blocked_attempts`` — число заблокированных/пустых попыток в цепочке
-    (рабочий заказ 1, дефект 3): честное «подтвердить не удалось» опирается
-    на них и не стирается воротами низкой доказательности."""
+    ``blocked_attempts`` is the number of blocked/empty attempts in the chain; an honest "could not confirm" rests on it and is not erased by the low-evidence gate.
+    """
     found = ()
     try:
         found = contradicted_claims(answer)
-    except Exception:  # noqa: BLE001 — обнаружитель не имеет права уронить ход
+    except Exception:  # noqa: BLE001 — a detector must not be able to crash the turn
         found = ()
     result = _enforce_without_contradictions(
         answer=answer,
@@ -239,7 +215,7 @@ def apply_answer_enforcement(
 def _annotate_unrepresented_prohibitions(
     result: EnforcementResult, contract: Any | None, question: str
 ) -> EnforcementResult:
-    """Довести до ОПЕРАТОРА запрет, который контракт не умеет проверять."""
+    """Tell the OPERATOR about a prohibition the contract cannot verify."""
     entries = tuple(getattr(contract, "unsupported_deliverables", ()) or ())
     quoted = [e.evidence for e in entries if getattr(e, "kind", "") == "prohibition"]
     if not quoted:
@@ -268,16 +244,10 @@ def _annotate_unrepresented_prohibitions(
 
 
 def _excise_fabricated(answer: str, report: Any) -> tuple[str, int] | None:
-    """Ответ без утверждений с несовпавшей ссылкой, или None — тогда отказ.
+    """Answer without the claims whose reference did not match, or None (then a refusal).
 
-    R4 запрещает выдать оператору сфабрикованную ссылку; он не требует
-    выбросить вместе с ней подтверждённое. Замер 2026-09-19 (экзамен агента):
-    четыре отозванных ответа из четырёх содержали ровно одно такое утверждение
-    и ни разу в главном выводе, а пользователь получал только служебную строку.
-    Остаток выдаётся, лишь если в нём есть утверждение, подтверждённое
-    уликами хода, и только если каждое снимаемое утверждение найдено в тексте
-    точно; иначе прежний отказ. Источник из списка, на который ссылались
-    лишь снятые утверждения, уходит вместе с ними.
+    The remainder is returned only if it holds a claim confirmed by the turn's evidence and every removed claim is found in the text exactly; otherwise the earlier refusal stands.
+    A source cited only by removed claims leaves with them.
     """
     chunks = tuple(getattr(report, "chunks", ()) or ())
     bad = [c for c in chunks if getattr(c, "verdict", "") == "cited_but_unmatched"]
@@ -323,8 +293,7 @@ def _excision_result(
     )
 
 
-#: Постоянное начало пометки о вырезании: по нему человеческая печать
-#: (`core/answer_format.py`) сохраняет строку, иначе она терялась бы в хвосте.
+# Fixed start of the excision note; the human print (`core/answer_format.py`) keeps the line by it.
 EXCISION_PREFIXES = ("⚠️ Из ответа убрано утверждений:", "⚠️ Removed from this answer:")
 
 
@@ -343,7 +312,7 @@ def _excision_note(count: int, locale: str) -> str:
 
 
 def _contradiction_note(found: tuple[Any, ...], locale: str) -> str:
-    """Называет предмет спора. Ответ не удаляется: оператору нужны обе стороны."""
+    """Names the subject of the dispute. The answer is not deleted: the operator needs both sides."""
     subjects = ", ".join(c.subject for c in found[:3])
     if locale == "ru":
         return (
@@ -412,16 +381,13 @@ def _enforce_without_contradictions(
             notes=("soft_fail_keep_draft",),
         )
 
-    # R4 (постановление оператора 2026-08-13): сфабрикованные цитаты
-    # ТЕРМИНАЛЬНЫ. Живой R-E1: «36 × 3 = 108» с двумя [dialogue:previous] на
-    # несуществовавший диалог ушёл как есть — усечение не добрало кусков, а
-    # ветки для фабрикации не было. Свойство текста, не эвристика: рубеж
-    # не зависит от режима раскатки. Определение одно, из evidence_support:
-    # fabricated == cited_but_unmatched.
+    # Fabricated citations are TERMINAL (an operator ruling): the boundary does not depend on
+    # rollout mode.
+    # One definition from evidence_support: fabricated == cited_but_unmatched.
     fabricated = int(getattr(report, "cited_but_unmatched_chunks", 0) or 0)
     if evidence_expected and fabricated > 0:
         if (excised := _excision_result(answer, report, fabricated, locale, mode_s)) is not None:
-            return excised  # 2026-09-19: cut only unmatched claims when the rest is verified
+            return excised  # cut only unmatched claims when the rest is verified
         if locale == "ru":
             note = (
                 "Черновик ответа не отправлен: проверка не смогла сопоставить "
@@ -473,8 +439,8 @@ def _enforce_without_contradictions(
             low_evidence_payload=le_skipped.to_log_payload(),
         )
 
-    # Existing strict long-answer truncation (always on when it fires —
-    # this is the pre-PR3 enforcement; flag only gates the NEW claim path).
+    # Existing strict long-answer truncation (always on when it fires); the flag gates only the new
+    # claim path.
     le = evaluate_low_evidence_policy(
         answer=answer,
         report=report,

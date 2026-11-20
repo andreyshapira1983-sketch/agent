@@ -1,17 +1,10 @@
 """Canonical subagent contract bridge.
 
-This module is the first compatibility step toward one end-to-end subagent
-contract.  It intentionally does not change proposal, planning, execution, or
-registry behaviour yet.  Instead it provides a loss-aware canonical shape and
-deterministic adapters for the two legacy contract models:
-
-* :class:`core.subagent_memory_scope.SubagentProposal`
-* :class:`core.team_plan.SubagentContract`
-
-Fields that a legacy model never declared remain ``None`` rather than being
-silently invented.  Later migration stages can therefore distinguish an
-explicit zero/empty policy from an undeclared policy.
-"""
+    A loss-aware canonical shape and deterministic adapters for the two legacy
+    contract models (:class:`core.subagent_memory_scope.SubagentProposal` and
+    :class:`core.team_plan.SubagentContract`). It changes no proposal, planning,
+    execution or registry behaviour. Fields a legacy model never declared stay
+    ``None``, so an explicit zero/empty policy differs from an undeclared one."""
 from __future__ import annotations
 
 import hashlib
@@ -109,10 +102,7 @@ class CanonicalBudgetScope:
 class CanonicalSubagentContract:
     """Versioned, loss-aware contract shared by future subagent layers.
 
-    The adapters are deliberately one-way during this first stage.  Existing
-    call sites continue using their legacy classes, so introducing this module
-    cannot change runtime behaviour.
-    """
+        Adapters are one-way; existing call sites keep their legacy classes, so this module cannot change runtime behaviour."""
 
     contract_id: str
     source: ContractSource
@@ -143,9 +133,7 @@ class CanonicalSubagentContract:
             )
         if self.risk_level not in {"low", "medium", "high"}:
             raise ValueError("risk_level must be low, medium, or high")
-        # `model_role` is the one free string here that another subsystem
-        # resolves later. `risk_level` right beside it is already checked
-        # against a closed set; this field was not.
+        # `model_role` is a free string resolved by another subsystem later; unlike `risk_level` it was not checked against a closed set.
         ensure_known_model_role(self.model_role)
 
     @classmethod

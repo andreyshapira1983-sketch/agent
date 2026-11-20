@@ -1,17 +1,6 @@
-"""Low-evidence answer policy.
+"""Low-evidence answer policy: keeps only chunks the verifier marked ``verified``, states that evidence was insufficient (EN or RU), downgrades the Output Contract ``Confidence`` line to ``low``, and routes the suppressed bulk into the ``Unverified`` section.
 
-* keeps only the chunks the verifier marked ``verified``; * states
-explicitly that evidence was insufficient (in the user's locale, EN or RU);
-* downgrades the Output Contract ``Confidence`` line to ``low``; * routes
-the suppressed bulk into the ``Unverified`` section so the count is visible
-to the operator.
-
-``dialogue_supported`` joins the numerator because of issue #119: a claim
-about *this session's own exchange* is backed by the verbatim transcript, so
-counting it as unsupported mass is what let the gate delete a valid self-
-correction. It is support, not verification — it is never folded into
-``verified_chunks``, and a world claim never earns it (the scoping test
-lives in :mod:`core.evidence_classes`).
+``dialogue_supported`` counts as support (not verification, never folded into ``verified_chunks``) because a claim about this session's own exchange is backed by the transcript; a world claim never earns it (see :mod:`core.evidence_classes`).
 """
 
 from __future__ import annotations
@@ -27,37 +16,17 @@ _DEFAULT_MAX_VERIFIED_RATIO = 0.20
 _DEFAULT_UNVERIFIED_FLOOR = 6
 
 
-# Roles whose deliverable is NEW synthesized code / docstring / diff rather than
-# factual claims about the world. Such output can never appear verbatim in the
-# source file it was derived from, so the factual verifier marks it "unverified"
-# and the low-evidence gate would delete exactly what the user asked to create.
-# For these roles the synthesis IS the deliverable — evidence is not expected.
+# Roles whose deliverable is NEW synthesized code / docstring / diff, not factual claims: it can never appear verbatim in its source, so the gate would delete exactly what was asked for; evidence is not expected.
 _GENERATIVE_ROLES: frozenset[str] = frozenset({"programmer"})
 
-#: Markers of an actually generated artifact in the answer text. A fenced block
-#: or a unified-diff header is newly synthesized output; ordinary prose about a
-#: repository is not, however programmer-ish the role that produced it.
+#: Markers of an actually generated artifact: a fenced block or unified-diff header is newly synthesized output; prose about a repository is not, however programmer-ish the role.
 _FENCE_MARKER = "```"
 _DIFF_MARKERS: tuple[str, ...] = ("--- ", "+++ ", "@@ ")
 
 
-#: --- Жанр, а не форма (авторство агента, 2026-08-29) -------------------------
-#: Измерено: код в заборе освобождался от улик, а ПЛАН прозой — нет, хотя оба
-#: суть синтез. За день это задушило пять его собственных планов (поставка MVP,
-#: карантин, оценка вакансии, выбор органа, реплика спора), и дважды курьеру
-#: приходилось просить заворачивать прозу в кодовый забор — то есть маскировать
-#: замысел под код, чтобы он прошёл.
-#:
-#: Водораздел его словами: «цифра-параметр не существует вне моего решения и её
-#: нельзя пойти и проверить; цифра-утверждение говорит о том, что существует
-#: независимо от меня». Утверждение о мире обязано нести источник; предложение о
-#: будущей работе источника иметь не может по природе — работы ещё нет.
-#:
-#: Наблюдаемые признаки внешнего факта (его мера, замер 9/9 + атака 7/7):
-#: единица измерения мира; дата; утвердительная связка при имени внешней
-#: сущности; имя внешней сущности без слова замысла рядом. Его же страховка:
-#: собственная величина в мировых единицах («бюджет 5 долларов») считается
-#: фактом — лишний запрос источника дешевле пропуска.
+#: Genre, not form: code in a fence was exempt from evidence but a PLAN in prose was not, though both are synthesis; the demand to wrap prose in a code fence masked intent as code.
+#: Watershed: a parameter-number does not exist outside the decision and cannot be checked; a claim-number speaks of what exists independently. A world claim must carry a source; a proposal about future work cannot, the work does not exist yet.
+#: Observable signs of an external fact: a world unit of measure; a date; an affirmative link with an external entity name; an external entity name without an intent word nearby. Safeguard: an own quantity in world units ("budget 5 dollars") counts as a fact, since an extra source request is cheaper than a miss.
 _WORLD_UNIT_MARKERS: tuple[str, ...] = (
     "доллар", "usd", "$", "евро", "eur", "рубл", "процент", "%", "годовых",
 )
@@ -85,9 +54,7 @@ _DATE_PATTERNS: tuple[str, ...] = (
 )
 
 
-#: Внешняя сущность — отдельным словом, не частью идентификатора. Рабочий
-#: экзамен 2026-09-19: оценка «4 шага … подсчёт сделает python_probe» считалась
-#: утверждением о мире (python), и ворота улик стёрли её целиком.
+#: An external entity as a separate word, not part of an identifier (an estimate like "python_probe will count" was read as a claim about python).
 _ENTITY_RE = re.compile(
     r"(?<![\w.])(?:" + "|".join(map(re.escape, _EXTERNAL_ENTITY_MARKERS)) + r")(?![\w])"
 )
@@ -97,24 +64,18 @@ def _names_entity(text: str) -> bool:
     return _ENTITY_RE.search(text) is not None
 
 
-#: Число вместе с единицей мира: «$500», «500 долларов», «12%», «7 евро».
+#: A number together with a world unit: "$500", "500 dollars", "12%", "7 euro".
 _UNIT_EXPR_RE = re.compile(
     r"\$\s?\d[\d.,]*|\d[\d.,]*\s?(?:доллар\w*|usd|евро|eur|рубл\w*|%|процент\w*|годовых)"
 )
-#: Строка со ссылкой на замер о себе — не утверждение о мире. Единица — строка,
-#: не предложение: точка внутри «3.11.9» резала предложение пополам.
+#: A line referencing a measurement about self is not a world claim. The unit is a line, not a sentence: the dot inside "3.11.9" cut a sentence in half.
 _SELF_MEASURED_RE = re.compile(r"(?m)^.*\[runtime:[^\]]*\].*$")
 
 
 def _states_external_fact(text: str, known: str = "") -> bool:
-    """True, когда текст утверждает о внешнем мире и потому обязан нести улику.
+    """True when the text asserts something about the outside world and so must carry evidence.
 
-    Рабочий экзамен 2026-09-19, шестой прогон: разбор пятнадцати заказов стёрт
-    целиком — ответ пересказывал заказ «сделка на бирже на $500» (знак доллара —
-    признак внешнего факта) и говорил «Python установлен (3.11.9)
-    [runtime:python_version]». Ни то ни другое не новое утверждение о мире:
-    признак, который уже стоит в вопросе пользователя (`known`), — пересказ, а
-    фраза со ссылкой [runtime:…] — измеренное о себе.
+    A feature already in the user's question (`known`) is a retelling, and a phrase with [runtime:...] is measured about self; neither is a new world claim.
     """
     import re
     text = _SELF_MEASURED_RE.sub(" ", text or "")
@@ -123,8 +84,7 @@ def _states_external_fact(text: str, known: str = "") -> bool:
     lowered = text.lower()
     known_low = (known or "").lower()
     if known_low:
-        # Сравнивается ВЫРАЖЕНИЕ «число + единица»: «$500» из вопроса — пересказ,
-        # «$900», которых в вопросе нет, — новое утверждение о мире.
+        # Compares the EXPRESSION "number + unit": "$500" from the question is a retelling, "$900" absent from it is a new world claim.
         def exprs(t: str) -> set[str]:
             return {re.sub(r"\s+", "", m.group(0)) for m in _UNIT_EXPR_RE.finditer(t)}
         if exprs(lowered) - exprs(known_low):
@@ -142,36 +102,23 @@ def _states_external_fact(text: str, known: str = "") -> bool:
                 word in sentence for word in _INTENT_WORD_MARKERS
             ):
                 return True
-    # Все признаки внешнего факта промолчали — это параметр замысла, не факт.
+    # All external-fact signals are silent: a design parameter, not a fact.
     return False
 
 
-#: Признаки предложения о будущей работе: наклонение намерения и нумерованные
-#: шаги. Одного признака мало — он должен встретиться в тексте, который НЕ
-#: утверждает о внешнем мире (см. `_states_external_fact`) и НЕ отчитывается
-#: о сделанном (см. `_reports_a_result`).
+#: Signs of a proposal about future work: intent mood and numbered steps. One sign is not enough: it must be in text that does NOT assert an external fact (`_states_external_fact`) and does NOT report done work (`_reports_a_result`).
 _PLAN_MARKERS: tuple[str, ...] = (
     "шаг ", "шаг:", "сначала", "затем", "потом", "предлагаю", "сделаю",
     "план:", "план ", "поставк",
-    # Прогноз и оценка — тот же жанр: высказывание о будущей работе. Замер
-    # 2026-09-19 (рабочий экзамен): «ПРОГНОЗ 1: да, шагов: 3» по просьбе «пока
-    # ничего не делай, спрогнозируй» — ворота улик стёрли весь ответ (0 из 10
-    # утверждений с источником), хотя у прогноза о себе источника нет по природе.
+    # A forecast or estimate is the same genre: a statement about future work, with no source by nature.
     "прогноз", "оценк", "оцениваю", "справлюсь", "шагов", "forecast", "estimate",
-    # Решение о своей работе — тот же жанр (рабочий экзамен, третий прогон:
-    # «N: БЕРУ / НЕ БЕРУ» по пятнадцати заказам стёрто целиком, 0 из 17).
+    # A decision about its own work is the same genre.
     "беру", "берусь", "выбираю", "рекомендую", "i take", "i choose", "i recommend",
 )
-#: Нумерованный список — только в начале строки. Экзамен 2026-09-05 (ход 43):
-#: `"1."` совпадало с дробью «601.23 с», и отчёт об измерении освобождался от
-#: улик как «план».
+#: A numbered list only at line start (`"1."` matched the fraction "601.23 s" and a measurement report was exempted as a "plan").
 _NUMBERED_LINE_RE = re.compile(r"(?m)^\s*\d{1,2}\.\s")
 
-#: Отчёт о результате — не предложение. Экзамен 2026-09-05 (ход 41): «Шаг 1
-#: (last_n=60) вернул events_returned=4» прошёл как план, ворота улик отключились,
-#: и ложное число (инструмент вернул 60) ушло оператору как проверенное.
-#: Признаки: глагол свершившегося действия или запись `поле=значение` из вывода
-#: инструмента.
+#: A result report is not a proposal. Signs: a verb of a completed action or a `field=value` record from tool output.
 _REPORT_VERB_MARKERS: tuple[str, ...] = (
     "вернул", "выполнен", "выполнил", "получен", "прочитан", "найден", "найдено",
     "показал", "завершил", "завершён", "обнаружен", "составил", "выдал", "записан",
@@ -182,23 +129,19 @@ _KEY_VALUE_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*=\S")
 
 
 def _reports_a_result(text: str) -> bool:
-    """True, когда текст отчитывается о сделанном, а не предлагает сделать."""
+    """True when the text reports something done rather than proposing to do it."""
     lowered = text.lower()
     if any(marker in lowered for marker in _REPORT_VERB_MARKERS):
         return True
     return _KEY_VALUE_RE.search(text) is not None or _CODE_LINE_RE.search(text) is not None
 
 
-#: Ссылка на строку кода — отчёт о прочитанном. Сквозная проверка 2026-09-21:
-#: ответ «`apply_episode_feedback` … на строке 801 … `risk_for()` (строки
-#: 111–120)» на два нумерованных вопроса освобождён от улик как «план» — сработали
-#: нумерация, «затем» и «оценк»(у риска), — и хвост сказал «внешнее
-#: подтверждение не требовалось», хотя ответ целиком стоял на прочитанных файлах.
+#: A reference to a code line is a report of what was read (an answer built wholly on read files was exempted as a "plan" via numbering, "then" and "estimate").
 _CODE_LINE_RE = re.compile(r"(?i)\bстрок[аеиу]?\s+\d+|\bline\s+\d+|\.py:\d+")
 
 
 def _carries_plan_proposal(answer: str, question: str = "") -> bool:
-    """True, когда ответ — предложение о будущей работе, а не отчёт о мире."""
+    """True when the answer is a proposal about future work, not a report about the world."""
     if not answer:
         return False
     lowered = answer.lower()
@@ -211,14 +154,9 @@ def _carries_plan_proposal(answer: str, question: str = "") -> bool:
 
 
 def _carries_generated_artifact(answer: str) -> bool:
-    """Whether *answer* actually contains generated code / a diff / a plan.
+    """Whether *answer* contains generated code / a diff / a plan.
 
-    Deterministic and regex-free for the code paths, matching the rest of this
-    module. A fenced block anywhere counts; diff markers count only at the start
-    of a line, so a sentence containing "---" in prose does not qualify. A plan
-    counts too: it is synthesis, not a claim about the world (see the genre note
-    above) — that is the only addition, and it never fires when the text states
-    an external fact.
+    Deterministic and regex-free for code paths. A fenced block anywhere counts; diff markers count only at line start. A plan counts too (synthesis, not a claim about the world) but never when the text states an external fact.
     """
 
     if not answer:
@@ -241,43 +179,16 @@ def is_evidence_expected(
     answer: str | None = None,
     question: str = "",
 ) -> bool:
-    """Whether the low-evidence truncation gate should apply to this turn.
+    """Whether the low-evidence truncation gate applies to this turn.
 
-    Evidence is NOT expected (gate disabled) when either:
-
-      * the deliverable is generative code (``role`` in ``_GENERATIVE_ROLES``)
-        **and the answer actually carries a generated artifact** — a
-        docstring/diff/code turn that read a file as *input* still produces new
-        text that cannot be verbatim-verified against that file; or
-      * the evidence chain is empty AND the question carries no realtime intent
-        (a pure reasoning/design answer where the model's synthesis is the whole
-        deliverable and there is nothing to cite).
-
-    Factual / realtime turns (researcher, technical_report, operator_chat, …)
-    keep the full gate, so unsupported factual answers are still suppressed.
-
-    The role exemption used to key on WHO answered rather than WHAT was
-    produced. Measured live: "In one sentence: what does core/model_router.py
-    do?" read the file, produced 7 chunks of which 6 verified, and still logged
-    ``no_evidence_expected`` — because it ran under ``role=programmer``. The
-    same class was already recorded in ``docs/COGNITIVE_CORE.md`` (open
-    question 3) for "how many TODO/FIXME are in core/?". Counting and
-    describing are not code generation, and the exemption's own rationale —
-    generated text "can never appear verbatim in the source file" — reaches
-    exactly as far as answers that carry a generated artifact.
-
-    ``answer`` is optional: a caller that does not hand over the text gets the
-    previous role-only behaviour, so no existing call site changes silently.
+    Evidence is NOT expected (gate disabled) when either the deliverable is generative code (``role`` in ``_GENERATIVE_ROLES``) AND the answer carries a generated artifact, or the evidence chain is empty AND the question has no realtime intent. Factual / realtime turns keep the full gate.
+    The exemption keys on WHAT was produced, not WHO answered; ``answer`` is optional (without it, the old role-only behaviour).
     """
     if role in _GENERATIVE_ROLES:
         if answer is None:
             return False
         return not _carries_generated_artifact(answer)
-    # Жанр решает независимо от роли: предложение о будущей работе — синтез, а
-    # не утверждение о мире, кем бы оно ни было произнесено. Планы пишутся и в
-    # роли собеседника оператора, и там их душило ровно так же (замер
-    # 2026-08-29). Освобождение снимается, как только текст начинает утверждать
-    # о внешнем мире — это проверяет `_carries_plan_proposal`.
+    # Genre decides regardless of role: a proposal about future work is synthesis, not a world claim; the exemption lifts once the text asserts an external fact (`_carries_plan_proposal`).
     if answer is not None and _carries_plan_proposal(answer, question):
         return False
     return not (chain_was_empty and not realtime_required)
@@ -296,13 +207,11 @@ class LowEvidencePolicyResult:
     reason: str = ""
     locale: str = "en"
     suppressed_chars: int = 0
-    #: The head of what was suppressed — journaled, so a censored answer can
-    #: be read afterwards (exam 2026-09-04, turn 3: 15 claims vanished unseen).
+    #: The head of what was suppressed, journaled so a censored answer can be read afterwards.
     suppressed_head: str = ""
     notes: tuple[str, ...] = field(default_factory=tuple)
     dialogue_supported_chunks: int = 0
-    #: Never part of `supported_chunks` (operator ruling 2026-08-03, MIR-028):
-    #: the user's words prove the words, not the world.
+    #: Never part of `supported_chunks`: the user's words prove the words, not the world.
     user_asserted_chunks: int = 0
 
     @property
@@ -318,10 +227,7 @@ class LowEvidencePolicyResult:
             "user_asserted_chunks": self.user_asserted_chunks,
             "supported_chunks": self.supported_chunks,
             "total_chunks": self.total_chunks,
-            # `verified_ratio` is kept for existing log consumers, but the value
-            # is and always was the ratio the gate DECIDES on — since issue #119
-            # that is (verified + dialogue_supported) / total. `supported_ratio`
-            # is the name that says so; prefer it in new consumers.
+            # `verified_ratio` is kept for existing log consumers; the value is the ratio the gate DECIDES on, (verified + dialogue_supported) / total. Prefer `supported_ratio` in new consumers.
             "verified_ratio": round(self.verified_ratio, 3),
             "supported_ratio": round(self.verified_ratio, 3),
             "unverified_total": self.unverified_total,
@@ -349,12 +255,7 @@ def _insufficient_data_notice(locale: str) -> str:
 def _conclusion_stub(
     verified_count: int, locale: str, dialogue_count: int = 0
 ) -> str:
-    """Conclusion line for the rebuilt short answer.
-
-    ``dialogue_count`` is stated separately, never merged into the verified
-    tally: claims about this session's own exchange are supported by the
-    transcript, not confirmed by a source (issue #119).
-    """
+    """Conclusion line for the rebuilt short answer; ``dialogue_count`` is stated separately, never merged into the verified tally."""
     if locale == "ru":
         if verified_count == 0 and dialogue_count == 0:
             return (
@@ -422,12 +323,7 @@ def _unverified_block(
 
 
 def _fenced_code_blocks(answer: str) -> list[str]:
-    """Кодовые заборы ответа — предложения, не утверждения (2026-08-29).
-
-    У рождённого кода улик нет по определению; его судья — тесты, не цитаты.
-    Подавитель гасит бездоказательную прозу, но хоронить вместе с ней код
-    значило душить творчество (живое удушение run_e4d9a8e8).
-    """
+    """Fenced code blocks of the answer: proposals, not claims. Born code has no evidence by definition; tests judge it, so the suppressor must not bury it."""
     import re
 
     return [m.group(1).strip()
@@ -452,13 +348,11 @@ def _build_short_answer(
     dialogue_count: int = 0,
     code_blocks: list[str] | None = None,
 ) -> str:
-    """Assemble a deterministic short reply that follows the Output
-    Contract section order. We rebuild from scratch — never paraphrase
-    the LLM's prose — so the truncation is visibly mechanical."""
+    """Assemble a deterministic short reply in Output Contract section order, rebuilt from scratch (never paraphrasing the LLM) so the truncation is visibly mechanical."""
     notice = _insufficient_data_notice(locale)
     stub = _conclusion_stub(len(verified_claim_texts) - dialogue_count, locale, dialogue_count)
     if verified_claim_texts:
-        # Двоеточие в конце: разговорный показ печатает Facts только после него.
+        # Trailing colon: conversational display prints Facts only after it.
         stub += " Оставлено:" if locale == "ru" else " Kept:"
     parts = [
         stub,
@@ -472,9 +366,7 @@ def _build_short_answer(
     return "\n\n".join(parts)
 
 
-# Verdict labels routed to "needs evidence support" buckets. Mirrors
-# the strings produced by core/verifier.py so a downstream change there
-# raises a single import-test failure if the names drift.
+# Verdict labels routed to "needs evidence support" buckets; mirrors core/verifier.py strings so drift raises an import-test failure.
 _UNSUPPORTED_VERDICTS: frozenset[str] = frozenset({
     "unverified",
     "cited_but_unmatched",
@@ -483,12 +375,7 @@ _UNSUPPORTED_VERDICTS: frozenset[str] = frozenset({
 })
 
 
-#: A claim that says «could not confirm / blocked / not done». Work order 1,
-#: pass 2 (2026-09-05): the draft's honest conclusion — sources blocked, no
-#: confirmed fares, task not done — was booked subagent_asserted / topic-only
-#: and erased by this gate, which then shipped one baggage fact. The gate did
-#: its formal job («ship nothing unsupported») and broke the user's («if
-#: nothing can be confirmed, say so»).
+#: A claim that says "could not confirm / blocked / not done": the honest conclusion must not be erased by this gate, which would have broken the user's goal ("if nothing can be confirmed, say so").
 _HONEST_NEGATIVE_RE = re.compile(
     r"(?i)(заблокирован|не пуска|BLOCKED|429|не подтверж|неподтверж|не удалось|"
     r"нет подтверждённ|не выполнен|пуст(ые|ая|ой) страниц|не предоставил|"
@@ -496,9 +383,7 @@ _HONEST_NEGATIVE_RE = re.compile(
     r"no confirmed|not (?:done|completed)|unsupported)"
 )
 
-#: What an ATTEMPT looks like in the chain: a fetch answered with an HTTP
-#: error, an unsupported/blocked page, a captcha wall, an empty result, or a
-#: subagent that reported the same. Counted from excerpt and source id.
+#: What an ATTEMPT looks like in the chain: a fetch answered with an HTTP error, an unsupported/blocked page, a captcha wall, an empty result, or a subagent that reported the same. Counted from excerpt and source id.
 _BLOCKED_ATTEMPT_RE = re.compile(
     r"(?i)(HTTP\s*(?:4\d\d|5\d\d)|\b(?:403|429|503)\b|Too Many Requests|unsupported|"
     r"\bBLOCKED\b|captcha|rate[- ]limit|access denied|forbidden|заблокирован|"
@@ -531,12 +416,7 @@ def _honest_negative_chunks(report: Any) -> list[str]:
 
 
 def _surviving_texts(report: Any) -> tuple[list[str], list[str]]:
-    """Texts the truncation keeps: verified chunks, and dialogue-scoped ones.
-
-    Dialogue-scoped claims survive the truncation alongside verified ones: the
-    answer loses its unsupported world claims and keeps the part the session
-    transcript backs (issue #119). Even when the gate fires, a self-correction
-    is never erased wholesale."""
+    """Texts the truncation keeps: verified chunks and dialogue-scoped ones, so a self-correction is never erased wholesale."""
     verified_texts: list[str] = []
     dialogue_texts: list[str] = []
     for c in getattr(report, "chunks", ()) or ():
@@ -565,9 +445,8 @@ def evaluate_low_evidence_policy(
 ) -> LowEvidencePolicyResult:
     """Decide whether to truncate the answer because evidence is too thin.
 
-    ``blocked_attempts`` (work order 1, defect 3): a chunk that honestly says
-    «blocked / not confirmed / not done» is SUPPORTED by the chain's blocked
-    attempts; a positive claim is never rescued by this rule."""
+    ``blocked_attempts``: a chunk honestly saying "blocked / not confirmed / not done" is supported by the chain's blocked attempts; a positive claim is never rescued by this rule.
+    """
     if report is None:
         return LowEvidencePolicyResult(
             triggered=False, answer=answer,
@@ -589,18 +468,9 @@ def evaluate_low_evidence_policy(
     subagent_asserted = int(
         getattr(report, "subagent_asserted_chunks", 0) or 0
     )
-    # `user_asserted` (operator ruling 2026-08-03, MIR-028) joins neither
-    # `supported` (the user's words never verify their own content, so an
-    # all-echo answer must not score supported_ratio=1.0 and slip past this
-    # gate) nor `unverified_total` (nothing was fabricated, so it does not
-    # push the floor). It still sits in `total_chunks`, i.e. it DOES drag
-    # supported_ratio down — "neutral" means neutral between those two
-    # counters, not absent from the trigger math. Its main weight lands in
-    # episode banking (`weak_chunks`) and the evidence-support score.
+    # `user_asserted` joins neither `supported` (the user's words never verify their own content) nor `unverified_total` (nothing was fabricated). It still sits in `total_chunks`, so it DOES drag supported_ratio down; its main weight lands in episode banking (`weak_chunks`) and the evidence-support score.
     user_asserted = int(getattr(report, "user_asserted_chunks", 0) or 0)
-    # Опровергнутое содержимым (2026-08-12) давит на пол улик не слабее
-    # непроверенного: раньше эти куски сидели в `topic_supported` и уже
-    # входили в сумму — выделение полярности не должно было их из неё вынуть.
+    # Content-refuted chunks press on the evidence floor no less than unverified ones (they already sat in `topic_supported`).
     refuted = int(getattr(report, "refuted_chunks", 0) or 0)
     unverified_total = (
         unverified + cited_unmatched + topic_supported + subagent_asserted
@@ -636,12 +506,7 @@ def evaluate_low_evidence_policy(
         )
 
     if not evidence_expected:
-        # The task never needed external evidence (pure reasoning / design
-        # question with an empty evidence chain and no realtime intent).
-        # Truncating here would suppress a legitimate answer just because it
-        # has nothing to cite — the model's synthesis IS the deliverable.
-        # Factual / realtime questions keep the full gate (evidence_expected
-        # stays True for them).
+        # The task never needed external evidence (pure reasoning/design, empty chain, no realtime intent); truncating would suppress a legitimate answer. Factual / realtime questions keep the full gate.
         return _result(
             triggered=False, answer_out=answer, reason="no_evidence_expected",
         )
@@ -663,9 +528,7 @@ def evaluate_low_evidence_policy(
         )
 
     if supported > 0 and unverified_total < unverified_floor:
-        # Borderline: some support exists but the unverified mass is too small
-        # to justify the truncation hammer. The evidence-support
-        # telemetry will still surface it.
+        # Borderline: some support exists but the unverified mass is too small to justify truncation; telemetry still surfaces it.
         return _result(
             triggered=False, answer_out=answer,
             reason="unverified_mass_below_floor",
@@ -678,9 +541,7 @@ def evaluate_low_evidence_policy(
     verified_texts, dialogue_texts = _surviving_texts(report)
 
     suppressed_count = total - supported
-    # An honest negative claim backed by blocked attempts survives even when
-    # the gate still fires on the rest: «nothing could be confirmed» is the
-    # one sentence the user must not lose.
+    # An honest negative claim backed by blocked attempts survives even when the gate fires on the rest.
     short_answer = _build_short_answer(
         verified_claim_texts=verified_texts + dialogue_texts + honest_negative_texts,
         suppressed_count=suppressed_count,

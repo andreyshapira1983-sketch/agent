@@ -1,25 +1,6 @@
-"""Writes at most ONE low-risk ``self_apply_lane.run`` proposal into the
-approval inbox, with full file content, for a human to bless.
+"""Writes at most ONE low-risk ``self_apply_lane.run`` proposal into the approval inbox, with full file content, for a human to bless.
 
-Never applies it: no patch reaches the tree, no lane runs, nothing is
-committed, pushed or merged, and the daemon, scheduler, agent_tick and the
-budget/model/catalog config are never touched.
-
-Roles: Manager -> Researcher -> Builder -> Critic -> Reporter.
-
-Four hard gates run before any LLM work, first trip wins, and each names the
-status it returns:
-
-  budget kill-switch active     -> "budget_kill_switch"
-  hour budget near exhaustion   -> "budget_wait"
-  a self_apply approval pending -> "approval_wait"
-  dirty git working tree        -> "dirty_tree_wait"
-
-After them the Manager may find no candidate ("no_patch") and the Critic may
-veto ("critic_veto"); either way no inbox item is created, and success is
-"proposed". Every dependency is injected, so no real provider is reachable
-from here.
-"""
+    Never applies it: no patch reaches the tree, no lane runs, nothing is committed, pushed or merged. Roles: Manager -> Researcher -> Builder -> Critic -> Reporter. Four hard gates run before any LLM work (first trip wins): budget kill-switch ("budget_kill_switch"), hour budget ("budget_wait"), pending self_apply approval ("approval_wait"), dirty git tree ("dirty_tree_wait"). Then the Manager may find no candidate ("no_patch") and the Critic may veto ("critic_veto"); success is "proposed". Every dependency is injected."""
 from __future__ import annotations
 
 import ast
@@ -55,22 +36,13 @@ from core.self_build_supervisor import (
     is_budget_near_exhaustion,
 )
 
-# Origin tag stamped on every payload this producer emits, so downstream tooling
-# (and the TD-024 bridge) can tell an autonomously-produced proposal apart from
-# a manual or repair-produced one.
+# Origin tag stamped on every payload this producer emits, so downstream tooling (the bridge) can tell an autonomous proposal from a manual or repair-produced one.
 PRODUCER_ORIGIN = "subagent_self_build_producer"
 
-# Origin tag for a deterministic (no-LLM) incremental-split step. Shared by the
-# ``:self-split`` command and the ``:self-build-produce`` producer so both emit
-# an identical, already-trusted approval artifact for an oversized-module split.
+# Origin tag for a deterministic (no-LLM) incremental-split step, shared by the ``:self-split`` command and the ``:self-build-produce`` producer.
 INCREMENTAL_SPLIT_ORIGIN = "incremental_splitter"
 
-# Seed allowlist of small low-risk candidate targets. Historically this was the
-# ONLY set the Manager could pick from. As of Provod #2 it is just a seed: a
-# grounded backlog candidate may also target any file that clears both hard
-# safety layers (see ``_is_self_build_target_allowed``) — the critical-organ
-# denylist below and the self-apply lane's low-risk classifier. Apply authority
-# is unchanged: every patch is still dry-run + human-approved + test-gated.
+# Seed allowlist of small low-risk targets. A grounded backlog candidate may also target any file that clears both hard safety layers (``_is_self_build_target_allowed``). Apply authority is unchanged: every patch is dry-run, human-approved and test-gated.
 DEFAULT_CANDIDATE_TARGETS: tuple[str, ...] = (
     "core/redaction.py",
     "core/truth_hype_filter.py",
@@ -78,9 +50,7 @@ DEFAULT_CANDIDATE_TARGETS: tuple[str, ...] = (
 )
 _SELF_BUILD_DOC_TARGET = "docs/self_build.md"
 
-# Critical "organs" that must never be a producer target in this first PR, even
-# though some would otherwise pass the lane allowlist. Denylist wins before the
-# allowlist. Prefix entries (ending in "/") match any file beneath them.
+# Critical "organs" that must never be a producer target, though some would pass the lane allowlist. Denylist wins before the allowlist; entries ending in "/" match any file beneath.
 CRITICAL_DENY: tuple[str, ...] = (
     "main.py",
     "core/loop.py",
@@ -96,44 +66,26 @@ CRITICAL_DENY: tuple[str, ...] = (
     "config/",
 )
 
-# Upper bound on generated file size. A low-risk self-build patch is small; a
-# huge blob is a signal of a runaway generation, not a surgical change.
+# Upper bound on generated file size: a huge blob signals runaway generation, not a surgical change.
 _MAX_CONTENT_BYTES = 60_000
 
-# The Builder must return the FULL post-image of the target file, not a diff. A
-# 2000-token cap truncates any non-trivial file (the JSON is cut off and fails to
-# parse, which the Critic then vetoes as "empty generated content"). This gives
-# enough headroom for real files while staying under _MAX_CONTENT_BYTES.
+# The Builder must return the FULL post-image of the target, not a diff; a 2000-token cap truncates any non-trivial file, so the cap is larger while staying under _MAX_CONTENT_BYTES.
 _BUILDER_MAX_TOKENS = 16_000
 
-# The repo enforces (scripts/agent_anatomy_check.py) that every core/*.py module
-# is referenced as a ``core/<name>`` token in this index. A module split creates
-# new core modules, so the head keeps this doc in sync automatically.
+# scripts/agent_anatomy_check.py requires every core/*.py module to be referenced as a ``core/<name>`` token in this index; a module split keeps it in sync.
 
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
-# A single-shot Builder cannot safely split a very large module — it keeps
-# dropping public API and getting vetoed. Above this many lines a ``split_module``
-# candidate is refused up-front ("too large for a single-shot split") instead of
-# burning a doomed generation; it needs a human-scoped incremental split.
+# A single-shot Builder cannot safely split a very large module (it drops public API and is vetoed). Above this many lines a ``split_module`` candidate is refused up-front and needs a human-scoped incremental split.
 _MAX_SPLIT_TARGET_LINES = 900
 
-#: Диагноз из core/split_proof.py (Proof.describe). Доказанная правка идёт
-#: детерминированным раскольщиком при ЛЮБОМ размере файла. 2026-09-21:
-#: доказанный дубль в core/scheduler.py (541 строка < 900) ушёл к модели-
-#: Строителю одним выстрелом, тот выбросил _FALSE_VALUES, _TRUE_VALUES,
-#: _VALID_STATUSES, и критик верно отказал — правка не получалась никогда.
+#: Diagnosis from core/split_proof.py (Proof.describe). A proven edit goes to the deterministic splitter at ANY file size.
 _PROVEN_DIAGNOSES = ("дубль:", "два предмета:")
 
-# Default number of Builder attempts per run. ``1`` preserves the historical
-# single-shot behaviour (and every existing producer test). The real
-# ``:self-build-produce`` command opts into ``2`` so ONE Critic veto is retried
-# with the exact veto reasons fed back before the run gives up — a vetoed
-# candidate is still NEVER applied.
+# Default number of Builder attempts per run. ``1`` is single-shot; the real ``:self-build-produce`` command uses ``2`` so ONE Critic veto is retried with the exact reasons fed back. A vetoed candidate is never applied.
 _DEFAULT_MAX_BUILDER_ATTEMPTS = 1
 
-# Lines/markers that betray a diff/patch instead of full file content. The
-# Builder must return the whole post-image; a diff-only answer is vetoed.
+# Lines/markers that betray a diff/patch instead of full file content; a diff-only answer is vetoed.
 _DIFF_MARKERS = ("--- ", "+++ ", "@@ ", "diff --git", "index ")
 
 _SELF_BUILD_DOC_REQUIRED_TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -171,8 +123,7 @@ _SELF_BUILD_DOC_GUIDANCE = (
 
 @dataclass
 class RoleOutput:
-    """One structured role result, surfaced verbatim in the ProducerReport so an
-    operator can see *who decided what*."""
+    """One structured role result, surfaced verbatim in the ProducerReport so an operator sees who decided what."""
 
     role: str
     decision: str
@@ -200,11 +151,7 @@ class ProducerReport:
     value_flags: list[str] = field(default_factory=list)
     attempts: int = 1
     next_human_action: str = ""
-    #: What the pipeline actually READ (MIR-121's write side): `file:<path>`
-    #: for the target, `memory:self-build-lessons` when recalled lessons were
-    #: injected into the Builder prompt. The episode writer carries these into
-    #: `source_labels`, so lesson provenance is recorded where the reading
-    #: happens rather than reconstructed later.
+    #: What the pipeline actually READ: `file:<path>` for the target, `memory:self-build-lessons` when recalled lessons were injected. The episode writer carries these into `source_labels`.
     sources: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -237,10 +184,7 @@ def _looks_like_diff(content: str) -> bool:
 def _top_level_defined_names(tree: ast.Module) -> set[str]:
     """Names *defined* at module top level (functions, classes, assignments).
 
-    These form the import surface of the module: anything another module or a
-    test can reach via ``from core.<mod> import <name>``. Dunder names are
-    excluded — they are never a meaningful cross-module import target.
-    """
+        These form the import surface of the module; dunder names are excluded."""
     names: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -272,9 +216,7 @@ def _top_level_bound_names(tree: ast.Module) -> set[str]:
 
 
 def _split_dropped_api(current_content: str, target_content: str) -> list[str]:
-    """Return top-level names present in the original target but no longer
-    defined *or* re-exported in the proposed (shrunk) target.
-    """
+    """Return top-level names present in the original target but no longer defined or re-exported in the proposed (shrunk) target."""
     try:
         old = ast.parse(current_content)
         new = ast.parse(target_content)
@@ -292,11 +234,7 @@ def _is_self_build_doc_target(target: str) -> bool:
 def _missing_self_build_doc_topics(content: str) -> list[str]:
     low = (content or "").lower()
     missing: list[str] = []
-    # Each topic's markers are ALTERNATIVES: any one satisfies the topic. This
-    # matches how _SELF_BUILD_DOC_GUIDANCE phrases them ("or") and prevents a
-    # Builder-following operator guide from being vetoed for not containing every
-    # synonym (e.g. both :approval-list and :approval-triage, or a literal
-    # "deny if").
+    # Each topic's markers are ALTERNATIVES: any one satisfies the topic (matches the "or" phrasing of _SELF_BUILD_DOC_GUIDANCE).
     for label, markers in _SELF_BUILD_DOC_REQUIRED_TOPICS:
         if not any(marker in low for marker in markers):
             missing.append(label)
@@ -306,22 +244,18 @@ def _missing_self_build_doc_topics(content: str) -> list[str]:
 def _split_target_too_large(content: str) -> tuple[bool, int]:
     """(too_large, line_count) for a would-be module split.
 
-    The single-shot Builder cannot safely split a very large module — it keeps
-    dropping public API and getting vetoed. Above :data:`_MAX_SPLIT_TARGET_LINES`
-    the producer refuses the split up-front instead of burning a doomed
-    generation. Pure; used only for ``split_module`` targets.
-    """
+        Above :data:`_MAX_SPLIT_TARGET_LINES` the producer refuses the split up-front instead of burning a doomed generation. Pure; only for ``split_module`` targets."""
     line_count = len((content or "").splitlines())
     return line_count > _MAX_SPLIT_TARGET_LINES, line_count
 
 
 def _why_json_failed(build: dict[str, Any]) -> str:
-    """Thin delegation — the wording lives in `core/builder_reply_diagnosis`."""
+    """Thin delegation: the wording lives in `core/builder_reply_diagnosis`."""
     return why_builder_reply_failed(build, max_tokens=_BUILDER_MAX_TOKENS)
 
 
 def _is_critical(rel: str) -> bool:
-    # Общий список «самоправка не трогает», затем местный.
+    # The shared "self-repair never touches" list first, then the local one.
     lower = rel.replace("\\", "/").strip().lower()
     return is_protected(rel) or any(
         lower.startswith(d) if d.endswith("/") else lower == d
@@ -330,34 +264,13 @@ def _is_critical(rel: str) -> bool:
 
 
 def _is_self_build_target_allowed(target: str) -> bool:
-    """Provod #2 (bold-mode) acceptance policy for a grounded backlog target.
+    """Acceptance policy for a grounded backlog target.
 
-    Instead of the narrow hardcoded :data:`DEFAULT_CANDIDATE_TARGETS` trio, a
-    grounded target is now accepted when it clears BOTH hard safety layers that
-    already exist:
-
-    * it is not a critical "organ" (:data:`CRITICAL_DENY` — main.py, loop.py,
-      autonomous_runtime.py, safe_vcs.py, the self-apply/self-build machinery,
-      config/, ...); and
-    * the self-apply lane's own low-risk classifier would accept it
-      (``core``/``cli``/``tools``/``tests`` ``*.py``, anything under ``docs/``,
-      any ``*.md``; never ``.github``/``config``/``secrets``/lockfiles/keys).
-
-    This only widens *candidate discovery* so the agent can act on its own
-    architecture-audit findings. It does NOT widen apply authority: every
-    produced patch is still dry-run, placed in the approval inbox for a human to
-    approve, and applied only via the lane (which re-runs tests and auto-rolls
-    back on red). Pure/deterministic; never raises.
-    """
+        A grounded target is accepted when it is not a critical organ (:data:`CRITICAL_DENY`) AND the self-apply lane's low-risk classifier would accept it. This widens only candidate discovery, not apply authority: every patch is still dry-run, human-approved and applied only via the lane. Pure; never raises."""
     rel = str(target or "").replace("\\", "/").strip()
     if not rel:
         return False
-    # Canonicalize exactly the way the lane classifier does (drop ``.`` segments,
-    # reject ``..``/absolute/drive paths) BEFORE the critical-organ check. Without
-    # this, an alias like ``./core/loop.py`` or ``core/./loop.py`` slips past
-    # _is_critical (raw-string match) yet classify_patch_risk normalizes it to the
-    # critical ``core/loop.py`` and accepts it — admitting a critical organ the
-    # fixed allowlist blocked. A path _normalize_rel rejects is never low-risk.
+    # Canonicalize exactly as the lane classifier does BEFORE the critical-organ check: otherwise an alias like ``./core/loop.py`` slips past the raw-string match yet is normalized to the critical path by classify_patch_risk. A path _normalize_rel rejects is never low-risk.
     canonical = _normalize_rel(rel)
     if canonical is None or _is_critical(canonical):
         return False
@@ -414,16 +327,14 @@ def _llm_json(
 
 
 def _preserve_rejected_raw(workspace: Path, roles: list[RoleOutput]) -> str | None:
-    """Persist a discarded builder reply to disk; return its repo-relative
-    path.
-    """
+    """Persist a discarded builder reply to disk; return its repo-relative path."""
     raw = ""
     for role in roles:
         if role.role != "builder":
             continue
         candidate = role.data.pop("raw_reply", None)
         if candidate:
-            raw = str(candidate)   # last non-empty wins; ALL roles are stripped
+            raw = str(candidate)  # last non-empty wins; ALL roles are stripped
     if not raw.strip():
         return None
     try:
@@ -491,18 +402,9 @@ def _manager_from_grounded(
     workspace: str | Path,
     named_targets: frozenset[str] = frozenset(),
 ) -> RoleOutput:
-    """Manager variant (TD-036) that takes its target + diagnosis from a
-    grounded backlog candidate instead of inventing one via the LLM.
+    """Manager variant that takes its target and diagnosis from a grounded backlog candidate instead of inventing one via the LLM.
 
-    ``named_targets`` — предмет, НАЗВАННЫЙ вызывающим (цель кампании дошла до
-    рук через `campaign_io._engineering_hands`). Живой прогон 2026-09-17 показал,
-    что он сюда доезжал и не значил ничего: попадал в `effective_allowed`, то
-    есть в РАЗРЕШЁННОЕ, а выбор всё равно делала верхушка бэклога — хартия
-    просила `core/self_build_producer.py`, руки брали `core/smart_memory.py`.
-    Названный предмет — задание, а не разрешение: если обоснованный кандидат не
-    он, честный ответ «не нашёл по названному», а не работа над чужим файлом.
-    Пустое множество (никто не называл) оставляет прежний ход бэклога.
-    """
+        ``named_targets`` is the subject named by the caller (a campaign goal). It is an assignment, not a permission: if the grounded candidate is not it, the honest answer is "not found for the named target". An empty set keeps the backlog order."""
     try:
         candidate = provider()
     except Exception:  # noqa: BLE001 — a broken selector must never break producer
@@ -510,10 +412,7 @@ def _manager_from_grounded(
     if candidate is None:
         return RoleOutput("manager", "no_target", "no grounded backlog candidate")
 
-    # Provod #2: widen the effective allowlist beyond the hardcoded trio to any
-    # grounded target that clears BOTH hard safety layers (critical-organ deny +
-    # the self-apply lane's low-risk classifier). Apply authority is unchanged —
-    # every produced patch still needs human approval and passing tests.
+    # Widen the effective allowlist beyond the hardcoded seed to any grounded target that clears BOTH hard safety layers. Apply authority is unchanged.
     candidate_target = str(getattr(candidate, "target_path", "") or "").replace(
         "\\", "/"
     ).strip()
@@ -536,10 +435,7 @@ def _manager_from_grounded(
         if mapping.mapping_rule:
             data["mapping_rule"] = mapping.mapping_rule
         reason = mapping.reason
-        # Ревизия PR #342: сверка с названным стоит НИЖЕ, а отображение умеет
-        # отказывать само. На этом пути журнал печатал одну лишь причину
-        # отображения — по ней нельзя понять, что просьбу вообще уронили, и
-        # отказ становился неотличим от подмены, против которой писался #342.
+        # The comparison with the named target comes later and the mapping may refuse by itself; the journal must show that the request was dropped, not only the mapping reason.
         if wanted:
             data["named_targets"] = sorted(wanted)
             reason = f"the goal named {', '.join(sorted(wanted))}; {reason}"
@@ -597,14 +493,7 @@ def _manager_from_grounded(
 def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> bool:
     """True if the producer could actually act on this ranked candidate.
 
-    The selection-time veto on oversized splits died 2026-08-28: it was the
-    SECOND copy of the premise MIR-179 buried — written when no incremental
-    splitter existed, while the produce-phase scale gate has long routed
-    oversized targets to the deterministic splitter. Its live cost, measured
-    on the first granted tick: no candidate was actionable, the fallback
-    returned the #1 (critical) target, and the run ended no_grounded_target
-    with four workable splits waiting right behind it (MIR-183).
-    """
+        The selection-time veto on oversized splits was removed: oversized targets are routed to the deterministic splitter, and the veto left no actionable candidate."""
     target = str(getattr(candidate, "target_path", "") or "")
     if _is_self_build_target_allowed(target):
         return True
@@ -624,21 +513,9 @@ def _grounded_candidate_actionable(candidate: Any, workspace: str | Path) -> boo
 
 
 def _norm_target(raw: Any) -> str:
-    """Одно написание пути для СРАВНЕНИЯ — и ничего сверх того.
+    """One spelling of a path for COMPARISON, nothing more.
 
-    Ревизия PR #342: названный предмет сверялся голой строкой, а написаний у
-    одного пути несколько. Живая дверь измерена одна — `_PY_TARGET_RE`
-    пропускает `\\`, `_named_target` отдаёт совпадение дословно, и
-    `core/best_next_action.py` кладёт это дословное в `target_path`. Кандидаты
-    же нормализованы у себя, пересечение пусто, и агент отказывается от файла,
-    который его же просили починить. `./` сюда сегодня не доезжает, но
-    нормализация обязана быть одна на оба написания, иначе это заплата под
-    один случай, а не правило.
-
-    `..` НЕ сворачивается намеренно: свести побег из рабочей области к
-    совпадению с файлом внутри неё — это не нормализация, а отмывание. Путь,
-    который никуда не годится, обязан остаться негодным.
-    """
+        Backslash and similar spellings are normalised the same way on both sides. `..` is NOT collapsed on purpose: turning a workspace escape into a match with an inner file would launder it."""
     cleaned = str(raw or "").replace("\\", "/").strip()
     while cleaned.startswith("./"):
         cleaned = cleaned[2:]
@@ -672,25 +549,9 @@ def _default_grounded_selector(
     exclude_targets: frozenset[str] = frozenset(),
     only_targets: frozenset[str] = frozenset(),
 ) -> Callable[[], Any]:
-    """Build the DEFAULT grounded backlog selector for a workspace (TD-036
-    follow-up).
+    """Build the DEFAULT grounded backlog selector for a workspace.
 
-    ``exclude_targets`` is a cooldown set of concrete paths that were just
-    critic-vetoed: candidates resolving to one of them are skipped so the
-    run advances to the NEXT grounded candidate instead of re-picking the
-    same wall (which would only be vetoed again). An empty set (the default)
-    is a no-op.
-
-    ``only_targets`` — предмет, названный целью. Верхушка бэклога отвечает на
-    вопрос «что вообще стоит чинить», а не на вопрос «почини вот это»; без
-    отбора названный файл был бы отвергнут управляющим, даже если кандидат на
-    него лежит в бэклоге строкой ниже. Пустое множество — прежний ход.
-
-    It never calls an LLM, never touches the network/git, and is fully best-
-    effort: any import/load failure yields a selector that returns ``None``,
-    so the Manager refuses (``no_patch``) instead of silently falling back
-    to the LLM manager.
-    """
+        ``exclude_targets`` is a cooldown set of paths just critic-vetoed; candidates resolving to them are skipped. ``only_targets`` is the subject named as the goal; the backlog top answers "what is worth fixing", not "fix this one". Empty sets are no-ops. Never calls an LLM, network or git; any import/load failure yields a selector returning ``None``, so the Manager refuses (``no_patch``)."""
     def _select() -> Any:
         try:
             from core.backlog_selector import load_backlog, select_top, value_review_signal
@@ -699,19 +560,14 @@ def _default_grounded_selector(
             candidates = load_backlog(
                 workspace, value_reviews=reviews, item_target_map=item_targets,
             )
-            # Cooldown (A): a target that was just critic-vetoed is temporarily
-            # excluded so the run advances to the NEXT grounded candidate rather
-            # than banging on the same wall. Matching is on the concrete path so
-            # an abstract backlog id that maps to a vetoed file is also skipped.
+            # Cooldown: a target just critic-vetoed is excluded so the run advances to the NEXT grounded candidate; matching is on the concrete path.
             if exclude_targets:
                 candidates = [
                     c
                     for c in candidates
                     if not (_candidate_concrete_targets(c, workspace) & exclude_targets)
                 ]
-            # Названный предмет сужает бэклог до себя: иначе кандидат на него,
-            # лежащий ниже верхушки, до управляющего не доедет никогда.
-            # Написание косой черты не вправе решать, дойдёт ли (ревизия #342).
+            # The named subject narrows the backlog to itself, otherwise a candidate below the top never reaches the manager; slash spelling must not decide.
             if only_targets:
                 wanted = {_norm_target(t) for t in only_targets} - {""}
                 candidates = [
@@ -719,13 +575,7 @@ def _default_grounded_selector(
                     for c in candidates
                     if _candidate_concrete_targets(c, workspace) & wanted
                 ]
-            # Provod #1 follow-up: candidates are ranked highest-first. Prefer the
-            # top-ranked candidate the producer can actually act on — directly
-            # low-risk OR mapper-resolvable to an allowed concrete file — so a
-            # higher-ranked but non-actionable target (e.g. a missing
-            # ``.github/workflows/ci.yml``) does not shadow an actionable one, yet
-            # a mappable tech-debt item is NOT skipped for a lower-ranked audit
-            # item. If nothing is actionable, fall back to the #1 (honest refusal).
+            # Candidates are ranked highest-first. Prefer the top-ranked one the producer can act on (low-risk or mapper-resolvable to an allowed file), so a non-actionable top item does not shadow an actionable one. If none is actionable, fall back to the #1 (honest refusal).
             for candidate in candidates:
                 if _grounded_candidate_actionable(candidate, workspace):
                     return candidate
@@ -766,9 +616,7 @@ def _normalize_builder_files(
 ) -> tuple[list[dict[str, str]], str]:
     """Normalise a builder LLM reply into a canonical ``files`` list.
 
-    Accepts the legacy single-file ``{"content": ...}`` shape (becomes a
-    one-element list) and the multi-file ``{"files": [{path, content}, ...]}``.
-    """
+        Accepts the single-file ``{"content": ...}`` shape and the multi-file ``{"files": [{path, content}, ...]}``."""
     raw_files = parsed.get("files")
     files: list[dict[str, str]] = []
     if isinstance(raw_files, (list, tuple)) and raw_files:
@@ -813,12 +661,7 @@ def _builder_generate(
 ) -> RoleOutput:
     """Generate the FULL proposed file content (never a diff).
 
-    When ``split_mode`` is True the Builder is asked to split the oversized
-    target module into several smaller files: it must return the shrunk target
-    plus one or more NEW sibling modules, each as complete file content. The
-    single-file path (``split_mode=False``) is unchanged and byte-identical to
-    the historical behaviour.
-    """
+        With ``split_mode`` the Builder splits the oversized target into the shrunk target plus new sibling modules, each as complete content."""
     safe_content, inj = prepare_untrusted_text_for_llm(
         current_content or "",
         source_label=f"self_build:{target}",
@@ -890,10 +733,7 @@ def _builder_generate(
             "builder",
             "failed",
             "builder returned no parseable JSON",
-            # MIR-071: the head preserves this to disk and strips it from the
-            # report, so the misfire is diagnosable without ballooning logs.
-            # `truncated` separates "the file does not fit in one pass" from
-            # "the model wrote nonsense" — the same veto text used to cover both.
+            # The head preserves the raw reply to disk and strips it from the report; `truncated` separates "does not fit in one pass" from "model wrote nonsense".
             {
                 "raw_reply": raw_reply,
                 "raw_chars": len(raw_reply),
@@ -928,11 +768,7 @@ def _builder_generate(
         "confidence": confidence,
     }
     if not (isinstance(content, str) and content.strip()):
-        # MIR-071's live shape: a truncated reply fragment-parses into a dict
-        # WITHOUT the content field (measured: 15948 tokens ≈ the 16000-token
-        # builder cap → outer JSON unbalanced → an inner balanced fragment
-        # "wins" extraction). The reply is not empty — say so, and carry the
-        # raw so the head can preserve it.
+        # A truncated reply can fragment-parse into a dict WITHOUT the content field (an inner balanced fragment wins). The reply is not empty: say so and carry the raw.
         data["raw_reply"] = raw_reply
         data["raw_chars"] = len(raw_reply)
     return RoleOutput(
@@ -946,8 +782,7 @@ def _builder_generate(
 def _python_body_vetoes(label: str, body: str, *, report_parse: bool) -> list[str]:
     """Parse + attribute-sieve vetoes for one python body.
 
-    The attribute subtype (meas_8fd5b4e5/meas_be27ac23): invented
-    claim.state shipped twice past the kwargs sieve. Doubt = silence."""
+        The attribute subtype: an invented field like claim.state slipped past the kwargs sieve. Doubt = silence."""
     try:
         ast.parse(body)
     except SyntaxError as exc:
@@ -975,9 +810,7 @@ def _critic_review(
     if not isinstance(content, str) or not content.strip():
         raw_chars = int(build.get("raw_chars") or 0)
         if raw_chars > 0:
-            # MIR-071: the model DID reply (often a truncated JSON whose inner
-            # fragment "won" extraction) — saying "empty" hid that for a
-            # 15948-token, 84-cost-unit reply. Name the real failure.
+            # The model DID reply (often truncated JSON whose inner fragment won extraction); name the real failure instead of "empty".
             veto.append(
                 f"builder reply did not parse into usable content "
                 f"(raw_chars={raw_chars}; {_why_json_failed(build)})"
@@ -1014,9 +847,7 @@ def _critic_review(
 
     files = build.get("files") or [{"path": target, "content": content}]
     norm_target = target.replace("\\", "/").strip()
-    # Multi-file (split) guard: validate every EXTRA file the same way the target
-    # is validated above. The target itself is already checked, so it is skipped
-    # here — keeping the single-file path byte-identical (no extra files).
+    # Multi-file (split) guard: validate every EXTRA file the same way as the target; the target is already checked, so the single-file path stays unchanged.
     for entry in files:
         path = str(entry.get("path") or "").replace("\\", "/").strip()
         if not path or path == norm_target:
@@ -1043,12 +874,7 @@ def _critic_review(
     if not ok:
         veto.append(f"risk classification failed: {risk_reason}")
 
-    # Split-integrity guard: when the Builder splits a module into several files,
-    # every top-level name that used to live in the target must remain importable
-    # from it (defined or re-exported). Otherwise external importers/tests that do
-    # `from core.<target> import <name>` break with ImportError — the exact churn
-    # that kept rolling back the verifier split. Only runs on real splits (extra
-    # files present), so the single-file path stays byte-identical.
+    # Split-integrity guard: when the Builder splits a module, every top-level name that lived in the target must remain importable from it (defined or re-exported), else importers and tests break with ImportError. Only on real splits.
     has_extra = any(
         str(e.get("path") or "").replace("\\", "/").strip() != norm_target
         for e in files
@@ -1062,9 +888,7 @@ def _critic_review(
     ):
         dropped = _split_dropped_api(current_content, content)
         if dropped:
-            # Name the real importers first: a dropped symbol that another
-            # project file actually imports is a guaranteed ImportError, so the
-            # message points the Builder at the exact consumer files.
+            # Name the real importers first: a dropped symbol that another file imports is a guaranteed ImportError.
             hard_broken = [
                 n for n in dropped if imported_symbols and n in imported_symbols
             ]
@@ -1089,10 +913,7 @@ def _critic_review(
         except SyntaxError as exc:
             veto.append(f"generated python does not parse: {exc.msg}")
 
-    # HARD RULES from past rollbacks: every symbol that once caused a
-    # rolled-back ImportError on this target must stay importable (defined or
-    # re-exported) in ANY new content — split or plain rewrite. Deterministic:
-    # the same rollback can never happen twice for the same symbol.
+    # HARD RULES from past rollbacks: every symbol that once caused a rolled-back ImportError on this target must stay importable in ANY new content. Deterministic.
     if (
         required_symbols
         and target.lower().endswith(".py")
@@ -1134,7 +955,7 @@ def _reporter_publish(
     evidence: list[str],
     workspace: Any = None,
 ) -> RoleOutput:
-    """Create exactly one approval inbox item for the TD-024 bridge."""
+    """Create exactly one approval inbox item for the bridge."""
     content = build["content"]
     files = build.get("files") or [{"path": target, "content": content}]
     payload = build_self_apply_payload(
@@ -1158,10 +979,7 @@ def _reporter_publish(
     summary = f"self-apply proposal for {target}"
     if extra > 0:
         summary = f"self-apply split proposal for {target} (+{extra} new file(s))"
-    # MIR-139 (OWASP-уточнение оператора 2026-08-28): правка судей — не
-    # только флаг, но и ЯВНО повышенный класс риска: обратим-то патч обратим,
-    # ущерб — судебной системе, и машинные ворота ниже по течению обязаны
-    # видеть это в поле risk, а не только глаз — в тексте.
+    # A judge edit is also an explicitly raised risk class: the patch is reversible but the damage is to the judging system, so downstream machine gates must see it in the risk field.
     _note = judge_touching_note([f["path"] for f in files])
     summary = _note + summary
     _risk = "irreversible" if _note else "reversible"
@@ -1174,8 +992,7 @@ def _reporter_publish(
         dedup_key=dedup_key,
     )
     if getattr(item, "status", "pending") == "denied":
-        # Block 3 (L10): the inbox remembered a denial of this same patch and
-        # returned the denied item instead of filing it again.
+        # The inbox remembered a denial of this same patch and returned the denied item instead of filing it again.
         return RoleOutput(
             "reporter",
             "refused_repeat",
@@ -1192,8 +1009,7 @@ def _reporter_publish(
 
 
 def _incremental_split_test_paths(workspace: str | Path, target: str) -> list[str]:
-    """Targeted tests for a split step: importer tests from the dependency map,
-    capped to the runner's argv limit, else the whole ``tests/`` suite."""
+    """Targeted tests for a split step: importer tests from the dependency map, capped to the runner's argv limit, else the whole ``tests/`` suite."""
     test_paths: list[str] = ["tests"]
     try:
         from core.dependency_map import build_dependency_map
@@ -1215,13 +1031,11 @@ def publish_incremental_split_step(
     reason: str,
     reader: Callable[[str], str | None] | None = None,
 ) -> tuple[Any, list[str]]:
-    """Publish ONE deterministic incremental-split step as a self-apply
-    approval.
-    """
+    """Publish ONE deterministic incremental-split step as a self-apply approval."""
     build: dict[str, Any] = {
         "files": [
             {"path": step.target, "content": step.target_content},
-            # У сведения дубля второй модуль не меняется: его не публикуют.
+            # A duplicate-merge step leaves the second module unchanged: it is not published.
             *([{"path": step.new_module, "content": step.new_content}]
               if step.new_content else []),
         ],
@@ -1237,7 +1051,7 @@ def publish_incremental_split_step(
     try:
         _sync_anatomy_groups(build, step.target, reader or _default_file_reader(workspace))
     except Exception:  # noqa: BLE001, S110 — как выше: сторож анатомии поймает
-        pass           # пропуск и откатит, молча уронить публикацию хуже
+        pass  # a skip and a rollback; silently dropping the publication is worse
     test_paths = _incremental_split_test_paths(workspace, step.target)
     evidence = [
         f"mode={step.mode}",
@@ -1281,15 +1095,9 @@ def publish_incremental_split_step(
 def _unproven_split_report(
     workspace: str | Path, target: str, gates: list[str], roles: list[RoleOutput],
 ) -> ProducerReport:
-    """Без доказательства самостоятельного разреза нет.
+    """Without proof there is no independent cut.
 
-    Правило оператора (23.09, повторено 24.09): файл делят, когда в нём чужие
-    функции или его нельзя прочесть — никогда за длину. 24.09 доказательства
-    для core/step_sanitizer.py не было, и раскольщик вынес «самую крупную
-    связную кучку»: три мелкие функции, которые зовёт сам файл, а нечитаемая
-    `sanitize_step` на 765 строк осталась как была. Файл стал короче, читать
-    его легче не стало — и раньше оператор отклонил четыре таких разреза.
-    """
+        A file is split when it holds foreign functions or cannot be read, never for length; without proof the splitter would extract the largest connected group and leave the unreadable function as it was."""
     from core.splitter_refusals import record_refusal
 
     reason = (
@@ -1315,27 +1123,15 @@ def _deterministic_split_report(
     gates: list[str],
     roles: list[RoleOutput],
 ) -> ProducerReport | None:
-    """Route an oversized-module split that the one-shot LLM path cannot handle to
-    the deterministic incremental splitter and publish its step (identical to
-    ``:self-split``).
+    """Route an oversized-module split that the one-shot LLM path cannot handle to the deterministic incremental splitter and publish its step (same as ``:self-split``).
 
-    Returns a ``proposed`` :class:`ProducerReport` when the planner proves one
-    safe extraction step, a ``no_patch`` report when it cannot — carrying either
-    the planner's precise decline reason or, if the planner *raised*, the
-    exception type/message (veto ``incremental_splitter_error``) so a crash is
-    never disguised as a clean decline — or ``None`` only when the splitter module
-    itself cannot be imported (capability genuinely absent) so the caller keeps
-    its prior refusal. The Builder/Critic/LLM are never consulted on this path —
-    the code is moved verbatim by AST slicing and the planner refuses any step it
-    cannot prove safe.
-    """
+        Returns a ``proposed`` :class:`ProducerReport` when the planner proves one safe step; a ``no_patch`` report when it cannot (with the planner's decline reason, or the exception type/message with veto ``incremental_splitter_error`` if it raised); or ``None`` only when the splitter module cannot be imported. Builder, Critic and LLM are never consulted: code is moved verbatim by AST slicing."""
     try:
         from core.incremental_splitter import plan_incremental_split
     except Exception:  # noqa: BLE001 — splitter unavailable → keep prior behaviour
         return None
     try:
-        # Доказательство правки ведёт раскольщик: дубль сводится, доказанная
-        # группа выносится (core/split_proof.py, 2026-09-21).
+        # The splitter leads the proof: a duplicate is merged, the proven group is extracted (core/split_proof.py).
         from core.split_proof import index_workspace, proof_for
 
         proof = proof_for(concrete_target, index_workspace(workspace))
@@ -1343,12 +1139,7 @@ def _deterministic_split_report(
             return _unproven_split_report(workspace, concrete_target, gates, roles)
         plan = plan_incremental_split(workspace, concrete_target, proof=proof)
     except Exception as exc:  # noqa: BLE001 — a crashing planner must be surfaced, not disguised
-        # The splitter IS present but threw on this input — that is a splitter
-        # bug, NOT a genuine "no safe step" outcome. Returning None here would let
-        # the caller fall back to its generic refusal ("no low-risk candidate" /
-        # "too large for a safe single-pass split"), hiding a real crash. Surface
-        # it as a distinct no_patch carrying the exception so the operator (and the
-        # journaled report) can tell a crash from a clean decline. Nothing applied.
+        # The splitter IS present but threw on this input: a splitter bug, not a clean "no safe step". Returning None would hide the crash behind the generic refusal, so surface it as a distinct no_patch carrying the exception. Nothing applied.
         roles.append(RoleOutput(
             "reporter",
             "error",
@@ -1372,7 +1163,7 @@ def _deterministic_split_report(
             ),
         )
     if plan.status != "planned" or plan.step is None:
-        # Отказ раскольщика ставит паузу до изменения файла (core/splitter_refusals.py).
+        # A splitter refusal sets a pause until the file changes (core/splitter_refusals.py).
         from core.splitter_refusals import record_refusal
         record_refusal(workspace, concrete_target, str(plan.reason))
         return ProducerReport(
@@ -1398,7 +1189,7 @@ def _deterministic_split_report(
         reader=reader,
     )
     if getattr(item, "status", "pending") == "denied":
-        # Block 3 (L10): the same split step (same digest) was denied recently.
+        # The same split step (same digest) was denied recently.
         roles.append(RoleOutput(
             "reporter", "refused_repeat",
             f"identical to denied {item.id}: "
@@ -1443,9 +1234,7 @@ def _has_pending_self_apply(inbox: Any) -> bool:
 
 
 def _waiting_self_apply_targets(inbox: Any) -> frozenset[str] | None:
-    """Files under a pending/approved self-apply item. ``None`` = unknown (an
-    item without a file list, or an inbox without the reader): the whole
-    hand waits, as it did before block 3."""
+    """Files under a pending/approved self-apply item. ``None`` = unknown (an item without a file list, or an inbox without the reader): the whole hand waits."""
     reader = getattr(inbox, "pending_targets", None)
     if reader is None:
         return None if _has_pending_self_apply(inbox) else frozenset()
@@ -1456,14 +1245,14 @@ def _waiting_self_apply_targets(inbox: Any) -> frozenset[str] | None:
 
 
 def _splitter_refused(workspace: str | Path) -> frozenset[str]:
-    """Файлы, которые раскольщик отказался резать и которые не менялись с тех пор."""
+    """Files the splitter refused to cut and that have not changed since."""
     from core.splitter_refusals import refused_unchanged
 
     return refused_unchanged(workspace)
 
 
 def _denied_self_apply_targets(inbox: Any) -> frozenset[str]:
-    """Files a human denied recently — the hand goes elsewhere (block 3, L10)."""
+    """Files a human denied recently: the hand goes elsewhere."""
     reader = getattr(inbox, "recently_denied_targets", None)
     if reader is None:
         return frozenset()
@@ -1477,11 +1266,7 @@ def _precheck_gates(
     *, inbox: Any, vcs: Any, budget_snapshot: Any, kill_switch: Any,
     explicit: tuple[str, ...],
 ) -> tuple[ProducerReport | None, list[str], Any, Any]:
-    """Gates 1–4 before any LLM work: (stop report or None, gates passed,
-    files waiting on approval, files on denial cooldown). Moved verbatim out of
-    `produce_self_apply_proposal` 2026-09-21 (over the linter's statement and
-    branch limits).
-    """
+    """Gates 1-4 before any LLM work: (stop report or None, gates passed, files waiting on approval, files on denial cooldown). Moved verbatim out of `produce_self_apply_proposal` (linter statement and branch limits)."""
     gates: list[str] = []
 
     # ── gate 1: budget kill-switch (before ANY LLM-heavy work) ──────────────
@@ -1507,11 +1292,7 @@ def _precheck_gates(
             ), gates, None, frozenset()
     gates.append("budget")
 
-    # ── gate 3: a self_apply approval on the SAME file is still waiting ─────
-    # Block 3 (L9, 2026-09-03): waiting on one file is not exhaustion of the
-    # hand. Only a candidate a waiting item already touches waits; a file a
-    # human denied recently is on cooldown; when the producer chooses, both
-    # sets are excluded so it advances to the next grounded candidate.
+    # gate 3: a self_apply approval on the SAME file is still waiting. Waiting on one file is not exhaustion of the hand: only a candidate a waiting item touches waits; a recently denied file is on cooldown; when the producer chooses, both sets are excluded.
     waiting = _waiting_self_apply_targets(inbox)
     denied_cooldown = _denied_self_apply_targets(inbox)
     if waiting is None or (explicit and set(explicit) & waiting):
@@ -1550,13 +1331,7 @@ def _precheck_gates(
 def _dependency_context(
     workspace: str | Path, target: str, evidence: list[str],
 ) -> tuple[Any, str | None]:
-    """Dependency map. Before the Builder touches a Python module, measure its
-    real consumers: which project files import it, which symbols they take, and
-    which test files exercise it. The Builder gets this as an explicit contract,
-    the Critic cross-checks dropped names against REAL imports, and the importer
-    tests are appended to the targeted-test list. Best-effort: a scan failure
-    must never break the producer. Appends to ``evidence`` in place.
-    """
+    """Dependency map: before the Builder touches a Python module, measure its real consumers (importing files, symbols taken, tests). The Builder gets this as a contract, the Critic cross-checks dropped names against REAL imports, importer tests join the targeted tests. Best-effort; appends to ``evidence`` in place."""
     if not target.lower().endswith(".py"):
         return None, None
     try:
@@ -1573,12 +1348,7 @@ def _dependency_context(
 def _hard_rules(
     workspace: str | Path, target: str, evidence: list[str], dep_context: str | None,
 ) -> tuple[dict[str, str], str | None]:
-    """Hard rules from past rollbacks. Machine-extracted lessons (e.g.
-    "ImportError: cannot import name 'X'") persisted by the apply command. The
-    Builder sees them as non-negotiable constraints and the Critic enforces them
-    deterministically. Returns (required symbols, Builder context with the rules
-    block prepended). Appends to ``evidence`` in place.
-    """
+    """Hard rules from past rollbacks: machine-extracted lessons (e.g. "ImportError: cannot import name 'X'") persisted by the apply command. The Builder sees them as constraints, the Critic enforces them. Returns (required symbols, Builder context with the rules block prepended). Appends to ``evidence`` in place."""
     required_symbols: dict[str, str] = {}
     if not target.lower().endswith(".py"):
         return required_symbols, dep_context
@@ -1625,13 +1395,9 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     recently_vetoed_targets: frozenset[str] | set[str] | tuple[str, ...] | None = None,
     max_builder_attempts: int = _DEFAULT_MAX_BUILDER_ATTEMPTS,
 ) -> ProducerReport:
-    """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce
-    at most one validated low-risk self-apply proposal into the approval
-    inbox.
+    """Run the Manager/Researcher/Builder/Critic/Reporter pipeline to produce at most one validated low-risk self-apply proposal into the approval inbox.
 
-    Returns a :class:`ProducerReport`. The function never applies the patch,
-    never runs the lane, and creates at most one inbox item per call.
-    """
+        Returns a :class:`ProducerReport`. Never applies the patch or runs the lane; at most one inbox item per call."""
     def _record(report: ProducerReport) -> ProducerReport:
         if registry is not None:
             try:
@@ -1651,16 +1417,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     reader = file_reader or _default_file_reader(workspace)
     roles: list[RoleOutput] = []
 
-    # ── Manager ─────────────────────────────────────────────────────────────
-    # TD-036 follow-up: the grounded backlog selector is now the DEFAULT source
-    # of the Manager's target + diagnosis, so the real callers
-    # (``:self-build-produce`` and the daemon) stop inventing a diagnosis via the
-    # LLM. Resolution order:
-    #   * an explicit ``grounded_selector`` (tests / advanced callers), else
-    #   * the default workspace-backed grounded selector.
-    # There is NO LLM fallback: an empty grounded backlog yields ``no_patch``
-    # rather than a fabricated diagnosis. The legacy LLM manager path runs ONLY
-    # when explicitly opted into via ``legacy_llm_manager=True`` (debug/tests).
+    # Manager: the grounded backlog selector is the DEFAULT source of target and diagnosis (an explicit ``grounded_selector`` wins). There is NO LLM fallback: an empty backlog yields ``no_patch``. The legacy LLM manager runs only with ``legacy_llm_manager=True`` (debug/tests).
     if legacy_llm_manager:
         manager = _manager_select(llm, targets)
     else:
@@ -1673,11 +1430,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
             selector, targets, workspace=workspace, named_targets=named)
     roles.append(manager)
     if manager.decision != "selected":
-        # A rejected grounded candidate is not evidence of a defect. In
-        # particular, an abstract ``split:*`` signal may describe only an
-        # architectural refactor. Do not turn that refusal into a deterministic
-        # split proposal: publication requires a concrete grounded target that
-        # the Manager actually selected.
+        # A rejected grounded candidate is not evidence of a defect (an abstract ``split:*`` signal may describe only a refactor); publication requires a concrete grounded target the Manager selected.
         return _record(ProducerReport(
             status="no_patch" if legacy_llm_manager else "no_grounded_target",
             reason=manager.detail or "no low-risk candidate selected",
@@ -1689,9 +1442,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     diagnosis = manager.data.get("diagnosis", "")
     split_mode = manager.data.get("mapping_rule") == "split_module"
 
-    # Recall past FAILED attempts on this exact target so the Builder is warned
-    # not to repeat a mistake already recorded in episodic memory (best-effort;
-    # a recall failure must never change or break the producer).
+    # Recall past FAILED attempts on this target so the Builder is warned (best-effort; a recall failure never breaks the producer).
     lessons: list[str] = []
     if lessons_provider is not None:
         try:
@@ -1699,7 +1450,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
         except Exception:  # noqa: BLE001 — lesson recall must never break producer
             lessons = []
 
-    # What this run READS, recorded at the moment of reading (MIR-121).
+    # What this run READS, recorded at the moment of reading.
     read_sources = [f"file:{target}"]
     if lessons:
         read_sources.append("memory:self-build-lessons")
@@ -1710,15 +1461,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     current_content = researcher.data["current_content"]
     evidence = list(researcher.data["evidence"])
 
-    # ── Scale filter (C) → deterministic incremental split ──────────────────
-    # A split of a very large module cannot be done safely in ONE Builder shot —
-    # it keeps dropping public API and getting vetoed. Instead of refusing (which
-    # dead-ended the run), hand it to the deterministic incremental splitter: it
-    # moves one dependency-closed block verbatim by AST slicing (no LLM, no
-    # token ceiling) and publishes one provably-safe extraction step for human
-    # approval. Only if the splitter is unavailable/can't plan do we fall back to
-    # the honest refusal below. Small splits (<= the one-shot budget) still take
-    # the LLM Builder path unchanged.
+    # Scale filter: a split of a very large module cannot be done safely in ONE Builder shot, so it goes to the deterministic incremental splitter (AST slicing, no LLM) which publishes one provably-safe step. Only if the splitter is unavailable do we fall back to refusal. Small splits still take the LLM Builder path.
     if split_mode:
         too_large, line_count = _split_target_too_large(current_content)
         if too_large or str(diagnosis).startswith(_PROVEN_DIAGNOSES):
@@ -1751,13 +1494,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
     dep_map, dep_context = _dependency_context(workspace, target, evidence)
     required_symbols, dep_context = _hard_rules(workspace, target, evidence, dep_context)
 
-    # ── Builder → Critic (with optional single retry on veto, B) ────────────
-    # When ``max_builder_attempts > 1`` a Critic veto is retried ONCE with the
-    # exact veto reasons fed back to the Builder as hard constraints, before the
-    # run gives up. Two attempts total, never more. This NEVER applies anything —
-    # a vetoed candidate is still blocked and no inbox item is created. Default
-    # is a single attempt (byte-identical to the historical behaviour); the real
-    # ``:self-build-produce`` command opts into two.
+    # Builder -> Critic with an optional single retry: when ``max_builder_attempts > 1`` a Critic veto is retried ONCE with the exact veto reasons as hard constraints; never more, never applied. Default is a single attempt.
     max_attempts = max(1, int(max_builder_attempts))
     builder_lessons = list(lessons)
     attempts_used = 0
@@ -1773,8 +1510,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
         )
         roles.append(builder)
 
-        # Importer test files are part of the change's blast radius: run them as
-        # targeted tests so a contract break fails fast inside the lane.
+        # Importer test files are part of the change's blast radius: run them as targeted tests so a contract break fails fast inside the lane.
         if builder.decision == "built" and dep_map is not None and dep_map.related_tests:
             try:
                 paths = [str(p) for p in (builder.data.get("test_paths") or [])]
@@ -1785,9 +1521,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
             except Exception:  # noqa: BLE001, S110 — test enrichment must never break produce
                 pass
 
-        # Self-build head keeps the anatomy index in sync: a split that adds new
-        # core/*.py modules must also register them in knowledge/generated/AGENT_ANATOMY.md, or
-        # the repo's anatomy-sync test fails and the lane rolls the apply back.
+        # A split that adds core/*.py modules must register them in knowledge/generated/AGENT_ANATOMY.md, or the anatomy-sync test fails and the lane rolls the apply back.
         if builder.decision == "built":
             try:
                 _sync_anatomy_index(builder.data, target, reader, workspace=workspace)
@@ -1808,15 +1542,12 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
             break
 
         veto_now = list(critic.data.get("veto_reasons", []))
-        # MIR-071: before this veto is finalized (or retried), pull the raw
-        # builder reply out of the role data and preserve it to disk — the
-        # only diagnosable evidence of an expensive misfire.
+        # Before this veto is finalized or retried, preserve the raw builder reply to disk: the only diagnosable evidence of an expensive misfire.
         raw_path = _preserve_rejected_raw(Path(workspace), roles)
         if raw_path is not None:
             veto_now.append(f"raw builder reply preserved: {raw_path}")
         if attempt < max_attempts:
-            # Feed the exact veto reasons back so the retry targets them directly
-            # instead of blindly regenerating the same defective candidate.
+            # Feed the exact veto reasons back so the retry targets them instead of regenerating the same defect.
             retry_note = (
                 "A previous attempt on this exact target was REJECTED by the "
                 "Critic for: "
@@ -1838,12 +1569,7 @@ def produce_self_apply_proposal(  # noqa: PLR0913 — keyword-only entry, 27 cal
             next_human_action="Critic vetoed the candidate; no approval created.",
         ))
 
-    # ── Value gate (TD-035): reject no-effect changes before publishing ─────
-    # Runs after the Critic's *technical* pass and before the Reporter creates
-    # an approval item. A hard veto (no code effect) blocks publication and
-    # creates NO inbox item; soft flags are attached to the evidence so a human
-    # reviewer sees them, but never block. Doc (*.md) targets are exempt from
-    # hard veto. Deterministic — no LLM/network/git side effects.
+    # Value gate: reject no-effect changes before publishing. Runs after the Critic's technical pass and before the Reporter. A hard veto (no code effect) blocks publication; soft flags are attached to the evidence and never block. Doc (*.md) targets are exempt from the hard veto. Deterministic.
     value = evaluate_proposal_value(
         target,
         current_content,

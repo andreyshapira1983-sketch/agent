@@ -1,6 +1,4 @@
-"""Admission rules for one planner step — the whitelist the model cannot argue
-with.
-"""
+"""Admission rules for one planner step: the whitelist the model cannot argue with."""
 from __future__ import annotations
 
 import hashlib
@@ -19,9 +17,7 @@ _PLACEHOLDER_HOSTS = frozenset({
 
 _PLACEHOLDER_TLDS = (".example", ".invalid", ".test", ".localhost")
 
-#: Похоже на имя узла: метки через точку с буквенным окончанием (или голый
-#: `localhost`), затем необязательные порт и путь. Пробелов нет — фраза
-#: («см. раздел 4.2») узлом не притворится.
+#: Looks like a host name: dotted labels with an alphabetic ending (or bare `localhost`), then optional port and path; no spaces.
 _HOSTLIKE_RE = re.compile(
     r"^(?:localhost|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,})"
@@ -60,29 +56,21 @@ def _is_placeholder_url(url_lower: str) -> bool:
     return any(host.endswith(tld) for tld in _PLACEHOLDER_TLDS)
 
 
-#: file_read window defaults. A window is asked for when the planner already
-#: knows WHERE to look, so it is short: enough for a function, not a file.
+#: file_read window default: a window is asked for when the planner knows WHERE to look, so it is short.
 _DEFAULT_LINE_WINDOW = 60
 _MAX_LINE_WINDOW = 400
 
 
 
-# How much of argv[1] may appear in a label. The digest carries uniqueness,
-# so the visible part exists only to stay readable — an unbounded token would
-# put a data blob (or a value the caller passed as the first argument) into
-# every journal line that quotes the label.
+# How much of argv[1] may appear in a label; the digest carries uniqueness, so an unbounded token must not reach every journal line.
 _LABEL_ARG_CHARS = 32
 
 
 def _shell_label(argv: list[str]) -> str:
     """Short, collision-resistant label for one shell_exec step.
 
-    Lossless while it can be: with at most two tokens AND argv[1] within
-    ``_LABEL_ARG_CHARS`` the label already contains the whole command, so no
-    digest is needed. The moment anything visible is dropped — a third token
-    or a truncated argv[1] — the whole argv is folded into a 24-bit digest:
-    collisions are astronomically unlikely per run, not impossible, and the
-    cost of one would be the pre-existing overwrite, never a wrong answer.
+    Lossless while it can be (at most two tokens and argv[1] within ``_LABEL_ARG_CHARS``); once anything visible is dropped,
+    the whole argv is folded into a 24-bit digest.
     """
     cmd = argv[0].strip().lower() if argv else ""
     head = f"shell_exec:{cmd}"
@@ -92,10 +80,7 @@ def _shell_label(argv: list[str]) -> str:
         truncated = len(arg) > _LABEL_ARG_CHARS
         head += f" {arg[:_LABEL_ARG_CHARS]}…" if truncated else f" {arg}"
     if len(argv) <= 2 and not truncated:
-        # Only here is the label still the whole command; a truncated
-        # argv[1] is lossy, so it falls through to the digest below —
-        # otherwise two commands sharing the visible prefix collide, which
-        # is the exact overwrite the digest exists to prevent.
+        # only here is the label still the whole command; a truncated argv[1] falls through to the digest
         return head
     digest = hashlib.blake2s(
         repr(argv).encode("utf-8", "replace"), digest_size=3
@@ -103,18 +88,14 @@ def _shell_label(argv: list[str]) -> str:
     return f"{head} #{digest}"
 
 
-#: Потолок кода эксперимента: замер — не программа (tools/python_probe.py).
+#: Cap on experiment code: a measurement, not a program (tools/python_probe.py).
 _PROBE_CODE_CAP = 4000
 
 
 def _sanitize_python_probe(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
-    """Пропуск лаборатории: форма шага. Глубину (AST-гейт эффектов, контейнер)
-    судит сам инструмент — здесь только «код есть, размер и таймаут вменяемы».
-    Живой повод 2026-08-16 (проба №3): планировщик, выучив карту, спланировал
-    эксперимент — и шаг умер с «no sanitiser, dropped». У руки не было пропуска.
-    """
+    """Admission for the lab step: its form only; depth (AST effect gate, container) is the tool's own."""
     code = args.get("code")
     if not isinstance(code, str) or not code.strip():
         warnings.append(f"step[{idx}]: python_probe without code, dropped")
@@ -134,20 +115,8 @@ def _sanitize_python_probe(
             )
             return None
         arguments["timeout_seconds"] = timeout
-    inputs = args.get("inputs")  # файлы рабочей папки для счёта (2026-09-19)
-    # Пустое значение равносильно отсутствию ключа, а одна строка —
-    # однозначный список из одной строки. Замер 2026-09-20: 15 снятых шагов
-    # из 47 за четверо суток пришлись сюда, а промпт планировщика объявляет
-    # ровно `inputs: list[str] = []` — правило допуска отвергало значение по
-    # умолчанию из собственного договора и выбрасывало вместе с ним весь
-    # замер. Жалоба теперь называет пришедшее: прежняя не сохраняла его, и
-    # по журналу форму аргумента установить было нельзя.
-    # Голая строка НЕ достраивается до списка одного. Замер 2026-09-20 дал
-    # 15 снятых шагов на этом ключе, но какой формы был аргумент — журнал не
-    # сохранял, и достройка строки была догадкой. Договор «список» держат два
-    # слоя сразу (здесь и tools/python_probe.py, где не-список поднимает
-    # ValueError), и расходиться им нельзя: строка — тоже последовательность,
-    # и принятая молча она разошлась бы посимвольно.
+    inputs = args.get("inputs")  # workspace files to compute over
+    # an empty value equals an absent key; a bare string is NOT widened to a one-item list: the contract is "list" in both layers (here and tools/python_probe.py) and a string would be split per character
     if isinstance(inputs, (list, str)) and not inputs:
         inputs = None
     if inputs is not None:
@@ -172,21 +141,12 @@ def _sanitize_python_probe(
 
 
 def _url_refusal(url: str) -> tuple[str | None, str]:
-    """Почему адрес web_fetch недопустим (или None) и адрес после достройки.
-
-    Одни правила на двух рубежах: при планировании для адреса-литерала и после
-    подстановки для адреса из вывода прошлого шага.
-    """
+    """Why a web_fetch URL is not allowed (or None), and the URL after completion; the same rules at planning and after substitution."""
     if len(url) > 2048:
         return f"too long ({len(url)} > 2048)", url
     if not url.isascii():
         return "not ASCII", url
-    # Голое имя узла — адрес с умолчательной схемой: так его понимает и
-    # браузер, и человек, диктующий «rfc-editor.org». Замер 2026-09-20: 11
-    # снятых шагов из 47 за четверо суток пришлись сюда, а какое значение
-    # отвергалось — по журналу не установить, жалоба его не сохраняла.
-    # Достраивается только похожее на узел; все прежние замки (локальная
-    # сеть, узлы-заглушки) стоят ПОСЛЕ достройки.
+    # a bare host name is a URL with the default scheme; only host-like strings are completed, and all locks run AFTER completion
     if "://" not in url and _HOSTLIKE_RE.match(url.strip()):
         url = "https://" + url.strip()
     url_lower = url.lower()
@@ -201,7 +161,7 @@ def _url_refusal(url: str) -> tuple[str | None, str]:
 
 
 def resolved_url_refusal(tool_name: str | None, arguments: dict[str, Any]) -> str | None:
-    """Проверка адреса ПОСЛЕ подстановки ссылки: причина отказа или None."""
+    """Check the URL AFTER step-reference substitution: refusal reason or None."""
     if tool_name != "web_fetch":
         return None
     url = arguments.get("url")
@@ -214,24 +174,12 @@ def resolved_url_refusal(tool_name: str | None, arguments: dict[str, Any]) -> st
 def _sanitize_web_fetch(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
-    """Пропуск наружу: адрес есть, он http(s), не свой узел и не заглушка.
-
-    Вынесено из лестницы `sanitize_step` 2026-09-20. Лекарство названо в
-    храповике этой функции давно — диспетчеризация по словарю вместо ветки
-    на инструмент, — и каждая правка вместо него поднимала планку. Эта
-    ветка ушла целиком, и функция стала КОРОЧЕ прежнего предела, а не
-    длиннее.
-    """
+    """Admission for fetching: the URL exists, is http(s), is not a local host and not a placeholder."""
     url = args.get("url")
     if not isinstance(url, str) or not url.strip():
         warnings.append(f"step[{idx}]: web_fetch without url, dropped")
         return None
-    # Ссылка на вывод прошлого шага — шаблон, а не адрес: проверять его здесь
-    # значит проверять имя переменной. Замер 2026-09-23 (экзамен): шаг
-    # «открыть найденное поиском» с url={{step:1.output}} снимался ДО запуска
-    # («must start with http:// or https://»), и связка «нашёл -> открыл» была
-    # невозможна в принципе. Проверка переносится на момент после подстановки
-    # (`resolved_url_refusal`) и там делает всё то же — с теми же замками.
+    # a step reference is a template, not a URL: the check moves to after substitution (`resolved_url_refusal`) with the same locks
     if not has_step_reference(url):
         reason, url = _url_refusal(url)
         if reason:
@@ -251,7 +199,7 @@ def _sanitize_web_fetch(
 def _sanitize_lesson_provenance(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
-    """Пропуск прибора: ключ урока — короткая строка или ничего (все уроки)."""
+    """Admission for the instrument: the lesson key is a short string or nothing (all lessons)."""
     key = args.get("lesson_key")
     arguments: dict[str, Any] = {}
     if key is not None:
@@ -292,11 +240,7 @@ def _line_range_arguments(
 ) -> tuple[dict[str, int] | None, list[str]]:
     """file_read's optional window: `{}` when absent, None when malformed.
 
-    Without a window `file_read` returns the whole file and the evidence
-    budget keeps a 12 000-char excerpt chosen by keyword — so a planner that
-    knew the line number (from findstr) still could not read that line
-    (measured 2026-09-05, three turns in a row). Either bound alone is
-    accepted; a reversed pair is a planning error, not something to guess at.
+    Either bound alone is accepted; a reversed pair is a planning error, not something to guess at.
     """
     start_raw = args.get("start_line")
     end_raw = args.get("end_line")
@@ -360,10 +304,7 @@ def _sanitize_read_logs(
     requested_n = args.get("last_n", 50)
     event_filter = args.get("event_filter")
     trace_id = args.get("trace_id")
-    # Clamp, do not drop: a planner that asked for 1000 events wanted the
-    # log, not nothing. Three read_logs steps were deleted this way in one
-    # exam session (2026-09-05) and the agent read a neighbour's trace
-    # instead. web_search.max_results has always been clamped; same rule.
+    # clamp, do not drop: a planner that asked for 1000 events wanted the log (same rule as web_search.max_results)
     last_n = _coerce_int(requested_n)
     if last_n is None:
         warnings.append(
@@ -428,7 +369,7 @@ def _sanitize_read_logs(
 
 
 def _sanitize_find_in_files(args: dict[str, Any], idx: int, warnings: list[str]) -> dict[str, Any] | None:
-    """Поиск по рабочей папке: строки как строки, без '..', целый предел выдачи."""
+    """Search the workspace: strings as strings, no '..', integer result limit."""
     clean: dict[str, Any] = {}
     for key, default in (("query", ""), ("path", "."), ("name", "*")):
         value = args.get(key, default)
@@ -456,22 +397,15 @@ def _sanitize_find_in_files(args: dict[str, Any], idx: int, warnings: list[str])
 
 
 def _web_fetch_find(args: dict[str, Any]) -> dict[str, str]:
-    """`find` для web_fetch (поиск по странице, 2026-09-20): строка до 200 знаков или ничего."""
+    """`find` for web_fetch (search within the page): a string up to 200 characters or nothing."""
     find = args.get("find")
     return {"find": find.strip()[:200]} if isinstance(find, str) and find.strip() else {}
 
 
 def _exists_in_workspace(workspace: str | None, path: str) -> bool:
-    """Лежит ли этот путь ФАЙЛОМ внутри рабочей папки.
+    """Whether this path exists as a FILE inside the workspace.
 
-    Различитель выдумки: имя, сочинённое планировщиком из фразы («привет.txt»),
-    на диске отсутствует, а собственный черновик агента — лежит. Замер
-    2026-09-20: в рабочей папке 1556 файлов с не-ASCII путём (его же
-    математические черновики), и запрет на не-ASCII снимал каждое чтение по
-    ним — 20 снятых шагов за семь суток, после каждого прогон бился вслепую.
-
-    Существование вне песочницы ничего не разрешает: путь приводится к
-    канону и обязан остаться внутри папки.
+    Tells an invented name from the agent's own draft; the path is canonicalised and must stay inside the folder.
     """
     if not workspace or not path:
         return False
@@ -484,9 +418,7 @@ def _exists_in_workspace(workspace: str | None, path: str) -> bool:
     return target.is_file()
 
 
-#: Файл правки самопочинки: его содержимое — блоки SEARCH/REPLACE, каждый из
-#: которых обязан дословно повторять кусок ЧУЖОГО файла. Такой текст нельзя
-#: знать заранее, его можно только прочитать (`core/patch_route.py`).
+#: Self-fix edit file: its content is SEARCH/REPLACE blocks that must repeat another file verbatim, so it can only be read first (`core/patch_route.py`).
 _PATCH_FILE_RE = re.compile(r"^proposals/selffix/[^/]+/edits\.txt$")
 
 
@@ -495,20 +427,10 @@ def _is_patch_file(path: str) -> bool:
 
 
 def _patch_task_from(content: str, idx: int, warnings: list[str], path: str) -> str:
-    """Готовый текст правки превратить в задание собрать её по прочитанному.
+    """Turn ready-made patch text into a task to assemble it from what was read.
 
-    Замер 2026-09-23: все 28 записей `proposals/selffix/**/edits.txt` за прогон
-    пришли с готовым content от планировщика — и пять правок из тринадцати
-    умерли с «the patch did not apply», потому что сторона SEARCH сочинялась по
-    догадке о чужом файле. Под запись: агент написал для `tools/web_fetch.py`
-    блок с `import requests` и функцией `fetch()`, которых там нет, и файл в
-    том ходе не читал ни разу.
-
-    Планировщик дословного текста чужого файла знать не может: он его не
-    видел. Поэтому текст заменяется заданием, и блоки соберутся перед самой
-    записью — по выводам уже исполненных чтений (`core/write_at_execution.py`).
-    Нет чтений — нет текста: шаг честно провалится вместо того, чтобы положить
-    выдумку. Замысел плана не выбрасывается: он и есть содержание задания.
+    The planner cannot know another file's verbatim text; the blocks are assembled just before the write from executed reads
+    (`core/write_at_execution.py`). No reads, no text: the step fails honestly. The plan's intent becomes the task content.
     """
     warnings.append(
         f"step[{idx}]: file_write в {path} с готовым текстом — блоки правки "
@@ -526,7 +448,7 @@ def _patch_task_from(content: str, idx: int, warnings: list[str], path: str) -> 
 def _sanitize_convert_file(
     args: dict[str, Any], idx: int, warnings: list[str],
 ) -> dict[str, Any] | None:
-    """Программы для файлов клиента: проверки живут рядом с песочницей (tools/convert_file.py)."""
+    """Programs for client files: checks live beside the sandbox (tools/convert_file.py)."""
     from tools.convert_file import sanitize_args
     return sanitize_args(args, idx, warnings)
 
@@ -552,31 +474,18 @@ def sanitize_step(
             warnings.append(f"step[{idx}]: file_read without path, dropped")
             return None
         path_norm = path.strip()
-        # MVP-14.4.x — narrow exception for self-documentation
-        # (e.g. README.md). The user asks "what do you understand
-        # about yourself?" → planner should reach for the docs
-        # without needing a --file hint. The allowlist is tiny
-        # and enforced both here and at instantiation time.
-        # MVP-14.4.x — self-documentation allowlist is kept for reference
-        # but file_read is now allowed for any workspace-relative path when
-        # no --file hint is given. Security is enforced by the tool executor
-        # (workspace sandbox + secret scanner). The allowlist is no longer
-        # used to gate reads.
+        # self-documentation exception: with no --file hint any workspace-relative path may be read; security is enforced by the tool executor (sandbox + secret scanner)
         if not file_hint:
             # No startup --file hint: allow any workspace-relative path.
             pass  # proceed to ASCII check below
         elif path_norm != file_hint.strip():
-            # A hint IS provided — only the exact hinted path is
-            # allowed (the existing pre-MVP-14 contract).
+            # a hint IS provided: only the exact hinted path is allowed
             warnings.append(
                 f"step[{idx}]: file_read path '{path}' does not match hint '{file_hint}', "
                 "remapping to hinted path"
             )
             path = file_hint
-        # ASCII-only identifier policy applies to paths invented by
-        # the planner. A user-supplied --file hint is explicit CLI
-        # input, so non-ASCII filenames (e.g. Russian documents) are
-        # allowed after the hint-equality/remap gate above.
+        # ASCII-only identifier policy applies to paths invented by the planner; a user-supplied --file hint may be non-ASCII
         is_explicit_hint_path = bool(file_hint) and path == file_hint.strip()
         if (not path.isascii() and not is_explicit_hint_path
                 and not _exists_in_workspace(workspace, path)):
@@ -622,9 +531,7 @@ def sanitize_step(
     if tool_name == "file_write":
         path = args.get("path")
         content = args.get("content")
-        # Задание вместо текста: текст соберётся ПЕРЕД вызовом инструмента, по
-        # выводам шагов этого же пакета (core/write_at_execution.py). Корень
-        # «сочиняет запись до чтения» лечится здесь, а не откладыванием круга.
+        # task instead of text: the text is assembled BEFORE the tool call from the outputs of this batch's steps (core/write_at_execution.py)
         instruction = args.get("write_instruction")
         if not isinstance(path, str) or not path.strip():
             warnings.append(f"step[{idx}]: file_write without path, dropped")
@@ -637,20 +544,14 @@ def sanitize_step(
         if isinstance(content, str) and _is_patch_file(path):
             instruction = _patch_task_from(content, idx, warnings, path)
             content = None
-        # ASCII-only identifier policy. Catches the LLM trying to
-        # honour a literal user request like «создай файл привет.txt»
-        # — the planner should transliterate, but if it doesn't, we
-        # drop the step before the tool layer raises.
+        # ASCII-only identifier policy: drop the step before the tool layer raises
         if not path.isascii():
             warnings.append(
                 f"step[{idx}]: file_write path '{path}' is not ASCII; "
                 "use an English filename (e.g. 'hello.txt'), dropped"
             )
             return None
-        # Defence in depth: reject obvious sandbox escapes BEFORE the
-        # tool would refuse them. The tool still validates the
-        # canonical path, but this catches the common mistakes
-        # without burning a re-plan slot.
+        # defence in depth: reject obvious sandbox escapes before the tool does, without burning a re-plan slot
         looks_unsafe = (
             path.startswith(("/", "\\"))
             or (len(path) >= 2 and path[1] == ":")  # Windows "C:\..."
@@ -665,8 +566,7 @@ def sanitize_step(
             "tool": "file_write",
             "arguments": ({"path": path, "content": content} if isinstance(content, str)
                           else {"path": path, "write_instruction": str(instruction).strip()[:2000]}),
-            # Label uses the path only — content can be huge and is also
-            # the thing most likely to carry sensitive data.
+            # label uses the path only: content can be huge and sensitive
             "label": f"file_write:{path}",
             "expected_outcome": "File created or overwritten; backup kept on overwrite.",
         }
@@ -683,9 +583,7 @@ def sanitize_step(
                 f"step[{idx}]: shell_exec argv too long ({len(argv)} > 16), dropped"
             )
             return None
-        # Every element must be a non-empty ASCII string. Shell
-        # argv is a programming boundary — non-ASCII breaks cmd.exe
-        # and would not be a legitimate command name or path here.
+        # every element must be a non-empty ASCII string: non-ASCII breaks cmd.exe
         cleaned: list[str] = []
         for j, elem in enumerate(argv):
             if not isinstance(elem, str) or not elem:
@@ -702,10 +600,7 @@ def sanitize_step(
                 )
                 return None
             cleaned.append(elem)
-        # Whitelist gate at the planner level — keeps obviously
-        # dangerous commands out of the JSONL before the tool even
-        # sees them. The tool's `_validate_argv` repeats the check
-        # (defence in depth).
+        # whitelist gate at the planner level; the tool's `_validate_argv` repeats it
         from tools.shell_exec import (
             ALL_WHITELIST,
             MUTATING_COMMANDS,
@@ -720,13 +615,7 @@ def sanitize_step(
                 f"whitelist, dropped"
             )
             return None
-        # Subcommand whitelist. Both sets, and both from the tool: this
-        # sanitizer used to consult the read-only half alone, so a planner
-        # that correctly planned `git checkout -b` / `add` / `commit` had
-        # those three steps deleted here — silently, as warnings — and the
-        # run then reported that it could not commit. The tool's own
-        # `_validate_argv` still re-checks every shape (defence in depth);
-        # what this must not do is refuse a permission the tool grants.
+        # subcommand whitelist: both read-only and mutating sets, both from the tool; this must not refuse a permission the tool grants
         sub_allowed = READ_ONLY_SUBCOMMANDS.get(cmd)
         if sub_allowed is not None:
             sub_allowed = sub_allowed | WRITE_SUBCOMMANDS.get(cmd, frozenset())
@@ -742,7 +631,7 @@ def sanitize_step(
                     f"subcommand not in {sorted(sub_allowed)}, dropped"
                 )
                 return None
-        # Shell metacharacters -> drop. No braces: shell=False, and `{{step:` must be searchable (exam 2026-09-05, turns 35–36). Mirrors `tools.shell_exec._FORBIDDEN_CHARS`.
+        # Shell metacharacters -> drop. No braces: shell=False, and `{{step:` must be searchable. Mirrors `tools.shell_exec._FORBIDDEN_CHARS`.
         _BAD = set(";|&<>`$()[]\n\r\t\0")
         for j, elem in enumerate(cleaned):
             if bad := next((ch for ch in elem if ch in _BAD), None):
@@ -773,14 +662,7 @@ def sanitize_step(
         return {
             "tool": "shell_exec",
             "arguments": {"argv": cleaned},
-            # Label is the command name + first arg — short, and it never
-            # echoes long argv. For anything longer a 6-hex digest of the
-            # WHOLE argv is appended, because the visible part alone is not
-            # unique: `grep -rl A core` and `grep -rl B core` both rendered
-            # as "shell_exec:grep -rl", and the loop keys its artifacts by
-            # label, so the second silently overwrote the first and the
-            # synthesizer never saw the answer it had already fetched
-            # (measured twice against the live agent, 2026-08-01).
+            # command name + first arg; for anything longer a 6-hex digest of the WHOLE argv is appended, because the visible part alone is not unique and the loop keys artifacts by label
             "label": _shell_label(cleaned),
             "expected_outcome": (
                 "Whitelisted command runs in the workspace sandbox with "
@@ -789,14 +671,14 @@ def sanitize_step(
             ),
         }
 
-    # ----- лаборатория (2026-08-16) -----
+    # ----- python_probe -----
     if tool_name == "python_probe":
         return _sanitize_python_probe(args, idx, warnings)
 
     if tool_name == "lesson_provenance":
         return _sanitize_lesson_provenance(args, idx, warnings)
 
-    # ----- MVP-14.2 web_fetch -----
+    # ----- web_fetch -----
     if tool_name == "web_fetch":
         return _sanitize_web_fetch(args, idx, warnings)
 
@@ -848,7 +730,7 @@ def sanitize_step(
             ),
         }
 
-    # ----- MVP-13.1 self-repair primitives -----
+    # ----- self-repair primitives -----
     if tool_name == "run_tests":
         paths = args.get("paths", ["tests"])
         pattern = args.get("pattern")
@@ -965,9 +847,7 @@ def sanitize_step(
                 "proposed_content": proposed,
                 "context_lines": ctx_lines,
             },
-            # Don't echo `proposed_content` in the label (it can be
-            # huge and may contain secrets — the tool layer redacts
-            # the diff, but a label is a separate surface).
+            # do not echo `proposed_content` in the label (large, may hold secrets)
             "label": f"diff_file:{path}",
             "expected_outcome": (
                 "Returns a unified diff between the current workspace "
@@ -1020,7 +900,7 @@ def sanitize_step(
         }
 
     if tool_name == "model_roster":
-        # The eye on his own models (2026-09-04): no arguments; read-only.
+        # no arguments; read-only
         if args:
             warnings.append(
                 f"step[{idx}]: model_roster takes no arguments, "
@@ -1037,7 +917,7 @@ def sanitize_step(
         }
 
     if tool_name == "memory_recall":
-        # The read door (2026-09-04): exactly one string, `term`; read-only.
+        # exactly one string, `term`; read-only
         term = str(args.get("term") or "").strip()
         _warn_extra_args(args, {"term"}, "memory_recall", idx, warnings)
         if not term:
@@ -1054,8 +934,7 @@ def sanitize_step(
         }
 
     if tool_name == "model_route":
-        # His routing door (2026-09-04 22:20): role, provider, reason required;
-        # model required unless provider == release; evidence optional.
+        # role, provider, reason required; model required unless provider == release; evidence optional
         required = ("role", "provider", "reason")
         missing = [k for k in required if not str(args.get(k) or "").strip()]
         if missing:
@@ -1101,10 +980,7 @@ def sanitize_step(
         }
 
     if tool_name == "semantic_scholar_search":
-        # Найден сторожем «зарегистрирован, но мёртв» 2026-09-01: инструмент
-        # стоял в поясе и в промпте планировщика, а ветки не имел — любой шаг
-        # с ним выбрасывался молча, и поиск научных работ был мёртвой
-        # способностью. Контракт: query обязателен, остальное необязательно.
+        # contract: query required, the rest optional
         query = str(args.get("query") or "").strip()
         if not query:
             warnings.append(
@@ -1292,18 +1168,8 @@ def fit_resolved_arguments(
 ) -> tuple[dict[str, Any], list[str]]:
     """Re-apply the sanitiser's TRUNCATION rules after step-reference substitution.
 
-    `sanitize_step` sees the plan as a template: a `context` of
-    ``{{step:3.output}}`` is 18 characters and passes. The value that
-    arrives after substitution is the measured output, and it has no cap.
-    Measured 2026-09-05 (exam, session `exam_h2`): a page from pytest's docs
-    plus a `findstr` listing landed in a sub-agent's `context`, the tool
-    refused it («'context' exceeds 2000 characters»), the step failed, and
-    the three steps that depended on it were never executed — the run that
-    was supposed to repair the agent ended without a single file written.
-
-    Only the rules that TRUNCATE are mirrored here; a rule that drops a step
-    belongs to admission, and a step that was admitted is not re-judged.
-    Returns the fitted arguments and the warnings, one per rule applied.
+    `sanitize_step` sees the plan as a template; the value after substitution is the measured output and has no cap.
+    Only truncating rules are mirrored here; a rule that drops a step belongs to admission. Returns the fitted arguments and one warning per rule applied.
     """
     warnings: list[str] = []
     if tool_name == "spawn_subagent":

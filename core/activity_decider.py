@@ -1,4 +1,4 @@
-"""Activity-type decider: the door must not choose the mind."""
+"""Classify operator text into conversation, bounded action, persistent goal or goal control."""
 from __future__ import annotations
 
 import re
@@ -9,10 +9,7 @@ ActivityType = Literal[
     "conversation", "bounded_action", "persistent_goal", "goal_control",
 ]
 
-#: Musing / thought-experiment / meta-discussion framing. A veto over every
-#: other class: the operator's borders — «а представь…» must never mint a
-#: campaign, and DESCRIBING the mechanism («… → C16 создаёт задачу», «если я
-#: напишу …, что произойдёт?») is architecture talk, not an order.
+#: Hypothetical, meta or mechanism-describing framing; vetoes every other class.
 _HYPOTHETICAL_RE = re.compile(
     r"(?i)как бы ты|что ты думаешь|что бы ты|расскажи|представь|вообрази"
     r"|если бы|допустим|гипотетически"
@@ -21,19 +18,15 @@ _HYPOTHETICAL_RE = re.compile(
     r"|what happens if|if i (?:write|say)|should be able",
 )
 
-#: Mention is not use (live specimen rtask_7879672a: a pasted diagram's
-#: quoted «"начни X и продолжай"» minted a real task). A verb inside any
-#: quoted/backticked span is somebody TALKING ABOUT the command.
+#: A verb inside a quoted or backticked span is mention, not use.
 _QUOTE_SPAN_RE = re.compile(r'"[^"\n]{2,400}"|«[^»\n]{2,400}»|`[^`\n]{2,400}`')
 
 
 def _unquoted(text: str) -> str:
-    """The text with quoted/backticked spans blanked — only top-level words
-    can carry a directive."""
+    """Return text with quoted/backticked spans blanked."""
     return _QUOTE_SPAN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
-#: Launching work: BOTH halves must fire. A bare start verb («начни с того,
-#: что расскажи…») is not an ongoing contract.
+#: Launching work: both a start verb and a continuity phrase must match.
 _START_RE = re.compile(
     r"(?i)\bначни|\bначинай|\bзаймись|\bприступай|\bвозьмись"
     r"|\bstart\b|\bbegin\b|\btake up\b",
@@ -44,7 +37,7 @@ _CONTINUITY_RE = re.compile(
     r"|keep going|as your (?:ongoing )?work|and continue|from now on",
 )
 
-#: Managing existing work: a control verb AND a work noun.
+#: Managing existing work: a control verb and a work noun.
 _CONTROL_RE = re.compile(
     r"(?i)останови|прекрати|приостанови|поставь на паузу|возобнови|отмени"
     r"|\bstop\b|\bpause\b|\bresume\b|\bcancel\b",
@@ -54,8 +47,7 @@ _WORK_NOUN_RE = re.compile(
     r"|\bwork\b|\bgoal\b|\btask\b|\blearning\b|\bcampaign\b",
 )
 
-#: Do-it-now imperatives; routing falls through to the loop either way, the
-#: label exists for the journal and for future completion contracts.
+#: Do-it-now imperatives; label only, routing is the same.
 _IMMEDIATE_RE = re.compile(
     r"(?i)\bпроверь|\bизмерь|\bзапусти|\bвыполни|\bсделай|\bпокажи"
     r"|\bcheck\b|\brun\b|\bverify\b|\bmeasure\b",
@@ -68,11 +60,7 @@ class ActivityDecision:
     reason: str
 
 
-#: An order LEADS the utterance; a narrative mentions verbs mid-text. Live
-#: proof 2026-08-17 (trace_68084781): the console glued a paste tail to a
-#: typed order («…выдумка.Начни…») and the whole-text scan minted a task
-#: from the chimera; a proof-demand question was likewise hijacked into
-#: goal_control by verbs buried in its argument.
+# An order leads the utterance; verbs buried mid-text (pasted tails, arguments) do not count.
 _HEAD_CHARS = 30
 
 
@@ -82,11 +70,7 @@ def _leads(pattern: re.Pattern[str], text: str) -> bool:
 
 
 def decide_activity(text: str) -> ActivityDecision:
-    """One decision, deterministic, before any channel semantics.
-
-    Directives are read from the UNQUOTED text only: mention is not use —
-    a persistent goal is born from a top-level directive, never from a
-    quote, an example, code, or a description of expected behaviour."""
+    """Return one deterministic decision from the unquoted text."""
     t = (text or "").strip()
     if not t:
         return ActivityDecision("conversation", "empty input")
