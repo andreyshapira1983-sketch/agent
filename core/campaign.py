@@ -110,7 +110,10 @@ def _verifier_llm(agent: Any) -> Any:
 
 
 def goal_met_now(goal: str, success_check: str, workspace: Any, started_at: Any, llm: Any = None) -> bool:
-    """Whether the goal criterion holds on fresh evidence, checked after EVERY working cycle (no model; no verdict written here)."""
+    """Whether the goal criterion holds on fresh evidence, checked after EVERY working cycle;
+    with `llm` the content judge may read the fresh product through the model;
+    no verdict is written here.
+    """
     if not str(success_check or "").strip():
         return False
     try:
@@ -387,7 +390,8 @@ def run_campaign(
     sleep_fn: Callable[[float], None] = time.sleep,
     on_cycle: Callable[[dict], None] | None = None,
 ) -> CampaignResult:
-    """Run a bounded autonomous campaign and return a full ledgered report; the model is called only inside `execute_action`."""
+    """Run a bounded autonomous campaign and return a full ledgered report; it calls no model
+    itself (models run in `execute_action`, `next_goal` and the verifier-backed goal judge)."""
     gather = gather_signals or _default_gather_signals
     execute = execute_action or _default_execute_action
     if ledger is None:

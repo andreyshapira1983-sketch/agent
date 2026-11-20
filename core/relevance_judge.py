@@ -62,7 +62,11 @@ def parse_verdict(raw: str) -> RelevanceVerdict | None:
 
 
 def judge_relevance(llm: Any, question: str | None, answer: str | None) -> RelevanceVerdict | None:
-    """One judge call; None means no score (off, empty, failure, malformed)."""
+    """One judge call; None means no score (off, empty input, malformed reply).
+
+    A failing `llm.complete` is NOT caught here: it propagates, and
+    loop_verification._judged_relevance journals it as sensor_failed.
+    """
     if llm is None or not judge_enabled():
         return None
     question, answer = (question or "").strip(), (answer or "").strip()

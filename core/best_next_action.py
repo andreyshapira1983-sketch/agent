@@ -753,8 +753,9 @@ def _candidate_open_self_improvement_issue(
         files = [str(item) for item in issue.get("related_files") or () if str(item)]
         if files:
             evidence.append("related files: " + ", ".join(files))
-        # Severity is taken FROM the record, not nailed down here, so a goal's own defects can pass
-        # `_partition_by_subject`.
+        # Severity is taken FROM the record, not nailed down here: a `high` registry record
+        # (the agent's own defect) must survive `_partition_by_subject` under an unrelated goal;
+        # a constant `medium` locked it out.
         # The record vocabulary stops at `high`; `critical` never comes from a record. An unknown
         # word reads as `medium`, so old records keep their weight.
         severity = str(issue.get("severity") or "medium")

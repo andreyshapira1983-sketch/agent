@@ -27,6 +27,8 @@ def record_capability_snapshot(
         rows = read_state_jsonl_unlocked(path) if path.is_file() else []
         last = rows[-1].get("blocked_tools") if rows else None
     except (OSError, ValueError):
+        # An unreadable journal counts as a change (the snapshot is appended, True returned):
+        # better to reopen a topic once too often than keep it locked after a real change.
         last = None
     if last == current:
         return False

@@ -485,7 +485,9 @@ class LLMPlanner:
                 dropped_tools.append(tool_name)
                 continue
 
-            # forbidden-action gate: a (tool, args) pair marked no-retry by ReplanPolicy cannot be revived; args canonicalised with sorted JSON keys
+            # forbidden-action gate: a (tool, args) pair marked no-retry by ReplanPolicy cannot be
+            # revived; canonicalise args exactly as ReplanPolicy._forbidden_actions does
+            # (sort_keys=True, ensure_ascii=False), or the membership test silently stops matching
             try:
                 canonical_args = json.dumps(args, sort_keys=True, ensure_ascii=False)
             except TypeError:

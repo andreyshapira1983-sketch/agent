@@ -343,8 +343,10 @@ def oversized_module_candidates(
 ) -> tuple[list[SignalRecord], str]:
     """Turn oversized source modules into grounded, report-only backlog signals; performs NO IO.
 
-    `files` is an iterable of ``(rel_path, content)``; each file at or above :data:`_OVERSIZED_MODULE_MIN_LINES` yields a
-    :class:`SignalRecord` with target ``split:<rel_path>``, ``evidence_ref`` ``<rel_path>:1`` and the line count as quote.
+    `files` is an iterable of ``(rel_path, content)``; each file whose longest function spans
+    at least :data:`_UNREADABLE_FUNCTION_LINES` lines yields a :class:`SignalRecord` (longest
+    first, at most :data:`_MAX_OVERSIZED_RECORDS`) with target ``split:<rel_path>``,
+    ``evidence_ref`` ``<rel_path>:<function line>`` and a quote naming the function and its size.
     """
     measured: list[tuple[int, int, str, str]] = []
     seen: set[str] = set()

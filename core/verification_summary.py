@@ -1,4 +1,7 @@
-"""Five-point verification explanation: only ``verified`` counts as confirmed; ``user_asserted`` and ``dialogue_supported`` are named in point 4 as NOT externally confirmed; a report with nothing examined has no answer tail but still explains itself for the journal."""
+"""Five-point verification explanation: ``verified`` and ``dialogue_supported`` count as
+confirmed (the tail says how many rest on this conversation);
+point 4 names the other claim verdicts, ``user_asserted`` included;
+nothing examined gives no answer tail but still explains itself for the journal."""
 from __future__ import annotations
 
 from dataclasses import dataclass

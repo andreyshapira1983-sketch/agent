@@ -1,4 +1,9 @@
-"""Data table of anatomy-map groups, kept in core on purpose so new core modules can register without touching scripts/."""
+"""Data table of anatomy-map groups, kept in core on purpose so new core modules can register without touching scripts/.
+
+GROUPS must stay a pure literal: scripts/gen_anatomy.py reads it with ast.literal_eval and never
+imports this module; core/anatomy_sync.py adds rows as text right after the source module's
+'"<name>",' entry, so keep double quotes and trailing commas.
+"""
 
 GROUPS: list[tuple[str, str, list[str]]] = [
     ("Interface & Interaction (§1)", "Operator-facing I/O, intent routing, output shaping.", [

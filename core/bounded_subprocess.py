@@ -1,4 +1,6 @@
-"""Run a subprocess with a timeout that kills the whole process tree and never re-reads the pipes."""
+"""Run a subprocess with a timeout that kills the whole process tree and never re-reads the pipes.
+Not `subprocess.run(timeout=)`: it kills only the direct child and, on Windows, then drains
+the pipes untimed, so a grandchild holding stdout hangs it."""
 
 from __future__ import annotations
 

@@ -70,7 +70,8 @@ def _leads(pattern: re.Pattern[str], text: str) -> bool:
 
 
 def decide_activity(text: str) -> ActivityDecision:
-    """Return one deterministic decision from the unquoted text."""
+    """Return one deterministic decision: the hypothetical/meta veto scans the whole text,
+    quotes included; directives are read only from the unquoted text."""
     t = (text or "").strip()
     if not t:
         return ActivityDecision("conversation", "empty input")

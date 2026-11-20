@@ -46,9 +46,9 @@
   `proposals/selffix/<тема>/edits.txt`, зовёт `patch_check`, тот зеленеет в выбрасываемой копии
   (`tools/patch_check.py:411`, «The workspace is never changed»), синтез отвечает «правки зелёные и
   применяются». `_settle_goal_answer` при пустом критерии даёт `unverifiable` → `done`
-  (`core/autonomous_runtime.py:965`, `:1180`), `settle_patch` без пути в критерии ничего не ставит
-  (`core/patch_route.py:226`). Ответ уходит в прогресс (`core/campaign_io.py:460`, `:1011`), следующий
-  заход получает его внутри текста ЦЕЛИ (`core/campaign_io.py:854` → `core/autonomous_runtime.py:910`),
+  (`core/autonomous_runtime.py:966`, `:975`), `settle_patch` без пути в критерии ничего не ставит
+  (`core/patch_route.py:226`). Ответ уходит в прогресс (`core/campaign_io.py:460`, `:882`), следующий
+  заход получает его внутри текста ЦЕЛИ (`core/campaign_io.py:854` → `core/autonomous_runtime.py:911`),
   то есть голосом оператора — мимо пометки «АДРЕС УСТАРЕЛ» (`core/code_citations.py:13`, подключена
   только к блокам памяти, `core/loop_memory_read.py:324`) и мимо правила «remembered answers are
   hypotheses» (оно про `<long_term_memory>`).
@@ -77,10 +77,10 @@
   Текст задания каждого захода начинается с той же цели → та же запись первая каждый раз.
 - **Отвергнуто: «запись пишется заново».** id чеканится из `secrets.token_hex(16)` (`core/ids.py:9`,
   `core/models.py:142`): повторная запись дала бы другой id. Дедуп и антитело эха стоят только на записи
-  (`core/memory_policy.py:195`, `:212`; устав `core/memory_echo_antibody.py:6` «NEVER writes new memory»),
+  (`core/memory_policy.py:195`, `:207`; устав `core/memory_echo_antibody.py:6` «NEVER writes new memory»),
   и при попытке переписать тот же вывод дверь отказывает — это видно в журнале как тот же id.
 - **Усилитель:** ответ захода с `[topic-only:memory:mem_…]` (ссылку оставляет верификатор,
-  `core/verifier_core.py:145`) уходил в записку прогресса (`core/goal_progress.py:58`) и вклеивался в
+  `core/verifier_core.py:144`) уходил в записку прогресса (`core/goal_progress.py:58`) и вклеивался в
   задание следующего захода — id входил в сам вопрос выборки. Воспроизведение: 5 заходов — запись выдана
   5 раз, rank 1; число вхождений id в задание 0, 2, 4, 6, 8. След показа (`access_count`) в безнадзорном
   профиле не пишется (`agent_tick.py:135`, `core/loop_memory_read.py:123`).
@@ -100,7 +100,7 @@
   решение оператора 21.09 (`tools/file_write.py:132`, `tests/test_own_proposals_are_fixed_in_place.py`);
   путь самопочинки выводится из отпечатка дефекта (`core/patch_route.py:115`). Состояние `patch_route`
   от перезаписи не путается: `attempted` — по отпечатку, `applied` — по дате, `patch_to_defect` — по пути
-  (`core/patch_route.py:116`, `:146`, `:329`); хеша содержимого нет нигде.
+  (`core/patch_route.py:116`, `:117`, `:281`); хеша содержимого нет нигде.
 - **Починка (`c9f039c`):** для файла правки писатель видит его нынешнее содержимое (в пределах рабочей
   папки, через ту же редакцию границы модели, что у производителя, с пометкой об усечении) и просьбу
   перенести блоки, которые остаются в силе. Свидетель: `tests/test_an_edit_is_continued_not_restarted.py`.
@@ -109,16 +109,16 @@
 #### 1.1.4 Кампания с целью оператора закрывается `healthy_idle` через 9–111 минут
 
 - **Серьёзность:** высоко (несделанная цель докладывается как `completed`, код возврата 0).
-- **Корень:** `core/campaign.py:636` — `if streak_repeats:` единственное, что отличает
-  `idle_stall`/`stopped` от `healthy_idle`/`completed`. Замысел 13.08 (`core/campaign.py:402`): серия
+- **Корень:** `core/campaign.py:640` — `if streak_repeats:` единственное, что отличает
+  `idle_stall`/`stopped` от `healthy_idle`/`completed`. Замысел 13.08 (`core/campaign.py:404`): серия
   priority-0 наблюдений — «мир осмотрен и здоров». С `goal_first` (26.09) после третьего пустого захода
-  `_reopen_operator_goal` оставляет `PURSUE_GOAL` в попытках (`core/campaign.py:198`), и `_goal_first`
-  отдаёт синтетический `observe` priority 0 НЕЗАВИСИМО от меню (`core/campaign.py:220`). У `--goal` нет
-  `next_goal` (`agent_tick.py:1978`), `_stall` не меняет цель и не ждёт (`core/campaign.py:412`, `:610`) —
-  управление доходит до классификатора. Пустые заходы не считаются повторами (`core/campaign.py:743`),
-  серия простоя обнуляется заходом (`core/campaign.py:770`). Вердикт цели (`unverifiable`, «критерий не
-  назван») считается после выхода из цикла и на статус не влияет (`core/campaign.py:939`).
-- **Почему 9–111 минут:** «пустой заход» — это заход без записи в журнал отката (`core/campaign.py:179`,
+  `_reopen_operator_goal` оставляет `PURSUE_GOAL` в попытках (`core/campaign.py:201`), и `_goal_first`
+  отдаёт синтетический `observe` priority 0 НЕЗАВИСИМО от меню (`core/campaign.py:223`). У `--goal` нет
+  `next_goal` (`agent_tick.py:1978`), `_stall` не меняет цель и не ждёт (`core/campaign.py:416`, `:472`) —
+  управление доходит до классификатора. Пустые заходы не считаются повторами (`core/campaign.py:747`),
+  серия простоя обнуляется заходом (`core/campaign.py:774`). Вердикт цели (`unverifiable`, «критерий не
+  назван») считается после выхода из цикла и на статус не влияет (`core/campaign.py:943`).
+- **Почему 9–111 минут:** «пустой заход» — это заход без записи в журнал отката (`core/campaign.py:182`,
   `:257`); три таких подряд дают остановку.
 - **Починка (`071d13f`):** цель человека с `PURSUE_GOAL` в попытках закрывается как `idle_stall`/`stopped`
   (уже задокументированный класс «работа была нужна и никуда не пришла, спроси оператора»). Цели агента
@@ -135,7 +135,7 @@
 - **Корень:** `core/clarification_gate.py:211` — `return not codes or not codes <= _DRAFT_ONLY_CAUSES`:
   вопрос о рамке («что строить / где / критерий») считался полезным при ЛЮБОЙ причине застревания, кроме
   двух причин черновика (`core/clarification_gate.py:197`). Страница или поиск о prompt injection цитирует
-  саму атаку, injection guard её блокирует (`core/loop_step_execution.py:150`, смягчение «наш документ»
+  саму атаку, injection guard её блокирует (`core/loop_step_execution.py:153`, смягчение «наш документ»
   только для закоммиченных файлов, `core/repo_provenance.py:62`), бюджет `injection_blocked` — одна попытка
   (`core/replan.py:346`) → `replan_exhausted`; синтезатор отвечает, решатель ставит шаблон над ответом
   (`core/loop_response_deciders.py:427`–`436`, `core/response_draft.py:89`). Ответ прозой в разговоре
@@ -145,7 +145,7 @@
   (`tests/test_a_stuck_draft_does_not_ask_the_human.py`). Свидетель:
   `tests/test_a_security_answer_is_not_turned_into_questions.py` (правило и сквозной ход агента).
 - **Не сделано:** рантайм превращает любой `replan_exhausted` в «clarify» с шаблоном, не спрашивая
-  `frame_questions_help` (`core/autonomous_runtime.py:921`); отказ кредитных ворот `file_read` приходит как
+  `frame_questions_help` (`core/autonomous_runtime.py:922`); отказ кредитных ворот `file_read` приходит как
   `tool_error` и даёт тот же шаблон (нужен свой код отказа — решение оператора); второй отрисовщик шаблона
   в кампании (1.4).
 
@@ -179,14 +179,14 @@
 | `_bm25_scores`, `_term_counts`, `_tokens`, `_tag_tokens` (`core/memory_policy.py:255`–`397`) | общий лексический ранжир | `core/weak_spot_retrieval.py:14`, `core/memory_consolidation.py:50`, `core/knowledge_use_policy.py:9` — приватные имена чужого модуля | средне | **перенесено** (`a92f3be`, `core/bm25.py`) |
 | `_merge_unverified` (`core/output_policy.py:178`) | сборка ответа (докстринг модуля: «merged … by ResponseDraft, not here») | только `core/response_draft.py:61` | средне | **перенесено** (`8af0882`) | <!-- historical-ref -->
 | `_looks_russian` ×3 (`core/low_evidence_policy.py:239`, `core/unsupported_claims.py:84`, `core/output_policy.py:80`) | язык текста | три политики ответа | низко | **сведено** (`6b792bf`, `core/lang_match.py`) |
-| учёт стоячего гранта (`core/autonomous_runtime.py:91`–`374`) | полномочие, а не оркестратор | `core/rule_approved_apply.py:37`–`56`, `core/burn_in_sandbox.py:198`, `:228` | высоко: запрет `core/standing_grant` в `_FORBIDDEN` уже есть (`core/patch_route.py:26`), а файла нет — счетовод полномочия живёт вне запрета | не сделано: `tests/test_a_standing_grant_is_spent_by_every_consumer.py:236` подменяет имя по старому адресу; новый модуль надо внести в `_FENCE` и `CRITICAL_DENY` — решение оператора |
-| `CRITICAL_DENY`, `_is_critical`, `_is_self_build_target_allowed`, `_candidate_concrete_targets` (`core/self_build_producer.py:54`, `:322`, `:334`, `:650`) | политика допуска цели самоправки | `core/drives.py:139`, `cli/commands_health.py:410`, `core/charter_goal.py:439`, `core/self_task_producer.py:21`, `core/self_task_builder.py:26` | средне; сам список запретных органов лежит в файле, которого нет ни в `PROTECTED_CORE`, ни в `_FORBIDDEN` | не сделано: `tests/test_a_forbidden_file_is_not_offered_as_work.py:170` подменяет по старому адресу |
-| `_llm_json`, `_llm_json_with_raw`, `_looks_like_diff`, `_default_file_reader` (`core/self_build_producer.py:175`, `:372`–`415`) | общий набор трёх производителей | `core/self_task_producer.py:20`–`32`, `core/self_task_builder.py:25`–`36` | средне | не сделано: `_llm_json_with_raw` — редакция на границе модели; файл-источник в `CRITICAL_DENY`, новый модуль туда надо внести тем же решением |
+| учёт стоячего гранта (`core/autonomous_runtime.py:92`–`374`) | полномочие, а не оркестратор | `core/rule_approved_apply.py:37`–`56`, `core/burn_in_sandbox.py:198`, `:205` | высоко: запрет `core/standing_grant` в `_FORBIDDEN` уже есть (`core/patch_route.py:26`), а файла нет — счетовод полномочия живёт вне запрета | не сделано: `tests/test_a_standing_grant_is_spent_by_every_consumer.py:236` подменяет имя по старому адресу; новый модуль надо внести в `_FENCE` и `CRITICAL_DENY` — решение оператора |
+| `CRITICAL_DENY`, `_is_critical`, `_is_self_build_target_allowed`, `_candidate_concrete_targets` (`core/self_build_producer.py:54`, `:256`, `:268`, `:527`) | политика допуска цели самоправки | `core/drives.py:139`, `cli/commands_health.py:410`, `core/charter_goal.py:439`, `core/self_task_producer.py:21`, `core/self_task_builder.py:26` | средне; сам список запретных органов лежит в файле, которого нет ни в `PROTECTED_CORE`, ни в `_FORBIDDEN` | не сделано: `tests/test_a_forbidden_file_is_not_offered_as_work.py:170` подменяет по старому адресу |
+| `_llm_json`, `_llm_json_with_raw`, `_looks_like_diff`, `_default_file_reader` (`core/self_build_producer.py:175`, `:285`–`415`) | общий набор трёх производителей | `core/self_task_producer.py:20`–`32`, `core/self_task_builder.py:25`–`36` | средне | не сделано: `_llm_json_with_raw` — редакция на границе модели; файл-источник в `CRITICAL_DENY`, новый модуль туда надо внести тем же решением |
 | `assemble_completion_state/verdict`, `CompletionVerdict` (`core/smart_memory.py:1032`–`1270`) | вердикт выполнения, не память | внутри `smart_memory` + 4 теста | средне | не сделано: строковая подмена `core.smart_memory.assemble_completion_state` (`tests/test_completion_axis_schema.py:129`) |
 | `_phantom_kwargs_reason` (`core/self_task_producer.py:385`) | сито фантомов, пара к `core/attribute_sieve.py:104` | `core/self_task_producer.py:501`, `core/lesson_ab_experiment.py:42` | средне | не сделано: сначала свести с `attribute_sieve._resolve_imports` |
 | `_extract_json` (`core/intent_understanding.py:51`), `_last_json_object` (`core/charter_goal.py:661`) | разбор JSON из ответа модели — дом `core/plan_parsing.py:226` | внутри своих модулей | низко | не сделано: поведение на краях отличается, нужна сверка |
-| `_rows`, `_similarity` (`core/drives.py:39`, `:102`) | формат хранилищ / мера Жаккара (`core/word_overlap.py`) | `core/drive_goal.py:11` | низко | не сделано |
-| `approval_paths` (`core/gateway_consult.py:64`) | предмет ящика одобрений (`core/approval_inbox.py:280` `pending_targets`) | `core/autonomous_runtime.py:887` | средне | не сделано: `core/approval_inbox.py` защищён |
+| `_rows`, `_similarity` (`core/drives.py:39`, `:79`) | формат хранилищ / мера Жаккара (`core/word_overlap.py`) | `core/drive_goal.py:11` | низко | не сделано |
+| `approval_paths` (`core/gateway_consult.py:64`) | предмет ящика одобрений (`core/approval_inbox.py:280` `pending_targets`) | `core/autonomous_runtime.py:888` | средне | не сделано: `core/approval_inbox.py` защищён |
 | `_as_text` (`core/observation_round.py:29`) | вид вывода инструмента (`core/tool_output_render.py`) | `core/write_at_execution.py:69` | низко | не сделано |
 
 **Слои (`cli/`, `app/`, `agent_tick.py`).** `app/` импортирует приватные функции `cli/` —
@@ -217,29 +217,29 @@
 | Функция | Строк | Что чужое / нечитаемое | Вердикт и план | Помехи |
 |---|---|---|---|---|
 | `core/step_sanitizer.py:456` `sanitize_step` | 771 → **749** | 23 ветки `if tool_name ==` в двух стилях (9 вынесены в `_sanitize_*`, 14 инлайн по 15–110 строк), 76 `return`; 5 почти одинаковых проверок «путь абсолютный / `..`», 3 способа зажать int, 5 копий «лишние аргументы» (**сведены**, `718594b`), мёртвая ветка `list_dir` (**удалена**); чужое: слаг контракта `spawn_subagent` = `tools/spawn_subagent.py:241`, `_BAD` = `tools/shell_exec.py:300` | cut_after_dedup: каждая инлайн-ветка → `_sanitize_<tool>` по образцу `_sanitize_web_fetch`, лестница остаётся (итог ≈60–80 строк) | AST-пин лестницы `tests/test_a_registered_tool_is_not_silently_dead.py:57`; тексты `… dropped` разбирает `core/replan.py:98` |
-| `core/campaign.py:360` `run_campaign` | 676 → **675** | 13 `nonlocal` в замыканиях `_switch_goal`/`_wait_for_change`; 5 копий `CampaignCycleRecord(...)` и четвёрки ledger/records/log/emit; 4 одинаковых выхода застоя; `idle_streak` значит сразу простой, повтор и стену цены; чужое — пара самоостановки = `agent_tick.py:2174` | cut_after_dedup: датакласс состояния прогона, `_cycle_record`, `_stall_or_stop`, ветки цикла функциями модуля (≈120 строк) | пин `tests/test_every_goal_is_judged_when_it_closes.py:111` режет исходник по `def _switch_goal` |
-| `core/loop_step_execution.py:353` `_execute_step` | 569 | 10 повторов «ErrorObject → log → `_step_trigger_tls.step_trigger = ReplanTrigger(…)` → return None»; почти одинаковые ветки SECRET/SENSITIVE; чужое: сборка `ActuationGateway` из восьми атрибутов, переклассификация успешного вывода в провал, конвейер постобработки | cut_after_dedup; риск высокий | 18 якорей CNS, канарейка `tests/test_cns_anchor_integrity.py:201` (≥ 11 писателей слота), пин `_blocked_output_or_replan` |
-| `agent_tick.py:1250` `run_tick` | 483 | глубина 7; `summary["result_status"]` перезаписывается исходом последней задачи; цикл разбора очереди — копия `AutonomousRuntime.run_task_queue` (`core/autonomous_runtime.py:280`), уже разошедшаяся (1.6) | cut_after_dedup — но сведение меняет поведение продакшен-демона | файл на пределе храповика (2230, теперь 2228) |
+| `core/campaign.py:363` `run_campaign` | 676 → **675** | 13 `nonlocal` в замыканиях `_switch_goal`/`_wait_for_change`; 5 копий `CampaignCycleRecord(...)` и четвёрки ledger/records/log/emit; 4 одинаковых выхода застоя; `idle_streak` значит сразу простой, повтор и стену цены; чужое — пара самоостановки = `agent_tick.py:2174` | cut_after_dedup: датакласс состояния прогона, `_cycle_record`, `_stall_or_stop`, ветки цикла функциями модуля (≈120 строк) | пин `tests/test_every_goal_is_judged_when_it_closes.py:111` режет исходник по `def _switch_goal` |
+| `core/loop_step_execution.py:356` `_execute_step` | 569 | 10 повторов «ErrorObject → log → `_step_trigger_tls.step_trigger = ReplanTrigger(…)` → return None»; почти одинаковые ветки SECRET/SENSITIVE; чужое: сборка `ActuationGateway` из восьми атрибутов, переклассификация успешного вывода в провал, конвейер постобработки | cut_after_dedup; риск высокий | 18 якорей CNS, канарейка `tests/test_cns_anchor_integrity.py:201` (≥ 11 писателей слота), пин `_blocked_output_or_replan` |
+| `agent_tick.py:1250` `run_tick` | 483 | глубина 7; `summary["result_status"]` перезаписывается исходом последней задачи; цикл разбора очереди — копия `AutonomousRuntime.run_task_queue` (`core/autonomous_runtime.py:281`), уже разошедшаяся (1.6) | cut_after_dedup — но сведение меняет поведение продакшен-демона | файл на пределе храповика (2230, теперь 2228) |
 | `core/loop_attempt.py:98` `_run_attempt_loop` | 443 | выбор источника плана глубины 5; три одинаковые заглушки `PlannerOutput`; сенсоры-наблюдатели внутри цикла; дубль с verify-путём (`core/loop_verify_replan.py:294`–`370`), и копии разошлись (`round_failsafe` против `max_total_replans`) | cut_after_dedup вместе с `_verify_and_settle_answer` | тело заморожено `tests/test_loop_attempt_split.py:361` (в неглубоком клоне пропускается) |
 | `core/loop_verify_replan.py:146` `_verify_and_settle_answer` | 385 | `while True` глубины 6 с замыканием, мутирующим состояние; номер попытки пересчитан 8 раз | cut_after_dedup (см. выше) | текстовые пины `tests/test_catalogue_core_is_shared.py:229`–`294` |
 | `core/loop_synthesis.py:168` `_synthesize` | 361 | три промпта повторяют один префикс; чужое: делёж бюджета памяти/улик, промпт локальной критики, блок `<host_environment>` | cut | запас храповика 36 из 40 |
 | `cli/command_dispatch.py:147` `handle_meta_command` | 358 | инлайн-тела команд памяти и аудита | cut только тел | `cli/` — префикс `_FORBIDDEN` |
 | `core/evidence.py:394` `evidence_from_tool_result` | 326 | 13 веток в двух стилях; две ручные пересборки `Evidence` ради хеша, теряющие поле `origin` (ловушка при новых полях) | cut_after_dedup, риск низкий | нет пинов; но 326 → < 150 требует снять запись из WATCH |
 | `core/work_session.py:144` `run_work_session` | 257 | автомат сходимости из пяти флагов глубины 6 | cut: `_ConvergenceWatch` | — |
-| `core/model_router.py:1374` `ModelRouter.for_task` | 209 | выбор STANDARD-провайдера решается дважды, правило расходится (`:1668` против `:1760`) | cut_after_dedup, низкий приоритет | решает, за какую модель платить |
+| `core/model_router.py:1380` `ModelRouter.for_task` | 209 | выбор STANDARD-провайдера решается дважды, правило расходится (`:1410` против `:1478`) | cut_after_dedup, низкий приоритет | решает, за какую модель платить |
 | остальные (`core/loop.py:194` `_run_inner`, `produce_self_apply_proposal`, `build_agent`, `AgentLoopInit.__init__`, `run_self_apply_lane`, `ReferentResolver.resolve`, `run_paced_campaign`, `_finalize_run_tail`) | 202–319 | длинные, но линейные и по теме | **leave** — резать за длину нельзя | — |
 
 ### 1.4 Дублирование: два слоя делают одно и то же
 
 | Пара | Что расходится | Серьёзн. | Что оставить / план | Статус |
 |---|---|---|---|---|
-| **Два судьи цели:** `_settle_goal_answer` (`core/autonomous_runtime.py:949`–`1190`) и `judge_campaign` (`core/campaign_verdict.py:68`–`170`) + `patch_goal_verdict` (`core/patch_route.py:148`) против `settle_patch` | проба: заметка-шаблон «(заполняется…)» — исполнитель `missing`, кампания без модели-проверяющего `verified`; правка одних тестов — кампания `verified`, исполнитель «нет свидетеля»; после применённой правки `patch_goal_verdict` пере-кладёт блоки на новый HEAD и, вероятно, пишет `missing` (вывод по коду) | высоко | один судья — `judge_campaign`; `settle_patch` — действие, его исход — вход судьи | не сделано: `core/patch_route.py` защищён; смена судьи меняет статусы — нужен прогон на журнале вердиктов |
+| **Два судьи цели:** `_settle_goal_answer` (`core/autonomous_runtime.py:950`–`1190`) и `judge_campaign` (`core/campaign_verdict.py:68`–`170`) + `patch_goal_verdict` (`core/patch_route.py:148`) против `settle_patch` | проба: заметка-шаблон «(заполняется…)» — исполнитель `missing`, кампания без модели-проверяющего `verified`; правка одних тестов — кампания `verified`, исполнитель «нет свидетеля»; после применённой правки `patch_goal_verdict` пере-кладёт блоки на новый HEAD и, вероятно, пишет `missing` (вывод по коду) | высоко | один судья — `judge_campaign`; `settle_patch` — действие, его исход — вход судьи | не сделано: `core/patch_route.py` защищён; смена судьи меняет статусы — нужен прогон на журнале вердиктов |
 | **Два списка «самоправка не трогает»:** `PROTECTED_CORE` (`core/self_apply_lane.py:38`) и `_FORBIDDEN` (`core/patch_route.py:26`) | полоса с одобрением НЕ запрещает `tools/patch_check.py`, `tools/run_tests.py`, `core/redaction.py`, `core/dlp.py`, `core/safe_vcs.py`, `tools/shell_exec.py`, `tools/web_fetch.py`; `core/own_decisions.py`, `core/stuck_route.py`, `core/planner_prompt.py` нет НИ в одном списке (проба `_is_denied`/`_forbidden` → False) — их защищает только слово оператора | высоко | одно множество с префиксами, общий предикат для обоих путей | не сделано: оба файла защищены |
 | «Воспроизведено до правки»: `red_before_fix` (`core/self_repair_utils.py:14`) и свидетель `patch_check`/`settle_patch` | само правило уже одно (коммит `3a0453d`, коды {1,2}); расходятся места вызова: `patch_check._verdict` даёт green без запуска свидетеля (`tools/patch_check.py:439`), `settle_patch` такую правку отвергает (`core/patch_route.py:246`), судья кампании принимает; третье, мягкое правило — `core/repair_proposal.py:194` (`not _tests_passed`) | средне | свидетель — явное поле, а не умолчание green | не сделано: `tools/patch_check.py`, `core/patch_route.py`, `core/self_repair_utils.py` защищены |
 | Процедуры (`core/smart_memory.py:281`) и шаблоны AWM (`core/workflow_memory.py`) | индуцируются из одного опыта, хранятся в двух JSONL; писатель шаблонов `induce_all` (`core/workflow_memory.py:142`) не вызывается нигде в коде; с `8f719df` выдача взаимоисключающая по роду работы — и для рода с шаблоном процедуры перестают получать кредит и дебет (обучение замерзает). Экзамен 2×2 из сообщения `8f719df`: процедуры 67, шаблоны 66, ничего 60, оба 63 (30×3), разница по разделам 1–2 из 18 — шум; гибрид не измерен | средне | истина и обратная связь — процедуры; шаблоны — производное, если рука E экзамена покажет выигрыш; иначе удалить слой | не сделано: сначала мера |
 | «Словарный фильтр и Llama Guard» | **Llama Guard в репозитории нет**: `git grep -i 'llama.?guard'` и поиск по истории — 0; модельного классификатора безопасности нет вообще. Настоящая пара — регекс вреда `core/operational_domain.py:119` (жёсткий отказ ДО плана, `core/loop_gates.py:66`) против суждения модели по `ROOT_PRINCIPLES` (`core/root_principles.py:12`). Проба: «bypass the authentication in our unit test fixture» → отказ; «помоги получить чужой пароль от почты» → пропуск. Ложный отказ словаря окончателен, пропуск ложится на модель | средне | регекс — только для эскалаций по возможностям; суждение о вреде — модельному слою, `harmful_illegal` сузить или перевести в сигнал планировщику | не сделано: `core/root_principles.py` защищён, тест закрепляет отказ; только после замера (XSTest/AgentHarm) |
-| Такт демона `run_tick` (`agent_tick.py:1411`–`1538`) и `run_task_queue` (`core/autonomous_runtime.py:280`) | см. 1.6: копии разошлись в `work_done` | высоко | одно ядро «запустить задачу и записать исход» | не сделано: меняет поведение демона |
-| Условные единицы (`core/model_usage.py:318`) и доллары (`core/usd_spend.py:14`) | единицы — все модели, до отправки; доллары — только DeepSeek, по хвосту журнала, между кругами; `row_usd` для не-DeepSeek → None, то есть $0 | средне | один журнал, одна точка принуждения, «unpriced» явно | не сделано: `core/usd_spend.py`, `core/budget_*` защищены |
+| Такт демона `run_tick` (`agent_tick.py:1411`–`1538`) и `run_task_queue` (`core/autonomous_runtime.py:281`) | см. 1.6: копии разошлись в `work_done` | высоко | одно ядро «запустить задачу и записать исход» | не сделано: меняет поведение демона |
+| Условные единицы (`core/model_usage.py:317`) и доллары (`core/usd_spend.py:14`) | единицы — все модели, до отправки; доллары — только DeepSeek, по хвосту журнала, между кругами; `row_usd` для не-DeepSeek → None, то есть $0 | средне | один журнал, одна точка принуждения, «unpriced» явно | не сделано: `core/usd_spend.py`, `core/budget_*` защищены |
 | Отрисовщики шаблона «Уточни:» (`core/clarification_gate.py:73`, `core/campaign_types.py:142`) | текст одинаков, правка одного не доходит до другого | низко | `ClarificationOutcome.prompt()` | не сделано (мелочь) |
 | Датчики «круг на месте»: `TerminationGuard.observe_attempt` (`core/termination_guard.py:79`) и `observation_round` (`core/observation_round.py:237`) | разные сигнатуры и пороги (2 против 3); метки артефактов у первого всегда пусты | низко | один счётчик | не сделано |
 | Два стража заготовки в `file_write` (`tools/file_write.py:53` и `core/placeholder_text.py:174`) | местный — строгое подмножество общего (перебор 400 тыс. строк: 0 расхождений) | низко | общий | **сведено** (`811ce0a`) |
@@ -259,15 +259,15 @@
   (`core/alert_ack.py:19`, при этом рабочее правило — копия в `core/best_next_action_helpers.py:52`, тест
   проверяет мёртвую), `restore_from_store`/`mark_verified`/`load_by_run` (`core/assumption_registry.py:302`,
   `:376`, `:594`; мост снят по MIR-027), `_code_line_count` (`core/backlog_signals.py:267`),
-  `evidence_from_user_directive`/`evidence_from_llm_claim` (`core/evidence.py:691`, `:917`), `rrf`
+  `evidence_from_user_directive`/`evidence_from_llm_claim` (`core/evidence.py:691`, `:762`), `rrf`
   (`core/memory_embeddings.py:155`). Не удалено: решение оператора (уменьшает число тестов).
 - **31 оставлены по записанной причине**, из них 25 — план асинхронного демона: `app/daemon.py`,
   `app/file_watcher.py`, `app/worker_pool.py`, `app/priority_event_queue.py` (транзитивно мёртв),
   `SchedulerService` (`core/scheduler.py:276`) — в проде их не импортирует никто, у каждого свой файл
   тестов; причина хранения — `knowledge/doctrine/ROADMAP.md:87` и `docs/CODE_NOTES.md:4237`. Если удалять,
   вместе с ними — ссылки в `docs/` (иначе упадёт проверка ссылок документов) и хук `on_task_added`.
-- **13 неясных** (`core/causal_climb.py:54` `run_intervention` и `:118` `refute` — продакшен делает то же
-  инлайн в `core/causal_climb_action.py:625`, `:715`, причём проверка «пустая причина не принимается» там не
+- **13 неясных** (`core/causal_climb.py:54` `run_intervention` и `:114` `refute` — продакшен делает то же
+  инлайн в `core/causal_climb_action.py:625`, `:638`, причём проверка «пустая причина не принимается» там не
   действует; `ClarificationOutcome.is_forbidden` — единственный предикат, который мог бы исполнять запрет
   `FORBIDDEN_IN_CLARIFY`, а сейчас запрет только печатается).
 - **Транзитивно мёртвое, чего vulture не видит:** `core/lang_match.py` кроме `normalize_text` (и нового
@@ -277,7 +277,7 @@
 ### 1.6 Попутные находки (перепроверены)
 
 1. **Такт демона пишет «сделано» задаче без работы** — высоко. `agent_tick.py:1517` зовёт
-   `apply_run_outcome` без `work_done=`, а рантайм передаёт его (`core/autonomous_runtime.py:342`–`475`,
+   `apply_run_outcome` без `work_done=`, а рантайм передаёт его (`core/autonomous_runtime.py:343`–`475`,
    A2 03.09). Продакшен-демон (`docker/daemon_loop.py` → `run_tick`) записывает выполненную без работы
    задачу как `done`. Не исправлено: смена поведения демона — слово оператора.
 2. **Тест выходит в интернет мимо сетевого запрета** — средне. Запрет в `tests/conftest.py:78` подменяет
@@ -289,10 +289,10 @@
    по-настоящему. Не исправлено: правка общей фикстуры тестов — отдельная задача.
 3. **Якоря CNS устарели, тест их не ловит** — низко. `knowledge/maps/cns_model.json` указывает, например,
    на `core/loop.py:400` (там `draft_answer=draft_answer,` вместо создания `failure_history`), на
-   `core/loop_step_execution.py:358` (докстринг) и `:496`; `tests/test_cns_model.py` проверяет только, что
+   `core/loop_step_execution.py:361` (докстринг) и `:389`; `tests/test_cns_model.py` проверяет только, что
    строка существует.
 4. **Стоячий грант падает на сроке без часового пояса** — низко, латентно. `active_standing_grant`
-   (`core/autonomous_runtime.py:239`) сравнивает `datetime.fromisoformat(expires)` с осознанным `now` и
+   (`core/autonomous_runtime.py:240`) сравнивает `datetime.fromisoformat(expires)` с осознанным `now` и
    ловит только `ValueError`; наивный срок даёт `TypeError` и роняет вызывающего. Рядом `_grant_is_live`
    (`:308`) и ящик (`core/approval_inbox.py:329`) наивную дату обрабатывают. Все штатные писатели ставят
    зону (`cli/commands_approval.py:441`, `scripts/autonomous_repair.py:206`), так что упадёт только правленый

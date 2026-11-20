@@ -55,7 +55,8 @@ _PYTEST_EXIT_MEANING = {2: "interrupted", 3: "internal error", 4: "usage error",
 _NO_TESTS_BLOCKED_TOOLS: frozenset[str] = frozenset({"run_tests"})
 
 # Tools that must NOT run on the unattended goal path regardless of dry-run (applied via PolicyGate.blocked_tools, run-scoped, always restored; the REPL is unaffected).
-# spawn_subagent is never unattended; web reading (web_search / web_fetch) is open, other network egress stays closed.
+# spawn_subagent is never unattended; of the network tools only semantic_scholar_search stays
+# blocked here (web_search, web_fetch, rss_fetch are open).
 _AUTONOMOUS_GOAL_BLOCKED_TOOLS: frozenset[str] = frozenset(
     {
         "spawn_subagent",

@@ -174,7 +174,8 @@ class PersistentMemoryStore:
     def load(self) -> list[MemoryRecord]:
         """Full file scan — returns only LIVE (non-expired) records."""
         now = _dt.datetime.now(_dt.timezone.utc)
-        # One lock over read and eviction rewrite, for the same reason as `update`.
+        # One lock over read and eviction rewrite: an append landing between them
+        # would be overwritten.
         with state_file_lock(self.path):
             all_records = self._load_raw_unlocked()
             live = [rec for rec in all_records if not self._is_expired(rec, now)]

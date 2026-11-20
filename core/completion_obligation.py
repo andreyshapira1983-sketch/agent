@@ -35,8 +35,10 @@ _OBSERVING_TOOLS: frozenset[str] = frozenset({
     "find_in_files",
 })
 
-#: A path named in the question (shared with the loop's file-scope notice); a linear scanner, no ReDoS.
-#: Owned by core/file_request_intent.py and re-exported here to avoid a cycle and keep import sites.
+#: Extensions for paths named in the question (wider than the loop's list), scanned by the
+#: shared linear scanner via paths_mentioned.
+#: Owned by core/file_request_intent.py so completion_contract shares it without an import
+#: cycle; re-exported here for old import sites.
 _OBLIGATION_PATH_EXTS = OBLIGATION_PATH_EXTS
 
 

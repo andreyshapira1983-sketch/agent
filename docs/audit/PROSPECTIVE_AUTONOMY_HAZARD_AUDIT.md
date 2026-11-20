@@ -90,7 +90,7 @@ allowlist.
 that is read-only in name and mutating in `argv[1]` beyond the recorded pairs.
 
 ### I-3 — one chokepoint, and it fails closed
-`gateway.evaluate` is called from exactly one place: `core/loop_step_execution.py:246`.
+`gateway.evaluate` is called from exactly one place: `core/loop_step_execution.py:249`.
 Direct registry access elsewhere fetches only reading tools (`file_read`,
 `web_search`, `web_fetch`, `rss_fetch`) and `run_tests`. A missing policy raises
 rather than passes: `if self.policy is None: raise ValueError`.
@@ -309,12 +309,12 @@ data and starts being instruction.
 1. *Untrusted text enters.* `web_fetch` / `web_search` are live tools in the
    registry and their output reaches planning.
 2. *It is persisted.* Every tool output is scanned
-   (`core/loop_step_execution.py:547`), and a non-clean verdict is written to the
+   (`core/loop_step_execution.py:550`), and a non-clean verdict is written to the
    run journal with `InjectionScanResult.to_log_payload()`, whose findings carry
    **`excerpt`** — a slice of the offending text itself
    (`core/injection_guard.py:266`).
 3. *It is read back through a channel that does not re-check it.*
-   `_INJECTION_SCAN_EXEMPT` (`core/loop_step_execution.py:51`) holds exactly
+   `_INJECTION_SCAN_EXEMPT` (`core/loop_step_execution.py:54`) holds exactly
    `list_dir`, `run_tests`, `read_logs`. The exemption is by tool NAME, so
    anything `read_logs` returns is handed on without scanning.
 4. *The reader feeds a decision-maker.* `ReadLogsTool` is registered into the

@@ -403,7 +403,10 @@ class AssumptionStore:
 
 
     def compact(self, *, keep_last: int = 500, dry_run: bool = False) -> dict:
-        """Dedupe (newest row per (category, text) wins) and keep at most ``keep_last`` rows; ``dry_run`` only counts.
+        """Dedupe (newest row per (category, text) wins) and keep at most ``keep_last`` rows;
+        ``dry_run`` skips only the compaction rewrite: the read itself may still quarantine
+        malformed rows (or upgrade legacy rows) and rewrite the file,
+        like every state-integrity read.
         Rows without usable category/text strings are kept as unique rather than merged.
         """
         if keep_last < 0:

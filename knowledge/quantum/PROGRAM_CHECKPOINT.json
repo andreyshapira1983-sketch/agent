@@ -56,7 +56,7 @@
       "found": [
         "MAP: C00 and C03 closed without naming a single production path. A closed cluster with no site index cannot enter a bidirectional coverage index at all. Recovered and recorded in quantum_cns.coverage.unit_to_physical.",
         "MAP: C06's scope said 'caches' for a planner cache deleted at a990e48. Corrected with a dated note.",
-        "CODE (banked, not fixed): core/loop_memory_read.py:319 describes the deleted planner cache in the present tense. It was written as the correction of an earlier lying comment and outlived its subject by hours."
+        "CODE (banked, not fixed): core/loop_memory_read.py:318 describes the deleted planner cache in the present tense. It was written as the correction of an earlier lying comment and outlived its subject by hours."
       ],
       "verdicts": {
         "REACHABILITY": "PROVEN",
@@ -111,7 +111,7 @@
         "external": "none"
       },
       "preconditions_proven": "Before mutating: tool.calls=1, <failure_context> present, and `code=injection_blocked` present in the synthesizer prompt.",
-      "mutation": "ONE literal, core/loop_step_execution.py:542, code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort is unchanged and only the code text moves.",
+      "mutation": "ONE literal, core/loop_step_execution.py:545, code=\"injection_blocked\" -> code=\"unknown\". Both types have max_occurrences=1, so the abort is unchanged and only the code text moves.",
       "prediction": "GREEN — stated before the run.",
       "observed": "GREEN. Full suite on the mutant: 7285 passed, 1 xfail, pytest exit 0. The mutation was live: the prompt carried code=unknown and the journal's triggers list read ['unknown']. Restore byte-identical, hash 4eaa5500 before and after, subject guard INTACT.",
       "diagnosis": "Not unreachable, not vacuous, not equivalent, not journal-only. Partial redundancy for the OPERATOR observer only — the injection_blocked EVENT is written from the scan itself and stayed in the journal unchanged through the mutation, so a human still saw it while the synthesizer did not. Classification: a real unprotected distinction at delivery to a live-model consumer.",
@@ -337,7 +337,7 @@
         "durable_state": "temporary workspace",
         "external": "none"
       },
-      "mutation": "ONE literal at core/loop_step_execution.py:421, verify_failed -> web_empty. Both budget 2, both requires_different_action=False, so control flow is identical and only the advice text moves. The ErrorObject at :521 left alone so the trigger is isolated from the journal.",
+      "mutation": "ONE literal at core/loop_step_execution.py:424, verify_failed -> web_empty. Both budget 2, both requires_different_action=False, so control flow is identical and only the advice text moves. The ErrorObject at :521 left alone so the trigger is isolated from the journal.",
       "the_finding": "An unwalked producer is not an unprotected one. And the test that caught it — test_failure_context_contains_code_tool_reason — asserts `code=verify_failed` inside the planner's failure_context, which is exactly the assertion shape injection_blocked lacked. The pattern existed in this repository, in an MVP-8-era file, and was not carried to the newer security path.",
       "also_established": "A budget-2 code's ADVICE reaches the planner on the retry the budget buys: planner call 1 carries 436 characters containing both the code and the advice, call 0 carries none. That is the consumer C08-U2 could not exercise.",
       "verdicts": {
@@ -614,7 +614,7 @@
       },
       "evaluation_domain_class": "DOMAIN_RECORDED",
       "premise_proven_first": "Three poles measured on the real code. Readiness blocker plus check_readiness=True: gateway returns `block` with reason 'readiness_blocker: 2 approval item(s) pending', the file is NOT written, and gateway_blocked plus replan_exhausted are journalled. Same blockers with check_readiness=False: `allow`, file written. Nothing engaged: `allow`, file written. So the behaviour is CORRECT and the gate is check_readiness, not the tuple.",
-      "mutation": "ONE relation at the wiring, core/loop_step_execution.py:225: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
+      "mutation": "ONE relation at the wiring, core/loop_step_execution.py:228: check_readiness=bool(getattr(self, 'gateway_check_readiness', False)) forced to False. That disables exactly one producer of one outcome and leaves the kill-switch producer untouched.",
       "observed": "The mutation is live: the subject probe's gateway returned `allow`, the file reached the disk. FULL SUITE GREEN — 7313 passed, 5 xfailed, exit 0. A readiness blocker stopped being able to stop an effectful write and nothing in the suite noticed. Restore byte-identical (4eaa5500), subject INTACT.",
       "the_certifying_test_stayed_green": "Under the same mutation, tests/test_gateway_refusals_stop_the_effect_c08.py passed both its cases, because M53 drives `block` through a latched kill switch. A certification of an OUTCOME is not a certification of its PRODUCERS — measured here, not argued.",
       "made_durable": "tests/test_gateway_readiness_block_stops_the_effect.py asserts the same three facts the kill-switch test does — the effect does not happen, the refusal is journalled under its own code, the failure reaches the replan machinery — and additionally requires the block to be attributed to the readiness producer BY NAME, so a block arriving from the kill switch cannot satisfy it. Two controls carry the anti-vacuity: with the gate off, and with nothing engaged, the write goes through. Fail-before verified.",

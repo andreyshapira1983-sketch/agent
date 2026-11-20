@@ -39,7 +39,10 @@ from core.step_sanitizer import fit_resolved_arguments, resolved_url_refusal
 # Thread-local slot for per-step replan triggers: parallel workers each own an isolated slot (no shared-state race).
 _step_trigger_tls: threading.local = threading.local()
 
-# Tools that read only the local workspace (trusted boundary): the injection guard is skipped for them.
+# Tools that read only the local workspace: only the soft secret-KEYWORD layer is off for them
+# (credential shapes still count).
+# NOT an injection exemption: they are still injection-scanned unless also listed in the
+# injection-scan exempt set below.
 _TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
     "file_read",
     "list_dir",
@@ -824,7 +827,8 @@ class AgentLoopStepExecution:
                     "data_class": cls_result.cls.value,
                 }
 
-            # PUBLIC/INTERNAL/SECRET-flagged data: cache the original output and return it as-is (secret_detected was already logged above).
+            # PUBLIC/PRIVATE data only (SECRET and SENSITIVE already returned redacted above):
+            # cache the original output; `else` returns it as-is.
             if self.memory is not None and action.tool_name:
                 self.memory.cache_store(
                     tool_name=action.tool_name,

@@ -1,6 +1,8 @@
 """Agent Market worker loop: poll, assign, run agent, submit, check status.
 
-Golden path of the marketplace; a row is parsed without memory of the past (first job, rework, resubmission after a dispute, or a question about a submitted job).
+Golden path of the marketplace; `classify` reads a row without memory (first job, in-flight,
+rework, dispute redo). A buyer message on a submitted job is answered once: its createdAt is
+kept in data/market/state.json, also across restarts.
 Only jobs from `allowed_jobs` are taken; the rest are journaled as awaiting permission, and there are no bids.
 """
 from __future__ import annotations
@@ -124,7 +126,8 @@ class MarketWorker:
         rows = self.client.my_assignments("in_progress") + self.client.my_assignments("submitted")
         for row in rows + self.client.my_assignments("accepted"):
             self.ledger.observe(row)
-        # Nearest deadline first: the buyer may cancel for free before it.
+        # Nearest deadline first: after `start` the buyer may cancel without paying once
+        # slaDeadlineAt has passed with no submission.
         rows.sort(key=lambda r: sla_seconds_left(r) if sla_seconds_left(r) is not None else float("inf"))
         reports = []
         for row in rows:

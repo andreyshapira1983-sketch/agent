@@ -217,7 +217,8 @@ class AgentLoopInit:
         # Whether this turn was a conversational correction / request to explain the agent's previous reply; decided per turn.
         self.last_self_analysis: SelfAnalysisDecision | None = None
         # Trust metadata over the Evidence chain.
-        self.last_confidence_vector: Any = None  # reads a memory record
+        # Read by the memory write (episode relevance_score) and the verification summary.
+        self.last_confidence_vector: Any = None
         # Source ranking is logged; the Ranker-to-Output Policy uses it to cap confidence for unsuitable realtime sources.
         self.last_source_ranking: SourceRankingReport | None = None
         # Source registry: catalog view over the same chain (source records plus first-pass claims).

@@ -433,7 +433,9 @@ def _parse_proposal(goal: str, data: dict[str, Any]) -> SubagentProposal:
 _DEFAULT_BUDGET = BudgetScope()
 _ALWAYS_FORBIDDEN = ("shell_exec", "send_message", "send_proposal", "reply_to_client",
                      "contact_client", "file_write")
-# A private tag is judged by WHOLE words of the tag, not pieces: "key-findings", "tokenizer", "secretary" are ordinary tags.
+# A private tag is judged by WHOLE words of the tag, not pieces: "key-findings", "tokenizer",
+# "tokens-budget" are ordinary tags. English "secretary" IS private (it fullmatches secret\w*);
+# the Russian word for secretary does not match.
 _PRIVATE_WORD_RE = re.compile(
     r"private\w*|secrets?|secret\w*|credentials?|passw\w*|personal\w*|pii"
     r"|приват\w*|личн\w*|секретн\w*|секреты?|парол\w*",

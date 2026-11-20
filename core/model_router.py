@@ -1289,7 +1289,13 @@ class ModelRouter:
     def _resolve_tier_provider(
         self, tier: Any, role_key: str
     ) -> tuple[str | None, str | None, list[str]]:
-        """Choose a provider for *tier* by complexity preference; returns (provider, reason, skipped) or (None, None, skipped) to keep the role default. The model is decided by the caller via tier_model_for. An explicit per-role provider, or one named in AGENT_TIER_PROVIDERS_* with a declared model, always wins."""
+        """Choose a provider for *tier* by complexity preference;
+        returns (provider, reason, skipped) or (None, None, skipped) to keep the role default.
+        The model is decided by the caller via tier_model_for.
+        An explicit per-role provider disables the preference (the role default wins);
+        a provider named in AGENT_TIER_PROVIDERS_* falls back to its declared model
+        when the catalog has none, but still needs support and credentials
+        and must fit AGENT_MODEL_MAX_COST; the first eligible provider in order wins."""
         explicit = self._routes.get(role_key)
         if explicit is not None and _normalise_provider(explicit.provider):
             return None, None, []

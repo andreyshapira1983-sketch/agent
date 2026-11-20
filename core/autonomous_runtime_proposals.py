@@ -1,4 +1,7 @@
 """Mixin that generates, parses and de-duplicates self-improvement proposals and drives the self-build producer."""
+# Pinned: tests/test_autonomous_runtime_proposals_split.py compares the moved functions it
+# lists with git history by AST, docstrings included; a code or docstring edit to one turns
+# it red unless that function moves to EVOLVED_AFTER_MOVE with its change named.
 from __future__ import annotations
 
 import hashlib

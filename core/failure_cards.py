@@ -542,7 +542,7 @@ def learn_after_turn(loop: Any) -> None:
         llm = router.for_role(ModelRole.MEMORY_SUMMARY) if router is not None else None
         store = learn_from_events(ws, read_events(path), llm,
                                   trace_id=str(getattr(log, "trace_id", "") or ""))
-        # A lesson was not asked for: the turn lives on, the reason goes to the journal.
+        # A failed lesson query does not stop the turn; its error is logged to the journal.
         for err in store.lesson_errors:
             _log(loop, "failure_card_lesson_error", {"error": err})
     except Exception as exc:  # noqa: BLE001 — учёба не должна ронять ход; причина — в журнал

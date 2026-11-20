@@ -363,7 +363,8 @@ def _every_claim_confirmed(tail_lines: list[str]) -> bool:
 
 
 def _chat_caveats(lines: list[str], tail_lines: list[str]) -> list[str]:
-    """Caveats for the human: one sentence or a list with one bullet; internal notes in words, once."""
+    """Caveats for the human: one item as a sentence, several as a list with a single '— '
+    bullet style; internal notes in words, once."""
     items: list[str] = []
     spoken = ""
     for raw in lines:
@@ -482,7 +483,10 @@ def format_human_response(answer: str) -> str:
         if any(low.startswith(p) for p in _SKIP_PREFIXES):
             section = "skip"
             continue
-        # The verification tail, the ask-back and the requested-format line (core/requested_format.py) land after the contract sections, so they are bucketed by their fixed prefixes, independent of the current section.
+        # Tail, ask-back, substituted-model and excision notices land after the contract
+        # sections, so they are bucketed by fixed prefix in any section.
+        # The requested-format line (core/requested_format.py) is bucketed only in the skip
+        # section (after Safety): is_tail_line matches any upper-case 'LABEL: value' line.
         if stripped.startswith(
             (_VERIFICATION_TAIL_PREFIX, _ASK_BACK_PREFIX,
              _SUBSTITUTED_MODEL_PREFIX, *_EXCISION_PREFIXES)

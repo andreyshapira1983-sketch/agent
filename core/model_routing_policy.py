@@ -1,7 +1,7 @@
 """The agent's own routing policy: which model answers which role and why; decisions are journaled without secrets."""
 # Layering in ModelRouter.route_for: agent policy -> env pins -> registry selection policy -> default. A record whose provider lost
-# its key falls through to the next layer, never to an uncredentialed call. This module stores the operator's decisions and
-# validates their form; it never ranks models in code.
+# its key falls through to the next layer, never to an uncredentialed call. This module stores
+# the agent's own routing decisions and validates their form; it never ranks models in code.
 from __future__ import annotations
 
 import os

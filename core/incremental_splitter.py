@@ -157,9 +157,9 @@ def _module_name(rel: str) -> str:
 def _pick_new_module_path(
     workspace: Path, target: str, suffix: str, *, numbered: bool = True,
 ) -> str | None:
-    """Name of the new module, unnumbered; None if the name is already taken.
-
-        Numbering (`_methods2`) stays with mixin mode, where the layering order is pinned by a test.
+    """Path `<target stem>_<suffix>.py` for the new module; if taken: None when numbered=False
+    (function mode), else (default, mixin mode only) the next free `<stem>_<suffix>N.py`,
+    N=2,3,..., whose layering a test pins.
     """
     base = target.replace("\\", "/").removesuffix(".py")
     candidate = f"{base}_{suffix}.py"

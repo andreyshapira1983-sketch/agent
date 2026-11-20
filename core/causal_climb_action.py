@@ -820,7 +820,8 @@ def _live_inventory_block(workspace, named=()):
 def birth_experiment_specs(
     *, agent: Any, workspace: str | Path,
 ) -> CampaignActionOutcome:
-    """Give a marked claim a sandbox experiment spec or an honest unexpressible note; the court never calls a model."""
+    """Ask the model for a marked claim's sandbox experiment spec, else record an unexpressible
+    note; kept outside the court, which never calls a model."""
     import dataclasses
 
     ws = Path(workspace)

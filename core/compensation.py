@@ -215,7 +215,9 @@ def _apply_action(action: CompensationAction, workspace_root: Path) -> Compensat
                 action, status="noop", detail="path already absent"
             )
         if target.is_dir():
-            # Safe to rmtree: everything above is refused by `_protected_root`.
+            # `_protected_root` refuses only the listed roots themselves, NOT the workspace root:
+            # a plan path of '.' or '' passes `_resolve_inside` and would reach this rmtree
+            # (no guard for that yet; plans are trusted to name tool-created paths).
             shutil.rmtree(target)
         else:
             target.unlink()

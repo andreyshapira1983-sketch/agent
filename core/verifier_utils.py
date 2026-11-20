@@ -631,7 +631,9 @@ def _number_is_a_date(text: str, m: Any) -> bool:
     return bool(re.search(r"[–—-]\s*$", before))
 
 
-#: A clarifying parenthesis ("according to the search - ...", "of which ...", "total ...") is not an item list. A list with quantities ("rotor-33: 5 pcs, gasket-9: 0 pcs") stays a list.
+#: A clarifying parenthesis ("according to ...", "of which ...", "in total ...", or the Russian
+#: equivalents) is not an item list; a bare "total ..." is not recognised. A list with
+#: quantities ("rotor-33: 5 pcs, gasket-9: 0 pcs") stays a list.
 _ITEM_CARRIES_A_COUNT_RE = re.compile(
     r"(?i)^(?:по\s+данным|согласно|всего|итого|according|in\s+total)|\bиз\s+них\b|\bof\s+which\b")
 

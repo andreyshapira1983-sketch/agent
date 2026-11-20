@@ -105,7 +105,7 @@ _Planning, verification, clarification, control loop._
 | `core/verifier_core` | The verifier's `verify()` entry point: turns a draft answer and its evidence chain into a per-claim verdict report. |
 | `core/verifier_models` | Verifier value types: a citation, a claim chunk and the verification report; extracted from `core/verifier`. |
 | `core/verifier_patterns` | Compiled patterns the verifier matches with: citations, sentence splits, headings, and statistical figures. |
-| `core/verification_summary` | Five-point verification explanation: only ``verified`` counts as confirmed; ``user_asserted`` and ``dialogue_supported`` are named in point 4 as NOT externally confirmed; a report with nothing examined has no answer tail but still explains itself for the journal. |
+| `core/verification_summary` | Five-point verification explanation: ``verified`` and ``dialogue_supported`` count as confirmed (the tail says how many rest on this conversation); point 4 names the other claim verdicts, ``user_asserted`` included; nothing examined gives no answer tail but still explains itself for the journal. |
 | `core/sensor_journal` | One channel for failures of observational sensors. |
 | `core/verifier_utils` | Verifier text utilities: chunk splitting, citation parsing and matching, and statistical-claim detection. |
 | `core/verifier_absence` | Certifying a claim of ABSENCE — the half of verification a citation cannot do. |

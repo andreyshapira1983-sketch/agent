@@ -491,9 +491,10 @@ class LLM:
     ) -> tuple[str, str]:
         messages: list[dict] = [{"role": "user", "content": user}]
         if prior:
-            # The partial answer goes back either way, or the model restarts. Trailing whitespace is rejected only on a trailing assistant turn
+            # The partial answer goes back either way, or the model restarts instead of resuming.
             needs_closing_turn = not self._anthropic_supports_prefill(self.model)
-            # (a prefill); once a user turn follows, boundary whitespace must survive so the continuation is glued at the right place.
+            # Trailing whitespace is rejected only on a trailing assistant turn (a prefill); once
+            # a user turn follows it must survive so the continuation joins at the right place.
             messages.append({
                 "role": "assistant",
                 "content": prior if needs_closing_turn else prior.rstrip(),

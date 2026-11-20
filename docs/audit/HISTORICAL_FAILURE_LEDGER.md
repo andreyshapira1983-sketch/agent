@@ -131,7 +131,7 @@ has since become a login wall would resolve the citation and RAISE acceptance.
 |---|---|
 | external claim | Therac-25: the machine's self-report diverged from its state; the fast path was not itself the defect |
 | local applicability | the cheap path skips the knowledge pipeline and source-registry catalogue, justified in a comment by the chain being empty |
-| local reproduction | end-to-end on «привет» with one persistent record: `planner_cheap_path` fired **and** `evidence_collected` reported **1** evidence of kind `memory`. Memory is folded into the chain (`_fold_evidence_chain`, `core/loop.py:455`) BEFORE the catalogue decision (`:484`) |
+| local reproduction | end-to-end on «привет» with one persistent record: `planner_cheap_path` fired **and** `evidence_collected` reported **1** evidence of kind `memory`. Memory is folded into the chain (`_fold_evidence_chain`, `core/loop.py:455`) BEFORE the catalogue decision (`:464`) |
 | causal mechanism | the branch decided on the cheap-path FLAG and described a different condition — chain emptiness — that nothing checked |
 | why the behaviour is still right | running the pipeline over a memory-only chain would bank the agent's own record as new knowledge. That is self-confirmation, and the doctrine already exists (MIR-046: one's own memory is not an independent witness). **The skip is correct; only its reason was false** |
 | minimal fix | the condition now tests what it claims: `cheap_path_active and not chain_has_tool_evidence(chain)`. On the cheap path no tool evidence exists by construction, so behaviour is unchanged and the premise became true |

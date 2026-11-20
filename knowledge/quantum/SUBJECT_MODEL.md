@@ -790,7 +790,7 @@ a record that merely carries the key is not accepted as the claim's evidence.
 
 **`PRECEDENCE_VIOLATED` bites now, and it bit the certificate.** The earlier attempt
 failed and was recorded as unbitten. `AGENT_PROVIDER` provided a lever needing no
-source mutation: `core/llm.py:26` reads it and `:32` takes the `local` branch before
+source mutation: `core/llm.py:26` reads it and `:30` takes the `local` branch before
 the `AGENT_MODEL` override at `:35`, so the certificate asserted a rule D4 predicting
 `qwen-local`. **Observation: `gpt-4o-mini`.** The claim was true and the explanation
 was false, and the machine said so — the exact case where an outcome-only check

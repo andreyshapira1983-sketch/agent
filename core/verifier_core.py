@@ -79,7 +79,9 @@ def _dialogue_verdict_for(chunk_text: str, chain: ProvenanceChain) -> Evidence |
 
 #: Reasons that do NOT prove a lie: the evidence merely does not support the claim. A claim's distinctive words must occur verbatim in the evidence excerpt;
 #: an honest report citing the closest evidence would otherwise be stamped `refuted`. `absence_refuted_by_evidence` is a real refutation and stays a lie;
-#: `cited_literal_absent` proves only that the words are absent from the excerpt.
+#: `cited_literal_absent` (a foreign path or a number the evidence never printed) also stays a
+#: lie unless the cited union covers it; only `cited_support_missing` (the cited source lacks
+#: the claim's words) is mere missing support.
 _UNSUPPORTED_REASONS: frozenset[str] = frozenset({"cited_support_missing"})
 
 
