@@ -58,7 +58,13 @@ def _proposal_tokens(text: str) -> frozenset[str]:
 
 
 def _proposal_canonical_signature(kind: str, description: str) -> str:
-    """Return a deterministic bucket key like 'tests:claim:registry:source'; coarse so the inbox can be grepped."""
+    """Deterministic, human-readable bucket key like 'tests:claim:registry:source'.
+
+    Different `kind` always yields different signatures. Within a kind, two
+    descriptions collapse to the same signature only if their token-sets are
+    identical *after* taking the top alphabetic slice; this is intentionally
+    coarse so the operator can grep the inbox.
+    """
     kind = (kind or "other").strip().lower() or "other"
     toks = sorted(_proposal_tokens(description))
     return f"{kind}:{':'.join(toks[:6])}"
@@ -79,7 +85,8 @@ class AutonomousRuntimeProposals:
         config: AutonomousRuntimeConfig,
         budget: BudgetGovernor,
     ) -> AutonomousTaskReport:
-        """Ask the LLM for 1-3 bounded proposals and write them to the approval inbox; never executes them."""
+        """Ask the LLM for 1-3 bounded next-task proposals and write them to
+        the approval inbox. Never executes any proposal."""
         cap = max(0, int(budget.limits.max_proposals_per_run))
         if cap == 0:
             return AutonomousTaskReport(task, "skipped", "proposals disabled (cap=0)")
@@ -279,7 +286,11 @@ class AutonomousRuntimeProposals:
     def _existing_proposal_fingerprints(
         self,
     ) -> tuple[set[str], list[tuple[str, frozenset[str]]]]:
-        """Return (sha256 hashes, [(kind, token_set)]) of pending proposals for exact and Jaccard dedup."""
+        """Return (sha256_hashes, [(kind, token_set), ...]) for pending proposals.
+
+        Hashes catch verbatim repeats. Token sets feed the Jaccard-based
+        semantic dedup so reworded near-duplicates do not bloat the inbox.
+        """
         hashes: set[str] = set()
         token_sets: list[tuple[str, frozenset[str]]] = []
         try:
@@ -335,7 +346,11 @@ class AutonomousRuntimeProposals:
         return digest
 
     def _has_pending_self_build_proposal(self) -> bool:
-        """Return True when a self-apply proposal already awaits human review."""
+        """True when a self-apply proposal is already awaiting human review.
+
+        Prevents the tick from stacking a fresh (expensive) LLM-produced split on
+        top of one the operator has not decided on yet.
+        """
         try:
             return any(
                 item.operation == "self_apply_lane.run"

@@ -181,19 +181,19 @@
 
 | функция | где |
 |---|---|
-| `MarketClient.my_bids` | `core/market_client.py:192` |
-| `induce_all` | `core/workflow_memory.py:158` |
+| `MarketClient.my_bids` | `core/market_client.py:172` |
+| `induce_all` | `core/workflow_memory.py:142` |
 
 ### 3д. Функции, которые зовут только тесты (47)
 
 Рабочий код их не вызывает, тесты вызывают. Это не мёртвый код, но и не рабочий: либо недоподключено, либо осталось от прошлого. Самые крупные:
-* `ProceduralMemoryStore.recompute_legacy_confidence` (`core/smart_memory.py:851`, 88 стр.);
-* `_code_line_count` (`core/backlog_signals.py:321`, 54 стр.);
-* `run_intervention` / `try_generalization` / `refute` / `name_scope` (`core/causal_climb.py:58–129`);
-* `make_default_proposal` (`core/subagent_memory_scope.py:257`);
-* `extract_from_task_and_review` (`core/directive_extractor.py:345`);
-* `reviewer_vs_contract` (`core/instruction_conflict_gate.py:350`);
-* `SourceRegistry.register_claim` (`core/source_registry.py:275`);
+* `ProceduralMemoryStore.recompute_legacy_confidence` (`core/smart_memory.py:754`, 88 стр.);
+* `_code_line_count` (`core/backlog_signals.py:267`, 54 стр.);
+* `run_intervention` / `try_generalization` / `refute` / `name_scope` (`core/causal_climb.py:54–129`);
+* `make_default_proposal` (`core/subagent_memory_scope.py:234`);
+* `extract_from_task_and_review` (`core/directive_extractor.py:282`);
+* `reviewer_vs_contract` (`core/instruction_conflict_gate.py:275`);
+* `SourceRegistry.register_claim` (`core/source_registry.py:266`);
 * `format_duration_seconds` (`tools/current_time.py:14`).
 
 Полный список (путь:строка):

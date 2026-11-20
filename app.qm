@@ -103,8 +103,8 @@
             "id": "R-A",
             "name": "default-with-override",
             "sites": [
-              "core/ingestion.py:120 (ingest_web_topic)",
-              "core/ingestion.py:268 (ingest_rss_feed)"
+              "core/ingestion.py:107 (ingest_web_topic)",
+              "core/ingestion.py:255 (ingest_rss_feed)"
             ],
             "contract": "the attribute is read via getattr with fallback False and used as the DEFAULT for write_memory; an explicit auto_write_memory argument overrides it, and dry_run forces it off",
             "consequence": "whether ingested web/RSS knowledge is written to memory",
@@ -126,7 +126,7 @@
                 "identical": "yes, over all six cells"
               },
               "independence_proven": "mutating ONLY the first occurrence of the shared expression -- the web site's override line, `if auto_write_memory is not None` -> `if False` -- flipped cells 3 and 4 of the WEB partition and left RSS untouched. So these are two measurements, not one reported twice. Restored byte-identical.",
-              "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:206, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
+              "reachability_per_site": "PROVEN separately. Each site delivers its effective control into agent.knowledge_pipeline.run(auto_write_memory=...) -- web at core/ingestion.py:193, rss at :332 -- observed by a recording pipeline on a stub agent, True and False both arriving.",
               "quotient_decision": "REFUSED, and now for a MEASURED reason rather than for missing evidence. Equivalence is relative to a named boundary and the two sites answer differently at two of them. Under the CONTROL-PARTITION / writer-invocation boundary they are INDISTINGUISHABLE: both follow the control in all six cells and attribute every suppression to auto_write_memory. Under the WRITE-ADMISSIBILITY boundary in the shipped configuration they are SHARPLY DISTINGUISHABLE: RSS produces claims the default policy admits, and Web cannot produce one at all -- 0.615 against a floor of 0.65, for every source-library entry. Quotienting them would erase that difference, so they stay separate semantic regimes.",
               "not_inferred_from_R_B": "nothing here is carried over from R-B. That the pipeline gate controls the writer is R-B's result about R-B's delivery; R-A's own delivery reaching the same gate is proven, and its consequence is not.",
               "preserved_failed_probe": {
@@ -139,7 +139,7 @@
               },
               "rss_site_closure": {
                 "status": "PROVEN, non-vacuous. The subject was instantiated before the writer was read.",
-                "site": "core/ingestion.py:268 (ingest_rss_feed)",
+                "site": "core/ingestion.py:255 (ingest_rss_feed)",
                 "preconditions_proven_in_every_cell": {
                   "1 function reached": "entries_ingested = 2",
                   "2 valid entries accepted": "2 of 2, built from a feed whose entries carry title, url, summary and published_at",
@@ -167,7 +167,7 @@
               },
               "web_site_closure": {
                 "status": "PROVEN under a named configuration. In the shipped one the control-enabled STATE is reachable and its writer-invocation CONSEQUENCE is not. Both are stated because they differ.",
-                "site": "core/ingestion.py:120 (ingest_web_topic)",
+                "site": "core/ingestion.py:107 (ingest_web_topic)",
                 "state_space_derived_from_the_web_path": "not inherited from RSS. Web needs a source-library entry, a search whose output survives _candidate_urls, and a fetch whose output evidence_from_tool_result will credit. Its chain carries TWO evidence kinds -- web_search_hit and web_page -- where RSS carried one, and its claim text is 'Fetched page <url>', unique per URL, so page claims can never corroborate each other.",
                 "preconditions_proven_in_every_cell": {
                   "1 function reached": "report built",
@@ -189,7 +189,7 @@
                   "attr=False, override=False, dry=True  -> control False, writer_called=0, skipped=4, policy auto_write_memory"
                 ],
                 "attribution": "every suppression carries policy_id 'auto_write_memory'. Not an empty chain, not a missing writer, not the verification gate, not the write policy.",
-                "fail_before": "only the WEB read was cut (core/ingestion.py:120), leaving RSS and R-C intact. The module still parses, so the red is not syntax. S3 fails NAMING getattr_names_by_function.ingest_web_topic; S4 stays green, so it is not another regime. And the consequence follows: the enabled cell flips to control=False, writer_called=0, suppression still attributed to auto_write_memory rather than to another gate. Restored byte-identical, graph GREEN, writer_called=2 again.",
+                "fail_before": "only the WEB read was cut (core/ingestion.py:107), leaving RSS and R-C intact. The module still parses, so the red is not syntax. S3 fails NAMING getattr_names_by_function.ingest_web_topic; S4 stays green, so it is not another regime. And the consequence follows: the enabled cell flips to control=False, writer_called=0, suppression still attributed to auto_write_memory rather than to another gate. Restored byte-identical, graph GREEN, writer_called=2 again.",
                 "UNPROVEN": "that the memory write COMPLETES -- the writer is reached and its record is stubbed, as in RSS and R-B.",
                 "_SUPERSEDED_wording": "kept as evidence. This field once began 'the ENABLED pole cannot exist at the default write policy'. Read a week later that says the True branch is unreachable, which the six cells directly contradict. Replaced below at the precision the measurement carries.",
                 "reachable_and_unreachable_in_the_shipped_configuration": "In the shipped configuration the R-A Web control-ENABLED STATE is REACHABLE -- control=True is produced by two of the six cells -- and its MEMORY-WRITER INVOCATION CONSEQUENCE is UNREACHABLE under the default write policy. evidence_from_tool_result gives a web_fetch evidence a base confidence of 0.75; freshness is already maximal at 1.0 (not_time_sensitive); final = base x tier x freshness, so clearing min_claim_confidence=0.65 needs a tier multiplier of at least 0.867. ALL SIX source-library entries -- wikipedia, wikibooks, project_gutenberg, internet_archive, open_library, arxiv -- rank `reputable` = 0.82, giving 0.615. The two higher tiers are not reachable for a web_page. So no page the web path can fetch reaches the memory writer while the policy is at its default, and no choice of input fixes that.",
@@ -224,7 +224,7 @@
             "id": "R-B",
             "name": "conjunct",
             "sites": [
-              "core/loop_evidence_chain.py:133"
+              "core/loop_evidence_chain.py:123"
             ],
             "contract": "the attribute is read as self.knowledge_auto_write, ANDed with may_knowledge, and passed AS the auto_write_memory argument into knowledge_pipeline.run",
             "consequence": "whether the evidence chain's knowledge pipeline writes memory",
@@ -234,7 +234,7 @@
               "ENABLED": "auto_write_memory=True with two file-kind evidences yielding verified claims -> the writer is REACHED (writer_called=1). The stub's return shape then raises, after the call, which is what was being measured and not more.",
               "DISABLED": "identical claims, auto_write_memory=False -> writer_called=0, memory_skipped=2, and every decision carries policy_id 'auto_write_memory'. The pipeline distinguishes that from 'memory_writer_missing', so the refusal names THIS control value rather than a missing writer.",
               "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:288 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written. S1 goes red here because the two structural reads stopped matching; that the journal and the control value must otherwise agree at runtime is not something S1 establishes. Restored byte-identical; report=True, control=True, delivered=True again.",
-              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:518 -> the memory writer",
+              "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:395 -> the memory writer",
               "strongest_justified_statement": "R-B controls ADMISSION TO and INVOCATION OF the memory writer.",
               "established": [
                 "source identity",
@@ -254,14 +254,14 @@
             "name": "project-suppressed",
             "status": "TESTED",
             "sites": [
-              "core/ingestion.py:457 (_ingest_paths)"
+              "core/ingestion.py:427 (_ingest_paths)"
             ],
             "contract": "the same three statements as R-A, plus a fourth: `if mode == \"project\": write_memory = False`. An extra unconditional suppressor that R-A's sites do not have.",
             "_why_its_own_regime": "found while enumerating R-A's sites. It differs from R-A in the expression itself, so grouping it with R-A would be exactly the error the R-A/R-B split was made to avoid.",
             "behavioral_closure": {
               "status": "PROVEN at the DEFAULT write policy -- file evidence scores 0.9 x primary 0.95 = 0.855 against the 0.65 floor, so unlike Web nothing was held.",
               "state_space_derived_from_ingest_paths": "FOUR control statements where R-A has three, and the fourth sits AFTER the override: attr read -> explicit override -> dry_run -> `if mode == \"project\": write_memory = False`. Order is the contract: in R-A an explicit override=True wins; in R-C mode='project' suppresses even it.",
-              "reachability": "both modes reachable from real commands: :ingest-source -> mode='source' (core/ingestion.py:62), :ingest-project -> mode='project' (:87). The probe used real files and real chunking; this path has no tool registry to stub.",
+              "reachability": "both modes reachable from real commands: :ingest-source -> mode='source' (core/ingestion.py:49), :ingest-project -> mode='project' (:87). The probe used real files and real chunking; this path has no tool registry to stub.",
               "preconditions_proven_in_every_cell": "files_ingested>0, chain non-empty, claims>0, writer wired, require_verified held False",
               "control_partition_with_consequence": [
                 "source : attr=T over=-  dry=F -> True,  writer=1",

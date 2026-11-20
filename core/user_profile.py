@@ -16,7 +16,6 @@ from core.state_integrity import (
     state_file_lock,
 )
 
-
 ExpertiseLevel = Literal["novice", "intermediate", "expert"]
 VerbosityLevel = Literal["brief", "normal", "detailed"]
 

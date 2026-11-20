@@ -91,7 +91,7 @@
       {
         "id": "D4",
         "was": "AGENT_PROVIDER=local selects LOCAL_LLM_MODEL before AGENT_MODEL is consulted",
-        "source_reading": "core/llm.py:28 reads AGENT_PROVIDER, and :32 takes the local branch before the AGENT_MODEL override at :35",
+        "source_reading": "core/llm.py:26 reads AGENT_PROVIDER, and :32 takes the local branch before the AGENT_MODEL override at :35",
         "measurement": "WITHDRAWN. With AGENT_PROVIDER=local the observed llm_model stayed gpt-4o-mini, so the rule predicted qwen-local and the validator returned PRECEDENCE_VIOLATED — the certificate's own self-check caught the certificate.",
         "status": "AGENT_PROVIDER is a source-visible dependency that measurement shows INERT for this claim in this evaluation — the QT5 pattern, found again from the inside",
         "residue": "the mechanism that DOES produce the journal's llm_model is UNRESOLVED; the router in core/model_router.py is the next place to look, and until then D3 names a value that is right and an explanation that is not proven",
@@ -116,9 +116,9 @@
       "app/bootstrap.py:145 -- ModelRouter.from_env()",
       "app/bootstrap.py:161 -- llm = model_router.for_role(ModelRole.SYNTHESIZER)",
       "ModelRouter.for_role -- model = route.model or self.default_model; provider = route.provider or self.default_provider",
-      "core/model_router.py:941 _llm_factory -- _default_provider_name(None) is 'anthropic'; anthropic has NO credentials here, so the healing branch substitutes the first credentialed provider (openai) and DROPS the requested model, by design and by comment: 'drop the model so the substitute's own default is used'",
-      "core/llm.py:134 LLM.__init__ -- self.model = None or _default_model('openai')",
-      "core/llm.py:35 _default_model -- returns AGENT_MODEL when set, otherwise the literal 'gpt-4o-mini'",
+      "core/model_router.py:784 _llm_factory -- _default_provider_name(None) is 'anthropic'; anthropic has NO credentials here, so the healing branch substitutes the first credentialed provider (openai) and DROPS the requested model, by design and by comment: 'drop the model so the substitute's own default is used'",
+      "core/llm.py:97 LLM.__init__ -- self.model = None or _default_model('openai')",
+      "core/llm.py:32 _default_model -- returns AGENT_MODEL when set, otherwise the literal 'gpt-4o-mini'",
       "app/bootstrap.py:204 -- 'llm_model': llm.model is written into the session_start record"
     ],
     "causal_mutation": "AGENT_MODEL=via-agent-model -> the journal records via-agent-model. The projected value changes.",

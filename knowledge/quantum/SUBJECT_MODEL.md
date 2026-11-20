@@ -283,7 +283,7 @@ on one consequence* — bites in production code, without any construction:
 
 Those distinct decisions reach **five** emission sites (:351, :363, :386, :405,
 :417) that all write the same `code="policy_blocked"`, and the downstream consumer
-in `core/loop_run_tail.py:302` tests **only** `code == "policy_blocked"`. So the
+in `core/loop_run_tail.py:251` tests **only** `code == "policy_blocked"`. So the
 consequence partition is strictly coarser than the decision partition: two runs
 that differ in decision are the *same* run under the consequence observer.
 
@@ -759,7 +759,7 @@ at a command that writes no journal, the validator returns 2 rather than guessin
   prediction and the observation still agreed and the status stayed VALID;
 - the obvious explanation — a module-level capture of `AGENT_MODEL` before
   `load_dotenv` runs — was checked and **not supported**: the only read is inside a
-  function, `core/llm.py:35`.
+  function, `core/llm.py:32`.
 
 So the mechanism is **undiagnosed**, and `PRECEDENCE_VIOLATED` is an **unbitten
 status**. What the failure does show is a limit of the check itself: it compares a
@@ -790,7 +790,7 @@ a record that merely carries the key is not accepted as the claim's evidence.
 
 **`PRECEDENCE_VIOLATED` bites now, and it bit the certificate.** The earlier attempt
 failed and was recorded as unbitten. `AGENT_PROVIDER` provided a lever needing no
-source mutation: `core/llm.py:28` reads it and `:32` takes the `local` branch before
+source mutation: `core/llm.py:26` reads it and `:32` takes the `local` branch before
 the `AGENT_MODEL` override at `:35`, so the certificate asserted a rule D4 predicting
 `qwen-local`. **Observation: `gpt-4o-mini`.** The claim was true and the explanation
 was false, and the machine said so — the exact case where an outcome-only check
@@ -852,10 +852,10 @@ set, so it returns the route untouched. The producer is `_llm_factory`'s
 credential-healing branch:
 
 > `app/bootstrap.py:145` router → `:161` `for_role(SYNTHESIZER)` → route model
-> `gpt-5.4` → `core/model_router.py:941` `_llm_factory`: the default provider is
+> `gpt-5.4` → `core/model_router.py:784` `_llm_factory`: the default provider is
 > `anthropic`, **anthropic has no credentials here**, so the branch substitutes the
 > first credentialed provider and **drops the model**, by design and by its own
-> comment → `core/llm.py:134` `self.model = None or _default_model('openai')` →
+> comment → `core/llm.py:97` `self.model = None or _default_model('openai')` →
 > `:35` returns `AGENT_MODEL` when set, else the literal → `bootstrap.py:204` writes
 > it into `session_start`.
 

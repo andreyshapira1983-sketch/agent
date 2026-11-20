@@ -7,7 +7,6 @@ import os
 from dataclasses import dataclass
 
 
-
 @dataclass(frozen=True)
 class PromptRecord:
     """Immutable record for a registered prompt."""

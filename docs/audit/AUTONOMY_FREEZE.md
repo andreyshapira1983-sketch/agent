@@ -108,14 +108,14 @@ in the file named.
 
 | Site | What the code decides for the agent |
 |---|---|
-| `core/best_next_action.py:36` | a utility function written as numbers — daemon down 100, tick error 90, failing tests 80, engineering task 59, doctrine document 58, external study 57, self-improvement failure 55, inbox debt 50. The largest weight wins |
-| `core/autonomous_runtime.py:950` | the autonomous queue always opens with two prescribed tasks — inspect state, then plan and dry-run ingest — before any judgement is made about what is worth doing |
-| `core/learning_planner.py:181` | attention has a fixed price list (100 / 95 / 70 / 55 / 40) and `core/learning_planner.py:366` holds a hardcoded set of core files to study when no focus is given |
-| `core/subagent_registry.py:50` | five roles exist by default. The registry recommends keep / watch / pause / retire and never hires or fires |
-| `core/team_plan.py:233` | a second, separate predefined workforce built from keywords, in which one watcher is added whenever a team is deemed necessary at all |
-| `core/autonomous_runtime.py:74` | `spawn_subagent` is blocked on the unattended goal path, alongside `python_probe`, `rss_fetch`, `semantic_scholar_search`, `memory_bank`, `journal_append`. Web READ (`web_fetch`, `web_search`) was opened on that path by the operator's word on 2026-09-01 (`data/capability_events.jsonl`, second row); this row said «alongside the network tools» until 2026-09-03 (audit D2). Roles a human wrote in advance may run; a worker the agent decides it needs may not be created |
-| `core/subagent_runner.py:380` | a subagent is a one-shot loop with `memory=None` and `persistent_store=None`. A temporary executor can be created; an employee who accumulates experience cannot |
-| `core/charter_goal.py:14` | the agent picks its campaign goal itself, but the goal must anchor to a verbatim line of a document a human wrote. A one-time human push was replaced by a permanent human push stored in a file |
+| `core/best_next_action.py:23` | a utility function written as numbers — daemon down 100, tick error 90, failing tests 80, engineering task 59, doctrine document 58, external study 57, self-improvement failure 55, inbox debt 50. The largest weight wins |
+| `core/autonomous_runtime.py:783` | the autonomous queue always opens with two prescribed tasks — inspect state, then plan and dry-run ingest — before any judgement is made about what is worth doing |
+| `core/learning_planner.py:174` | attention has a fixed price list (100 / 95 / 70 / 55 / 40) and `core/learning_planner.py:323` holds a hardcoded set of core files to study when no focus is given |
+| `core/subagent_registry.py:29` | five roles exist by default. The registry recommends keep / watch / pause / retire and never hires or fires |
+| `core/team_plan.py:226` | a second, separate predefined workforce built from keywords, in which one watcher is added whenever a team is deemed necessary at all |
+| `core/autonomous_runtime.py:59` | `spawn_subagent` is blocked on the unattended goal path, alongside `python_probe`, `rss_fetch`, `semantic_scholar_search`, `memory_bank`, `journal_append`. Web READ (`web_fetch`, `web_search`) was opened on that path by the operator's word on 2026-09-01 (`data/capability_events.jsonl`, second row); this row said «alongside the network tools» until 2026-09-03 (audit D2). Roles a human wrote in advance may run; a worker the agent decides it needs may not be created |
+| `core/subagent_runner.py:322` | a subagent is a one-shot loop with `memory=None` and `persistent_store=None`. A temporary executor can be created; an employee who accumulates experience cannot |
+| `core/charter_goal.py:2` | the agent picks its campaign goal itself, but the goal must anchor to a verbatim line of a document a human wrote. A one-time human push was replaced by a permanent human push stored in a file |
 | `agent_tick.py:122` | on the unattended path `with_memory=False`, `episodic_replay=False`, and durable writes are restricted to a two-entry allowlist |
 
 The pattern is not five imposed subagents. It is a layer of

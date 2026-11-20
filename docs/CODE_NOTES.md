@@ -301,7 +301,7 @@ for streamed calls.** By the time a stream dies, chunks may already be on the
 user's screen; replaying from a substitute provider would emit the answer
 twice. The error is recorded (`status=error`) and re-raised — the synthesis
 ladder owns what happens next. A provider double without `stream_complete`
-falls back to the billed `complete`, the same rule `core/llm.py:384` applies
+falls back to the billed `complete`, the same rule `core/llm.py:299` applies
 inside `LLM` for non-streaming providers.
 
 The file-size ratchet ceiling moved 1800 → 1860 for this: the billed method
@@ -2302,7 +2302,7 @@ Worth recording, because it is the honest answer to "what will it find on its
 own". It read `core/loop.py` and `core/self_repair.py` and reported a defect:
 low-confidence repair proposals are not handled.
 
-The finding is wrong. `core/self_repair.py:117` sets `low_confidence`, records a
+The finding is wrong. `core/self_repair.py:111` sets `low_confidence`, records a
 blocked step, logs the gate and returns; a second gate at line 206 does the same
 for measured confidence after tests. The answer's own Fact 1 describes that
 mechanism correctly, and its Conclusion and Fact 2 assert the opposite — a

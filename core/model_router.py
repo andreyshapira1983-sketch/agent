@@ -1091,7 +1091,17 @@ class ModelRouter:
         usage_ledger: ModelUsageLedger | None = None,
         routing_policy: Any | None = None,
     ) -> ModelRouter:
-        """Build a router from default (AGENT_PROVIDER / AGENT_MODEL) and role-specific (AGENT_<ROLE>_PROVIDER / _MODEL) environment variables for planner, synthesizer, repair, repair_proposal, memory, verifier."""
+        """Build a router from default and role-specific environment variables.
+
+        Names are built from ``_ROLE_ENV_PREFIXES``; the literal flags are:
+            AGENT_PROVIDER / AGENT_MODEL (defaults)
+            AGENT_PLANNER_PROVIDER / AGENT_PLANNER_MODEL
+            AGENT_SYNTHESIZER_PROVIDER / AGENT_SYNTHESIZER_MODEL
+            AGENT_REPAIR_PROVIDER / AGENT_REPAIR_MODEL
+            AGENT_REPAIR_PROPOSAL_PROVIDER / AGENT_REPAIR_PROPOSAL_MODEL
+            AGENT_MEMORY_PROVIDER / AGENT_MEMORY_MODEL
+            AGENT_VERIFIER_PROVIDER / AGENT_VERIFIER_MODEL
+        """
 
         routes: dict[ModelRole, ModelRoute] = {}
         for role, prefixes in _ROLE_ENV_PREFIXES.items():

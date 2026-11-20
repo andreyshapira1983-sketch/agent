@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import Literal
 
-
 ClarificationMode = Literal["proceed", "clarify"]
 AllowedAction = Literal["ask_question", "diagnostic_report", "minimal_next_step"]
 

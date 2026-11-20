@@ -110,7 +110,7 @@ def honor(
             origin = "converted"
             try:
                 raw = convert(label, draft or answer)
-            except Exception:  # conversion never fails the answer; the missing line is stated below
+            except Exception:  # noqa: BLE001 — conversion never fails the answer; the missing line is stated below
                 raw = ""
             got = _last_value(raw, label) or ((_clean(raw), True) if raw.strip() else None)
             if got and (not got[0] or got[0].upper() == "NONE"):

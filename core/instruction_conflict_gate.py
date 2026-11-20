@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-
 AuthorityLevel = Literal[
     "operator",  # 1 owner of the system
     "task_contract",  # 2 what the task explicitly requires or forbids

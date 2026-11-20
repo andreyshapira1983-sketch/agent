@@ -90,7 +90,7 @@ allowlist.
 that is read-only in name and mutating in `argv[1]` beyond the recorded pairs.
 
 ### I-3 — one chokepoint, and it fails closed
-`gateway.evaluate` is called from exactly one place: `core/loop_step_execution.py:344`.
+`gateway.evaluate` is called from exactly one place: `core/loop_step_execution.py:246`.
 Direct registry access elsewhere fetches only reading tools (`file_read`,
 `web_search`, `web_fetch`, `rss_fetch`) and `run_tests`. A missing policy raises
 rather than passes: `if self.policy is None: raise ValueError`.
@@ -124,7 +124,7 @@ tool call that skipped the gateway.
 | H-27 | an external effect happens, its accounting does not | effects plus a separate ledger | **yes** | `tools/base.py:139-145` writes the invoke receipt for success AND failure — correct — but wraps the write itself in `except Exception: pass`, with no log | none on the failure path | source read 2026-08-27 | **LOCALLY_REACHABLE** | show a receipt write failing (read-only dir) while the effect lands | tripwire, not a fix: the swallow is deliberate, the SILENCE is the defect |
 | H-51 | recovery proven for one item, needed for many | a restore path exercised at unit scale only | **yes** | the state drill proves one isolated file | none — scale is untested | MIR-018 family | FUTURE_PLAUSIBLE_UNPROVEN | a drill over the simultaneous blast radius, not one store | record only |
 | H-43 | a value becomes STRUCTURE for the next parser | a text format where a value can close its own frame | **yes** | 24 JSONL stores | `json.dumps` escapes newlines — but no writer was audited for manual concatenation | not yet checked | queued | audit every JSONL writer for hand-built lines | examine next |
-| H-43 | a value becomes STRUCTURE for the next parser | a text format where a value can close its own frame | **yes**, 24 JSONL stores | every writer audited: `core/logger.py:36`, `core/checkpoint.py:135`, `core/state_integrity.append_state_jsonl` | `json.dumps` escapes the newline, so a value cannot end its own record; no hand-built line found | source read 2026-08-27 | ALREADY_PROTECTED | re-check if any writer ever formats a row by hand | none |
+| H-43 | a value becomes STRUCTURE for the next parser | a text format where a value can close its own frame | **yes**, 24 JSONL stores | every writer audited: `core/logger.py:36`, `core/checkpoint.py:95`, `core/state_integrity.append_state_jsonl` | `json.dumps` escapes the newline, so a value cannot end its own record; no hand-built line found | source read 2026-08-27 | ALREADY_PROTECTED | re-check if any writer ever formats a row by hand | none |
 | H-29 | corruption detected, and silently LESS data returned | a store that drops damaged rows | **yes** | `read_state_jsonl_unlocked`: a damaged row is QUARANTINED to `*.bad.jsonl` and the file rewritten with the survivors | evidence is preserved — better than the historical case | source read 2026-08-27 | ALREADY_PROTECTED, **with a named residual** | the CALLER is not told: `load()` returns fewer records and no runtime event is emitted | tripwire, not a fix |
 | H-41 | a weak or truncated hash used as a credential | a truncated digest standing for identity in an AUTHORITY path | **yes** | `_effects_dedup_key` = `sha256(goal)[:16]` — **64 bits** — and `_granted_effects_approval` finds a live approval BY that key | none: a collision would let an approval granted for goal A authorise goal B | source read 2026-08-27 | FUTURE_PLAUSIBLE_UNPROVEN | a demonstrated pair of goals colliding at 64 bits, plus a way to submit the second | the repair is one line (full digest) but it is a **migration contract**: existing pending items carry the old key and would stop matching |
 | H-47 | automatic failover itself causes the harm | a recovery path that runs unattended | **yes** | the catalog autorefresh fires from an ordinary tier lookup when the cache expires | throttled: `_AUTOREFRESH_DONE`, one attempt per process | live 2026-08-27 | **LIVE_OBSERVED, fixed same day (MIR-170)** | — | done: the refresh no longer deletes a provider it could not ask |
@@ -309,12 +309,12 @@ data and starts being instruction.
 1. *Untrusted text enters.* `web_fetch` / `web_search` are live tools in the
    registry and their output reaches planning.
 2. *It is persisted.* Every tool output is scanned
-   (`core/loop_step_execution.py:662`), and a non-clean verdict is written to the
+   (`core/loop_step_execution.py:547`), and a non-clean verdict is written to the
    run journal with `InjectionScanResult.to_log_payload()`, whose findings carry
    **`excerpt`** — a slice of the offending text itself
-   (`core/injection_guard.py:322`).
+   (`core/injection_guard.py:266`).
 3. *It is read back through a channel that does not re-check it.*
-   `_INJECTION_SCAN_EXEMPT` (`core/loop_step_execution.py:67`) holds exactly
+   `_INJECTION_SCAN_EXEMPT` (`core/loop_step_execution.py:51`) holds exactly
    `list_dir`, `run_tests`, `read_logs`. The exemption is by tool NAME, so
    anything `read_logs` returns is handed on without scanning.
 4. *The reader feeds a decision-maker.* `ReadLogsTool` is registered into the

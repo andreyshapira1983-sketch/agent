@@ -86,7 +86,7 @@
     "causal_mutation": "AGENT_KNOWLEDGE_AUTO_WRITE=0 -> the journal records false. Baseline with the variable unset records true.",
     "non_causal_mutation": "AGENT_SYNTHESIZER_MODEL=gpt-5.4 -> the journal still records true. That mutation provably LANDS elsewhere: it moves the synthesizer route reason to env:AGENT_SYNTHESIZER, measured during C2's closure.",
     "control_side_and_consequence": {
-      "consumer": "core/ingestion.py:120 and :268 -- write_memory = bool(getattr(agent, \"knowledge_auto_write\", False))",
+      "consumer": "core/ingestion.py:107 and :268 -- write_memory = bool(getattr(agent, \"knowledge_auto_write\", False))",
       "consequence": "the consumer decides whether ingested knowledge is written to memory. This is a control-flow consequence, stronger than C2's, whose only consumer returns a report through a tool boundary.",
       "measured": "build_agent yields agent.knowledge_auto_write True with the variable unset and False with it set to 0 — so the input the consumer reads follows the same lever as the reported value.",
       "IMPORTANT_the_two_are_siblings": "app/bootstrap.py reads the variable TWICE: line 224 for the journal and line 288 for the agent attribute. The reported value and the controlling value are therefore SIBLINGS of one source, not parent and child. They agree by construction and NOTHING CHECKS THAT THEY AGREE. A change to one read alone would make the journal lie about the control state, and no test in this repository would notice. Recorded as a finding of this certificate, not fixed by it."

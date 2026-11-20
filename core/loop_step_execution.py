@@ -49,10 +49,12 @@ _TRUSTED_INTERNAL_TOOLS: frozenset[str] = frozenset({
     "read_logs",
 })
 
-# Exempt from the INJECTION scan (narrower than the secret-keyword question above): the workspace is NOT a trusted boundary,
-# ingest-web, ingest-rss, ingest-project, clones and downloads put outside content into it. `file_read`, `diff_file`, `list_dir`
-# and `run_tests` are therefore scanned. `read_logs` stays exempt ON PURPOSE: the guard preserved its excerpts as evidence,
-# and the fix belongs on the write side. The rest return framework-shaped output (scanning it tripped false positives, see untrusted_scan_view).
+# Exempt from the INJECTION scan (narrower than the secret-keyword question above). The
+# workspace is NOT a trusted boundary: ingest commands, clones and downloads put outside
+# content into it, so `file_read`, `diff_file`, `list_dir` and `run_tests` are scanned.
+# `read_logs` stays exempt on purpose: its excerpts are evidence the guard itself saved.
+# Suppression conditions (MIR-181): framework-shaped exemptions — standing: the framework
+# produces that output; read_logs — until: excerpt defusing lands on the guard's write side.
 _INJECTION_SCAN_EXEMPT: frozenset[str] = frozenset({
     "read_logs",
 })

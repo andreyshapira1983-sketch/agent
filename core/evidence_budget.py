@@ -6,7 +6,6 @@ import re
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 
-
 # ~100 000 chars is ~30k tokens: the largest agent module reaches the synthesizer whole.
 EVIDENCE_FILE_CHARS:  int = 96_000   # per-artifact ceiling
 EVIDENCE_TOTAL_CHARS: int = 100_000  # total ceiling across all artifacts

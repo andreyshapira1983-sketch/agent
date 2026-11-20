@@ -1,12 +1,16 @@
-"""Reasoning vs action consistency check (MAST FM-2.6). Observational only: it reports, never blocks.
+"""Reasoning vs action consistency check (MAST FM-2.6); observational only: it reports, never blocks.
 
-    Pure-Python heuristic comparing the planner's free-text ``reasoning`` with the
-    chosen ``steps``. ``unjustified_action``: a step's tool has no recognisable
-    mention in the reasoning. ``mentioned_but_not_planned``: the reasoning names a
-    tool the plan lacks. The keyword table is only a fallback for plans without
-    per-step rationale; ``check_by_rationale`` judges whether a step states why it
-    is there. The detector's firing rate is high, so it must not gate anything;
-    tests/test_the_mismatch_sensor_was_measured.py pins the table against the registry."""
+Pure-Python heuristic comparing the planner's free-text ``reasoning`` with the
+chosen ``steps``. ``unjustified_action``: a step's tool has no recognisable
+mention in the reasoning. ``mentioned_but_not_planned``: the reasoning names a
+tool the plan lacks. The keyword table is only a fallback for plans without
+per-step rationale; ``check_by_rationale`` judges whether a step states why it
+is there.
+
+Measured firing rate (not an error rate): 190 of 268 planner turns (2026-08-19)
+and 54% of 1208 turns (2026-09-20). That is why it must not gate anything;
+tests/test_the_mismatch_sensor_was_measured.py pins the table against the registry.
+"""
 
 from __future__ import annotations
 

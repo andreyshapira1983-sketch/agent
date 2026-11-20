@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 AmbiguityKind = Literal[
     "missing_target",
     "conflicting_scope",

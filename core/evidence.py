@@ -14,7 +14,6 @@ from typing import Any, Literal
 from core.ids import new_id
 from core.injection_guard import carries_suspicious_annotation
 
-
 EvidenceKind = Literal[
     "file",             # file_read result — workspace file contents
     "web_page",         # web_fetch result — actual fetched page body
@@ -408,7 +407,7 @@ _ABSOLUTE_RE = re.compile(r"^(/|[a-z]:/)")
 
 
 def _norm_path(path: Any) -> str:
-    """Slashes, `.` and `..` resolved, case folded: `DOCS\..\Data` -> `data`."""
+    """Slashes, `.` and `..` resolved, case folded: `DOCS/../Data` -> `data`."""
     text = str(path or "").strip().strip("'\"`").replace("\\", "/")
     return posixpath.normpath(text).casefold() if text else ""
 
