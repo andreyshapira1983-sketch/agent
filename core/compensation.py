@@ -230,13 +230,13 @@ def _same_entry(a: Path, b: Path) -> bool:
 def _overlaps(target: Path, home: Path, workspace_root: Path, *, inside_too: bool) -> bool:
     """True when removing `target` removes `home` (target is home or above it), or with inside_too when target lies inside home."""
     for anc in (home, *home.parents):
-        if anc == workspace_root or anc == anc.parent:
+        if anc in (workspace_root, anc.parent):
             break
         if anc == target or _same_entry(anc, target):
             return True
     if inside_too:
         for anc in (target, *target.parents):
-            if anc == workspace_root or anc == anc.parent:
+            if anc in (workspace_root, anc.parent):
                 break
             if anc == home or _same_entry(anc, home):
                 return True
@@ -251,9 +251,7 @@ def _link_chain(path: Path, limit: int = 40) -> list[Path]:
         if not _is_link(current):
             break
         hops.append(current)
-        nxt = os.readlink(current)
-        if nxt.startswith("\\\\?\\"):
-            nxt = nxt[4:]
+        nxt = os.readlink(current).removeprefix("\\\\?\\")
         nxt_path = Path(nxt) if os.path.isabs(nxt) else current.parent / nxt
         current = Path(os.path.realpath(nxt_path.parent)) / nxt_path.name
     return hops
@@ -340,7 +338,8 @@ def _guarded_link(workspace_root: Path, own: Path) -> str | None:
 
 
 def _control_file(workspace_root: Path, path: Path) -> str | None:
-    from core.control_files import control_file_hit  # local import: control_files must not load at module import time
+    from core.control_files import control_file_hit
+
     return control_file_hit(workspace_root, path)
 
 
@@ -417,28 +416,37 @@ def _delete_created(action: CompensationAction, workspace_root: Path) -> Compens
     return CompensationOutcome(action, status="ok", detail=f"removed {action.path}")
 
 
-def _restore_backup(action: CompensationAction, workspace_root: Path) -> CompensationOutcome:
+def _restore_paths(action: CompensationAction, workspace_root: Path) -> tuple[Path, Path] | str:
+    """(target, backup) when both may be touched, else the reason to refuse."""
     if not action.path or not action.backup_path:
-        return _error(action, "restore needs both a target and a backup path")
+        return "restore needs both a target and a backup path"
     for role, rel in (("target", action.path), ("backup", action.backup_path)):
         if _is_link(_entry(workspace_root, rel)):
-            return _error(action, f"{role} path is a link; restore never follows one")
+            return f"{role} path is a link; restore never follows one"
     target = _resolve_inside(workspace_root, action.path)
     backup = _resolve_inside(workspace_root, action.backup_path)
     if target is None or backup is None:
-        return _error(action, "path escapes workspace")
+        return "path escapes workspace"
     if target == workspace_root:
-        return _error(action, "refusing to restore over the workspace root")
+        return "refusing to restore over the workspace root"
     if _touches_git(workspace_root, action.path, target) or _touches_git(workspace_root, action.backup_path, backup):
-        return _error(action, "refusing to touch anything under .git")
+        return "refusing to touch anything under .git"
     for role, path in (("target", target), ("backup", backup)):
         protected = _protected_root(workspace_root, path)
         if protected is not None:
-            return _error(action, f"refusing to touch protected root {protected!r} ({role})")
+            return f"refusing to touch protected root {protected!r} ({role})"
         if _control_file(workspace_root, path) is not None:
-            return _error(action, f"refusing to touch an operator-only control file ({role})")
+            return f"refusing to touch an operator-only control file ({role})"
     if target.is_dir():
-        return _error(action, "restore target is a directory")
+        return "restore target is a directory"
+    return target, backup
+
+
+def _restore_backup(action: CompensationAction, workspace_root: Path) -> CompensationOutcome:
+    checked = _restore_paths(action, workspace_root)
+    if isinstance(checked, str):
+        return _error(action, checked)
+    target, backup = checked
     if not backup.exists():
         return CompensationOutcome(action, status="noop", detail="backup already gone; the target was not restored by this run")
     backup_stat = os.lstat(backup)

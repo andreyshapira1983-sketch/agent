@@ -6,7 +6,12 @@ import pathlib
 
 import pytest
 
-from core.compensation import CompensationAction, CompensationPlan, _apply_action, apply_compensation_plan
+from core.compensation import (
+    CompensationAction,
+    CompensationPlan,
+    _apply_action,
+    apply_compensation_plan,
+)
 
 
 def _workspace(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -406,7 +411,7 @@ def test_an_operator_control_file_is_never_removed(tmp_path) -> None:
     from core.control_files import CONTROL_RELPATHS
 
     ws = _workspace(tmp_path)
-    rel = sorted(CONTROL_RELPATHS)[0]
+    rel = min(CONTROL_RELPATHS)
     (ws / rel).parent.mkdir(parents=True, exist_ok=True)
     (ws / rel).write_text("brake", encoding="utf-8")
 

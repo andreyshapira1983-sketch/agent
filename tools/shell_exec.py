@@ -1016,8 +1016,7 @@ class ShellExecTool(Tool):
     # Compensation plan — built BEFORE execution
     # ------------------------------------------------------------------
     def _build_compensation_plan(
-        self, cmd: str, argv: list[str], target_existed_before: bool,
-        target_path: Path | None = None,
+        self, cmd: str, argv: list[str], target_existed_before: bool, target_path: Path | None = None
     ) -> CompensationPlan:
         write_subs = WRITE_SUBCOMMANDS.get(cmd, frozenset())
         if write_subs and len(argv) > 1 and argv[1].strip().lower() in write_subs:
@@ -1055,12 +1054,6 @@ class ShellExecTool(Tool):
                     tool_name=self.name,
                     description=f"'{cmd} {path_str}' did not create a new path",
                 )
-            recorded = path_str
-            if target_path is not None:  # the path the command really acts on, not its spelling or a link in front of it
-                try:
-                    recorded = str(target_path.relative_to(self.workspace_root))
-                except ValueError:
-                    recorded = path_str
             return CompensationPlan(
                 tool_name=self.name,
                 description=f"undo '{cmd} {path_str}' by deleting the created path",
@@ -1068,7 +1061,7 @@ class ShellExecTool(Tool):
                     CompensationAction(
                         kind="delete_path_if_created",
                         description=f"delete path created by {cmd}",
-                        path=recorded,
+                        path=str(target_path.relative_to(self.workspace_root)) if target_path else path_str,
                     )
                 ],
             )
