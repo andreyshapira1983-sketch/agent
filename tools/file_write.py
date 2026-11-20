@@ -18,8 +18,11 @@ must NOT contain any high-confidence credential pattern (delegated to
 """
 from __future__ import annotations
 
+import calendar
+import os
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,6 +32,22 @@ from core.secret_scanner import contains_secret
 from tools.base import Risk, Tool, require_ascii_identifier
 
 MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
+
+
+def _reserve_backup(target: Path) -> Path:
+    """Claim a fresh `<file>.bak.<UTC stamp>` name; a taken name (two writes in one second) moves the stamp on, so an older backup is never overwritten."""
+    seconds = calendar.timegm(time.gmtime())
+    for step in range(3600):
+        stamp = datetime.fromtimestamp(seconds + step, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        candidate = target.with_suffix(target.suffix + f".bak.{stamp}")
+        if os.path.lexists(candidate):  # also a dangling link: O_EXCL would follow it on Windows
+            continue
+        try:
+            os.close(os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            continue
+        return candidate
+    raise FileExistsError(f"no free backup name for {target.name} within an hour of stamps")
 
 
 class FileWriteTool(Tool):
@@ -173,9 +192,12 @@ class FileWriteTool(Tool):
         if target_existed_before:
             # Backup first so the previous content is recoverable even if
             # the write that follows is interrupted (power loss, etc.).
-            ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-            backup = target.with_suffix(target.suffix + f".bak.{ts}")
-            shutil.copy2(target, backup)
+            backup = _reserve_backup(target)
+            try:
+                shutil.copy2(target, backup)
+            except BaseException:
+                backup.unlink(missing_ok=True)  # an empty placeholder must not pass for a backup
+                raise
             backup_rel = str(backup.relative_to(self.workspace_root))
             mode = "overwrite"
         else:
