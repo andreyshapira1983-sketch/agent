@@ -664,6 +664,63 @@ def test_the_real_home_of_a_linked_control_file_is_protected(tmp_path) -> None:
     assert (ws / "vault" / "switch.json").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="volume GUID paths exist only on Windows")
+def test_a_link_spelled_through_a_volume_guid_still_guards_its_home(tmp_path) -> None:
+    import ctypes
+
+    ws = tmp_path / "ws"
+    (ws / "store").mkdir(parents=True)
+    (ws / "store" / "live.txt").write_text("keep", encoding="utf-8")
+    drive = str(ws.resolve())[:3]
+    buf = ctypes.create_unicode_buffer(64)
+    if not ctypes.windll.kernel32.GetVolumeNameForVolumeMountPointW(drive, buf, 64):
+        pytest.skip("no volume GUID for this drive")
+    try:
+        os.symlink(buf.value + str((ws / "store").resolve())[3:], ws / "data", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"cannot create a symlink here: {exc}")
+    if not (ws / "data" / "live.txt").exists():
+        pytest.skip("this system does not follow volume GUID links")
+
+    outcome = apply_compensation_plan(_delete("store"), ws).outcomes[0]
+
+    assert outcome.status == "error", outcome.detail
+    assert (ws / "store" / "live.txt").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="8.3 short names are a Windows feature")
+def test_a_nested_git_reached_by_its_short_name_is_protected(tmp_path) -> None:
+    import ctypes
+
+    ws = tmp_path / "ws"
+    (ws / "sub" / ".git").mkdir(parents=True)
+    (ws / "sub" / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    buf = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(ws / "sub" / ".git"), buf, 1024):
+        pytest.skip("short names are off on this volume")
+    short = pathlib.Path(buf.value).name
+    if short.casefold() == ".git":
+        pytest.skip("this volume keeps no separate short name")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path=f"sub/{short}"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "sub" / ".git" / "HEAD").exists()
+
+
+def test_restore_cannot_create_a_linked_control_file_home_in_another_case(tmp_path) -> None:
+    ws = _workspace(tmp_path)
+    (ws / "vault").mkdir()
+    _symlink(ws / "data" / "budget_kill_switch.json", ws / "vault" / "switch.json")  # dangling: the switch is not set
+    (ws / "VAULT").mkdir(exist_ok=True)
+    (ws / "VAULT" / "SWITCH.JSON.bak.20260101T000000Z").write_text('{"tripped": false}', encoding="utf-8")
+
+    outcome = _apply_action(_restore("VAULT/SWITCH.JSON", "VAULT/SWITCH.JSON.bak.20260101T000000Z"), ws)
+
+    assert outcome.status == "error"
+    assert not os.path.exists(ws / "vault" / "switch.json")
+
+
 def test_two_overwrites_in_one_second_keep_the_original_backup(tmp_path, monkeypatch) -> None:
     import time
 

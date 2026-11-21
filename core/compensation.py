@@ -227,20 +227,40 @@ def _same_entry(a: Path, b: Path) -> bool:
         return False
 
 
+def _key(path: Path) -> tuple[str, ...]:
+    """A path compared part by part the way a case-insensitive file system may read it (also for paths that do not exist yet)."""
+    return tuple(_norm_part(p) for p in path.parts)
+
+
 def _overlaps(target: Path, home: Path, workspace_root: Path, *, inside_too: bool) -> bool:
     """True when removing `target` removes `home` (target is home or above it), or with inside_too when target lies inside home."""
+    target_key, home_key = _key(target), _key(home)
     for anc in (home, *home.parents):
         if anc in (workspace_root, anc.parent):
             break
-        if anc == target or _same_entry(anc, target):
+        if anc == target or _key(anc) == target_key or _same_entry(anc, target):
             return True
     if inside_too:
         for anc in (target, *target.parents):
             if anc in (workspace_root, anc.parent):
                 break
-            if anc == home or _same_entry(anc, home):
+            if anc == home or _key(anc) == home_key or _same_entry(anc, home):
                 return True
     return False
+
+
+def _plain_target(link: Path, raw: str) -> str:
+    """A Windows link target as an ordinary path; device forms (volume GUID, GLOBALROOT) are resolved by the OS or refused."""
+    if raw.startswith(("\\\\?\\", "\\??\\")):
+        rest = raw[4:]
+        if len(rest) >= 3 and rest[1] == ":" and rest[2] == "\\":
+            return rest
+        if rest.upper().startswith("UNC\\"):
+            return "\\\\" + rest[4:]
+        raw = os.path.realpath(link)
+    if raw.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
+        raise OSError(f"cannot judge where the link {link} points ({raw!r})")
+    return raw
 
 
 def _walk_links(start: Path, limit: int = 256) -> tuple[list[Path], Path]:
@@ -262,7 +282,7 @@ def _walk_links(start: Path, limit: int = 256) -> tuple[list[Path], Path]:
             current = nxt
             continue
         links.append(nxt)
-        raw = os.readlink(nxt).removeprefix("\\\\?\\")
+        raw = _plain_target(nxt, os.readlink(nxt)) if _WINDOWS else os.readlink(nxt)
         if _WINDOWS:  # Windows joins a link target to the link's folder and collapses '..' as text
             rest = list(Path(os.path.normpath(os.path.join(str(current), raw, *parts))).parts)
             current, parts = Path(rest[0]), rest[1:]
@@ -347,7 +367,7 @@ def _guard_hit(workspace_root: Path, target: Path, guards: list[tuple[str, Path,
 
 
 def _touches_git(workspace_root: Path, rel: str | None, located: Path | None) -> bool:
-    """True when the plan path or its real location is named .git or lies inside the workspace's .git."""
+    """True when the plan path or its real location is a .git entry (any depth, any spelling of it) or lies inside one."""
     if rel and any(_norm_part(p) == ".git" for p in Path(rel).parts):
         return True
     if located is None:
@@ -357,6 +377,11 @@ def _touches_git(workspace_root: Path, rel: str | None, located: Path | None) ->
             return True
     except ValueError:
         return False
+    for anc in (located, *located.parents):  # an alias such as GIT~1 on a mount that keeps 8.3 names
+        if anc in (workspace_root, anc.parent):
+            break
+        if _same_entry(anc, anc.parent / ".git"):
+            return True
     return _overlaps(located, workspace_root / ".git", workspace_root, inside_too=True)
 
 
