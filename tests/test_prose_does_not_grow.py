@@ -1,0 +1,44 @@
+"""Писанина в core/ (строки комментариев и докстрингов) не растёт: база только вниз."""
+from __future__ import annotations
+
+import ast
+import io
+import tokenize
+from pathlib import Path
+
+_CORE = Path(__file__).resolve().parents[1] / "core"
+
+_BASELINE_PROSE_LINES = 19297  # +10 (2026-11-17, «17 × 23» from memory): new core/arithmetic_check.py (docstrings + why ambiguous questions are refused), the receipt helper, the checklist judging the human text and their fallbacks.  # +2 (2026-11-17, lower floor 0.60 for hash-checked file answers): the operator's word at the constant and the rule's docstring.  # +20 (2026-11-17, answer from memory): new core/replay_freshness.py (one docstring per rule, reads vs actions), the input_digests field and the why at the call sites.  # +4 (2026-11-18, hunter round): shell words that expand into own state, weak claim not promoted, rejection outranks a fresh card.  # +9 (2026-11-18, six medium fixes of the 25-spot check): own-path rule, weak-witness reuse of the write policy, hygiene apply brake, fresh-card eviction, egress gate for memory-holding subagents; one-line docstrings for new helpers.  # +4 (2026-11-17): пометка кэша своих результатов вынесена из закреплённого метода в отдельный.  # +2 (2026-11-17): число в поле-списке — сломанная строка, а не элемент.  # +10 (2026-11-17, мелкие повторной проверки): схлопывание по позиции, кандидат быстрого пути, чтение списков.  # +72 (2026-11-17, средние повторной проверки): 14 починок в 11 файлах, у каждой «почему» и ссылка на находку.  # +60 (2026-11-17): повторная проверка памяти — одно правило независимости улик, одно правило срока жизни, patch_many, фильтр инъекций на воротах записи; у каждого «почему» и ссылка на находку.  # +277 (2026-11-16): проверка всей памяти — 48 починок за день, у каждой одна-три строки «почему» и ссылка на находку; плюс докстринги новых помощников.  # +83 (2026-11-10): починки около 90 мест за день; новый модуль core/protected_paths.py и пояснения к новым отказам.
+
+
+def _prose_lines(source: str) -> int:
+    lines = source.splitlines()
+    prose: set[int] = set()
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT:
+            prose.add(tok.start[0])
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                prose.update(range(body[0].lineno, body[0].end_lineno + 1))
+    return sum(1 for n in prose if lines[n - 1].strip())
+
+
+def _core_prose_lines() -> int:
+    return sum(
+        _prose_lines(path.read_text(encoding="utf-8")) for path in sorted(_CORE.glob("*.py"))
+    )
+
+
+def test_prose_does_not_grow() -> None:
+    found = _core_prose_lines()
+    assert found <= _BASELINE_PROSE_LINES, (
+        f"писанина в core/ выросла: {found} > {_BASELINE_PROSE_LINES} строк "
+        "комментариев и докстрингов; сократи или объясни рост в сообщении коммита"
+    )

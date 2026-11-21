@@ -4,10 +4,11 @@ Background: docs/CODE_NOTES.md, "The unattended path was the blind one".
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from core.best_next_action import select_best_next_action
-from core.campaign_io import _open_self_improvement_issues
+from core.campaign_io import _default_gather_signals, _open_self_improvement_issues
 
 _ISSUE = {
     "id": "sii_test",
@@ -17,6 +18,16 @@ _ISSUE = {
     "action": "improve_failure_to_idea_pipeline",
     "evidence": ["detectors reasoning_action_mismatch, user_contract_unrepresented"],
 }
+
+
+def test_the_campaign_now_passes_the_list():
+    """Вторая половина дороги: кандидат бесполезен, пока вход даёт только REPL —
+    то есть путь, где человек и так смотрит.
+    """
+    source = inspect.getsource(_default_gather_signals)
+
+    assert "open_self_improvement_issues=open_issues" in source
+    assert "self_improvement_registry_available=registry_available" in source
 
 
 def test_an_unreadable_registry_says_i_do_not_know(tmp_path: Path):

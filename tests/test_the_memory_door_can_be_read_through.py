@@ -53,3 +53,13 @@ def test_the_tool_is_read_only_and_strict_about_arguments():
         tool.run(term="x", limit=50)
     with pytest.raises(ValueError, match="requires"):
         tool.run()
+
+
+def test_the_door_is_wired_and_classified_for_the_unattended_path():
+    import inspect
+
+    from app import bootstrap
+    from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+    assert "MemoryRecallTool(" in inspect.getsource(bootstrap.build_agent)
+    assert "memory_recall" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS

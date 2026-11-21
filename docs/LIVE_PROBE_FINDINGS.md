@@ -215,7 +215,7 @@ findings below are amplifiers of this loop.
   collected. Root of the "provided materials" phrasing (LPF-020).
   *(FIXED 2026-08-13: `core/loop_observe.py::_interpret` now issues a criterion
   conditional on collected evidence — cite what was collected, label the rest
-  unverified, never invent; pinned by `tests/test_goal_criterion_is_satisfiable.py`.)*
+  unverified, never invent; pinned by `tests/test_goal_criterion_is_satisfiable.py` (removed in the 2026-11-21 test cut; does not exist any more).)*
 - **LPF-008 — fabricated citations get positive evidence credit.**
   `compute_confidence` (`core/confidence_gate.py`) = `(verified*1.0 + cited*0.5 +
   unverified*-0.25)/total`. `cited_but_unmatched` chunks (i.e. citations that
@@ -296,7 +296,7 @@ findings below are amplifiers of this loop.
   U+FFFD and scans clean. **Fixed** by scanning only the untrusted payload
   (`untrusted_scan_view`, `core/loop_helpers.py`; `shell_exec` → `stdout+stderr`
   only) — branch `fix/injection-scan-scope` (PR #95), regression
-  `tests/test_injection_scan_scope.py`. **Lesson:** reproduce a scanner finding
+  `tests/test_injection_scan_scope.py` (removed in the 2026-11-21 test cut; does not exist any more). **Lesson:** reproduce a scanner finding
   on the EXACT input production feeds it (the whole serialized envelope), not a
   hand-picked substring.
 

@@ -43,6 +43,31 @@ DISPATCH_SOURCE = Path(dispatch_module.__file__).read_text(encoding="utf-8")
 # in _startup_tokens, which must build the real class, not its own stand-in).
 _REAL_STDIN_READER = repl_module._StdinLineReader
 
+# Frozen snapshot at 9daa9bf. A diff here means a surface moved — update this
+# table to match.
+FROZEN = {
+    # 141 -> 142 (2026-08-15): `:causal`, водитель причинной лестницы.
+    # 142 -> 144 (2026-08-26): `:standing-grant` и её сокращение `:grant`.
+    # Автомат ЧИТАЛ стоячий грант, а завести его не мог никто (MIR-166).
+    # 144 -> 145 (2026-08-28): `:receipts` — накопленную улику стало чем
+    # спросить (MIR-138).
+    # 145 -> 146 (2026-08-30): `:self-issue-retire` — дверь человеческого
+    # вердикта: реестр умел только копить, 29 вечных записей глушили весы.
+    "dispatched": 146,
+    "pre_dotenv_fast_paths": 2,
+    "repl_control_tokens": 4,
+    # 96 at 9daa9bf; 98 after the two documented help gaps were closed
+    # (`:refresh-models` and `:help` itself were added to the page).
+    "help_tokens": 103,  # +1: :standing-grant (2026-08-26); +1: :receipts (2026-08-28); +1: :self-issue-retire (2026-08-30)
+    # One printed token (`:task-begin`) is a REPL block token rather than a
+    # dispatched command — see the divergence tests below.
+    # 72/71 -> 73/72 (2026-08-13): `:refresh-models` joined the banner beside
+    # its read-only sibling — the visible half of the catalog pair had steered
+    # the operator to a usage refusal while the catalog stayed expired (R7).
+    "startup_tokens": 76,  # +1: :standing-grant (2026-08-26); +1: :self-issue-retire (2026-08-30)
+    "startup_dispatched_tokens": 75,  # +1: :standing-grant (2026-08-26); +1: :self-issue-retire (2026-08-30)
+    "nl_intent_kinds": 23,
+}
 
 _STANDALONE_TOKEN = re.compile(r"(?<![\w-])(:[a-z][a-z0-9-]*)(?![\w-])")
 
@@ -55,6 +80,46 @@ def _dispatched() -> set[str]:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.dispatched_commands(DISPATCH_SOURCE)
+
+
+def _pre_dotenv_source_prefix(app_source: str) -> str:
+    """Everything in `run_cli` that runs BEFORE `load_dotenv` is called.
+
+    Located through the AST, not by matching a literal load_dotenv() line.
+    That literal broke the moment the call gained an argument -- the CLI now
+    reads the workspace's .env instead of the launch directory's -- so the
+    guard failed on a FIX, not on a regression. A boundary defined by the text
+    of one line is not a boundary.
+    """
+    import ast
+
+    for node in ast.walk(ast.parse(app_source)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "load_dotenv"):
+            return chr(10).join(app_source.splitlines()[: node.lineno - 1])
+    raise AssertionError("no load_dotenv() call found in cli/app.py")
+
+
+def _pre_dotenv_fast_paths() -> set[str]:
+    """Commands matched with `head.lower() == …` before `load_dotenv()` runs."""
+    # The startup sequence moved to cli/app.py with the rest of `main()`;
+    # scanning main.py here would silently freeze an empty set.
+    app_source = Path(app_module.__file__).read_text(encoding="utf-8")
+    prefix = _pre_dotenv_source_prefix(app_source)
+    return set(re.findall(r'head\.lower\(\)\s*==\s*"(:[a-z0-9-]+)"', prefix))
+
+
+def _repl_control_tokens() -> set[str]:
+    """Block/buffer tokens the REPL intercepts itself (never head-dispatched)."""
+    # All three patterns now live in cli/repl.py: the dialogue loop joined the
+    # stdin reader and the instruction-buffer collector there, so main.py no
+    # longer contains any `q == ":…"` branch. Reading main.py here would make
+    # this guard silently green.
+    repl_source = Path(repl_module.__file__).read_text(encoding="utf-8")
+    tokens = set(re.findall(r'q\s*==\s*"(:[a-z0-9-]+)"', repl_source))
+    tokens |= set(re.findall(r'marker\s*==\s*"(:[a-z0-9-]+)"', repl_source))
+    tokens |= set(re.findall(r'\.lower\(\)\s*==\s*"(:end)"', repl_source))
+    return tokens
 
 
 def _help_tokens(tmp_path: Path, capsys) -> set[str]:
@@ -85,6 +150,24 @@ def _startup_tokens(tmp_path: Path, monkeypatch, capsys) -> set[str]:
     banner = err.split("Commands:", 1)[1]
     assert pending == []
     return set(_STANDALONE_TOKEN.findall(banner))
+
+
+# ── exact sizes ───────────────────────────────────────────────────────────────
+
+
+def test_pre_dotenv_fast_paths_are_exactly_two():
+    fast = _pre_dotenv_fast_paths()
+    assert fast == {":self-build-propose", ":schedule-disable"}
+    assert len(fast) == FROZEN["pre_dotenv_fast_paths"]
+
+
+def test_repl_control_tokens_are_frozen():
+    control = _repl_control_tokens()
+    assert control == {":operator-task", ":task-begin", ":task-end", ":task-abort", ":end"}
+    # `:operator-task` genuinely overlaps: the REPL intercepts it as a block AND
+    # `handle_meta_command` dispatches it. The other four are REPL-only.
+    assert ":operator-task" in _dispatched()
+    assert len(control - _dispatched()) == FROZEN["repl_control_tokens"]
 
 
 # ── exact divergences ─────────────────────────────────────────────────────────

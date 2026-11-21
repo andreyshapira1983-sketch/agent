@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import io
 import re
+import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +45,71 @@ def _help_tokens() -> set[str]:
     with redirect_stderr(buf), redirect_stdout(io.StringIO()):
         assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), REPO_ROOT) is True
     return set(_STANDALONE.findall(buf.getvalue()))
+
+
+# ── purity ───────────────────────────────────────────────────────────────────
+
+def test_registry_is_pure_data():
+    """The registry and BOTH of its spec volumes keep the purity contract.
+
+    "Pure" here means what the assertions below enforce: no runtime-layer
+    imports and no side effects at import time — a frozen dataclass with a
+    trivial `tokens` property is fine, dispatch logic is not. Since the #278
+    split (authored by the self-build producer) the command table lives in
+    two sibling volumes that the registry combines; the contract covers all
+    three files so the split never becomes a door for behaviour."""
+    spec_siblings = {".command_specs", ".command_specs_ops"}
+    for name, allowed in (
+        ("command_registry.py", {"__future__", "dataclasses"} | spec_siblings),
+        ("command_specs.py", {"__future__", "dataclasses"}),
+        ("command_specs_ops.py", {"__future__", "dataclasses", ".command_specs"}),
+    ):
+        source = Path(find_spec(f"cli.{name.removesuffix('.py')}").origin).read_text(encoding="utf-8")
+        imports = re.findall(r"^\s*(?:from|import)\s+([\w.]+)", source, re.MULTILINE)
+        forbidden = [
+            imp
+            for imp in imports
+            if imp.split(".")[0] in {"core", "app", "tools", "api", "main", "docker"}
+            or imp.startswith("cli.commands")
+        ]
+        assert not forbidden, f"{name} must import no runtime module, found: {forbidden}"
+        # stdlib + own pure-data siblings only, and no behaviour smuggled in
+        assert set(imports) <= allowed, (name, imports)
+        for banned in ("subprocess", "open(", "requests", "urllib"):
+            assert banned not in source, (name, banned)
+
+
+_IMPORT_PROBE = """
+import sys
+
+_WATCHED = {"open", "os.listdir", "os.scandir", "os.mkdir", "os.remove", "os.rename",
+            "shutil.rmtree", "subprocess.Popen", "socket.connect"}
+touched = []
+
+def _hook(event, args):
+    if event in _WATCHED:
+        caller = sys._getframe(1).f_code.co_filename
+        if not caller.startswith("<frozen importlib"):
+            touched.append(f"{event} {args[0]!r} from {caller}")
+
+sys.addaudithook(_hook)
+import cli.command_registry
+for item in touched:
+    print(item)
+"""
+
+
+def test_registry_import_has_no_side_effects():
+    """A fresh import of the registry and both spec volumes touches no file or process.
+
+    Runs in a new interpreter so the spec modules really execute; only the import
+    machinery's own reads of module code are allowed."""
+    result = subprocess.run(  # noqa: S603 — fixed argv: this interpreter and a literal probe
+        [sys.executable, "-B", "-c", _IMPORT_PROBE],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", f"importing the registry touched:\n{result.stdout}"
 
 
 # ── the token surface ────────────────────────────────────────────────────────

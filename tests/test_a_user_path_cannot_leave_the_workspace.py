@@ -24,3 +24,15 @@ def test_traversal_and_absolute_and_rooted_are_all_refused(tmp_path: Path) -> No
                     "\\\\server\\share\\x"):
         verdict = validate_user_file_path(hostile, workspace=tmp_path)
         assert verdict["ok"] is False, hostile
+
+
+def test_the_fence_stands_before_any_filesystem_probe() -> None:
+    """Порядок ворот — закон: сначала resolve/relative_to, потом exists/stat."""
+    import inspect
+
+    from core import file_request_intent as mod
+
+    src = inspect.getsource(mod.validate_user_file_path)
+    fence = src.index("relative_to(")
+    first_probe = min(src.index(".exists()"), src.index(".stat()"))
+    assert fence < first_probe, "файловая проба раньше забора — инъекция пути"

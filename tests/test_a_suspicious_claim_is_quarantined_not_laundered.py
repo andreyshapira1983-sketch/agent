@@ -59,6 +59,21 @@ def test_the_write_policy_refuses_a_suspect_claim() -> None:
         )
 
 
+def test_corroboration_does_not_launder_a_suspect_claim() -> None:
+    """An echo is not a second witness — for adversarial content an echo is
+    the cheapest thing to manufacture, so `suspect` must not upgrade the way
+    `extracted` does."""
+    import inspect
+
+    import core.knowledge_pipeline as kp
+
+    src = inspect.getsource(kp)
+    # The upgrade site admits exactly `extracted`; pin that `suspect` is not
+    # added to it later by accident.
+    assert 'claim.status == "extracted"' in src
+    assert 'claim.status in {"extracted", "suspect"}' not in src
+
+
 # ── Audit of this closure (CLOSURE_AUDIT_2026-08-22.md in git history) ──────────
 #
 # The field's named failure for scanner-driven quarantine: false positives

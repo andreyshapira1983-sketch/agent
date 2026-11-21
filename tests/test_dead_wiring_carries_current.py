@@ -64,6 +64,16 @@ def test_open_incidents_reach_the_status_line(tmp_path: Path) -> None:
     assert "1 open" in line and "1 awaiting a human" in line and "autonomous_run_stopped" in line
 
 
+def test_the_daemon_status_prints_the_incident_line() -> None:
+    """Wiring: the reader is called where the operator looks."""
+    import inspect
+
+    import agent_tick
+
+    src = inspect.getsource(agent_tick._print_status)
+    assert "status_line()" in src and "INCIDENT_LOG_PATH" in src
+
+
 # ── W2 ───────────────────────────────────────────────────────────────────────
 
 
@@ -152,6 +162,16 @@ def test_web_search_is_metered_too(tmp_path: Path) -> None:
         tool.run("anything")  # refused before any network call
 
 
+def test_bootstrap_hands_the_ledger_to_every_egress_tool() -> None:
+    import inspect
+
+    from app import bootstrap
+
+    src = inspect.getsource(bootstrap.build_agent)
+    assert 'for egress_tool in ("web_search", "web_fetch", "rss_fetch")' in src
+    assert ".budget_ledger = budget_ledger" in src
+
+
 # ── W4 ───────────────────────────────────────────────────────────────────────
 
 _PROSE = (
@@ -182,3 +202,13 @@ def test_the_door_consults_the_antibody(tmp_path: Path, monkeypatch) -> None:
     )
 
     assert seen["recent"], "the second knock saw no recent writes"
+
+
+# ── W5 ───────────────────────────────────────────────────────────────────────
+
+
+def test_the_egress_host_lists_are_documented() -> None:
+    config = Path("docs/CONFIGURATION.md").read_text(encoding="utf-8")
+    example = Path(".env.example").read_text(encoding="utf-8")
+    for name in ("AGENT_FETCH_ALLOW_HOSTS", "AGENT_FETCH_DENY_HOSTS"):
+        assert name in config and name in example, name

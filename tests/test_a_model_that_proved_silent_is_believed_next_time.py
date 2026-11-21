@@ -19,7 +19,12 @@ data/reasoning_roster.jsonl deepseek-reasoner записан как молчав
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from core import llm as llm_module
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 def test_the_entry_point_gives_the_roster_a_home_in_the_workspace(monkeypatch, tmp_path):
@@ -34,3 +39,12 @@ def test_the_entry_point_gives_the_roster_a_home_in_the_workspace(monkeypatch, t
     assert llm_module._roster_path() == home
     llm_module.remember_reasoning_model("deepseek", "deepseek-reasoner", spent=1200)
     assert llm_module.is_known_reasoning_model("deepseek", "deepseek-reasoner") is True
+
+
+def test_both_live_entry_points_call_the_wiring():
+    """Проверка нерва: функция без вызова из точки входа — та же мёртвая проводка."""
+    for rel in ("agent_tick.py", "cli/app.py"):
+        source = (REPO / rel).read_text(encoding="utf-8")
+        assert re.search(r"\bensure_roster_home\(", source), (
+            f"{rel}: точка входа не объявляет дом реестра молчавших"
+        )

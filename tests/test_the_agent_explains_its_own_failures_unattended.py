@@ -97,6 +97,16 @@ def test_an_uncovered_observation_is_listed_most_recurrent_first(tmp_path: Path)
     assert naked_rare.fingerprint in fps
 
 
+def test_the_action_never_ships_without_its_executor() -> None:
+    """Анти-MIR-179: имя, которое рождает выбиратель, знает исполнитель."""
+    import inspect
+
+    from core import campaign_io as mod
+
+    src = inspect.getsource(mod._default_execute_action)
+    assert '"explain_causal_observation"' in src
+
+
 def test_two_falsifiable_hypotheses_become_a_claim_with_no_winner(tmp_path: Path) -> None:
     """Сердце слайса: заявка с двумя предсказаниями и БЕЗ выбранного."""
     _seed(tmp_path, [_record(("reasoning_action_mismatch",), occurrences=5)])

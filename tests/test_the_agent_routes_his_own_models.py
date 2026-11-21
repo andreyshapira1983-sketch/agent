@@ -171,6 +171,17 @@ def test_the_tool_needs_a_reason_refuses_secrets_names_the_pool_and_caps_itself(
     assert not capped["set"] and "ceiling" in capped["refused_by"]
 
 
+def test_the_door_is_wired_and_classified_for_the_unattended_path():
+    import inspect
+
+    from app import bootstrap
+    from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+    src = inspect.getsource(bootstrap.build_agent)
+    assert "ModelRouteTool(" in src and "routing_policy=" in src
+    assert "model_route" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
+
+
 def test_the_eye_shows_his_decision_under_the_routers_role_name_and_the_measured_table(tmp_path, monkeypatch):
     from core.model_roster import model_roster, model_roster_block
 

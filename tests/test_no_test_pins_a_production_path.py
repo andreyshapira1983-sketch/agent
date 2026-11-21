@@ -113,6 +113,17 @@ def _literal_production_reads() -> list[tuple[str, str]]:
     return offenders
 
 
+def test_no_new_test_reads_shipped_code_by_a_literal_path():
+    new = [line for key, line in _literal_production_reads() if key not in _KNOWN_PINS]
+
+    assert new == [], (
+        "these read shipped code by path, so moving the file reddens a test "
+        "about something else. Read it through the module instead — "
+        "`inspect.getsource(mod)` or `Path(mod.__file__)`:\n  "
+        + "\n  ".join(new)
+    )
+
+
 def test_the_ratchet_only_goes_down():
     """A migrated pin must leave the list, or the list becomes an amnesty."""
     present = {key for key, _line in _literal_production_reads()}

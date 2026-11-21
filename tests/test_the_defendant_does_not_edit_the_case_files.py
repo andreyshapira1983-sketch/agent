@@ -31,3 +31,20 @@ def test_a_judge_touching_patch_carries_the_loud_flag() -> None:
 
     assert "СУДЬЮ" in note and "tests/" in note
     assert silent == ""
+
+
+def test_both_proposal_builders_wear_the_flag_and_elevate_risk() -> None:
+    """Обе точки рождения заявки: флаг в summary И повышенный класс риска.
+
+    OWASP-уточнение оператора: правка судей — явно повышенный риск, чтобы её
+    видели машинные ворота, а не только глаз.
+    """
+    import inspect
+
+    from core import self_build_producer as mod
+
+    src = inspect.getsource(mod)
+    assert src.count("judge_touching_note") >= 2, (
+        "обе inbox.add-точки полосы обязаны нести флаг «правит судью»")
+    assert src.count('"irreversible" if _') >= 2, (
+        "правка судей обязана поднимать класс риска в ОБЕИХ точках")

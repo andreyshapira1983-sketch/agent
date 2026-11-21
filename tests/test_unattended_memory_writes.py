@@ -94,6 +94,62 @@ def test_with_the_flag_an_uncorroborated_claim_is_still_skipped():
     assert result.memory_skipped > 0
 
 
+def test_the_unattended_path_always_demands_verification():
+    """Флаг открывает дверь, но не снимает замок — и дверей больше одной.
+
+    Область сторожа — ВЕСЬ `core/`, а не один модуль. Первая редакция разбирала
+    только `core.autonomous_runtime`, и это было не осторожностью, а догадкой о
+    том, где может быть дефект. Перепись 2026-08-05 показала, чего догадка не
+    видела: необслуживаемый прогон идёт через обычный цикл
+    (`core/autonomous_runtime.py` зовёт `agent.run`), а конвейер знаний хода
+    вызывается ещё из `core/loop_evidence_chain.py` и
+    `core/loop_verify_replan.py` — причём второй внутри цикла добычи цитат, то
+    есть на каждой итерации. Сторож был честен внутри своей области и не знал,
+    что область выбрана заранее.
+
+    Читается из исходника, а не исполняется: чтобы дойти до этих строк, нужен
+    целиком собранный прогон, а проверить надо простое — что ни одна настройка
+    не может включить запись, не включив содержательные ворота.
+    """
+    import ast
+    import pathlib
+
+    # The invariant is about the GATE, not about every function that happens to
+    # forward an `auto_write_memory` flag. `core/ingestion.py` passes the flag
+    # down to `_ingest_paths`, which resolves the question itself; demanding the
+    # keyword there would be demanding it twice. What may never happen is the
+    # pipeline running with the question unanswered.
+    calls = []
+    for path in sorted(pathlib.Path("core").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        calls.extend(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and "knowledge_pipeline" in ast.unparse(node.func.value)
+        )
+    assert calls, "the knowledge-pipeline call sites vanished — update this guard"
+    for call in calls:
+        kwargs = {kw.arg for kw in call.keywords}
+        assert "require_verified" in kwargs, (
+            "запись в память без требования подтверждения: "
+            f"{ast.unparse(call)[:120]}"
+        )
+        verified = next(kw for kw in call.keywords if kw.arg == "require_verified")
+        # Not "must be the literal True". The turn path is driven by BOTH a
+        # human at the REPL and the unattended runtime, so a constant there
+        # would be wrong in one of the two directions; it derives the answer
+        # from `gateway_path`, which is what records who drives the run. What
+        # may never appear is a literal that switches the gate off.
+        assert not (
+            isinstance(verified.value, ast.Constant) and verified.value.value is False
+        ), (
+            "content gate switched off by a literal: "
+            f"{ast.unparse(call)[:120]}"
+        )
+
+
 def test_a_code_source_is_refused_even_when_verified():
     """The gate is added, not substituted: the code rule still holds above it.
 

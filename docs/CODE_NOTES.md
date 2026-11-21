@@ -812,7 +812,7 @@ else's mismatch; minting a new one distils a recipe from a run whose
 actions diverged from its reasoning.
 
 The falsification trail is the valuable part, so it is kept verbatim in
-tests/test_minting_a_skill_has_no_judgement_of_its_own.py: v1 «дефект
+tests/test_minting_a_skill_has_no_judgement_of_its_own.py (removed in the 2026-11-21 test cut; does not exist any more): v1 «дефект
 записан — материал допущен» (true, intentional); v2 «чеканка молчалива»
 (FALSIFIED — by the same error class this repo pins on its verifier:
 absence certified from a 200-char TRUNCATED excerpt; the full record
@@ -1179,7 +1179,7 @@ measurement that did not apply, reported as a measurement:
    before the value: does the question name a topic at all? The indefinite
    pronoun's slots (governing verb before, descriptor after) are dropped
    structurally — no per-phrase adjective/verb lists. Unseen forms of the
-   class are pinned in `tests/test_relevance_topicless_prompts.py`.
+   class are pinned in `tests/test_relevance_topicless_prompts.py` (removed in the 2026-11-21 test cut; does not exist any more).
 2. **The tail called a no-debt turn a zero** (`verification_summary`).
    `evidence_support` ruled `no_evidence_expected` and the tail still said
    «уверенность: нулевая» — the exact conflation that module's rewrite exists
@@ -1221,7 +1221,7 @@ Two constraints shape the code:
   kill-switch, approval of irreversible/external actions, deep escalation.
 - **Costs no model call.** A tick fires every 30 minutes. The sync reads
   `episodic_store` and nothing else; no agent is built, so the model router is
-  never dragged in. `tests/test_the_idle_tick_directs_itself.py` pins this by
+  never dragged in. `tests/test_the_idle_tick_directs_itself.py` (removed in the 2026-11-21 test cut; does not exist any more) pins this by
   making `bootstrap.build_agent` raise.
 
 It lives in `core/` rather than in `agent_tick.py` because the entry point is
@@ -3184,7 +3184,7 @@ month (37 → 73 files), and one evening cycle "produced" an 823-line contract
 that was a copy of the one already in the tree with a single corrupted line.
 Implementing a piece of an existing contract, or revising one against measured
 reality, stays welcome. Witness:
-`tests/test_the_paper_rule_reaches_goal_selection.py` (nerve check — the rule
+`tests/test_the_paper_rule_reaches_goal_selection.py` (removed in the 2026-11-21 test cut; does not exist any more) (nerve check — the rule
 text reaches the model).
 
 ## Block 13 — the first work order: flights, three passes, three defects (2026-09-05, morning)
@@ -3284,7 +3284,7 @@ once steal each other's questions; one per session, always.
 
 Three repairs the same night, each pinned by a test:
 - **the eye reaches the answerer** (`spend_block` on `SynthesisState`, into
-  the synthesizer beside long-term memory) — `tests/test_the_eye_reaches_the_answerer.py`;
+  the synthesizer beside long-term memory) — `tests/test_the_eye_reaches_the_answerer.py` (removed in the 2026-11-21 test cut; does not exist any more);
   the split-fidelity signature check now admits an added keyword with a
   default, the same line as the retired body snapshots;
 - **a fact the loop measured is evidence to the loop** — new evidence kind
@@ -5707,7 +5707,7 @@ instead of a call only if its world cannot have changed — web reads within the
 session, file_read while the file's mtime and size are the same; tests, the
 lab, workspace search/listing, writes, time and memory are always called again.
 Storage is unchanged (results still serve as later turns' evidence). Witness:
-`tests/test_a_changed_world_is_not_served_from_cache.py`; the citation-refusal
+`tests/test_a_changed_world_is_not_served_from_cache.py` (removed in the 2026-11-21 test cut; does not exist any more); the citation-refusal
 test now keeps its sources on disk (a cache that served a file that does not
 exist was the defect).
 (2) «Answer strictly in lines ПРОГНОЗ n: …» — the answer described the format

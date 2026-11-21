@@ -49,3 +49,16 @@ def test_the_judge_never_breaks_the_run(tmp_path: Path) -> None:
         cycle=2, why="goal_switch", started_at=_START, ts=_START,
     ) is None
     assert any(name == "campaign_goal_verdict_failed" for name, _ in agent.events)
+
+
+def test_the_switch_closes_the_previous_goal_with_its_own_criterion() -> None:
+    """Связь с механизмом: смена цели зовёт судью до подмены критерия."""
+    import inspect
+
+    from core import campaign
+
+    source = inspect.getsource(campaign)
+    switch = source.split("def _switch_goal", maxsplit=1)[1].split("\n    def ", maxsplit=1)[0]
+    judged = switch.index("judge_closing_goal")
+    replaced = switch.index("current_success_check = switched_check")
+    assert judged < replaced, "цель судится уже новым критерием — мерка чужая"

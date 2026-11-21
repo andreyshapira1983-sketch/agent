@@ -13,6 +13,8 @@ answer. That ordering is recorded here so extraction cannot silently reverse it.
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +27,8 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 from core.checkpoint import CheckpointWriter
 from core.loop import format_human_response
+
+REPO_ROOT = Path(main_module.__file__).resolve().parent
 
 
 def _fake_agent() -> SimpleNamespace:
@@ -78,6 +82,37 @@ def test_invalid_trace_id_returns_two_without_building_agent(bad, tmp_path, monk
     err = capsys.readouterr().err
     assert f"[resume] Invalid trace_id {bad!r}:" in err
     assert "only letters, digits, hyphens and underscores are allowed." in err
+
+
+def test_invalid_trace_id_exit_code_is_two_in_a_real_process(tmp_path):
+    """Proves the launcher maps the return value to process exit code 2.
+
+    Runs `main.py` with CWD inside the tmp workspace so `load_dotenv()` cannot
+    pick up the repository's `.env`; validation fails before any provider or
+    agent construction, so no network path is reachable.
+    """
+    env = {**os.environ, "AGENT_PROVIDER": "mock", "PYTHONIOENCODING": "utf-8"}
+    # argv фиксирован: sys.executable + наш main.py (S603 подавлен по месту —
+    # remote-режим Codacy не читает per-file-ignores, #300).
+    proc = subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603
+        [
+            sys.executable,
+            str(REPO_ROOT / "main.py"),
+            "--resume",
+            "not/a/valid/id",
+            "--workspace",
+            str(tmp_path),
+        ],
+        check=False,
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    assert proc.returncode == 2, (proc.returncode, proc.stdout, proc.stderr)
+    assert "[resume] Invalid trace_id" in proc.stderr
+    assert not (tmp_path / "logs").exists()
 
 
 def test_valid_trace_id_shapes_are_accepted(tmp_path, monkeypatch, capsys):

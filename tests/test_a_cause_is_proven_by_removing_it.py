@@ -130,3 +130,12 @@ def test_the_signal_and_the_executor_ship_together() -> None:
     assert picked.action == "run_claim_experiment"
     assert silent.action != "run_claim_experiment"
     assert '"run_claim_experiment"' in inspect.getsource(mod._default_execute_action)
+
+
+def test_the_experiment_calls_no_model() -> None:
+    import inspect
+
+    from core import causal_climb_action as mod
+
+    src = inspect.getsource(mod.run_claim_experiment)
+    assert ".complete(" not in src and "llm" not in src

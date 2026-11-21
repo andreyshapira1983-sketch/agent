@@ -180,3 +180,13 @@ def test_prose_is_not_work_for_the_engineering_action_only_a_filed_item_is(monke
     # the goal alive. It goes to the log, not the ledger.
     assert outcome.artifact is None
     assert outcome.did_work is False
+
+
+def test_the_charter_hears_that_approved_items_are_the_lanes_not_his():
+    import inspect
+
+    from core import charter_goal
+
+    src = inspect.getsource(charter_goal)
+    assert "APPROVED items are applied by the operator's lane" in src
+    assert 'if v == "approved"' in src

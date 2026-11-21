@@ -9,6 +9,8 @@ the name of the climb step that last touched the claim.
 """
 from __future__ import annotations
 
+import inspect
+
 from core.causal_claim_store import (
     distilled_lessons,
     lesson_block_for_prompt,
@@ -65,6 +67,13 @@ def test_the_planner_receipts_only_what_it_delivered(tmp_path) -> None:
     receipts = (tmp_path / "data" / "lesson_injections.jsonl").read_text(
         encoding="utf-8").strip().splitlines()
     assert len(receipts) == 1, "a receipt for a lesson that was not delivered"
+
+
+def test_the_plan_passes_its_question_to_the_lesson_door() -> None:
+    """Wiring: the scoped door is only worth something if `plan` uses it."""
+    src = inspect.getsource(LLMPlanner.plan)
+    assert "self.lesson_block_for_prompt(" in src
+    assert "question, file_hint," in src
 
 
 def test_the_machine_action_travels_with_the_prose(tmp_path) -> None:

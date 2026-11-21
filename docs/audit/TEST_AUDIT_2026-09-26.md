@@ -39,7 +39,7 @@
 
 | место | проверка | почему |
 |---|---|---|
-| `tests/test_a_past_write_is_not_a_present_claim.py:79` | `assert action_report_mismatch(...) is None or True` | `or True` делает её всегда истинной. Следующая строка (`!=`) проверяет по-настоящему, так что тест не пустой, но эта строка — балласт. |
+| `tests/test_a_past_write_is_not_a_present_claim.py:79` (removed in the 2026-11-21 test cut; does not exist any more) | `assert action_report_mismatch(...) is None or True` | `or True` делает её всегда истинной. Следующая строка (`!=`) проверяет по-настоящему, так что тест не пустой, но эта строка — балласт. |
 
 Ещё 9 проверок вида `f(x) == f(x)` (например, `test_evidence.py:71`, `test_help_render.py:151`, `test_truth_hype_filter.py:87`) — **не пустые**: это проверки детерминизма, они падают, если функция недетерминирована.
 
@@ -47,7 +47,7 @@
 
 | тест | почему |
 |---|---|
-| `tests/test_loop_context_split.py:117` `test_logic_moved_symbol_for_symbol` | `PIECES = {8, 9}`, и оба куска внесены в `_RETIRED_BODY_EQUIVALENCE`. Набор параметров пуст, pytest пропускает тест с «got empty parameter set» на любой машине. |
+| `tests/test_loop_context_split.py:117` <!-- historical-ref: the cited test was removed in the 2026-11-21 test cut --> `test_logic_moved_symbol_for_symbol` | `PIECES = {8, 9}`, и оба куска внесены в `_RETIRED_BODY_EQUIVALENCE`. Набор параметров пуст, pytest пропускает тест с «got empty parameter set» на любой машине. |
 
 ### 1г. Проверяют только «вызов не бросает исключение» (27)
 

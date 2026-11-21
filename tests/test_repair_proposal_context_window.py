@@ -172,3 +172,24 @@ def test_the_output_budget_is_configurable_like_the_window(tmp_path: Path):
     _generator(llm, tmp_path, max_output_tokens=1234).generate(target_path=target)
 
     assert llm.max_tokens == [1234], "the configured output budget never reached the model"
+
+
+# ── 4. the window must actually cover the codebase ───────────────────────────
+
+
+def test_the_window_covers_most_of_core(tmp_path: Path):
+    """A repair mechanism blind to a third of the package is not a mechanism.
+
+    Not a snapshot of a count — a floor. Before the fix 43 of 145 modules were
+    truncated (70% covered); the window must keep ordinary modules reachable so
+    that a refusal means "this file is genuinely huge", not "the limit is low".
+    """
+    core = Path(__file__).resolve().parent.parent / "core"
+    modules = list(core.glob("*.py"))
+    visible = [p for p in modules if p.stat().st_size <= DEFAULT_MAX_CONTEXT_CHARS]
+
+    covered = len(visible) * 100 // len(modules)
+    assert covered >= 95, (
+        f"only {covered}% of core/ fits the repair window "
+        f"({len(modules) - len(visible)} modules refused up front)"
+    )

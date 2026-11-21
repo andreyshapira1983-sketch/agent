@@ -65,6 +65,35 @@ class _Agent(AgentLoopContext):
 
 
 # ---------------------------------------------------------------------------
+# The mixin must be able to call the cure at all
+# ---------------------------------------------------------------------------
+
+def test_the_file_declares_the_sensor_it_needs():
+    """The root cause, pinned separately from the symptom.
+
+    Both handlers were silent because `_sensor_failed` was not in the host
+    contract, so the file could not reach it through the MRO in a way the
+    layer's own convention would admit. Declaring it is the fix; this checks
+    the declaration rather than trusting that the calls below happen to work.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(__import__(
+        "core.loop_context", fromlist=["x"]
+    )))
+    declared: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
+            declared |= {
+                sub.target.id
+                for sub in ast.walk(node)
+                if isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name)
+            }
+    assert "_sensor_failed" in declared
+
+
+# ---------------------------------------------------------------------------
 # Referent resolution
 # ---------------------------------------------------------------------------
 

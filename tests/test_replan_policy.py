@@ -82,6 +82,16 @@ class TestForbiddenActions:
     def setup_method(self):
         self.policy = ReplanPolicy(max_total_replans=10)
 
+    def test_args_serialised_with_sorted_keys(self):
+        """Order of dict keys must not matter — the planner sanitiser
+        compares against this canonical form."""
+        history = [FakeTrigger(
+            code="approval_deny",
+            tool_name="t",
+            arguments={"b": 1, "a": 2},
+        )]
+        d = self.policy.decide(history, completed_attempts=1)
+        assert d.forbidden_actions == (("t", '{"a": 2, "b": 1}'),)
 
     def test_duplicate_forbidden_action_deduped(self):
         history = [

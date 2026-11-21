@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import agent_tick
 from agent_tick import (
     _maybe_produce_self_build,
     _read_producer_state,
@@ -73,7 +74,48 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+# ── the DEFAULT builder — the path no test used to exercise ──────────────────
+#
+# Every test above hands in `build_agent_fn`, so the branch a real tick takes
+# (`build_agent_fn is None`) was never executed by the suite. It had been broken
+# since the Phase-7 extraction: the call read
+# `__import__("main", fromlist=["build_agent"])`, `main.py` shrank to 47 lines,
+# and `build_agent` moved to `app.bootstrap` — so every real tick failed with
+# `AttributeError: module 'main' has no attribute 'build_agent'`, reported to the
+# operator as the single word "error". Naming the target in a string is what hid
+# it: there is no import for a linter or for architecture_invariants to resolve.
+
+
+def test_no_build_site_names_its_target_in_a_string():
+    """The shape of the defect, banned at source level.
+
+    `__import__("main", ...)` cannot be resolved by a linter or by
+    `scripts/architecture_invariants.py`, so it survives a refactor that moves
+    the function it names. A plain import breaks loudly instead.
+    """
+    src = Path(agent_tick.__file__).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in src.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert '__import__("main"' not in code
+    assert "__import__('main'" not in code
+
+
 # ── hard safety: no lane execution / no git side effects ─────────────────────
+
+
+def test_wrapper_never_imports_or_runs_self_apply_lane_helpers():
+    # The wrapper must NOT reference run_self_apply_lane anywhere in its source.
+    src = Path(agent_tick.__file__).read_text(encoding="utf-8")
+    # Grab just the wrapper function body.
+    start = src.index("def _maybe_produce_self_build(")
+    end = src.index("# ── main tick", start)
+    body = src[start:end]
+    assert "run_self_apply_lane" not in body
+    # Look for actual method-call syntax, not prose in the docstring.
+    for banned in (".commit(", ".push(", ".fetch(", ".pull(", ".merge(",
+                   ".reset_hard(", ".stage_all(", ".create_temp_branch("):
+        assert banned not in body, banned
 
 
 def test_real_producer_creates_at_most_one_item_and_no_git(tmp_path: Path):

@@ -16,8 +16,11 @@ never wrote (0 of 479 rows); `blocked`/`failed` runs occupied their theme.
 """
 from __future__ import annotations
 
+import inspect
 import json
 
+from core import campaign as campaign_mod
+from core.campaign_ledger import CampaignCycleRecord
 from core.charter_goal import _recent_goals, _repeats_recent
 
 _DESIGN = (
@@ -71,4 +74,17 @@ def test_the_window_is_ordered_by_last_work(tmp_path) -> None:
     assert goals[-1] == "old theme", (
         "the theme worked most recently fell out of the window because it "
         f"first appeared earliest: {goals}"
+    )
+
+
+def test_the_campaign_writes_the_word_the_reader_asks_for() -> None:
+    """Wiring, not presence: the record carries it and the run fills it."""
+    record = CampaignCycleRecord(
+        cycle=1, ts="t", goal="g", action="a", action_title="A", severity="low",
+        priority=1, risk="read_only", idle=False, llm_calls_spent=0,
+        cost_units_spent=0, result="completed", reason="", work_done=True,
+    )
+    assert record.to_dict()["work_done"] is True
+    assert "work_done=outcome.did_work" in inspect.getsource(campaign_mod), (
+        "the executed-cycle record no longer writes the outcome's word"
     )

@@ -15,7 +15,31 @@ GitLab.com, 31 января 2017: рабочий каталог основной
 """
 from __future__ import annotations
 
-from core.state_integrity import read_state_jsonl
+import pathlib
+import shutil
+
+import pytest
+
+from core.state_integrity import quarantine_dir_for, read_state_jsonl
+
+_BACKUPS = sorted(pathlib.Path("data").glob("*.bak"))
+
+
+@pytest.mark.skipif(not _BACKUPS, reason="в этом клоне резервных копий нет")
+@pytest.mark.parametrize("backup", _BACKUPS, ids=lambda p: p.name[:40])
+def test_a_backup_loads_through_the_real_loader(backup: pathlib.Path, tmp_path) -> None:
+    """Каждый непустой ряд копии читается как полезная нагрузка; карантин пуст.
+
+    Читается копия в tmp: на битых рядах загрузчик переписывает файл, который читает."""
+    copy = tmp_path / backup.name
+    shutil.copyfile(backup, copy)
+    expected = sum(1 for line in backup.read_bytes().split(b"\n") if line.strip())
+
+    rows = read_state_jsonl(copy)
+
+    assert not quarantine_dir_for(copy).exists(), f"{backup.name}: ряды ушли в карантин"
+    assert len(rows) == expected, backup.name
+    assert not any("_integrity" in row for row in rows), backup.name
 
 
 def test_the_drill_would_notice_a_broken_backup(tmp_path) -> None:

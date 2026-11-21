@@ -57,6 +57,25 @@ def test_one_run_counts_once_however_many_calls_it_made():
     assert [o.runs for o in outcomes] == [1]
 
 
+def test_the_router_asks_the_measurement_before_the_tier_map():
+    """Вторая половина дороги. Порядок здесь и есть вся правка: сначала замер,
+    карта имён — пол.
+    """
+    import inspect
+
+    from core.model_router import UsageTrackedLLM
+
+    # 2026-08-22: the substitution moved one hop, into `_next_provider_llm`,
+    # when MIR-132's pre-emptive health check began sharing it with the
+    # exception path. The invariant is unchanged — measurement first, tier map
+    # as the floor — so the pin follows the chain instead of the old location.
+    source = inspect.getsource(UsageTrackedLLM._failover_llm)
+    chain = inspect.getsource(UsageTrackedLLM._next_provider_llm)
+    assert "_next_provider_llm(" in source
+    assert "substitute_model_with_reason(" in chain
+    assert "peer_model_at_same_tier" not in source + chain
+
+
 def test_a_measured_winner_that_the_world_no_longer_offers_is_dropped():
     """Опыт живёт дольше мира.
 
@@ -72,3 +91,15 @@ def test_a_measured_winner_that_the_world_no_longer_offers_is_dropped():
     assert preferred_model(
         outcomes, role="planner", provider="openai", offered={"живая"},
     ) == "живая"
+
+
+def test_the_live_selection_consults_the_world():
+    """Вторая половина дороги: сверка обязана стоять в живом пути, а не только
+    в чистой функции.
+    """
+    import inspect
+
+    from core.model_outcomes import substitute_model_with_reason
+
+    source = inspect.getsource(substitute_model_with_reason)
+    assert "offered_models(provider)" in source

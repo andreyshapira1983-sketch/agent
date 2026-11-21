@@ -51,6 +51,23 @@ def test_the_block_is_bounded() -> None:
     assert len(mentor_block(many, max_chars=900)) <= 900
 
 
+def test_the_goal_chooser_reads_the_channel(tmp_path: Path) -> None:
+    """Проводка: вопросы доходят до выбора цели тем же путём, что вердикты.
+
+    Пин по смыслу: имя связано в модуле выбора и вопросы входят в подсказку.
+    """
+    import inspect
+
+    from core import charter_goal as mod
+
+    assert callable(getattr(mod, "open_questions", None))
+    src = inspect.getsource(mod)
+    assert "mentor_block" in src
+    ask_src = inspect.getsource(mod._ask)
+    assert "mentor_questions" in ask_src
+    assert "if mentor_questions:" in ask_src
+
+
 def test_a_broken_channel_is_silence_not_a_crash(tmp_path: Path) -> None:
     """Битый файл канала не роняет выбор цели — и не выдумывает вопросов."""
     path = tmp_path / "data" / "mentor_questions.jsonl"

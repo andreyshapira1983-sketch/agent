@@ -204,6 +204,21 @@ def test_unparseable_builder_output_is_vetoed(workspace: Path):
     assert report.status == "critic_veto"
 
 
+def test_no_push_or_network_methods_in_producer_and_vcs():
+    import core.self_build_producer as producer
+    from core.safe_vcs import SafeVCS
+
+    src = Path(producer.__file__).read_text(encoding="utf-8")
+    import_lines = [
+        ln for ln in src.splitlines()
+        if ln.strip().startswith(("import ", "from "))
+    ]
+    for banned in ("requests", "urllib", "httpx", "socket", "subprocess"):
+        assert not any(banned in ln for ln in import_lines), banned
+    for banned in ("push", "fetch", "pull", "remote", "merge"):
+        assert not hasattr(SafeVCS, banned), banned
+
+
 # ── value gate (TD-035): pre-publish no-effect veto + soft flags ──────────────
 
 

@@ -18,13 +18,14 @@ Specifically covered:
 from __future__ import annotations
 
 import json
+import typing
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from core.logger import TraceLogger
-from core.loop import AgentLoop, new_trace_id
+from core.loop import AgentLoop, ReplanCode, new_trace_id
 from core.policy import PolicyGate
 from core.replan import (
     ReplanPolicy,
@@ -143,6 +144,53 @@ def _build_agent(
         kwargs["max_replan_attempts"] = max_replan_attempts
     agent = AgentLoop(**kwargs)
     return agent, workspace / "logs" / f"{trace_id}.jsonl"
+
+
+# ============================================================
+# A — Taxonomy drift: the tuple and the budgets must match FailureType
+# ============================================================
+
+class TestTaxonomyDrift:
+    """If someone adds a new failure type in core/replan.py and forgets
+    to update core/loop.py (or vice versa), this test class screams."""
+
+    def _replancode_values(self) -> set[str]:
+        # Python's Literal exposes its values via typing.get_args().
+        return set(typing.get_args(ReplanCode))
+
+
+    def test_loop_only_emits_known_failure_codes(self):
+        """Grep `core/loop.py` for hard-coded `code=` assignments to
+        ReplanTrigger and verify every one of them is a known code.
+        This catches a typo like `code="too_error"`."""
+        # Through the module (census C1). The grep is about the codes THIS
+        # module hard-codes, and that question travels with it.
+        import inspect
+
+        from core import loop as _loop_mod
+
+        loop_src = inspect.getsource(_loop_mod)
+        # very loose pattern: `code="something"` anywhere in the file
+        import re
+        codes_used = set(re.findall(r'code\s*=\s*"([a-z_]+)"', loop_src))
+        # Filter to the codes that get assigned to a ReplanTrigger by
+        # looking at the immediate context. Easier: every code that
+        # appears more than once and is lowercase_snake is a candidate.
+        # We'll just intersect with the union of ReplanCode + a few
+        # extra non-replan codes we know live in this file.
+        extra_codes_in_loop = {
+            # ErrorObject codes that aren't ReplanCode but show up in
+            # the same pattern:
+            "replan_exhausted",
+            "gateway_blocked",
+        }
+        known = self._replancode_values() | extra_codes_in_loop
+        unknown = codes_used - known
+        assert not unknown, (
+            f"core/loop.py uses code(s) {unknown} that are NOT in "
+            f"ReplanCode and not in the explicit whitelist. Either "
+            f"add to ReplanCode or to the whitelist if intentional."
+        )
 
 
 # ============================================================

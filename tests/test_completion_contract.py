@@ -17,6 +17,8 @@ nothing represented the deliverable.
 """
 from __future__ import annotations
 
+import inspect
+
 from core.completion_contract import (
     derive_completion_contract,
     unmet_obligations,
@@ -34,6 +36,34 @@ def _green_tests() -> dict:
         },
         "issues": [],
     }
+
+
+class TestDerivedBeforeWork:
+    def test_the_loop_logs_the_contract_before_any_tool_call(self):
+        """The journal ordering is the evidence that the criterion predates the
+        work. Read off the source: the contract event is emitted in the
+        interpret block, above the plan/execute section."""
+        source = inspect.getsource(
+            __import__("core.loop", fromlist=["loop"])
+        )
+        contract_at = source.index('self.log.log(\n            "completion_contract"')
+        # Планирование и исполнение уехали в `core/loop_attempt` целым циклом
+        # попыток (разбор больших файлов на модули); в `core/loop.py` остался
+        # его ВЫЗОВ — по нему и меряем порядок, проверяемое свойство то же.
+        attempt_at = source.index("self._run_attempt_loop(")
+        assert contract_at < attempt_at, "contract must be fixed before planning"
+
+        # И проверка, без которой предыдущая строка ничего не значит: план и
+        # исполнение действительно живут ВНУТРИ этого вызова. Уедь они куда-то
+        # ещё — «раньше вызова» перестало бы означать «раньше работы».
+        attempt_src = inspect.getsource(
+            __import__("core.loop_attempt", fromlist=["loop_attempt"])
+        )
+        assert 'self.log.log("plan"' in attempt_src
+        assert "self._execute_steps_parallel(" in attempt_src
+        assert 'self.log.log("plan"' not in source, (
+            "планирование вернулось в цикл — порядок надо мерить заново"
+        )
 
 
 class TestUnmetBlocksCredit:
@@ -122,3 +152,24 @@ class TestReviewRoundOn258:
             "issues": [],
         }
         assert len(unmet_obligations(contract, artifacts={"run_tests:.": stalled})) == 1
+
+
+    def test_the_two_modules_are_not_cyclic(self):
+        """`paths_mentioned` moved to the shared scanner's home so the contract
+        and the obligation sensor stopped importing each other."""
+        import ast
+
+        # Through the module, not a literal path: the check is about what
+        # THIS module imports, and reading it by name survives a relocation
+        # (census C1). `pathlib` stays imported above for the rest of the file.
+        import inspect
+
+        from core import completion_contract as _cc_mod
+
+        source = inspect.getsource(_cc_mod)
+        imported = {
+            node.module
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert "core.completion_obligation" not in imported

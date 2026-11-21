@@ -25,9 +25,13 @@ Contract under test:
 """
 from __future__ import annotations
 
+import dataclasses
+import re
+from importlib.util import find_spec
 from pathlib import Path
 
 from core.verification_summary import (
+    _VERDICT_RU,
     build_verification_summary,
 )
 from core.verifier_models import ClaimChunk, VerificationReport
@@ -92,3 +96,23 @@ class TestFivePoints:
         # never silently folded into the confirmed bucket.
         assert "слов" in text and "оператора" in text
         assert "низкая" in summary.tail
+
+
+class TestVerdictVocabularyIsCovered:
+    def test_every_verdict_the_verifier_assigns_has_russian_wording(self):
+        """Every verdict the verifier can emit has wording for point 4.
+
+        Two sources, so moving the literals into constants cannot empty the
+        check: the scrape of verifier_core and the report's per-verdict counters.
+        """
+        src = Path(find_spec("core.verifier_core").origin).read_text(encoding="utf-8")
+        scraped = set(re.findall(r'verdict\s*=\s*"([a-z_]+)"', src))
+        scraped |= set(re.findall(r'verdict="([a-z_]+)"', src))
+        assert scraped, "скрейп verifier_core не нашёл ни одного вердикта — обнови шаблон"
+        counted = {
+            f.name.removesuffix("_chunks")
+            for f in dataclasses.fields(VerificationReport)
+            if f.name.endswith("_chunks") and f.name != "total_chunks"
+        }
+        missing = sorted(v for v in scraped | counted if v not in _VERDICT_RU)
+        assert not missing, f"вердикты без русской формулировки: {missing}"

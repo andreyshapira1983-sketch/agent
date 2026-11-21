@@ -6,10 +6,12 @@
 """
 from __future__ import annotations
 
+import inspect
 import os
 import time
 from pathlib import Path
 
+from core import loop_response_deciders
 from core.turn_provenance import older_than_turn
 
 OLD_VIDEO = "converted/build_character_v4__blender_script_20260924-174639/character.mp4"
@@ -50,3 +52,7 @@ def test_code_the_turn_only_read_is_not_called_out(tmp_path: Path) -> None:
         os.utime(f, (started - 3600, started - 3600))
     head = "Risk в `tools/base.py` — Literal; complete — метод обёртки в `core/model_router.py`."
     assert older_than_turn(head, tmp_path, started, ["file_write", "patch_check"]) is None
+
+
+def test_the_answer_path_consults_it() -> None:
+    assert "older_than_turn(" in inspect.getsource(loop_response_deciders)

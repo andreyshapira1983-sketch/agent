@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import ast
+import pathlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -72,6 +74,33 @@ def test_quarantine_is_visible_to_the_operator(tmp_path: Path) -> None:
 
     assert lines and "1 finding" in lines[0]
     assert "may influence" in lines[0], "строка обязана называть, что права у находки нет"
+
+
+def test_nothing_else_reads_the_quarantine(tmp_path: Path) -> None:
+    """Граница, на которой стоит смысл карантина.
+
+    Если запись начнёт читать подбор памяти, планировщик или верификатор — она
+    перестанет быть уликой без прав и станет памятью, никем не продвинутой.
+    """
+    allowed = {"subagent_quarantine.py", "agent_tick.py"}
+    core_dir = pathlib.Path(__file__).resolve().parents[1] / "core"
+    readers: set[str] = set()
+    for path in sorted(core_dir.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        names = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        if {"load_quarantine", "quarantine_path"} & names and path.name not in allowed:
+            readers.add(path.name)
+
+    assert not readers, (
+        "карантин читают помимо своего модуля и строки состояния: "
+        + ", ".join(sorted(readers))
+    )
 
 
 def test_a_subagent_needs_a_reason_and_a_prediction(tool, tmp_path: Path) -> None:

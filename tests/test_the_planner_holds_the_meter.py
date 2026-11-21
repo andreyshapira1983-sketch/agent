@@ -45,6 +45,15 @@ def test_an_empty_store_is_a_reading_not_an_error(tmp_path: Path) -> None:
     assert "no lessons" in out["rendered"]
 
 
+def test_the_tool_is_in_the_agents_hands() -> None:
+    """Registered at birth — the lab's lesson: a tool outside the registry
+    does not exist for the loop."""
+    from app import bootstrap
+
+    src = Path(bootstrap.__file__).read_text(encoding="utf-8")
+    assert "LessonProvenanceTool(" in src
+
+
 def test_the_sanitizer_admits_the_meter() -> None:
     """The lab's live lesson (проба №3): a planned step died with «no
     sanitiser, dropped» — the hand had no pass. The meter gets one at birth."""

@@ -100,3 +100,16 @@ def test_the_tool_is_read_only_and_argumentless() -> None:
     assert tool.validate_output(out) == (True, [])
     with pytest.raises(PermissionError):
         tool.run(provider="openai")
+
+
+def test_the_eye_is_wired_into_the_context_and_the_registry() -> None:
+    """Wiring, not presence: the block is built where the spend mirror is,
+    and the tool is registered for every agent."""
+    import inspect
+
+    from app import bootstrap
+    from core import loop_context
+
+    assert "ModelRosterTool(" in inspect.getsource(bootstrap.build_agent)
+    src = inspect.getsource(loop_context)
+    assert "_model_roster_block" in src and "model_roster_unavailable" in src

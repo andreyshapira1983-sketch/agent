@@ -93,3 +93,12 @@ def test_a_broken_registry_does_not_break_the_turn_and_does_not_stay_silent() ->
 
     assert register_read_sources(agent, chain) == 0
     assert any(e == "read_sources_unregistered" for e, _ in agent.log.events)
+
+
+def test_the_run_tail_calls_it() -> None:
+    """Связь с механизмом: хвост хода зовёт регистрацию, иначе это снова шов."""
+    import inspect
+
+    from core import loop_run_tail
+
+    assert "register_read_sources" in inspect.getsource(loop_run_tail)

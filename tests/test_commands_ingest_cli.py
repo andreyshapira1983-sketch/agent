@@ -191,6 +191,20 @@ def test_ingest_web_usage_errors_never_reach_the_network(
     assert expected in capsys.readouterr().err
 
 
+def test_ingest_web_defaults_are_conservative(agent, tmp_path, monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(mod, "ingest_web_topic", lambda **kw: seen.update(kw) or report())
+
+    assert _handle_ingest_web("autonomous agents", agent, tmp_path) is True
+
+    assert seen["topic"] == "autonomous agents"
+    assert seen["dry_run"] is False
+    assert seen["limit"] == 5
+    assert seen["per_source"] == 1
+    assert seen["source_selection"] is None
+    assert seen["auto_write_memory"] is None, "memory writing is left to the caller's policy"
+
+
 def test_ingest_web_forwards_every_flag(agent, tmp_path, monkeypatch):
     seen: dict = {}
     monkeypatch.setattr(mod, "ingest_web_topic", lambda **kw: seen.update(kw) or report())

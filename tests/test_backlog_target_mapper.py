@@ -74,3 +74,17 @@ def test_untraceable_model_candidate_returns_no_target(workspace: Path) -> None:
     assert result.decision == "no_target"
     assert result.candidate is None
     assert result.reason == "candidate is not traceable to TECH_DEBT.md"
+
+
+def test_mapper_has_no_network_or_runtime_imports() -> None:
+    import core.backlog_target_mapper as mapper
+
+    src = Path(mapper.__file__).read_text(encoding="utf-8")
+    import_lines = [
+        line for line in src.splitlines()
+        if line.strip().startswith(("import ", "from "))
+    ]
+    for banned in ("requests", "urllib", "httpx", "socket", "subprocess"):
+        assert not any(banned in line for line in import_lines), banned
+    for banned in ("approval_inbox", "scheduler", "agent_tick"):
+        assert not any(banned in line for line in import_lines), banned

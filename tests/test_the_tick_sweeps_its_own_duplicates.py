@@ -53,3 +53,21 @@ def test_protected_rows_are_not_touched(workspace: Path) -> None:
 
     assert dropped == 0
     assert len(store.load()) == 2
+
+
+def test_run_tick_actually_reaches_the_sweep() -> None:
+    """The MIR-131 shape itself, pinned: an organ that exists but is not on
+    the live path is exactly what this repair exists to end."""
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path("agent_tick.py").read_text(encoding="utf-8"))
+    by_name = {n.name: n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert "run_tick" in by_name
+    called = {getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+              for n in ast.walk(by_name["run_tick"]) if isinstance(n, ast.Call)}
+    assert "_sweep_episodic_duplicates" in called, (
+        "the sweep exists but run_tick never calls it — thirteen organs "
+        "already have that exact defect"
+    )

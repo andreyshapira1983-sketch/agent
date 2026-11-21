@@ -121,3 +121,14 @@ def test_a_cycle_that_did_no_work_is_not_useful(tmp_path: Path) -> None:
     result = _run(tmp_path, _ScriptedExecute([hollow]))
 
     assert result.totals["useful_cycles"] == 0
+
+
+def test_a_failed_attempt_that_spent_is_banked(tmp_path: Path) -> None:
+    """Запуск, который потратил и упал, — попытка: повтор в эту кампанию запрещён."""
+    spent_and_failed = CampaignActionOutcome(result="failed", cost_units_spent=5)
+    execute = _ScriptedExecute([spent_and_failed])
+
+    result = _run(tmp_path, execute)
+
+    assert execute.calls == 1
+    assert any(r.result == "repeat" for r in result.records)

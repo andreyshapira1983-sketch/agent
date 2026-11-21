@@ -43,3 +43,35 @@ def test_a_committed_document_is_our_own(repo: Path) -> None:
 def test_a_path_escaping_the_repository_is_never_ours(repo: Path) -> None:
     """Обход через `..` не должен давать пропуск."""
     assert is_committed_source("file:../outside.md", repo) is False
+
+
+def test_the_blocked_branch_consults_provenance(repo: Path) -> None:
+    """Проводка: решение обязано стоять в горячем пути, а не только в модуле.
+
+    Сквозное подтверждение придёт из журнала ближайшего планового тика —
+    событие `injection_blocked_downgraded` вместо голой блокировки. До тех пор
+    это закрепление источника: без него правка тихо осталась бы неподключённой,
+    как уже случалось (MIR-138).
+    """
+    import inspect
+
+    from core import loop_step_execution as mod
+
+    # Смотрим МОДУЛЬ, а не одну функцию: первая версия пина держалась за имя
+    # `_execute_step` и покраснела, как только обработку блокировки вынесли в
+    # помощника. Пин обязан переживать перестановку, иначе он охраняет форму,
+    # а не свойство. Имя предиката тоже сменилось — с `is_committed_source` на
+    # `block_may_be_annotated`, когда к «своим» добавился вывод собственного
+    # набора тестов; пин следует за СМЫСЛОМ, а не за прежним словом.
+    src = inspect.getsource(mod)
+
+    assert "block_may_be_annotated" in src
+    assert "injection_blocked_downgraded" in src
+    assert "_blocked_output_or_replan" in inspect.getsource(
+        mod.AgentLoopStepExecution._execute_step
+    ), "решение должно вызываться из горячего пути, а не просто жить в модуле"
+    # Первая версия этой проверки смотрела ТОЛЬКО текст исходника и прошла,
+    # когда имя стояло в коде, а импорта не было: в бою это дало бы NameError
+    # на первом же заблокированном чтении. Свидетель обязан требовать
+    # СВЯЗАННОГО имени, а не совпадения строки.
+    assert callable(getattr(mod, "block_may_be_annotated", None))

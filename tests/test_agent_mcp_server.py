@@ -18,6 +18,7 @@ never established.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -26,6 +27,53 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 _VIEW = _REPO / "tools" / "agent_state_view.py"
+_TRANSPORT = _REPO / "tools" / "agent_mcp_server.py"
+
+#: Every name that mutates something, as it would appear in a call. Checked
+#: against the server's AST rather than its behaviour: a write reached only on
+#: a rare branch would never show up in a functional test.
+_MUTATORS = (
+    "write_text", "write_bytes", "open", "unlink", "mkdir", "rmdir", "remove",
+    "rename", "replace", "touch", "append_state_jsonl_unlocked",
+    "rewrite_state_jsonl_unlocked", "add", "save", "save_many", "update",
+    "delete", "mark_running", "mark_failed", "approve", "enqueue",
+)
+
+
+def _opens_for_writing(call: ast.Call) -> bool:
+    """Is this `open(...)` a write? Fails CLOSED on anything it cannot read.
+
+    Three ways this was wrong before review round #317, all in the direction
+    that lets a write through — the only direction that matters in a guard:
+
+    * It flagged EVERY `open`, contradicting its own comment. Fixed first,
+      because streaming a 5 MB journal needs `open`.
+    * It read the mode from argument 1, which is right for the builtin
+      `open(path, mode)` and WRONG for `path.open(mode)`, where the mode is
+      argument 0. Since this file's own reader uses `path.open`, a
+      `path.open("w")` would have passed unseen.
+    * A mode it could not evaluate — `open(p, mode=chosen)` — counted as
+      read. A gate that shrugs at what it does not understand is not a gate.
+
+    Now: the mode position follows the call shape, and a present-but-unreadable
+    mode is treated as a write. A caller who means read can pass the literal
+    `"r"` and say so.
+    """
+    # `path.open(mode)` vs `open(path, mode)` — an attribute call puts the
+    # mode first because the path is the receiver.
+    mode_index = 0 if isinstance(call.func, ast.Attribute) else 1
+    candidates: list[ast.expr] = []
+    if len(call.args) > mode_index:
+        candidates.append(call.args[mode_index])
+    candidates.extend(kw.value for kw in call.keywords if kw.arg == "mode")
+    if not candidates:
+        return False              # no mode at all is "r"
+    for node in candidates:
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            return True          # unreadable mode: fail closed
+        if any(ch in node.value for ch in "wax+"):
+            return True
+    return False
 
 
 def _module():
@@ -34,6 +82,35 @@ def _module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_the_server_is_registered_for_sessions_in_this_repository():
+    config = json.loads((_REPO / ".mcp.json").read_text(encoding="utf-8"))
+    entry = config["mcpServers"]["agent-state"]
+    assert entry["args"] == ["tools/agent_mcp_server.py"], entry
+    assert Path(_REPO / entry["args"][0]).is_file()
+
+
+def test_nothing_in_the_server_can_write():
+    """Read-only by inspection, not by intention.
+
+    `subprocess.run` is allowed and is the one call that leaves the process —
+    it runs `agent_tick.py --status`, which the agent's own CLI already treats
+    as a read. Everything else that could mutate a store must be absent.
+    """
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name in _MUTATORS and name != "open":
+            found.append(name)
+            continue
+        if name == "open" and _opens_for_writing(node):
+            found.append("open(mode=write)")
+    assert not found, f"в сервере появились изменяющие вызовы: {sorted(set(found))}"
 
 
 def test_the_task_view_reads_the_one_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -131,6 +208,22 @@ def test_the_episode_view_returns_the_newest_episodes(tmp_path: Path,
     assert view["episodes"][-1]["question"] == "q4"
 
 
+def test_the_transport_holds_no_logic_of_its_own():
+    """Everything testable lives where CI can reach it without `mcp` installed.
+
+    `mcp` is not a project requirement — it brings 18 direct dependencies
+    including a web-server stack, and this repository pins, locks and SBOMs
+    everything it ships. So the transport must stay a binding: if reading logic
+    migrates back into it, CI can no longer test that logic at all, and the
+    guard above would be scanning an empty file while the real code went
+    unchecked.
+    """
+    tree = ast.parse(_TRANSPORT.read_text(encoding="utf-8"))
+    defined = [n.name for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    assert not defined, f"в транспорте появилась логика: {defined}"
+
+
 def test_the_status_view_captures_the_stream_the_agent_actually_writes():
     """`_print_status` writes to stderr; a stdout-only capture returns nothing.
 
@@ -142,6 +235,31 @@ def test_the_status_view_captures_the_stream_the_agent_actually_writes():
     status = module.agent_status()
     assert status != "(no output)"
     assert "Daemon:" in status, status[:200]
+
+
+def test_a_large_journal_is_not_loaded_whole():
+    """Reading is line by line: the biggest log here is 5 MB and growing.
+
+    Checked structurally, because a functional test on a small file passes
+    either way — `read_text().splitlines()` is the defect, and it is invisible
+    until the file is large enough to hurt.
+
+    By AST, not by searching the source text: the first version of this test
+    matched `read_text(` and went red on the DOCSTRING that explains why
+    `read_text` was removed. Judging code by resemblance to a string is the
+    same mistake as an audit that cannot see through a name.
+    """
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
+    reader = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_read_jsonl")
+    whole_file = [
+        node.func.attr for node in ast.walk(reader)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr in ("read_text", "read_bytes", "readlines")
+    ]
+    assert not whole_file, (
+        f"хранилище снова читается целиком в память: {whole_file}"
+    )
 
 
 def test_the_journal_reports_matches_and_the_raw_total_separately(
@@ -181,6 +299,29 @@ def test_the_journal_reports_matches_and_the_raw_total_separately(
     assert nothing["rows_in_log"] == 4, (
         "пустой фильтр и пустой журнал стали неотличимы"
     )
+
+
+def test_the_journal_streams_instead_of_materialising_the_log():
+    """The consumer must stream too, not only the reader beneath it.
+
+    The first fix made `_read_jsonl` stream and then called it with `last=0`
+    from `run_journal`, which kept every row and filtered into a second list:
+    the plumbing was fixed and the one tap that pours 5 MB was left open.
+    Checked by AST, since a small fixture behaves identically either way.
+    """
+    tree = ast.parse(_VIEW.read_text(encoding="utf-8"))
+    journal = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "run_journal")
+    calls = [n.func.id for n in ast.walk(journal)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    assert "_read_jsonl" not in calls, (
+        "run_journal снова читает через материализующий вызов"
+    )
+    assert any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "open"
+        for n in ast.walk(journal)
+    ), "run_journal перестал читать файл потоком"
 
 
 def test_the_journal_tail_is_bounded_by_matches_not_by_rows(tmp_path: Path,

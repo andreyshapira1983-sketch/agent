@@ -18,6 +18,7 @@ MIR-186, ночь 2026-08-29. Живой материал: откат перво
 """
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -62,3 +63,12 @@ def test_the_freshness_detector_reads_the_stamp(tmp_path) -> None:
 
     assert has_fresh_self_improvement_failure(fresh_agent, tmp_path) is True
     assert has_fresh_self_improvement_failure(stale_agent, tmp_path) is False
+
+
+def test_the_unattended_path_sees_its_failures_now() -> None:
+    """Проводка: кампания передаёт неудачи и свежесть, не только REPL."""
+    from core import campaign_io
+
+    src = inspect.getsource(campaign_io)
+    assert "recent_self_improvement_failures=_recent_failures" in src
+    assert "fresh_self_improvement_failure=_has_fresh_failure" in src

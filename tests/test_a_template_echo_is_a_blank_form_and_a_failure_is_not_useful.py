@@ -21,6 +21,16 @@ def test_the_template_echo_is_refused_and_a_real_spec_passes() -> None:
     assert real is not None and real.effect == "mismatch в отчёте"
 
 
+def test_the_birth_prompt_example_is_built_from_the_same_words() -> None:
+    import inspect
+
+    import core.causal_climb_action as mod
+
+    src = inspect.getsource(mod._birth_experiment_spec)
+    assert "format(*_SPEC_PLACEHOLDERS)" in src, "the example and the refusal are one source"
+    assert not any(word in src for word in _SPEC_PLACEHOLDERS), "no second copy of the placeholder words"
+
+
 def test_a_failed_cycle_is_not_counted_useful() -> None:
     rows = [
         {"cycle": 1, "result": "failed", "action": "run_claim_experiment", "work_done": False},

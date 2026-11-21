@@ -44,3 +44,13 @@ def test_broken_link_is_detectable(tmp_path):
     broken = mod.find_broken_links([str(sample)])
     assert any("nope_missing.md" in target for _src, target in broken)
     assert all("real.md" not in target for _src, target in broken)
+
+
+def test_script_is_read_only():
+    with open(_SCRIPT, encoding="utf-8") as handle:
+        src = handle.read()
+    assert "import core" not in src
+    assert "from core" not in src
+    assert "subprocess" not in src
+    assert "urllib" not in src
+    assert "requests" not in src

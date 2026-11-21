@@ -40,3 +40,41 @@ def test_all_three_forms_mean_the_same_instant(raw: str, expected: datetime) -> 
         f"«{raw}» прочитано как другой момент — вернулась трактовка наивного "
         "значения как местного времени"
     )
+
+
+def test_the_live_state_carries_no_naive_stamps() -> None:
+    """Замер, а не предположение: в хранилищах наивных отметок нет."""
+    import json
+    import pathlib
+    import re
+
+    keys = ("created_at", "updated_at", "completed_at", "started_at",
+            "heartbeat_at", "run_after", "first_seen", "last_seen", "ts")
+    naive = 0
+    checked = 0
+    for path in sorted(pathlib.Path("data").glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            payload = row.get("payload", row)
+            if not isinstance(payload, dict):
+                continue
+            for key in keys:
+                value = payload.get(key)
+                if not isinstance(value, str) or len(value) < 10:
+                    continue
+                checked += 1
+                if not re.search(r"(?:Z|[+-]\d{2}:?\d{2})$", value):
+                    naive += 1
+
+    if checked == 0:
+        # Чистый клон (CI): data/ в gitignore, живого состояния нет — честный
+        # пропуск по образцу соседей («no live store in this environment»),
+        # а не провал. Дома замер обязателен. 2026-08-28.
+        pytest.skip("нет живого data/ в этом окружении")
+    assert checked > 100, "замер ничего не проверил — данные пропали?"
+    assert naive == 0, f"наивных отметок в живом состоянии: {naive} из {checked}"

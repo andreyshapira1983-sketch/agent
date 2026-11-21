@@ -53,6 +53,13 @@ def test_the_doorman_passes_inputs_and_rejects_a_malformed_list():
     assert any("inputs must be a list" in w for w in warnings)
 
 
+def test_the_default_agent_gives_the_lab_its_workspace():
+    from app import bootstrap
+
+    src = Path(bootstrap.__file__).read_text(encoding="utf-8")
+    assert "PythonProbeTool(workspace_root=workspace)" in src
+
+
 def test_a_task_file_named_but_not_given_is_copied_by_itself(tmp_path: Path):
     """Замер 2026-09-19: без входного файла эксперимент напечатал «exists: False»,
     и строка ушла в sum.txt как результат; позже, в опыте с библиотекой книг,

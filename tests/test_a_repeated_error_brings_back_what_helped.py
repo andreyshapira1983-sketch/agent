@@ -214,3 +214,13 @@ def test_a_loop_without_a_workspace_writes_no_cards_where_it_runs(tmp_path: Path
     assert with_past_experience(_Bare(), trig) is trig
     assert experience_notes(_Bare(), {"x": {"tool": "python_probe", "output": _probe_fail()["output"]}}) == {}
     assert not (run_dir / "data").exists()
+
+def test_the_loop_uses_it_where_failures_are_read() -> None:
+    import inspect
+
+    from core import loop_attempt, loop_memory_write, loop_step_execution, observation_round
+
+    assert "attempt_failures.append(with_past_experience(self, trigger))" in inspect.getsource(loop_attempt)
+    assert "notes=experience_notes(loop, attempt_artifacts)" in inspect.getsource(observation_round)
+    assert "failed_output_reason(result.output)" in inspect.getsource(loop_step_execution)
+    assert "learn_after_turn(self)" in inspect.getsource(loop_memory_write)

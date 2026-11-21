@@ -45,3 +45,27 @@ def test_a_disk_level_bad_byte_does_not_kill_the_store(tmp_path: Path) -> None:
     rows = read_state_jsonl(path)
 
     assert len(rows) == 5, f"выжило {len(rows)} из 6 — один байт унёс весь файл"
+
+
+def test_the_atomic_write_carries_a_durability_barrier() -> None:
+    """H-06 (crash consistency): данные обязаны быть сброшены ДО замены.
+
+    Честная оговорка: следствие этой ветки — потеря данных при отказе ХОСТА
+    или пропаже питания, и внутрипроцессно оно не воспроизводимо. Поэтому
+    здесь пинится наличие барьера, а не его эффект: temp+rename даёт
+    атомарность записи в КАТАЛОГЕ, но пустой файл после замены читался бы как
+    законно пустое хранилище, и контрольные суммы рядов не помогли бы —
+    проверять было бы нечего.
+    """
+    import inspect
+
+    from core.state_integrity import _atomic_write_lines
+
+    src = inspect.getsource(_atomic_write_lines)
+    barrier = src.index("fh.flush()")
+    replace_at = src.index("tmp.replace(path)")
+
+    assert "os.fsync" in src, "барьер долговечности снят"
+    assert barrier < replace_at, (
+        "сброс стоит ПОСЛЕ замены — порядок и есть весь смысл барьера"
+    )

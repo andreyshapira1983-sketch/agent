@@ -28,6 +28,8 @@ the cure existed, the connection did not.
 """
 from __future__ import annotations
 
+import ast
+import inspect
 from typing import Any
 
 from core.answer_format import SYSTEM_ANSWER
@@ -67,6 +69,31 @@ class _Agent(AgentLoopSynthesis):
 
     def _save_budget_pause_checkpoint(self, *a, **kw):
         raise AssertionError("not reached in these tests")
+
+
+# ---------------------------------------------------------------------------
+# The mixin must be able to reach the cure
+# ---------------------------------------------------------------------------
+
+def test_the_file_declares_the_sensor_it_needs():
+    """The root cause, pinned apart from the symptom — as in A3.
+
+    Both handlers were silent because `_sensor_failed` was not in this file's
+    host contract. Declaring it is the fix; this checks the declaration rather
+    than trusting that the calls below happen to resolve.
+    """
+    import core.loop_synthesis as mod
+
+    tree = ast.parse(inspect.getsource(mod))
+    declared: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
+            declared |= {
+                sub.target.id
+                for sub in ast.walk(node)
+                if isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name)
+            }
+    assert "_sensor_failed" in declared
 
 
 # ---------------------------------------------------------------------------
@@ -161,3 +188,21 @@ def test_a_failed_cheap_tier_is_reported_and_still_answers():
     assert llm == "NORMAL-MODEL", "falling back to the normal model must stay"
     assert "cheap_path_synth_model" not in agent.log.events
     assert agent.sensor_failures == ["cheap_path_model_tier"]
+
+
+# ---------------------------------------------------------------------------
+# Both handlers, as they stand in the source
+# ---------------------------------------------------------------------------
+
+def test_the_cheap_tier_handler_still_calls_its_sensor():
+    """The one branch this file still exercises as a copy.
+
+    The tier selection sits inside `_run_synthesizer_ladder`, which ends in a
+    real synthesis call, so it cannot be run here whole. Checking the name in
+    the source is the weaker guard — it judges text rather than behaviour — and
+    it is kept only where behaviour is genuinely out of reach. The registry
+    branch above no longer needs it.
+    """
+    import core.loop_synthesis as mod
+
+    assert '_sensor_failed("cheap_path_model_tier"' in inspect.getsource(mod)
