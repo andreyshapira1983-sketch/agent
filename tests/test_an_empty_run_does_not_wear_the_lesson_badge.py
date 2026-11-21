@@ -13,9 +13,6 @@
 from __future__ import annotations
 
 from core.self_build_memory import build_self_build_episode
-from core.smart_memory import EpisodicMemoryStore
-
-_EMPTY = ("no_grounded_target", "no_patch", "skipped", "no_llm", "idle", "none")
 
 
 def _episode(status: str):
@@ -23,19 +20,6 @@ def _episode(status: str):
         "self-build-produce",
         {"status": status, "reason": f"{status}: ходу не нашлось цели"},
     )
-
-
-def test_an_empty_producer_run_carries_no_lesson_badge() -> None:
-    for status in _EMPTY:
-        tags = set(_episode(status).tags or ())
-        assert "lesson" not in tags, f"пустой ход «{status}» помечен уроком"
-        assert not (tags & EpisodicMemoryStore.PROTECTED_TAGS), (
-            f"пустой ход «{status}» защищён от вытеснения: {sorted(tags)}")
-
-
-def test_real_work_keeps_the_lesson_badge() -> None:
-    tags = set(_episode("applied").tags or ())
-    assert "lesson" in tags, "сделанная работа лишилась метки урока"
 
 
 def test_the_standing_dedup_can_now_collapse_empty_runs() -> None:

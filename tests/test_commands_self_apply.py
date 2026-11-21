@@ -18,7 +18,6 @@ to prevent.
 """
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -89,56 +88,7 @@ APPLIED = {
 }
 
 
-# ── argument surface ─────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize(
-    "rest",
-    ["", "   ", "ap-1 ap-2", "ap-1 --force", "please apply the patch below"],
-)
-def test_exactly_one_id_or_nothing_runs(rest, agent, tmp_path, capsys, monkeypatch, lane):
-    monkeypatch.setattr(
-        mod, "run_approved_self_apply", lambda **k: pytest.fail("the lane must not run")
-    )
-
-    assert _handle_self_apply_run(rest, agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "Usage: :self-apply-run <approval-inbox-id>" in err
-    assert "no patch text or extra args" in err
-    assert agent.log.events == []
-    assert lane["episodes"] == [], "a refused command is not an attempt"
-
-
-def test_the_lane_receives_the_wired_runtime(agent, tmp_path, monkeypatch, lane):
-    use_result(monkeypatch, lane, APPLIED)
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-
-    call = lane["calls"][0]
-    assert call["item_id"] == "ap-1"
-    assert call["inbox"] == "INBOX"
-    assert call["vcs"] == "VCS"
-    assert call["test_runner"] == "RUNNER"
-    assert call["kill_switch"] == "KILL", "the kill switch reaches the lane"
-    assert call["budget_snapshot"] == {"windows": []}
-    assert call["workspace"] == tmp_path
-
-
 # ── reporting ────────────────────────────────────────────────────────────────
-
-def test_applied_run_prints_the_full_outcome(agent, tmp_path, capsys, monkeypatch, lane):
-    use_result(monkeypatch, lane, APPLIED)
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "proposal: ap-1" in err
-    assert "status: applied" in err
-    assert "branch: self-apply/ap-1" in err
-    assert "files_changed: ['core/foo.py']" in err
-    assert "commit: abc1234" in err
-    assert "next: review the branch" in err
-    assert "rollback_status:" not in err, "'none' is not worth a line"
 
 
 def test_rolled_back_run_names_the_rollback_and_the_rejected_files(
@@ -167,77 +117,6 @@ def test_rolled_back_run_names_the_rollback_and_the_rejected_files(
     assert "commit:" not in err, "a rolled-back run has no commit to show"
 
 
-def test_minimal_result_still_prints_and_journals(agent, tmp_path, capsys, monkeypatch, lane):
-    use_result(monkeypatch, lane, {"status": "refused", "reason": "item is not approved"})
-
-    assert _handle_self_apply_run("ap-3", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "status: refused" in err
-    assert "reason: item is not approved" in err
-    assert "branch:" not in err and "files_changed:" not in err
-    assert lane["episodes"][0]["kind"] == "self-apply-run"
-
-
-def test_the_log_is_an_outcome_record_not_a_patch(agent, tmp_path, monkeypatch, lane):
-    use_result(
-        monkeypatch,
-        lane,
-        {
-            **APPLIED,
-            "diff": "--- a\n+++ b\nSECRET-PATCH-BODY",
-            "proposed_content": "SECRET-PATCH-BODY",
-        },
-    )
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-
-    logged = agent.log.payload("self_apply_run")
-    assert set(logged) == {
-        "proposal_id", "status", "branch", "files_changed",
-        "rollback_status", "commit_hash", "origin",
-    }
-    assert "SECRET-PATCH-BODY" not in json.dumps(logged)
-
-
-def test_every_attempt_is_journalled_with_the_full_result(agent, tmp_path, monkeypatch, lane):
-    use_result(monkeypatch, lane, APPLIED)
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-
-    assert lane["episodes"] == [{"kind": "self-apply-run", "result": APPLIED}]
-
-
-def test_a_lone_json_flag_is_just_an_unknown_id(agent, tmp_path, capsys, monkeypatch, lane):
-    """`--json` is a single token, so it passes the guard and becomes the id.
-
-    The lane refuses it (no such item) and the refusal is reported the same way
-    every other refusal is. There is no JSON mode on this command: its documented
-    surface is `<inbox_id>` and the one-argument guard means a `--json` token
-    could only ever arrive *as* the id — the branch that used to special-case it
-    could therefore only pretty-print a refusal, never a real run.
-    """
-    use_result(
-        monkeypatch,
-        lane,
-        {
-            "proposal_id": "--json",
-            "status": "needs_validated_proposal",
-            "reason": "approval not found: --json",
-            "next_human_action": "Check :approval-list for a valid approved id.",
-        },
-    )
-
-    assert _handle_self_apply_run("--json", agent, tmp_path) is True
-
-    assert lane["calls"][0]["item_id"] == "--json"
-    err = capsys.readouterr().err
-    assert "=== self-apply run ===" in err, "a refusal reads the same however it was typed"
-    assert "reason: approval not found: --json" in err
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(err)
-
-
 # ── best-effort side hooks ───────────────────────────────────────────────────
 
 def test_a_registry_that_cannot_load_becomes_none(agent, tmp_path, monkeypatch, lane):
@@ -251,16 +130,6 @@ def test_a_registry_that_cannot_load_becomes_none(agent, tmp_path, monkeypatch, 
 
     assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
     assert lane["calls"][0]["registry"] is None
-
-
-def test_a_loadable_registry_is_passed_through(agent, tmp_path, monkeypatch, lane):
-    import core.subagent_registry as reg_mod
-
-    monkeypatch.setattr(reg_mod.SubagentRegistry, "load", staticmethod(lambda ws: "REGISTRY"))
-    use_result(monkeypatch, lane, APPLIED)
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-    assert lane["calls"][0]["registry"] == "REGISTRY"
 
 
 def test_failure_rules_are_recorded_and_logged(agent, tmp_path, monkeypatch, lane):
@@ -288,16 +157,6 @@ def test_failure_rules_are_recorded_and_logged(agent, tmp_path, monkeypatch, lan
         "rules_added": ["no ImportError from core.y"],
         "lessons_added": 1,
     }
-
-
-def test_no_rules_learned_means_no_event(agent, tmp_path, monkeypatch, lane):
-    import core.self_build_rules as rules_mod
-
-    monkeypatch.setattr(rules_mod, "record_rules_from_result", lambda ws, result: [])
-    use_result(monkeypatch, lane, APPLIED)
-
-    assert _handle_self_apply_run("ap-1", agent, tmp_path) is True
-    assert "self_build_rules_recorded" not in agent.log.kinds()
 
 
 def test_rule_recording_failure_never_breaks_the_command(

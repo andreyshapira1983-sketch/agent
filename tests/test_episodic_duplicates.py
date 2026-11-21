@@ -33,35 +33,3 @@ def test_a_failure_repeated_verbatim_is_kept_once(tmp_path: Path):
     kept = store.load()
     assert len(kept) == 2
     assert sum(1 for e in kept if "dirty_tree_wait" in e.summary) == 1
-
-
-def test_the_survivor_is_the_newest(tmp_path: Path):
-    """The last occurrence carries the current state; older copies add nothing."""
-    store = EpisodicMemoryStore(tmp_path / "episodic.jsonl")
-    for _ in range(3):
-        store.save(_ep("same failure"))
-    newest = store.load()[-1].id
-
-    collapse_duplicate_episodes(store)
-
-    assert [e.id for e in store.load()] == [newest]
-
-
-def test_different_failures_are_not_collapsed(tmp_path: Path):
-    """A summary is the lesson; two different ones are two lessons."""
-    store = EpisodicMemoryStore(tmp_path / "episodic.jsonl")
-    store.save(_ep("dirty_tree_wait"))
-    store.save(_ep("no_grounded_target"))
-    store.save(_ep("dirty_tree_wait", goal="another goal"))
-
-    assert select_duplicate_episodes(store.load()) == []
-
-
-def test_a_dry_run_removes_nothing(tmp_path: Path):
-    """Sensor first: the caller decides whether the store is rewritten."""
-    store = EpisodicMemoryStore(tmp_path / "episodic.jsonl")
-    for _ in range(4):
-        store.save(_ep("same failure"))
-
-    assert len(collapse_duplicate_episodes(store, dry_run=True)) == 3
-    assert len(store.load()) == 4

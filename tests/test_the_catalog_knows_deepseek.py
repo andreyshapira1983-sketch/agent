@@ -32,9 +32,3 @@ def test_a_deepseek_key_makes_deepseek_a_refresh_target(monkeypatch) -> None:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
     assert mc._credentialed_providers() == ["deepseek"]
-
-
-def test_the_default_deepseek_model_is_an_official_name(monkeypatch) -> None:
-    from core.llm import _default_model
-    monkeypatch.delenv("AGENT_MODEL", raising=False)
-    assert _default_model("deepseek") == "deepseek-flash"

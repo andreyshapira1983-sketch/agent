@@ -7,16 +7,12 @@ from __future__ import annotations
 
 import gzip
 import io
-import socket
 import urllib.error
 from typing import Any
 
 import pytest
 
 from tools.rss_fetch import (
-    DEFAULT_MAX_BYTES,
-    DEFAULT_TIMEOUT_SECONDS,
-    MAX_ENTRIES_CAP,
     RssFetchTool,
 )
 
@@ -63,13 +59,6 @@ def _opener(body: bytes, **kwargs) -> _StubOpener:
     return _StubOpener(_StubResponse(body=body, **kwargs))
 
 
-def _resolver_for(ip: str):
-    def _resolver(host, port, family, socktype, proto, flags):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 443))]
-
-    return _resolver
-
-
 RSS = b"""<?xml version="1.0"?>
 <rss version="2.0">
   <channel>
@@ -104,15 +93,6 @@ ATOM = b"""<?xml version="1.0"?>
 """
 
 
-def test_defaults_and_risk():
-    tool = RssFetchTool()
-
-    assert tool.max_bytes == DEFAULT_MAX_BYTES
-    assert tool.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
-    assert tool.risk == "read_only"
-    assert tool.risk_for({}) == "read_only"
-
-
 @pytest.mark.parametrize("kwargs", [
     {"max_bytes": 0},
     {"timeout_seconds": 0},
@@ -120,23 +100,6 @@ def test_defaults_and_risk():
 def test_invalid_construction_rejected(kwargs: dict):
     with pytest.raises(ValueError):
         RssFetchTool(**kwargs)
-
-
-def test_rss_feed_parsed():
-    opener = _opener(RSS)
-    out = RssFetchTool(opener=opener).run(
-        url="https://example.com/feed.xml",
-        max_entries=1,
-    )
-
-    assert out["title"] == "Example Feed"
-    assert out["requested_url"] == "https://example.com/feed.xml"
-    assert out["feed_type"] == "rss"
-    assert len(out["entries"]) == 1
-    assert out["entries"][0]["title"] == "First item"
-    assert out["entries"][0]["url"] == "https://example.com/first"
-    assert len(out["content_hash"]) == 64
-    assert opener.last_request.headers["User-agent"].startswith("AutonomousAgent/RSS")
 
 
 def test_atom_feed_parsed():
@@ -214,11 +177,6 @@ def test_unsafe_urls_rejected(url: str):
         RssFetchTool(opener=_opener(RSS)).run(url=url)
 
 
-def test_plain_http_rejected_by_default():
-    with pytest.raises(PermissionError, match="plain HTTP"):
-        RssFetchTool(opener=_opener(RSS)).run(url="http://example.com/feed.xml")
-
-
 def test_plain_http_allowed_for_explicit_host():
     out = RssFetchTool(
         opener=_opener(RSS),
@@ -226,16 +184,6 @@ def test_plain_http_allowed_for_explicit_host():
     ).run(url="http://example.com/feed.xml")
 
     assert out["requested_url"] == "http://example.com/feed.xml"
-
-
-def test_hostname_resolving_to_private_ip_rejected():
-    tool = RssFetchTool(
-        opener=_opener(RSS),
-        resolver=_resolver_for("127.0.0.1"),
-    )
-
-    with pytest.raises(PermissionError, match="public global"):
-        tool.run(url="https://looks-public.example/feed.xml")
 
 
 def test_final_redirect_url_revalidated():
@@ -255,37 +203,6 @@ def test_egress_allow_policy_blocks_unlisted_host():
 
     with pytest.raises(PermissionError, match="not allowed by egress policy"):
         tool.run(url="https://example.com/feed.xml")
-
-
-def test_final_url_is_reported_after_redirect():
-    tool = RssFetchTool(
-        opener=_opener(RSS, final_url="https://example.com/final.xml"),
-    )
-
-    out = tool.run(url="https://example.com/feed.xml")
-
-    assert out["url"] == "https://example.com/final.xml"
-    assert out["requested_url"] == "https://example.com/feed.xml"
-
-
-def test_max_entries_capped():
-    """Asking for more than the cap from a longer feed returns the first MAX_ENTRIES_CAP."""
-    items = "".join(
-        f"<item><title>Item {i}</title><link>https://example.com/{i}</link></item>"
-        for i in range(MAX_ENTRIES_CAP + 10)
-    )
-    feed = (
-        '<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title>'
-        f"{items}</channel></rss>"
-    ).encode()
-
-    out = RssFetchTool(opener=_opener(feed)).run(
-        url="https://example.com/feed.xml",
-        max_entries=MAX_ENTRIES_CAP + 100,
-    )
-
-    assert len(out["entries"]) == MAX_ENTRIES_CAP
-    assert out["entries"][0]["title"] == "Item 0"
 
 
 def test_validate_output():

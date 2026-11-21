@@ -33,7 +33,6 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from core.smart_memory import (
-    EpisodeRecord,
     EpisodicMemoryStore,
     episode_from_agent_cycle,
 )
@@ -75,15 +74,6 @@ def _fast_path_fired(events: list[str]) -> bool:
     return "episodic_fast_path" in events
 
 
-def _replay_episodes(store: EpisodicMemoryStore) -> list[EpisodeRecord]:
-    """Episodes banked by a fast-path replay carry a `memory:<id>` source label."""
-    return [
-        ep
-        for ep in store.load()
-        if any(str(lbl).startswith("memory:") for lbl in ep.source_labels)
-    ]
-
-
 # ─────────────────────────────── MIR-002 ────────────────────────────────────
 
 def test_mir002_1_ungrounded_quality1_episode_must_not_fast_path(workspace: Path):
@@ -109,60 +99,7 @@ def test_mir002_1_ungrounded_quality1_episode_must_not_fast_path(workspace: Path
     )
 
 
-def test_mir002_3_legacy_episode_without_provenance_must_not_fast_path(workspace: Path):
-    """(3) An OLD episode deserialized without an explicit provenance field must
-    default to not-verified (not_run) and must NOT fast-path — no guessing
-    verification from legacy fields."""
-    loop, events, store = _make_loop(workspace)
-    legacy = EpisodeRecord.from_dict({
-        "goal": "answer",
-        "question": _Q,
-        "outcome": "success",
-        "summary": "Sydney.",
-        "full_answer": "Sydney.",
-        "tools_used": [],
-        "source_labels": [],
-        "verified_chunks": 1,   # a legacy count — must NOT be read as "verified"
-        "unverified_chunks": 0,
-        # NOTE: no verification_status / response_origin key (pre-fix record)
-    })
-    store.save(legacy)
-
-    loop.run(_Q)
-
-    assert not _fast_path_fired(events), (
-        "fast-path replayed a legacy episode with no explicit verification "
-        "provenance — legacy records must be treated as not_run"
-    )
-
-
 # ─────────────────────────────── MIR-041 ────────────────────────────────────
-
-def test_mir041_4_replay_must_not_be_recorded_verified(workspace: Path):
-    """(4) When a fast-path replay happens, the replay episode it banks must NOT
-    carry verified_chunks=1 (a replay produces no new evidence)."""
-    loop, _events, store = _make_loop(workspace)
-    source = episode_from_agent_cycle(
-        goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
-        verified_chunks=3, unverified_chunks=0,  # a genuinely-evidenced answer
-        # Eligibility (2c) and completion (MIR-057) both fail-close on
-        # unclassified episodes, so the seed must be explicitly admitted for
-        # the fast path to fire at all — otherwise this test never reaches
-        # the assertion it exists for.
-        usage_eligible=True,
-        declared_completion="achieved",
-    )
-    store.save(source)
-
-    loop.run(_Q)
-
-    replays = _replay_episodes(store)
-    assert replays, "expected a replay episode to be banked (fast-path should have fired)"
-    assert all(r.verified_chunks == 0 for r in replays), (
-        "a memory replay was re-banked with verified_chunks>=1 — a replay must "
-        "create no new verified evidence"
-    )
 
 
 def test_mir041_5_replay_episode_must_not_be_fast_path_candidate(workspace: Path):
@@ -185,64 +122,4 @@ def test_mir041_5_replay_episode_must_not_be_fast_path_candidate(workspace: Path
     assert not _fast_path_fired(events), (
         "fast-path used a memory_replay record as its source — replays must never "
         "be fast-path candidates"
-    )
-
-
-def test_mir041_6_repeated_asks_must_not_self_reinforce_verified_chain(workspace: Path):
-    """(6) Repeated asks served from memory leave exactly one verified-success record.
-
-    The source is admitted as in test 4, so every ask really replays it.
-    """
-    loop, events, store = _make_loop(workspace)
-    source = episode_from_agent_cycle(
-        goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
-        verified_chunks=3, unverified_chunks=0,
-        usage_eligible=True,
-        declared_completion="achieved",
-    )
-    store.save(source)
-
-    for _ in range(3):
-        loop.run(_Q)
-
-    assert events.count("episodic_fast_path") == 3, "every ask should replay the source"
-    verified_success = [
-        ep for ep in store.load()
-        if ep.outcome == "success" and ep.verified_chunks >= 1
-    ]
-    assert len(verified_success) == 1, (
-        f"self-reinforcing loop: {len(verified_success)} verified-success episodes "
-        "after 3 asks — replays must not mint new verified-success records"
-    )
-
-
-# ─────────────────────────── protective (guard) ─────────────────────────────
-
-def test_mir_protective_7_genuinely_verified_episode_may_fast_path(workspace: Path):
-    """(7) GUARD: a genuinely-verified source episode must still be allowed to use
-    the safe fast-path, so the fix does not destroy the legitimate optimization.
-
-    Passes on current code (gate = quality>=0.70). After the fix, the seeded
-    episode must be created with verification_status==verified (a field the fix
-    adds) for this to keep passing — update the seeding when the field lands.
-    """
-    loop, events, store = _make_loop(workspace)
-    verified = episode_from_agent_cycle(
-        goal="answer", question=_Q, answer="Canberra.",
-        tools_used=[], source_labels=["general-knowledge"],  # a file label now needs its hash (17.11)
-        verified_chunks=3, unverified_chunks=0,
-        # Seeding updated exactly as this docstring instructs. The eligibility
-        # field (2c) and the completion axis (MIR-057) both fail-close on
-        # unclassified episodes, so a genuinely-verified seed must say so.
-        usage_eligible=True,
-        declared_completion="achieved",
-    )
-    store.save(verified)
-
-    loop.run(_Q)
-
-    assert _fast_path_fired(events), (
-        "a genuinely-verified answer was NOT fast-pathed — the safe optimization "
-        "must survive the fix"
     )

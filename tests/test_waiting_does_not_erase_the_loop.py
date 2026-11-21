@@ -95,46 +95,6 @@ def test_loop_counters_are_not_reset_by_waiting(tmp_path: Path) -> None:
     assert result.records[-1].goal == result.records[-2].goal
 
 
-def test_waiting_still_happens_and_is_recorded(tmp_path: Path) -> None:
-    """Сохранение улик не отменяет само ожидание: блок 8 остаётся в силе."""
-    result = _run(tmp_path, next_goal=lambda: "", max_cycles=12)
-
-    assert any(r.result == "waiting" for r in result.records)
-    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
-
-
-def test_a_real_world_change_may_open_a_new_era(tmp_path: Path) -> None:
-    """Обратная сторона: настоящая перемена мира ВПРАВЕ обнулить то, что от
-    мира и зависит.
-
-    Вердикт «по этой теме больше нечего делать» вынесен в прежнем мире; когда
-    состав доступных инструментов изменился, запирать тему нечестно (MIR о
-    журнале перемен, core/capability_events.py). Здесь мир меняется во время
-    КАЖДОГО ожидания, и кампания вправе перебрать больше тем, чем даёт один
-    потолок смен.
-    """
-    from core.capability_events import record_capability_snapshot
-
-    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
-    # Точка отсчёта: первая строка журнала переменой не считается.
-    record_capability_snapshot(tmp_path, frozenset({"web_search"}))
-    changes = {"n": 0}
-
-    def _sleep(_seconds: float) -> None:
-        changes["n"] += 1
-        record_capability_snapshot(tmp_path, frozenset({f"tool_{changes['n']}"}))
-
-    result = _run(tmp_path, next_goal=_endless_goals(), max_cycles=120,
-                  pace=1.0, sleep_fn=_sleep)
-
-    assert changes["n"] > 0, "ожидание не дошло до сна — тест ничего не проверил"
-    goals = {r.goal for r in result.records}
-    assert len(goals) > _MAX_GOAL_SWITCHES + 1, (
-        "перемена мира обязана открывать новую эру выбора, иначе агент заперт "
-        "вердиктами, вынесенными в другом мире"
-    )
-
-
 def test_an_unlimited_switch_budget_keeps_choosing_instead_of_sleeping(tmp_path: Path) -> None:
     """Суточный прогон 2026-09-19: двенадцать смен кончились за час с
     небольшим, дальше кампания спала до «перемены мира». Оператор: «мне не

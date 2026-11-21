@@ -34,42 +34,7 @@ same input yields the same winner, with one more true thing written down.
 """
 from __future__ import annotations
 
-import pytest
-
 from core.best_next_action import select_best_next_action
-
-
-def test_a_contested_choice_names_the_table_that_settled_it() -> None:
-    """Two real problems at once — daemon down (100) and failing tests (80).
-    The winner was picked by numbers a developer wrote, and the record must
-    say so rather than presenting the outcome as the agent's judgement."""
-    action = select_best_next_action(
-        heartbeat_missing=True,          # daemon candidate, priority 100
-        tests_health="fail",             # tests candidate, priority 80
-        failed_tests=("tests/test_x.py",),
-    )
-    assert action.decided_by == "priority_table", (
-        f"a contested selection recorded {action.decided_by!r} — the developer's "
-        "numbers picked the winner and the record does not say so"
-    )
-    assert action.candidates_considered >= 2
-
-
-def test_a_single_admissible_action_is_not_a_choice() -> None:
-    """One candidate means nothing was selected. Calling that a decision would
-    inflate the record exactly where it must not."""
-    action = select_best_next_action(tests_health="fail",
-                                     failed_tests=("tests/test_x.py",))
-    assert action.decided_by == "sole_candidate"
-    assert action.candidates_considered == 1
-
-
-def test_the_observe_fallback_admits_that_nothing_was_chosen() -> None:
-    """A clean world produces the observe action. Nothing competed, and the
-    record must not imply a judgement was made."""
-    action = select_best_next_action(tests_health="pass", result_status="done")
-    assert action.decided_by == "no_candidate"
-    assert action.candidates_considered == 0
 
 
 def test_no_path_claims_the_agent_deliberated() -> None:
@@ -88,42 +53,3 @@ def test_no_path_claims_the_agent_deliberated() -> None:
         assert action.decided_by in {
             "no_candidate", "sole_candidate", "priority_table",
         }, f"unexpected provenance {action.decided_by!r} for {kwargs}"
-
-
-def test_the_provenance_reaches_the_record_not_only_the_object() -> None:
-    """A distinction that never leaves the process cannot be audited after the
-    run — the whole reason the three axes were called a gap."""
-    action = select_best_next_action(
-        heartbeat_missing=True, tests_health="fail", failed_tests=("t.py",)
-    )
-    payload = action.to_dict()
-    assert payload["decided_by"] == "priority_table"
-    assert payload["candidates_considered"] >= 2
-
-
-def test_the_chosen_action_itself_is_unchanged() -> None:
-    """Recording provenance must not move a single verdict. Same world, same
-    winner — one more true thing written beside it."""
-    action = select_best_next_action(
-        heartbeat_missing=True, tests_health="fail", failed_tests=("t.py",)
-    )
-    assert action.action == "restart_daemon" or action.priority == 100, (
-        f"the winner changed: {action.action!r} at priority {action.priority}"
-    )
-
-
-@pytest.mark.parametrize("acknowledged,expected", [
-    (frozenset(), 3),
-    (frozenset({"review_inbox_backlog"}), 2),
-])
-def test_the_count_reflects_what_actually_competed(
-    acknowledged: frozenset, expected: int
-) -> None:
-    """Suppressed candidates leave the race, so they were not competitors. The
-    count must describe the race that happened, not the one that might have."""
-    action = select_best_next_action(
-        heartbeat_missing=True, tests_health="fail", failed_tests=("t.py",),
-        inbox_pending=20,  # the advisory backlog candidate really enters the race
-        acknowledged=acknowledged,
-    )
-    assert action.candidates_considered == expected

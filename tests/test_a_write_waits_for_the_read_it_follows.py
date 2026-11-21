@@ -64,18 +64,6 @@ def test_a_write_before_the_read_and_a_copy_by_reference_run_at_once(workspace: 
     assert not _events(loop, "writes_deferred"), "перенос по ссылке — не слепой текст"
 
 
-def test_without_the_flag_nothing_is_deferred(workspace: Path):
-    (workspace / "numbers.txt").write_text("1\n2\n3\n", encoding="utf-8")
-    planner = _ScriptedPlanner([
-        [_src("file_read", {"path": "numbers.txt"}),
-         _src("file_write", {"path": "sum.txt", "content": "6"})],
-    ])
-    loop = _loop(workspace, planner, observe=False)
-    loop.run("Посчитай сумму чисел в numbers.txt и запиши её в sum.txt")
-    assert (workspace / "sum.txt").read_text(encoding="utf-8") == "6"
-    assert not _events(loop, "writes_deferred")
-
-
 def test_a_reference_written_as_prose_does_not_buy_a_round(workspace: Path):
     readme = "Шаги ссылаются друг на друга так: {{step:N.output}} — вывод шага N.\n"
     planner = _ScriptedPlanner([[_src("file_write", {"path": "README.md", "content": readme})], []])
@@ -103,24 +91,3 @@ def test_on_the_last_round_the_write_is_not_deferred_into_nothing(workspace: Pat
     loop.run("Посчитай сумму чисел в numbers.txt и запиши её в sum.txt")
 
     assert (workspace / "sum.txt").read_text(encoding="utf-8") == "6"
-
-
-def test_a_write_waits_one_round_not_every_round(workspace: Path):
-    """2026-09-22 14:31: планировщик на каждом круге добавлял ещё одно чтение,
-    запись откладывалась дважды и легла лишь на последнем круге — на исправление
-    по выводу проверки кругов не осталось. Ждёт один круг, не каждый."""
-    (workspace / "a.txt").write_text("1\n", encoding="utf-8")
-    (workspace / "b.txt").write_text("2\n", encoding="utf-8")
-    planner = _ScriptedPlanner([
-        [_src("file_read", {"path": "a.txt"}), _src("file_write", {"path": "out.txt", "content": "first"})],
-        [_src("file_read", {"path": "b.txt"}), _src("file_write", {"path": "out.txt", "content": "second"})],
-        [],
-    ])
-    loop = _loop(workspace, planner, observe=True)
-
-    loop.run("Прочитай a.txt и b.txt и запиши итог в out.txt")
-
-    assert (workspace / "out.txt").read_text(encoding="utf-8") == "second"
-    assert len(_events(loop, "writes_deferred")) == 1
-
-

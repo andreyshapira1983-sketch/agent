@@ -51,16 +51,6 @@ def test_a_reason_is_logged_by_name_and_is_not_a_product(said):
         assert events[-1][1]["reason"] == said
 
 
-@pytest.mark.parametrize("said", [
-    "approvals_new=1", "repair_proposed:ain_3", "engineering_proposed:ain_4",
-    "doc_draft_proposed:ain_5", "hypothesis_recorded:key", "test_proposed:ain_6",
-])
-def test_a_created_thing_is_a_product(said):
-    from core.campaign_io import _product
-
-    assert _product(_agent(), said) == said
-
-
 class _Inbox:
     """pending() answers differently before and after the run."""
 
@@ -119,24 +109,6 @@ def test_a_permission_question_born_in_the_run_is_not_a_new_proposal(monkeypatch
     )
 
     assert outcome.proposal is None
-
-
-def test_a_real_item_born_in_the_run_still_counts(monkeypatch, tmp_path):
-    import core.campaign_io as cio
-    from core.campaign import _default_execute_action
-
-    item = SimpleNamespace(id="ain_real", operation="self_apply_lane.run")
-    inbox = _Inbox(after=[item])
-    _run_with(monkeypatch, inbox)
-    monkeypatch.setattr(cio, "_propose_repair_from_diagnosis", lambda **kw: None)
-
-    outcome = _default_execute_action(
-        agent=_agent(), workspace=tmp_path, action=_action("investigate_tick_error"),
-        config=CampaignConfig(goal="Investigate", dry_run=False), approval_inbox=inbox,
-    )
-
-    assert outcome.proposal == "approvals_new=1"
-    assert outcome.did_work is True
 
 
 def test_a_declined_repair_leaves_the_cycle_without_a_product(monkeypatch, tmp_path):

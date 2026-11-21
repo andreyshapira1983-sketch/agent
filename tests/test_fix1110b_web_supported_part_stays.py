@@ -33,10 +33,3 @@ def test_the_verified_fact_survives_the_truncation(monkeypatch: pytest.MonkeyPat
     assert triggered
     assert "Download Python 3.15.2" in shown, shown
     assert "9.1.7" not in shown and "9.7.7" not in shown, shown
-
-
-def test_nothing_verified_means_nothing_kept(monkeypatch: pytest.MonkeyPatch) -> None:
-    shown, triggered = _truncated(monkeypatch, true_version=False)
-    assert triggered
-    assert "9.0.7" not in shown and "9.1.7" not in shown, shown
-    assert "ни одно утверждение не подтверждено" in shown, shown

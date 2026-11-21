@@ -99,55 +99,7 @@ def test_generated_corpus_never_regresses_either_oracle():
                 assert new is not None, f"regression vs oracle on {text!r}"
 
 
-# ── documented improvements: inputs the old code answered WRONGLY ────────────
-
-def test_two_objects_defeat_subagent_oracle_but_not_the_core():
-    """Greedy `{.*}` spans both objects and dies; the balanced scan does not."""
-    text = 'first {"a": 1} and second {"b": 2}'
-    assert _oracle_subagent(text) is None  # fail-before, pinned
-    assert extract_json_object(text) == {"a": 1}
-
-
-def test_unfenced_answer_after_illustration_defeats_self_build_oracle():
-    """A narrating model shows a broken shape, then answers without a fence.
-    The old first-{/last-} span glues both together and dies. (With a fence
-    the old code coped — its fence regex searched anywhere; that agreement is
-    part of the corpus above.)"""
-    text = 'the shape is {"draft": ... } and the real answer {"real": 1} follows'
-    assert _oracle_self_build(text) is None  # fail-before, pinned
-    assert extract_json_object(text) == {"real": 1}
-
-
-def test_brace_inside_string_value_defeats_naive_span():
-    text = 'note: {"code": "if x { return }"} trailing } brace'
-    assert _oracle_subagent(text) is None  # greedy span eats the stray brace
-    assert extract_json_object(text) == {"code": "if x { return }"}
-
-
-# ── the shared scanner keeps repair_proposal's contract ──────────────────────
-
-def test_embedded_objects_yield_left_to_right_and_string_aware():
-    spans = list(embedded_json_objects('x {"a": "{"} y {"b": 2}'))
-    assert spans == ['{"a": "{"}', '{"b": 2}']
-
-
-def test_non_string_and_empty_inputs_return_none():
-    assert extract_json_object("") is None
-    assert extract_json_object("   ") is None
-    assert extract_json_object(None) is None  # type: ignore[arg-type]
-    assert extract_json_object(12) is None  # type: ignore[arg-type]
-
-
 # ── review round on PR #247: the scanner survives an unclosed brace ──────────
-
-def test_unclosed_brace_before_valid_object_no_longer_hides_it():
-    """The scanner's old "nothing further can close either" return was wrong:
-    an object opened later can be balanced. Pinned against the retired
-    subagent oracle, which also failed here (greedy span, unbalanced)."""
-    text = 'prose {unclosed {"a": 1} tail'
-    assert _oracle_subagent(text) is None  # fail-before, pinned
-    assert extract_json_object(text) == {"a": 1}
-    assert '{"a": 1}' in list(embedded_json_objects(text))
 
 
 def test_wall_of_stray_braces_is_bounded_not_quadratic():

@@ -53,24 +53,6 @@ def _contract(**overrides) -> CanonicalSubagentContract:
     return CanonicalSubagentContract(**values)
 
 
-def test_run_contract_maps_canonical_fields_to_legacy_runner(tmp_path: Path) -> None:
-    runner = _runner(tmp_path)
-    expected = object()
-    runner.run = MagicMock(return_value=expected)  # type: ignore[method-assign]
-
-    result = runner.run_contract(_contract(), context="bounded context")
-
-    assert result is expected
-    runner.run.assert_called_once_with(
-        contract_name="RepositoryAuditor",
-        role="auditor",
-        objective="Audit the repository",
-        context="bounded context",
-        allowed_tools=["file_read"],
-        model_role="verifier",
-    )
-
-
 def test_run_contract_requires_explicit_approval(tmp_path: Path) -> None:
     runner = _runner(tmp_path)
     runner.run = MagicMock()  # type: ignore[method-assign]

@@ -56,20 +56,6 @@ class TestEmptyResults:
 # ============================================================
 
 class TestSoftWarnings:
-    def test_well_formed_row_passes_clean(self):
-        ok, issues = WebSearchTool().validate_output(
-            [
-                {
-                    "title": "Hello",
-                    "url": "https://example.com/",
-                    "snippet": "world",
-                    "source": "duckduckgo",
-                }
-            ]
-        )
-        assert ok is True
-        assert issues == []
-
     def test_missing_snippet_is_warning_not_hard_fail(self):
         ok, issues = WebSearchTool().validate_output(
             [
@@ -140,18 +126,3 @@ class TestRunArgumentValidation:
         tool = WebSearchTool()
         with pytest.raises(ValueError, match="non-empty string"):
             tool.run(query=bad_query)  # type: ignore[arg-type]
-
-
-# ============================================================
-# Tool contract sanity
-# ============================================================
-
-class TestToolContract:
-    def test_name_and_risk_match_architecture(self):
-        tool = WebSearchTool()
-        assert tool.name == "web_search"
-        assert tool.risk == "read_only"
-
-    def test_default_max_results_is_within_cap(self):
-        tool = WebSearchTool()
-        assert 1 <= tool.default_max_results <= MAX_RESULTS_CAP

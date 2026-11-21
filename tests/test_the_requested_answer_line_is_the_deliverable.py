@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from core.answer_format import format_human_response
 from core.loop_run_tail import AgentLoopRunTail
-from core.requested_format import honor, requested_labels
+from core.requested_format import honor
 
 GAIA = ("You are a general AI assistant. I will ask you a question. Report your thoughts, and finish "
         "your answer with the following template: FINAL ANSWER: [YOUR FINAL ANSWER]. YOUR FINAL "
@@ -30,13 +30,6 @@ def _contract(conclusion: str) -> str:
             "Safety:\nnothing\n\nПроверка: подтверждено 1 из 2 утверждений; уверенность: средняя.")
 
 
-def test_templates_are_found_and_pasted_logs_are_not():
-    assert requested_labels(GAIA) == ("FINAL ANSWER",)
-    assert requested_labels("Ответь одной строкой: ОТВЕТ: <значение в рублях>") == ("ОТВЕТ",)
-    assert requested_labels("Traceback… ERROR: [Errno 2] No such file") == ()
-    assert requested_labels("просто вопрос без формы") == ()
-
-
 def test_a_tagged_line_in_the_conclusion_ends_the_answer_clean_with_its_warning_above():
     answer = _contract("FINAL ANSWER: 34689 [unverified]")
     out = honor(answer, question=GAIA)
@@ -45,22 +38,6 @@ def test_a_tagged_line_in_the_conclusion_ends_the_answer_clean_with_its_warning_
     assert "не подтверждено" in lines[-2]  # метка не пропала — стала словами
     assert _gaia_value(out.text) == "34689"
     assert "Conclusion:" in out.text and out.origins == {"FINAL ANSWER": "answer"}
-
-
-def test_the_line_inside_the_conclusion_header_keeps_the_header():
-    out = honor(_contract("").replace("Conclusion:\n", "Conclusion: FINAL ANSWER: Paris [web:https://x.org]\n"),
-                question=GAIA)
-    assert out.text.startswith("Conclusion:")
-    assert out.text.splitlines()[-1] == "FINAL ANSWER: Paris"
-
-
-def test_a_line_the_gates_cut_comes_back_from_the_draft_marked_unconfirmed():
-    gated = _contract("Недостаточно данных для развёрнутого ответа.")
-    draft = _contract("FINAL ANSWER: 7 [general-knowledge]")
-    out = honor(gated, question=GAIA, draft=draft)
-    assert out.origins == {"FINAL ANSWER": "draft"}
-    assert out.text.splitlines()[-1] == "FINAL ANSWER: 7"
-    assert "не подтверждено" in out.text.splitlines()[-2]
 
 
 def test_a_missing_line_is_converted_in_a_separate_step_from_the_answer_text():

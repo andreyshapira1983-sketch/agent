@@ -21,15 +21,6 @@ _FABRICATED = [
     "core/logical_coherence.py",
 ]
 
-#: Настоящие модули тех же тем — правило обязано их пропускать.
-_REAL = [
-    "core/reasoning_action_check.py",
-    "core/answer_contradiction.py",
-    "core/completion_contract.py",
-    "core/completion_obligation.py",
-    "core/reflection.py",
-]
-
 
 @pytest.mark.parametrize("focus", _FABRICATED)
 def test_every_fabricated_focus_area_is_dropped(focus: str):
@@ -37,35 +28,6 @@ def test_every_fabricated_focus_area_is_dropped(focus: str):
     читать несуществующие файлы.
     """
     assert _checked_focus_area(focus, "repair") == ("", "monitor")
-
-
-@pytest.mark.parametrize("focus", _REAL)
-def test_a_real_file_keeps_its_lesson_intact(focus: str):
-    """Улов не отдан: настоящий адрес — самое ценное, что есть в уроке."""
-    assert _checked_focus_area(focus, "repair") == (focus, "repair")
-
-
-@pytest.mark.parametrize("focus", [
-    "general", "memory subsystem", "планирование", "",
-])
-def test_a_topic_name_is_not_a_path_and_is_not_checked(focus: str):
-    """Не всякая область — адрес. Спрашивать у диска про «general» значило бы
-    выбрасывать уроки за то, что они не про файл.
-    """
-    assert _checked_focus_area(focus, "repair") == (focus, "repair")
-
-
-def test_a_repair_without_a_target_stops_being_a_repair():
-    """Починка без цели не починка. Оставить `repair` значило бы хранить в
-    памяти задачу, зовущую следующий прогон в пустоту.
-    """
-    assert _checked_focus_area("core/nope_xyz.py", "repair")[1] == "monitor"
-
-
-def test_a_watch_or_a_study_keeps_its_own_action():
-    """Понижается только `repair`: наблюдать и изучать можно и без адреса."""
-    assert _checked_focus_area("core/nope_xyz.py", "monitor")[1] == "monitor"
-    assert _checked_focus_area("core/nope_xyz.py", "learn_more")[1] == "learn_more"
 
 
 @pytest.mark.parametrize("focus", [

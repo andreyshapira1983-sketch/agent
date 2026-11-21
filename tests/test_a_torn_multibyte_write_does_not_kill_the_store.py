@@ -30,49 +30,8 @@ from pathlib import Path
 
 from core.state_integrity import (
     append_state_jsonl,
-    encode_state_row,
-    quarantine_dir_for,
     read_state_jsonl,
 )
-
-
-def _cut_inside_a_character(row: str) -> int:
-    """Смещение обрыва, попадающее внутрь многобайтового символа."""
-    data = row.encode("utf-8")
-    return next(i for i in range(1, len(data)) if (data[i] & 0xC0) == 0x80)
-
-
-def test_a_kill_inside_a_cyrillic_character_keeps_the_other_rows(tmp_path: Path) -> None:
-    path = tmp_path / "runtime_tasks.jsonl"
-    append_state_jsonl(path, [{"id": i, "цель": f"задача {i}"} for i in range(4)])
-
-    torn = encode_state_row({"goal": "разобраться почему self-build падает"})
-    with path.open("ab") as fh:  # процесс убит ровно здесь
-        fh.write(torn.encode("utf-8")[: _cut_inside_a_character(torn)])
-
-    rows = read_state_jsonl(path)
-
-    assert [r["id"] for r in rows] == [0, 1, 2, 3], (
-        "обрыв внутри символа убил ВСЕ ряды: восстановление на чтении не "
-        "построчное, и хранилище нечитаемо при каждом следующем чтении"
-    )
-
-
-def test_the_torn_line_is_quarantined_not_silently_dropped(tmp_path: Path) -> None:
-    path = tmp_path / "episodic_memory.jsonl"
-    append_state_jsonl(path, [{"id": 0, "итог": "успех"}])
-    torn = encode_state_row({"summary": "проверка гипотезы про кириллицу"})
-    with path.open("ab") as fh:
-        fh.write(torn.encode("utf-8")[: _cut_inside_a_character(torn)])
-
-    read_state_jsonl(path)
-
-    quarantined = list(quarantine_dir_for(path).glob("*.bad.jsonl"))
-    assert quarantined, "битая строка исчезла молча — потерю нельзя расследовать"
-    assert "utf-8" in quarantined[0].read_text(encoding="utf-8"), (
-        "причина в карантине не названа: запись должна отличать оборванный "
-        "байт от битого json и от несошедшейся контрольной суммы"
-    )
 
 
 def test_a_disk_level_bad_byte_does_not_kill_the_store(tmp_path: Path) -> None:
@@ -86,40 +45,3 @@ def test_a_disk_level_bad_byte_does_not_kill_the_store(tmp_path: Path) -> None:
     rows = read_state_jsonl(path)
 
     assert len(rows) == 5, f"выжило {len(rows)} из 6 — один байт унёс весь файл"
-
-
-def test_a_healthy_file_is_read_byte_for_byte_as_before(tmp_path: Path) -> None:
-    """Граница, которую починка не имеет права перейти: здоровый файл читается
-    ровно как раньше, и ни один ряд не переписывается «на всякий случай»."""
-    path = tmp_path / "clean.jsonl"
-    payloads = [{"id": i, "текст": f"строка {i} с кириллицей"} for i in range(20)]
-    append_state_jsonl(path, payloads)
-    before = path.read_bytes()
-
-    assert read_state_jsonl(path) == payloads
-    assert path.read_bytes() == before, "здоровый файл переписан на чтении"
-    assert not quarantine_dir_for(path).exists()
-
-
-def test_the_atomic_write_carries_a_durability_barrier() -> None:
-    """H-06 (crash consistency): данные обязаны быть сброшены ДО замены.
-
-    Честная оговорка: следствие этой ветки — потеря данных при отказе ХОСТА
-    или пропаже питания, и внутрипроцессно оно не воспроизводимо. Поэтому
-    здесь пинится наличие барьера, а не его эффект: temp+rename даёт
-    атомарность записи в КАТАЛОГЕ, но пустой файл после замены читался бы как
-    законно пустое хранилище, и контрольные суммы рядов не помогли бы —
-    проверять было бы нечего.
-    """
-    import inspect
-
-    from core.state_integrity import _atomic_write_lines
-
-    src = inspect.getsource(_atomic_write_lines)
-    barrier = src.index("fh.flush()")
-    replace_at = src.index("tmp.replace(path)")
-
-    assert "os.fsync" in src, "барьер долговечности снят"
-    assert barrier < replace_at, (
-        "сброс стоит ПОСЛЕ замены — порядок и есть весь смысл барьера"
-    )

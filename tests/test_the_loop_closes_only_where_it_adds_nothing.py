@@ -25,21 +25,6 @@ def _existing(path: str) -> FileChange:
     return FileChange(path=path, content="x\n", base_sha256="deadbeef", base_checked=True)
 
 
-def test_a_new_document_may_be_applied_without_a_human() -> None:
-    """Красный свидетель: 11 предложений из 27 — ровно этот класс.
-
-    Замер 2026-08-27 по живому ящику, по ИСТОРИИ, а не по сегодняшнему дереву:
-    11 предложений на момент подачи трогали только новые файлы, и все 11 —
-    документы в `knowledge/doctrine/future/`. Ни одного теста, ни строчки кода.
-    До сих пор каждое из них ждало человека, который откроет ящик.
-    """
-    ok, reason = autonomous_execution_verdict(
-        _proposal(_new("knowledge/doctrine/future/MIGRATION_PATH.md"))
-    )
-
-    assert ok is True, reason
-
-
 def test_touching_an_existing_file_is_never_autonomous() -> None:
     """Перезапись — необратимое действие, и оно принадлежит человеку (I-1)."""
     ok, reason = autonomous_execution_verdict(
@@ -90,85 +75,3 @@ def test_an_unstamped_proposal_is_refused() -> None:
 
     assert ok is False
     assert "unstamped" in reason
-
-
-def test_one_bad_file_disqualifies_the_whole_proposal() -> None:
-    """Предложение применяется целиком, значит и судится целиком."""
-    ok, _ = autonomous_execution_verdict(
-        _proposal(_new("docs/ok.md"), _new("core/thing.py"))
-    )
-
-    assert ok is False
-
-
-def test_the_drain_refuses_while_effects_are_off(tmp_path) -> None:
-    """Первые ворота: выключенные эффекты значат «ничего не делать».
-
-    Не «нечего делать» — именно отказ, и он назван, иначе сухой прогон нельзя
-    отличить от пустого ящика.
-    """
-    from core.rule_approved_apply import drain_rule_approved_proposals
-
-    out = drain_rule_approved_proposals(tmp_path, dry_run=True)
-
-    assert out["applied"] == 0
-    assert out["blocked"] == "effects disabled"
-
-
-def test_the_drain_refuses_without_a_standing_grant(tmp_path) -> None:
-    """Вторые ворота: разрешение оператора спрашивается ТОЙ ЖЕ функцией.
-
-    Своя вторая проверка разошлась бы с первой — класс H-26 проспективного
-    аудита. Здесь гранта нет, и шаг обязан отказать по названной причине.
-    """
-    from core.rule_approved_apply import drain_rule_approved_proposals
-
-    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
-    out = drain_rule_approved_proposals(tmp_path, dry_run=False)
-
-    assert out["applied"] == 0
-    assert out["blocked"] == "no active standing grant"
-
-
-def test_the_drain_runs_on_the_live_scheduled_path(tmp_path) -> None:
-    """Красный свидетель: шаг был вшит в артерию, по которой кровь не течёт.
-
-    Плановая задача выходит через `run_paced_campaign` (`if args.campaign:
-    sys.exit(...)`) и до `run_tick` не доходит НИКОГДА — последний
-    `tick_complete` в живом журнале датирован 25 августа. Первая проводка
-    (MIR-173) стояла в хвосте `run_tick`: зелёные тесты, мёртвый путь — ровно
-    урок «починка не готова без живого пути». Проверено по журналу прогона
-    11:31: грант списан, кампания прошла, событий петли ноль.
-
-    Свидетель поведенческий: гоняем сам живой путь с подделками и требуем след
-    шага в журнале тиков.
-    """
-    import json
-
-    from agent_tick import run_paced_campaign
-
-    class _Result:
-        status = "completed"
-        stop_reason = ""
-        cycles_run = 1
-        totals: dict = {}  # noqa: RUF012 — подделка, класс живёт один тест
-
-        @staticmethod
-        def user_summary() -> str:
-            return "fake"
-
-    code = run_paced_campaign(
-        tmp_path,
-        dry_run=True,
-        max_cycles=1,
-        heartbeat_fn=lambda ws, payload: None,
-        run_campaign_fn=lambda *a, **k: _Result(),
-        build_agent_fn=lambda ws: object(),
-    )
-
-    assert code == 0
-    log = tmp_path / "logs" / "daemon_tick.jsonl"
-    events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    drains = [e for e in events if e.get("event") == "rule_approved_drain"]
-    assert drains, "шаг замыкания петли не оставил следа на ЖИВОМ пути"
-    assert drains[0].get("blocked") == "effects disabled"

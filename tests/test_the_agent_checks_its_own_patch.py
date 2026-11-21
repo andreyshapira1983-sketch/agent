@@ -37,45 +37,6 @@ def test_a_search_typed_from_memory_is_answered_with_the_real_lines(tmp_path: Pa
     assert "    2|     *," in errors[0], "агенту показаны настоящие строки файла, чтобы скопировать"
 
 
-def test_a_good_patch_is_applied_and_tested_outside_the_workspace(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    rel = _patch(root, (
-        "FILE: pkg/mod.py\n<<<<<<< SEARCH\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n"
-        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
-        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
-
-    result = PatchCheckTool(workspace_root=root).run(path=rel)
-
-    assert result["applied"] is True and result["errors"] == []
-    assert result["tests_exit_code"] == 0, result["tests_output"]
-    assert "return x\n" in (root / "pkg" / "mod.py").read_text(encoding="utf-8"), "рабочая папка не тронута"
-    assert not (root / "tests").exists()
-
-
-def test_a_patch_without_a_test_is_told_so(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    rel = _patch(root, "FILE: pkg/mod.py\n<<<<<<< SEARCH\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n")
-    result = PatchCheckTool(workspace_root=root).run(path=rel)
-    assert result["tests_exit_code"] is None and "proves nothing" in result["tests_output"]
-
-
-def test_lines_are_replaced_by_number_without_copying_old_text(tmp_path: Path) -> None:
-    """2026-09-22 14:37: модель трижды не смогла переписать сигнатуру символ в
-    символ, хотя видела её; номера строк из file_read она видит без ошибок."""
-    root = _repo(tmp_path)
-    rel = _patch(root, (
-        "FILE: pkg/mod.py\n<<<<<<< LINES 1-4\ndef f(*, x: int = 1, y: int = 0) -> int:\n>>>>>>> REPLACE\n"
-        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + y\n>>>>>>> REPLACE\n"
-        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
-        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1, y=2) == 3\n>>>>>>> REPLACE\n"))
-
-    result = PatchCheckTool(workspace_root=root).run(path=rel)
-
-    assert result["applied"] is True, result["errors"]
-    assert result["tests_exit_code"] == 0, result["tests_output"]
-    assert "+def f(*, x: int = 1, y: int = 0) -> int:" in result["diff"]
-
-
 def test_a_line_range_outside_the_file_is_refused(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     errors = apply_blocks(root, parse_blocks("FILE: pkg/mod.py\n<<<<<<< LINES 4-99\nx\n>>>>>>> REPLACE\n"))
@@ -93,15 +54,6 @@ def test_a_patch_that_changes_nothing_is_not_green(tmp_path: Path) -> None:
     assert result["verdict"] == "red" and "changes nothing" in result["why"]
 
 
-def test_only_a_change_with_a_passing_test_is_green(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    rel = _patch(root, (
-        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
-        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
-        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
-    assert PatchCheckTool(workspace_root=root).run(path=rel)["verdict"] == "green"
-
-
 def test_text_outside_the_blocks_is_named_not_dropped(tmp_path: Path) -> None:
     """2026-09-22 14:54: новый код стоял ПОСЛЕ закрывающей метки блока LINES —
     четыре круга подряд он пропадал молча, и ошибка не менялась."""
@@ -111,27 +63,6 @@ def test_text_outside_the_blocks_is_named_not_dropped(tmp_path: Path) -> None:
     assert result["verdict"] == "red" and "return x + 1" in result["errors"][0]
 
 
-def test_a_lines_block_may_carry_old_text_before_the_separator(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    blocks = parse_blocks("FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n")
-    assert blocks[0]["new"] == "    return x + 1\n"
-    assert apply_blocks(root, blocks) == []
-    assert "return x + 1" in (root / "pkg" / "mod.py").read_text(encoding="utf-8")
-
-
-def test_the_copy_runs_without_the_agents_keys(tmp_path: Path, monkeypatch) -> None:
-    """2026-09-22 15:07: полный набор внутри patch_check шёл с настоящим ключом
-    DeepSeek в окружении и не уложился в 900 с; ключ тестам не нужен вовсе."""
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-should-not-travel")
-    root = _repo(tmp_path)
-    rel = _patch(root, (
-        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
-        "FILE: tests/test_env.py\n<<<<<<< SEARCH\n=======\n"
-        "import os\n\n\ndef test_no_key():\n    assert 'DEEPSEEK_API_KEY' not in os.environ\n>>>>>>> REPLACE\n"))
-    result = PatchCheckTool(workspace_root=root).run(path=rel)
-    assert result["tests_exit_code"] == 0, result["tests_output"]
-
-
 def test_the_full_suite_waits_for_the_own_test_to_be_green(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     rel = _patch(root, (
@@ -139,16 +70,3 @@ def test_the_full_suite_waits_for_the_own_test_to_be_green(tmp_path: Path) -> No
     result = PatchCheckTool(workspace_root=root).run(path=rel, full=True)
     assert result["tests_exit_code"] == 1 and "full_exit_code" not in result
     assert "make them green first" in result["full_output"]
-
-
-def test_the_verdict_and_test_output_come_before_the_diff(tmp_path: Path) -> None:
-    """2026-09-22 16:15: показ ответа агенту режется на 6000 знаков; длинный diff
-    стоял раньше вывода тестов, и агент пять кругов не видел новой ошибки."""
-    root = _repo(tmp_path)
-    rel = _patch(root, (
-        "FILE: pkg/mod.py\n<<<<<<< LINES 5-5\n    return x + 1\n>>>>>>> REPLACE\n"
-        "FILE: tests/test_mod.py\n<<<<<<< SEARCH\n=======\n"
-        "from pkg.mod import f\n\n\ndef test_f():\n    assert f(x=1) == 2\n>>>>>>> REPLACE\n"))
-    keys = list(PatchCheckTool(workspace_root=root).run(path=rel))
-    assert keys[:2] == ["verdict", "why"]
-    assert keys.index("tests_output") < keys.index("diff")

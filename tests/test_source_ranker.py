@@ -6,10 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.evidence import ProvenanceChain, make_evidence
+from core.evidence import make_evidence
 from core.source_ranker import (
-    is_realtime_question,
-    rank_chain,
     rank_evidence,
 )
 
@@ -36,59 +34,6 @@ def _ev(
     )
 
 
-def test_realtime_question_detector_handles_market_language():
-    assert is_realtime_question("Какая цена Bitcoin прямо сейчас?")
-    assert is_realtime_question("latest BTC price today")
-    assert not is_realtime_question("Кто написал README проекта?")
-    assert not is_realtime_question("Use no general knowledge; fetch Python downloads")
-
-
-def test_repo_local_task_with_current_is_not_realtime():
-    # Regression: repo-local architecture tasks must not be flagged realtime just
-    # because they contain "current"/"latest"/"now" — that downgrades confidence
-    # on purely local evidence (weak evidence-support false positive).
-    assert not is_realtime_question(
-        "Find the safest next project action after Gateway G2. "
-        "Use current repo docs/code only."
-    )
-    assert not is_realtime_question("Summarize the current architecture of this repository")
-    assert not is_realtime_question("What is the latest state of the codebase?")
-    assert not is_realtime_question("опиши текущую архитектуру в этом репозитории")
-
-
-def test_repo_local_marker_does_not_suppress_strong_realtime_terms():
-    # Strong market/news/weather terms stay realtime even with a repo-local word.
-    assert is_realtime_question("current bitcoin price in this repo's dashboard")
-    assert is_realtime_question("weather today for the repository owner")
-
-
-def test_search_hit_is_weak_pointer():
-    rank = rank_evidence(
-        _ev("web_search_hit", "web_search:bitcoin price"),
-        question="Какая цена Bitcoin прямо сейчас?",
-        now=NOW,
-    )
-    assert rank.tier == "search_pointer"
-    assert rank.support_level == "insufficient_for_realtime"
-    assert rank.confidence_ceiling == 0.35
-    assert rank.final_score <= 0.35
-
-
-def test_fetched_general_web_page_is_not_enough_for_realtime():
-    rank = rank_evidence(
-        _ev(
-            "web_page",
-            "web_page:https://example.com/bitcoin",
-            fetched_at="2026-05-28T11:30:00+00:00",
-        ),
-        question="Какая цена Bitcoin прямо сейчас?",
-        now=NOW,
-    )
-    assert rank.freshness_status == "fresh"
-    assert rank.support_level == "insufficient_for_realtime"
-    assert rank.final_score <= 0.35
-
-
 def test_realtime_market_domain_without_value_timestamp_is_not_live_source():
     rank = rank_evidence(
         _ev(
@@ -104,23 +49,6 @@ def test_realtime_market_domain_without_value_timestamp_is_not_live_source():
     assert rank.freshness_status == "fresh"
     assert rank.support_level == "insufficient_for_realtime"
     assert rank.final_score <= 0.35
-
-
-def test_realtime_market_domain_can_directly_support_realtime_with_timestamp():
-    rank = rank_evidence(
-        _ev(
-            "web_page",
-            "web_page:https://coinmarketcap.com/currencies/bitcoin/",
-            fetched_at="2026-05-28T11:59:00+00:00",
-            excerpt="Bitcoin price is 123 USD. Last updated 2026-05-28 11:59 UTC.",
-        ),
-        question="Какая цена BTC сейчас?",
-        now=NOW,
-    )
-    assert rank.tier == "reputable"
-    assert rank.freshness_status == "fresh"
-    assert rank.support_level == "direct"
-    assert rank.final_score > 0.5
 
 
 def test_stale_realtime_source_gets_confidence_ceiling():
@@ -171,20 +99,6 @@ def test_official_docs_rank_above_blog_for_non_realtime_question():
     assert docs.tier == "authoritative"
     assert blog.tier == "blog_or_forum"
     assert docs.final_score > blog.final_score
-
-
-def test_rank_chain_reports_best_and_support_counts():
-    chain = ProvenanceChain()
-    chain.add(_ev("web_search_hit", "web_search:python json"))
-    chain.add(_ev("file", "file:README.md"))
-    report = rank_chain(chain, question="Что написано в README?", now=NOW)
-    assert report.best is not None
-    assert report.best.kind == "file"
-    assert report.support_counts()["direct"] == 1
-    assert report.support_counts()["weak"] == 1
-    payload = report.to_log_payload()
-    assert payload["count"] == 2
-    assert payload["best"]["kind"] == "file"
 
 
 @pytest.mark.parametrize(

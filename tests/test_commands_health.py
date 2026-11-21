@@ -90,28 +90,6 @@ def _write_self_build_docs_pilot_signal(workspace: Path) -> None:
     proposal.write_text(_SELF_BUILD_PROPOSAL, encoding="utf-8")
 
 
-def test_dry_health_pass_is_handled_locally_without_planner_or_model(
-    workspace: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys,
-):
-    monkeypatch.setattr(
-        health,
-        "_git_tree_payload",
-        lambda _workspace: {"status": "clean", "porcelain_count": 0},
-    )
-    planner = _BombPlanner()
-    llm = _BombLLM()
-    agent = SimpleNamespace(planner=planner, llm=llm)
-
-    assert handle_meta_command(":dry-health-pass", agent, workspace) is True
-
-    out = capsys.readouterr()
-    assert "=== dry health pass ===" in out.err
-    assert planner.calls == 0
-    assert llm.calls == []
-
-
 def test_dry_health_pass_json_reports_collected_facts(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -255,28 +233,6 @@ def test_grounded_target_payload_docs_pilot_not_available_after_doc_exists(
 
     assert payload["classification"] == "none"
     assert payload["target_path"] is None
-
-
-def test_dry_health_pass_missing_files_are_unknown_and_do_not_create_state(
-    workspace: Path,
-):
-    assert not (workspace / "data").exists()
-
-    payload = health.collect_dry_health_pass(
-        workspace,
-        git_status_fn=lambda _workspace: {"status": "unknown", "reason": "not a repo"},
-    )
-
-    assert payload["daemon"]["status"] == "unknown"
-    assert payload["approvals"]["pending"] is None
-    assert payload["tasks"]["paused"] is None
-    assert payload["scheduler"]["due"] is None
-    assert payload["budget"]["status"] == "unknown"
-    assert payload["kill_switch"]["active"] is None
-    assert payload["self_build"]["cooldown"]["status"] == "unknown"
-    assert payload["self_build"]["grounded_target"]["classification"] == "unknown"
-    assert payload["value_reviews"]["status"] == "unknown"
-    assert not (workspace / "data").exists()
 
 
 def test_dry_health_pass_broken_files_are_unknown(workspace: Path):

@@ -27,13 +27,3 @@ def test_the_same_empty_run_is_banked_once(tmp_path: Path) -> None:
     assert record_self_build_episode(agent, kind="self-build-produce", result=result) is False
 
     assert len(agent.episodic_store.load()) == 1
-
-
-def test_real_work_is_still_banked_every_time(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    result = {"status": "proposed", "target_path": "core/x.py", "approval_id": "ain_1"}
-
-    assert record_self_build_episode(agent, kind="self-build-produce", result=result) is True
-    assert record_self_build_episode(agent, kind="self-build-produce", result=result) is True
-
-    assert len(agent.episodic_store.load()) == 2

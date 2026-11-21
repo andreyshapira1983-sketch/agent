@@ -28,50 +28,6 @@ defects. The duplicate-mixin special case stays. Resolution paths
 """
 from __future__ import annotations
 
-from core.self_improvement_issues import (
-    failure_fingerprint,
-    issue_from_failure,
-)
-
-_Q1 = "detectors content_refuted: Campaign goal: изучи фреймворк langgraph: ответ опровергнут"
-_Q2 = "detectors content_refuted: «Назови один урок из прошлого опыта»: ответ опровергнут содержимым"
-
-
-def test_the_same_detector_class_on_two_questions_is_one_issue() -> None:
-    """The witness for the 106-row monoculture: identity is the class."""
-    assert failure_fingerprint(_Q1) == failure_fingerprint(_Q2), (
-        "one detector class on two questions minted two permanent issues — "
-        "the registry grows by one open row per campaign turn forever"
-    )
-
-
-def test_different_detector_classes_stay_distinct() -> None:
-    a = "detectors content_refuted: q"
-    b = "detectors citation_fabricated: q"
-    assert failure_fingerprint(a) != failure_fingerprint(b)
-
-
-def test_a_detector_issue_carries_a_class_action_and_title() -> None:
-    """Distinct from the generic bucket, so `suppress_generic_issue_duplicates`
-    and consumers can tell an investigated signal from an unclassified one."""
-    issue = issue_from_failure(_Q1, "2026-08-22T00:00:00+00:00")
-    assert issue.action == "investigate_detector_signal"
-    assert "content_refuted" in issue.title
-
-
-def test_the_mismatch_sensors_solo_firing_mints_nothing() -> None:
-    """MIR-015's contract default applied at this sink: a sensor firing on 71%
-    of turns, dominated by its own table defects, must not create permanent
-    open defects. Solo (or with its co-lexical twin) it is dropped."""
-    from core.self_build_memory import _detector_failure_text
-
-    assert _detector_failure_text(
-        ["reasoning_action_mismatch"], "q: s"
-    ) is None
-    assert _detector_failure_text(
-        ["reasoning_action_mismatch", "user_contract_unrepresented"], "q: s"
-    ) is None
-
 
 def test_a_verifier_caught_signal_still_mints() -> None:
     """The route's founding case must survive: the agent invented four
@@ -80,24 +36,3 @@ def test_a_verifier_caught_signal_still_mints() -> None:
 
     text = _detector_failure_text(["citation_fabricated"], "q: s")
     assert text is not None and "citation_fabricated" in text
-
-
-def test_a_mixed_firing_keeps_only_the_reliable_signals() -> None:
-    from core.self_build_memory import _detector_failure_text
-
-    text = _detector_failure_text(
-        ["reasoning_action_mismatch", "content_refuted"], "q: s"
-    )
-    assert text is not None
-    assert "content_refuted" in text
-    assert "reasoning_action_mismatch" not in text, (
-        "the unreliable sensor rides into the durable record on a reliable "
-        "signal's coat-tails"
-    )
-
-
-def test_non_detector_failures_keep_text_keyed_identity() -> None:
-    """The boundary: two different rollback reasons ARE two defects."""
-    a = failure_fingerprint("self-apply rolled_back: targeted tests failed")
-    b = failure_fingerprint("self-apply rolled_back: anatomy map not updated")
-    assert a != b

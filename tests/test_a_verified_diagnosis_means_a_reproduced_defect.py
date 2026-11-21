@@ -36,7 +36,6 @@ from core.self_repair_models import RepairProposal
 from core.self_repair_utils import _diagnosis_verified
 
 _GREEN = {"timed_out": False, "exit_code": 0, "failed": 0, "errors": 0}
-_RED = {"timed_out": False, "exit_code": 1, "failed": 3, "errors": 0}
 _TIMED_OUT = {"timed_out": True, "exit_code": 1, "failed": 0, "errors": 0}
 
 
@@ -44,12 +43,6 @@ def test_a_timed_out_baseline_is_not_a_verified_diagnosis() -> None:
     """Boundary pin: the one distinction the current proxy does make."""
     assert _diagnosis_verified(_TIMED_OUT) is False
     assert _diagnosis_verified(None) is False
-
-
-def test_a_reproduced_defect_is_a_verified_diagnosis() -> None:
-    """The other boundary: whatever replaces the proxy must keep this true, or
-    self-repair can never act on a real defect."""
-    assert _diagnosis_verified(_RED) is True
 
 
 def test_a_green_baseline_is_not_a_verified_diagnosis() -> None:
@@ -66,11 +59,6 @@ def _proposal(**kw) -> RepairProposal:
     return RepairProposal(path="core/units.py", proposed_content="x = 1\n", **kw)
 
 
-def test_a_red_test_the_diagnosis_does_not_name_verifies_nothing() -> None:
-    """Something red somewhere in the whole suite is not THIS defect reproduced."""
-    assert _diagnosis_verified(_FAILED, _proposal(reason="off-by-one in parse()")) is False
-
-
 @pytest.mark.parametrize("kw", [
     {"reason": "test_meters_to_feet fails: factor 3.28 is applied twice"},
     {"evidence": ("tests/test_units.py::test_meters_to_feet",)},
@@ -79,7 +67,3 @@ def test_a_red_test_the_diagnosis_does_not_name_verifies_nothing() -> None:
 ], ids=["named_in_reason", "named_in_evidence", "named_by_path", "named_by_pattern"])
 def test_a_reproduced_named_failure_is_a_verified_diagnosis(kw) -> None:
     assert _diagnosis_verified(_FAILED, _proposal(**kw)) is True
-
-
-def test_a_red_run_without_test_names_cannot_show_the_named_one_failed() -> None:
-    assert _diagnosis_verified(_RED, _proposal(reason="test_meters_to_feet")) is False

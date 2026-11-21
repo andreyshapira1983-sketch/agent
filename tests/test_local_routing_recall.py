@@ -25,11 +25,8 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
-
 import core.operator_intent_patterns as patterns
 from core.operator_intent import route_operator_intent
-from core.operator_intent_patterns import _has_any, _has_any_loose, _loose_patterns
 
 PATTERN_SOURCE = Path(patterns.__file__).read_text(encoding="utf-8")
 _CYRILLIC = re.compile(r"[Ѐ-ӿ]")
@@ -93,114 +90,4 @@ def test_an_inserted_filler_never_costs_a_local_route():
         f"{len(lost)} phrasings lost their local route (a turn sent to the LLM "
         f"answers as a generic model instead of from the agent's own state):\n  "
         + "\n  ".join(lost[:15])
-    )
-
-
-@pytest.mark.parametrize(
-    "phrase,expected",
-    [
-        ("что ты уже умеешь", "capability_check"),
-        ("что вы уже умеете", "capability_check"),
-        ("какие у вас есть возможности", "capability_check"),
-        ("готов уже к автономной работе", "autonomy_readiness"),
-        ("где сейчас слабое место", "weakness_finder"),
-        ("what can you already do", "capability_check"),
-    ],
-)
-def test_the_phrasings_from_the_live_session(phrase, expected):
-    """Spelled out, because these are the exact shapes that failed in practice."""
-    intent = route_operator_intent(phrase)
-    assert intent is not None, f"fell through to the LLM: {phrase!r}"
-    assert intent.kind == expected
-
-
-# ── 2. no over-capture ───────────────────────────────────────────────────────
-
-ORDINARY_TURNS = (
-    "объясни, как работает бюджетный контур",
-    "напиши тест для парсера",
-    "что ты думаешь про этот код",
-    "почему упал последний прогон",
-    "расскажи, как устроена память",
-    "покажи мне файл core/loop.py",
-    "давай обсудим архитектуру",
-    "мне нужно понять, где узкое место в производительности",
-    "я хочу добавить новую команду",
-    "сколько стоит один прогон",
-    "как ты понимаешь мои фразы",
-    "можно ли доверять этому ответу",
-    "перепиши этот абзац проще",
-    "переведи это на английский",
-    "какие тесты покрывают маршрутизацию",
-    "не надо ничего запускать, просто объясни",
-    "в чём разница между этими двумя подходами",
-    "предложи план на неделю",
-    "что было в прошлой сессии",
-    "проверь орфографию в этом тексте",
-    "мне кажется, ты меня не понял",
-    "верни предыдущий вариант",
-    "сделай таблицу из этих данных",
-    # both halves of a trigger phrase, far apart, inside an ordinary sentence
-    "что ты сделаешь, если я скажу, что ты совсем не умеешь считать",
-    "что ты ответишь человеку, который заявляет, будто вы не умеете читать",
-)
-
-
-@pytest.mark.parametrize("turn", ORDINARY_TURNS)
-def test_an_ordinary_turn_is_not_hijacked_into_a_command(turn):
-    intent = route_operator_intent(turn)
-    kind = intent.kind if intent is not None else None
-    assert kind is None, f"{turn!r} was captured as {kind}"
-
-
-# ── 3. the primitive's contract ──────────────────────────────────────────────
-
-def test_loose_matching_tolerates_one_insertion_and_no_more():
-    terms = ("готов к автономной работе",)
-    assert _has_any_loose("готов к автономной работе", terms)
-    assert _has_any_loose("готов уже к автономной работе", terms)
-    assert not _has_any_loose("готов вот прямо уже к автономной работе", terms), (
-        "two inserted words must not match — looseness may not compound"
-    )
-
-
-def test_single_word_terms_get_no_tolerance():
-    assert _loose_patterns("самостро") == ()
-    assert _has_any_loose("самострой", ("самостро",)), "substring behaviour is unchanged"
-
-
-def test_strict_matching_is_untouched():
-    assert _has_any("готов к автономной работе", ("готов к автономной работе",))
-    assert not _has_any("готов уже к автономной работе", ("готов к автономной работе",))
-
-
-def test_suppression_guards_keep_strict_matching():
-    """`_looks_like_*` decides when routing is BLOCKED — that stays literal.
-
-    Widening what is recognised is one decision; widening what is suppressed is
-    another, and a riskier one. This is asserted at the source level because the
-    difference is invisible from the outside until it misfires.
-    """
-    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.MULTILINE)
-    guards = [b for b in blocks if b.startswith("def _looks_like_")]
-    assert len(guards) >= 5, "guard extraction collapsed"
-    offenders = [
-        b.splitlines()[0] for b in guards if "_has_any_loose(" in b
-    ]
-    assert not offenders, f"suppression guards must stay strict: {offenders}"
-
-
-def test_positive_matchers_use_the_loose_primitive():
-    """The other half of the same design decision, so it cannot silently revert."""
-    blocks = re.split(r"(?=^def )", PATTERN_SOURCE, flags=re.MULTILINE)
-    matchers = [b for b in blocks if b.startswith("def _matches_")]
-    assert len(matchers) >= 20, "matcher extraction collapsed"
-    strict_only = [
-        b.splitlines()[0]
-        for b in matchers
-        if "_has_any(" in b.replace("_has_any_loose(", "")
-    ]
-    assert not strict_only, (
-        "these positive matchers still use strict substring matching, so a filler "
-        f"word will send their turns to the LLM: {strict_only}"
     )

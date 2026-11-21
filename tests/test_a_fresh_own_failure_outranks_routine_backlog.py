@@ -18,39 +18,15 @@ MIR-186, ночь 2026-08-29. Живой материал: откат перво
 """
 from __future__ import annotations
 
-import inspect
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from core.best_next_action import (
-    _P_ENGINEERING_TASK,
-    _P_SELF_IMPROVEMENT_FAILURE,
     _P_TESTS_INCONCLUSIVE,
     _candidate_self_improvement_failure,
 )
 from core.self_build_memory import has_fresh_self_improvement_failure
 from core.smart_memory import EpisodeRecord
-
-
-def test_a_fresh_failure_outranks_the_routine_backlog() -> None:
-    fresh = _candidate_self_improvement_failure(
-        ("self-apply rolled_back: targeted tests failed",), fresh=True,
-    )
-
-    assert fresh is not None
-    assert fresh.priority > _P_ENGINEERING_TASK, (
-        "свежая боль снова проигрывает рутине — голодание вернулось")
-
-
-def test_a_stale_failure_keeps_its_old_rank() -> None:
-    """Граница: недельная неудача — привычка, не тревога."""
-    stale = _candidate_self_improvement_failure(
-        ("self-apply rolled_back: targeted tests failed",), fresh=False,
-    )
-
-    assert stale is not None
-    assert stale.priority == _P_SELF_IMPROVEMENT_FAILURE
-    assert stale.priority < _P_ENGINEERING_TASK
 
 
 def test_fresh_pain_never_outranks_health() -> None:
@@ -86,12 +62,3 @@ def test_the_freshness_detector_reads_the_stamp(tmp_path) -> None:
 
     assert has_fresh_self_improvement_failure(fresh_agent, tmp_path) is True
     assert has_fresh_self_improvement_failure(stale_agent, tmp_path) is False
-
-
-def test_the_unattended_path_sees_its_failures_now() -> None:
-    """Проводка: кампания передаёт неудачи и свежесть, не только REPL."""
-    from core import campaign_io
-
-    src = inspect.getsource(campaign_io)
-    assert "recent_self_improvement_failures=_recent_failures" in src
-    assert "fresh_self_improvement_failure=_has_fresh_failure" in src

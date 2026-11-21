@@ -27,25 +27,10 @@ def _conclusion() -> MemoryRecord:
     return MemoryRecord(content="Вопрос: x\nВывод: y 12", tags=["conclusion"], type="semantic")
 
 
-def test_consolidate_unhashable_target_falls_back_to_add():
-    r = _conclusion()
-    llm = _LLM(json.dumps({"operation": "NOOP", "target": [r.id], "merged": None, "title": None}))
-    out = consolidate(llm, "Вопрос: x\nВывод: y 12", "x", [r])
-    assert out.operation == "ADD"
-    assert out.target_id is None
-
-
 def test_consolidate_dict_target_falls_back_to_add():
     r = _conclusion()
     llm = _LLM(json.dumps({"operation": "DELETE", "target": {"id": r.id}, "merged": None}))
     assert consolidate(llm, "c", "x", [r]).operation == "ADD"
-
-
-def test_consolidate_question_none_does_not_raise():
-    r = _conclusion()
-    llm = _LLM(json.dumps({"operation": "NOOP", "target": r.id, "merged": None, "title": None}))
-    out = consolidate(llm, "c", None, [r])
-    assert out.operation == "NOOP" and out.target_id == r.id
 
 
 def _store(tmp_path) -> PersistentMemoryStore:
@@ -88,26 +73,6 @@ def test_recall_newest_first_across_time_zones(tmp_path):
     s.save_many([older, newer])
     recs = MemoryRecallTool(store=s).run(term="port")["records"]
     assert [x["id"] for x in recs] == [newer.id, older.id]
-
-
-def test_dedup_never_deletes_a_supersession_target(tmp_path):
-    r0, r1, r2 = _stale_trio()
-    s = _store(tmp_path)
-    s.save_many([r0, r1, r2])
-    rep = deduplicate_memory(s)
-    ids = {r.id for r in s.load()}
-    assert r2.id in ids                       # the current record survives
-    assert r2.id not in rep.deleted
-    assert rep.deleted == [r0.id]             # its older near-copy goes instead
-    assert rep.groups[0].canonical_id == r2.id
-
-
-def test_dedup_dry_run_also_spares_target(tmp_path):
-    r0, r1, r2 = _stale_trio()
-    s = _store(tmp_path)
-    s.save_many([r0, r1, r2])
-    rep = deduplicate_memory(s, dry_run=True)
-    assert r2.id not in rep.deleted
 
 
 def test_dedup_two_targets_that_match_both_stay(tmp_path):

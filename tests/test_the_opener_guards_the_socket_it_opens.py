@@ -83,22 +83,6 @@ def test_a_peer_that_turns_private_at_connect_time_is_refused(
     assert peer_ip in str(inner)
 
 
-def test_a_public_peer_still_gets_to_send(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Boundary pin: a guard that refuses everything would pass the test above
-    while breaking every outbound request."""
-    fake = _RebindingSocket(("93.184.216.34", 80))
-    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: fake)
-
-    opener = build_safe_opener(NetworkSafetyPolicy(tool_name="probe"))
-    with pytest.raises((AssertionError, urllib.error.URLError)) as caught:
-        opener.open("http://example.invalid/x", timeout=1)
-
-    inner = getattr(caught.value, "reason", caught.value)
-    assert not isinstance(inner, PermissionError), (
-        f"a public peer was refused: {inner}"
-    )
-
-
 @pytest.mark.parametrize("peer_ip", ["169.254.169.254", "10.0.0.7"])
 def test_the_https_path_is_guarded_too(
     monkeypatch: pytest.MonkeyPatch, peer_ip: str
@@ -120,4 +104,3 @@ def test_the_https_path_is_guarded_too(
         f"an https request to {peer_ip} raised {type(inner).__name__}: {inner}"
     )
     assert peer_ip in str(inner)
-

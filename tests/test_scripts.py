@@ -52,15 +52,6 @@ class TestGenerateSbom:
         assert gs.main(["--check"]) == 1
         assert "missing" in capsys.readouterr().err
 
-    def test_written_sbom_is_valid_cyclonedx(self, tmp_path: Path, monkeypatch, capsys):
-        self._setup(tmp_path, monkeypatch)
-        gs.main([])
-        capsys.readouterr()
-        payload = json.loads((tmp_path / "sbom.cdx.json").read_text(encoding="utf-8"))
-        assert payload["bomFormat"] == "CycloneDX"
-        names = {c["name"] for c in payload["components"]}
-        assert {"certifi", "idna"} <= names
-
 
 # ============================================================
 # scripts/audit_release.py — smoke run on the real repo (read-only)

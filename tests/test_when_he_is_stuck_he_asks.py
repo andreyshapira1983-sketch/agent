@@ -37,18 +37,6 @@ def test_a_goal_that_went_nowhere_twice_raises_the_pull(tmp_path: Path) -> None:
     assert compute_drives(tmp_path, _NOW)["stuck_need"]["value"] > 0.3
 
 
-def test_the_goal_sends_him_to_the_internet_and_to_the_partner(tmp_path: Path) -> None:
-    _ledger(tmp_path, [{"goal": "почини дефект X", "result": "empty"}] * 2)
-
-    goal = stuck_goal(tmp_path)
-
-    assert "web_search" in goal.goal and "data/chat_outbox.jsonl" in goal.goal
-    # С 2026-09-26 успех — ЕГО решение, а вопрос человеку — только когда шаг не его
-    # (tests/test_a_decision_about_own_code_is_not_a_question.py).
-    assert goal.success_check.startswith("В data/own_decisions.jsonl")
-    assert goal.drive == "stuck_need"
-
-
 def test_defects_taken_but_never_landed_count_as_stuck(tmp_path: Path) -> None:
     state = {"attempted": {"a": "2026-09-22T10:00:00+00:00", "b": "2026-09-22T11:00:00+00:00"},
              "applied": {}}

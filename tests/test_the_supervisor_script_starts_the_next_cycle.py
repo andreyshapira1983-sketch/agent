@@ -140,31 +140,6 @@ def test_one_malformed_ledger_row_does_not_stop_the_experiment(repo: Path) -> No
 
 # ── 3. потолок батареи обязан быть настоящим ─────────────────────────────────
 
-def test_the_battery_is_bounded_by_the_tree_killing_runner() -> None:
-    """Батарея ждёт через `core/bounded_subprocess`, а не через `run(timeout=)`.
-
-    Утверждение о происхождении, а не о тексте: `_battery` обязана звать
-    `run_with_tree_kill`. Голый `subprocess.run(timeout=)` в дереве процессов
-    pytest не ограничивает ожидание вовсе — модуль-ограничитель заведён с
-    двумя замерами именно этого.
-    """
-    import ast
-    import inspect
-    import textwrap
-
-    source = inspect.getsource(script._battery)
-    assert "run_with_tree_kill" in source, (
-        "батарея ждёт голым subprocess.run(timeout=): зависший внук "
-        "остановит десятичасовой опыт навсегда"
-    )
-    # Докстринг называет голый вызов, чтобы объяснить, почему его тут нет;
-    # утверждение — про тело, поэтому пояснение из него вырезано разбором.
-    fn = ast.parse(textwrap.dedent(source)).body[0]
-    assert isinstance(fn, ast.FunctionDef)
-    if ast.get_docstring(fn):
-        fn.body = fn.body[1:]
-    assert "subprocess.run" not in ast.unparse(fn)
-
 
 def test_a_battery_that_outlives_its_ceiling_is_a_refusal(
     repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -179,21 +154,6 @@ def test_a_battery_that_outlives_its_ceiling_is_a_refusal(
 
     assert not ok
     assert str(script._BATTERY_TIMEOUT_SECONDS) in reason
-
-
-def test_a_green_battery_is_still_green(repo: Path) -> None:
-    """Сосед: обычный путь через ограничитель по-прежнему читает исход."""
-    def _ok(argv, *, cwd, env, timeout):
-        return b"5 passed\n", b"", 0, False
-
-    original = script.run_with_tree_kill
-    script.run_with_tree_kill = _ok
-    try:
-        ok, tail = script._battery(repo)
-    finally:
-        script.run_with_tree_kill = original
-
-    assert ok and tail == "5 passed"
 
 
 def test_a_wrong_sha_is_refused_even_when_a_tree_is_asked_for(

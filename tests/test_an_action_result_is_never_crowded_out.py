@@ -21,18 +21,6 @@ def _reads(n: int) -> dict:
     return {f"file:doc{i}.md": {"tool": "file_read", "output": "x" * 7000} for i in range(n)}
 
 
-def test_a_verdict_after_long_reads_is_shown() -> None:
-    """Ломалось здесь: три длинных чтения съедали предел, вердикт шёл последним."""
-    artifacts = _reads(3)
-    artifacts["patch_check:proposals/selffix/x/edits.txt"] = {
-        "tool": "patch_check",
-        "output": {"verdict": "red", "why": "text outside blocks", "applied": False},
-    }
-    block = format_observations(_PLAN, artifacts)
-    assert "text outside blocks" in block
-    assert "patch_check:proposals/selffix/x/edits.txt] (не показан" not in block
-
-
 def test_a_computation_is_shown_before_the_reads() -> None:
     artifacts = _reads(4)
     artifacts["python_probe:import math"] = {

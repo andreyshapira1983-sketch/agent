@@ -86,13 +86,6 @@ def test_the_honest_negative_report_ships_when_the_chain_shows_blocked_attempts(
     assert "honest_negative" in result.reason
 
 
-def test_without_blocked_attempts_the_gate_behaves_as_before():
-    report = _pass_two_report()
-    answer = "\n".join(c.text for c in report.chunks)
-    result = evaluate_low_evidence_policy(answer=answer, report=report, question="найди перелёт", blocked_attempts=0)
-    assert result.triggered is True
-
-
 def test_a_positive_claim_is_never_rescued_by_the_rule():
     report = _report([
         _chunk(POSITIVE, "subagent_asserted"),

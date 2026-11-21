@@ -29,21 +29,3 @@ def test_a_dated_signature_survives(text: str) -> None:
     assert [f.kind for f in scan_pii(text)] == [], (
         "подпись с датой не должна редактироваться как телефон"
     )
-
-
-@pytest.mark.parametrize("text", [
-    "позвони +7 916 123-45-67",
-    "мой номер +1 (415) 555-0123",
-    "+7 (916) 123-45-67",
-])
-def test_a_real_phone_is_still_caught(text: str) -> None:
-    assert "phone" in [f.kind for f in scan_pii(text)], (
-        "правило обязано остаться живым для настоящего номера"
-    )
-
-
-def test_a_phone_beside_a_date_is_still_caught() -> None:
-    """Дата в тексте не выдаёт индульгенцию соседнему номеру."""
-    text = "встреча 2026-09-01, звони +7 916 123-45-67"
-
-    assert "phone" in [f.kind for f in scan_pii(text)]

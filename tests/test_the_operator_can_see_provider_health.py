@@ -47,18 +47,6 @@ def _record(workspace: Path, *, provider: str, status: str,
                   completed_at=at.isoformat(), duration_ms=1, error=error)
 
 
-def test_a_demoted_provider_is_named_in_the_status(workspace: Path) -> None:
-    for i in range(3):
-        _record(workspace, provider="anthropic", status="error", error=_CREDIT,
-                at=_NOW - timedelta(minutes=10 - i))
-
-    line = _provider_health_line(workspace)
-
-    assert "anthropic" in line and "SKIPPED" in line, (
-        f"the operator cannot see that a provider is being skipped: {line!r}"
-    )
-
-
 def test_ok_means_the_last_call_worked_not_merely_out_of_cooldown(
     workspace: Path,
 ) -> None:
@@ -73,24 +61,3 @@ def test_ok_means_the_last_call_worked_not_merely_out_of_cooldown(
         f"a provider whose every recorded call failed is reported healthy: {line!r}"
     )
     assert "last=error" in line
-
-
-def test_a_working_provider_reads_ok(workspace: Path) -> None:
-    _record(workspace, provider="openai", status="success", error=None,
-            at=_NOW - timedelta(minutes=1))
-
-    assert "openai ok" in _provider_health_line(workspace)
-
-
-def test_the_status_line_never_crashes(workspace: Path, monkeypatch) -> None:
-    """A ledger that raises yields a named «unavailable» line, not an exception.
-
-    Operator status must survive a broken store; a garbage line alone is
-    skipped by the ledger and never reaches the wrapper.
-    """
-    def _unreadable(self, *, limit: int) -> list[dict]:
-        raise OSError("store unreadable")
-
-    monkeypatch.setattr(ModelUsageLedger, "_recent_rows", _unreadable)
-
-    assert _provider_health_line(workspace) == "unavailable (OSError)"

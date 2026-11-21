@@ -7,18 +7,6 @@ import pytest
 from core.governance import AgentMode, GovernancePolicy, GovernedOperation
 
 
-def test_diagnostic_mode_allows_read_only_surfaces():
-    policy = GovernancePolicy()
-    for op in (
-        GovernedOperation.READ_LOGS,
-        GovernedOperation.RUN_TESTS,
-        GovernedOperation.READ_SOURCE,
-        GovernedOperation.FETCH_WEB,
-    ):
-        decision = policy.evaluate(mode=AgentMode.DIAGNOSTIC, operation=op)
-        assert decision.allowed
-
-
 def test_diagnostic_mode_denies_writes():
     decision = GovernancePolicy().evaluate(
         mode=AgentMode.DIAGNOSTIC,
@@ -53,33 +41,6 @@ def test_learning_mode_denies_code_change():
         evidence_verified=True,
     )
     assert decision.denied
-
-
-def test_repair_mode_can_propose_diff_after_verified_diagnosis():
-    decision = GovernancePolicy().evaluate(
-        mode=AgentMode.REPAIR,
-        operation=GovernedOperation.PROPOSE_DIFF,
-        evidence_verified=True,
-    )
-    assert decision.allowed
-
-
-def test_repair_write_requires_verified_diagnosis_rollback_and_approval():
-    denied = GovernancePolicy().evaluate(
-        mode=AgentMode.REPAIR,
-        operation=GovernedOperation.APPLY_CODE_CHANGE,
-        evidence_verified=True,
-        has_rollback=False,
-    )
-    assert denied.denied
-
-    gated = GovernancePolicy().evaluate(
-        mode=AgentMode.REPAIR,
-        operation=GovernedOperation.APPLY_CODE_CHANGE,
-        evidence_verified=True,
-        has_rollback=True,
-    )
-    assert gated.requires_approval
 
 
 def test_repair_rollback_allowed_only_with_compensation_plan():

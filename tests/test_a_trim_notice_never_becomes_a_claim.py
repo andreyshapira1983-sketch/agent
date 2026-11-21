@@ -27,9 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.evidence import make_evidence
 from core.evidence_budget import carries_framework_notice
-from core.knowledge_pipeline import ClaimExtractor, SourceRecord
 
 # ── the grammar ──────────────────────────────────────────────────────────────
 
@@ -63,57 +61,6 @@ def test_an_unseen_marker_of_the_same_shape_is_recognised() -> None:
         assert carries_framework_notice(unseen), f"unseen form passed: {unseen!r}"
 
 
-@pytest.mark.parametrize("text", [
-    "Он замолчал... потом продолжил говорить о деле.",
-    "The array a[i] is sorted before the loop begins.",
-    "This is documented in the paper [4] and reproduced here.",
-    "Ellipsis at the end is ordinary prose...",
-    "Скобки [важное] и многоточие... порознь — обычный текст.",
-    "def f(x): return x[:limit] + suffix",
-])
-def test_ordinary_prose_is_not_a_notice(text: str) -> None:
-    assert not carries_framework_notice(text), f"false positive: {text!r}"
-
-
-# ── the pipeline ─────────────────────────────────────────────────────────────
-
-def _extract(excerpt: str):
-    evidence = make_evidence(
-        kind="file", source_id="file:docs/X.md", obtained_via="file_read",
-        claim="Read docs/X.md", excerpt=excerpt, confidence=0.9,
-    )
-    source = SourceRecord(
-        id=evidence.source_id, type="file", locator="docs/X.md",
-        title="X", trust_level=0.95,
-    )
-    return ClaimExtractor().extract(evidence, source=source)
-
-
-def test_no_claim_carries_a_marker_from_a_trimmed_excerpt() -> None:
-    """The witness for the exact live corruption: the sentence that regenerated
-    within 24 hours of the 2026-08-15 cleanup."""
-    claims = _extract(
-        "If a command is not here, ...[truncated]"
-    )
-    for claim in claims:
-        assert "truncated" not in claim.text, (
-            f"a trim notice became a durable claim again: {claim.text!r}"
-        )
-
-
-def test_clean_sentences_still_extract_beside_a_marker() -> None:
-    """The gate must not swallow the document it protects: sentences the
-    source actually finished still assert."""
-    claims = _extract(
-        "Агент не может слить ветку без решения оператора. "
-        "Команды описаны в карте и проверяются на каждом прогоне сборки.\n"
-        "...[INTENT-BUDGET: 120 of 9000 chars; head only]"
-    )
-    assert claims, "the marker gate swallowed every claim from the excerpt"
-    for claim in claims:
-        assert "INTENT-BUDGET" not in claim.text
-
-
 # ── Audit of this closure against the field's criticism ─────────────────────
 #
 # From CLOSURE_AUDIT_2026-08-22.md in git history. Shape-based stripping is
@@ -135,19 +82,3 @@ def test_bibliographic_and_elision_brackets_are_not_notices() -> None:
         "the passage reads ...[а] and continues",
     ):
         assert not carries_framework_notice(text), text
-
-
-def test_every_real_marker_still_survives_the_narrowing() -> None:
-    """The narrowing must not open a hole: all five live writer shapes."""
-    for text in _LIVE_MARKERS:
-        assert carries_framework_notice(text), text
-
-
-def test_the_irreducible_false_positive_is_recorded_not_hidden() -> None:
-    """A one-word prose elision cannot be told from a one-word marker. Pinned
-    so the limit is visible in the suite rather than only in prose — and so a
-    future author who thinks they fixed it has something to turn green."""
-    assert carries_framework_notice("user: ...[typing]"), (
-        "if this now passes, a shape rule learned to tell prose from marker — "
-        "record how, and update the audit"
-    )

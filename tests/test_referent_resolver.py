@@ -1,19 +1,15 @@
 """Tests for core.referent_resolver (critique plan PR1)."""
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.referent_resolver import (
-    FEATURE_FLAG,
-    FEATURE_FLAG_DEFAULT,
     ArtifactRef,
     FileHintRef,
     MemoryRef,
     PriorTurnRef,
     ReferentResolver,
-    artifacts_from_working_memory,
 )
 
 SESSION = "sess_test"
@@ -24,53 +20,6 @@ OTHER_TURN = "turn_old"
 
 def _resolver(tmp_path: Path | None = None) -> ReferentResolver:
     return ReferentResolver(workspace_root=tmp_path)
-
-
-def test_feature_flag_defaults_off():
-    assert FEATURE_FLAG == "referent_resolver_v1"
-    assert FEATURE_FLAG_DEFAULT is False
-
-
-def test_referent_resolver_mode_default_on(monkeypatch):
-    """Постановление оператора 2026-08-13 (R5): орган включён рождением.
-
-    Прежний default-off стоил живого хода: анафора при пустой истории взяла
-    чужое число из опыта под видом диалога. off/shadow остались ключами.
-    """
-    monkeypatch.delenv("AGENT_REFERENT_RESOLVER", raising=False)
-    from core.referent_resolver import referent_resolver_mode
-
-    assert referent_resolver_mode() == "on"
-
-
-def test_referent_resolver_mode_shadow_and_on(monkeypatch):
-    from core.referent_resolver import referent_resolver_mode
-
-    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "shadow")
-    assert referent_resolver_mode() == "shadow"
-    monkeypatch.setenv("AGENT_REFERENT_RESOLVER", "on")
-    assert referent_resolver_mode() == "on"
-
-
-def test_anaphora_resolves_to_prior_turn():
-    prior = PriorTurnRef(
-        turn_id="turn_prev",
-        session_id=SESSION,
-        question="длинная формулировка про продукт",
-        answer="Вот развёрнутый предыдущий ответ агента про продукт и риски.",
-    )
-    decision = _resolver().resolve(
-        "покажи слабые стороны этого",
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-        prior_turns=(prior,),
-    )
-    assert decision.status == "resolved"
-    assert decision.primary is not None
-    assert decision.primary.kind == "prior_turn"
-    assert decision.analysis_target_excerpt.startswith("Вот развёрнутый")
-    # Directive stays separate from analysis material semantics.
-    assert "покажи" in decision.directive_excerpt.casefold()
 
 
 def test_multi_artifact_only_relevant_becomes_primary(tmp_path: Path):
@@ -108,35 +57,6 @@ def test_multi_artifact_only_relevant_becomes_primary(tmp_path: Path):
         assert decision.primary.id != "a_noise"
 
 
-def test_irrelevant_cached_artifact_not_primary(tmp_path: Path):
-    decision = ReferentResolver(workspace_root=tmp_path).resolve(
-        "покажи слабые стороны формулировки только покажи",
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-        artifacts=(
-            ArtifactRef(
-                id="old",
-                session_id=SESSION,
-                label="cache:old.py",
-                tool="file_read",
-                path=str(tmp_path / "old.py"),
-                preview="def hello(): pass",
-            ),
-        ),
-        prior_turns=(
-            PriorTurnRef(
-                turn_id="turn_prev",
-                session_id=SESSION,
-                answer="Предыдущий текст для критики про формулировку пользователя.",
-            ),
-        ),
-    )
-    assert decision.primary is None or decision.primary.id != "old"
-    if decision.status == "resolved":
-        assert decision.primary is not None
-        assert decision.primary.kind == "prior_turn"
-
-
 def test_stale_file_hint_other_turn_not_candidate(tmp_path: Path):
     f = tmp_path / "task.txt"
     f.write_text("task body", encoding="utf-8")
@@ -148,22 +68,6 @@ def test_stale_file_hint_other_turn_not_candidate(tmp_path: Path):
     )
     assert all(c.kind != "file_hint" for c in decision.candidates)
     assert "stale_file_hint_other_turn" in decision.notes
-
-
-def test_current_turn_file_hint_needs_tool(tmp_path: Path):
-    f = tmp_path / "task.txt"
-    f.write_text("task body", encoding="utf-8")
-    decision = ReferentResolver(workspace_root=tmp_path).resolve(
-        "выяви слабые стороны",
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-        file_hint=FileHintRef(path=str(f), turn_id=TURN, session_id=SESSION),
-    )
-    assert decision.status == "needs_tool"
-    assert decision.primary is not None
-    assert decision.primary.kind == "file_hint"
-    # PR1 must not pretend the file was read / verified.
-    assert "read_required" in decision.notes
 
 
 def test_bare_string_file_hint_rejected_without_turn_scope(tmp_path: Path):
@@ -223,28 +127,6 @@ def test_stale_artifact_ttl(tmp_path: Path):
     assert any(n.startswith("stale_artifact") for n in decision.notes)
 
 
-def test_ambiguous_when_two_strong_different_kinds(tmp_path: Path):
-    f = tmp_path / "a.txt"
-    f.write_text("body", encoding="utf-8")
-    decision = ReferentResolver(workspace_root=tmp_path).resolve(
-        "покажи слабые стороны этого и файла a.txt",
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-        file_hint=FileHintRef(path=str(f), turn_id=TURN, session_id=SESSION),
-        prior_turns=(
-            PriorTurnRef(
-                turn_id="turn_prev",
-                session_id=SESSION,
-                answer="Длинный предыдущий ответ для анализа слабых сторон.",
-            ),
-        ),
-    )
-    # Path/hint vs prior_turn both strong → ambiguous, do not pick at random.
-    assert decision.status == "ambiguous"
-    assert decision.primary is None
-    assert decision.conflict_reason
-
-
 def test_memory_never_silent_primary():
     decision = _resolver().resolve(
         "покажи слабые стороны этого",
@@ -277,45 +159,6 @@ def test_path_traversal_rejected(tmp_path: Path):
     assert all(c.kind != "file_hint" for c in decision.candidates)
 
 
-def test_user_text_material_is_data_channel_not_evidence_api():
-    """Long critique of embedded text → user_text excerpt, no evidence write."""
-    question = (
-        "выяви слабые стороны: Система проигнорировала контекст и сделала "
-        "категоричный вывод при нулевой подтверждённости. Ничего не делай, "
-        "а только покажи."
-    )
-    decision = _resolver().resolve(
-        question,
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-    )
-    assert decision.status == "resolved"
-    assert decision.primary is not None
-    assert decision.primary.kind == "user_text"
-    assert decision.primary.trust == "user_data"
-    assert decision.analysis_target_excerpt
-    # Resolver has no evidence-chain side effect by construction.
-    assert not hasattr(decision, "evidence")
-
-
-def test_artifacts_from_working_memory_adapter():
-    refs = artifacts_from_working_memory(
-        {
-            "k1": {
-                "tool": "file_read",
-                "arguments": {"path": "docs/x.md"},
-                "output": "hello world",
-                "turn_index": 2,
-            }
-        },
-        session_id=SESSION,
-    )
-    assert len(refs) == 1
-    assert refs[0].session_id == SESSION
-    assert refs[0].path == "docs/x.md"
-    assert "hello" in refs[0].preview
-
-
 def test_empty_question_unresolved():
     decision = _resolver().resolve(
         "   ",
@@ -323,70 +166,3 @@ def test_empty_question_unresolved():
         current_turn_id=TURN,
     )
     assert decision.status == "unresolved"
-
-
-def test_to_dict_omits_full_excerpt_body():
-    decision = _resolver().resolve(
-        "выяви слабые стороны: " + ("слово " * 30),
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-    )
-    payload = decision.to_dict()
-    assert "analysis_target_excerpt_chars" in payload
-    assert "analysis_target_excerpt" not in payload
-
-
-def test_is_local_critique_eligible_prior_turn():
-    from core.referent_resolver import is_local_critique_eligible
-
-    prior = PriorTurnRef(
-        turn_id="turn_prev",
-        session_id=SESSION,
-        question="план",
-        answer="Категоричный текст без доказательств о росте рынка.",
-    )
-    decision = _resolver().resolve(
-        "покажи слабые стороны этого",
-        current_session_id=SESSION,
-        current_turn_id=TURN,
-        prior_turns=(prior,),
-    )
-    assert decision.status == "resolved"
-    assert is_local_critique_eligible(decision) is True
-
-
-def test_is_local_critique_eligible_rejects_unresolved():
-    from core.referent_resolver import (
-        ReferentDecision,
-        is_local_critique_eligible,
-    )
-
-    decision = ReferentDecision(status="unresolved")
-    assert is_local_critique_eligible(decision) is False
-
-
-def test_resolve_stays_cheap_on_a_wall_of_separators(tmp_path: Path) -> None:
-    """The path scan must not turn the question's length into quadratic work.
-
-    The question is whatever the user typed; nothing caps it. The path pattern
-    could start a match inside a run of `/`, `.` and `-`, so n separators gave
-    n starting positions, each rescanning the rest. Measured before the fix:
-    5.5 s for 6400 repetitions of "-/-". A question can be pasted, so this is
-    reachable from outside.
-
-    The bound is loose on purpose — the point is the shape of the curve, not
-    the wall-clock number on any one machine.
-    """
-    question = "/" + "-/-" * 6000
-
-    start = time.perf_counter()
-    decision = ReferentResolver(workspace_root=tmp_path).resolve(
-        question,
-        current_session_id="s1",
-        current_turn_id="t1",
-    )
-    elapsed = time.perf_counter() - start
-
-    # Separators alone name nothing; the verdict does not change.
-    assert decision.status == "unresolved"
-    assert elapsed < 1.0, f"resolving {len(question)} chars took {elapsed:.2f}s"

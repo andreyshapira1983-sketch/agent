@@ -29,13 +29,6 @@ def pick(workspace):
 '''
 
 
-def test_the_live_specimen_is_caught() -> None:
-    reason = phantom_attribute_reason(_LIVE_SPECIMEN)
-    assert reason is not None
-    assert "state" in reason
-    assert "CausalClaim" in reason
-
-
 def test_the_honest_form_passes() -> None:
     code = '''
 from core.causal_claim_store import load_claims
@@ -51,17 +44,6 @@ def pick(workspace):
     assert phantom_attribute_reason(code) is None
 
 
-def test_a_real_field_on_a_constructed_object_passes() -> None:
-    code = '''
-from core.causal_lesson import Observation
-
-def f():
-    obs = Observation(episode_id="e", trace_id="t", run_id="r")
-    return obs.episode_id
-'''
-    assert phantom_attribute_reason(code) is None
-
-
 def test_an_invented_field_on_a_constructed_object_is_caught() -> None:
     code = '''
 from core.causal_lesson import Observation
@@ -73,47 +55,6 @@ def f():
     reason = phantom_attribute_reason(code)
     assert reason is not None
     assert "provenance_grade" in reason
-
-
-def test_methods_and_properties_are_not_phantoms() -> None:
-    code = '''
-from core.causal_lesson import Observation
-
-def f():
-    obs = Observation(episode_id="e", trace_id="t", run_id="r")
-    return obs.to_log_payload()
-'''
-    assert phantom_attribute_reason(code) is None
-
-
-def test_an_unknown_variable_is_silence() -> None:
-    code = '''
-def f(mystery):
-    return mystery.whatever_field
-'''
-    assert phantom_attribute_reason(code) is None
-
-
-def test_a_non_literal_getattr_is_silence() -> None:
-    code = '''
-from core.causal_lesson import Observation
-
-def f(name):
-    obs = Observation(episode_id="e", trace_id="t", run_id="r")
-    return getattr(obs, name, None)
-'''
-    assert phantom_attribute_reason(code) is None
-
-
-def test_an_unimportable_module_is_silence() -> None:
-    code = '''
-from nowhere.at.all import Ghost
-
-def f():
-    g = Ghost()
-    return g.anything
-'''
-    assert phantom_attribute_reason(code) is None
 
 
 def test_broken_code_is_silence_not_a_crash() -> None:

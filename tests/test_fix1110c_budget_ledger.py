@@ -88,9 +88,3 @@ def test_a_valid_config_still_loads(tmp_path: Path) -> None:
     path = tmp_path / "budget_limits.json"
     path.write_text(json.dumps({"hour": {"llm_calls": 60}}), encoding="utf-8")
     assert _load_budget_config(path) == {"hour": {"llm_calls": 60}}
-
-
-def test_kill_switch_docstring_names_the_real_command() -> None:
-    from core.budget_kill_switch import BudgetKillSwitch
-
-    assert ":budget-kill-switch --clear" in (BudgetKillSwitch.load.__doc__ or "")

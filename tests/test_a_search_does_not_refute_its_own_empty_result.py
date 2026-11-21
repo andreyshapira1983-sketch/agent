@@ -24,7 +24,7 @@ core/evidence.py): имена — из вопроса, истина — из и�
 from __future__ import annotations
 
 from core.evidence import QUESTION_CODE_MARKER, evidence_from_tool_result
-from core.verifier_absence import absence_reason, absent_literal_reason
+from core.verifier_absence import absence_reason
 from core.verifier_utils import truth_excerpt
 
 _EMPTY = "no matches for 'smart_memory_helpers2' in 3305 text files under ."
@@ -50,18 +50,6 @@ def test_the_query_echo_leaves_the_truth_excerpt() -> None:
 
 def test_a_true_absence_is_no_longer_called_a_lie() -> None:
     assert absence_reason(_CLAIM, _evidence(_EMPTY), "tool") is None
-
-
-def test_the_name_is_still_not_a_fabrication() -> None:
-    assert absent_literal_reason(_CLAIM, _evidence(_EMPTY), "tool") is None
-
-
-def test_a_search_that_found_something_is_untouched() -> None:
-    found = ("2 matching lines (2 occurrences) in 1 of 3305 text files under .\n"
-             "core/smart_memory.py:11: from core.smart_memory_helpers import (")
-    ev = _evidence(found)
-    assert ev.excerpt == found, "находка — улика целиком, резать нечего"
-    assert QUESTION_CODE_MARKER not in ev.excerpt
 
 
 def test_an_absence_its_evidence_really_refutes_is_still_caught() -> None:

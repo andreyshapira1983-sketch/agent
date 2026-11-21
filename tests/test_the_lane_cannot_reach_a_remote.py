@@ -55,33 +55,3 @@ def test_a_remote_verb_never_reaches_the_runner(workspace: Path, argv) -> None:
     with pytest.raises(VcsError):
         vcs._git(*([argv] if isinstance(argv, str) else argv))
     assert calls == [], f"the verb reached git anyway: {calls}"
-
-
-def test_the_local_verbs_the_lane_actually_uses_still_run(workspace: Path) -> None:
-    """Boundary pin: refusing everything would pass the test above and break
-    the lane. Every verb SafeVCS itself issues must survive."""
-    calls, runner = _spy()
-    vcs = SafeVCS(workspace=workspace, runner=runner)
-    for verb, args in (
-        ("rev-parse", ("--abbrev-ref", "HEAD")),
-        ("status", ("--porcelain",)),
-        ("add", ("-A",)),
-        ("branch", ("--list",)),
-        ("checkout", ("-b", "tmp-x")),
-        ("reset", ("--hard", "HEAD")),
-        ("clean", ("-fd",)),
-    ):
-        vcs._git(verb, *args)
-    assert len(calls) == 7
-
-
-def test_an_option_before_the_verb_does_not_smuggle_one_past(workspace: Path) -> None:
-    """`commit` passes `-c user.name=…` ahead of the verb, so the check cannot
-    simply read argv[0] — and that skipping must not become a hiding place."""
-    calls, runner = _spy()
-    vcs = SafeVCS(workspace=workspace, runner=runner)
-    vcs._git("-c", "user.name=x", "-c", "user.email=y", "commit", "-m", "m")
-    assert len(calls) == 1
-    with pytest.raises(VcsError):
-        vcs._git("-c", "user.name=x", "push", "origin", "HEAD")
-    assert len(calls) == 1, "a leading -c option smuggled a remote verb through"

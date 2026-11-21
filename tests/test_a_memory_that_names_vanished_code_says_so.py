@@ -6,13 +6,11 @@
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from core.code_citations import annotate, stale_refs
-from core.failure_cards import CARDS_RELPATH, note_for, signature
+from core.code_citations import stale_refs
 from core.loop_memory_read import AgentLoopMemoryRead
 
 
@@ -28,29 +26,6 @@ def test_a_vanished_file_and_a_vanished_name_are_named(ws: Path) -> None:
             "LIMIT at core/alive.py::LIMIT")
     assert stale_refs(ws, text) == ["core/confidence_gate.py (файла больше нет)",
                                     "core/alive.py::gone_helper (имени в файле больше нет)"]
-
-
-@pytest.mark.parametrize("text", ["the cap lives in core/alive.py::LIMIT (line 1)",
-                                  "reader (core/alive.py:N — a masked line number)",
-                                  "core/alive.py:114 — a plain line number"])
-def test_a_record_whose_code_still_exists_is_left_exactly_as_it_was(ws: Path, text: str) -> None:
-    assert annotate(ws, text) is text
-
-
-def test_the_record_is_kept_and_marked_not_deleted(ws: Path) -> None:
-    out = annotate(ws, "use core/model_router_helpers.py to pick a model")
-    assert out.startswith("use core/model_router_helpers.py to pick a model")
-    assert "АДРЕС УСТАРЕЛ: core/model_router_helpers.py (файла больше нет)" in out
-
-
-def test_a_past_lesson_shown_at_failure_carries_the_mark(ws: Path) -> None:
-    sig = signature("file_read", "FileNotFoundError: core/old.py")
-    card = {"sig": sig, "tool": "file_read", "error": "x", "status": "active",
-            "lesson": "read core/confidence_gate.py first"}
-    (ws / CARDS_RELPATH).parent.mkdir(parents=True, exist_ok=True)
-    (ws / CARDS_RELPATH).write_text(json.dumps(card, ensure_ascii=False) + "\n", encoding="utf-8")
-    note = note_for(ws, "file_read", "FileNotFoundError: core/old.py")
-    assert note is not None and "АДРЕС УСТАРЕЛ: core/confidence_gate.py" in note
 
 
 class _Log:

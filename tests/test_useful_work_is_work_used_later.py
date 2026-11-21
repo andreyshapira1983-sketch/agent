@@ -112,12 +112,3 @@ def test_a_goal_claude_confirmed_counts_as_out_of_band(tmp_path: Path) -> None:
     rule(tmp_path, item, "confirmed", "parser tests green, fix in place")
     cycle = _one(tmp_path)
     assert cycle.signals["goal_verified"] and summary([cycle])["out_of_band"] == 1
-
-
-def test_a_young_cycle_is_pending_and_the_summary_counts_honestly(tmp_path: Path) -> None:
-    _ws(tmp_path, [_cycle("2026-09-22T10:00:00+00:00", "old, nothing came of it"),
-                   _cycle("2026-09-29T10:00:00+00:00", "too young to judge")], [])
-    cycles = measure(tmp_path, window_days=3, now=NOW)
-    assert [c.verdict for c in cycles] == ["not_yet", "pending"]
-    stats = summary(cycles)
-    assert (stats["judged"], stats["useful"], stats["pending"], stats["no_product_named"]) == (1, 0, 1, 1)

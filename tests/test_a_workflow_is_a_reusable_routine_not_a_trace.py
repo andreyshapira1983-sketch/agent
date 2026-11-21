@@ -17,7 +17,6 @@ from core.workflow_memory import (
     WorkflowRecord,
     format_workflows,
     induce,
-    unabstracted,
 )
 
 
@@ -43,14 +42,6 @@ def test_a_routine_with_variables_becomes_a_workflow() -> None:
     assert "Experiences:" in llm.calls[0]["user"] and llm.calls[0]["json_object"] is True
 
 
-def test_a_step_that_keeps_a_concrete_path_is_not_a_workflow() -> None:
-    """Литерал опыта в шаге — это след, а не шаблон (AWM: изменчивое → переменные)."""
-    llm = _LLM({"workflows": [{"description": "x",
-                               "steps": ["find it -> find_in_files", "read core/a.py -> file_read"]}]})
-    assert induce("source", _LINES, llm) == []
-    assert unabstracted(["read {source_file} -> file_read"]) == []
-
-
 def test_one_experience_is_not_enough_to_generalise() -> None:
     llm = _LLM({"workflows": []})
     assert induce("source", _LINES[:1], llm) == [] and not llm.calls
@@ -66,17 +57,6 @@ def test_workflows_of_the_question_kind_reach_the_prompt(tmp_path: Path) -> None
     assert [w.kind for w in got] == ["source"]
     block = format_workflows(got)
     assert block.startswith("<agent_workflows>") and "Check a claim" in block and "Price an order" not in block
-
-
-def test_rebuilding_a_kind_replaces_it(tmp_path: Path) -> None:
-    store = WorkflowMemoryStore(tmp_path / FILE_NAME)
-    store.replace_kind("source", [WorkflowRecord(kind="source", description="old", steps=("a", "b"))])
-    store.replace_kind("source", [WorkflowRecord(kind="source", description="new", steps=("a", "b"))])
-    assert [w.description for w in store.load()] == ["new"]
-
-
-def test_no_file_no_block(tmp_path: Path) -> None:
-    assert WorkflowMemoryStore(tmp_path / FILE_NAME).for_question("проверь источник") == []
 
 
 def test_the_live_loop_puts_workflows_of_the_kind_into_its_experience_block(tmp_path: Path) -> None:

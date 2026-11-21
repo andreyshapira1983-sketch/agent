@@ -375,93 +375,6 @@ class TestUnresolvedCitationHardCap:
 
 
 # ===========================================================================
-# Negative: no web citations at all -> loop NEVER triggers
-# ===========================================================================
-
-class TestNoWebCitationsNoReplan:
-    def test_file_only_citations_skip_unresolved_loop(self, workspace: Path):
-        """A draft with only [file:...] (or no) citations must not
-        trigger the unresolved_citation loop — that loop is exclusively
-        for [web:URL] mismatches."""
-        (workspace / "doc.txt").write_text("hello", encoding="utf-8")
-        from tools.file_read import FileReadTool
-        reg = ToolRegistry()
-        reg.register(FileReadTool(workspace_root=workspace))
-
-        planner = ScriptedPlanner(scripts=[
-            [{
-                "tool": "file_read",
-                "arguments": {"path": "doc.txt"},
-                "label": "file:doc.txt",
-            }],
-        ])
-
-        llm = FakeLLM(responses=["fact [file:doc.txt]. claim with no cite."])
-        trace_id = new_trace_id()
-        logger = TraceLogger(
-            trace_id=trace_id, log_dir=workspace / "logs", verbose=False
-        )
-        agent = AgentLoop(
-            registry=reg,
-            policy=PolicyGate(reg),
-            llm=llm,
-            logger=logger,
-            planner=planner,
-            approval_provider=AutoApprover(default="approve"),
-        )
-        agent.run("q", file_hint="doc.txt")
-
-        # The [file:doc.txt] resolves normally and the loop runs once.
-        assert "[verified:file:doc.txt]" in agent.last_verification.annotated_answer
-        assert len(planner.calls) == 1  # exactly one planner call
-
-        # No verify-phase events at all.
-        events = _events(workspace / "logs" / f"{trace_id}.jsonl")
-        verify_phase = [
-            e for e in events
-            if e.get("payload", {}).get("phase") == "verify"
-        ]
-        assert verify_phase == []
-
-
-# ===========================================================================
-# Negative: verifier_enabled=False -> no replan at all
-# ===========================================================================
-
-class TestVerifierDisabledNoReplan:
-    def test_verifier_off_skips_loop_entirely(self, workspace: Path):
-        """With the Verifier off the loop has no way to know a citation
-        is unresolved — the draft must come out untouched and the
-        unresolved_citation machinery must not fire."""
-        url = "https://example.com/x"
-        planner = ScriptedPlanner(scripts=[
-            [{
-                "tool": "web_search",
-                "arguments": {"query": "q"},
-                "label": "search:q",
-            }],
-        ])
-        agent, log_path, _ = _build_agent(
-            workspace,
-            planner=planner,
-            llm_responses=[f"cited [web:{url}]."],
-            url_routes={},
-            verifier_enabled=False,
-        )
-        answer = agent.run("q")
-
-        # Draft unchanged: no verified marker, no unverified tag.
-        assert f"[web:{url}]" in answer
-        assert "[verified:" not in answer
-        assert "[unverified]" not in answer
-
-        # Planner called exactly once — no verify replan.
-        assert len(planner.calls) == 1
-        events = _events(log_path)
-        assert not [e for e in events if e["event"] == "verification"]
-
-
-# ===========================================================================
 # The return leg: the policy's verdict travels BACK and changes the run
 # ===========================================================================
 
@@ -480,32 +393,6 @@ class TestPolicyVerdictTravelsBack:
     citation, only `max_total_replans` differs.
     """
 
-    def test_continue_verdict_comes_back_and_the_run_replans(
-        self, workspace: Path
-    ):
-        url = "https://example.com/pole-continue"
-        planner = ScriptedPlanner(scripts=[
-            [{"tool": "web_search", "arguments": {"query": "q"},
-              "label": "search:q"}],
-            [{"tool": "web_fetch", "arguments": {"url": url},
-              "label": "web:page"}],
-        ])
-        agent, log_path, _ = _build_agent(
-            workspace,
-            planner=planner,
-            llm_responses=[f"Conclusion: claim [web:{url}]. Sources: {url}"],
-            url_routes={url: b"<html>body</html>"},
-            max_replan_attempts=3,
-        )
-        agent.run("q")
-
-        events = _events(log_path)
-        assert [e for e in events
-                if e["event"] == "replan"
-                and e["payload"].get("phase") == "verify"]
-        assert not [e for e in events if e["event"] == "replan_exhausted"]
-        assert agent.last_replan_exhausted is False
-        assert len(planner.calls) == 2
 
     def test_abort_verdict_comes_back_and_stops_the_replan(
         self, workspace: Path

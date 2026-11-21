@@ -55,28 +55,3 @@ def test_a_chain_with_tool_evidence_is_not_skippable() -> None:
     assert chain_has_tool_evidence(_chain("web_page")) is True
     assert chain_has_tool_evidence(_chain("memory", "file")) is True
     assert chain_has_tool_evidence(_chain("shell_output")) is True
-
-
-def test_the_premise_the_code_states_is_the_one_it_checks() -> None:
-    """Сам исторический урок: утверждение системы о себе обязано совпадать с
-    тем, что она проверяет. Ветка не имеет права ссылаться на пустоту
-    цепочки, пока в цепочке лежит память."""
-    import inspect
-
-    from core.loop_evidence_chain import AgentLoopEvidenceChain
-
-    src = inspect.getsource(AgentLoopEvidenceChain._rank_and_catalog_evidence)
-    branch = src[src.index("if cheap_path_active"):]
-    branch = branch[:branch.index("else:")]
-
-    assert "chain_has_tool_evidence" in branch, (
-        "ветка снова решает по одному лишь флагу дешёвого пути"
-    )
-    # Прежняя версия этой проверки запрещала саму ФРАЗУ «the chain is empty»
-    # и падала на комментарии, который цитирует её как историю. Запрещать
-    # цитирование прошлой ошибки — значит стирать её объяснение; проверять
-    # надо решение, а не словарь. Поэтому здесь пинится журнальная причина:
-    # она называет то же условие, что и ветка.
-    assert "cheap_path_no_tool_evidence" in branch, (
-        "журнальная причина разошлась с условием ветки"
-    )

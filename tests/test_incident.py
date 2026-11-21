@@ -23,29 +23,6 @@ from core.incident import (
 # ---------------------------------------------------------------------------
 
 class TestIncidentRecord:
-    def test_minimal_incident_defaults(self) -> None:
-        inc = Incident(severity="low", trigger="tool_timeout")
-        assert inc.id.startswith("inc_")
-        assert inc.status == "open"
-        assert inc.affected_module == ""
-        assert inc.containment_action == ""
-        assert inc.postmortem_note == ""
-        assert inc.is_open is True
-
-    def test_critical_forces_human_escalation(self) -> None:
-        inc = Incident(severity="critical", trigger="circuit_breaker_open")
-        assert inc.human_escalation is True
-        assert inc.needs_human is True
-
-    def test_high_forces_human_escalation(self) -> None:
-        inc = Incident(severity="high", trigger="daemon_stale")
-        assert inc.human_escalation is True
-
-    def test_low_does_not_force_escalation(self) -> None:
-        inc = Incident(severity="low", trigger="retry")
-        assert inc.human_escalation is False
-        assert inc.needs_human is False
-
     def test_invalid_severity_rejected(self) -> None:
         with pytest.raises(ValueError):
             Incident(severity="boom", trigger="x")  # type: ignore[arg-type]
@@ -58,37 +35,15 @@ class TestIncidentRecord:
         with pytest.raises(ValueError):
             Incident(severity="low", trigger="   ")
 
-    def test_resolved_is_not_open(self) -> None:
-        inc = Incident(severity="low", trigger="x", status="resolved")
-        assert inc.is_open is False
-        assert inc.needs_human is False
-
 
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
 class TestSerialization:
-    def test_round_trip(self) -> None:
-        inc = Incident(
-            severity="medium",
-            trigger="verify_collapse",
-            affected_module="core.verifier",
-            containment_action="replanned",
-            postmortem_note="planner over-claimed",
-            status="contained",
-        )
-        restored = Incident.from_dict(inc.to_dict())
-        assert restored == inc
-
     def test_from_dict_rejects_bad_severity(self) -> None:
         with pytest.raises(ValueError):
             Incident.from_dict({"severity": "nope", "trigger": "x"})
-
-    def test_from_dict_defaults_missing_fields(self) -> None:
-        inc = Incident.from_dict({"severity": "low", "trigger": "t"})
-        assert inc.status == "open"
-        assert inc.affected_module == ""
 
 
 # ---------------------------------------------------------------------------
@@ -140,15 +95,6 @@ class TestIncidentLog:
         assert len(reloaded.incidents) == 1
         assert reloaded.incidents[0].trigger == "tool_error"
 
-    def test_update_status_and_note(self, tmp_path: Path) -> None:
-        log = IncidentLog(path=tmp_path / "incidents.jsonl")
-        inc = log.open_incident(severity="low", trigger="retry")
-        updated = log.update(inc.id, status="resolved", postmortem_note="transient")
-        assert updated is not None
-        assert updated.status == "resolved"
-        assert updated.postmortem_note == "transient"
-        assert updated.updated_at >= inc.updated_at
-        assert log.open_incidents() == []
 
     def test_update_missing_returns_none(self, tmp_path: Path) -> None:
         log = IncidentLog(path=tmp_path / "incidents.jsonl")

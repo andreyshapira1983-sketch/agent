@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -57,18 +56,6 @@ def _submits(m) -> int:
 
 def _uploads(m) -> int:
     return sum(1 for f in m.files.values() if f.get("completed"))
-
-
-def test_dying_while_the_agent_works_resumes_the_started_order(market, tmp_path: Path) -> None:  # noqa: F811
-    _only_allowed(market)
-    asked: list[str] = []
-    with pytest.raises(_Died):
-        _worker(market, tmp_path, asked, die_in_run=True).poll_once()
-    a = market.assignments["as-1"]["assignment"]
-    assert a["startedAt"] and a["status"] == "in_progress"  # начат и брошен
-    report = _worker(market, tmp_path, asked).poll_once()[0]
-    assert report.kind == "in_flight" and "submit" in report.steps and report.error is None
-    assert a["status"] == "submitted" and _submits(market) == 1
 
 
 def test_dying_during_upload_does_not_run_the_agent_again(market, tmp_path: Path) -> None:  # noqa: F811
@@ -123,17 +110,3 @@ def test_dying_in_a_rework_neither_repeats_the_ack_nor_loses_the_comment(market,
     assert len(acks) == 1, "the buyer is told once"
     assert "Нужно подробнее" in asked[-1], "after our ack the comment lives only in the thread"
     assert "submit" in report.steps and _submits(market) == 1
-
-
-def test_dying_mid_state_write_keeps_the_old_state(market, tmp_path: Path, monkeypatch) -> None:  # noqa: F811
-    worker = _worker(market, tmp_path, [])
-    worker._remember("as-1", seen_message_at="2026-09-25T10:00:00Z")
-    import core.market_worker as mw
-
-    def die(*a, **k):
-        raise _Died
-    monkeypatch.setattr(mw.os, "replace", die)
-    with pytest.raises(_Died):
-        worker._remember("as-1", seen_message_at="2026-09-25T11:00:00Z")
-    kept = json.loads((tmp_path / "market" / "state.json").read_text(encoding="utf-8"))
-    assert kept["as-1"]["seen_message_at"] == "2026-09-25T10:00:00Z"

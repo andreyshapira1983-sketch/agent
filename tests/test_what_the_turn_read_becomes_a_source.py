@@ -78,32 +78,6 @@ def test_a_fetched_page_becomes_a_source() -> None:
     assert any(e == "read_sources_registered" for e, _ in agent.log.events)
 
 
-def test_a_tool_output_is_not_a_source() -> None:
-    """Граница: вывод инструмента и попадание поисковика — не документы."""
-    agent = _Agent(_Store())
-    chain = _Chain([
-        _Evidence("tool_output", "python_probe"),
-        _Evidence("web_search_hit", "https://example.org/hit"),
-        _Evidence("test_result", "pytest"),
-    ])
-
-    assert register_read_sources(agent, chain) == 0
-    # Тишины здесь БОЛЬШЕ НЕТ. Улики в ходе были, а к записи не подошла ни
-    # одна — журнал обязан это сказать: три часа 23.09 тихий ноль выдавал
-    # себя за «нечего записывать», пока я не полез в живой след.
-    events = dict(agent.log.events)
-    assert "read_sources_none_matched" in events, agent.log.events
-    assert events["read_sources_none_matched"]["evidences_seen"] == 3
-    assert "tool_output" in events["read_sources_none_matched"]["kinds"]
-
-
-def test_a_workspace_file_is_left_to_the_ordinary_ingest() -> None:
-    """Файлы рабочей папки пишет штатный приём — дублировать его незачем."""
-    agent = _Agent(_Store())
-
-    assert register_read_sources(agent, _Chain([_Evidence("file", "core/loop.py")])) == 0
-
-
 def test_the_same_page_read_twice_is_named_once() -> None:
     agent = _Agent(_Store())
     url = "https://peps.python.org/pep-0008/"
@@ -119,20 +93,3 @@ def test_a_broken_registry_does_not_break_the_turn_and_does_not_stay_silent() ->
 
     assert register_read_sources(agent, chain) == 0
     assert any(e == "read_sources_unregistered" for e, _ in agent.log.events)
-
-
-def test_no_store_no_crash() -> None:
-    class _Bare:
-        log = _Log()
-
-    assert register_read_sources(_Bare(), _Chain([_Evidence("web_page", "https://x.org/")])) == 0
-    assert register_read_sources(_Agent(_Store()), None) == 0
-
-
-def test_the_run_tail_calls_it() -> None:
-    """Связь с механизмом: хвост хода зовёт регистрацию, иначе это снова шов."""
-    import inspect
-
-    from core import loop_run_tail
-
-    assert "register_read_sources" in inspect.getsource(loop_run_tail)

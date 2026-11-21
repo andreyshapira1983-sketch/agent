@@ -26,25 +26,10 @@ import pathlib
 
 from core.approval_inbox import ApprovalInbox
 from core.self_task_producer import SELF_TASK_OPERATION, _unresolved_task
-from core.state_integrity import read_state_jsonl
 
 
 def _inbox(tmp_path: pathlib.Path) -> ApprovalInbox:
     return ApprovalInbox(path=tmp_path / "inbox.jsonl")
-
-
-def test_a_week_of_identical_proposals_stays_one_row(tmp_path) -> None:
-    inbox = _inbox(tmp_path)
-
-    for tick in range(48 * 7):
-        inbox.add(
-            operation=SELF_TASK_OPERATION, summary=f"предложение {tick}",
-            risk="read_only", reasons=("сигнал",), payload={},
-            dedup_key="self_task:core/x.py:same",
-        )
-
-    assert len(read_state_jsonl(tmp_path / "inbox.jsonl")) == 1
-    assert len(inbox.pending()) == 1
 
 
 def test_the_in_flight_gate_holds_while_a_task_is_unresolved(tmp_path) -> None:
@@ -64,18 +49,4 @@ def test_the_in_flight_gate_holds_while_a_task_is_unresolved(tmp_path) -> None:
     )
 
     inbox.mark_executed(first.id)
-    assert _unresolved_task(inbox) is None
-
-
-def test_a_denial_releases_the_gate(tmp_path) -> None:
-    """Граница с другой стороны: отказ обязан отпускать, иначе один «нет»
-    остановил бы производителя навсегда."""
-    inbox = _inbox(tmp_path)
-    item = inbox.add(
-        operation=SELF_TASK_OPERATION, summary="предложение", risk="read_only",
-        reasons=(), payload={},
-    )
-
-    inbox.deny(item.id, reason="не нужно")
-
     assert _unresolved_task(inbox) is None

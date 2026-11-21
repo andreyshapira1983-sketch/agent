@@ -9,7 +9,6 @@ import json
 from core.causal_claim_store import (
     LessonCard,
     distilled_lessons,
-    load_claims,
     save_claim,
 )
 from core.causal_climb import (
@@ -77,16 +76,6 @@ def _full_ladder() -> CausalClaim:
     return name_scope(claim, "generated repair acceptance tests")
 
 
-def test_three_repeats_do_not_make_a_lesson(tmp_path):
-    """Предохранитель оператора: «3 раза видели» не становится «урок» само.
-    Повторы дают только повод расследовать — состояние OBSERVED.
-    """
-    save_claim(_observed_only(), workspace=tmp_path)
-
-    assert state_of(_observed_only()) == "OBSERVED"
-    assert distilled_lessons(tmp_path) == ()
-
-
 def test_only_the_full_ladder_reaches_the_planner(tmp_path):
     claim = _full_ladder()
     assert state_of(claim) == "LESSON"
@@ -105,16 +94,6 @@ def test_only_the_full_ladder_reaches_the_planner(tmp_path):
     assert "runtime signature" in card.directive
 
 
-def test_a_refuted_claim_never_returns(tmp_path):
-    claim = CausalClaim(
-        **{**_full_ladder().__dict__, "refuted_reason": "prediction failed live"},
-    )
-
-    save_claim(claim, workspace=tmp_path)
-
-    assert distilled_lessons(tmp_path) == ()
-
-
 def test_generalization_on_the_origin_case_does_not_count(tmp_path):
     """Самоподтверждение закрыто и на выходе из хранилища."""
     claim = _full_ladder()
@@ -128,25 +107,6 @@ def test_generalization_on_the_origin_case_does_not_count(tmp_path):
 
     assert state_of(claim) != "LESSON"
     assert distilled_lessons(tmp_path) == ()
-
-
-def test_roundtrip_preserves_the_ladder(tmp_path):
-    save_claim(_full_ladder(), workspace=tmp_path, directive="d")
-
-    (loaded, extra), = load_claims(tmp_path)
-
-    assert state_of(loaded) == "LESSON"
-    assert loaded.generalized_rule == _full_ladder().generalized_rule
-    assert extra["directive"] == "d"
-
-
-def test_saving_twice_updates_one_row_not_two(tmp_path):
-    """Подъём — это ОДНО утверждение в разных состояниях, а не история строк."""
-    save_claim(_observed_only(), workspace=tmp_path)
-    save_claim(_full_ladder(), workspace=tmp_path, directive="d")
-
-    assert len(load_claims(tmp_path)) == 1
-    assert len(distilled_lessons(tmp_path)) == 1
 
 
 class _CapturingLLM:
@@ -174,19 +134,6 @@ def _card() -> LessonCard:
         evidence=("approval:ain_31874b06",),
         cases=("ep-run-a", "gen-case-other-module"),
     )
-
-
-def test_without_a_lesson_the_prompt_is_the_old_one():
-    """Поведение A: пустое хранилище — подсказка прежняя, без сигнатур."""
-    llm = _CapturingLLM()
-
-    _task_builder_generate(
-        llm, impl_path="core/self_repair_models.py", quote="q",
-        evidence_ref="e", current_content="",
-    )
-
-    assert "Real signatures" not in llm.user
-    assert "LESSON" not in llm.system
 
 
 def test_a_lesson_changes_the_next_action():

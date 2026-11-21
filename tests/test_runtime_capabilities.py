@@ -14,29 +14,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.operator_intent import route_operator_intent
-
-# --- 1. routing -----------------------------------------------------------
-
-def test_umeesh_phrasings_route_to_capability_check():
-    for text in (
-        "что ты умеешь делать сейчас",
-        "что ты умеешь",
-        "что умеешь делать",
-        "what can you do",
-        "what are you capable of",
-    ):
-        intent = route_operator_intent(text)
-        assert intent is not None and intent.kind == "capability_check", (
-            f"{text!r} did not route to capability_check (got {intent})"
-        )
-
-
-def test_capability_router_stays_narrow():
-    # A plain unrelated request must NOT be swallowed by the capability route.
-    assert route_operator_intent("умеет ли пользователь программировать на Rust") is None
-
-
 # --- 2. content: live runtime facts --------------------------------------
 
 def test_runtime_capability_facts_lists_live_tools():

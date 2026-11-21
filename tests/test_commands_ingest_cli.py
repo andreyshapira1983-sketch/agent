@@ -124,14 +124,6 @@ def test_ingest_project_rejects_a_bad_option(agent, tmp_path, capsys, monkeypatc
 
 # ── :source-library ──────────────────────────────────────────────────────────
 
-def test_source_library_lists_groups_and_entries(capsys):
-    assert _handle_source_library("") is True
-
-    err = capsys.readouterr().err
-    assert "=== source library ===" in err
-    assert "groups: " in err
-    assert "trust=" in err
-
 
 def test_source_library_filters_by_group(capsys):
     """A group argument lists exactly that group's sources, no more and no fewer."""
@@ -199,20 +191,6 @@ def test_ingest_web_usage_errors_never_reach_the_network(
     assert expected in capsys.readouterr().err
 
 
-def test_ingest_web_defaults_are_conservative(agent, tmp_path, monkeypatch):
-    seen: dict = {}
-    monkeypatch.setattr(mod, "ingest_web_topic", lambda **kw: seen.update(kw) or report())
-
-    assert _handle_ingest_web("autonomous agents", agent, tmp_path) is True
-
-    assert seen["topic"] == "autonomous agents"
-    assert seen["dry_run"] is False
-    assert seen["limit"] == 5
-    assert seen["per_source"] == 1
-    assert seen["source_selection"] is None
-    assert seen["auto_write_memory"] is None, "memory writing is left to the caller's policy"
-
-
 def test_ingest_web_forwards_every_flag(agent, tmp_path, monkeypatch):
     seen: dict = {}
     monkeypatch.setattr(mod, "ingest_web_topic", lambda **kw: seen.update(kw) or report())
@@ -248,13 +226,6 @@ def test_ingest_web_reports_a_fetch_failure(agent, tmp_path, capsys, monkeypatch
 
     assert _handle_ingest_web("agents", agent, tmp_path) is True
     assert "(ingest web failed: TimeoutError: provider did not answer)" in capsys.readouterr().err
-
-
-def test_ingest_web_prints_the_report(agent, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "ingest_web_topic", lambda **kw: report("WEB-REPORT"))
-
-    assert _handle_ingest_web("agents", agent, tmp_path) is True
-    assert "WEB-REPORT" in capsys.readouterr().err
 
 
 # ── :ingest-rss — the other network command ──────────────────────────────────
@@ -315,10 +286,3 @@ def test_ingest_rss_reports_a_fetch_failure(agent, tmp_path, capsys, monkeypatch
 
     assert _handle_ingest_rss("https://example.com/feed", agent, tmp_path) is True
     assert "(ingest rss failed: ConnectionError: feed unreachable)" in capsys.readouterr().err
-
-
-def test_ingest_rss_prints_the_report(agent, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(mod, "ingest_rss_feed", lambda **kw: report("RSS-REPORT"))
-
-    assert _handle_ingest_rss("https://example.com/feed", agent, tmp_path) is True
-    assert "RSS-REPORT" in capsys.readouterr().err

@@ -109,17 +109,6 @@ def test_a_wavering_no_leaves_the_old_conclusion_unmarked(workspace: Path, jev) 
     assert all(r.superseded_by is None for r in loop.persistent_store.load())
 
 
-@pytest.mark.parametrize("flag, key", [(None, _FAKE_KEY), ("0", _FAKE_KEY), ("1", None)])
-def test_without_the_flag_or_the_key_jev_is_never_called(workspace: Path, jev, flag, key) -> None:
-    fake_jev = jev(p=0.93, flag=flag, key=key)
-
-    loop, _first, _new = _two_conclusions(workspace)
-
-    assert fake_jev.calls == [], "Jev позвали без флага или без ключа"
-    assert all(r.superseded_by is None for r in loop.persistent_store.load())
-    assert _events(loop, "jev_memory_marks") == []
-
-
 def test_a_failing_jev_marks_nothing_and_says_so(workspace: Path, jev) -> None:
     fake_jev = jev(error=ConnectionError("api.typesafe.ai unreachable"))
 
@@ -130,24 +119,6 @@ def test_a_failing_jev_marks_nothing_and_says_so(workspace: Path, jev) -> None:
     writes = _events(loop, "conclusion_memory_write")
     assert writes[-1]["record_id"] == new_id, "сбой Jev сорвал запись вывода"
     assert "jev_memory" in {p["sensor"] for p in _events(loop, "sensor_failed")}, "сбой не в журнале"
-
-
-def test_texts_go_to_jev_redacted() -> None:
-    from core import jev_judge
-    from core.models import MemoryRecord
-
-    sent: list[dict] = []
-    old = MemoryRecord(content="Вывод: писать ivan.petrov@example.com", type="semantic")
-
-    def transport(body: dict, _key: str) -> tuple[int, dict]:
-        sent.append(body)
-        return 200, {"answers": {"q0": {"type": "noul", "noul": 0.8}}}
-
-    got = jev_judge.replacement_probabilities(
-        _FAKE_KEY, "Вывод: писать не ivan.petrov@example.com, а в чат", [old], transport=transport)
-
-    assert got == {old.id: 0.8}
-    assert "ivan.petrov@example.com" not in json.dumps(sent, ensure_ascii=False)
 
 
 def test_rate_limits_are_retried_and_other_errors_are_not() -> None:

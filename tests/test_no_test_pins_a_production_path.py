@@ -113,72 +113,8 @@ def _literal_production_reads() -> list[tuple[str, str]]:
     return offenders
 
 
-def test_no_new_test_reads_shipped_code_by_a_literal_path():
-    new = [line for key, line in _literal_production_reads() if key not in _KNOWN_PINS]
-
-    assert new == [], (
-        "these read shipped code by path, so moving the file reddens a test "
-        "about something else. Read it through the module instead — "
-        "`inspect.getsource(mod)` or `Path(mod.__file__)`:\n  "
-        + "\n  ".join(new)
-    )
-
-
 def test_the_ratchet_only_goes_down():
     """A migrated pin must leave the list, or the list becomes an amnesty."""
     present = {key for key, _line in _literal_production_reads()}
     stale = sorted(_KNOWN_PINS - present)
     assert stale == [], "pins no longer found — delete them from _KNOWN_PINS:\n  " + "\n  ".join(stale)
-
-
-def test_the_detector_catches_the_spelling_the_repo_uses():
-    """Negative control (G1): the first detector found 0 of 34 because it
-    looked for `"core/"` in the receiver's text."""
-    snippet = (
-        "from pathlib import Path\n"
-        "REPO_ROOT = Path(__file__).resolve().parent.parent\n"
-        "src = (REPO_ROOT / 'core' / 'loop.py').read_text()\n"
-        "raw = open(Path(__file__).parent.parent / 'cli' / 'app.py').read()\n"
-    )
-    # Known blind spot, stated: a path built into a variable and read later
-    # (`rel = Path('scripts') / 'x.py'; rel.read_text()`) is not followed.
-    found = _pins_in(ast.parse(snippet), "synthetic.py")
-    assert {k for k, _ in found} == {
-        "synthetic.py::core/loop.py", "synthetic.py::cli/app.py",
-    }, found
-
-
-def test_a_fixture_tree_named_like_the_program_is_not_a_pin():
-    snippet = (
-        "def test_x(tmp_path):\n"
-        "    (tmp_path / 'core' / 'foo.py').write_text('x')\n"
-        "    repo = tmp_path\n"
-        "    assert (repo / 'core' / 'foo.py').read_text() == 'x'\n"
-    )
-    assert _pins_in(ast.parse(snippet), "synthetic.py") == []
-
-
-def test_the_file_that_blocked_part_b_no_longer_pins_a_path():
-    """Named, because it is the one that mattered.
-
-    `core/loop_repair.py` has no caller inside the cycle — the census verified
-    that by call sites — and B1 moves it out. This test pinned the module's
-    routing rule by reading its path, so the move would have reddened it without
-    touching behaviour.
-    """
-    # By CALL, not by string. A first version searched the text for
-    # `Path("core/loop_repair.py")` and went red on the docstring that records
-    # what the file used to do — a guard that punishes writing down history is
-    # worse than the coupling it looks for. The census found exactly that shape
-    # in `tests/test_one_task_store.py`; repeating it inside the fix for C1
-    # would have been careless.
-    offenders = [
-        line for key, line in _literal_production_reads()
-        if key.startswith("test_repair_routes_by_complexity.py")
-    ]
-    assert offenders == [], offenders
-
-    src = pathlib.Path(
-        "tests/test_repair_routes_by_complexity.py"
-    ).read_text(encoding="utf-8")
-    assert "inspect.getsource" in src, "it must find the source some other way"

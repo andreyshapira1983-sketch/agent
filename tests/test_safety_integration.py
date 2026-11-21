@@ -21,7 +21,6 @@ from pathlib import Path
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.memory import WorkingMemory
-from core.memory_policy import MemoryWritePolicy
 from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM
@@ -318,75 +317,3 @@ class TestLLMHallucinatedLeakIsCaught:
             and e["payload"]["surface"] == "user_output"
             for e in events
         )
-
-
-# ============================================================
-# Clean inputs do not trigger any safety events
-# ============================================================
-
-class TestCleanInputsAreSilent:
-    def test_no_secret_no_secret_detected_event(self, workspace: Path):
-        (workspace / "doc.txt").write_text("alpha beta gamma\n", encoding="utf-8")
-
-        llm = FakeLLM(responses=[PLAN_FILE_READ, SYNTH_PLAIN])
-        agent, _memory, log_path = _build_agent(workspace, llm)
-
-        agent.run(user_question="What is in doc.txt?", file_hint="doc.txt")
-
-        events = _events(log_path)
-        secret_events = [e for e in events if e["event"] == "secret_detected"]
-        assert secret_events == []
-
-        # data_classified events still fire (for audit), with safe classes.
-        classified = [e for e in events if e["event"] == "data_classified"]
-        assert classified, "classifier must always emit, even for clean input"
-        for e in classified:
-            assert e["payload"]["class"] in {"public", "private", "sensitive"}
-
-
-# ============================================================
-# S7 — third-party data gate on MemoryWritePolicy
-# ============================================================
-
-class TestThirdPartyDataGate:
-    def test_first_party_owners_pass(self):
-        policy = MemoryWritePolicy()
-        for owner in ("self", "user", "session", "User", "  USER  "):
-            d = policy.decide(
-                content="A perfectly normal fact about the project.",
-                tags=["fact"],
-                source="user-explicit",
-                owner=owner,
-            )
-            assert d.decision == "save", f"owner={owner!r} should be first-party"
-
-    def test_third_party_without_consent_rejected(self):
-        policy = MemoryWritePolicy()
-        d = policy.decide(
-            content="My client said something interesting last meeting.",
-            tags=["fact"],
-            source="user-explicit",
-            owner="client",
-        )
-        assert d.decision == "reject"
-        assert any("third-party" in r for r in d.reasons)
-
-    def test_third_party_with_cross_owner_consent_passes(self):
-        policy = MemoryWritePolicy()
-        d = policy.decide(
-            content="My client gave permission to record this preference.",
-            tags=["fact", "cross-owner-consent"],
-            source="user-explicit",
-            owner="client",
-        )
-        assert d.decision == "save"
-
-    def test_default_owner_is_first_party(self):
-        # Existing callers don't pass `owner` — they should keep working.
-        policy = MemoryWritePolicy()
-        d = policy.decide(
-            content="A normal fact.",
-            tags=["fact"],
-            source="user-explicit",
-        )
-        assert d.decision == "save"

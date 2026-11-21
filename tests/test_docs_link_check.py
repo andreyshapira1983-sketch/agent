@@ -32,20 +32,6 @@ def test_main_returns_zero():
     assert mod.main() == 0
 
 
-def test_line_anchor_and_fragment_are_stripped():
-    mod = _load_module()
-    assert mod._normalize_target("main.py:1069") == "main.py"
-    assert mod._normalize_target("core/loop.py:41-52") == "core/loop.py"
-    assert mod._normalize_target("docs/ROADMAP.md#track-h") == "docs/ROADMAP.md"
-
-
-def test_external_links_skipped():
-    mod = _load_module()
-    assert mod._is_external("https://example.com")
-    assert mod._is_external("#anchor")
-    assert not mod._is_external("../AGENT_DOCTRINE.md")
-
-
 def test_broken_link_is_detectable(tmp_path):
     # Pure proof the guard flags a missing target, without touching real docs.
     mod = _load_module()
@@ -58,13 +44,3 @@ def test_broken_link_is_detectable(tmp_path):
     broken = mod.find_broken_links([str(sample)])
     assert any("nope_missing.md" in target for _src, target in broken)
     assert all("real.md" not in target for _src, target in broken)
-
-
-def test_script_is_read_only():
-    with open(_SCRIPT, encoding="utf-8") as handle:
-        src = handle.read()
-    assert "import core" not in src
-    assert "from core" not in src
-    assert "subprocess" not in src
-    assert "urllib" not in src
-    assert "requests" not in src

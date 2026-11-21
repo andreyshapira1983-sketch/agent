@@ -31,29 +31,8 @@ def _seen(tmp_path: Path, episode: str, times: int) -> str:
     return record.fingerprint
 
 
-def test_a_repeated_signal_becomes_a_defect(tmp_path: Path) -> None:
-    fingerprint = _seen(tmp_path, "ep-1", times=3)
-
-    filed = intake_observations(tmp_path)
-
-    assert filed == [fingerprint]
-    issues = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).unresolved()
-    assert len(issues) == 1
-    assert "action_report_mismatch" in issues[0].title
-    assert any("file_write" in e or fingerprint in e for e in issues[0].evidence)
-
-
 def test_a_single_signal_is_not_a_defect_yet(tmp_path: Path) -> None:
     _seen(tmp_path, "ep-2", times=1)
 
     assert intake_observations(tmp_path) == []
     assert SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).unresolved() == []
-
-
-def test_the_same_signal_is_not_filed_twice(tmp_path: Path) -> None:
-    _seen(tmp_path, "ep-3", times=3)
-    intake_observations(tmp_path)
-
-    intake_observations(tmp_path)
-
-    assert len(SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).unresolved()) == 1

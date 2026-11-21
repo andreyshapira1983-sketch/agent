@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from core.causal_claim_store import load_claims
 from core.causal_climb_action import explain_causal_observation
-from core.causal_lesson import Observation, trace_log_path
+from core.causal_lesson import Observation
 from core.causal_store import CausalObservationStore
 
 
@@ -58,11 +58,6 @@ _TWO_PAIRS = (
     "ОБЪЯСНЕНИЕ 2: причина Б\n"
     "ПРЕДСКАЗАНИЕ 2: в памяти нет записи [probe: data/causal_observations.jsonl | zzz | нет]\n"
 )
-
-
-def test_the_address_is_built_once() -> None:
-    assert trace_log_path("trace_t1") == "logs/trace_t1.jsonl"
-    assert trace_log_path("t1") == "logs/trace_t1.jsonl"
 
 
 def test_an_old_doubled_address_is_repaired_and_the_real_file_is_listed(tmp_path) -> None:

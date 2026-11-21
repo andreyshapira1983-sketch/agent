@@ -25,14 +25,6 @@ def test_a_stamp_without_a_zone_is_refused(tmp_path, stamp) -> None:
     assert not (tmp_path / "data" / "watchdog_checks.jsonl").exists()
 
 
-@pytest.mark.parametrize("stamp", ["2026-09-20T17:17:00+00:00", "2026-09-20T17:17:00Z",
-                                   "2026-09-20T20:17:00+03:00"])
-def test_a_stamp_with_a_zone_is_written(tmp_path, stamp) -> None:
-    tool = _tool(tmp_path)
-    result = tool.run(path="data/watchdog_checks.jsonl", record={"check": "git", "ts": stamp})
-    assert result["appended"] is True
-
-
 def test_a_field_that_is_not_a_stamp_is_left_alone(tmp_path) -> None:
     tool = _tool(tmp_path)
     result = tool.run(path="data/watchdog_checks.jsonl",

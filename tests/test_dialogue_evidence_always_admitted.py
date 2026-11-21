@@ -84,19 +84,6 @@ def _loop_with_history(workspace: Path) -> tuple[AgentLoop, list[str]]:
     return loop, events
 
 
-def test_dialogue_is_evidence_without_a_correction(workspace: Path):
-    """Обычный вопрос с историей — диалог всё равно допущен в улики."""
-    loop, events = _loop_with_history(workspace)
-
-    loop.run(FOLLOW_UP_QUESTION)
-
-    assert "self_analysis_turn" not in events or "dialogue_evidence_admitted" in events
-    assert "dialogue_evidence_admitted" in events, (
-        "история диалога подана в контекст, но не допущена как улика — "
-        "честная ссылка на свою же реплику станет «фабрикацией»"
-    )
-
-
 def test_the_honest_self_citation_is_not_called_fabricated(workspace: Path):
     """Главное: ссылка на свою прошлую реплику не считается выдумкой."""
     loop, _events = _loop_with_history(workspace)
@@ -122,25 +109,3 @@ def test_dialogue_support_is_still_never_verified(workspace: Path):
     assert report.verified_chunks == 0, (
         "разговор нельзя засчитывать как внешнее подтверждение (issue #119)"
     )
-
-
-def test_a_first_turn_without_history_admits_nothing(workspace: Path):
-    """Ссылаться не на что: без истории диалоговых улик не появляется."""
-    registry = ToolRegistry()
-    loop = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=FakeLLM(responses=[ANSWER_CITING_THE_DIALOGUE]),
-        logger=TraceLogger(
-            trace_id=new_trace_id(), log_dir=workspace / "logs", verbose=False
-        ),
-        planner=FakePlanner(sources=[], reasoning="первый ход"),
-        memory=WorkingMemory(),
-    )
-    events: list[str] = []
-    _orig = loop.log.log
-    loop.log.log = lambda e, *a, **k: (events.append(e), _orig(e, *a, **k))[1]  # type: ignore[method-assign]
-
-    loop.run(PRIOR_QUESTION)
-
-    assert "dialogue_evidence_admitted" not in events

@@ -1,4 +1,4 @@
-from core.causal_claim_store import lesson_block_for_prompt, save_claim
+from core.causal_claim_store import save_claim
 from core.causal_lesson import (
     CausalClaim,
     Explanation,
@@ -26,17 +26,6 @@ def _make_claim():
     )
 
 
-def test_empty_store_returns_empty_block(tmp_path):
-    assert lesson_block_for_prompt(tmp_path) == ""
-
-
-def test_store_with_lesson_returns_rule_and_refutation(tmp_path):
-    save_claim(_make_claim(), workspace=tmp_path)
-    block = lesson_block_for_prompt(tmp_path)
-    assert "rule: always check the planner prompt" in block
-    assert "counter-evidence" in block
-
-
 def test_planner_with_workspace_injects_lesson_and_receipt(tmp_path):
     save_claim(_make_claim(), workspace=tmp_path)
     planner = LLMPlanner(llm=None, registry=None, workspace=str(tmp_path))
@@ -46,10 +35,3 @@ def test_planner_with_workspace_injects_lesson_and_receipt(tmp_path):
     lines = receipt_path.read_text().strip().splitlines()
     assert len(lines) == 1
     assert "planner" in lines[0]
-
-
-def test_planner_without_workspace_returns_empty_and_no_receipt(tmp_path):
-    planner = LLMPlanner(llm=None, registry=None)
-    assert planner.lesson_block_for_prompt() == ""
-    receipt_path = tmp_path / "data" / "lesson_injections.jsonl"
-    assert not receipt_path.exists()

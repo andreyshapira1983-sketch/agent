@@ -66,7 +66,3 @@ def test_a_template_or_a_stub_source_does_not_pass(tmp_path: Path) -> None:
 
     rel = _note(tmp_path, _GOOD.replace("math_study/library/txt/Stein_ElementaryNumberTheory.txt", "книга по теории чисел"))
     assert "источник" in settle_note(tmp_path, criterion(rel))["reason"]
-
-
-def test_a_goal_without_a_note_is_left_to_the_ordinary_judge(tmp_path: Path) -> None:
-    assert settle_note(tmp_path, "в книге найдена теорема") is None

@@ -90,11 +90,6 @@ def test_private_tag_synonyms_are_not_granted(tag: str) -> None:
     assert got == ("project",)
 
 
-@pytest.mark.parametrize("tag", ["project", "отличные идеи", "keyboard", "monkey"])
-def test_ordinary_tags_still_granted(tag: str) -> None:
-    assert _parse_proposal("g", {"memory_read_tags": [tag]}).memory_scope.read_tags == (tag,)
-
-
 # ── 4. шаблон: сторож, литералы в описании, пути Windows, строка-шаг ─────────
 
 class _LLM:

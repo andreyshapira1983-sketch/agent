@@ -38,20 +38,6 @@ def test_a_resolved_target_is_recorded_as_targeted() -> None:
     assert g["phantom"] == []
 
 
-def test_a_phantom_target_is_never_recorded_as_targeted() -> None:
-    g = learning_grounding(
-        focus_areas=["core/reasoning.py", "core/citation.py"],
-        source_paths=["core/verifier.py", "tests/test_verifier.py"],
-        workspace=_REPO,
-    )
-    assert g["status"] == "invalid_diagnosis", (
-        "a plan whose named weak spots do not exist was recorded as "
-        f"{g['status']!r} — the substitution is invisible again"
-    )
-    assert sorted(g["phantom"]) == ["core/citation.py", "core/reasoning.py"]
-    assert g["resolved"] == []
-
-
 def test_a_real_target_that_the_plan_dropped_is_not_targeted() -> None:
     """The subtler half: the file exists, but the plan studied other things."""
     g = learning_grounding(

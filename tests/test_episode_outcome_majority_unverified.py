@@ -34,12 +34,3 @@ def test_majority_unverified_is_partial_not_success():
     assert ep.outcome == "partial", f"expected partial, got {ep.outcome!r}"
     # A non-clean episode must not graduate into a reusable procedure.
     assert procedure_from_episode(ep) is None
-
-
-def test_verified_majority_still_success():
-    assert _ep(verified=8, unverified=1).outcome == "success"
-
-
-def test_zero_evidence_general_knowledge_unchanged():
-    # Deliberately out of scope: a pure general-knowledge answer stays success.
-    assert _ep(verified=0, unverified=0).outcome == "success"

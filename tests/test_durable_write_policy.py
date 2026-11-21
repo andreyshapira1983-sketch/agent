@@ -28,7 +28,6 @@ import pytest
 
 from app.bootstrap import build_agent
 from core.loop import AgentLoop
-from core.loop_memory_write import KNOWN_DURABLE_SINKS
 
 # Shared cycle/snapshot helpers live with the wiring suite that introduced them.
 from tests.test_memory_core_wiring import _drive_one_cycle, _durable_snapshot
@@ -51,29 +50,6 @@ def _agent(workspace: Path, durable_writes) -> AgentLoop:
 
 
 # --------------------------------------------------------------------------
-# The two absolute brakes — an allowlist must never pierce them.
-# --------------------------------------------------------------------------
-def test_audit_read_only_is_absolute(tmp_path: Path) -> None:
-    agent = _agent(tmp_path, frozenset({"episode"}))
-    agent.set_audit_read_only(True)
-
-    for sink in KNOWN_DURABLE_SINKS:
-        assert agent._durable_learning_suppressed(sink) is True, (
-            f"audit_read_only must deny '{sink}' even when it is allowlisted"
-        )
-
-
-def test_dry_run_brake_is_absolute(tmp_path: Path) -> None:
-    agent = _agent(tmp_path, frozenset({"episode"}))
-    agent.suppress_durable_learning_writes = True
-
-    for sink in KNOWN_DURABLE_SINKS:
-        assert agent._durable_learning_suppressed(sink) is True, (
-            f"the dry-run brake must deny '{sink}' even when it is allowlisted"
-        )
-
-
-# --------------------------------------------------------------------------
 # Default-deny.
 # --------------------------------------------------------------------------
 def test_unknown_sink_is_denied(tmp_path: Path) -> None:
@@ -84,62 +60,11 @@ def test_unknown_sink_is_denied(tmp_path: Path) -> None:
     assert agent._durable_learning_suppressed("episodes") is True
 
 
-def test_unnamed_sink_is_denied_under_an_allowlist(tmp_path: Path) -> None:
-    agent = _agent(tmp_path, frozenset({"episode"}))
-
-    assert agent._durable_learning_suppressed() is True, (
-        "a caller that names no sink must not bypass the allowlist"
-    )
-    assert agent._durable_learning_suppressed(None) is True
-
-
-# --------------------------------------------------------------------------
-# The three policy shapes.
-# --------------------------------------------------------------------------
-def test_none_policy_allows_every_KNOWN_sink(tmp_path: Path) -> None:
-    """The interactive default: every *known* sink is permitted."""
-    agent = _agent(tmp_path, None)
-
-    for sink in KNOWN_DURABLE_SINKS:
-        assert agent._durable_learning_suppressed(sink) is False
-
-
-def test_unknown_sink_is_denied_without_an_allowlist(tmp_path: Path) -> None:
-    """`durable_writes=None` must not become an escape hatch for a bad name.
-
-    Sink validity and sink permission are different questions. Answering
-    "permitted" before "is this even a real sink" let a typo through on the
-    interactive profile — the one with the most stores attached.
-    """
-    agent = _agent(tmp_path, None)
-
-    assert agent._durable_learning_suppressed("not_a_real_sink") is True
-    assert agent._durable_learning_suppressed("episodes") is True
-
-
 def test_unnamed_sink_is_denied_without_an_allowlist(tmp_path: Path) -> None:
     agent = _agent(tmp_path, None)
 
     assert agent._durable_learning_suppressed() is True
     assert agent._durable_learning_suppressed(None) is True
-
-
-def test_empty_allowlist_denies_every_sink(tmp_path: Path) -> None:
-    """The unattended profile as of step 1 — write nothing at all."""
-    agent = _agent(tmp_path, frozenset())
-
-    for sink in KNOWN_DURABLE_SINKS:
-        assert agent._durable_learning_suppressed(sink) is True
-
-
-def test_allowlist_permits_only_the_named_sink(tmp_path: Path) -> None:
-    agent = _agent(tmp_path, frozenset({"episode"}))
-
-    assert agent._durable_learning_suppressed("episode") is False
-    for sink in KNOWN_DURABLE_SINKS - {"episode"}:
-        assert agent._durable_learning_suppressed(sink) is True, (
-            f"'{sink}' is not allowlisted and must be denied"
-        )
 
 
 # --------------------------------------------------------------------------

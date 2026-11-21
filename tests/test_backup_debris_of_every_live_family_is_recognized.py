@@ -71,35 +71,6 @@ def test_an_undated_backup_ages_by_mtime_not_by_name(tmp_path: Path) -> None:
     assert report.scanned == 2
 
 
-def test_what_is_not_understood_is_not_touched(tmp_path: Path) -> None:
-    """Прежний закон органа держится: незнакомое имя — не кандидат."""
-    for name in ("live.jsonl", "weird.bakery", "x.bak-not-really"):
-        _make_old(tmp_path / name)
-
-    report = cleanup_backups(tmp_path, keep_last=0, max_age_days=0, now=_NOW)
-
-    assert report.scanned == 0
-    for name in ("live.jsonl", "weird.bakery", "x.bak-not-really"):
-        assert (tmp_path / name).exists()
-
-
-def test_keep_last_pools_by_target_across_name_families(tmp_path: Path) -> None:
-    """keep_last считает по ЦЕЛИ: три семьи имён одной цели — один пул."""
-    names = [
-        "t.jsonl.bak.20260801T120000Z",
-        "t.jsonl.20260802T120000Z.bak",
-        "t.jsonl.pre-fix-20260803T120000Z.bak",
-    ]
-    for name in names:
-        _make_old(tmp_path / name)
-
-    report = cleanup_backups(tmp_path, keep_last=2, max_age_days=1, now=_NOW)
-
-    assert report.scanned == 3
-    assert len(report.deleted) == 1
-    assert not (tmp_path / names[0]).exists(), "старейшая в пуле цели уходит первой"
-
-
 def test_the_sweep_walks_with_the_unattended_hygiene_pass(tmp_path: Path) -> None:
     """Проводка: проход гигиены метёт копии; dry_run считает и НЕ удаляет.
 

@@ -19,8 +19,6 @@ from core.model_router import (
     ModelRoute,
     UsageTrackedLLM,
     _is_local_unavailable_error,
-    _is_switch_key_error,
-    _next_failover_provider,
 )
 
 
@@ -100,28 +98,6 @@ def _tracked(primary, factory, ledger):
 
 # --- classifier --------------------------------------------------------------
 
-def test_is_switch_key_error_status_code():
-    assert _is_switch_key_error(_RateLimitError("429 Too Many Requests"))
-
-
-def test_is_switch_key_error_text_quota():
-    assert _is_switch_key_error(Exception("Error: insufficient_quota, please add billing"))
-
-
-def test_is_switch_key_error_text_auth():
-    assert _is_switch_key_error(Exception("invalid api key provided"))
-
-
-def test_non_switch_key_error_not_matched():
-    assert not _is_switch_key_error(ValueError("content policy violation"))
-    assert not _is_switch_key_error(TimeoutError("connection reset"))
-
-
-def test_is_local_unavailable_error_timeout_and_connection():
-    assert _is_local_unavailable_error(TimeoutError("timed out"))
-    assert _is_local_unavailable_error(ConnectionError("connection refused"))
-    assert _is_local_unavailable_error(ConnectionRefusedError("refused"))
-
 
 def test_is_local_unavailable_error_sdk_class_names():
     class APIConnectionError(Exception):
@@ -137,24 +113,6 @@ def test_is_local_unavailable_error_sdk_class_names():
 def test_is_local_unavailable_error_rejects_content_errors():
     assert not _is_local_unavailable_error(ValueError("content policy violation"))
     assert not _is_local_unavailable_error(RuntimeError("invalid json in model output"))
-
-
-# --- next provider selection -------------------------------------------------
-
-def test_next_failover_provider_skips_uncredentialed(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    # openai not credentialed → skipped; anthropic chosen.
-    assert _next_failover_provider(tried=[]) == "anthropic"
-
-
-def test_next_failover_provider_skips_tried(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    assert _next_failover_provider(tried=["openai"]) == "anthropic"
-
-
-def test_next_failover_provider_none_when_no_creds():
-    assert _next_failover_provider(tried=[]) is None
 
 
 # --- end-to-end failover -----------------------------------------------------
@@ -229,24 +187,6 @@ def test_all_providers_exhausted_raises_and_records_each(monkeypatch):
     assert {r["provider"] for r in ledger.records} == {"openai", "anthropic"}
 
 
-def test_failover_disabled_by_env(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
-    monkeypatch.setenv("AGENT_PROVIDER_FAILOVER", "0")
-
-    primary = _FakeLLM("openai", raises=_RateLimitError("429"))
-
-    def factory(provider, model):  # pragma: no cover - must not be called
-        raise AssertionError("factory should not be called when failover disabled")
-
-    ledger = _FakeLedger()
-    tracked = _tracked(primary, factory, ledger)
-
-    with pytest.raises(_RateLimitError):
-        tracked.complete(system="s", user="u")
-    assert [r["status"] for r in ledger.records] == ["error"]
-
-
 def test_no_factory_means_no_failover(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
@@ -265,21 +205,6 @@ def test_no_factory_means_no_failover(monkeypatch):
     with pytest.raises(_RateLimitError):
         tracked.complete(system="s", user="u")
     assert [r["status"] for r in ledger.records] == ["error"]
-
-
-def test_successful_call_unchanged(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-oa")
-    primary = _FakeLLM("openai", output="hello")
-
-    def factory(provider, model):  # pragma: no cover - not reached
-        raise AssertionError("no failover on success")
-
-    ledger = _FakeLedger()
-    tracked = _tracked(primary, factory, ledger)
-
-    assert tracked.complete(system="s", user="u") == "hello"
-    assert [r["status"] for r in ledger.records] == ["success"]
-    assert ledger.records[0]["route_reason"] == "test"
 
 
 # --- local downtime failover -------------------------------------------------

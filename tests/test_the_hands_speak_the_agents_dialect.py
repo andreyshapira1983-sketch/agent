@@ -44,34 +44,6 @@ def test_a_posix_path_is_translated_for_findstr_even_without_substitution(
         "живой отказ 2026-08-28 вернулся")
 
 
-def test_switches_and_patterns_stay_untouched(monkeypatch) -> None:
-    """Граница: ключи (/S, /C:...) и шаблоны без косых не трогаются."""
-    import tools.shell_exec as mod
-
-    monkeypatch.setattr(mod.sys, "platform", "win32")
-    out = ShellExecTool._normalise_argv_for(
-        ["findstr", "/S", "/N", "/C:core/x", "pattern", "*.py"],
-        substituted=False,
-        real_cmd="findstr",
-    )
-
-    assert out == ["findstr", "/S", "/N", "/C:core/x", "pattern", "*.py"]
-
-
-def test_other_binaries_keep_their_own_dialect(monkeypatch) -> None:
-    """Граница: git и прочие понимают прямые косые — их не переводим."""
-    import tools.shell_exec as mod
-
-    monkeypatch.setattr(mod.sys, "platform", "win32")
-    out = ShellExecTool._normalise_argv_for(
-        ["git", "log", "--", "core/loop.py"],
-        substituted=False,
-        real_cmd="git",
-    )
-
-    assert out[-1] == "core/loop.py"
-
-
 # ── 2. OEM-кодировка отказов ─────────────────────────────────────────────────
 
 def test_an_oem_refusal_is_readable_not_mojibake(monkeypatch, tmp_path) -> None:
@@ -86,17 +58,6 @@ def test_an_oem_refusal_is_readable_not_mojibake(monkeypatch, tmp_path) -> None:
     assert "Не удалось открыть" in text, (
         "причина отказа снова пришла кракозябрами — агенту нечем её прочитать")
     assert truncated is False
-
-
-def test_utf8_still_wins_when_it_decodes(monkeypatch, tmp_path) -> None:
-    import tools.shell_exec as mod
-
-    monkeypatch.setattr(mod, "_oem_encoding", lambda: "cp866")
-    tool = ShellExecTool(workspace_root=tmp_path)
-
-    text, _ = tool._cap_and_decode("обычный utf-8 вывод".encode())
-
-    assert text == "обычный utf-8 вывод"
 
 
 def test_undecodable_bytes_still_degrade_not_crash(monkeypatch, tmp_path) -> None:
@@ -131,13 +92,6 @@ def test_a_bare_hex_id_finds_its_own_trace(tmp_path) -> None:
         "голый идентификатор снова получил «файла нет» — "
         "живой отказ раунда 7 вернулся")
     assert out["trace_id"] == "trace_4f40f42689b6ea86"
-
-
-def test_an_exact_stem_is_preferred_over_prefixing(tmp_path) -> None:
-    """Граница: точное имя остаётся первым — префикс лишь запасной ход."""
-    tool = _logs_with_trace(tmp_path, "trace_abc")
-
-    assert tool.run(trace_id="trace_abc")["events_returned"] == 1
 
 
 def test_traversal_is_still_refused(tmp_path) -> None:

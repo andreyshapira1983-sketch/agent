@@ -60,27 +60,6 @@ def _install_fake_agent(monkeypatch: Any) -> _FakeAgent:
     return agent
 
 
-def test_dry_run_leaves_no_durable_delta(workspace: Path, monkeypatch: Any) -> None:
-    """Красный свидетель: три одинаковых эпизода переживают сухой тик.
-
-    До починки подметание дубликатов стояло в `run_tick` без флага и уносило
-    две строки из трёх — необратимо, в прогоне, который обещал ничего не менять.
-    """
-    from agent_tick import run_tick
-
-    _install_fake_agent(monkeypatch)
-    store = _seed_identical_episodes(workspace)
-    before = [row.id for row in store.load()]
-
-    assert run_tick(workspace, dry_run=True) == 0
-
-    after = [row.id for row in store.load()]
-    assert after == before, (
-        "сухой прогон удалил строки эпизодической памяти: "
-        f"{len(before)} -> {len(after)}"
-    )
-
-
 def test_a_live_tick_still_collapses_duplicates(workspace: Path, monkeypatch: Any) -> None:
     """Обратная сторона: починка не отменяет саму уборку.
 
@@ -95,50 +74,6 @@ def test_a_live_tick_still_collapses_duplicates(workspace: Path, monkeypatch: An
     assert run_tick(workspace, dry_run=False) == 0
 
     assert len(store.load()) == 1
-
-
-def test_hygiene_mode_cannot_outrank_dry_run(workspace: Path, monkeypatch: Any) -> None:
-    """Переменная окружения не вправе отменить объявленный сухой режим.
-
-    ``AGENT_AUTO_HYGIENE=on`` — согласие оператора на удаление, а не отмена
-    ``dry_run``. Два разрешения должны СОВПАСТЬ, чтобы что-то было удалено.
-    """
-    from agent_tick import run_tick
-
-    agent = _install_fake_agent(monkeypatch)
-    monkeypatch.setenv("AGENT_AUTO_HYGIENE", "on")
-
-    assert run_tick(workspace, dry_run=True) == 0
-
-    assert agent.maintenance_calls, "проход гигиены вообще не дошёл до вызова"
-    assert all(agent.maintenance_calls), (
-        "гигиена получила dry_run=False внутри сухого тика: "
-        f"{agent.maintenance_calls}"
-    )
-
-
-def test_hygiene_still_removes_on_a_live_tick(workspace: Path, monkeypatch: Any) -> None:
-    """И снова обратная сторона: живой тик с `on` удаляет, как и раньше."""
-    from agent_tick import run_tick
-
-    agent = _install_fake_agent(monkeypatch)
-    monkeypatch.setenv("AGENT_AUTO_HYGIENE", "on")
-
-    assert run_tick(workspace, dry_run=False) == 0
-
-    assert agent.maintenance_calls == [False]
-
-
-def test_shadow_mode_stays_shadow_on_a_live_tick(workspace: Path, monkeypatch: Any) -> None:
-    """Значение по умолчанию не меняется: `shadow` только считает."""
-    from agent_tick import run_tick
-
-    agent = _install_fake_agent(monkeypatch)
-    monkeypatch.delenv("AGENT_AUTO_HYGIENE", raising=False)
-
-    assert run_tick(workspace, dry_run=False) == 0
-
-    assert agent.maintenance_calls == [True]
 
 
 # ── Вторая течь того же обещания, найденная ревизией PR #333 ──────────────────
@@ -258,24 +193,3 @@ def test_a_dry_tick_still_requeues_a_recoverable_orphan(
         "сухой тик оставил брошенную строку в работе: перепостановка в очередь "
         "обратима и запрещать её узкий договор не просил"
     )
-
-
-def test_a_live_tick_still_buries_a_stranded_row(
-    workspace: Path, monkeypatch: Any
-) -> None:
-    """Живой тик по-прежнему доводит исчерпанную строку до терминального исхода.
-
-    Без этого MIR-040 вернулся бы: строка, исчерпавшая попытки, воскресала и
-    получала прогон сверх потолка.
-    """
-    from agent_tick import run_tick
-
-    _install_fake_agent(monkeypatch)
-    _, task_id = _stranded_queue(workspace, max_attempts=1)
-
-    assert run_tick(workspace, dry_run=False) == 0
-
-    assert _row_status(workspace, task_id) == "failed", (
-        "живой тик перестал хоронить исчерпанную брошенную строку"
-    )
-

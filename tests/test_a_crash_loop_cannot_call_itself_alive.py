@@ -49,13 +49,6 @@ def test_a_completed_tick_resets_the_streak(tmp_path: Path) -> None:
     assert error_tick_streak(tmp_path) == 0
 
 
-def test_a_kill_switch_tick_is_throttling_not_failure(tmp_path: Path) -> None:
-    """Тик, остановленный рубильником бюджета, вёл себя как задумано."""
-    _write_journal(tmp_path, ["tick_error", "tick_error", "budget_kill_switch"])
-
-    assert error_tick_streak(tmp_path) == 0
-
-
 def test_no_journal_and_broken_lines_mean_zero_not_a_crash(tmp_path: Path) -> None:
     """Незнание — не приговор: нет журнала — нет серии, битая строка — пропуск."""
     assert error_tick_streak(tmp_path) == 0

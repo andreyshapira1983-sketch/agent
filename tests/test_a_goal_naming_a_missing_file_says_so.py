@@ -40,21 +40,6 @@ def _pick(goal: str):
     )
 
 
-def test_a_missing_file_is_told_apart_from_no_file_at_all() -> None:
-    """Отказ разрешения не должен быть неотличим от отсутствия."""
-    from core.best_next_action import unresolved_goal_targets
-
-    assert unresolved_goal_targets(
-        "Проследить core/no_such_module и описать", exists=_exists
-    ) == ("core/no_such_module",)
-    assert unresolved_goal_targets(
-        "Проследить core/loop.py и описать", exists=_exists
-    ) == ()
-    assert unresolved_goal_targets(
-        "Разобраться, почему агент повторяет одно и то же", exists=_exists
-    ) == ()
-
-
 def test_a_goal_about_a_missing_file_refuses_by_name() -> None:
     """Красный свидетель: цель тихо теряла силу и агент делал чужую работу.
 

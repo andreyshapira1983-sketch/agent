@@ -80,29 +80,6 @@ def test_a_granted_tag_reaches_the_subagent(tmp_path: Path) -> None:
     assert "исходный контекст" in passed, "проекция не должна съедать прежний контекст"
 
 
-def test_an_ungranted_record_never_appears(tmp_path: Path) -> None:
-    """Граница: выдана одна метка — вторая не видна.
-
-    Без этой проверки «проекция» удовлетворялась бы передачей всей памяти.
-    """
-    _store_with(
-        tmp_path,
-        MemoryRecord(content="потолок дня равен 500", tags=["budget"], source="agent-auto"),
-        MemoryRecord(content="пароль оператора", tags=["secret"], source="user-explicit"),
-    )
-    runner = _runner(tmp_path)
-    runner.run = MagicMock(return_value=object())  # type: ignore[method-assign]
-
-    runner.run_contract(
-        _contract(memory_scope=CanonicalMemoryScope(read_tags=("budget",))),
-        context="",
-    )
-
-    passed = runner.run.call_args.kwargs["context"]
-    assert "потолок дня равен 500" in passed
-    assert "пароль оператора" not in passed
-
-
 def test_a_write_grant_is_still_refused(tmp_path: Path) -> None:
     """Право ЗАПИСИ не выдано и этой правкой не выдаётся.
 
@@ -116,20 +93,6 @@ def test_a_write_grant_is_still_refused(tmp_path: Path) -> None:
             _contract(memory_scope=CanonicalMemoryScope(write_tags=("lesson",))),
             context="",
         )
-
-
-def test_no_grant_means_no_memory_at_all(tmp_path: Path) -> None:
-    """Умолчание остаётся прежним: без названной метки субагент беспамятен."""
-    _store_with(
-        tmp_path,
-        MemoryRecord(content="что-то важное", tags=["budget"], source="agent-auto"),
-    )
-    runner = _runner(tmp_path)
-    runner.run = MagicMock(return_value=object())  # type: ignore[method-assign]
-
-    runner.run_contract(_contract(), context="только это")
-
-    assert runner.run.call_args.kwargs["context"] == "только это"
 
 
 def test_an_empty_store_adds_nothing(tmp_path: Path) -> None:

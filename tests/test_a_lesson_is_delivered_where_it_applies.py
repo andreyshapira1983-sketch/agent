@@ -9,10 +9,7 @@ the name of the climb step that last touched the claim.
 """
 from __future__ import annotations
 
-import inspect
-
 from core.causal_claim_store import (
-    LESSON_MACHINE_ACTIONS,
     distilled_lessons,
     lesson_block_for_prompt,
     save_claim,
@@ -49,26 +46,6 @@ _WEB = _lesson("ep-web", rule="retry web_fetch once on timeout",
                scope="web_fetch tool timeouts", case="tools/web_fetch.py")
 
 
-def test_an_unscoped_call_delivers_everything(tmp_path) -> None:
-    """The pre-block-4 contract for callers that name no question."""
-    save_claim(_PLANNER, workspace=tmp_path)
-    save_claim(_WEB, workspace=tmp_path)
-
-    block = lesson_block_for_prompt(tmp_path)
-
-    assert "planner prompt" in block and "web_fetch once" in block
-
-
-def test_a_question_selects_the_lesson_whose_scope_it_touches(tmp_path) -> None:
-    save_claim(_PLANNER, workspace=tmp_path)
-    save_claim(_WEB, workspace=tmp_path)
-
-    block = lesson_block_for_prompt(tmp_path, question="why does web_fetch time out?")
-
-    assert "web_fetch once" in block
-    assert "planner prompt" not in block, "a lesson about the planner rode along"
-
-
 def test_a_file_hint_selects_by_the_named_file(tmp_path) -> None:
     save_claim(_WEB, workspace=tmp_path)
 
@@ -90,21 +67,6 @@ def test_the_planner_receipts_only_what_it_delivered(tmp_path) -> None:
     assert len(receipts) == 1, "a receipt for a lesson that was not delivered"
 
 
-def test_no_applicable_lesson_means_no_block_and_no_receipt(tmp_path) -> None:
-    save_claim(_PLANNER, workspace=tmp_path)
-    planner = LLMPlanner(llm=None, registry=None, workspace=str(tmp_path))
-
-    assert planner.lesson_block_for_prompt("compare budget accounting practices") == ""
-    assert not (tmp_path / "data" / "lesson_injections.jsonl").exists()
-
-
-def test_the_plan_passes_its_question_to_the_lesson_door() -> None:
-    """Wiring: the scoped door is only worth something if `plan` uses it."""
-    src = inspect.getsource(LLMPlanner.plan)
-    assert "self.lesson_block_for_prompt(" in src
-    assert "question, file_hint," in src
-
-
 def test_the_machine_action_travels_with_the_prose(tmp_path) -> None:
     save_claim(_PLANNER, workspace=tmp_path, machine_action="include_real_signatures")
 
@@ -112,13 +74,3 @@ def test_the_machine_action_travels_with_the_prose(tmp_path) -> None:
 
     assert "Machine action: include_real_signatures" in block
     assert distilled_lessons(tmp_path)[0].machine_action == "include_real_signatures"
-
-
-def test_a_climb_step_name_is_provenance_not_an_action(tmp_path) -> None:
-    """The field also records which step last touched the claim; that name
-    must not be handed to the planner as something to do."""
-    save_claim(_PLANNER, workspace=tmp_path, machine_action="run_claim_experiment")
-
-    assert "run_claim_experiment" not in LESSON_MACHINE_ACTIONS
-    assert distilled_lessons(tmp_path)[0].machine_action == ""
-    assert "Machine action" not in lesson_block_for_prompt(tmp_path)

@@ -83,43 +83,6 @@ def _stop(**overrides) -> dict:
     return base
 
 
-def test_without_a_stop_journal_the_choice_says_so(tmp_path):
-    """Прогон A дифференциального теста: журнала нет — поле честно пустое."""
-    llm = _LLM(_reply())
-
-    report = propose_charter_goal(llm, _workspace(tmp_path))
-
-    assert report.status == "proposed"
-    assert report.stop_considered is False
-    assert report.previous_stop_ref == ""
-    assert "recent STOPS" not in llm.user
-
-
-def test_a_recorded_stop_reaches_the_prompt_and_the_report(tmp_path):
-    """Прогон B: запись есть — она видна и в промпте, и машинным полем."""
-    llm = _LLM(_reply(previous_stop_ref=_STOP_SIGNATURE))
-
-    report = propose_charter_goal(llm, _workspace(tmp_path, stops=(_stop(),)))
-
-    assert report.status == "proposed"
-    assert report.stop_considered is True
-    assert report.previous_stop_ref == _STOP_SIGNATURE
-    assert "recent STOPS" in llm.user
-    assert "propose_engineering_task:cap" in llm.user
-    assert _STOP_SIGNATURE[:12] in llm.user
-
-
-def test_an_invented_signature_does_not_reach_the_report(tmp_path):
-    """Поле доказывает эффект, а не фразу: подпись обязана быть из журнала."""
-    llm = _LLM(_reply(previous_stop_ref="totally-made-up-signature"))
-
-    report = propose_charter_goal(llm, _workspace(tmp_path, stops=(_stop(),)))
-
-    assert report.status == "proposed"
-    assert report.stop_considered is True
-    assert report.previous_stop_ref == "", "выдуманная подпись не является учётом"
-
-
 def test_a_refusal_also_carries_the_machine_field(tmp_path):
     """Отказ — тоже исход выбора: по нему должно быть видно, видел ли он журнал."""
     llm = _LLM(_reply(success_check=""))

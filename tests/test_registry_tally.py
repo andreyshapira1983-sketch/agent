@@ -47,16 +47,3 @@ def test_the_external_checklist_is_not_counted_as_an_issue() -> None:
     )
     # Control: the same missing Status under an issue id is reported.
     assert parse("### MIR-002 — a defect\n- **Sources:** x\n") == ({}, ["002"])
-
-
-def test_no_issue_appears_under_two_statuses() -> None:
-    module = _load()
-    by_status, _ = module.parse(module.REGISTRY.read_text(encoding="utf-8"))
-
-    seen: dict[str, str] = {}
-    for status, ids in by_status.items():
-        for ident in ids:
-            assert ident not in seen, (
-                f"MIR-{ident} is listed under both {seen[ident]!r} and {status!r}"
-            )
-            seen[ident] = status

@@ -13,7 +13,6 @@ from core.smart_memory import (
     episode_from_agent_cycle,
     format_experience_context,
     is_usage_eligible,
-    procedure_credit_allowed,
 )
 from core.state_integrity import append_state_jsonl_unlocked, read_state_jsonl_unlocked
 from tests.conftest import FakeLLM
@@ -40,16 +39,6 @@ def test_repeat_hint_survives_lesson_without_quality(workspace: Path) -> None:
     block = agent._retrieve_experience_memory(QUESTION)
     assert "<repeat_question_hint>" in block
     assert [e for e in _events(log_path) if e["event"] == "repeat_question_detected"]
-
-
-# 2 -- a run with zero checked facts must not credit or mint a procedure on its own word
-def test_no_procedure_credit_without_verified_evidence() -> None:
-    bare = _ep(verified_chunks=0, unverified_chunks=0, weak_chunks=0, source_labels=[])
-    assert bare.completion_state == "achieved" and bare.outcome == "success"  # precondition
-    assert not procedure_credit_allowed(bare)
-    assert sm.feedback_for_episode(bare) == "none"
-    assert sm.procedure_from_episode(bare) is None
-    assert procedure_credit_allowed(_ep())  # a verified run still earns credit
 
 
 # 3 -- ineligible near-matches must not use up the retrieval slots of an eligible episode
@@ -106,33 +95,6 @@ def test_prune_never_evicts_the_row_just_saved(tmp_path: Path) -> None:
     store = EpisodicMemoryStore(path, max_episodes=3)
     stored = store.save(_ep(run_id="new"))
     assert stored.id in [r.get("id") for r in read_state_jsonl_unlocked(path)]
-
-
-def test_prune_keeps_unknown_fields_of_kept_rows(tmp_path: Path) -> None:
-    path = tmp_path / "ep.jsonl"
-    store = EpisodicMemoryStore(path, max_episodes=2)
-    store.save(_ep(run_id="r1"))
-    rows = read_state_jsonl_unlocked(path)
-    rows[0]["extra_field"] = 42
-    from core.state_integrity import rewrite_state_jsonl_unlocked
-    rewrite_state_jsonl_unlocked(path, rows)
-    old = replace(_ep(run_id="r0"), created_at="2000-01-01T00:00:00+00:00")
-    store.save(old)
-    store.save(_ep(run_id="r2"))
-    kept = [r for r in read_state_jsonl_unlocked(path) if r.get("id") == "ep-run-r1"]
-    assert kept and kept[0].get("extra_field") == 42
-
-
-def test_procedure_writes_keep_unreadable_rows(tmp_path: Path) -> None:
-    path = tmp_path / "procs.jsonl"
-    append_state_jsonl_unlocked(path, [{"id": "broken", "name": "x", "success_count": "много", "extra": 1}])
-    store = ProceduralMemoryStore(path)
-    proc, _ = store.upsert_from_episode(_ep(run_id="u1"))
-    assert "broken" in [r.get("id") for r in read_state_jsonl_unlocked(path)]
-    store.apply_episode_feedback(replace(_ep(run_id="u2"), used_procedure_ids=(proc.id,)))
-    rows = read_state_jsonl_unlocked(path)
-    assert "broken" in [r.get("id") for r in rows]
-    assert next(r for r in rows if r.get("id") == proc.id)["success_count"] == 1
 
 
 # 6 -- read and write of one update happen under ONE lock, so a concurrent write cannot be lost

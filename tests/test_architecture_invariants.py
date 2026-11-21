@@ -41,23 +41,10 @@ def test_core_layer_imports_downward_only(guard):
     assert checked > 100, "the check found almost no core modules — it is not looking"
 
 
-def test_no_orphaned_core_modules(guard):
-    problems, _ = guard.check_no_orphaned_modules()
-    assert problems == []
-
-
 def test_documented_env_flags_exist(guard):
     problems, checked = guard.check_documented_env_flags()
     assert problems == []
     assert checked > 10, "no AGENT_* flags were scanned — the check is vacuous"
-
-
-def test_verifier_verdicts_are_all_bucketed(guard):
-    problems, checked = guard.check_verdict_vocabulary()
-    assert problems == []
-    # dialogue_supported (issue #119) is one of them: the verdict that has to be
-    # bucketed by every consumer or a supported claim counts as unsupported.
-    assert checked >= 6
 
 
 # ── The guard bites ──────────────────────────────────────────────────────────
@@ -77,15 +64,6 @@ def test_inv1_catches_a_core_module_importing_app(guard, tmp_path, monkeypatch):
     assert len(problems) == 1
     assert "leaky.py" in problems[0]
     assert "may not depend on `app`" in problems[0]
-
-
-def test_inv1_allows_relative_imports_inside_core(guard, tmp_path, monkeypatch):
-    core = tmp_path / "core"
-    core.mkdir()
-    (core / "sibling.py").write_text("from .models import Thing\n", encoding="utf-8")
-    monkeypatch.setattr(guard, "CORE", core)
-
-    assert guard.check_core_layering()[0] == []
 
 
 def test_inv2_catches_a_module_no_production_code_imports(

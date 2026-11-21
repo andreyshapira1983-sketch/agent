@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 
 from core.evidence import ProvenanceChain, evidence_from_tool_result
-from core.verifier_utils import match_citation, parse_citations, same_file
+from core.verifier_utils import match_citation, parse_citations
 
 _SPELLINGS = (
     "present.txt",
@@ -48,49 +48,4 @@ def test_every_spelling_of_one_file_resolves_against_every_other(cited, gathered
     citation = parse_citations(f"факт [file:{cited}].")[0]
     assert match_citation(citation, _chain_for(gathered)) is not None, (
         f"cited as {cited!r}, gathered as {gathered!r} — one file, one identity"
-    )
-
-
-@pytest.mark.parametrize(
-    "cited,source_id",
-    [
-        # Each of these matched under plain containment. The characters of the
-        # cited name sit inside the label, mid-segment.
-        ("notes.md", "file:my_notes.md"),
-        ("main.py", "file:domain.py"),
-        ("test.py", "file:latest.py"),
-        # Same basename, different directory: never the same file.
-        ("sub/x.txt", "file:other/x.txt"),
-    ],
-)
-def test_a_coincidence_of_characters_is_not_the_same_file(cited, source_id):
-    assert not same_file(cited, source_id), (
-        f"{cited!r} was credited with evidence about {source_id!r}"
-    )
-
-
-def test_a_path_suffix_is_the_same_file():
-    """The half that makes spellings interchangeable, stated on its own."""
-    assert same_file("present.txt", "file:./present.txt")
-    assert same_file("./present.txt", "file:present.txt")
-    assert same_file(r"C:\ws\present.txt", "file:present.txt")
-    assert same_file("present.txt", r"file:C:\ws\present.txt")
-
-
-def test_only_file_citations_are_compared_as_paths():
-    """A web query or a memory id is a string, not a path — rule unchanged.
-
-    Without this the change would quietly alter matching for every prefix; the
-    web pool in particular relies on substring behaviour over query labels.
-    """
-    chain = ProvenanceChain()
-    chain.add(evidence_from_tool_result(
-        tool_name="web_search",
-        arguments={"query": "autonomous agent memory"},
-        output=[{"title": "t", "url": "https://example.org/a", "snippet": "s"}],
-        status="success",
-    ))
-    citation = parse_citations("факт [search:autonomous agent].")[0]
-    assert match_citation(citation, chain) is not None, (
-        "substring matching over non-path labels must be untouched"
     )

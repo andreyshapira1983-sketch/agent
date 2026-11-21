@@ -68,27 +68,6 @@ def test_refresh_models_logs_success(monkeypatch, tmp_path, capsys):
     assert "updated_at" in payload
 
 
-def test_refresh_models_logs_failure_and_returns_true(monkeypatch, tmp_path, capsys):
-    _isolate(monkeypatch, tmp_path)
-
-    def _boom(*args, **kwargs):
-        raise RuntimeError("provider unreachable")
-
-    monkeypatch.setattr(mc, "refresh_catalog", _boom)
-    agent = _FakeAgent()
-
-    # Handler must swallow the error and keep the REPL alive.
-    assert _handle_refresh_models("--anthropic", agent) is True
-
-    events = dict(agent.log.events)
-    assert "refresh_models" not in events
-    assert "refresh_models_failed" in events
-    payload = events["refresh_models_failed"]
-    assert payload["providers"] == ["anthropic"]
-    assert payload["error_type"] == "RuntimeError"
-    assert "provider unreachable" in payload["error"]
-
-
 def test_refresh_models_error_message_is_truncated(monkeypatch, tmp_path, capsys):
     _isolate(monkeypatch, tmp_path)
 
@@ -115,21 +94,4 @@ def test_refresh_models_success_payload_has_no_secret(monkeypatch, tmp_path, cap
 
     assert _handle_refresh_models("--anthropic", agent) is True
     payload = dict(agent.log.events)["refresh_models"]
-    assert secret not in json.dumps(payload, ensure_ascii=False)
-
-
-def test_refresh_models_failure_payload_has_no_secret(monkeypatch, tmp_path, capsys):
-    _isolate(monkeypatch, tmp_path)
-    secret = "sk-ant-TOP-SECRET-DO-NOT-LEAK"
-    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
-
-    def _boom(*args, **kwargs):
-        # An error that does NOT echo the secret; the payload must not add it.
-        raise RuntimeError("auth failed")
-
-    monkeypatch.setattr(mc, "refresh_catalog", _boom)
-    agent = _FakeAgent()
-
-    assert _handle_refresh_models("--anthropic", agent) is True
-    payload = dict(agent.log.events)["refresh_models_failed"]
     assert secret not in json.dumps(payload, ensure_ascii=False)

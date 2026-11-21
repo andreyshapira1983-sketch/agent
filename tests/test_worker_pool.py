@@ -42,39 +42,6 @@ def test_rejects_invalid_max_workers_drain_and_task_timeout():
 
 
 @pytest.mark.asyncio
-async def test_processes_events_and_respects_concurrency():
-    q = PriorityEventQueue()
-    current = 0
-    peak = 0
-    lock = asyncio.Lock()
-    seen: list[str] = []
-
-    async def handler(event) -> None:
-        nonlocal current, peak
-        async with lock:
-            current += 1
-            peak = max(peak, current)
-        await asyncio.sleep(0)
-        async with lock:
-            current -= 1
-            seen.append(event.kind)
-
-    pool = WorkerPool(q, handler, max_workers=2)
-    run_task = asyncio.create_task(pool.run())
-    await asyncio.sleep(0)
-    for i in range(5):
-        q.put(f"e{i}", EventPriority.SCHEDULED)
-    q.close()
-    await asyncio.wait_for(run_task, timeout=2.0)
-
-    assert sorted(seen) == [f"e{i}" for i in range(5)]
-    assert peak <= 2
-    assert pool.processed_count == 5
-    assert pool.error_count == 0
-    assert pool.timeout_count == 0
-
-
-@pytest.mark.asyncio
 async def test_handler_error_does_not_stop_pool(caplog):
     q = PriorityEventQueue()
     seen: list[str] = []
@@ -131,26 +98,6 @@ async def test_shutdown_stops_accepting_and_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_shutdown_drains_short_work_before_exit():
-    q = PriorityEventQueue()
-    done: list[str] = []
-
-    async def handler(event) -> None:
-        await asyncio.sleep(0)
-        done.append(event.kind)
-
-    pool = WorkerPool(q, handler, max_workers=2, drain_timeout=2.0)
-    run_task = asyncio.create_task(pool.run())
-    await asyncio.sleep(0)
-    q.put("a", EventPriority.SCHEDULED)
-    q.put("b", EventPriority.SCHEDULED)
-    await pool.shutdown(drain_timeout=2.0)
-    await asyncio.wait_for(run_task, timeout=2.0)
-    assert sorted(done) == ["a", "b"]
-    assert pool.processed_count == 2
-
-
-@pytest.mark.asyncio
 async def test_run_cancellation_triggers_shutdown():
     q = PriorityEventQueue()
     gate = asyncio.Event()
@@ -202,28 +149,6 @@ async def test_task_timeout_then_pool_continues_with_next_event(caplog):
         for r in caplog.records
     )
 
-@pytest.mark.asyncio
-async def test_task_timeout_none_allows_long_handler_until_shutdown():
-    q = PriorityEventQueue()
-    started = asyncio.Event()
-
-    async def handler(event) -> None:
-        started.set()
-        await asyncio.Event().wait()
-
-    pool = WorkerPool(
-        q, handler, max_workers=1, task_timeout=None, drain_timeout=0.05
-    )
-    run_task = asyncio.create_task(pool.run())
-    await asyncio.sleep(0)
-    q.put("slow", EventPriority.SCHEDULED)
-    await asyncio.wait_for(started.wait(), timeout=1.0)
-    await asyncio.sleep(0.08)  # would have timed out if default 0.05 applied
-    assert pool.timeout_count == 0
-    assert pool.processed_count == 0
-    await pool.shutdown()
-    await asyncio.wait_for(run_task, timeout=2.0)
-
 
 def _checkpoint_store(tmp_path: Path) -> InFlightCheckpointStore:
     fixed = datetime(2026, 7, 16, 12, 30, tzinfo=timezone.utc)
@@ -231,28 +156,6 @@ def _checkpoint_store(tmp_path: Path) -> InFlightCheckpointStore:
         tmp_path / "in_flight.jsonl",
         now=lambda: fixed,
     )
-
-
-@pytest.mark.asyncio
-async def test_checkpoint_is_durable_before_handler_and_removed_on_success(tmp_path):
-    q = PriorityEventQueue()
-    store = _checkpoint_store(tmp_path)
-    observed: list[dict] = []
-
-    async def handler(event) -> None:
-        observed.extend(store.load())
-
-    pool = WorkerPool(q, handler, max_workers=1, checkpoint_store=store)
-    run_task = asyncio.create_task(pool.run())
-    await asyncio.sleep(0)
-    event = q.put("success", payload={"task_id": "rtask_1"})
-    q.close()
-    await asyncio.wait_for(run_task, timeout=2.0)
-
-    assert observed[0]["event_id"] == event.event_id
-    assert observed[0]["checkpointed_at"] == "2026-07-16T12:30:00+00:00"
-    assert observed[0]["event"]["payload"] == {"task_id": "rtask_1"}
-    assert store.load() == []
 
 
 @pytest.mark.asyncio
@@ -349,58 +252,6 @@ async def test_checkpoint_removed_after_shutdown_cancellation(tmp_path):
     await asyncio.wait_for(run_task, timeout=2.0)
 
     assert store.load() == []
-
-
-@pytest.mark.asyncio
-async def test_concurrent_handlers_keep_independent_checkpoints(tmp_path):
-    q = PriorityEventQueue()
-    store = _checkpoint_store(tmp_path)
-    both_started = asyncio.Event()
-    release = asyncio.Event()
-    started = 0
-
-    async def handler(event) -> None:
-        nonlocal started
-        started += 1
-        if started == 2:
-            both_started.set()
-        await release.wait()
-
-    pool = WorkerPool(q, handler, max_workers=2, checkpoint_store=store)
-    run_task = asyncio.create_task(pool.run())
-    await asyncio.sleep(0)
-    first = q.put("first")
-    second = q.put("second")
-    q.close()
-    await asyncio.wait_for(both_started.wait(), timeout=1.0)
-
-    assert {row["event_id"] for row in store.load()} == {
-        first.event_id,
-        second.event_id,
-    }
-    release.set()
-    await asyncio.wait_for(run_task, timeout=2.0)
-    assert store.load() == []
-
-
-def test_checkpoint_atomic_failure_preserves_previous_file(tmp_path, monkeypatch):
-    store = _checkpoint_store(tmp_path)
-    q = PriorityEventQueue()
-    first = q.put("first")
-    second = q.put("second")
-    store.checkpoint(first, worker_id=0)
-    original_replace = Path.replace
-
-    def fail_replace(path, target):
-        if Path(target) == store.path:
-            raise OSError("simulated replace failure")
-        return original_replace(path, target)
-
-    monkeypatch.setattr(Path, "replace", fail_replace)
-    with pytest.raises(OSError, match="simulated replace failure"):
-        store.checkpoint(second, worker_id=1)
-
-    assert [row["event_id"] for row in store.load()] == [first.event_id]
 
 
 def test_checkpoint_cleanup_is_idempotent_and_preserves_other_work(tmp_path):

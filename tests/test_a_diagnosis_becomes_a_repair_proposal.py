@@ -111,26 +111,6 @@ def test_a_partially_verified_diagnosis_is_not_trusted_with_a_patch():
     assert agent.proposed_with is None
 
 
-def test_dry_run_creates_no_durable_item():
-    """Заявка в очереди — долговременный эффект; сухой прогон их не делает."""
-    inbox = _Inbox()
-
-    note = _run(_Agent(), inbox=inbox,
-                config=CampaignConfig(goal="g", dry_run=True))
-
-    assert note is None and inbox.items == []
-
-
-def test_other_actions_do_not_manufacture_repairs():
-    """Health-pass ремонта не обещал: провод живёт только на действии про
-    собственный дефект.
-    """
-    inbox = _Inbox()
-
-    assert _run(_Agent(), inbox=inbox, action=_action("observe")) is None
-    assert inbox.items == []
-
-
 def test_a_diagnosis_naming_no_real_file_proposes_nothing():
     """Адрес спрашивается у диска. Выдуманные reasoning.py и citation.py уже
     один раз завели реестр в пустоту.

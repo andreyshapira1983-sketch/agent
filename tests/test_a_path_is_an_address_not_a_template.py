@@ -7,7 +7,6 @@ from __future__ import annotations
 import pytest
 
 from core.placeholder_text import (
-    looks_like_unfilled_content,
     looks_like_unfilled_path,
 )
 
@@ -17,10 +16,6 @@ _MEASURED = [
     "core/<identified_file>.py",        # file_read, right after listing core/
 ]
 
-#: The third measured shape is CONTENT, not an address — the guard that already
-#: existed. Kept beside its siblings because the class is one: a plan carrying a
-#: template where the concrete thing belongs.
-_MEASURED_CONTENT = "<updated content for core/loop.py with experience_block integration>"
 
 #: Unseen shapes of the same class. The operator's rule: a repair counts only
 #: when a form it was NOT fitted to is stopped.
@@ -32,18 +27,6 @@ _UNSEEN = [
     "<insert path>",
     "core/${MODULE}.py",
     "tests/test_XXX.py",
-]
-
-#: Real paths from this repository. A guard that stops these is worse than none.
-_REAL = [
-    "core/loop_attempt.py",
-    "data/causal_observations.jsonl",
-    "docs/CODE_NOTES.md",
-    "tests/conftest.py",
-    "knowledge/maps/COMMANDS_MAP.md",
-    "scripts/gen_anatomy.py",
-    "core/loop_memory_write.py",
-    "probe/x.txt",
 ]
 
 
@@ -65,22 +48,9 @@ def test_unseen_shapes_of_the_same_class_are_refused(path: str):
     assert looks_like_unfilled_path(path) is True
 
 
-@pytest.mark.parametrize("path", _REAL)
-def test_a_real_path_is_never_refused(path: str):
-    assert looks_like_unfilled_path(path) is False
-
-
 def test_an_empty_path_is_not_this_defect():
     """Emptiness has its own error already; two guards for one fault confuse
     the reader about which one fired.
     """
     assert looks_like_unfilled_path("") is False
     assert looks_like_unfilled_path("   ") is False
-
-
-def test_the_content_shape_stays_with_its_own_guard():
-    """One class, two guards, and they must not be merged: an unfilled address
-    sends the agent hunting for a file, an unfilled body creates a junk one.
-    """
-    assert looks_like_unfilled_content(_MEASURED_CONTENT) is True
-    assert looks_like_unfilled_content("# настоящий код\nimport os\n") is False

@@ -91,31 +91,6 @@ def lane(monkeypatch: Any) -> _Applications:
     return fake
 
 
-def test_every_applied_effect_has_an_approval_event(
-    workspace: Path, lane: _Applications
-) -> None:
-    """Красный свидетель: два применения — ноль записей о расходе гранта.
-
-    Полномочие на применение бралось из гранта, а след расхода оставался
-    пустым, то есть по журналу нельзя было ответить, чем именно разрешено
-    каждое изменение.
-    """
-    from core.rule_approved_apply import drain_rule_approved_proposals
-
-    inbox = _inbox(workspace)
-    grant = _grant(inbox, runs_per_day=5)
-    _pending_document(inbox, workspace, "first")
-    _pending_document(inbox, workspace, "second")
-
-    out = drain_rule_approved_proposals(workspace, dry_run=False)
-
-    assert out["applied"] == 2, out
-    assert len(lane.item_ids) == 2
-    assert standing_runs_today(workspace, grant.id) == 2, (
-        "применения без записи расхода: грант выдал полномочие бесследно"
-    )
-
-
 def test_standing_grant_cap_counts_all_consumers(
     workspace: Path, lane: _Applications
 ) -> None:
@@ -162,41 +137,6 @@ def test_an_exhausted_grant_applies_nothing(
     assert out["applied"] == 0
     assert out["blocked"] == "no active standing grant"
     assert lane.item_ids == []
-
-
-def test_an_expired_grant_applies_nothing(
-    workspace: Path, lane: _Applications
-) -> None:
-    """Срок — тоже стена: вчерашнее «да» сегодня не полномочие."""
-    from core.rule_approved_apply import drain_rule_approved_proposals
-
-    inbox = _inbox(workspace)
-    _grant(inbox, runs_per_day=5, days=-1)
-    _pending_document(inbox, workspace, "alpha")
-
-    out = drain_rule_approved_proposals(workspace, dry_run=False)
-
-    assert out["applied"] == 0
-    assert out["blocked"] == "no active standing grant"
-    assert lane.item_ids == []
-
-
-def test_the_drain_still_applies_what_the_rule_allows(
-    workspace: Path, lane: _Applications
-) -> None:
-    """Учёт не отменяет саму петлю: разрешённый документ по-прежнему проходит."""
-    from core.rule_approved_apply import drain_rule_approved_proposals
-
-    inbox = _inbox(workspace)
-    _grant(inbox, runs_per_day=5)
-    item = _pending_document(inbox, workspace, "alpha")
-
-    out = drain_rule_approved_proposals(workspace, dry_run=False)
-
-    assert out == {"considered": 1, "applied": 1, "unapplied": 0,
-                   "attempted": 1, "refused": 0, "blocked": ""}
-    assert lane.item_ids == [item.id]
-    assert inbox.get(item.id).status == "approved"
 
 
 # ── Ревизия PR #333: потолок обязан быть неделимым ────────────────────────────

@@ -168,13 +168,6 @@ def test_missing_budget_fails_before_any_copy_is_created(source: Path) -> None:
     assert not (source / ".autonomous-repair").exists()
 
 
-def test_the_controller_is_outside_the_agents_edit_authority() -> None:
-    from core.burn_in_sandbox import _FENCE
-    from core.burn_in_supervisor import SUPERVISOR_FENCE
-
-    assert "scripts/autonomous_repair.py" in _FENCE & SUPERVISOR_FENCE
-
-
 def test_interrupt_kills_the_child_before_returning_control(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 

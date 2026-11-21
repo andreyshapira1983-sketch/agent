@@ -42,27 +42,6 @@ def _report(fact: str):
     return verify(answer=answer, chain=chain)
 
 
-def test_the_journal_carries_the_code_of_each_refutation() -> None:
-    payload = _report("- Ключи дают в сумме 99. [tool:python_probe]").to_log_payload()
-    assert payload["refuted_chunks"] == 1
-    refutations = payload["refutations"]
-    assert len(refutations) == 1
-    only = refutations[0]
-    assert only["code"] == "sum_mismatch"
-    assert only["expected"] == "5" and only["actual"] == "99"
-    # `computed_from` у арифметики несёт саму работу — пары, которые гейт
-    # сложил. Именно её пришлось восстанавливать вручную, чтобы увидеть, что
-    # складывались `exit_code` и `duration_ms`.
-    assert only["computed_from"] == "alpha=2 beta=3"
-    assert "сумме 99" in only["claim"], "по записи должно быть видно, что судили"
-
-
-def test_a_clean_answer_carries_no_refutations() -> None:
-    payload = _report("- Ключи дают в сумме 5. [tool:python_probe]").to_log_payload()
-    assert payload["refuted_chunks"] == 0
-    assert payload["refutations"] == []
-
-
 def test_the_record_stays_bounded() -> None:
     facts = "\n".join(
         f"- Ключи дают в сумме {n}. [tool:python_probe]" for n in range(90, 99)

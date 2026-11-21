@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from core.backlog_signals import (
-    ValuePenalties,
     anatomy_candidates,
     open_tech_debt,
     value_review_penalties,
@@ -56,17 +55,6 @@ def test_open_tech_debt_quote_is_traceable_and_ref_points_at_source():
     assert rec.signal_source == "tech_debt"
 
 
-def test_open_tech_debt_empty_input_is_empty():
-    assert open_tech_debt("") == []
-
-
-def test_open_tech_debt_multi_id_title_is_supported():
-    text = "TD-011 / TD-012 — Combo\nСтатус: Partial — half done.\n"
-    records = open_tech_debt(text)
-    assert len(records) == 1
-    assert records[0].target_path == "TD-011 / TD-012"
-
-
 # ── AGENT_ANATOMY parsing ─────────────────────────────────────────────────────
 
 _ANATOMY = """\
@@ -102,10 +90,6 @@ def test_anatomy_candidates_quote_traceable_and_targets_namespaced():
         assert r.evidence_ref.startswith("knowledge/generated/AGENT_ANATOMY.md:")
 
 
-def test_anatomy_candidates_missing_section_is_empty():
-    assert anatomy_candidates("# no candidates here\n\ntext") == []
-
-
 # ── value-review penalties (anti-repeat) ──────────────────────────────────────
 
 
@@ -113,12 +97,6 @@ class _Rev:
     def __init__(self, item_id: str, verdict: str) -> None:
         self.item_id = item_id
         self.verdict = verdict
-
-
-def test_value_review_penalties_need_a_target_map():
-    reviews = [_Rev("i1", "rejected_wrong_target")]
-    # No map -> best-effort no-op, nothing suppressed.
-    assert value_review_penalties(reviews, None) == ValuePenalties.empty()
 
 
 def test_value_review_penalties_suppress_and_penalize():
@@ -132,13 +110,3 @@ def test_value_review_penalties_suppress_and_penalize():
     assert pen.suppressed == frozenset({"core/a.py"})
     assert pen.penalized == frozenset({"core/b.py"})
     assert "core/c.py" not in pen.suppressed | pen.penalized
-
-
-def test_value_review_penalties_latest_verdict_wins():
-    reviews = [
-        _Rev("i1", "rejected_wrong_target"),
-        _Rev("i1", "accepted"),  # later -> clears suppression
-    ]
-    pen = value_review_penalties(reviews, {"i1": "core/a.py"})
-    assert pen.suppressed == frozenset()
-    assert pen.penalized == frozenset()

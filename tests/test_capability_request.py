@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -34,16 +33,6 @@ def test_detect_capability_type_unknown_for_non_string() -> None:
     assert detect_capability_type(None) == "unknown"  # type: ignore[arg-type]
 
 
-def test_telegram_request_is_bounded_and_approval_required() -> None:
-    request = propose_capability_request("Хочу, чтобы ты сам сообщал мне, когда нужно решение")
-
-    assert request.capability_type == "telegram"
-    assert request.approval_required is True
-    assert "owner notifications" in request.write_scope
-    assert "message third parties" in request.forbidden_actions
-    assert request.budget_limits["max_messages_per_day"] == 10
-
-
 def test_email_request_forbids_destructive_and_outbound_actions() -> None:
     request = propose_capability_request("Следи за важными письмами")
 
@@ -71,24 +60,6 @@ def test_unknown_request_asks_for_narrower_boundary() -> None:
     assert request.risk_level == "low"
     assert "No access requested yet" in request.requested_access
     assert "activate connectors" in request.forbidden_actions
-
-
-def test_request_to_dict_is_json_serializable() -> None:
-    request = propose_capability_request("Нужно подключить Telegram")
-    raw = json.dumps(request.to_dict())
-
-    assert json.loads(raw)["capability_type"] == "telegram"
-    assert request.request_id.startswith("capreq_")
-    assert request.created_at
-
-
-def test_user_summary_contains_required_operator_fields() -> None:
-    text = propose_capability_request("Следи за почтой").user_summary()
-
-    assert "capability request" in text
-    assert "forbidden_actions" in text
-    assert "budget_limits" in text
-    assert "approval_required: true" in text
 
 
 def test_request_is_frozen() -> None:

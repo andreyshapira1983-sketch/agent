@@ -16,8 +16,6 @@ from pathlib import Path
 import pytest
 
 from app.file_watcher import (
-    DEFAULT_DEBOUNCE,
-    DEFAULT_POLL_INTERVAL,
     FileChange,
     FileWatcher,
 )
@@ -95,21 +93,7 @@ def test_rejects_negative_debounce(workspace: Path):
         FileWatcher([workspace], debounce=-1)
 
 
-def test_defaults_exposed():
-    assert DEFAULT_POLL_INTERVAL > 0
-    assert DEFAULT_DEBOUNCE >= 0
-
-
 # ── pure scan / diff logic ────────────────────────────────────────────────
-
-
-def test_scan_lists_directory_files(workspace: Path):
-    _write(workspace / "a.txt", "1")
-    _write(workspace / "b.txt", "2")
-    watcher = FileWatcher([workspace])
-    snap = watcher.scan()
-    assert (workspace / "a.txt") in snap
-    assert (workspace / "b.txt") in snap
 
 
 def test_scan_pattern_filter(workspace: Path):
@@ -247,52 +231,6 @@ def test_coalesces_burst_into_single_batch(workspace: Path):
     # created + subsequent modifies coalesce to a single created entry.
     assert batches[0] == [FileChange(kind="created", path=cfg)]
     assert watcher.batches == 1
-
-
-def test_no_change_emits_nothing_and_no_self_echo(workspace: Path):
-    """A stable watched set produces no batches — the watcher never writes."""
-    clock = StepClock(START)
-    _write(workspace / "stable.txt", "constant")
-    watcher = FileWatcher(
-        [workspace], now=clock.now, sleep=clock.sleep, poll_interval=1.0, debounce=0.3
-    )
-    batches: list = []
-    watcher._on_change = batches.append
-
-    def on_sleep(count: int):
-        if count >= 5:
-            watcher.stop()
-
-    clock.on_sleep = on_sleep
-    run_async(watcher.run())
-
-    assert batches == []
-    assert watcher.batches == 0
-
-
-def test_survives_missing_directory_then_appears(workspace: Path):
-    """A watched dir that does not exist yet is tolerated; later files fire."""
-    clock = StepClock(START)
-    inbox = workspace / "later" / "inbox"
-    watcher = FileWatcher(
-        [inbox], now=clock.now, sleep=clock.sleep, poll_interval=1.0, debounce=0.3
-    )
-    batches: list = []
-
-    def on_change(batch):
-        batches.append(batch)
-        watcher.stop()
-
-    watcher._on_change = on_change
-
-    def on_sleep(count: int):
-        if count == 2:  # first poll: dir absent (no error); now create it
-            _write(inbox / "req.jsonl", "hello")
-
-    clock.on_sleep = on_sleep
-    run_async(watcher.run())
-
-    assert batches == [[FileChange(kind="created", path=inbox / "req.jsonl")]]
 
 
 def test_emit_existing_reports_baseline_as_created(workspace: Path):

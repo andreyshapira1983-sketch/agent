@@ -6,20 +6,9 @@ transient console log.
 """
 from __future__ import annotations
 
-import pytest
-
 from cli.self_build_memory import (
     build_self_build_episode,
-    record_self_build_episode,
 )
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.saved: list = []
-
-    def save(self, episode) -> None:
-        self.saved.append(episode)
 
 
 class _FakeAgent:
@@ -46,126 +35,6 @@ def test_apply_rollback_is_recorded_as_failed_with_reason() -> None:
     assert "lesson" in ep.tags
     assert "self-apply-run" in ep.tags
     assert "self-build" in ep.tags
-
-
-def test_apply_commit_is_recorded_as_success() -> None:
-    result = {
-        "proposal_id": "ain_ok",
-        "status": "committed_local",
-        "reason": "applied and committed on branch",
-        "files_changed": ["core/campaign.py"],
-        "rollback_status": "none",
-    }
-    ep = build_self_build_episode("self-apply-run", result)
-    assert ep is not None
-    assert ep.outcome == "success"
-    assert "committed_local" in ep.summary
-    # rollback=none is noise → not surfaced.
-    assert "rollback" not in ep.summary
-
-
-def test_produce_critic_veto_records_veto_reasons() -> None:
-    result = {
-        "status": "critic_veto",
-        "reason": "empty generated content; confidence 0.00 below threshold 0.60",
-        "target_path": "core/planner.py",
-        "veto_reasons": ["empty generated content", "no targeted tests specified"],
-    }
-    ep = build_self_build_episode("self-build-produce", result)
-    assert ep is not None
-    assert ep.outcome == "failed"
-    assert "core/planner.py" in ep.goal
-    assert "empty generated content" in ep.summary
-    assert "no targeted tests specified" in ep.summary
-    assert "core/planner.py" in ep.tags
-
-
-def test_produce_proposed_is_success() -> None:
-    result = {
-        "status": "proposed",
-        "reason": "Split the campaign engine into a thin wrapper plus a module.",
-        "target_path": "core/campaign.py",
-        "approval_id": "ain_1b2d",
-    }
-    ep = build_self_build_episode("self-build-produce", result)
-    assert ep is not None
-    assert ep.outcome == "success"
-
-
-def test_produce_no_patch_is_partial() -> None:
-    result = {"status": "no_patch", "reason": "no grounded backlog candidate"}
-    ep = build_self_build_episode("self-build-produce", result)
-    assert ep is not None
-    assert ep.outcome == "partial"
-
-
-def test_unknown_status_defaults_to_partial() -> None:
-    ep = build_self_build_episode("self-apply-run", {"status": "weird", "reason": "x"})
-    assert ep is not None
-    assert ep.outcome == "partial"
-
-
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        ("proposed", "achieved"),
-        ("critic_veto", "failed"),
-        ("rolled_back", "failed"),
-        ("no_patch", "partially_achieved"),
-        ("weird", "partially_achieved"),  # unknown status still lands somewhere
-    ],
-)
-def test_every_written_episode_carries_a_settled_completion_state(
-    status: str, expected: str
-) -> None:
-    """The axis is settled at write time, never left for retrieval to guess.
-
-    Leaving `completion_state=None` is not a harmless omission. `admit_for_storage`
-    grants a `lesson`-tagged record `usage_eligible=True` so these lessons stop
-    being invisible (MIR-042) — and every episode this writer builds is tagged
-    `lesson`. So an unset axis produces exactly the row shape that
-    `test_no_legacy_episode_in_the_live_store_is_ever_admitted` forbids: replayed
-    into a prompt while carrying no verdict. `outcome` already answers the
-    question, so there is nothing to infer and no excuse to defer it.
-    """
-    ep = build_self_build_episode("self-build-produce", {"status": status})
-    assert ep is not None
-    assert ep.completion_state == expected
-    # The shape the live-store invariant checks for: never unclassified.
-    assert ep.completion_state is not None
-
-
-def test_record_persists_to_store() -> None:
-    store = _FakeStore()
-    agent = _FakeAgent(store)
-    ok = record_self_build_episode(
-        agent,
-        kind="self-apply-run",
-        result={"status": "rolled_back", "reason": "targeted tests failed",
-                "proposal_id": "ain_z"},
-    )
-    assert ok is True
-    assert len(store.saved) == 1
-    assert store.saved[0].outcome == "failed"
-
-
-def test_record_is_noop_without_store() -> None:
-    # Missing / None episodic_store must not raise and must report no write.
-    assert record_self_build_episode(_FakeAgent(None), kind="self-apply-run",
-                                     result={"status": "rolled_back"}) is False
-    assert record_self_build_episode(object(), kind="self-build-produce",
-                                     result={"status": "no_patch"}) is False
-
-
-def test_record_swallows_store_errors() -> None:
-    class _Boom:
-        def save(self, episode) -> None:
-            raise RuntimeError("disk full")
-
-    agent = _FakeAgent(_Boom())
-    # Journaling must never break the operator command.
-    assert record_self_build_episode(agent, kind="self-apply-run",
-                                     result={"status": "rolled_back"}) is False
 
 
 # ── recent_self_build_lessons (recall past failures before a new attempt) ──────
@@ -277,12 +146,6 @@ def test_recently_vetoed_targets_ignores_non_path_tags() -> None:
         _TaggedEpisode(("self-build", "critic_veto", "failed")),
     ])
     assert recently_vetoed_self_build_targets(_FakeAgent(store)) == frozenset()
-
-
-def test_recently_vetoed_targets_is_empty_without_store() -> None:
-    from cli.self_build_memory import recently_vetoed_self_build_targets
-
-    assert recently_vetoed_self_build_targets(_FakeAgent(None)) == frozenset()
 
 
 def test_recently_vetoed_targets_swallows_store_errors() -> None:

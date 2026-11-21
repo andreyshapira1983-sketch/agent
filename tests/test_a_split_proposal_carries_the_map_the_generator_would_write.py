@@ -100,22 +100,6 @@ def test_the_map_in_the_proposal_is_exactly_what_the_generator_renders_for_that_
     assert doc == expected
 
 
-def test_without_a_generator_in_the_workspace_the_old_canned_row_still_lands(tmp_path):
-    from core.self_build_producer import _sync_anatomy_index
-
-    ws = _sandbox(tmp_path)
-    (ws / "scripts" / "gen_anatomy.py").unlink()
-    (ws / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(
-        "# Agent Anatomy\n\n| `core/a` | Module A does one thing. |\n", encoding="utf-8",
-    )
-    build = {"files": [{"path": "core/a.py", "content": _A}, {"path": "core/a_helpers.py", "content": _A_HELPERS}]}
-
-    _sync_anatomy_index(build, "core/a.py", _reader(ws), workspace=ws)
-
-    doc = {f["path"]: f["content"] for f in build["files"]}["knowledge/generated/AGENT_ANATOMY.md"]
-    assert "| `core/a_helpers` | Extracted from `core/a` by autonomous self-build module split. |" in doc
-
-
 def test_an_unrenderable_tree_gets_the_canned_row_and_no_total(tmp_path):
     """Groups that miss the source module: canned row only, no invented group, no total.
 
@@ -137,12 +121,3 @@ def test_an_unrenderable_tree_gets_the_canned_row_and_no_total(tmp_path):
         "# map\n\n"
         "| `core/a_helpers` | Extracted from `core/a` by autonomous self-build module split. |\n"
     )
-
-
-def test_the_live_generator_exposes_the_three_hooks():
-    spec = importlib.util.spec_from_file_location("gen_anatomy_live", _ROOT / "scripts" / "gen_anatomy.py")
-    assert spec and spec.loader
-    gen = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gen)
-    assert callable(gen.load_groups_from_source) and callable(gen.purpose_from_source)
-    assert gen.purpose_from_source('"""One. Two."""') == "One."

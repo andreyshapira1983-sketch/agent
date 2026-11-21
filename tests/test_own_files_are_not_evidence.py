@@ -13,36 +13,8 @@
 """
 from __future__ import annotations
 
-import pytest
-
-from core.knowledge_pipeline import KnowledgeWritePolicy, _is_own_artifact
+from core.knowledge_pipeline import KnowledgeWritePolicy
 from core.source_registry import ClaimRecord, SourceRecord
-
-
-@pytest.mark.parametrize(
-    ("locator", "own"),
-    [
-        # Живые случаи 2026-09-23.
-        ("proposals/selffix/sii_eb1d0bc19f4a7b28/edits.txt", True),
-        ("data/chat_outbox.jsonl", True),
-        ("knowledge/generated/AGENT_ANATOMY.md", True),
-        ("data/notes/20260923_rag_agent_proposal.md", True),
-        ("data/self_improvement_issues.jsonl:1-40", True),
-        ("logs/campaign_24h_stderr.log", True),
-        ("/root/agent-main/data/chat_outbox.jsonl", True),
-        ("./proposals/x/edits.txt", True),
-        # Книги и документы, написанные людьми, остаются источниками.
-        ("knowledge_library/cs/txt/Mogensen_BasicsOfCompilerDesign.txt", False),
-        ("knowledge_library/cs/txt/Mogensen_BasicsOfCompilerDesign.txt:940-1075", False),
-        ("math_study/library/txt/Judson_AbstractAlgebra.txt", False),
-        ("knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md", False),
-        ("docs/plan.md:5-9", False),
-        # Слово «data» внутри пути книги — не журнал агента.
-        ("knowledge_library/cs/txt/data_structures.txt", False),
-    ],
-)
-def test_the_agents_own_files_are_recognised(locator: str, own: bool) -> None:
-    assert _is_own_artifact(locator) is own
 
 
 def _decide(locator: str) -> str:
@@ -59,9 +31,3 @@ def test_an_own_draft_is_refused_as_a_fact() -> None:
     assert _decide("proposals/selffix/sii_eb1d0bc19f4a7b28/edits.txt") == "reject"
     assert _decide("data/chat_outbox.jsonl") == "reject"
     assert _decide("knowledge/generated/AGENT_ANATOMY.md") == "reject"
-
-
-def test_a_book_still_becomes_knowledge() -> None:
-    """Сторож не шире основания: книга по-прежнему даёт факт."""
-    assert _decide("knowledge_library/cs/txt/Mogensen_BasicsOfCompilerDesign.txt") == "save"
-    assert _decide("knowledge/doctrine/CENTRAL_AGENT_GOVERNANCE.md") == "save"

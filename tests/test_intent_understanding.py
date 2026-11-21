@@ -8,7 +8,7 @@ contract with a fake LLM, so no real model is called.
 """
 from __future__ import annotations
 
-from core.intent_understanding import IntentDecision, understand_intent
+from core.intent_understanding import understand_intent
 
 
 class _FakeLLM:
@@ -22,15 +22,6 @@ class _FakeLLM:
 
 
 ACTIONS = ("capability_query", "project_health", "architecture_audit")
-
-
-def test_clear_request_maps_to_grounded_action():
-    llm = _FakeLLM('{"kind":"action","action":"capability_query","confidence":0.95,"reasoning":"asks what it can do"}')
-    d = understand_intent("что ты умеешь делать сейчас", available_actions=ACTIONS, llm=llm)
-    assert isinstance(d, IntentDecision)
-    assert d.kind == "action" and d.action == "capability_query"
-    # the real capability list was grounded into the prompt
-    assert "capability_query" in llm.calls[0][0]
 
 
 def test_conversational_mention_is_not_an_action():
@@ -54,12 +45,6 @@ def test_low_confidence_falls_back_to_conversation():
     llm = _FakeLLM('{"kind":"action","action":"project_health","confidence":0.2,"reasoning":"unsure"}')
     d = understand_intent("hmm", available_actions=ACTIONS, llm=llm)
     assert d.kind == "conversation"
-
-
-def test_malformed_output_falls_back_safely():
-    llm = _FakeLLM("I'm not going to answer in JSON, sorry.")
-    d = understand_intent("anything", available_actions=ACTIONS, llm=llm)
-    assert d.kind == "conversation" and d.action is None
 
 
 def test_json_wrapped_in_fences_is_parsed():

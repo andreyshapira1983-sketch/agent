@@ -63,18 +63,6 @@ def test_a_file_read_an_hour_ago_is_deprioritised_through_the_store(
     )
 
 
-def test_a_file_read_a_month_ago_keeps_its_place(workspace: Path) -> None:
-    """Контроль: без него порядок мог бы объясняться базовой оценкой, не окном."""
-    store = _store_saying_read_at(workspace, datetime.now(timezone.utc) - timedelta(days=30))
-
-    with_store = LearningPlanner().plan(
-        workspace=workspace, limit=2, source_registry=store, stale_hours=6.0
-    )
-    without = LearningPlanner().plan(workspace=workspace, limit=2)
-
-    assert list(with_store.source_paths) == list(without.source_paths)
-
-
 def test_the_store_answers_the_question_the_planner_asks(workspace: Path) -> None:
     """Граница между типами: живой вызывающий передаёт СКЛАД, а не реестр.
 

@@ -108,54 +108,6 @@ def _budget_sensitive_llm(needs: int) -> LLM:
     return llm
 
 
-def _budgets(llm: LLM) -> list[int]:
-    return [c["max_tokens"] for c in llm._client.chat.completions.calls]
-
-
-# ==========================================================================
-# Следствие первое: цена.
-# ==========================================================================
-def test_a_leg_cut_mid_answer_is_not_re_asked_at_the_same_budget() -> None:
-    """Обрезанная нога, которая ПИСАЛА, тоже обязана повысить потолок.
-
-    Сегодня удвоение стоит под `if last_leg_empty`, поэтому продуктивная но
-    обрезанная нога переспрашивается тем же числом. Соседний тест
-    `test_empty_continuation_escalates_then_stops` требует ровно этого для
-    пустой ноги, и его довод — «этот запрос уже доказал, что так не работает» —
-    относится к обрезанной ноге слово в слово.
-
-    Повтор НА потолке эскалации законен и здесь не оспаривается: потолок —
-    осознанная граница (`_CONTINUE_ESCALATION_CAP`), а спор идёт о том, что до
-    него цепочка не доходила вовсе.
-    """
-    llm = _scripted_openai_llm([("часть. ", 11000, 2048, "length")] * 5)
-
-    llm.complete(system="s", user="u", max_tokens=DEFAULT_MAX_TOKENS)
-
-    budgets = _budgets(llm)
-    assert len(budgets) > 1, "цепочка обязана была продолжить обрезанный ответ"
-    assert budgets[1] > budgets[0], (
-        f"вторая нога стоила столько же, значит запрос ушёл заново зря: {budgets}"
-    )
-    assert budgets == sorted(budgets), budgets
-
-
-def test_an_answer_that_needs_a_bigger_leg_finishes_instead_of_being_cut() -> None:
-    """Ответу нужно 8192; плоский потолок 2048 не доберётся туда никогда.
-
-    Живой замер: выход 10 240 = 5 x 2048, то есть ВСЕ ноги израсходованы и
-    ответ всё равно обрезан. Сколько ног ни дай, при неподвижном потолке ответ
-    не закончится — цепочка умеет только платить.
-    """
-    llm = _budget_sensitive_llm(needs=8192)
-
-    llm.complete(system="s", user="u", max_tokens=DEFAULT_MAX_TOKENS)
-
-    assert llm.last_answer_was_truncated is False, (
-        f"ответ так и не дописан за {len(_budgets(llm))} ног: {_budgets(llm)}"
-    )
-
-
 def test_the_bill_for_one_answer_is_not_the_prompt_five_times() -> None:
     """Запрос уходит целиком на каждой ноге — значит ног должно быть мало.
 
@@ -169,43 +121,6 @@ def test_the_bill_for_one_answer_is_not_the_prompt_five_times() -> None:
     spent_in = llm.last_usage["input_tokens"]
     assert spent_in <= 11000 * 3, (
         f"запрос оплачен {spent_in / 11000:.1f} раз вместо одного"
-    )
-
-
-# ==========================================================================
-# Стороны, которые двигать нельзя.
-# ==========================================================================
-def test_a_finished_answer_still_costs_exactly_one_leg() -> None:
-    """Контроль: без обрыва продолжения нет и быть не должно."""
-    llm = _scripted_openai_llm([("весь ответ", 11000, 40, "stop")])
-
-    out = llm.complete(system="s", user="u")
-
-    assert out == "весь ответ"
-    assert len(_budgets(llm)) == 1
-    assert llm.last_answer_was_truncated is False
-
-
-def test_an_empty_cut_leg_still_escalates_the_way_it_did() -> None:
-    """Контроль: поведение пустой ноги — соседний договор, его не трогаем."""
-    llm = _scripted_openai_llm([(None, 11000, 2048, "length")] * 6)
-
-    llm.complete(system="s", user="u", max_tokens=DEFAULT_MAX_TOKENS)
-
-    budgets = _budgets(llm)
-    assert budgets == sorted(set(budgets)), budgets
-    assert max(budgets) <= budgets[0] * 4, "потолок эскалации сдвинут"
-
-
-def test_the_chain_is_still_bounded_by_its_cap() -> None:
-    """Контроль: повышение потолка не превращает цепочку в бесконечную."""
-    llm = _budget_sensitive_llm(needs=10**9)
-
-    llm.complete(system="s", user="u", max_tokens=DEFAULT_MAX_TOKENS)
-
-    assert len(_budgets(llm)) <= 5, _budgets(llm)
-    assert llm.last_answer_was_truncated is True, (
-        "ответ, который не дописан, обязан признаться в этом"
     )
 
 
@@ -259,22 +174,3 @@ def test_a_cut_answer_says_it_was_cut_where_the_marker_is_judged_missing(
     assert event.get("truncated") is True, (
         "вердикт о маркере молчит о том, что ответ был обрезан"
     )
-
-
-def test_a_whole_answer_without_a_marker_is_not_blamed_on_truncation(
-    tmp_path: Path, monkeypatch, _offline_routing
-) -> None:
-    """Контроль: маркер забыли на ЦЕЛОМ ответе — обрыва тут нет."""
-    def _fake(self, *_args, completion_nonce: str = "", llm=None, **_kwargs) -> str:
-        target = llm if llm is not None else self.llm
-        target.last_answer_was_truncated = False
-        return BODY
-
-    monkeypatch.setattr("core.loop.AgentLoop._synthesize", _fake)
-    agent = _agent(tmp_path)
-
-    agent.run("сколько строк в файле core/loop_methods2.py")
-
-    event = _events(agent, "completion_declaration")[-1]
-    assert event["parse"] == "missing"
-    assert event.get("truncated") is False

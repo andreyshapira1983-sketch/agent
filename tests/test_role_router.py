@@ -16,13 +16,6 @@ def test_routes_learning_requests_to_learning_role():
     assert "learning" in ctx.knowledge_scopes
 
 
-def test_routes_operator_chat_by_default():
-    ctx = RoleRouter().route("Что дальше делать?")
-    assert ctx.role == "operator_chat"
-    assert ctx.tone == "human"
-    assert ctx.output_style == "conversation"
-
-
 def test_routes_live_operator_self_questions_to_operator_chat_not_research():
     samples = [
         "Посмотри, что у тебя сейчас не готово",

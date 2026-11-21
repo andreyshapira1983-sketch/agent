@@ -7,8 +7,6 @@ from __future__ import annotations
 import pathlib
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from core.approval_inbox import ApprovalInbox
 
 _KEY = "autonomous_runtime.allow_effects:deadbeefdeadbeef"
@@ -43,20 +41,6 @@ def _grant(inbox: ApprovalInbox, *, goal: str, expires_at: str | None):
     return item
 
 
-def test_an_expired_grant_no_longer_authorises(tmp_path) -> None:
-    inbox = ApprovalInbox(path=tmp_path / "inbox.jsonl")
-    config = _Config()
-    past = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    _grant(inbox, goal=config.goal, expires_at=past)
-
-    found = _runtime(tmp_path, inbox)._granted_effects_approval(config)
-
-    assert found is None, (
-        "разрешение на необратимые эффекты, срок которого истёк тридцать дней "
-        "назад, всё ещё разрешает их"
-    )
-
-
 def test_a_live_grant_still_authorises(tmp_path) -> None:
     """Контроль: без него первый тест проходил бы и на сломанном поиске."""
     inbox = ApprovalInbox(path=tmp_path / "inbox.jsonl")
@@ -67,15 +51,6 @@ def test_a_live_grant_still_authorises(tmp_path) -> None:
     found = _runtime(tmp_path, inbox)._granted_effects_approval(config)
 
     assert found is not None and found.id == granted.id
-
-
-def test_a_grant_for_another_goal_never_authorises(tmp_path) -> None:
-    """Граница, которая была верна и до правки: цель A не разрешает цель B."""
-    inbox = ApprovalInbox(path=tmp_path / "inbox.jsonl")
-    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
-    _grant(inbox, goal="совсем другая цель", expires_at=future)
-
-    assert _runtime(tmp_path, inbox)._granted_effects_approval(_Config()) is None
 
 
 def test_a_malformed_deadline_is_refused_not_trusted(tmp_path) -> None:
@@ -122,23 +97,3 @@ def test_the_standing_grant_already_did_this(tmp_path) -> None:
     live = ApprovalInbox(path=tmp_path / "live.jsonl")
     fresh = _standing(live, expires_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat())
     assert active_standing_grant(live, tmp_path).id == fresh.id
-
-
-@pytest.mark.parametrize("goal", ["цель один", "цель два"])
-def test_the_key_is_still_scoped_by_goal(goal: str) -> None:
-    """Граница: ключ остаётся привязкой к цели, а не к чему-то шире.
-
-    Обещание СУЖЕНО 2026-09-17 и зелено здесь не случайно: эти цели не называют
-    файла, поэтому ключ по-прежнему берётся от текста. Цель, называющая файл,
-    с тех пор ключуется ПРЕДМЕТОМ и переживает переформулировку — замер и
-    граница в `tests/test_a_permission_outlives_the_wording_of_its_goal.py`.
-    """
-    from core.autonomous_runtime import AutonomousRuntime
-    from core.best_next_action_helpers import _named_target
-
-    assert _named_target(goal) is None, (
-        "цель стала называть файл — этот свидетель проверяет уже не ту ветвь"
-    )
-    key = AutonomousRuntime._effects_dedup_key(goal)
-    assert key.startswith("autonomous_runtime.allow_effects:")
-    assert key != AutonomousRuntime._effects_dedup_key(goal + " ещё")

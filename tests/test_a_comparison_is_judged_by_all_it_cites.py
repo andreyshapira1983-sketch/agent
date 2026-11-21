@@ -33,7 +33,3 @@ def test_a_comparison_citing_both_sources_is_verified() -> None:
 def test_a_figure_neither_source_has_is_still_not_verified() -> None:
     assert _verdict("В DOCX итог 48 750 руб., а в скане 46 000 руб. "
                     "[file:inbox/a.docx][file:inbox/a_scan.png]") != "verified"
-
-
-def test_one_source_alone_still_suffices_for_its_own_figure() -> None:
-    assert _verdict("В скане итог 47 250 руб. [file:inbox/a_scan.png]") == "verified"

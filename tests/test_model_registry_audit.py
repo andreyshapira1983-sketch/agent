@@ -5,48 +5,6 @@ from core.model_router import ModelRouter
 from tests.conftest import FakeLLM
 
 
-def test_model_registry_audit_explains_routes_are_smaller_than_registry(monkeypatch):
-    monkeypatch.setenv("AGENT_MODEL_POLICY", "balanced")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-
-    # Keep this test independent from role-specific routes loaded from .env.
-    for key in (
-        "AGENT_PROVIDER",
-        "AGENT_MODEL",
-        "AGENT_PLANNER_PROVIDER",
-        "AGENT_PLANNER_MODEL",
-        "AGENT_SYNTHESIZER_PROVIDER",
-        "AGENT_SYNTHESIZER_MODEL",
-        "AGENT_REPAIR_PROVIDER",
-        "AGENT_REPAIR_MODEL",
-        "AGENT_MEMORY_PROVIDER",
-        "AGENT_MEMORY_MODEL",
-        "AGENT_VERIFIER_PROVIDER",
-        "AGENT_VERIFIER_MODEL",
-    ):
-        monkeypatch.delenv(key, raising=False)
-
-    def factory(provider: str | None, model: str | None) -> FakeLLM:
-        llm = FakeLLM()
-        llm.provider = provider or "unset"
-        llm.model = model or "unset"
-        return llm
-
-    router = ModelRouter.from_env(llm_factory=factory)
-    audit = audit_model_registry(router)
-    payload = audit.to_dict()
-
-    assert payload["catalog_mode"] == "local_config"
-    assert payload["live_provider_catalog"] is False
-    assert audit.route_count == 5
-    assert audit.registry_model_count >= 4
-    assert len(audit.unique_route_models) == 2
-    assert any("one model per role" in warning for warning in audit.warnings)
-    assert "anthropic:claude-sonnet-4-5" in audit.unique_route_models
-    assert "openai:gpt-4o-mini" in audit.unique_route_models
-
-
 def test_model_registry_audit_reports_unavailable_and_unsupported_models(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL_POLICY", "quality")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

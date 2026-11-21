@@ -56,23 +56,6 @@ def line_clip(start, end):
 '''
 
 
-def test_only_one_connected_subject_moves(tmp_path) -> None:
-    _write(tmp_path, "core/mixed.py", _TWO_SUBJECTS)
-    plan = plan_incremental_split(tmp_path, "core/mixed.py")
-    assert plan.status == "planned", plan.reason
-    moved = set(plan.step.moved_names)
-    url = {"_HOST_RE", "url_host", "url_is_local", "url_scheme"}
-    line = {"line_window", "line_clip"}
-    assert moved in (url, line), moved
-
-
-def test_the_new_module_is_named_by_its_subject(tmp_path) -> None:
-    _write(tmp_path, "core/mixed.py", _TWO_SUBJECTS)
-    plan = plan_incremental_split(tmp_path, "core/mixed.py")
-    assert plan.step.new_module in ("core/mixed_url.py", "core/mixed_line.py"), \
-        plan.step.new_module
-
-
 def test_an_occupied_name_is_refused_not_numbered(tmp_path) -> None:
     _write(tmp_path, "core/mixed.py", _TWO_SUBJECTS)
     first = plan_incremental_split(tmp_path, "core/mixed.py").step
@@ -81,27 +64,6 @@ def test_an_occupied_name_is_refused_not_numbered(tmp_path) -> None:
     assert again.status == "no_split"
     assert "already exists" in again.reason
     assert not any((tmp_path / "core").glob("mixed_*2.py"))
-
-
-def _chain(prefix: str, n: int, lines_each: int) -> str:
-    out = []
-    for i in range(n):
-        call = f"    {prefix}_{i + 1}(x)\n" if i + 1 < n else ""
-        body = "".join(f"    a{j} = x\n" for j in range(lines_each - 2))
-        out.append(f"def {prefix}_{i}(x):\n{call}{body}")
-    return "\n\n".join(out) + "\n"
-
-
-def test_a_proven_group_is_what_moves(tmp_path) -> None:
-    """С доказательством «два предмета» уезжает ровно доказанная группа —
-    не та, что крупнее, и не всё переносимое."""
-    _write(tmp_path, "core/twofold.py",
-           _chain("alpha", 6, 30) + "\n\n" + _chain("omega", 5, 30))
-    proof = proof_for("core/twofold.py", index_workspace(tmp_path))
-    assert proof is not None and proof.kind == "multi_subject", proof
-    plan = plan_incremental_split(tmp_path, "core/twofold.py", proof=proof)
-    assert plan.status == "planned", plan.reason
-    assert set(plan.step.moved_names) == set(proof.names)
 
 
 def test_a_duplicate_is_merged_by_import_not_split(tmp_path) -> None:

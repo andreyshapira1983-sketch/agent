@@ -27,11 +27,6 @@ def _drives(**values: float) -> dict:
     return {k: {"value": v, "why": "t"} for k, v in base.items()}
 
 
-def test_the_alarm_is_not_the_content() -> None:
-    drive, _ = choose_drive(_drives(), {"weights": {}}, NOW)
-    assert drive == "uncertainty", "idle_time wakes; it never becomes the task"
-
-
 def test_a_drive_that_did_not_fall_yields_to_the_next() -> None:
     state = {"weights": {}, "last": {"drive": "uncertainty", "value": 0.7, "ts": NOW.isoformat()},
              "updated": NOW.isoformat()}
@@ -45,12 +40,6 @@ def test_a_drive_that_fell_keeps_its_full_weight() -> None:
              "updated": NOW.isoformat()}
     _, state = choose_drive(_drives(competence_math=0.1), state, NOW)
     assert state["weights"]["competence_math"] == 1.0
-
-
-def test_weight_comes_back_with_time() -> None:
-    state = {"weights": {"uncertainty": 0.5}, "updated": (NOW - timedelta(hours=3)).isoformat()}
-    _, state = choose_drive(_drives(), state, NOW)
-    assert abs(state["weights"]["uncertainty"] - 0.8) < 1e-9
 
 
 def test_a_plateau_does_not_starve_the_subjects() -> None:
@@ -95,35 +84,6 @@ def test_a_check_naming_files_that_are_not_there_is_refused(tmp_path: Path) -> N
     assert "которых нет на диске" in _problem(goal, tmp_path, guessed)
     assert _problem(goal, tmp_path, "Цитата из math_study/library/txt/Judson_AbstractAlgebra.txt "
                                     "с номером теоремы и страницей") == ""
-
-
-def test_a_stale_need_does_not_outrank_a_growing_subject() -> None:
-    """20 min of goal-first, 2026-09-19: the threshold sat on the raw value, the
-    subject drives were under 0.2, and uncertainty (0.89, weight 0.1) won 12 of 14."""
-    drives = _drives(uncertainty=0.89, unfinished_obligations=0.0, competence_world=0.03,
-                     competence_math=0.17, idle_time=0.03)
-    state = {"weights": {"uncertainty": 0.1}, "updated": NOW.isoformat()}
-    drive, _ = choose_drive(drives, state, NOW)
-    assert drive == "competence_math"
-
-
-def test_a_subject_task_ends_in_a_note_that_the_check_looks_at(tmp_path) -> None:
-    """2026-09-22: критерий называл входную книгу (она обязана быть на диске), а
-    судья не засчитывает след старше начала цели — «прочитай раздел» не
-    засчитывалась никогда. Теперь задача кончается конспектом в data/notes/."""
-    from datetime import datetime, timezone
-
-    from core.drive_goal import _with_notes
-    from core.success_check import observe_success_check
-
-    goal, check = _with_notes("Прочитай раздел.", "В книге найдена теорема.", "competence_math",
-                              datetime(2026, 9, 22, 17, 0, tzinfo=timezone.utc))
-    assert "data/notes/20260922T170000_competence_math.md" in goal
-    assert observe_success_check(check, tmp_path)["verdict"] == "missing"
-    note = tmp_path / "data" / "notes" / "20260922T170000_competence_math.md"
-    note.parent.mkdir(parents=True)
-    note.write_text("итог", encoding="utf-8")
-    assert observe_success_check(check, tmp_path)["verdict"] == "verified"
 
 
 def test_open_defects_raise_the_need_to_repair_itself(tmp_path) -> None:

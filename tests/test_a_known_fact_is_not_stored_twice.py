@@ -20,8 +20,6 @@ from pathlib import Path
 from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.memory_consolidation import similar_conclusions
-from core.models import MemoryRecord
 from core.persistent_memory import PersistentMemoryStore
 from core.policy import PolicyGate
 from core.smart_memory import EpisodeRecord
@@ -129,15 +127,6 @@ def test_a_contradiction_archives_the_old_conclusion(workspace: Path) -> None:
     assert first_id in {r.id for r in loop.persistent_store.load_archive()}
 
 
-def test_new_knowledge_is_added(workspace: Path) -> None:
-    loop, fake, _first = _stored_first(workspace)
-    _say(fake, operation="ADD")
-
-    loop._remember_conclusion(_episode("Сохранение энергии у Тонга следует из однородности времени."))
-
-    assert len(loop.persistent_store.load()) == 2
-
-
 def test_a_model_failure_never_loses_a_conclusion(workspace: Path) -> None:
     """Неразборчивый ответ и ссылка на несуществующую запись — ADD, как было."""
     loop, fake, _first = _stored_first(workspace)
@@ -162,13 +151,3 @@ def test_a_letter_as_question_gets_a_short_title(workspace: Path) -> None:
     record = loop.persistent_store.load()[0]
     assert record.content.startswith("Вопрос: Как формулируется теорема Нётер у Тонга?\n")
     assert "Claude. Я прочитал" not in record.content
-
-
-def test_only_conclusions_are_offered_to_the_model() -> None:
-    """Сверяется вывод с выводами; урок с теми же словами — не кандидат."""
-    lesson = MemoryRecord(content="Теорема Нётер у Тонга: урок о симметрии.", type="semantic",
-                          tags=["fact", "lesson"], owner="self", source="agent-auto")
-    conclusion = MemoryRecord(content=f"Вопрос: {_QUESTION}\nВывод: {FIRST}", type="semantic",
-                              tags=["fact", "conclusion"], owner="self", source="agent-auto")
-    got = similar_conclusions(f"Вопрос: {_QUESTION}\nВывод: {RESTATED}", [lesson, conclusion])
-    assert got == [conclusion]

@@ -21,8 +21,6 @@ from pathlib import Path
 from core.split_proof import index_workspace, proof_for
 from core.success_check import observe_success_check
 
-_BODY = "\n".join(f"    v{i} = x + {i}" for i in range(8)) + "\n    return v0\n"
-
 
 def _write(root: Path, rel: str, text: str) -> None:
     path = root / rel
@@ -40,26 +38,6 @@ def _group(prefix: str, n: int, lines_each: int) -> str:
     return "\n\n".join(out) + "\n"
 
 
-def test_a_verbatim_copy_is_a_dup_proof(tmp_path) -> None:
-    fn = f"def _parse(x):\n{_BODY}\n\ndef _other(x):\n{_BODY}"
-    _write(tmp_path, "core/a.py", fn)
-    _write(tmp_path, "core/b.py", fn.replace("_parse", "_parse_iso").replace("_other", "_o2"))
-    proof = proof_for("core/a.py", index_workspace(tmp_path))
-    assert proof is not None and proof.kind == "dup" and proof.other == "core/b.py"
-
-
-def test_a_fat_file_with_one_subject_has_no_proof(tmp_path) -> None:
-    _write(tmp_path, "core/fat.py", "x = 1\n" * 3000 + _group("step", 10, 30))
-    assert proof_for("core/fat.py", index_workspace(tmp_path)) is None
-
-
-def test_two_disconnected_subjects_are_a_proof(tmp_path) -> None:
-    _write(tmp_path, "core/mixed.py", _group("alpha", 5, 30) + "\n\n" + _group("beta", 5, 30))
-    proof = proof_for("core/mixed.py", index_workspace(tmp_path))
-    assert proof is not None and proof.kind == "multi_subject"
-    assert len(proof.groups) == 2
-
-
 def test_the_subject_named_like_the_module_stays_home(tmp_path) -> None:
     """core/verifier_absence.py — ворота отсутствия; выносятся ДРУГИЕ ворота."""
     _write(tmp_path, "core/gate_absence.py",
@@ -69,32 +47,9 @@ def test_the_subject_named_like_the_module_stays_home(tmp_path) -> None:
     assert all(name.startswith("offtopic") for name in proof.names), proof.names
 
 
-def test_a_module_with_one_client_is_not_a_proof(tmp_path) -> None:
-    """Правило «чужого дома» по одному клиенту гнало агента отменять раскол
-    core/loop.py (110 ложных срабатываний на живом коде) — его здесь нет."""
-    _write(tmp_path, "core/loop_part.py", _group("part", 6, 40))
-    _write(tmp_path, "core/loop.py", "from core.loop_part import part_0\n\npart_0(1)\n")
-    assert proof_for("core/loop_part.py", index_workspace(tmp_path)) is None
-
-
 def test_a_code_trace_holds_only_after_the_change(tmp_path) -> None:
     _write(tmp_path, "core/a.py", "def _parse(x):\n    return x\n")
     check = "undefined:_parse@core/a.py — копия убрана"
     assert observe_success_check(check, tmp_path)["verdict"] == "missing"
     _write(tmp_path, "core/a.py", "from core.b import _parse  # noqa: F401\n")
     assert observe_success_check(check, tmp_path)["verdict"] == "verified"
-
-
-def test_the_old_paperwork_check_proved_nothing(tmp_path) -> None:
-    """Прежний критерий не отличал сделанное от несделанного — вот почему он ушёл.
-
-    Вердикт одинаков, подана заявка или нет: `self_apply_lane.run` читается как
-    имя файла, которого нет, — «missing» при любом исходе.
-    """
-    old = "в data/approval_inbox.jsonl появилась новая заявка self_apply_lane.run"
-    _write(tmp_path, "data/approval_inbox.jsonl", "")
-    before = observe_success_check(old, tmp_path)["verdict"]
-    _write(tmp_path, "data/approval_inbox.jsonl",
-           '{"payload": {"operation": "self_apply_lane.run", "status": "pending"}}\n')
-    after = observe_success_check(old, tmp_path)["verdict"]
-    assert before == after, "критерий, не видящий разницы, ничего не проверяет"

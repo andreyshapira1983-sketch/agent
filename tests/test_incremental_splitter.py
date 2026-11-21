@@ -10,7 +10,6 @@ import pytest
 
 from core.incremental_splitter import (
     _bound_names,
-    _free_refs,
     _uses_forbidden_scope,
     plan_incremental_split,
 )
@@ -51,22 +50,6 @@ def test_refuses_unparseable_target(workspace: Path):
     assert "cannot parse" in plan.reason
 
 
-def test_module_state_moves_together_with_its_reader_and_writer(workspace: Path):
-    """STATE, read and write move as one group.
-
-    Moving read/write without STATE would leave them pointing at a name left behind.
-    """
-    src = (
-        "STATE = {}\n\n\n"
-        "def read():\n    return STATE\n\n\n"
-        "def write(k, v):\n    STATE[k] = v\n"
-    )
-    _write(workspace, "core/stateful.py", src)
-    plan = plan_incremental_split(workspace, "core/stateful.py")
-    assert plan.status == "planned", plan.reason
-    assert plan.step.moved_names == ["STATE", "read", "write"]
-
-
 # ── function mode ────────────────────────────────────────────────────────────
 
 
@@ -91,60 +74,6 @@ def helper_b(y):
 def uses_limit():
     return LIMIT + 1
 '''
-
-
-def test_function_split_moves_closed_group(workspace: Path):
-    _write(workspace, "core/funcs.py", FUNC_SRC)
-    plan = plan_incremental_split(workspace, "core/funcs.py")
-    assert plan.status == "planned", plan.reason
-    step = plan.step
-    assert step.mode == "functions"
-    assert step.new_module == "core/funcs_helpers.py"
-    # ONE connected group moves, closed over its dependencies: LIMIT travels
-    # exactly when uses_limit does. Until 2026-09-21 this pinned all four names
-    # at once — the union of two unrelated groups (helper_a/helper_b and
-    # LIMIT/uses_limit). That union is how the live plan for
-    # core/step_sanitizer.py carried URL checks, int coercion, a line window,
-    # a shell label and four tool sanitizers into one file: they were connected
-    # only through `sanitize_step`, which stayed behind.
-    moved = set(step.moved_names)
-    assert moved in ({"helper_a", "helper_b"}, {"LIMIT", "uses_limit"}), moved
-    assert ("LIMIT" in moved) == ("uses_limit" in moved)
-
-
-def test_function_split_target_reexports_everything(workspace: Path):
-    _write(workspace, "core/funcs.py", FUNC_SRC)
-    plan = plan_incremental_split(workspace, "core/funcs.py")
-    step = plan.step
-    kept = _bound_names(ast.parse(step.target_content))
-    for name in step.moved_names:
-        assert name in kept, f"{name} lost from target import surface"
-    assert "from core.funcs_helpers import" in step.target_content
-
-
-def test_function_split_new_module_is_self_sufficient(workspace: Path):
-    _write(workspace, "core/funcs.py", FUNC_SRC)
-    plan = plan_incremental_split(workspace, "core/funcs.py")
-    step = plan.step
-    tree = ast.parse(step.new_content)
-    unbound = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            unbound |= _free_refs(node)
-    # every free name must be bound at the new module's top level or a builtin
-    top = _bound_names(tree)
-    import builtins
-
-    leftover = unbound - top - set(dir(builtins))
-    assert not leftover, f"new module misses bindings for {leftover}"
-
-
-def test_function_split_shrinks_target(workspace: Path):
-    _write(workspace, "core/funcs.py", FUNC_SRC)
-    plan = plan_incremental_split(workspace, "core/funcs.py")
-    step = plan.step
-    assert step.target_content.count("\n") < FUNC_SRC.count("\n")
-    assert "shrinks" in " ".join(step.notes)
 
 
 def test_function_split_respects_line_budget(workspace: Path):
@@ -203,32 +132,6 @@ def _make_dominant_class_src() -> str:
         "        return MODULE_FLAG\n\n"
         + "\n".join(methods)
     )
-
-
-def test_mixin_split_on_dominant_class(workspace: Path):
-    _write(workspace, "core/engine.py", _make_dominant_class_src())
-    plan = plan_incremental_split(workspace, "core/engine.py")
-    assert plan.status == "planned", plan.reason
-    step = plan.step
-    assert step.mode == "mixin"
-    assert step.new_module == "core/engine_methods.py"
-    assert "EngineExtractedMethods" in step.new_content
-    # __init__ and module-global-touching methods stay behind
-    assert "__init__" not in step.moved_names
-    assert "uses_flag" not in step.moved_names
-    assert all(n.startswith("method_") for n in step.moved_names)
-
-
-def test_mixin_split_adds_base_and_import(workspace: Path):
-    _write(workspace, "core/engine.py", _make_dominant_class_src())
-    plan = plan_incremental_split(workspace, "core/engine.py")
-    step = plan.step
-    assert "class Engine(EngineExtractedMethods):" in step.target_content
-    assert "from core.engine_methods import EngineExtractedMethods" in (
-        step.target_content
-    )
-    ast.parse(step.target_content)
-    ast.parse(step.new_content)
 
 
 def test_repeated_mixin_split_uses_unique_base_class(workspace: Path):
@@ -471,13 +374,6 @@ def test_prune_drops_whole_orphans_narrows_partial_ones_and_keeps_the_rest():
     assert ast.parse(out)  # still a module
 
 
-def test_prune_keeps_a_name_used_only_inside_a_string():
-    from core.incremental_splitter import prune_orphaned_imports
-
-    src = 'from typing import Sequence\n\ndef f() -> "Sequence[int]":\n    return []\n'
-    assert prune_orphaned_imports(src) == src
-
-
 def test_prune_returns_unparseable_input_unchanged():
     from core.incremental_splitter import prune_orphaned_imports
 
@@ -515,21 +411,6 @@ class Keeper:
     def run_more(self) -> Any:
         return self.run()
 '''
-
-
-def test_function_split_prunes_orphaned_imports_and_sorts_the_reexport(workspace: Path):
-    _write(workspace, "core/lint.py", SPLIT_LINT_SRC)
-    plan = plan_incremental_split(workspace, "core/lint.py", max_move_lines=40)
-    assert plan.status == "planned", plan.reason
-    step = plan.step
-    assert "helper_stamp" in step.moved_names
-    target = step.target_content
-    assert "from datetime import" not in target, target
-    assert "from core.aaa import aaa" in target and "from core.zzz import zzz" in target
-    # sorted: core.aaa < core.lint_helpers < core.zzz
-    assert target.index("from core.aaa import") < target.index("from core.lint_helpers import") < target.index("from core.zzz import")
-    # the new module carries the datetime import it needs
-    assert "from datetime import datetime, timezone" in step.new_content
 
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff не установлен")

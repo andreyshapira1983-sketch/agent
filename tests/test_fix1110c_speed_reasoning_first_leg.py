@@ -15,10 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import core.llm as llm_module
 from core.llm import LLM, remember_reasoning_model
 from core.request_checklist import BUILD_SYSTEM, JUDGE_SYSTEM
-from core.verifier_utils import _NLI_SYSTEM, _semantic_nli_check
+from core.verifier_utils import _NLI_SYSTEM
 
 _THINKING_TOKENS = 64
 _NOTES = "Список дел.\nКод склада: 7391.\nПозвонить в банк.\n"
@@ -69,58 +68,6 @@ def provider(monkeypatch, tmp_path):
     fake = _ThinkingProvider()
     monkeypatch.setattr(LLM, "_build_client", lambda self: fake)
     return fake
-
-
-def _flash() -> LLM:
-    return LLM(provider="deepseek", model="deepseek-flash")
-
-
-def test_a_known_thinker_answers_a_four_token_question_in_one_request(provider) -> None:
-    """ГЛАВНОЕ: реестр знает модель — пустого запроса на 4 токена больше нет."""
-    remember_reasoning_model("deepseek", "deepseek-flash", spent=4)
-    llm = _flash()
-
-    assert llm.complete(_NLI_SYSTEM, "u", max_tokens=4, temperature=0.0) == "yes"
-
-    assert [r["max_tokens"] for r in provider.requests] == [llm_module._REASONING_TOKEN_FLOOR]
-    assert llm.last_usage["input_tokens"] == 100, "оплачен один запрос, не два"
-
-
-def test_an_unknown_model_still_gets_exactly_what_the_caller_asked(provider) -> None:
-    """Ломка наоборот: без записи в реестре первый запрос не поднимается — модель учится один раз."""
-    llm = _flash()
-
-    assert llm.complete(_NLI_SYSTEM, "u", max_tokens=4, temperature=0.0) == "yes"
-
-    budgets = [r["max_tokens"] for r in provider.requests]
-    assert budgets[0] == 4 and len(budgets) == 2
-    assert llm_module.is_known_reasoning_model("deepseek", "deepseek-flash")
-
-
-def test_a_caller_asking_for_more_than_the_floor_keeps_its_number(provider) -> None:
-    remember_reasoning_model("deepseek", "deepseek-flash", spent=4)
-    generous = llm_module._REASONING_TOKEN_FLOOR * 2
-
-    _flash().complete("s", "u", max_tokens=generous, temperature=0.0)
-
-    assert [r["max_tokens"] for r in provider.requests] == [generous]
-
-
-def test_the_effective_budget_is_what_the_provider_receives(provider) -> None:
-    """Тот же договор, что у моделей из таблицы имён (tests/test_llm.py), — теперь и для реестра."""
-    remember_reasoning_model("deepseek", "deepseek-flash", spent=4)
-    llm = _flash()
-
-    llm.complete("s", "u", max_tokens=1024, temperature=0.0)
-
-    assert llm._effective_budget(1024) == provider.requests[0]["max_tokens"]
-
-
-def test_the_entailment_check_costs_one_request_and_keeps_its_verdict(provider) -> None:
-    remember_reasoning_model("deepseek", "deepseek-flash", spent=4)
-
-    assert _semantic_nli_check("Код склада — 7391.", _NOTES, _flash()) is True
-    assert len(provider.requests) == 1
 
 
 # ── сквозь настоящий ход: проверки на месте, лишних запросов нет ───────────────

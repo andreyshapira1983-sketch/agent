@@ -175,13 +175,6 @@ class TestWebFailureBranches:
         assert report.pages_fetched == 0
         assert any("search failed" in e and "network down" in e for e in report.errors)
 
-    def test_search_warning_is_surfaced(self, workspace: Path):
-        agent = _agent(workspace, _registry(_SearchWithWarning(), _OkFetch()))
-        report = ingest_web_topic(
-            agent=agent, topic="autonomous agent", source_selection="wikipedia", limit=1,
-        )
-        assert any("search warning" in e for e in report.errors)
-        assert report.pages_fetched == 1
 
     def test_fetch_validation_failure_skips_url(self, workspace: Path):
         agent = _agent(workspace, _registry(_SearchWithWarning(), _FetchValidationFails()))

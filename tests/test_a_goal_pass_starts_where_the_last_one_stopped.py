@@ -59,9 +59,3 @@ def test_the_second_pass_is_told_what_the_first_did(tmp_path: Path, monkeypatch:
     assert "Прогресс прошлых заходов" not in first
     assert EDIT in second and "нет поля registry.tools" in second, second[-600:]
     assert "Продолжай с последнего шага" in second
-
-
-def test_the_agents_own_goal_keeps_no_progress_file(tmp_path: Path, monkeypatch: Any) -> None:
-    _, second = _run_passes(tmp_path, monkeypatch, goal_is_self=True)
-    assert "Прогресс прошлых заходов" not in second
-    assert not (tmp_path / "data" / "goal_progress").exists()

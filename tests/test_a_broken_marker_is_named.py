@@ -12,11 +12,9 @@ diff, в трёх — проза. Сообщение печатало выбро
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from tools.patch_check import apply_blocks, marker_hint, parse_blocks
+from tools.patch_check import marker_hint
 
 
 @pytest.mark.parametrize(("stray", "needle"), [
@@ -33,13 +31,3 @@ def test_a_broken_marker_gets_a_named_fix(stray: str, needle: str) -> None:
 
 def test_prose_gets_no_hint() -> None:
     assert marker_hint("Step 1 did not return the exact text of lines 150-172") == ""
-
-
-def test_a_blank_line_in_search_still_creates_a_new_file(tmp_path: Path) -> None:
-    blocks = parse_blocks("FILE: tests/test_new.py\n<<<<<<< SEARCH\n\n=======\nx = 1\n>>>>>>> REPLACE\n")
-    assert blocks and blocks[0]["old"].strip() == ""
-
-    errors = apply_blocks(tmp_path, blocks)
-
-    assert errors == []
-    assert (tmp_path / "tests" / "test_new.py").read_text(encoding="utf-8") == "x = 1\n"

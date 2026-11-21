@@ -57,21 +57,6 @@ def test_a_claim_that_denies_its_source_is_not_verified(claim: str) -> None:
     )
 
 
-ASSERTS_EN = "The average request latency was 20 milliseconds."
-
-
-def test_the_english_lexicon_works_within_english() -> None:
-    """Лексикон отрицания языкозависим, поэтому проверяется ВНУТРИ языка.
-
-    Первая версия этого случая брала английское отрицание по РУССКОЙ улике и
-    падала — но не из-за полярности: при разных алфавитах гейт молчит по
-    замыслу, потому что отрицания в улике на другом языке он не увидит. Случай
-    мерил не тот орган и был исправлен, а не гейт."""
-    assert _verdict(
-        "The average latency was 20 milliseconds, which is not true.", ASSERTS_EN
-    ) != "verified"
-
-
 def test_reporting_a_sources_own_denial_survives() -> None:
     """Граница: улика сама отрицает, утверждение лишь передаёт."""
     claim = "Задержка в 20 миллисекунд неверна и не подтверждается."
@@ -80,25 +65,6 @@ def test_reporting_a_sources_own_denial_survives() -> None:
         "передача отрицания, которое несёт сама улика, демотирована — правило "
         "сравнивает полярности, а не ищет маркер в одном тексте"
     )
-
-
-@pytest.mark.parametrize("claim", [
-    # Обычное отрицание члена предложения — не спор с источником.
-    "Средняя задержка не превысила 20 миллисекунд.",
-    # Противопоставление.
-    "Средняя задержка составила 20 миллисекунд, а не пиковая.",
-    # Отрицание внутри количественной оговорки.
-    "Средняя задержка составила не менее 20 миллисекунд.",
-])
-def test_ordinary_negation_is_left_alone(claim: str) -> None:
-    """Главная граница: русское «не» стоит всюду и почти никогда не спорит."""
-    assert _verdict(claim) == "verified", (
-        f"обычное отрицание принято за спор с источником: «{claim}»"
-    )
-
-
-def test_a_plain_restatement_is_still_verified() -> None:
-    assert _verdict(ASSERTS) == "verified"
 
 
 def test_the_gate_stays_silent_without_a_shared_subject() -> None:

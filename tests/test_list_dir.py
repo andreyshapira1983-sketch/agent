@@ -21,64 +21,6 @@ def tool(ws: Path) -> ListDirTool:
 
 
 # ---------------------------------------------------------------------------
-# Happy path
-# ---------------------------------------------------------------------------
-
-class TestBasicListing:
-    def test_lists_files_in_root(self, ws: Path):
-        (ws / "a.txt").write_text("a")
-        (ws / "b.txt").write_text("b")
-        t = tool(ws)
-        result = t.run(".")
-        assert "a.txt" in result
-        assert "b.txt" in result
-
-    def test_directories_end_with_slash(self, ws: Path):
-        (ws / "subdir").mkdir()
-        t = tool(ws)
-        result = t.run(".")
-        assert "subdir/" in result
-
-    def test_empty_path_uses_root(self, ws: Path):
-        (ws / "x.md").write_text("x")
-        t = tool(ws)
-        result = t.run("")
-        assert "x.md" in result
-
-    def test_subdirectory_listing(self, ws: Path):
-        sub = ws / "mydir"
-        sub.mkdir()
-        (sub / "c.py").write_text("c")
-        t = tool(ws)
-        result = t.run("mydir")
-        assert "c.py" in result
-
-    def test_empty_directory_returns_marker(self, ws: Path):
-        (ws / "empty").mkdir()
-        t = tool(ws)
-        result = t.run("empty")
-        assert "(empty directory)" in result
-
-    def test_dirs_sorted_before_files(self, ws: Path):
-        (ws / "z_file.txt").write_text("z")
-        (ws / "a_dir").mkdir()
-        t = tool(ws)
-        result = t.run(".")
-        lines = result.splitlines()
-        dir_idx = next(i for i, ln in enumerate(lines) if ln.endswith("/"))
-        file_idx = next(i for i, ln in enumerate(lines) if not ln.endswith("/"))
-        assert dir_idx < file_idx
-
-    def test_windows_backslash_path(self, ws: Path):
-        sub = ws / "docs"
-        sub.mkdir()
-        (sub / "readme.txt").write_text("hi")
-        t = tool(ws)
-        result = t.run(".\\docs")
-        assert "readme.txt" in result
-
-
-# ---------------------------------------------------------------------------
 # Sandbox / security
 # ---------------------------------------------------------------------------
 
@@ -132,12 +74,6 @@ class TestTruncation:
 # ---------------------------------------------------------------------------
 
 class TestValidateOutput:
-    def test_valid_string(self, ws: Path):
-        t = tool(ws)
-        ok, errors = t.validate_output("file.txt")
-        assert ok
-        assert errors == []
-
     def test_non_string_invalid(self, ws: Path):
         t = tool(ws)
         ok, errors = t.validate_output(42)

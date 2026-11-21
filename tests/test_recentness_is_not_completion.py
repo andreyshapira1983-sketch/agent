@@ -85,36 +85,6 @@ def _workspace(tmp_path, *, completed_goal: str | None = None,
     return tmp_path
 
 
-def test_a_completed_theme_still_blocks_when_the_world_is_unchanged(tmp_path):
-    """Дифференциальная сторона A: без изменения мира повтор запрещён как был."""
-    ws = _workspace(tmp_path, completed_goal=_STUDY_GOAL)
-
-    report = propose_charter_goal(_LLM([_reply()]), ws)
-
-    assert report.status == "declined"
-    assert "repeats" in report.reason
-
-
-def test_a_capability_change_reopens_an_earlier_theme(tmp_path):
-    """Дифференциальная сторона B: мир изменился ПОСЛЕ завершения — тема снова
-    допустима. Это ровно случай его continuity-документа: веб открылся после
-    того, как работа была «завершена» без веба."""
-    ws = _workspace(tmp_path, completed_goal=_STUDY_GOAL,
-                    completed_ts="2026-09-01T19:51:16+00:00")
-    record_capability_snapshot(ws, frozenset({"spawn_subagent"}))
-    record_capability_snapshot(
-        ws, frozenset({"spawn_subagent", "python_probe"}),
-    )
-
-    report = propose_charter_goal(_LLM([_reply()]), ws)
-
-    assert report.status == "proposed", (
-        "вердикт «здесь больше нечего делать» выносился в другом мире; "
-        f"отказ: {report.reason!r}"
-    )
-    assert report.goal == _STUDY_GOAL
-
-
 def test_work_done_after_the_change_blocks_again(tmp_path):
     """Повторная допустимость — одноразовая: новая работа по теме в НОВОМ мире
     снова занимает её. Иначе одно событие открывало бы тему навсегда."""

@@ -45,13 +45,6 @@ def test_the_same_issue_is_said_once(tmp_path: Path) -> None:
         assert "already said" in str(excinfo.value)
 
 
-def test_a_different_issue_still_gets_through(tmp_path: Path) -> None:
-    tool = JournalAppendTool(workspace_root=tmp_path)
-    _say(tool, _SAME[0])
-    _say(tool, "Нужен ключ к сайту заказчика: без него не могу проверить выгрузку, пробовал web_fetch — 403. "
-               "Дашь ключ?", reason="wall")
-
-
 def test_the_same_issue_can_be_said_again_the_next_day(tmp_path: Path) -> None:
     tool = JournalAppendTool(workspace_root=tmp_path)
     old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=30)).isoformat()

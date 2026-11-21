@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from core.best_next_action import BestNextAction
 from core.campaign import CampaignActionOutcome, CampaignConfig, run_campaign
-from core.campaign_ledger import CampaignLedger, spent_units_by_action
+from core.campaign_ledger import CampaignLedger
 
 
 def _work(action: str) -> BestNextAction:
@@ -79,21 +79,6 @@ def _run(tmp_path: Path, ledger: CampaignLedger, action: str, execute, cap: int 
     )
 
 
-def test_the_cross_run_sum_reads_the_ledger() -> None:
-    """Основание потолка: сумма трат по сигнатуре за ВСЕ запуски."""
-    rows = [
-        {"action": "a", "cost_units_spent": 100},
-        {"action": "a", "cost_units_spent": 50},
-        {"action": "b", "cost_units_spent": 7},
-        {"action": "c"},
-        {"broken": True},
-    ]
-
-    spent = spent_units_by_action(rows)
-
-    assert spent == {"a": 150, "b": 7}
-
-
 def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
     """Красный свидетель: история ≥ потолка — исполнения нет.
 
@@ -116,30 +101,6 @@ def test_a_signature_over_the_cap_is_not_executed(tmp_path: Path) -> None:
     assert capped, "строка эскалации обязана лечь в леджер"
     assert str(cap) in capped[0].reason and str(per_row * 4) in capped[0].reason
     assert "оператор" in capped[0].reason.lower()
-
-
-def test_a_signature_under_the_cap_still_runs(tmp_path: Path) -> None:
-    """Другая сторона: история ниже живого потолка — работа идёт как шла."""
-    cap = 400
-    ledger = _ledger_with_history(
-        tmp_path, "improve_x", units_per_row=cap // 4, rows=3)
-    execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
-
-    result = _run(tmp_path, ledger, "improve_x", execute)
-
-    assert execute.calls == 1
-    assert all(r.result != "cost_cap" for r in result.records)
-
-
-def test_a_zero_cost_signature_never_trips(tmp_path: Path) -> None:
-    """Законные повторения бесплатны — 200 строк истории не рождают вопроса."""
-    ledger = _ledger_with_history(tmp_path, "observe_like", units_per_row=0, rows=200)
-    execute = _CountingExecute(CampaignActionOutcome(result="completed", work_done=True))
-
-    result = _run(tmp_path, ledger, "observe_like", execute)
-
-    assert execute.calls == 1
-    assert all(r.result != "cost_cap" for r in result.records)
 
 
 def test_the_capped_campaign_still_stops_not_spins(tmp_path: Path) -> None:

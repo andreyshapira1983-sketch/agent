@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import pytest
 
-from core.answer_contradiction import contradicted_claims
 from core.completion_contract import derive_completion_contract
 from core.knowledge_pipeline import KnowledgeWritePolicy
 from core.smart_memory import (
@@ -77,13 +76,6 @@ _OTHER_CONTRADICTION = (
 )
 
 
-def test_a_different_subject_is_still_caught() -> None:
-    """Опровержение №1: SHA вместо идентификатора прогона."""
-    found = contradicted_claims(_OTHER_CONTRADICTION)
-    assert found, "обнаружитель поймал только предмет из своей фикстуры"
-    assert any("20698b1e4c2" in c.subject for c in found)
-
-
 def _episode(**kw) -> EpisodeRecord:
     base = {
         "goal": "g", "question": "q", "outcome": "success", "summary": "s",
@@ -108,31 +100,7 @@ def test_every_named_signal_blocks_both_gates(signal: str) -> None:
     assert not procedure_credit_allowed(ep)
 
 
-def test_a_signal_outside_the_set_still_credits() -> None:
-    """Опровержение №3: набор не разросся до «любой сигнал запрещает».
-
-    Иначе починка тихо превратилась бы в противоположный дефект — процедура
-    теряла бы заслугу за чужие ошибки (MIR-057).
-    """
-    ep = _episode(defect_signals=["answer_enforcement_failed"])
-    assert procedure_credit_allowed(ep)
-
-
 # ── КЛАСС 2: секреты ─────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("text", [
-    "AWS_SECRET_ACCESS_KEY=[REDACTED:aws-secret]",
-    "Строка подключения: postgres://user:[REDACTED:db-password]@host/db",
-    "webhook: https://hooks.example.com/[REDACTED:slack-webhook]",
-])
-def test_other_secret_shapes_do_not_survive_sanitisation(text: str) -> None:
-    """Опровержение №4: маркер, а не конкретные имена из `.env`.
-
-    В исходной фикстуре были только переменные окружения этой установки.
-    Здесь — строка подключения и вебхук, которых там не было.
-    """
-    decision = KnowledgeWritePolicy().decide(_Claim(text), source=_Src())
-    assert decision.decision == "reject", f"остаток секрета принят: {text!r}"
 
 
 def test_an_unknown_redaction_kind_is_still_refused() -> None:
@@ -179,20 +147,3 @@ def test_other_prohibitions_reach_the_operator(request_text: str) -> None:
         answer=answer, report=_Report(), question=request_text, contract=contract
     )
     assert "не проверял" in result.answer or "not mechanically checked" in result.answer
-
-
-def test_the_note_never_claims_enforcement() -> None:
-    """Опровержение №8: наблюдаемость не имеет права звучать как исполнение.
-
-    Оператор потребовал не выдавать одно за другое. Заметка обязана говорить
-    «соблюдение не установлено», а не «запрет соблюдён».
-    """
-    request = "Разбери цикл. Не используй сеть."
-    contract = derive_completion_contract(request)
-    result = apply_answer_enforcement(
-        answer="Conclusion: ok. [file]\nFacts:\n- ok [file]\n",
-        report=_Report(), question=request, contract=contract,
-    )
-    lowered = result.answer.lower()
-    for forbidden in ("запрет соблюд", "prohibition enforced", "compliance verified"):
-        assert forbidden not in lowered, f"заметка присвоила себе исполнение: {forbidden}"

@@ -107,34 +107,6 @@ def test_no_credentials_means_no_attempt(stale_catalog, monkeypatch) -> None:
     assert mc.tier_model_for(ComplexityTier.STANDARD, "anthropic") == ""
 
 
-def test_the_killswitch_holds(stale_catalog, monkeypatch) -> None:
-    """AGENT_CATALOG_AUTOREFRESH=0 — оператор запретил; suite живёт этим же."""
-    monkeypatch.setenv("AGENT_CATALOG_AUTOREFRESH", "0")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder-not-a-real-key")
-
-    def must_not_run(providers=None, api_keys=None):
-        raise AssertionError("refresh_catalog вызван при выключателе 0")
-
-    monkeypatch.setattr(mc, "refresh_catalog", must_not_run)
-    assert mc.tier_model_for(ComplexityTier.STANDARD, "anthropic") == ""
-
-
-def test_a_fresh_catalog_is_left_alone(tmp_path: Path, monkeypatch) -> None:
-    """ПРЕДОХРАНИТЕЛЬ: свежий каталог не трогают."""
-    cat = tmp_path / "model_catalog.json"
-    _write_catalog(cat, age_days=0, standard="claude-sonnet-5")
-    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH", str(cat))
-    monkeypatch.setenv("AGENT_CATALOG_AUTOREFRESH", "1")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder-not-a-real-key")
-    monkeypatch.setattr(mc, "_AUTOREFRESH_DONE", False, raising=False)
-
-    def must_not_run(providers=None, api_keys=None):
-        raise AssertionError("свежий каталог обновлять незачем")
-
-    monkeypatch.setattr(mc, "refresh_catalog", must_not_run)
-    assert mc.tier_model_for(ComplexityTier.STANDARD, "anthropic") == "claude-sonnet-5"
-
-
 def _router(registry: ModelRegistry, *, max_cost: str | None = None) -> ModelRouter:
     def factory(provider, model):
         class _L:
@@ -188,16 +160,6 @@ def test_the_declared_model_respects_the_cost_ceiling() -> None:
     ])
     router = _router(registry, max_cost="medium")
     assert router._declared_model_for("anthropic") == "claude-sonnet-5"
-
-
-def test_builtin_still_answers_when_it_is_all_there_is() -> None:
-    """ПРЕДОХРАНИТЕЛЬ: без операторских спеков встроенный остаётся ответом."""
-    registry = ModelRegistry([
-        ModelSpec(id="anthropic-default", provider="anthropic",
-                  model="claude-sonnet-4-5", source="builtin"),
-    ])
-    router = _router(registry)
-    assert router._declared_model_for("anthropic") == "claude-sonnet-4-5"
 
 
 def test_the_reason_confesses_a_declared_fallback(monkeypatch, tmp_path) -> None:

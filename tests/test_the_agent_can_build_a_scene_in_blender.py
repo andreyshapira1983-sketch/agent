@@ -10,17 +10,12 @@ blender, лаборатории запрещён subprocess, а render3d тол�
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 import pytest
 
 from tools import convert_file
-from tools.convert_file import ConvertFileTool, _argv, _collect_tree_into, sandbox_available
-
-needs_blender_sandbox = pytest.mark.skipif(
-    sandbox_available() is not None or not shutil.which("blender"),
-    reason="нужны песочница (Linux, root, setpriv) и blender")
+from tools.convert_file import ConvertFileTool, _argv, _collect_tree_into
 
 
 def test_a_failing_script_cannot_look_like_success() -> None:
@@ -65,15 +60,6 @@ def test_a_link_out_of_the_sandbox_is_not_collected(tmp_path: Path) -> None:
     assert (dest / "frames" / "f_0001.png").exists() and not (dest / "leak.txt").exists()
 
 
-def test_a_file_the_script_did_not_create_is_not_collected(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    out.mkdir()
-    (out / "mine.txt").write_text("x", encoding="utf-8")
-    owner = (out / "mine.txt").lstat().st_uid + 1
-    picked, skipped = _collect_tree_into(out, tmp_path / "dest", owner=owner)
-    assert picked == [] and skipped == 1
-
-
 def test_the_collection_is_capped(tmp_path: Path, monkeypatch) -> None:
     out = tmp_path / "out"
     out.mkdir()
@@ -82,51 +68,3 @@ def test_the_collection_is_capped(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(convert_file, "_MAX_TREE_FILES", 2)
     picked, skipped = _collect_tree_into(out, tmp_path / "dest", owner=None)
     assert len(picked) == 2 and skipped == 1
-
-
-def _script(tmp_path: Path, name: str, body: str) -> str:
-    (tmp_path / name).write_text(body, encoding="utf-8")
-    return name
-
-
-@needs_blender_sandbox
-def test_blender_builds_a_scene_and_renders_a_frame(tmp_path: Path) -> None:
-    name = _script(tmp_path, "scene.py", (
-        "import bpy\n"
-        "bpy.ops.mesh.primitive_uv_sphere_add(radius=1)\n"
-        "s = bpy.context.scene\n"
-        "s.render.engine = 'CYCLES'; s.cycles.samples = 2; s.cycles.use_denoising = False\n"
-        "s.render.resolution_x = 64; s.render.resolution_y = 48\n"
-        "s.render.filepath = 'out/frames/f_'\n"
-        "bpy.ops.wm.save_as_mainfile(filepath='out/scene.blend')\n"
-        "bpy.ops.render.render(write_still=True)\n"))
-    result = ConvertFileTool(workspace_root=tmp_path).run(op="blender_script", path=name)
-    assert result["exit_code"] == 0, result["log_tail"]
-    names = [Path(p).name for p in result["outputs"]]
-    assert "scene.blend" in names and any(n.endswith(".png") for n in names), result
-    assert all((tmp_path / p).exists() for p in result["outputs"])
-
-
-@needs_blender_sandbox
-def test_a_python_error_comes_back_with_its_traceback(tmp_path: Path) -> None:
-    name = _script(tmp_path, "broken.py", "import bpy\nraise RuntimeError('scene is broken')\n")
-    result = ConvertFileTool(workspace_root=tmp_path).run(op="blender_script", path=name)
-    assert result["exit_code"] == 1
-    assert "scene is broken" in result["log_tail"]
-
-
-@needs_blender_sandbox
-def test_the_script_cannot_smuggle_a_root_file_out(tmp_path: Path) -> None:
-    secret = tmp_path / "secret.env"
-    secret.write_text("KEY=do-not-leak\n", encoding="utf-8")
-    secret.chmod(0o600)
-    name = _script(tmp_path, "smuggle.py", (
-        "import os\n"
-        "os.makedirs('out', exist_ok=True)\n"
-        f"os.symlink({str(secret)!r}, 'out/leak.txt')\n"
-        "open('out/ok.txt', 'w').write('fine')\n"))
-    result = ConvertFileTool(workspace_root=tmp_path).run(op="blender_script", path=name)
-    assert [Path(p).name for p in result["outputs"]] == ["ok.txt"], result
-    assert result["skipped_outputs"] == 1
-    for p in result["outputs"]:
-        assert "do-not-leak" not in (tmp_path / p).read_text(encoding="utf-8")

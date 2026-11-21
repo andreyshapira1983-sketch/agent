@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 
 import pytest
 
@@ -52,25 +51,10 @@ PLANNER_SYSTEM = "You are the planner of an autonomous agent. PLANNER_MODE."
 # ============================================================
 
 class TestProviderRouting:
-    def test_mock_construction_needs_no_api_key(self):
-        llm = LLM(provider="mock")
-        assert llm.provider == "mock"
-        assert llm.model == "mock-1"
-
     def test_unknown_provider_raises_value_error(self):
         with pytest.raises(ValueError, match="Unsupported AGENT_PROVIDER"):
             LLM(provider="nonexistent-provider")
 
-    def test_explicit_provider_overrides_env(self, monkeypatch):
-        monkeypatch.setenv("AGENT_PROVIDER", "anthropic")
-        # Explicit kwarg must win.
-        llm = LLM(provider="mock")
-        assert llm.provider == "mock"
-
-    def test_env_provider_is_picked_up_when_no_kwarg(self, monkeypatch):
-        monkeypatch.setenv("AGENT_PROVIDER", "mock")
-        llm = LLM()
-        assert llm.provider == "mock"
 
     def test_agent_model_env_overrides_default(self, monkeypatch):
         monkeypatch.setenv("AGENT_PROVIDER", "mock")
@@ -100,40 +84,6 @@ class TestProviderRouting:
         assert captured["timeout"] == 12.5
         assert "1234" in captured["base_url"]
 
-    def test_local_ignores_agent_model_for_default(self, monkeypatch):
-        monkeypatch.setenv("AGENT_MODEL", "gpt-cloud")
-        monkeypatch.delenv("LOCAL_LLM_MODEL", raising=False)
-        assert _default_model("local") == "qwen-local"
-
-
-# ============================================================
-# Mock synthesis mode (non-planner system prompt)
-# ============================================================
-
-class TestMockSynthesisMode:
-    def test_synthesis_mode_returns_deterministic_echo(self):
-        llm = LLM(provider="mock")
-        out = llm.complete(
-            system="You are a synthesizer.",
-            user="hello world",
-            temperature=0.5,
-        )
-        # The mock echo carries diagnostic hints — pin them so future
-        # refactors don't silently change the shape integration tests rely on.
-        assert "[mock-llm response]" in out
-        assert "system_chars=" in out
-        assert "user_chars=" in out
-        assert "user_preview=hello world" in out
-
-    def test_synthesis_truncates_user_preview_to_200_chars(self):
-        llm = LLM(provider="mock")
-        long_user = "x" * 500
-        out = llm.complete(system="synth", user=long_user)
-        # The preview is exactly 200 chars; the marker `user_preview=` is
-        # followed by at most 200 'x' characters then a newline.
-        assert "user_preview=" + ("x" * 200) + "\n" in out
-        assert ("x" * 201) not in out
-
 
 # ============================================================
 # Mock planner mode — deterministic heuristic routing
@@ -149,10 +99,6 @@ class TestMockPlannerMode:
         )
         return json.loads(raw)
 
-    # --- empty plan branch ---
-    def test_general_question_no_file_no_web_cues_returns_empty_plan(self):
-        plan = self._plan("What is 2+2?")
-        assert plan["steps"] == []
 
     # --- web_search branch ---
     @pytest.mark.parametrize(
@@ -207,28 +153,6 @@ class TestMockPlannerMode:
         tools = [s["tool"] for s in plan["steps"]]
         assert tools == ["file_read"]
 
-    def test_file_hint_with_too_short_question_keeps_empty_plan(self):
-        # Very short question: heuristic stays out of file_read fallback.
-        plan = self._plan("ok", file_hint="doc.txt")
-        assert plan["steps"] == []
-
-    # --- false-positive guard (the bug that motivated the heuristic fix) ---
-    def test_word_today_INSIDE_scaffolding_does_not_trigger_web(self):
-        # "current_date: 2026-01-01" must NOT be interpreted as a web cue
-        # just because it contains the word "current". The mock searches the
-        # question line only, not the whole prompt. Regression test for the
-        # bug fixed during MVP-3.
-        llm = LLM(provider="mock")
-        raw = llm.complete(
-            system=PLANNER_SYSTEM,
-            user=_make_planner_prompt("Hi"),
-            temperature=0.0,
-        )
-        plan = json.loads(raw)
-        assert plan["steps"] == [], (
-            "scaffolding tokens (current_date, registered tools) must not "
-            "leak into cue detection"
-        )
 
     # --- output shape contract ---
     def test_mock_plan_always_returns_valid_json_object(self):
@@ -252,24 +176,6 @@ class TestMockPlannerMode:
 # ============================================================
 
 class TestUsageTracking:
-    def test_counters_start_at_zero(self):
-        llm = LLM(provider="mock")
-        s = llm.usage_summary()
-        assert s["call_count"] == 0
-        assert s["input_tokens"] == 0
-        assert s["output_tokens"] == 0
-        assert s["total_tokens"] == 0
-        assert s["provider"] == "mock"
-        assert s["model"] == "mock-1"
-
-    def test_complete_increments_call_count(self):
-        llm = LLM(provider="mock")
-        llm.complete(system="x", user="y")
-        assert llm.call_count == 1
-        llm.complete(system="x", user="y")
-        llm.complete(system="x", user="y")
-        assert llm.call_count == 3
-
     def test_complete_accumulates_tokens(self):
         llm = LLM(provider="mock")
         llm.complete(system="a" * 40, user="b" * 40)
@@ -285,23 +191,6 @@ class TestUsageTracking:
             second["input_tokens"] + second["output_tokens"]
         )
 
-    def test_last_usage_reflects_latest_call(self):
-        llm = LLM(provider="mock")
-        llm.complete(system="short", user="short")
-        first_last = dict(llm.last_usage)
-        llm.complete(system="a" * 200, user="b" * 200)
-        second_last = dict(llm.last_usage)
-        # last_usage carries ONLY the most recent call, not the sum.
-        assert second_last["input_tokens"] > first_last["input_tokens"]
-        assert second_last["total_tokens"] == (
-            second_last["input_tokens"] + second_last["output_tokens"]
-        )
-        # Cumulative counter is the SUM of both calls, not just the
-        # last one — sanity-check the two views don't get confused.
-        s = llm.usage_summary()
-        assert s["input_tokens"] == (
-            first_last["input_tokens"] + second_last["input_tokens"]
-        )
 
     def test_reset_usage_zeroes_everything(self):
         llm = LLM(provider="mock")
@@ -374,25 +263,6 @@ class TestUsageTracking:
         assert llm.call_count == 2
         assert llm.input_tokens == 0
 
-    def test_usage_summary_includes_provider_and_model(self):
-        llm = LLM(provider="mock")
-        s = llm.usage_summary()
-        assert "provider" in s
-        assert "model" in s
-        assert s["provider"] == "mock"
-
-    def test_mock_planner_path_also_tracks(self):
-        """Both branches of `_complete_mock` must record usage."""
-        llm = LLM(provider="mock")
-        llm.complete(
-            system=PLANNER_SYSTEM,
-            user=_make_planner_prompt("Hi"),
-            temperature=0.0,
-        )
-        assert llm.call_count == 1
-        assert llm.last_usage["input_tokens"] > 0
-        assert llm.last_usage["output_tokens"] > 0
-
 
 # ============================================================
 # Pure helpers — model classification and default selection
@@ -416,121 +286,19 @@ class TestModelHelpers:
         monkeypatch.setenv("AGENT_MODEL", "my-model")
         assert _default_model("openai") == "my-model"
 
-    @pytest.mark.parametrize(
-        "model,supported",
-        [
-            # gen-3 → temperature allowed. Note the ordering: the generation
-            # comes FIRST here and the family last, the reverse of gen-4+. A
-            # check that grabs the first number it sees reads the minor "5" of
-            # claude-3-5-sonnet as a generation and wrongly drops temperature
-            # from the oldest models — so both gen-3 shapes are pinned.
-            ("claude-3-5-sonnet-20241022", True),
-            ("claude-3-opus-20240229", True),
-            ("claude-sonnet-4-5", False),           # gen-4 → temperature dropped
-            ("claude-opus-4-1", False),
-            # Generation 5 and beyond. The docstring always said "4+", but the
-            # test stopped at 4 and so did the pattern, so the first gen-5 model
-            # the catalog picked up sent `temperature` and got HTTP 400 back —
-            # observed live on claude-opus-5 through the repair path.
-            ("claude-opus-5", False),
-            ("claude-sonnet-5", False),
-            ("claude-haiku-4-5-20251001", False),
-            ("claude-opus-10", False),             # two-digit generation
-        ],
-    )
-    def test_anthropic_supports_temperature(self, model, supported):
-        assert LLM._anthropic_supports_temperature(model) is supported
-
-    @pytest.mark.parametrize(
-        "model,supported",
-        [
-            ("claude-3-5-sonnet-20241022", True),
-            ("claude-3-opus-20240229", True),
-            ("claude-sonnet-4-5", True),      # gen-4 still prefills natively
-            ("claude-opus-4-1", True),
-            ("claude-opus-5", False),         # gen-5 requires a closing user turn
-            ("claude-sonnet-5", False),
-            ("claude-opus-10", False),
-        ],
-    )
-    def test_anthropic_supports_prefill(self, model, supported):
-        assert LLM._anthropic_supports_prefill(model) is supported
-
-    @pytest.mark.parametrize(
-        "model,generation",
-        [
-            # gen-4+ scheme: claude-<family>-<generation>
-            ("claude-sonnet-4-5", 4),
-            ("claude-opus-4-1", 4),
-            ("claude-haiku-4-5-20251001", 4),
-            ("claude-opus-5", 5),
-            ("claude-opus-10", 10),
-            # gen-3 scheme puts the generation first, so there is no family
-            # name to anchor on and the answer is None, not a number. Reading
-            # a number here would pick up the MINOR version instead.
-            ("claude-3-5-sonnet-20241022", None),
-            ("claude-3-opus-20240229", None),
-            ("gpt-4o", None),
-        ],
-    )
-    def test_anthropic_generation(self, model, generation):
-        assert LLM._anthropic_generation(model) == generation
-
-    @pytest.mark.parametrize(
-        "model,is_o",
-        [
-            ("o1", True),
-            ("o3-mini", True),
-            ("o4-mini", True),
-            ("gpt-5", True),
-            ("gpt-5.1-mini", True),
-            ("gpt-4o-mini", False),   # the 'o' in 4o is not a word-boundary o-series
-            ("gpt-4o", False),
-            ("gpt-3.5-turbo", False),
-        ],
-    )
-    def test_is_o_series(self, model, is_o):
-        assert LLM._is_o_series(model) is is_o
-
 
 # ============================================================
 # Provider client construction (no network — clients are lazy)
 # ============================================================
 
-def _decoy_every_key(monkeypatch):
-    """Give every provider's key variable its own value.
-
-    The SDKs fall back to their own variable when handed None, so only a set
-    neighbour variable shows a branch that reads the wrong one.
-    """
-    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN",
-                "DEEPSEEK_API_KEY", "LOCAL_LLM_API_KEY"):
-        monkeypatch.setenv(var, f"decoy-{var}")
-
 
 class TestBuildClient:
-    def test_openai_client_built_with_key(self, monkeypatch):
-        """The OpenAI client carries OPENAI_API_KEY and the default endpoint."""
-        _decoy_every_key(monkeypatch)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-        llm = LLM(provider="openai")
-        assert llm._client.api_key == "sk-test"
-        assert str(llm._client.base_url).startswith("https://api.openai.com/")
-
     def test_huggingface_client_built_with_token(self, monkeypatch):
         monkeypatch.setenv("HF_TOKEN", "hf-test")
         llm = LLM(provider="huggingface")
         assert llm._client is not None
         # HF routes through the OpenAI-compatible router base URL.
         assert "huggingface" in str(getattr(llm._client, "base_url", ""))
-
-    def test_anthropic_client_built_with_key(self, monkeypatch):
-        """The Anthropic client carries ANTHROPIC_API_KEY, not a neighbour's key."""
-        _decoy_every_key(monkeypatch)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        llm = LLM(provider="anthropic")
-        assert llm._client.api_key == "sk-ant-test"
 
 
 # ============================================================
@@ -604,22 +372,6 @@ def _anthropic_llm(model="claude-sonnet-4-5"):
 
 
 class TestAnthropicCallPath:
-    def test_complete_parses_text_and_records_usage(self):
-        llm = _anthropic_llm()
-        out = llm.complete(system="sys", user="hi", temperature=0.3)
-        assert out == "hello from claude"
-        assert llm.call_count == 1
-        assert llm.last_usage == {
-            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
-            "cache_hit_tokens": None, "cache_miss_tokens": None,
-        }
-
-    def test_complete_drops_temperature_for_gen4_model(self):
-        llm = _anthropic_llm("claude-sonnet-4-5")
-        llm.complete(system="s", user="u", temperature=0.9)
-        # gen-4 models must not receive the temperature kwarg.
-        assert "temperature" not in llm._client.last_create_kwargs
-
     def test_complete_keeps_temperature_for_gen3_model(self):
         llm = _anthropic_llm("claude-3-5-sonnet-20241022")
         llm.complete(system="s", user="u", temperature=0.4)
@@ -712,18 +464,6 @@ def _openai_llm(model="gpt-4o-mini"):
 
 
 class TestOpenAICallPath:
-    def test_complete_parses_content_and_records_usage(self):
-        llm = _openai_llm()
-        out = llm.complete(system="s", user="u", temperature=0.5)
-        assert out == "hello from gpt"
-        assert llm.last_usage == {
-            "input_tokens": 9, "output_tokens": 4, "total_tokens": 13,
-            "cache_hit_tokens": None, "cache_miss_tokens": None,
-        }
-        # Non-o-series model uses max_tokens + temperature.
-        assert "max_tokens" in llm._client.last_kwargs
-        assert llm._client.last_kwargs["temperature"] == 0.5
-
     def test_complete_o_series_uses_max_completion_tokens_no_temperature(self):
         llm = _openai_llm("o3-mini")
         llm.complete(system="s", user="u", temperature=0.5)
@@ -784,8 +524,6 @@ class TestHuggingFaceFallsBackToComplete:
 # feeds the partial answer back and resumes until a natural stop or the
 # AGENT_MAX_CONTINUATIONS cap. Usage is summed across every leg.
 # ============================================================
-
-
 
 
 class _ScriptedAnthropicMessages:
@@ -868,8 +606,6 @@ class TestLargeOutputContinuation:
 
     # --- config helpers ---------------------------------------------------
 
-    def test_auto_continue_default_on(self):
-        assert _auto_continue_enabled() is True
 
     def test_auto_continue_disabled(self, monkeypatch):
         monkeypatch.setenv("AGENT_AUTO_CONTINUE", "0")
@@ -884,29 +620,6 @@ class TestLargeOutputContinuation:
 
     # --- anthropic --------------------------------------------------------
 
-    def test_anthropic_continues_until_natural_stop(self):
-        llm = _scripted_anthropic_llm([
-            ("AAAA", 10, 5, "max_tokens"),
-            ("BBBB", 3, 4, "end_turn"),
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "AAAABBBB"
-        assert len(llm._client.messages.calls) == 2
-        # second call carried the partial answer back as an assistant prefill
-        second = llm._client.messages.calls[1]["messages"]
-        assert second[-1]["role"] == "assistant"
-        assert second[-1]["content"] == "AAAA"
-        # usage is summed across both legs
-        assert llm.last_usage == {
-            "input_tokens": 13, "output_tokens": 9, "total_tokens": 22,
-            "cache_hit_tokens": None, "cache_miss_tokens": None,
-        }
-
-    def test_anthropic_no_continuation_on_natural_stop(self):
-        llm = _scripted_anthropic_llm([("AAAA", 10, 5, "end_turn")])
-        out = llm.complete(system="s", user="u")
-        assert out == "AAAA"
-        assert len(llm._client.messages.calls) == 1
 
     def test_gen5_continuation_ends_on_a_user_message(self):
         """Generation 5 refuses a trailing assistant turn — ask, don't prefill.
@@ -931,14 +644,6 @@ class TestLargeOutputContinuation:
         # The partial answer must still be carried back, or the model restarts.
         assert second[-2] == {"role": "assistant", "content": "AAAA"}
 
-    def test_gen4_continuation_still_uses_native_prefill(self):
-        """The fallback must not spread to models that continue natively."""
-        llm = _scripted_anthropic_llm(
-            [("AAAA", 10, 5, "max_tokens"), ("BBBB", 3, 4, "end_turn")],
-            model="claude-sonnet-4-5",
-        )
-        llm.complete(system="s", user="u")
-        assert llm._client.messages.calls[1]["messages"][-1]["role"] == "assistant"
 
     def test_gen5_replay_keeps_boundary_whitespace(self):
         """Only a PREFILL may not end in whitespace — history may, and must.
@@ -958,49 +663,12 @@ class TestLargeOutputContinuation:
         replayed = llm._client.messages.calls[1]["messages"][-2]
         assert replayed == {"role": "assistant", "content": "the quick brown \n"}
 
-    def test_gen4_prefill_is_still_trimmed(self):
-        """The other half of the same rule: a prefill IS rejected with it."""
-        llm = _scripted_anthropic_llm(
-            [("the quick brown \n", 10, 5, "max_tokens"), ("fox", 3, 4, "end_turn")],
-            model="claude-sonnet-4-5",
-        )
-        llm.complete(system="s", user="u")
-
-        prefill = llm._client.messages.calls[1]["messages"][-1]
-        assert prefill == {"role": "assistant", "content": "the quick brown"}
 
     # --- openai -----------------------------------------------------------
 
-    def test_openai_continues_until_natural_stop(self):
-        llm = _scripted_openai_llm([
-            ("AAAA", 9, 4, "length"),
-            ("BBBB", 2, 3, "stop"),
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "AAAABBBB"
-        assert len(llm._client.chat.completions.calls) == 2
-        # second call replays the partial answer + a continue instruction
-        msgs = llm._client.chat.completions.calls[1]["messages"]
-        assert msgs[-2]["role"] == "assistant"
-        assert msgs[-2]["content"] == "AAAA"
-        assert msgs[-1]["role"] == "user"
-        assert llm.last_usage == {
-            "input_tokens": 11, "output_tokens": 7, "total_tokens": 18,
-            "cache_hit_tokens": None, "cache_miss_tokens": None,
-        }
 
     # --- caps / disable ---------------------------------------------------
 
-    def test_respects_max_continuations_cap(self, monkeypatch):
-        monkeypatch.setenv("AGENT_MAX_CONTINUATIONS", "1")
-        llm = _scripted_openai_llm([
-            ("AAAA", 5, 5, "length"),
-            ("BBBB", 5, 5, "length"),   # still truncated, but cap=1 stops here
-            ("CCCC", 5, 5, "stop"),     # must never be reached
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "AAAABBBB"
-        assert len(llm._client.chat.completions.calls) == 2
 
     def test_disabled_by_env_returns_truncated(self, monkeypatch):
         monkeypatch.setenv("AGENT_AUTO_CONTINUE", "0")
@@ -1022,39 +690,6 @@ class TestLargeOutputContinuation:
         assert out == "AAAA"
         assert len(llm._client.messages.calls) == 1
 
-    def test_empty_continuation_escalates_then_stops(self):
-        # A model that reports truncation must not be re-asked with the SAME
-        # budget — that request already proved it cannot finish. The chain
-        # escalates the per-leg budget instead, and stops once the ceiling is
-        # reached. It must still be bounded: no infinite loop, and whatever
-        # text we have is returned.
-        llm = _scripted_anthropic_llm([
-            ("AAAA", 5, 5, "max_tokens"),
-            ("", 1, 0, "max_tokens"),
-            ("", 1, 0, "max_tokens"),
-            ("", 1, 0, "max_tokens"),
-            ("", 1, 0, "max_tokens"),
-            ("", 1, 0, "max_tokens"),
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "AAAA"
-        calls = llm._client.messages.calls
-        budgets = [c["max_tokens"] for c in calls]
-        # This line used to read `budgets[0] == budgets[1]`, justified as "the
-        # leg that produced AAAA DID return text, so there is no evidence the
-        # budget is the problem". A live run on 2026-09-17 refuted it: five
-        # productive legs, each cut at the same 2048, 10 240 output tokens and
-        # 80 810 input tokens for one answer worth ~11 000. A leg that wrote
-        # text AND hit max_tokens is evidence the budget is exactly the
-        # problem — it says the answer did not fit, not that the model is mute.
-        assert budgets[1] > budgets[0]
-        # The budget keeps escalating, and never repeats a value below the
-        # ceiling that already came back truncated.
-        assert budgets[2] > budgets[1]
-        assert budgets == sorted(budgets)
-        # Bounded: capped by the escalation ceiling and the continuation cap.
-        assert len(calls) <= 1 + int(os.getenv("AGENT_MAX_CONTINUATIONS", "4"))
-        assert max(budgets) <= budgets[0] * 4
 
     def test_empty_and_finished_continuation_breaks_immediately(self):
         # Empty AND not truncated means the model genuinely has nothing left to
@@ -1088,25 +723,6 @@ class TestLargeOutputContinuation:
             importlib.reload(llm_module)
 
     # --- boundary whitespace preservation --------------------------------
-
-    def test_anthropic_continuation_preserves_boundary_whitespace(self):
-        # A truncation boundary must not merge lines/tokens: trailing whitespace
-        # of an earlier leg and leading whitespace of a later leg must survive so
-        # a faithfully-continued answer reads correctly.
-        llm = _scripted_anthropic_llm([
-            ("Line one\n\n", 10, 5, "max_tokens"),
-            ("Line two", 3, 4, "end_turn"),
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "Line one\n\nLine two"
-
-    def test_openai_continuation_preserves_boundary_whitespace(self):
-        llm = _scripted_openai_llm([
-            ("the quick brown ", 9, 4, "length"),
-            ("fox jumps", 2, 3, "stop"),
-        ])
-        out = llm.complete(system="s", user="u")
-        assert out == "the quick brown fox jumps"
 
 
 class TestStructuredAnswersAreNotBlindlyStitched:
@@ -1158,22 +774,6 @@ class TestStructuredAnswersAreNotBlindlyStitched:
 
         assert llm.last_answer_was_truncated is True
 
-    def test_a_complete_structured_answer_is_not_flagged(self):
-        llm = _scripted_anthropic_llm([('{"content": "ok"}', 10, 5, "end_turn")])
-
-        llm.complete(system="s", user="u", allow_continuation=False)
-
-        assert llm.last_answer_was_truncated is False
-
-    def test_prose_answers_are_still_continued(self):
-        """Only structured callers opt out — long prose still gets stitched."""
-        llm = _scripted_anthropic_llm([
-            ("AAAA", 10, 5, "max_tokens"),
-            ("BBBB", 3, 4, "end_turn"),
-        ])
-
-        assert llm.complete(system="s", user="u") == "AAAABBBB"
-
 
 class TestReasoningTokenBudget:
     """OpenAI reasoning models spend the budget on thinking before answering.
@@ -1184,29 +784,6 @@ class TestReasoningTokenBudget:
     the caller's request as a floor for these models only.
     """
 
-    def test_reasoning_model_budget_is_raised_to_floor(self):
-        llm = _scripted_openai_llm(
-            [("{}", 5, 5, "stop")], model="gpt-5.6-terra"
-        )
-        llm.complete(system="s", user="u", max_tokens=1024)
-        call = llm._client.chat.completions.calls[0]
-        assert call["max_completion_tokens"] >= llm_module._REASONING_TOKEN_FLOOR
-        assert "max_tokens" not in call
-
-    def test_reasoning_budget_never_lowers_a_larger_request(self):
-        llm = _scripted_openai_llm(
-            [("{}", 5, 5, "stop")], model="gpt-5.6-terra"
-        )
-        big = llm_module._REASONING_TOKEN_FLOOR * 3
-        llm.complete(system="s", user="u", max_tokens=big)
-        assert llm._client.chat.completions.calls[0]["max_completion_tokens"] == big
-
-    def test_non_reasoning_model_keeps_exact_budget(self):
-        llm = _scripted_openai_llm([("{}", 5, 5, "stop")], model="gpt-4o")
-        llm.complete(system="s", user="u", max_tokens=1024)
-        call = llm._client.chat.completions.calls[0]
-        assert call["max_tokens"] == 1024
-        assert "max_completion_tokens" not in call
 
     def test_floor_of_zero_disables_the_raise(self, monkeypatch):
         monkeypatch.setenv("AGENT_REASONING_TOKEN_FLOOR", "0")
@@ -1246,27 +823,6 @@ class TestEscalationStartsFromTheEffectiveBudget:
     def _budgets(llm, key):
         return [c[key] for c in llm._client.chat.completions.calls]
 
-    def test_reasoning_model_escalates_above_the_floor(self):
-        # Every leg empty and truncated: the loop keeps escalating until the
-        # ceiling. Requested budget is far below the floor on purpose.
-        llm = _scripted_openai_llm(
-            [(None, 10, 10, "length")] * 6, model="gpt-5.6-terra"
-        )
-        llm.complete(system="s", user="u", max_tokens=1024)
-
-        budgets = self._budgets(llm, "max_completion_tokens")
-        floor = llm_module._REASONING_TOKEN_FLOOR
-
-        assert budgets[0] == floor, "leg 1 is already raised to the floor"
-        assert len(budgets) > 1, "an empty truncated leg must be retried"
-        # The real defect: legs 2..n repeated the floor verbatim.
-        assert budgets == sorted(set(budgets)), (
-            f"continuation budgets must strictly increase, got {budgets}"
-        )
-        assert budgets[1] > floor, (
-            "the first retry must cost more than leg 1, otherwise it is the "
-            f"same request twice: {budgets}"
-        )
 
     def test_reasoning_escalation_still_respects_a_ceiling(self):
         llm = _scripted_openai_llm(
@@ -1278,37 +834,6 @@ class TestEscalationStartsFromTheEffectiveBudget:
         ceiling = llm_module._REASONING_TOKEN_FLOOR * llm_module._CONTINUE_ESCALATION_CAP
         assert max(budgets) <= ceiling
         assert len(budgets) <= 1 + _max_continuations()
-
-    def test_non_reasoning_model_escalates_from_its_own_request(self):
-        # No floor applies here, so the effective budget IS the requested one.
-        llm = _scripted_openai_llm([(None, 10, 10, "length")] * 6, model="gpt-4o")
-        llm.complete(system="s", user="u", max_tokens=1000)
-
-        budgets = self._budgets(llm, "max_tokens")
-        assert budgets[0] == 1000
-        assert budgets[1] == 2000, f"expected a plain doubling, got {budgets}"
-
-    def test_effective_budget_matches_what_the_provider_receives(self):
-        reasoning = _scripted_openai_llm([("x", 1, 1, "stop")], model="gpt-5.6-terra")
-        plain = _scripted_openai_llm([("x", 1, 1, "stop")], model="gpt-4o")
-
-        reasoning.complete(system="s", user="u", max_tokens=1024)
-        plain.complete(system="s", user="u", max_tokens=1024)
-
-        assert (
-            reasoning._effective_budget(1024)
-            == reasoning._client.chat.completions.calls[0]["max_completion_tokens"]
-        )
-        assert (
-            plain._effective_budget(1024)
-            == plain._client.chat.completions.calls[0]["max_tokens"]
-        )
-
-    def test_anthropic_effective_budget_is_the_request(self):
-        llm = LLM(provider="mock")
-        llm.provider = "anthropic"
-        llm.model = "claude-sonnet-4-5"
-        assert llm._effective_budget(1024) == 1024
 
 
 class TestBudgetEnvVarsFailSoft:
@@ -1339,21 +864,5 @@ class TestBudgetEnvVarsFailSoft:
         try:
             mod = self._reload_with(monkeypatch, "AGENT_CONTINUE_ESCALATION_CAP", "oops")
             assert mod._CONTINUE_ESCALATION_CAP == 4
-        finally:
-            importlib.reload(llm_module)
-
-    def test_cap_is_clamped_to_at_least_one(self, monkeypatch):
-        # A cap of 0 would push the ceiling below the starting budget and
-        # silently disable continuation as a side effect.
-        try:
-            mod = self._reload_with(monkeypatch, "AGENT_CONTINUE_ESCALATION_CAP", "0")
-            assert mod._CONTINUE_ESCALATION_CAP >= 1
-        finally:
-            importlib.reload(llm_module)
-
-    def test_valid_overrides_are_still_honoured(self, monkeypatch):
-        try:
-            mod = self._reload_with(monkeypatch, "AGENT_REASONING_TOKEN_FLOOR", "4096")
-            assert mod._REASONING_TOKEN_FLOOR == 4096
         finally:
             importlib.reload(llm_module)

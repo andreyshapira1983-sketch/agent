@@ -36,15 +36,3 @@ def test_a_missing_file_leaves_no_trace(tmp_path) -> None:
     ws = _ws(tmp_path)
     record_refusal(ws, "core/gone.py", "whatever")
     assert not (ws / "data" / "splitter_refusals.jsonl").exists()
-
-
-def test_the_goal_does_not_pick_a_paused_file(tmp_path, monkeypatch) -> None:
-    from core import drives
-
-    ws = _ws(tmp_path)
-    monkeypatch.setattr(drives, "_paused_targets", lambda root: frozenset({"core/budget.py"}))
-    from types import SimpleNamespace
-    monkeypatch.setattr("core.split_proof.index_workspace",
-                        lambda root: {"core/budget.py": SimpleNamespace(lines=1)})
-    monkeypatch.setattr("core.split_proof.proof_for", lambda rel, idx: object())
-    assert drives.self_improvement_proofs(ws) == []

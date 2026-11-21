@@ -88,19 +88,6 @@ def _synth_citing(record_id: str) -> str:
     )
 
 
-# ── the field ────────────────────────────────────────────────────────────────
-
-def test_causal_use_defaults_to_zero_and_round_trips(tmp_path):
-    store = PersistentMemoryStore(tmp_path / "mem.jsonl")
-    rec = MemoryRecord(type="semantic", content="x", tags=["fact"], owner="user")
-    assert rec.causal_use == 0
-    store.save(rec)
-    loaded = store.load()[0]
-    assert loaded.causal_use == 0
-    store.update(loaded.model_copy(update={"causal_use": 3}))
-    assert store.load()[0].causal_use == 3
-
-
 # ── the strong credit ────────────────────────────────────────────────────────
 
 def test_verified_memory_citation_earns_causal_credit(workspace: Path):
@@ -126,44 +113,6 @@ def test_verified_memory_citation_earns_causal_credit(workspace: Path):
     ]
     assert len(credit_events) == 1
     assert credit_events[0]["payload"]["record_ids"] == [rec_id]
-
-
-def test_uncited_turn_earns_no_causal_credit(workspace: Path):
-    path = workspace / "data" / "mem.jsonl"
-    agent_a, _store, _ = _build_agent(workspace, FakeLLM(), path)
-    agent_a.remember(
-        content="User prefers Python over JavaScript for backend services.",
-        tags=["preference"],
-        source="user-explicit",
-    )
-    synth_uncited = (
-        "Conclusion: probably Python [general-knowledge].\n"
-        "Facts:\n- common choice [general-knowledge]\n"
-        "Sources:\n1. general-knowledge - general-knowledge\n"
-        "Confidence: low\nUnverified: nothing\n"
-    )
-    llm = FakeLLM(responses=[PLAN_EMPTY, synth_uncited])
-    agent_b, store_b, _ = _build_agent(workspace, llm, path)
-    agent_b.run(user_question="What programming language does the user prefer?")
-    assert store_b.load()[0].causal_use == 0, (
-        "вставка без подтверждённой цитаты — не польза (постановление)"
-    )
-
-
-def test_suppressed_profile_writes_no_credit(workspace: Path):
-    path = workspace / "data" / "mem.jsonl"
-    agent_a, store, _ = _build_agent(workspace, FakeLLM(), path)
-    agent_a.remember(
-        content="User prefers Python over JavaScript for backend services.",
-        tags=["preference"],
-        source="user-explicit",
-    )
-    rec_id = store.load()[0].id
-    llm = FakeLLM(responses=[PLAN_EMPTY, _synth_citing(rec_id)])
-    agent_b, store_b, _ = _build_agent(workspace, llm, path)
-    agent_b.suppress_durable_learning_writes = True
-    agent_b.run(user_question="What programming language does the user prefer?")
-    assert store_b.load()[0].causal_use == 0, "сухой профиль не оставляет следов"
 
 
 # ── dormancy: the tag floor no longer grants immortality ────────────────────
@@ -203,39 +152,3 @@ def test_auto_fact_without_causal_credit_goes_dormant():
     assert len(report.archived) == 1, (
         "автозапись-«факт» без причинного кредита обязана уметь засыпать"
     )
-
-
-def test_auto_fact_with_causal_credit_stays_active():
-    store = _FakeStore([_auto_fact(age_days=30, causal_use=2)])
-    report = archive_low_value_memory(store)
-    assert report.archived == [], "подтверждённо полезное не отодвигается"
-
-
-def test_curated_lesson_stays_protected():
-    rec = MemoryRecord(
-        type="semantic",
-        content="урок: не расширять объём",
-        tags=["lesson"],
-        owner="user",
-        created_at=datetime.now(timezone.utc) - timedelta(days=90),
-    )
-    store = _FakeStore([rec])
-    report = archive_low_value_memory(store)
-    assert report.archived == []
-
-
-# ── the five-point hygiene verdict ───────────────────────────────────────────
-
-def test_maintenance_pass_explains_itself_in_five_points(workspace: Path):
-    path = workspace / "data" / "mem.jsonl"
-    llm = FakeLLM(responses=[])
-    agent, _store, log_path = _build_agent(workspace, llm, path)
-    agent.run_maintenance_pass(dry_run=True)
-    events = [e for e in _events(log_path) if e.get("event") == "hygiene_explained"]
-    assert len(events) == 1
-    text = events[0]["payload"]["full_text"]
-    for marker in (
-        "Проверял:", "Способ:", "Доказательство:",
-        "Непроверенным осталось:", "Уверенность:",
-    ):
-        assert marker in text

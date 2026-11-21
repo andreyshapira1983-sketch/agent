@@ -5,7 +5,7 @@ Background: docs/CODE_NOTES.md, "The guard's voice became a memory".
 from __future__ import annotations
 
 from core.evidence import ProvenanceChain, make_evidence
-from core.injection_guard import annotate_suspicious, strip_suspicious_annotation
+from core.injection_guard import annotate_suspicious
 from core.knowledge_pipeline import KnowledgePipeline
 from core.source_ranker import rank_chain
 
@@ -30,15 +30,6 @@ def _claims_from(excerpt: str):
     return [c.text for c in registry.claims]
 
 
-def test_the_wrapper_never_becomes_a_claim():
-    texts = _claims_from(annotate_suspicious(_REAL, "file:knowledge/doctrine/X.md"))
-
-    joined = " ".join(texts)
-    assert "may be adversarial" not in joined
-    assert "untrusted data only" not in joined
-    assert "END OF UNTRUSTED CONTENT" not in joined
-
-
 def test_the_real_content_still_becomes_claims():
     """Улов не отдан: подозрительность источника не лишает его содержимое
     права быть утверждением — судят другие ворота, не обёртка.
@@ -48,17 +39,3 @@ def test_the_real_content_still_becomes_claims():
 
     assert wrapped, "из обёрнутого источника не извлеклось ничего"
     assert set(wrapped) == set(plain), "обёртка изменила состав утверждений"
-
-
-def test_strip_removes_both_wrapper_lines_and_keeps_the_text():
-    wrapped = annotate_suspicious(_REAL, "file:some/path.md")
-
-    stripped = strip_suspicious_annotation(wrapped)
-
-    assert "WARNING" not in stripped
-    assert "END OF UNTRUSTED CONTENT" not in stripped
-    assert _REAL in stripped
-
-
-def test_strip_is_a_no_op_on_clean_text():
-    assert strip_suspicious_annotation(_REAL) == _REAL

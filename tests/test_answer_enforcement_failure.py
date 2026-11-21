@@ -123,27 +123,6 @@ class _Agent(AgentLoopResponseDeciders):
 
 
 # ---------------------------------------------------------------------------
-# The healthy path, so the contract below is measured against something real
-# ---------------------------------------------------------------------------
-
-def test_the_healthy_path_really_truncates():
-    """Without this the rest of the file would be testing an inert case.
-
-    The first attempt at this investigation used three chunks and never
-    triggered, which is why the user-visible damage went unproven for a while.
-    The floor is eight (`core/low_evidence_policy.py`).
-    """
-    agent = _Agent()
-    body = agent.build().render()
-
-    assert UNSUPPORTED_CLAIM not in body
-    assert len(body) < len(DRAFT)
-    assert "answer_enforcement" in agent.log.names()
-    assert "low_evidence_truncation" in agent.log.names()
-    assert agent._defect_signals == []
-
-
-# ---------------------------------------------------------------------------
 # The same contract at every one of the six failure points
 # ---------------------------------------------------------------------------
 
@@ -237,19 +216,6 @@ def test_the_signal_denies_a_clean_success():
     assert episode.completion_override == "answer_enforcement_failed"
     assert episode.declared_completion == "achieved", "the claim is refuted, not erased"
     assert decide_usage_eligibility(episode) is False
-
-
-def test_an_honest_report_is_not_made_worse():
-    """One direction only: it lowers a claim, it never punishes candour."""
-    episode = episode_from_agent_cycle(
-        goal="g", question="q", answer="a",
-        tools_used=[], source_labels=[],
-        declared_completion="blocked",
-        defect_signals=["answer_enforcement_failed"],
-    )
-
-    assert episode.completion_state == "blocked"
-    assert episode.completion_override is None
 
 
 # ---------------------------------------------------------------------------

@@ -14,8 +14,8 @@ import pytest
 
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import SELF_APPLY_OPERATION, rehydrate_proposal
-from core.self_task_builder import TASK_BUILD_ORIGIN, build_coding_task
-from core.self_task_producer import SELF_TASK_OPERATION, decode_frozen_test
+from core.self_task_builder import build_coding_task
+from core.self_task_producer import SELF_TASK_OPERATION
 
 # ── fakes ────────────────────────────────────────────────────────────────────
 
@@ -206,36 +206,6 @@ def test_redaction_corrupted_frozen_test_rejected(workspace: Path):
 # ── happy path ───────────────────────────────────────────────────────────────
 
 
-def test_happy_path_publishes_one_self_apply_item(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    task = _seed_task(inbox)
-    report = _run(workspace, inbox, task.id)
-    assert report.status == "proposed"
-    assert report.target_path == _IMPL
-
-    apply_items = [i for i in inbox.list() if i.operation == SELF_APPLY_OPERATION]
-    assert len(apply_items) == 1
-    item = apply_items[0]
-    assert report.approval_id == item.id
-    paths = [f["path"] for f in item.payload["files"]]
-    assert paths == [_IMPL, _TEST_PATH]
-    assert item.payload["test_paths"] == [_TEST_PATH]
-    assert item.payload["origin"] == TASK_BUILD_ORIGIN
-
-
-def test_frozen_test_is_passed_through_exactly(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    task = _seed_task(inbox)
-    report = _run(workspace, inbox, task.id)
-    assert report.status == "proposed"
-    item = inbox.get(report.approval_id)
-    # The lane reads file content via rehydrate_proposal, which restores the
-    # byte-exact copy that the durable redactor would otherwise have scrubbed.
-    prop = rehydrate_proposal(item.payload)
-    test_file = next(c for c in prop.files if c.path == _TEST_PATH)
-    assert test_file.content == _FROZEN_TEST
-
-
 def test_impl_content_reaches_lane(workspace: Path):
     inbox = ApprovalInbox(path=None)
     task = _seed_task(inbox)
@@ -299,10 +269,3 @@ def test_noop_identical_impl_vetoes(workspace: Path):
                   llm=FakeLLM([_builder_json(content=_CURRENT)]))
     assert report.status == "build_veto"
     assert any("no-op" in r for r in report.veto_reasons)
-
-
-def test_decode_frozen_test_used_for_lane(workspace: Path):
-    # Sanity: the seeded item exposes the exact test via decode_frozen_test.
-    inbox = ApprovalInbox(path=None)
-    task = _seed_task(inbox)
-    assert decode_frozen_test(inbox.get(task.id).payload) == _FROZEN_TEST

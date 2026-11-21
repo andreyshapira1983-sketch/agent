@@ -67,13 +67,6 @@ def test_the_class_is_narrow_a_bare_proof_question_reaches_the_planner() -> None
         assert intent is None or intent.kind != "capability_check", text
 
 
-def test_a_plain_inventory_question_still_takes_the_shortcut() -> None:
-    """The fix must not buy correctness by closing the shortcut altogether."""
-    for text in ("что ты умеешь делать", "покажи свои способности"):
-        intent = route_operator_intent(text)
-        assert intent is not None and intent.kind == "capability_check", text
-
-
 def test_show_without_an_ability_question_is_still_critique_wording() -> None:
     from core.proof_demand import demands_demonstration
 

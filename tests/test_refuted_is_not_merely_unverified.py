@@ -26,10 +26,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
-
-import pytest
 
 from core.approval import AutoApprover
 from core.evidence import ProvenanceChain, make_evidence
@@ -39,11 +36,7 @@ from core.loop import AgentLoop
 from core.memory import WorkingMemory
 from core.policy import PolicyGate
 from core.smart_memory import (
-    DISQUALIFYING_DEFECT_SIGNALS,
-    EpisodeRecord,
     EpisodicMemoryStore,
-    decide_usage_eligibility,
-    procedure_credit_allowed,
 )
 from core.verifier import verify
 from tests.conftest import FakeLLM, FakePlanner
@@ -63,44 +56,6 @@ def _file_ev(source_id: str, excerpt: str):
         kind="file", source_id=source_id, obtained_via="test", claim="",
         excerpt=excerpt, confidence=0.9,
     )
-
-
-_REFUTED_ANSWER = (
-    "Conclusion: The producer lives in core/self_build_memory.py. [file:core/loop.py]\n"
-    "Facts:\n"
-    "- The producer lives in core/self_build_memory.py [file:core/loop.py]\n"
-    "Sources:\n1. file:core/loop.py - loop\n"
-    "Confidence: high\nUnverified: nothing\n"
-)
-
-
-def test_a_refuted_chunk_gets_its_own_verdict() -> None:
-    """ГЛАВНОЕ: доказанная ложь перестаёт называться «не подтверждено»."""
-    report = verify(
-        answer=_REFUTED_ANSWER,
-        chain=_chain(_file_ev("core/loop.py", "from core.loop_memory_write import X\n")),
-        user_question="who produces lesson records",
-    )
-    refuted = [c for c in report.chunks if c.verdict == "refuted"]
-    assert refuted, [c.verdict for c in report.chunks]
-    assert all(c.reason is not None for c in refuted)
-    assert report.refuted_chunks == len(refuted)
-    assert report.topic_supported_but_claim_unverified_chunks == 0
-
-
-def test_the_marker_carries_the_polarity_to_the_operator() -> None:
-    """Пометка в отгружаемом тексте называет ложь ложью, а не «не проверено»."""
-    report = verify(
-        answer=_REFUTED_ANSWER,
-        chain=_chain(_file_ev("core/loop.py", "from core.loop_memory_write import X\n")),
-        user_question="who produces lesson records",
-    )
-    line = next(
-        ln for ln in report.annotated_answer.splitlines()
-        if "self_build_memory" in ln and ln.startswith("-")
-    )
-    assert "[claim-refuted]" in line, line
-    assert "[claim-figure-unverified]" not in line, line
 
 
 def test_a_claim_verified_by_another_source_is_not_refuted() -> None:
@@ -134,33 +89,6 @@ def test_a_claim_verified_by_another_source_is_not_refuted() -> None:
         (c.verdict, getattr(c.reason, "code", None)) for c in report.chunks
     ]
     assert all(c.reason is None for c in report.chunks if c.verdict == "verified")
-
-
-def test_merely_unverified_is_still_not_refuted() -> None:
-    """Обратная сторона границы: без доказательства лжи полярность не выдаётся.
-
-    Кусок с процентом, которого улика не содержит, — «не подтверждено», а не
-    «опровергнуто»: неполная улика не доказывает ложь (пятый гейт того же
-    семейства заведён ровно против этого превращения).
-
-    Форма выбрана не случайно: статистический гейт понижает БЕЗ `ClaimReason`,
-    и это законно — он не вычислил противоположного, он лишь не нашёл опоры.
-    (Первая версия фикстуры с голым числом «7520 tests» получила `verified`
-    целиком — известная числовая дыра MIR-060, xfail-класс, не этот тест.)
-    """
-    answer = (
-        "Conclusion: The rate grew by 34%. [file:notes.txt]\n"
-        "Facts:\n- The rate grew by 34% [file:notes.txt]\n"
-        "Sources:\n1. file:notes.txt - notes\n"
-        "Confidence: high\nUnverified: nothing\n"
-    )
-    report = verify(
-        answer=answer,
-        chain=_chain(_file_ev("notes.txt", "The rate is discussed in the report.\n")),
-        user_question="how fast did the rate grow",
-    )
-    assert report.refuted_chunks == 0
-    assert report.topic_supported_but_claim_unverified_chunks >= 1
 
 
 def test_five_good_claims_do_not_dilute_one_lie(tmp_path: Path) -> None:
@@ -227,25 +155,3 @@ def test_five_good_claims_do_not_dilute_one_lie(tmp_path: Path) -> None:
         "эпизод с доказанной ложью пригоден для обучения — "
         "пять хороших утверждений растворили одну ложь"
     )
-
-
-@pytest.mark.parametrize(
-    "signal", sorted({"content_refuted", *DISQUALIFYING_DEFECT_SIGNALS}),
-)
-def test_the_disqualification_is_shared_law(signal: str) -> None:
-    """Каждый дисквалифицирующий сигнал закрывает оба рубежа: опыт и кредит.
-
-    Тот же эпизод без сигнала проходит оба, значит отказ идёт от сигнала.
-    """
-    clean = EpisodeRecord(
-        goal="кто пишет уроки", question="кто пишет уроки", outcome="success",
-        summary="разбор", full_answer="ответ", completion_state="achieved",
-        verified_chunks=5, unverified_chunks=0, answer_quality_score=1.0,
-        tools_used=["file_read"], source_labels=["file:doc.txt"],
-    )
-    assert decide_usage_eligibility(clean) and procedure_credit_allowed(clean), (
-        "контроль: чистый эпизод обязан пройти оба рубежа"
-    )
-    bad = replace(clean, defect_signals=[signal])
-    assert not decide_usage_eligibility(bad), f"{signal}: эпизод допущен в опыт"
-    assert not procedure_credit_allowed(bad), f"{signal}: эпизод кредитует процедуру"

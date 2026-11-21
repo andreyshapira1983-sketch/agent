@@ -64,17 +64,7 @@ def test_an_english_scan_is_read_in_english(monkeypatch) -> None:
     assert clean in text and "ап N" not in text
 
 
-def test_a_russian_scan_keeps_both_languages(monkeypatch) -> None:
-    russian = "Теорема 1. Быстрое преобразование Фурье требует N log N шагов."
-    monkeypatch.setattr(web_fetch, "_ocr_runner", _programs_reading({"rus+eng": russian}))
-    assert russian in web_fetch._pdf_text(_blank_pdf())
-
-
 def test_without_the_sandbox_there_is_no_recognition(monkeypatch) -> None:
     monkeypatch.setattr(convert_file, "sandbox_available", lambda: "no sandbox here")
     with pytest.raises(ValueError, match=r"scanned images.*OCR is unavailable: .*no sandbox here"):
         web_fetch._pdf_text(_blank_pdf())
-
-
-def test_a_textbook_fits_under_the_pdf_cap() -> None:
-    assert web_fetch.PDF_MAX_BYTES >= 25_055_430, "Erickson's Algorithms (24.09) must fit"

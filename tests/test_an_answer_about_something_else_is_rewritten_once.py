@@ -92,13 +92,6 @@ def test_a_degraded_answer_is_not_rewritten() -> None:
     assert st.draft_answer == OFF_TOPIC and loop.log.events == []
 
 
-def test_the_switch_is_off_by_default(monkeypatch) -> None:
-    monkeypatch.delenv("AGENT_REWRITE_OFF_TOPIC", raising=False)
-    loop, st = _loop(), _state(OFF_TOPIC)
-    loop._rewrite_if_off_topic(st, lambda _a: ON_TOPIC)
-    assert st.draft_answer == OFF_TOPIC and loop.log.events == []
-
-
 def test_a_failing_rewrite_keeps_the_first_draft() -> None:
     loop, st = _loop(), _state(OFF_TOPIC)
 

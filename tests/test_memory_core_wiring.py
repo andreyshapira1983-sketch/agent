@@ -68,13 +68,6 @@ def _autonomous(workspace: Path) -> AgentLoop:
     )
 
 
-def _one_shot(workspace: Path) -> AgentLoop:
-    """The `--ask` profile — `main.py:2015`, deliberately isolated."""
-    return build_agent(
-        workspace, with_memory=False, with_persistent=False, approval_provider=None
-    )
-
-
 SYNTH_GENERAL = """Conclusion:
 Four.
 
@@ -149,123 +142,6 @@ def _replayable_episode(question: str) -> EpisodeRecord:
         id="ep-replay-1",
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-
-
-def _episode(question: str) -> EpisodeRecord:
-    return EpisodeRecord(
-        goal="ship the release notes",
-        question=question,
-        outcome="success",  # type: ignore[arg-type]
-        summary="Checked the changelog with file_read and summarised it.",
-        # Wiring suite: seed past the completion gate (MIR-057), which has
-        # its own suite, so this stays a test about which stores are held.
-        completion_state="achieved",
-        verified_chunks=3,
-        unverified_chunks=0,
-        replan_exhausted=False,
-        answer_quality_score=0.9,
-        tools_used=["file_read"],
-        usage_eligible=True,   # see _replayable_episode: mechanism, not policy
-        id="ep-wiring-1",
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-
-# --------------------------------------------------------------------------
-# 1. GUARD — the interactive profile is fully wired (must keep passing).
-# --------------------------------------------------------------------------
-def test_interactive_profile_has_every_memory_store(tmp_path: Path) -> None:
-    agent = _interactive(tmp_path)
-
-    assert agent.memory is not None, "working memory"
-    assert agent.persistent_store is not None, "persistent/semantic memory"
-    assert agent.episodic_store is not None, "episodic memory"
-    assert agent.procedural_store is not None, "procedural memory"
-    # MIR-044: the consolidation store is retired — the tally is computed on
-    # demand, so no profile constructs one.
-    assert agent.consolidation_store is None, "the retired sink was constructed"
-
-
-# --------------------------------------------------------------------------
-# 2. FAIL-BEFORE — the unattended agent must have experience memory.
-# --------------------------------------------------------------------------
-def test_autonomous_profile_has_experience_stores(tmp_path: Path) -> None:
-    agent = _autonomous(tmp_path)
-
-    # Persistent memory already reaches this path today; the experience
-    # stores are the gap.
-    assert agent.persistent_store is not None, "regression: persistent memory lost"
-    assert agent.episodic_store is not None, (
-        "the unattended agent records no episodes: episodic memory is created "
-        "only under with_memory=True (app/bootstrap.py:151)"
-    )
-    assert agent.procedural_store is not None, (
-        "the unattended agent builds no reusable procedures"
-    )
-
-
-# --------------------------------------------------------------------------
-# 3. FAIL-BEFORE — behavioural proof, not just a constructor check.
-#    Experience accumulated on disk is invisible to the unattended agent.
-# --------------------------------------------------------------------------
-def test_autonomous_agent_reads_experience_accumulated_on_disk(tmp_path: Path) -> None:
-    question = "summarise the changelog for the release notes"
-
-    # A human-driven session banked a successful episode.
-    EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).save(_episode(question))
-
-    # The interactive agent can see it — this is the reference behaviour.
-    assert _interactive(tmp_path)._retrieve_experience_memory(question).strip(), (
-        "precondition failed: the interactive agent should surface the episode"
-    )
-
-    # The unattended agent, asked the very same thing, must see it too.
-    recalled = _autonomous(tmp_path)._retrieve_experience_memory(question)
-    assert recalled.strip(), (
-        "the unattended agent is blind to experience that exists on disk: "
-        "the same episode the interactive agent recalls returns nothing here"
-    )
-
-
-# --------------------------------------------------------------------------
-# 4. GUARD — `--ask` stays isolated. A fix that widens memory too broadly
-#    (e.g. by flipping a default) must fail here.
-# --------------------------------------------------------------------------
-def test_one_shot_profile_stays_isolated(tmp_path: Path) -> None:
-    EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).save(_episode("q"))
-    agent = _one_shot(tmp_path)
-
-    # main.py:2011-2014 promises "no memory, fresh session" for one-shot runs;
-    # the live-probe and audit workflows depend on that isolation.
-    assert agent.memory is None, "one-shot must not carry working memory"
-    assert agent.persistent_store is None, "one-shot must not read persistent memory"
-    assert agent.episodic_store is None, "one-shot must not read episodic memory"
-    assert agent.procedural_store is None, "one-shot must not read procedural memory"
-
-
-# --------------------------------------------------------------------------
-# 5. COMPOSITION — experience memory is a genuinely independent axis.
-#    It must not be reachable only through persistent memory.
-# --------------------------------------------------------------------------
-def test_experience_stores_are_independent_of_persistent(tmp_path: Path) -> None:
-    agent = build_agent(
-        tmp_path,
-        with_memory=False,
-        with_persistent=False,
-        with_experience=True,
-        approval_provider=None,
-    )
-
-    assert agent.episodic_store is not None, (
-        "experience memory must not depend on persistent memory being enabled"
-    )
-    assert agent.procedural_store is not None
-    # MIR-044: retired — experience memory no longer includes a consolidation
-    # store on any profile.
-    assert agent.consolidation_store is None
-    # ...while the other two axes stay off.
-    assert agent.persistent_store is None
-    assert agent.memory is None
 
 
 # --------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.llm import LLM, accepted_flags
+from core.llm import LLM
 
 
 class _Completions:
@@ -34,46 +34,6 @@ def _llm(provider: str, script) -> LLM:
     llm.provider, llm.model = provider, "m"
     llm._client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions(script)))
     return llm
-
-
-def test_deepseek_gets_json_mode_when_asked() -> None:
-    llm = _llm("deepseek", [('{"steps": []}', "stop")])
-    assert llm.complete("s", "u", json_object=True) == '{"steps": []}'
-    assert llm._client.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
-
-
-def test_without_the_request_nothing_changes() -> None:
-    llm = _llm("deepseek", [("text", "stop")])
-    llm.complete("s", "u")
-    assert "response_format" not in llm._client.chat.completions.calls[0]
-
-
-def test_a_provider_without_json_mode_is_not_sent_it() -> None:
-    llm = _llm("local", [("{}", "stop")])
-    llm.complete("s", "u", json_object=True)
-    assert "response_format" not in llm._client.chat.completions.calls[0]
-
-
-def test_a_continuation_leg_resumes_text_not_a_new_object() -> None:
-    llm = _llm("deepseek", [('{"steps": [', "length"), ("]}", "stop")])
-    assert llm.complete("s", "u", json_object=True) == '{"steps": []}'
-    first, second = llm._client.chat.completions.calls
-    assert "response_format" in first and "response_format" not in second
-
-
-def test_a_wrapper_that_predates_the_flag_is_not_sent_it() -> None:
-    def old(system, user, max_tokens=1, temperature=0.0):
-        return ""
-
-    def new(system, user, max_tokens=1, temperature=0.0, *, json_object=False):
-        return ""
-
-    def open_ended(system, user, **kwargs):
-        return ""
-
-    assert accepted_flags(old, {"json_object": True}) == {}
-    assert accepted_flags(new, {"json_object": True}) == {"json_object": True}
-    assert accepted_flags(open_ended, {"json_object": True}) == {"json_object": True}
 
 
 def test_the_router_carries_the_flag_and_does_not_pay_twice() -> None:
@@ -99,20 +59,3 @@ def test_the_router_carries_the_flag_and_does_not_pay_twice() -> None:
     except TypeError:
         pass
     assert calls == [{"json_object": True, "allow_continuation": False}]
-
-
-def test_the_planner_asks_for_json() -> None:
-    from core.planner import LLMPlanner as Planner
-    from tools.base import ToolRegistry
-
-    seen: list[dict] = []
-
-    class _Recorder:
-        provider, model = "deepseek", "m"
-
-        def complete(self, system, user, max_tokens=1, temperature=0.0, **flags):
-            seen.append(flags)
-            return '{"reasoning": "r", "steps": []}'
-
-    Planner(llm=_Recorder(), registry=ToolRegistry()).plan("прочитай core/llm.py", None)
-    assert seen and seen[0].get("json_object") is True

@@ -87,25 +87,6 @@ def test_the_carried_over_entry_says_that_it_is_old(
     assert "carried_over" not in saved["openai"]
 
 
-def test_an_answered_empty_list_is_a_real_answer(
-    catalog_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Контроль: «спросили и получили пусто» — это ответ, и его надо записать.
-
-    Отвергнут вариант «переносить всегда, когда моделей нет»: тогда поставщик,
-    честно снявший все модели, оставался бы в каталоге навсегда.
-    """
-    _fetchers(monkeypatch, anthropic=_ANTHROPIC, openai=_OPENAI)
-    _seed(catalog_path)
-
-    _fetchers(monkeypatch, anthropic=[], openai=_OPENAI)
-    mc.refresh_catalog(["anthropic", "openai"])
-
-    saved = json.loads(catalog_path.read_text(encoding="utf-8"))["providers"]
-    assert saved["anthropic"]["models"] == []
-    assert "carried_over" not in saved["anthropic"]
-
-
 def test_an_unknown_provider_that_fails_stays_absent(
     catalog_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

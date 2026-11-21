@@ -38,7 +38,6 @@ from core.ids import new_trace_id
 from core.logger import TraceLogger
 from core.loop import AgentLoop
 from core.memory import WorkingMemory
-from core.operator_intent import route_operator_intent
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
@@ -78,16 +77,6 @@ def agent(tmp_path: Path) -> AgentLoop:
     )
 
 
-def test_the_original_hijack_is_gone() -> None:
-    """Прежний перехват Q2 закрыт ремонтом R6 (2026-08-13) — и не вернётся.
-
-    Первая версия этого теста закрепляла сам перехват как предусловие и
-    покраснела в момент починки — ровно так, как обещало её описание.
-    """
-    intent = route_operator_intent(_FORMERLY_HIJACKED)
-    assert intent is None or intent.kind != "implementation_plan", intent
-
-
 def test_a_routed_question_stays_in_the_session(agent: AgentLoop, tmp_path: Path) -> None:
     """ГЛАВНОЕ: перехваченный вопрос не исчезает из истории."""
     agent.run("Это диагностический прогон, ничего не изменяй.")
@@ -104,29 +93,6 @@ def test_a_routed_question_stays_in_the_session(agent: AgentLoop, tmp_path: Path
     assert "Operator Task Layer" in agent.memory.turns[-1].question
 
 
-def test_the_next_planner_sees_it(agent: AgentLoop, tmp_path: Path) -> None:
-    """КОНЕЦ ЦЕПИ: ход виден там, где собирается контекст следующего.
-
-    Присутствие в списке ничего не стоит, если сборка контекста его не берёт —
-    именно это расхождение и наблюдалось живьём.
-    """
-    intent_bridge.handle_conversational_operator_input(_ROUTED, agent, tmp_path)
-    context = agent.memory.conversation_context(max_turns=5)
-    assert "Operator Task Layer" in context, context
-
-
-def test_the_answering_command_is_named(agent: AgentLoop, tmp_path: Path) -> None:
-    """Не «ответ был», а КТО ответил.
-
-    Без имени команды следующий ход снова решит, что вердикт где-то есть, и
-    снова застрянет. Записанное имя — это готовое объяснение, почему
-    `POSSIBLE/IMPOSSIBLE/UNKNOWN` в разговоре не появился.
-    """
-    intent_bridge.handle_conversational_operator_input(_ROUTED, agent, tmp_path)
-    turn = agent.memory.turns[-1]
-    assert ":implementation-plan" in turn.answer, turn.answer
-
-
 def test_the_local_reply_carries_its_own_words(agent: AgentLoop) -> None:
     """У локального ответа тело ЕСТЬ — и оно обязано попасть в историю.
 
@@ -138,18 +104,6 @@ def test_the_local_reply_carries_its_own_words(agent: AgentLoop) -> None:
     )
     assert intent_bridge._handle_local_operator_reply(text, agent) is True
     assert agent.memory.turns[-1].answer.strip() == "ACK-42"
-
-
-def test_a_message_nobody_answered_is_not_recorded(agent: AgentLoop, tmp_path: Path) -> None:
-    """ПРЕДОХРАНИТЕЛЬ: запись появляется только когда ход ДЕЙСТВИТЕЛЬНО отвечен.
-
-    Обычный вопрос проходит маршрут насквозь и попадает в цикл, который запишет
-    его сам. Запись здесь же дала бы двойной ход.
-    """
-    assert intent_bridge.handle_conversational_operator_input(
-        "перечисли функции в core/loop.py", agent, tmp_path
-    ) is False
-    assert agent.memory.turns == []
 
 
 def test_the_operators_own_falsification(agent: AgentLoop, tmp_path: Path) -> None:

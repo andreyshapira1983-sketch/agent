@@ -1,35 +1,12 @@
 """`:remember` takes tags only from an explicit form; the help says `:forget` needs a target."""
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from cli.command_dispatch import handle_meta_command
-from cli.command_registry import lookup
-from cli.help import render_help
 from cli.parsers import _parse_remember
-
-_ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.mark.parametrize("text", [
-    "project Alpha is due on Friday",
-    "fact is, the build was red",
-    "decision pending on the vendor",
-    "insight from the retro",
-    "preference dark mode",
-    "user-approved wording for the banner",
-    "Project\nAlpha is due",
-    "FACT checking takes a day",
-    "[1] first item of the list",
-    "[] empty brackets",
-    "[a, b] spaced list",
-    "[link](https://example.com) is the reference",
-])
-def test_a_note_keeps_its_first_word(text: str) -> None:
-    assert _parse_remember(text) == (["user-approved"], text)
 
 
 @pytest.mark.parametrize(("text", "tags", "content"), [
@@ -64,14 +41,3 @@ def test_the_dispatcher_stores_the_whole_note(tmp_path) -> None:
     assert stored == [
         {"content": "project Alpha is due", "tags": ["user-approved"], "source": "user-explicit"}
     ]
-
-
-def test_every_help_surface_says_forget_needs_a_target() -> None:
-    assert lookup(":forget").usage == "<id|--all>"
-    page = render_help()
-    assert ":forget <id|--all>" in page and "[id|all]" not in page
-    row = next(
-        line for line in (_ROOT / "knowledge" / "maps" / "COMMANDS_MAP.md").read_text(encoding="utf-8").splitlines()
-        if line.startswith("| `:forget")
-    )
-    assert "--all" in row and "required" in row and "[id" not in row

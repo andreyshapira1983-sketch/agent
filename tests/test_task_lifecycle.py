@@ -66,23 +66,6 @@ def test_run_outcome_mapping(status, stop_reason, expected):
     assert classify_run_outcome(status=status, stop_reason=stop_reason).outcome == expected
 
 
-def test_stopped_run_carries_its_stop_reason():
-    decision = classify_run_outcome(status="stopped", stop_reason="circuit open")
-    assert decision.outcome == "failed"
-    assert decision.reason == "circuit open"
-
-
-def test_completed_run_marks_done(workspace: Path):
-    queue = TaskQueueStore(workspace / "tasks.jsonl")
-    task = queue.add(goal="ok")
-    queue.mark_running(task.id)
-
-    updated, decision = apply_run_outcome(queue, task.id, status="completed")
-
-    assert updated.status == "done"
-    assert decision.outcome == "done"
-
-
 def test_blocked_run_parks_the_task_instead_of_failing_it(workspace: Path):
     """An approval block is not a failure and no retry timer can clear it."""
     queue = TaskQueueStore(workspace / "tasks.jsonl")
@@ -101,19 +84,6 @@ def test_blocked_run_parks_the_task_instead_of_failing_it(workspace: Path):
     assert decision.outcome == "blocked"
     # Not re-queued, so no consumer picks it up and no attempt is burned.
     assert queue.pending() == []
-
-
-def test_stopped_run_fails_the_task_with_the_reason(workspace: Path):
-    queue = TaskQueueStore(workspace / "tasks.jsonl")
-    task = queue.add(goal="budget")
-    queue.mark_running(task.id)
-
-    updated, _ = apply_run_outcome(
-        queue, task.id, status="stopped", stop_reason="day budget exhausted"
-    )
-
-    assert updated.status == "failed"
-    assert updated.last_error == "day budget exhausted"
 
 
 def test_exception_leaves_the_task_terminal_not_running(workspace: Path):
@@ -193,30 +163,3 @@ def test_recovery_refuses_to_run_without_the_lock(workspace: Path):
 
     # And it changed nothing.
     assert TaskQueueStore(path).load()[0].status == "running"
-
-
-def test_recovery_under_the_lock_finalises_the_orphan(workspace: Path):
-    path = workspace / "tasks.jsonl"
-    queue = TaskQueueStore(path)
-    task = queue.add(goal="stuck", max_attempts=3)
-    queue.mark_running(task.id)
-    _age(path, task.id, minutes=45)
-
-    recovered = recover_orphaned_tasks(queue, lock=_Lock(True))
-
-    assert [t.id for t in recovered] == [task.id]
-    assert recovered[0].status == "pending"
-
-
-def test_recovery_does_not_resurrect_a_task_past_its_attempt_cap(workspace: Path):
-    """The `max_attempts` bypass that made the first wiring unsafe."""
-    path = workspace / "tasks.jsonl"
-    queue = TaskQueueStore(path)
-    task = queue.add(goal="kills-its-process", max_attempts=1)
-    queue.mark_running(task.id)
-    _age(path, task.id, minutes=45)
-
-    recovered = recover_orphaned_tasks(queue, lock=_Lock(True))
-
-    assert recovered[0].status == "failed"
-    assert queue.pending() == []

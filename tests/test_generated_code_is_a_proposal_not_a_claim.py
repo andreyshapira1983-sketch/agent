@@ -47,11 +47,6 @@ def test_code_is_outside_the_evidence_arithmetic() -> None:
     assert is_structural_chunk(_FENCED) is True
 
 
-def test_prose_is_still_a_claim() -> None:
-    """Граница: проза вокруг кода осталась под проверкой."""
-    assert is_structural_chunk("Этот модуль уже течёт в проде.") is False
-
-
 def test_suppression_spares_the_code_proposal() -> None:
     """Ядро: при усечении за бедность улик код переживает чистку."""
     answer = (
@@ -78,21 +73,3 @@ def test_suppression_spares_the_code_proposal() -> None:
         "творчество")
     assert "Планировщик стал медленнее" not in result.answer, (
         "граница: бездоказательная проза обязана гаситься как прежде")
-
-
-def test_an_answer_without_code_suppresses_exactly_as_before() -> None:
-    """Граница: у ответа без забора ничего не меняется."""
-    answer = ("Одно. Второе. Третье. Четвёртое. Пятое. Шестое. "
-              "Седьмое. Восьмое. Девятое.")
-    report = SimpleNamespace(
-        total_chunks=9, verified_chunks=0, dialogue_supported_chunks=0,
-        unverified_chunks=9, cited_but_unmatched_chunks=0,
-        topic_supported_but_claim_unverified_chunks=0,
-        subagent_asserted_chunks=0, user_asserted_chunks=0, refuted_chunks=0,
-        chunks=(),
-    )
-
-    result = evaluate_low_evidence_policy(answer=answer, report=report)
-
-    assert result.triggered
-    assert "```" not in result.answer

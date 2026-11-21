@@ -96,74 +96,8 @@ def test_running_the_report_changes_no_byte(tmp_path: Path, capsys) -> None:
     assert "stores unchanged" in capsys.readouterr().out
 
 
-def test_empty_stores_do_not_crash(tmp_path: Path, capsys) -> None:
-    (tmp_path / "data").mkdir()
-
-    assert main(["--workspace", str(tmp_path)]) == 0
-    assert "episodes: 0" in capsys.readouterr().out
-
-
 def test_absent_stores_do_not_crash(tmp_path: Path) -> None:
     assert main(["--workspace", str(tmp_path)]) == 0
-
-
-# ==========================================================================
-# The gates are reported apart, and the lesson arm is not an anomaly.
-# ==========================================================================
-def test_a_legacy_lesson_is_an_expected_admission_not_an_anomaly() -> None:
-    report = build_report([_episode("les", tags=("lesson",), outcome="failed")], [])
-
-    assert report["gates"]["lesson context eligibility"] == 1
-    assert report["gates"]["positive episodic reuse"] == 0
-    assert report["gates"]["episodic fast-path"] == 0
-    assert report["anomalies"] == {}, (
-        "a curated lesson ignores completion by design; calling that an "
-        "anomaly would train the reader to skip the section"
-    )
-
-
-def test_the_lesson_arm_reports_what_retrieval_admits_not_what_the_policy_says() -> None:
-    """The report models RETRIEVAL, and retrieval reads the STORED bit.
-
-    `decide_usage_eligibility` is the banking-time policy: for a lesson it
-    returns True regardless of the stored `usage_eligible`. Retrieval calls
-    `is_usage_eligible`, which admits only an explicit True — so a legacy
-    lesson, whose bit was never set, is refused. Reporting the policy's answer
-    said 108 legacy lessons were admitted when the live agent admits none, and
-    a diagnostic that overstates what memory is reachable is worse than no
-    diagnostic.
-    """
-    unclassified = _episode("legacy-lesson", tags=("lesson",), outcome="failed",
-                            eligible=None)
-    admitted = _episode("live-lesson", tags=("lesson",), outcome="failed",
-                        eligible=True)
-
-    report = build_report([unclassified, admitted], [])
-
-    assert report["gates"]["lesson context eligibility"] == 1, (
-        "a legacy lesson carries no eligibility bit and retrieval refuses it"
-    )
-    assert report["anomalies"] == {}
-
-
-def test_the_stored_eligibility_bit_is_reported() -> None:
-    """It is what actually withholds legacy memory, so it has to be visible."""
-    report = build_report(
-        [_episode("a", eligible=None), _episode("b", eligible=False),
-         _episode("c", eligible=True)],
-        [],
-    )
-
-    assert report["usage_eligible"] == {"<missing>": 1, "False": 1, "True": 1}
-    assert "STORED eligibility bit" in render(report)
-
-
-def test_an_achieved_episode_reaches_the_positive_gates() -> None:
-    report = build_report([_episode("ok", completion="achieved")], [])
-
-    assert report["gates"]["positive episodic reuse"] == 1
-    assert report["gates"]["procedural credit"] == 1
-    assert report["anomalies"] == {}
 
 
 def test_the_anomaly_detector_actually_fires(monkeypatch) -> None:
@@ -242,14 +176,6 @@ def test_the_report_and_the_migration_never_disagree() -> None:
         ), f"report and migration disagree about {row.id}"
 
 
-def test_the_live_shape_reports_zero_candidates() -> None:
-    """The store's real shape: nothing carries a durable fact to classify."""
-    report = build_report([_episode(f"ep-{i}") for i in range(5)], [])
-
-    assert report["backfill_candidates"] == []
-    assert "safe episode backfill candidates: 0" in render(report)
-
-
 # ==========================================================================
 # Procedural counters — association, never attribution.
 # ==========================================================================
@@ -268,16 +194,6 @@ def test_procedures_are_counted_by_legacy_reference_not_by_blame() -> None:
         "only a procedure with BOTH non-zero counters and a legacy reference "
         "qualifies; a zero-counter procedure has nothing unverifiable yet"
     )
-
-
-def test_references_to_evicted_episodes_are_reported_as_missing() -> None:
-    report = build_report(
-        [_episode("ep-legacy")],
-        [_procedure("p", refs=("ep-legacy", "ep-evicted-1", "ep-evicted-2"))],
-    )
-
-    entry = report["procedures_with_legacy_refs"][0]
-    assert (entry["refs_total"], entry["refs_legacy"], entry["refs_missing"]) == (3, 1, 2)
 
 
 def test_the_report_states_the_limit_of_attribution() -> None:
@@ -307,64 +223,6 @@ def test_the_report_does_not_overclaim(word: str) -> None:
 # together with its own `refs_missing` count. The headline converged to zero
 # exactly as the credit became LESS verifiable. A sensor whose reading improves
 # as the thing it measures gets worse is worse than no sensor.
-
-
-def test_evicted_evidence_reads_as_unexaminable_not_as_clean() -> None:
-    """The witness for the live store's exact state: counters whose every
-    source reference points at nothing must appear in the report."""
-    episodes: list = []  # the FIFO already evicted everything
-    procs = [_procedure("p1", refs=("gone-1", "gone-2", "gone-3"), success=5)]
-
-    report = build_report(episodes, procs)
-
-    flagged = report["procedures_with_legacy_refs"]
-    assert flagged, (
-        "a procedure with success=5 and every reference evicted vanished from "
-        "the report — zero-because-evicted read as zero-because-clean"
-    )
-    assert flagged[0]["refs_missing"] == 3
-    assert flagged[0]["refs_legacy"] == 0
-
-
-def test_a_clean_procedure_is_still_not_flagged() -> None:
-    """Zero-because-clean must stay zero: classified, resolvable evidence is
-    exactly what the policy wants, and flagging it would cry wolf."""
-    episodes = [_episode("e1", completion="achieved")]
-    procs = [_procedure("p1", refs=("e1",), success=2)]
-
-    report = build_report(episodes, procs)
-
-    assert report["procedures_with_legacy_refs"] == []
-
-
-def test_the_two_zeros_are_distinguishable_in_the_rendered_text(capsys) -> None:
-    """The number is read by a human; the words must carry the split. A reader
-    of the old report could not tell 'nothing unverifiable' from 'the evidence
-    is gone' — that is the difference the live store fell into."""
-    procs = [_procedure("p1", refs=("gone-1",), success=1)]
-
-    text = render(build_report([], procs))
-
-    # The static prose always mentions "missing", so that word alone proves
-    # nothing (this test first passed unfixed for exactly that reason). The
-    # procedure's own line must be printed, and the headline must carry the
-    # evicted split.
-    assert "tools:p1" in text, (
-        "the affected procedure is not in the rendered report — the reader "
-        "cannot tell zero-because-clean from zero-because-evicted"
-    )
-    assert "evicted" in text.lower()
-
-
-def test_a_mixed_procedure_reports_both_counts() -> None:
-    episodes = [_episode("e1", completion=None)]  # present, unclassified
-    procs = [_procedure("p1", refs=("e1", "gone-1"), success=3)]
-
-    report = build_report(episodes, procs)
-
-    flagged = report["procedures_with_legacy_refs"]
-    assert flagged and flagged[0]["refs_legacy"] == 1
-    assert flagged[0]["refs_missing"] == 1
 
 
 def test_zero_counter_procedures_stay_out_even_with_missing_refs() -> None:

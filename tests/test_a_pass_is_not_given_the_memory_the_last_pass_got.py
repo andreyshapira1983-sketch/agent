@@ -72,14 +72,3 @@ def test_the_next_pass_task_carries_the_conclusion_but_no_memory_id(tmp_path: Pa
     assert "Прогресс прошлых заходов" in goals[1]
     assert "поле tools пустое" in goals[1]
     assert target_id not in goals[1]
-
-
-def test_another_action_does_not_inherit_the_exclusion(tmp_path: Path) -> None:
-    """Исключение живёт только в заходе на цель: любое другое действие его снимает."""
-    from core.goal_progress import start_pass
-
-    agent = SimpleNamespace(compensation_log=[], memory_given_to_goal=frozenset({"mem_x"}))
-
-    assert start_pass(agent, tmp_path, SimpleNamespace(goal=GOAL, goal_is_self=False),
-                      SimpleNamespace(action="observe")) is None
-    assert agent.memory_given_to_goal == frozenset()

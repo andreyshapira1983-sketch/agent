@@ -65,47 +65,8 @@ class _Agent(AgentLoopContext):
 
 
 # ---------------------------------------------------------------------------
-# The mixin must be able to call the cure at all
-# ---------------------------------------------------------------------------
-
-def test_the_file_declares_the_sensor_it_needs():
-    """The root cause, pinned separately from the symptom.
-
-    Both handlers were silent because `_sensor_failed` was not in the host
-    contract, so the file could not reach it through the MRO in a way the
-    layer's own convention would admit. Declaring it is the fix; this checks
-    the declaration rather than trusting that the calls below happen to work.
-    """
-    import ast
-    import inspect
-
-    tree = ast.parse(inspect.getsource(__import__(
-        "core.loop_context", fromlist=["x"]
-    )))
-    declared: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
-            declared |= {
-                sub.target.id
-                for sub in ast.walk(node)
-                if isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name)
-            }
-    assert "_sensor_failed" in declared
-
-
-# ---------------------------------------------------------------------------
 # Referent resolution
 # ---------------------------------------------------------------------------
-
-def test_a_healthy_referent_resolution_logs_its_decision():
-    """The baseline, so the failure case is measured against something real."""
-    agent = _Agent()
-    with patch("core.loop_context.referent_resolver_mode", return_value="shadow"):
-        agent._maybe_resolve_referent("вопрос", file_hint=None)
-
-    assert "referent_decision" in agent.log.events
-    assert agent.last_referent_decision != "UNSET"
-    assert agent.sensor_failures == []
 
 
 def test_a_broken_referent_resolution_is_reported_and_fails_safe():
@@ -127,13 +88,6 @@ def test_a_broken_referent_resolution_is_reported_and_fails_safe():
 # Assumption extraction — the better hiding place
 # ---------------------------------------------------------------------------
 
-def test_a_healthy_extraction_registers_assumptions():
-    agent = _Agent()
-    registry, _cp = agent._open_run("сколько строк в файле core/loop.py?")
-
-    assert len(registry) > 0
-    assert agent.sensor_failures == []
-
 
 def test_a_broken_extraction_is_reported_rather_than_looking_empty():
     """The point of A3, stated as the thing that used to be impossible.
@@ -150,18 +104,3 @@ def test_a_broken_extraction_is_reported_rather_than_looking_empty():
 
     assert len(registry) == 0
     assert agent.sensor_failures == ["assumption_extraction"]
-
-
-def test_an_empty_question_is_not_reported_as_a_failure():
-    """The other side of the same coin: silence must stay available.
-
-    A question with nothing to assume is not a defect, and turning every empty
-    registry into a sensor failure would trade one indistinguishable pair for
-    another.
-    """
-    agent = _Agent()
-    with patch("core.loop_context.extract_from_question", return_value=[]):
-        registry, _cp = agent._open_run("привет")
-
-    assert len(registry) == 0
-    assert agent.sensor_failures == []

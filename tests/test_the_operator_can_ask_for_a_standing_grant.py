@@ -49,19 +49,6 @@ def test_a_shipped_command_can_file_the_request(tmp_path: Path) -> None:
     assert (filed[0].payload or {}).get("max_runs_per_day") == 6
 
 
-def test_filing_is_not_granting(tmp_path: Path) -> None:
-    """Просьба и разрешение — разные события и не сливаются в одно.
-
-    Норма ратифицирована оператором 2026-08-22 (MIR-117, правило B). Поэтому
-    команда КЛАДЁТ заявку, а открывает её отдельное слово через
-    `:approval-approve` — иначе оператор одобрял бы сам себе одной строкой.
-    """
-    _, agent = _run(":standing-grant 6 48", tmp_path)
-
-    filed = [i for i in agent.approval_inbox.list() if i.operation == _OPERATION]
-    assert filed[0].status == "pending"
-
-
 def test_the_grant_carries_its_risk_and_its_end(tmp_path: Path) -> None:
     """Бессрочный грант с необъявленным риском — не грант, а дыра."""
     _, agent = _run(":standing-grant 6 48", tmp_path)

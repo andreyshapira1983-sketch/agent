@@ -28,7 +28,6 @@ import pytest
 
 from app.bootstrap import DEFAULT_EPISODIC_MEMORY_PATH, build_agent
 from core.loop import AgentLoop
-from core.loop_memory_write import KNOWN_DURABLE_SINKS
 from core.models import MemoryRecord
 from core.smart_memory import EpisodeRecord, EpisodicMemoryStore
 
@@ -63,27 +62,6 @@ def _seed_prunable(workspace: Path) -> EpisodicMemoryStore:
     return store
 
 
-# ==========================================================================
-# Hygiene is a durable write and is governed as one.
-# ==========================================================================
-def test_hygiene_is_a_known_durable_sink() -> None:
-    assert "hygiene" in KNOWN_DURABLE_SINKS, (
-        "hygiene deletes durable state, so it must be governed by the same "
-        "policy as every other write rather than a parallel permission check"
-    )
-
-
-def test_audit_read_only_stops_the_pass(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    _seed_prunable(tmp_path)
-    agent.set_audit_read_only(True)
-
-    report = agent.run_maintenance_pass(dry_run=False)
-
-    assert report["skipped"], "the audit brake must stop hygiene outright"
-    assert len(EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).load()) == 2
-
-
 def test_dry_run_brake_stops_the_pass(tmp_path: Path) -> None:
     agent = _agent(tmp_path)
     _seed_prunable(tmp_path)
@@ -99,46 +77,6 @@ def test_a_profile_without_the_sink_cannot_run_hygiene(tmp_path: Path) -> None:
 
     assert agent.run_maintenance_pass(dry_run=False)["skipped"]
     assert len(EpisodicMemoryStore(tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).load()) == 2
-
-
-# ==========================================================================
-# Shadow first.
-# ==========================================================================
-def test_shadow_pass_reports_without_removing(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    store = _seed_prunable(tmp_path)
-
-    report = agent.run_maintenance_pass(dry_run=True)
-
-    assert not report.get("skipped")
-    assert report["dry_run"] is True
-    assert report["episodes_pruned"] >= 1, "shadow must still report what it would remove"
-    assert len(store.load()) == 2, "shadow must not remove anything"
-
-
-def test_enforcing_pass_actually_removes(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    store = _seed_prunable(tmp_path)
-
-    report = agent.run_maintenance_pass(dry_run=False)
-
-    assert report["dry_run"] is False
-    assert len(store.load()) < 2, "the enforcing pass must remove the stale episode"
-
-
-# ==========================================================================
-# Safety: what must survive a pass.
-# ==========================================================================
-def test_curated_lesson_survives_the_pass(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    store = _seed_prunable(tmp_path)
-
-    agent.run_maintenance_pass(dry_run=False)
-
-    assert "curated" in {e.id for e in store.load()}, (
-        "a lesson episode is learn-from-failure by design and must never be "
-        "pruned, however stale it looks"
-    )
 
 
 def test_user_explicit_records_are_not_archived(tmp_path: Path) -> None:

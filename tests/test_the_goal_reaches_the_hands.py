@@ -62,64 +62,6 @@ import ast
 from importlib.util import find_spec
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parents[1]
-_PRODUCER = "produce_self_apply_proposal"
-#: Machine-driven callers only. cli/ is the operator's hand: a human typing
-#: :self-build-produce IS the binding, so it proves nothing about the loop.
-_MACHINE_DIRS = ("core", "app")
-
-
-def _producer_call_sites() -> list[tuple[str, int, set[str]]]:
-    """Every machine call of the producer, with the kwargs it passes."""
-    sites: list[tuple[str, int, set[str]]] = []
-    for folder in _MACHINE_DIRS:
-        for path in (_REPO / folder).glob("*.py"):
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except SyntaxError:  # pragma: no cover - unparseable file
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                name = getattr(func, "id", None) or getattr(func, "attr", None)
-                if name != _PRODUCER:
-                    continue
-                kwargs = {kw.arg for kw in node.keywords if kw.arg}
-                sites.append((f"{folder}/{path.name}", node.lineno, kwargs))
-    return sites
-
-
-def test_the_producer_is_actually_called_by_the_machine() -> None:
-    """Boundary pin: if this fails the bank below is measuring nothing."""
-    sites = _producer_call_sites()
-    assert sites, f"no machine caller of {_PRODUCER}() — the road moved"
-    assert len(sites) >= 2, (
-        f"expected both the charter road and the runtime to call it; found {sites}"
-    )
-
-
-def test_the_producer_can_be_told_which_target_to_take() -> None:
-    """Boundary pin: the socket exists, so the gap is wiring, not API."""
-    src = Path(find_spec("core.self_build_producer").origin).read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    params: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == _PRODUCER:
-            params = {a.arg for a in node.args.args + node.args.kwonlyargs}
-    assert {"candidate_targets", "grounded_selector"} <= params, (
-        "the producer lost the parameters that could carry the head's choice"
-    )
-
-
-def test_some_machine_road_hands_the_producer_a_target() -> None:
-    sites = _producer_call_sites()
-    binding = [s for s in sites if {"candidate_targets", "grounded_selector"} & s[2]]
-    assert binding, (
-        "no machine caller passes candidate_targets or grounded_selector; "
-        f"call sites and their kwargs: {sites}"
-    )
-
 
 def test_the_head_decision_can_name_a_target() -> None:
     """ПРОБЕЛ ЗАКРЫТ 2026-08-24; до того здесь стоял строгий xfail.

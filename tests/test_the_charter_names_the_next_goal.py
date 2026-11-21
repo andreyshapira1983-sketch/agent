@@ -56,17 +56,6 @@ def _reply(**overrides) -> dict:
     return base
 
 
-def test_a_grounded_goal_is_proposed(tmp_path):
-    llm = _LLM(_reply())
-
-    result = propose_charter_goal(llm, _workspace(tmp_path))
-
-    assert result.status == "proposed", result.reason
-    assert result.goal.startswith("Сделать явными границы памяти")
-    assert result.charter_quote, "якорь взят из самой хартии по номеру"
-    assert result.charter_quote in _CHARTER
-
-
 def test_a_fabricated_anchor_is_declined(tmp_path):
     """Якорь — выбор номера из строк самой хартии; номер в никуда — это
     fabricated citation, и судьба у него та же. Живой замер 2026-08-15:
@@ -78,19 +67,6 @@ def test_a_fabricated_anchor_is_declined(tmp_path):
 
     assert result.status == "declined"
     assert "anchor" in result.reason
-
-
-def test_a_repeat_of_a_recent_goal_is_declined(tmp_path):
-    """Топтание запрещено: цель, совпадающая с недавней целью журнала,
-    не предлагается заново.
-    """
-    goal = "Найди в своём собственном коде конкретный дефект, докажи его чтением кода, и почини"
-    llm = _LLM(_reply(goal=goal))
-
-    result = propose_charter_goal(llm, _workspace(tmp_path, recent=(goal,)))
-
-    assert result.status == "declined"
-    assert "recent" in result.reason
 
 
 def test_an_authority_widening_goal_is_declined(tmp_path):

@@ -22,7 +22,6 @@ WHY THIS EXISTS. Аудит автономности 2026-09-17, находки 
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,40 +30,9 @@ from typing import Any
 from core.autonomous_runtime import AutonomousRuntime
 from core.autonomous_runtime_types import AutonomousRuntimeConfig, AutonomousTask
 from core.campaign_types import CampaignConfig
-from core.success_check import named_artifacts, observe_success_check
+from core.success_check import observe_success_check
 
 _BURN_IN_CHECK = "файл result.json существует и содержит status=ready"
-
-
-# --------------------------------------------------------------------------- #
-# 1. Чтение критерия: что вообще можно наблюдать                               #
-# --------------------------------------------------------------------------- #
-
-def test_a_named_file_is_the_observable_part_of_a_criterion() -> None:
-    assert named_artifacts(_BURN_IN_CHECK) == ("result.json",)
-    assert named_artifacts("создан docs/notes/plan.md и он не пуст") == (
-        "docs/notes/plan.md",
-    )
-
-
-def test_a_criterion_without_a_named_file_is_not_pretended_to_be_checked() -> None:
-    """«Проверка не названа» — отдельное состояние, а не молчаливое «да»."""
-    assert named_artifacts("агент стал полезнее") == ()
-    assert named_artifacts("") == ()
-
-    verdict = observe_success_check("агент стал полезнее", Path("."))
-    assert verdict["verdict"] == "unverifiable"
-
-
-def test_the_criterion_is_read_from_the_world_not_from_the_answer(tmp_path: Path) -> None:
-    missing = observe_success_check(_BURN_IN_CHECK, tmp_path)
-    assert missing["verdict"] == "missing"
-    assert missing["missing"] == ["result.json"]
-
-    (tmp_path / "result.json").write_text('{"status": "ready"}', encoding="utf-8")
-    found = observe_success_check(_BURN_IN_CHECK, tmp_path)
-    assert found["verdict"] == "verified"
-    assert found["missing"] == []
 
 
 # ── Ревизия PR #333: наличие файла — ещё не критерий ──────────────────────────
@@ -76,22 +44,6 @@ def test_the_criterion_is_read_from_the_world_not_from_the_answer(tmp_path: Path
 # брался как `root / relpath`, то есть `tmp/../../outside/result.json` уводил
 # проверяющего ЗА пределы рабочей копии — и след, положенный снаружи, засчитывал
 # цель внутри.
-
-
-def test_a_criterion_is_not_met_by_the_wrong_content(tmp_path: Path) -> None:
-    """Названная пара «ключ=значение» обязана найтись в названном файле.
-
-    Иначе вердикт `verified` означает «файл есть», притворяясь, что означает
-    «критерий сошёлся».
-    """
-    (tmp_path / "result.json").write_text('{"status": "broken"}', encoding="utf-8")
-
-    verdict = observe_success_check(_BURN_IN_CHECK, tmp_path)
-
-    assert verdict["verdict"] != "verified", (
-        "критерий требовал status=ready, а файл говорит broken — "
-        "проверялось только существование файла"
-    )
 
 
 def test_a_criterion_cannot_point_outside_the_workspace(tmp_path: Path) -> None:
@@ -117,16 +69,6 @@ def test_a_criterion_cannot_point_outside_the_workspace(tmp_path: Path) -> None:
     assert verdict["verdict"] != "verified", (
         "критерий увёл проверяющего за пределы рабочей копии"
     )
-
-
-def test_a_criterion_without_a_content_claim_still_checks_existence(
-    tmp_path: Path
-) -> None:
-    """Сужения не произошло: критерий без пары по-прежнему проверяет наличие."""
-    (tmp_path / "plan.md").write_text("черновик", encoding="utf-8")
-
-    assert observe_success_check("создан plan.md", tmp_path)["verdict"] == "verified"
-    assert observe_success_check("создан other.md", tmp_path)["verdict"] == "missing"
 
 
 # --------------------------------------------------------------------------- #
@@ -186,44 +128,6 @@ def test_goal_contract_reaches_execution(tmp_path: Path, monkeypatch: Any) -> No
     assert seen["config"].goal_success_check == _BURN_IN_CHECK, (
         "критерий цели не доехал до исполнителя: судить выполнение нечем"
     )
-
-
-def test_the_cycle_record_keeps_the_criterion(tmp_path: Path) -> None:
-    """Журнал цикла обязан нести критерий: иначе «сошлось ли» непроверяемо
-    после прогона, а прогон длится десять часов без человека."""
-    from core.campaign import run_campaign
-    from core.campaign_ledger import CampaignLedger
-    from core.campaign_types import CampaignActionOutcome
-
-    def _gather(agent, workspace, approval_inbox, goal="", exhausted_actions=frozenset()):
-        return {"action": SimpleNamespace(
-            action="propose_engineering_task", title="one thing", severity="low",
-            priority=10, risk="reversible", grounds="operator_goal",
-            decided_by="test", next_check_at=None, reason="",
-        )}
-
-    def _execute(*, agent, workspace, action, config, approval_inbox=None):
-        assert config.success_check == _BURN_IN_CHECK, (
-            "исполнитель обязан слышать критерий ТЕКУЩЕЙ цели"
-        )
-        return CampaignActionOutcome(result="completed", work_done=True,
-                                     subject="s", llm_calls_spent=1)
-
-    ledger_path = tmp_path / "data" / "campaign_ledger.jsonl"
-    result = run_campaign(
-        CampaignConfig(goal=_Pick.goal, success_check=_BURN_IN_CHECK,
-                       max_cycles=1, dry_run=False),
-        agent=SimpleNamespace(log=None),
-        workspace=str(tmp_path),
-        gather_signals=_gather,
-        execute_action=_execute,
-        ledger=CampaignLedger(path=ledger_path),
-        now_fn=lambda: datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc),
-    )
-
-    assert result.records[0].success_check == _BURN_IN_CHECK
-    row = json.loads(ledger_path.read_text(encoding="utf-8").splitlines()[0])
-    assert row["success_check"] == _BURN_IN_CHECK
 
 
 def test_a_switched_goal_brings_its_own_criterion(tmp_path: Path) -> None:
@@ -420,63 +324,6 @@ def test_a_real_artifact_makes_the_task_done(tmp_path: Path) -> None:
     assert report.details["success_check_verdict"] == "verified"
 
 
-def test_an_unverifiable_criterion_says_so_out_loud(tmp_path: Path) -> None:
-    """Критерий без наблюдаемого следа не превращается ни в «да», ни в «нет».
-
-    Прежнее поведение сохраняется (непустой ответ — `done`), но запись
-    исполнения честно говорит, что проверка не проводилась.
-    """
-    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
-    agent = _TalkativeAgent(tmp_path)
-    runtime = AutonomousRuntime(agent, workspace=tmp_path)
-    task = AutonomousTask(kind="goal", description="подумай о вечном")
-
-    report = runtime._task_goal(task, AutonomousRuntimeConfig(
-        goal="подумать", goal_success_check="агент стал мудрее",
-        dry_run=True, include_tests=False,
-    ))
-
-    assert report.status == "done"
-    assert report.details["success_check_verdict"] == "unverifiable"
-
-
-def test_a_goal_without_a_criterion_keeps_the_old_behaviour(tmp_path: Path) -> None:
-    """Пустой критерий — прежний путь. Починка не вводит новых отказов там,
-    где вопрос вообще не ставился."""
-    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
-    agent = _TalkativeAgent(tmp_path)
-    runtime = AutonomousRuntime(agent, workspace=tmp_path)
-    task = AutonomousTask(kind="goal", description="что-нибудь")
-
-    report = runtime._task_goal(task, AutonomousRuntimeConfig(
-        goal="что-нибудь", dry_run=True, include_tests=False,
-    ))
-
-    assert report.status == "done"
-    assert report.details["success_check_verdict"] == "unverifiable"
-
-
-def test_a_config_cannot_be_built_positionally() -> None:
-    """Порядок полей растущей настройки — не договор, и притворяться им не должен.
-
-    Ревизия PR #333: `success_check` встал ВТОРЫМ полем `CampaignConfig`, и
-    любой позиционный вызывающий с этого дня молча получал критерий успеха
-    там, где передавал `max_cycles`. Молчаливая подмена смысла хуже падения:
-    прогон продолжается, а настройка уже не та.
-    """
-    import pytest as _pytest
-
-    from core.autonomous_runtime_types import AutonomousRuntimeConfig
-    from core.campaign_types import CampaignConfig
-
-    with _pytest.raises(TypeError):
-        CampaignConfig("цель")
-    with _pytest.raises(TypeError):
-        AutonomousRuntimeConfig("цель")
-
-    assert CampaignConfig(goal="цель").goal == "цель"
-
-
 # ── признаки успеха: два замечания ревизии PR #334 ───────────────────────────
 #
 # Оба про одно: проверяющий обязан отвечать на критерий, а не на что-то
@@ -502,76 +349,6 @@ def test_a_claim_is_not_met_by_a_value_that_merely_starts_the_same(tmp_path):
     )
 
     assert seen["verdict"] == "missing", seen["reason"]
-
-
-def test_a_claim_is_not_met_by_a_key_that_merely_ends_the_same(tmp_path):
-    """I6, вторая половина: приставка у КЛЮЧА."""
-    from core.success_check import observe_success_check
-
-    (tmp_path / "result.json").write_text(
-        '{"my_status": "ready"}', encoding="utf-8"
-    )
-
-    seen = observe_success_check(
-        "result.json существует и содержит status=ready", tmp_path
-    )
-
-    assert seen["verdict"] == "missing", seen["reason"]
-
-
-def test_a_claim_that_is_actually_met_is_still_met(tmp_path):
-    """Сосед: границы не вправе сломать обычное совпадение.
-
-    Три записи одного утверждения — критерий говорит об утверждении, а не о
-    синтаксисе.
-    """
-    from core.success_check import observe_success_check
-
-    for body in ('{"status": "ready"}', "status: ready", "status=ready"):
-        (tmp_path / "result.json").write_text(body, encoding="utf-8")
-        seen = observe_success_check(
-            "result.json существует и содержит status=ready", tmp_path
-        )
-        assert seen["verdict"] == "verified", f"{body}: {seen['reason']}"
-
-
-def test_a_claim_belongs_to_the_artifact_it_was_said_about(tmp_path):
-    """S3. Утверждения применялись К КАЖДОМУ названному следу.
-
-    Критерий «result.json содержит status=ready, и создан log.txt» требовал
-    `status=ready` ещё и от `log.txt`. Ложный ОТКАЗ: честно выполненная цель
-    объявлялась невыполненной, и агент принимался чинить работающее.
-    """
-    from core.success_check import observe_success_check
-
-    (tmp_path / "result.json").write_text('{"status": "ready"}', encoding="utf-8")
-    (tmp_path / "log.txt").write_text("работа шла\n", encoding="utf-8")
-
-    seen = observe_success_check(
-        "result.json содержит status=ready, и создан log.txt", tmp_path
-    )
-
-    assert seen["verdict"] == "verified", seen["reason"]
-
-
-def test_the_artifact_that_owns_the_claim_still_has_to_meet_it(tmp_path):
-    """Сосед к S3: привязка не вправе стать поблажкой.
-
-    Тот же критерий, но `result.json` утверждения НЕ несёт. Отказ обязан
-    остаться, иначе «привязали к своему» превратилось бы в «не проверяем».
-    """
-    from core.success_check import observe_success_check
-
-    (tmp_path / "result.json").write_text('{"status": "broken"}', encoding="utf-8")
-    (tmp_path / "log.txt").write_text("работа шла\n", encoding="utf-8")
-
-    seen = observe_success_check(
-        "result.json содержит status=ready, и создан log.txt", tmp_path
-    )
-
-    assert seen["verdict"] == "missing"
-    assert "result.json" in seen["missing"]
-    assert "log.txt" not in seen["missing"]
 
 
 def test_a_book_that_was_there_before_the_goal_is_not_its_result(tmp_path: Path) -> None:

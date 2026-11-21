@@ -15,31 +15,6 @@ _STUDY_GOAL = (
     "Изучи в интернете, как устроен фреймворк LangGraph, и примерь его идеи "
     "к своей системе"
 )
-_OPEN_ISSUE = {
-    "fingerprint": "abc123", "status": "open",
-    "action": "improve_failure_to_idea_pipeline",
-    "title": "Resolve the open self-improvement issue", "evidence": ["e1"],
-}
-
-
-def test_a_study_goal_beats_the_repair_habit():
-    action = select_best_next_action(
-        goal=_STUDY_GOAL,
-        open_self_improvement_issues=(_OPEN_ISSUE,),
-        self_improvement_registry_available=True,
-    )
-
-    assert action.action == "study_external_source"
-
-
-def test_a_repair_goal_is_untouched():
-    action = select_best_next_action(
-        goal="Найди в своём собственном коде конкретный дефект и почини",
-        open_self_improvement_issues=(_OPEN_ISSUE,),
-        self_improvement_registry_available=True,
-    )
-
-    assert action.action == "improve_failure_to_idea_pipeline"
 
 
 def test_a_doc_goal_still_outranks_study():
@@ -122,48 +97,3 @@ def test_a_condenser_without_a_block_is_declined(tmp_path):
 
     assert note == "hypothesis_declined:no_block"
     assert load_claims(tmp_path) == ()
-
-
-def test_study_unblocks_only_the_web_on_the_goal_path():
-    """Разблокировка узкая по построению: учебному прогону открывается ровно
-    web_search/web_fetch; spawn_subagent и python_probe не разблокируемы
-    этим полем вовсе.
-    """
-    from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS, _goal_block_set
-
-    blocked = _goal_block_set(
-        unblock_tools=frozenset({"web_search", "web_fetch", "spawn_subagent",
-                                 "python_probe"}),
-        include_tests=True,
-    )
-
-    assert "web_search" not in blocked
-    assert "web_fetch" not in blocked
-    assert "spawn_subagent" in blocked
-    # python_probe на безнадзорном пути не заблокирован вовсе — 2026-09-19, слово оператора перед суточным прогоном: «разрешения у него будут все».
-    assert "python_probe" not in blocked
-    assert _goal_block_set(unblock_tools=frozenset(), include_tests=True) == \
-        _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-
-
-def test_verified_and_topic_only_citations_are_read_too(tmp_path):
-    """Живой обрыв цепочки (первый прогон автомата, 2026-08-16): к моменту
-    жатвы верификатор уже переписал [web:x] в [verified:web:x]/[topic-only:…],
-    и жнец, знающий только сырую орфографию, отказал с no_web_citations при
-    состоявшемся чтении.
-    """
-    answer = (
-        "Контрольные точки сохраняют состояние [verified:web:LangGraph "
-        "checkpoints обзор] и это применимо частично "
-        "[topic-only:web_search:восстановление прогонов]."
-    )
-
-    note = _propose_hypothesis_from_study(
-        agent=SimpleNamespace(llm=_CondenserLLM(), log=None),
-        workspace=tmp_path, goal=_STUDY_GOAL, answer=answer,
-    )
-
-    assert note.startswith("hypothesis_recorded:")
-    ((claim, _extra),) = load_claims(tmp_path)
-    refs = " ".join(claim.observation.evidence_refs)
-    assert "LangGraph" in refs

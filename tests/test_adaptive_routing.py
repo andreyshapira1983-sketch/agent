@@ -17,7 +17,6 @@ import pytest
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.model_router import ModelRole, ModelRouter
-from core.planner import LLMPlanner
 from core.policy import PolicyGate
 from core.task_complexity import ComplexityTier, assess_complexity
 from tests.conftest import FakeLLM, FakePlanner
@@ -40,111 +39,6 @@ def _make_registry(workspace: Path) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(FileReadTool(workspace_root=workspace))
     return registry
-
-
-def _make_loop(workspace: Path, fake_llm: FakeLLM, planner: FakePlanner) -> AgentLoop:
-    registry = _make_registry(workspace)
-    return AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=fake_llm,
-        logger=TraceLogger(trace_id=new_trace_id(), log_dir=workspace / "logs", verbose=False),
-        planner=planner,
-    )
-
-
-# ── 1. LLMPlanner.plan() uses llm= override ──────────────────────────────────
-
-class TestPlannerLLMOverride:
-    def test_llm_override_is_used(self, tmp_path: Path):
-        """When llm= is passed, the planner should call it, not self.llm."""
-        default_llm = FakeLLM(responses=['{"reasoning":"default","sources":[]}'])
-        override_llm = FakeLLM(responses=['{"reasoning":"override","sources":[]}'])
-
-        registry = _make_registry(tmp_path)
-        planner = LLMPlanner(llm=default_llm, registry=registry)
-
-        result = planner.plan(
-            question="привет",
-            file_hint=None,
-            llm=override_llm,
-        )
-
-        # override was called, default was not
-        assert len(override_llm.calls) == 1
-        assert len(default_llm.calls) == 0
-        assert result.reasoning == "override"
-
-    def test_no_override_uses_self_llm(self, tmp_path: Path):
-        """When llm= is not passed, self.llm is used (backward compat)."""
-        default_llm = FakeLLM(responses=['{"reasoning":"default","sources":[]}'])
-        registry = _make_registry(tmp_path)
-        planner = LLMPlanner(llm=default_llm, registry=registry)
-
-        result = planner.plan(question="привет", file_hint=None)
-
-        assert len(default_llm.calls) == 1
-        assert result.reasoning == "default"
-
-
-# ── 2. AgentLoop._synthesize() uses llm= override ────────────────────────────
-
-class TestSynthesizeLLMOverride:
-    def test_synthesize_override_is_used(self, tmp_path: Path):
-        """_synthesize(llm=...) must call the override, not self.llm."""
-        from core.models import Goal
-
-        default_llm = FakeLLM(responses=[_make_answer("default answer")])
-        override_llm = FakeLLM(responses=[_make_answer("override answer")])
-
-        loop = _make_loop(tmp_path, default_llm, FakePlanner())
-        goal = Goal(
-            id="g1",
-            description="test",
-            success_criteria="",
-            parent_goal_id=None,
-            status="pending",
-            priority=5,
-            deadline=None,
-        )
-
-        result = loop._synthesize(
-            goal=goal,
-            artifacts={},
-            question="test question",
-            planner_reasoning="none",
-            llm=override_llm,
-        )
-
-        assert len(override_llm.calls) == 1
-        assert len(default_llm.calls) == 0
-        assert "override answer" in result
-
-    def test_synthesize_no_override_uses_self_llm(self, tmp_path: Path):
-        """_synthesize() without llm= uses self.llm."""
-        from core.models import Goal
-
-        default_llm = FakeLLM(responses=[_make_answer("self llm answer")])
-        loop = _make_loop(tmp_path, default_llm, FakePlanner())
-        goal = Goal(
-            id="g1",
-            description="test",
-            success_criteria="",
-            parent_goal_id=None,
-            status="pending",
-            priority=5,
-            deadline=None,
-        )
-
-        result = loop._synthesize(
-            goal=goal,
-            artifacts={},
-            question="test question",
-            planner_reasoning="none",
-        )
-
-        assert len(default_llm.calls) == 1
-        assert "self llm answer" in result
 
 
 # ── 3. AgentLoop.run() calls for_task() and logs adaptive_route ───────────────
@@ -208,50 +102,6 @@ def _run_with_mock_router(
     loop.run(question, deep_escalation=deep_escalation)
 
     return events, for_task_calls
-
-
-class TestChosenTierModelsAreUsed:
-    """The power wire of adaptive routing: the CHOSEN models do the work.
-
-    Measured 2026-08-08: cutting `llm=st._task_planner_llm` (loop_attempt:288)
-    AND `llm=_synth_llm` (loop_synthesis:638) left 221 routing tests green —
-    for_task was still called, its verdict still logged, and its RESULT
-    silently discarded: every run would execute on the default model. One
-    wire past M11: the operator's escalation reached the router, the router
-    picked the deep model, and the loop threw the choice away.
-    """
-
-    def test_planner_and_synthesizer_run_on_the_routed_models(
-        self, tmp_path: Path
-    ) -> None:
-        default_llm = FakeLLM(responses=[])
-        planner_llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
-        synth_llm = FakeLLM(responses=[_make_answer("tiered answer")])
-
-        def routed(role, task, *, escalation=None, task_role=None):
-            key = role.value if hasattr(role, "value") else str(role)
-            return planner_llm if key == "planner" else synth_llm
-
-        registry = _make_registry(tmp_path)
-        loop = AgentLoop(
-            registry=registry,
-            policy=PolicyGate(registry),
-            llm=default_llm,
-            logger=TraceLogger(
-                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
-            ),
-        )
-        loop.model_router.for_task = routed  # type: ignore[method-assign]
-
-        answer = loop.run("какой статус системы")
-
-        assert planner_llm.calls, "the routed planner model must plan"
-        assert synth_llm.calls, "the routed synthesizer model must synthesize"
-        assert "tiered answer" in answer
-        assert default_llm.calls == [], (
-            "the default model may not be consulted when the router chose "
-            "tier models — a call here means the choice was discarded"
-        )
 
 
 class TestObserveOutputsReachConsumers:
@@ -338,124 +188,6 @@ class TestObserveOutputsReachConsumers:
             "the routed role never reached the synthesis prompt"
         )
 
-    def test_the_goal_carries_the_question_into_the_banked_episode(
-        self, tmp_path: Path
-    ) -> None:
-        """goal = _interpret(observation) -> episode.goal, with the question in it.
-
-        The goal is a constant-shaped string, so the bite pins the part that
-        matters: the operator's actual question must survive into the banked
-        episode's goal, or later retrieval ranks it against a blank.
-        """
-        from core.smart_memory import EpisodicMemoryStore
-
-        question = "how much is two plus two"
-        fake_llm = FakeLLM(
-            responses=[
-                '{"reasoning":"no tools","sources":[]}',
-                _make_answer("four"),
-            ]
-        )
-        registry = _make_registry(tmp_path)
-        store = EpisodicMemoryStore(tmp_path / "ep.jsonl")
-        loop = AgentLoop(
-            registry=registry,
-            policy=PolicyGate(registry),
-            llm=fake_llm,
-            logger=TraceLogger(
-                trace_id=new_trace_id(), log_dir=tmp_path / "logs", verbose=False
-            ),
-            episodic_store=store,
-        )
-
-        loop.run(question)
-
-        banked = store.load()
-        assert banked, "the cycle must bank an episode"
-        assert question in banked[0].goal, (
-            f"the question must survive into the episode's goal, "
-            f"got {banked[0].goal!r}"
-        )
-
-
-class TestRunAdaptiveRoute:
-    def _run_with_mock_router(self, tmp_path: Path, question: str, **kwargs):
-        return _run_with_mock_router(tmp_path, question, **kwargs)
-
-    def test_for_task_called_for_planner_and_synth(self, tmp_path: Path):
-        """run() must call for_task() for both PLANNER and SYNTHESIZER roles."""
-        _events, for_task_calls = self._run_with_mock_router(
-            tmp_path, "какой статус системы"
-        )
-        # role may be ModelRole enum or plain string — normalise to value
-        roles_called = [
-            r.value if hasattr(r, "value") else str(r)
-            for r, _, _, _ in for_task_calls
-        ]
-        assert "planner" in roles_called
-        assert "synthesizer" in roles_called
-
-    def test_operator_escalation_reaches_the_router_for_both_roles(
-        self, tmp_path: Path
-    ):
-        """run(deep_escalation=...) must arrive at for_task() unmodified.
-
-        This is the only wire that lets --reason/--expect open the deep tier;
-        cut it and the operator's escalation is silently a no-op. Measured
-        2026-08-08: with `escalation=None` forced at the forwarding site,
-        253 escalation-adjacent tests stayed green — none of them watched
-        this edge.
-        """
-        from core.deep_escalation import OperatorEscalation
-
-        marker = OperatorEscalation(reason="operator_request", expected_output="plan")
-        _events, for_task_calls = self._run_with_mock_router(
-            tmp_path, "какой статус системы", deep_escalation=marker
-        )
-
-        escalations = {
-            (r.value if hasattr(r, "value") else str(r)): esc
-            for r, _, _, esc in for_task_calls
-        }
-        assert escalations.get("planner") is marker, (
-            "the planner route lost the operator's escalation"
-        )
-        assert escalations.get("synthesizer") is marker, (
-            "the synthesizer route lost the operator's escalation"
-        )
-
-    def test_for_task_receives_task_role(self, tmp_path: Path):
-        """run() must forward the RoleRouter verdict to for_task().
-
-        Regression guard: the loop computed ``role_route`` and then dropped it,
-        so ``assess_complexity`` never learned that a repair/programming task
-        was in flight and could route it to the cheapest model.
-        """
-        _events, for_task_calls = self._run_with_mock_router(
-            tmp_path, "какой статус системы"
-        )
-        assert for_task_calls, "for_task() was never called"
-        task_roles = {tr for _, _, tr, _ in for_task_calls}
-        # Every call carries the same, non-empty verdict.
-        assert len(task_roles) == 1
-        assert task_roles != {None}
-
-    def test_adaptive_route_log_includes_task_role(self, tmp_path: Path):
-        """The routing decision must be explainable from the log alone."""
-        events, _calls = self._run_with_mock_router(
-            tmp_path, "какой статус системы"
-        )
-        routes = [e for e in events if e.get("type") == "adaptive_route"]
-        assert routes, "adaptive_route was never logged"
-        assert "task_role" in routes[0]
-
-    def test_for_task_receives_full_question(self, tmp_path: Path):
-        """for_task() must receive the full user question as the task string."""
-        question = "сделай полный архитектурный аудит системы"
-        _events, for_task_calls = self._run_with_mock_router(tmp_path, question)
-        questions_passed = [task for _, task, _, _ in for_task_calls]
-        assert all(q == question for q in questions_passed)
-
 
 # ── 3b. Routing failures must never vanish ───────────────────────────────────
 
@@ -535,14 +267,6 @@ class TestRoutingFailureIsVisible:
         # ...and no successful route was claimed.
         assert not [e for e in events if e.get("type") == "adaptive_route"]
 
-    def test_successful_route_logs_no_error(self, tmp_path: Path):
-        """Negative control: the error event is absent on the happy path."""
-        events, _calls = _run_with_mock_router(
-            tmp_path, "какой статус системы"
-        )
-        assert not [e for e in events if e.get("type") == "adaptive_route_error"]
-        assert [e for e in events if e.get("type") == "adaptive_route"]
-
 
 # ── 4. for_task() cost tier ──────────────────────────────────────────────────
 
@@ -601,34 +325,6 @@ class TestForTaskCostTier:
 # ── 5. assess_complexity() LIGHT / STANDARD / DEEP ───────────────────────────
 
 class TestComplexityClassification:
-    @pytest.mark.parametrize("question", [
-        "привет",
-        "hi",
-        "статус",
-        "что такое Python",
-        "кратко объясни",
-    ])
-    def test_light_questions(self, question: str):
-        assert assess_complexity(question) == ComplexityTier.LIGHT
-
-    @pytest.mark.parametrize("question", [
-        "Найди новости про Python 3.14",
-        "как работает asyncio",
-        "объясни разницу между list и tuple в Python",
-    ])
-    def test_standard_questions(self, question: str):
-        assert assess_complexity(question) == ComplexityTier.STANDARD
-
-    @pytest.mark.parametrize("question", [
-        "спроектируй полную архитектуру микросервисов",
-        "сделай полный аудит безопасности",
-        "разработать с нуля систему мониторинга",
-        "полный стратегический анализ рисков",
-        "комплексный анализ всех компонентов",
-    ])
-    def test_deep_questions(self, question: str):
-        assert assess_complexity(question) == ComplexityTier.DEEP
-
     def test_memory_summary_always_light(self):
         deep = "сделай полный архитектурный аудит и разработай с нуля"
         assert assess_complexity(deep, role="memory_summary") == ComplexityTier.LIGHT

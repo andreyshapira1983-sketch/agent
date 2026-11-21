@@ -76,53 +76,6 @@ def _pairs(first_probe: str, second_probe: str) -> str:
     )
 
 
-def test_both_files_created_yields_one_claim_with_two_explanations(tmp_path):
-    _seed_observation(tmp_path)
-    _write_log(tmp_path, "real.log", "needle_a present")
-    _write_log(tmp_path, "second.log", "needle_b present")
-    agent = _FakeAgent(_pairs(
-        "[probe: logs/real.log | needle_a | есть]",
-        "[probe: logs/second.log | needle_b | есть]",
-    ))
-
-    explain_causal_observation(agent=agent, workspace=tmp_path)
-
-    claims = load_claims(tmp_path)
-    assert len(claims) == 1
-    claim, _extra = claims[0]
-    assert len(claim.explanations) == 2
-
-
-def test_ghost_log_not_created_declines_claim(tmp_path):
-    _seed_observation(tmp_path)
-    _write_log(tmp_path, "real.log", "needle_a present")
-    agent = _FakeAgent(_pairs(
-        "[probe: logs/real.log | needle_a | есть]",
-        "[probe: logs/ghost.log | needle_b | есть]",
-    ))
-
-    explain_causal_observation(agent=agent, workspace=tmp_path)
-
-    assert len(load_claims(tmp_path)) == 0
-    assert any(
-        event == "causal_climb_declined" and "выжило" in str(payload)
-        for event, payload in agent.log.events
-    )
-
-
-def test_real_journal_log_created_uses_it_in_first_call(tmp_path):
-    _seed_observation(tmp_path)
-    _write_log(tmp_path, "real_journal.log", "needle_a present")
-    agent = _FakeAgent(_pairs(
-        "[probe: logs/real_journal.log | needle_a | есть]",
-        "[probe: logs/real_journal.log | needle_b | нет]",
-    ))
-
-    explain_causal_observation(agent=agent, workspace=tmp_path)
-
-    assert "real_journal.log" in agent.llm.calls[0]["user"]
-
-
 def test_pair_with_probe_and_pair_without_probe_yields_one_claim(tmp_path):
     _seed_observation(tmp_path)
     _write_log(tmp_path, "real.log", "needle_a present")

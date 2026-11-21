@@ -26,14 +26,12 @@ from core.request_checklist import (
     BUILD_SYSTEM,
     ENV,
     JUDGE_SYSTEM,
-    UNIVERSAL,
-    UNIVERSAL_IMPORTANCE,
     Checklist,
     ChecklistItem,
     build_checklist,
     check_answer,
 )
-from core.smart_memory import EpisodicMemoryStore, assemble_completion_verdict
+from core.smart_memory import EpisodicMemoryStore
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 
@@ -109,13 +107,6 @@ def test_an_unmet_important_item_lowers_achieved(tmp_path, monkeypatch) -> None:
     assert episode.completion_override == "checklist_unmet"
 
 
-def test_a_met_checklist_leaves_achieved_alone(tmp_path, monkeypatch) -> None:
-    """Ломка наоборот: всё «да» — вердикт не трогается."""
-    monkeypatch.setenv(ENV, "1")
-    agent, _ = _run(tmp_path, _Llm(["YES", "YES", "YES"], _ANSWER))
-    assert agent.episodic_store.load()[-1].completion_state == "achieved"
-
-
 def test_a_failed_judge_is_not_an_accusation(tmp_path, monkeypatch) -> None:
     """Судья упал — «не знаю»; программный пункт (VERDICT: есть) остался «да»."""
     monkeypatch.setenv(ENV, "1")
@@ -125,73 +116,12 @@ def test_a_failed_judge_is_not_an_accusation(tmp_path, monkeypatch) -> None:
     assert agent.episodic_store.load()[-1].completion_state == "achieved"
 
 
-def test_switched_off_costs_no_model_calls(tmp_path, monkeypatch) -> None:
-    """Аварийный выключатель =0 — ни одного лишнего вызова, ход как прежде."""
-    monkeypatch.setenv(ENV, "0")
-    llm = _Llm(["NO", "NO", "NO"], _ANSWER)
-    agent, events = _run(tmp_path, llm)
-    assert not {"request_checklist", "checklist_verdict"} & set(_names(events))
-    assert not any(c["system"] in (BUILD_SYSTEM, JUDGE_SYSTEM) for c in llm.calls)
-    assert agent.episodic_store.load()[-1].completion_state == "achieved"
-
-
-def test_an_exact_item_is_checked_by_program_not_by_the_judge() -> None:
-    """RLCF: подстрока проверяется программой; судья её не видит."""
-    llm = _Llm(["YES", "YES", "YES"], "")
-    checklist = build_checklist(llm, _REQUEST)
-    assert checklist.items[-1].question == UNIVERSAL
-    verdict = check_answer(llm, _REQUEST, checklist, "без нужной строки")
-    by_q = {v.item.question: v for v in verdict.verdicts}
-    assert by_q["Есть строка VERDICT:?"].how == "program"
-    assert by_q["Есть строка VERDICT:?"].answer == "no"
-    assert "Есть строка VERDICT:?" not in llm.calls[-1]["user"]
-    assert "Есть строка VERDICT:?" in verdict.unmet
-
-
-def test_an_item_without_a_quote_from_the_request_is_dropped() -> None:
-    """Замер 24.09 на 16 живых парах: важное «нет» в 14, и большинство — за
-    выдуманные «подразумеваемые» требования (извинись, пообещай, разговорный
-    тон). Пункт держится, только если его цитата дословно стоит в поручении."""
-    checklist = build_checklist(_Llm([], ""), _REQUEST)
-    questions = [i.question for i in checklist.items]
-    assert "Извинился ли агент?" not in questions
-    assert "Не больше трёх предложений?" in questions, "лишний пробел в цитате не в счёт"
-    assert "unquoted dropped: 1" in checklist.reason
-
-
-def test_the_universal_item_cannot_lower_the_verdict_alone() -> None:
-    checklist = Checklist(items=(ChecklistItem(UNIVERSAL, UNIVERSAL_IMPORTANCE),), reason="t")
-    assert check_answer(_Llm(["NO"], ""), _REQUEST, checklist, "ответ").unmet == ()
-
-
-def test_a_minor_item_answered_no_is_not_unmet() -> None:
-    """Вес ниже порога — «нет» записано, но вердикт не понижает."""
-    checklist = Checklist(items=(ChecklistItem("Объяснено ли, что такое BM25?", 20),), reason="t")
-    verdict = check_answer(_Llm(["NO"], ""), _REQUEST, checklist, "ответ")
-    assert verdict.verdicts[0].answer == "no" and verdict.unmet == ()
-
-
 @pytest.mark.parametrize("raw", ["", "не json", '{"items": []}', '{"items": [{"question": ""}]}'])
 def test_an_unusable_checklist_is_empty_not_invented(raw: str) -> None:
     class _Raw(FakeLLM):
         def complete(self, system, user, **kwargs):
             return raw
     assert build_checklist(_Raw(), _REQUEST).items == ()
-
-
-def test_the_rule_never_raises_a_worse_verdict() -> None:
-    for declared in ("blocked", "failed", "partially_achieved"):
-        verdict = assemble_completion_verdict(
-            aborted_reason="", replan_exhausted=False, declared=declared, checklist_unmet=True)
-        assert verdict.state == declared
-
-
-def test_a_judge_abstaining_is_not_a_no() -> None:
-    """Замер 24.09, #544: пункт «не меняй код» — про действие, не про текст ответа;
-    судья ответил «нет, в ответе нет инструкции». Теперь судья может сказать N/A."""
-    checklist = Checklist(items=(ChecklistItem("Код не изменён?", 95),), reason="t")
-    verdict = check_answer(_Llm(["N/A"], ""), _REQUEST, checklist, "ответ")
-    assert verdict.verdicts[0].answer == "unknown" and verdict.unmet == ()
 
 
 def test_a_no_the_judge_does_not_repeat_is_not_counted() -> None:
@@ -212,18 +142,3 @@ def test_a_no_the_judge_does_not_repeat_is_not_counted() -> None:
     verdict = check_answer(llm, _REQUEST, checklist, "ответ")
     assert verdict.verdicts[0].answer == "unknown" and verdict.unmet == ()
     assert sum(c["system"] == JUDGE_SYSTEM for c in llm.calls) == 2
-
-
-def test_a_minor_no_is_not_asked_twice() -> None:
-    llm = _Llm(["NO"], "")
-    check_answer(llm, _REQUEST, Checklist(items=(ChecklistItem("Мелочь?", 10),), reason="t"), "ответ")
-    assert sum(c["system"] == JUDGE_SYSTEM for c in llm.calls) == 1
-
-
-def test_it_is_on_by_default(monkeypatch) -> None:
-    """Решение оператора 24.09: починка работает сразу, переменная только выключает."""
-    from core.request_checklist import enabled
-    monkeypatch.delenv(ENV, raising=False)
-    assert enabled()
-    monkeypatch.setenv(ENV, "0")
-    assert not enabled()

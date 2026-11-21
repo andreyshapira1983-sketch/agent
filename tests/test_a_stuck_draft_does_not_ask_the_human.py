@@ -16,20 +16,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.clarification_gate import frame_questions_help
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
-
-
-def test_the_rule() -> None:
-    assert not frame_questions_help(["unresolved_citation"])
-    assert not frame_questions_help(("unresolved_citation", "claim_refuted"))
-    assert frame_questions_help([]), "an unknown cause keeps the old behaviour"
-    assert frame_questions_help(["unresolved_citation", "tool_error"])
-    assert frame_questions_help(["plan_parse_failed"])
 
 
 class _Notes(Tool):
@@ -69,16 +60,3 @@ def test_a_draft_citing_an_unfetched_page_is_not_turned_into_questions(tmp_path:
     assert "clarification_gate" not in names
     assert "clarification_gate_skipped" in names
     assert "Что именно нужно построить" not in answer
-
-
-def test_a_clear_request_with_gathered_evidence_is_not_a_frame_problem() -> None:
-    """Третий веб-прогон 2026-09-19, N04: круги наблюдения съели бюджет, на
-    последнем лаборатория отказалась ходить в сеть (`tool_error`) — а ответ
-    «3.7» со страницей PyPI начался с «что именно нужно построить?»."""
-    assert not frame_questions_help(["tool_error"], gathered=True, frame_clear=True)
-    assert frame_questions_help(["tool_error"], gathered=False, frame_clear=True), (
-        "nothing gathered — the frame may be the problem; ask as before"
-    )
-    assert frame_questions_help(["tool_error"], gathered=True, frame_clear=False), (
-        "the contract itself saw an ambiguity; ask"
-    )

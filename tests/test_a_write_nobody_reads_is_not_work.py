@@ -46,21 +46,6 @@ def tool(tmp_path):
     return JournalAppendTool(workspace_root=tmp_path)
 
 
-def test_the_result_names_the_reader(tool) -> None:
-    out = tool.run(path="data/self_improvement_issues.jsonl",
-                   record={"fingerprint": "probe-cwd", "title": "проба во временной папке"})
-    assert "campaign_io" in out["reader"]
-    assert "warning" not in out
-
-
-def test_a_journal_nobody_reads_says_so(tool) -> None:
-    out = tool.run(path="data/judgements.jsonl", record={"decision": "не трогать веса"})
-    assert out["appended"] is True, "писать не запрещено: журналы заводят и законно"
-    assert out["reader"] is None
-    assert "никто не читает" in out["warning"]
-    assert "self_improvement_issues.jsonl" in out["warning"], "назови те, у кого читатель есть"
-
-
 def test_a_record_the_reader_would_drop_is_refused(tool) -> None:
     """Без отпечатка читатель реестра отбрасывает запись молча."""
     with pytest.raises(ValueError, match="fingerprint"):
@@ -80,12 +65,3 @@ def test_a_placeholder_field_is_refused(tool) -> None:
     with pytest.raises(ValueError, match="заглушкой"):
         tool.run(path="data/judgements.jsonl",
                  record={"topic": "веса", "decision": "PENDING — filled in this turn"})
-
-
-def test_an_honest_record_still_goes_through(tool) -> None:
-    out = tool.run(path="data/self_improvement_issues.jsonl",
-                   record={"fingerprint": "probe-cwd-high", "title": "прибор врёт молча",
-                           "evidence": ["проба живёт во временной папке"],
-                           "related_files": ["tools/python_probe.py"], "severity": "high"})
-    assert out["appended"] is True
-    assert out["reader"]

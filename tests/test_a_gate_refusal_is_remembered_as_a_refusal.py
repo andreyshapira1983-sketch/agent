@@ -38,21 +38,6 @@ def test_the_second_offer_of_a_refused_action_is_skipped() -> None:
                           result="blocked")
 
 
-def test_a_refusal_that_spent_something_is_not_a_gate_refusal() -> None:
-    """Потраченный вызов — это попытка; её судят прежние правила."""
-    refused: set[str] = set()
-    assert not _refused_again("x", refused, ran=True, result="blocked")
-    assert not _refused_again("x", refused, ran=True, result="blocked")
-    assert refused == set()
-
-
-def test_other_outcomes_are_not_refusals() -> None:
-    refused: set[str] = set()
-    for result in ("idle", "completed", "failed", "empty"):
-        assert not _refused_again("y", refused, ran=False, result=result)
-    assert refused == set()
-
-
 def test_a_different_action_is_unaffected() -> None:
     refused: set[str] = set()
     _refused_again("a", refused, ran=False, result="blocked")

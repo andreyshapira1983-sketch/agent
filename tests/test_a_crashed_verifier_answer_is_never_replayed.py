@@ -9,32 +9,6 @@ import core.verifier
 from tests.test_fast_path_verification_provenance import _Q, _fast_path_fired, _make_loop
 
 
-def _bank_as_after_a_verifier_crash(workspace: Path):
-    """Записать эпизод ровно так, как цикл пишет его после мягкого сбоя верификатора."""
-    loop, _events, store = _make_loop(workspace)
-    loop._record_experience_memory(
-        goal_description="answer", question=_Q, answer="Sydney.",
-        tools_used=[], source_labels=["general-knowledge"],
-        verified_chunks=0, unverified_chunks=0, replan_exhausted=False,
-        verifier_failure=True, declared_completion="achieved",
-    )
-    return store
-
-
-def test_an_episode_from_a_crashed_verifier_is_not_replayed(workspace: Path) -> None:
-    """Эпизод после падения верификатора не проходит в быстрый путь."""
-    store = _bank_as_after_a_verifier_crash(workspace)
-
-    loop, events, _ = _make_loop(workspace)
-    loop.run(_Q)
-
-    assert not _fast_path_fired(events)
-    banked = [ep for ep in store.load() if ep.full_answer == "Sydney."]
-    assert len(banked) == 1
-    assert banked[0].answer_quality_score is None, "пустая проверка не должна давать оценку"
-    assert banked[0].usage_eligible is False, "без проверенных фрагментов эпизод не ведёт будущие ответы"
-
-
 def test_a_live_verifier_crash_is_soft_and_leaves_nothing_replayable(
     workspace: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

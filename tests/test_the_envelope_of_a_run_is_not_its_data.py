@@ -21,7 +21,6 @@ C = 250/400 = 0.625, сумма вероятностей = 1.0». Верифик
 """
 from __future__ import annotations
 
-from core.claim_arithmetic import parse_pairs
 from core.evidence import ProvenanceChain, evidence_from_tool_result
 from core.verifier_core import verify
 
@@ -59,28 +58,6 @@ def _verified(answer: str, output=None):
     return verify(answer=answer, chain=chain)
 
 
-def test_the_envelope_is_not_a_dataset() -> None:
-    evidence = evidence_from_tool_result(
-        tool_name="python_probe", arguments={"code": _CODE}, output=_OUT)
-    pairs = parse_pairs(evidence.excerpt)
-    assert "duration_ms" not in pairs, "длительность прогона — не данные"
-    assert "exit_code" not in pairs, "код возврата — не данные"
-
-
 def test_a_correct_calculation_is_not_called_a_lie() -> None:
     report = _verified(_answer(_CLAIM))
     assert report.refuted_chunks == 0, "верный расчёт опровергнут собственным конвертом"
-
-
-def test_a_real_sum_mismatch_is_still_caught() -> None:
-    out = dict(_OUT, stdout="alpha: 2\nbeta: 3\n")
-    fact = "- Ключи дают в сумме 99. [tool:python_probe]"
-    report = _verified(_answer(fact), output=out)
-    assert report.refuted_chunks == 1, "настоящее расхождение обязано ловиться"
-
-
-def test_a_real_sum_that_holds_is_verified() -> None:
-    out = dict(_OUT, stdout="alpha: 2\nbeta: 3\n")
-    fact = "- Ключи дают в сумме 5. [tool:python_probe]"
-    report = _verified(_answer(fact), output=out)
-    assert report.refuted_chunks == 0

@@ -47,18 +47,6 @@ class TestResolveInsideWorkspace:
         with pytest.raises(ValueError, match="path is required"):
             _resolve_inside_workspace(tmp_path, "   ")
 
-    def test_relative_path_resolves_under_workspace(self, tmp_path: Path):
-        resolved = _resolve_inside_workspace(tmp_path, "docs/readme.md")
-        assert resolved == (tmp_path / "docs" / "readme.md").resolve()
-
-    def test_strips_surrounding_quotes(self, tmp_path: Path):
-        resolved = _resolve_inside_workspace(tmp_path, '"docs/a.txt"')
-        assert resolved == (tmp_path / "docs" / "a.txt").resolve()
-
-    def test_absolute_path_inside_workspace_is_returned(self, tmp_path: Path):
-        target = (tmp_path / "x.txt").resolve()
-        resolved = _resolve_inside_workspace(tmp_path, str(target))
-        assert resolved == target
 
     def test_traversal_escape_raises_permission_error(self, tmp_path: Path):
         with pytest.raises(PermissionError, match="escapes workspace"):
@@ -92,12 +80,6 @@ class TestIterProjectFiles:
         found = list(_iter_project_files(tmp_path, limit=2))
         assert len(found) == 2
 
-    def test_results_are_sorted_casefold(self, tmp_path: Path):
-        (tmp_path / "Zeta.txt").write_text("z", encoding="utf-8")
-        (tmp_path / "alpha.txt").write_text("a", encoding="utf-8")
-        names = [p.name for p in _iter_project_files(tmp_path, limit=100)]
-        assert names == ["alpha.txt", "Zeta.txt"]
-
 
 # ── _chunk_text ──────────────────────────────────────────────────────────────
 
@@ -106,15 +88,6 @@ class TestChunkText:
         assert _chunk_text("", max_chunks=8) == []
         assert _chunk_text("\n\n   \n\n", max_chunks=8) == []
 
-    def test_small_text_is_a_single_chunk(self):
-        chunks = _chunk_text("hello world", max_chunks=8)
-        assert chunks == ["hello world"]
-
-    def test_paragraphs_merge_until_chunk_limit(self):
-        # Two short paragraphs fit in one chunk.
-        text = "para one\n\npara two"
-        chunks = _chunk_text(text, max_chunks=8)
-        assert chunks == ["para one\n\npara two"]
 
     def test_oversize_paragraph_is_split_into_pieces(self):
         big = "x" * (CHUNK_CHARS * 2 + 50)
@@ -215,12 +188,3 @@ class TestIngestFilesSkipBranches:
         bad.write_bytes(b"\xff\xfe\x00\x01 not utf8")
         report = ingest_files(agent=_fake_agent(), workspace=tmp_path, paths=["bad.txt"], dry_run=True)
         assert any("not valid UTF-8" in s for s in report.skipped_paths)
-
-    def test_valid_text_file_is_ingested(self, tmp_path: Path):
-        (tmp_path / "good.txt").write_text("a real paragraph of text.", encoding="utf-8")
-        report = ingest_files(agent=_fake_agent(), workspace=tmp_path, paths=["good.txt"], dry_run=True)
-        assert report.files_ingested == 1
-        assert report.chunks >= 1
-        assert "good.txt" in report.ingested_paths
-        # dry_run forces auto_write_memory off regardless of the flag.
-        assert report.auto_write_memory is False

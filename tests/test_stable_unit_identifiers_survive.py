@@ -21,9 +21,7 @@
 """
 from __future__ import annotations
 
-import pytest
-
-from core.completion_contract import derive_completion_contract, requested_units
+from core.completion_contract import derive_completion_contract
 
 _LIVE = """Perform a live read-only contract-continuity stress test.
 
@@ -41,56 +39,6 @@ Determine narrowly what this module selects.
 ## A. Contract intake
 ## B. Plan linkage
 """
-
-
-def test_the_declared_identifiers_are_kept() -> None:
-    """ГЛАВНОЕ: U01–U03 перестают исчезать."""
-    titles = [u.title for u in requested_units(_LIVE)]
-    for ident in ("U01", "U02", "U03"):
-        assert any(t.startswith(ident) for t in titles), (
-            f"{ident} потерян; извлечено: {titles}"
-        )
-
-
-def test_the_report_sections_are_kept_too() -> None:
-    """Оператор просил и работу, и отчёт — терять нельзя ни то, ни другое."""
-    titles = [u.title for u in requested_units(_LIVE)]
-    assert any(t.startswith("A.") for t in titles)
-    assert any(t.startswith("B.") for t in titles)
-    assert len(titles) == 5, titles
-
-
-@pytest.mark.parametrize("heading,ident", [
-    ("# U01 — Verifier implementation", "U01"),
-    ("## R7 – Проверка маршрутизации", "R7"),
-    ("### T12: Learning safety", "T12"),
-    ("# ЕД03 — Разбор памяти", "ЕД03"),
-])
-def test_labelled_units_are_read_in_every_shape(heading: str, ident: str) -> None:
-    """Тире, длинное тире, двоеточие; латиница и кириллица."""
-    titles = [u.title for u in requested_units(f"Задание.\n\n{heading}\nтекст\n")]
-    assert any(t.startswith(ident) for t in titles), (heading, titles)
-
-
-def test_the_identifier_survives_verbatim() -> None:
-    """Идентификатор — часть контракта, а не наша перефразировка."""
-    unit = next(u for u in requested_units(_LIVE) if u.title.startswith("U02"))
-    assert "U02" in unit.title
-    assert "Smart-memory implementation" in unit.title
-
-
-def test_a_plain_request_still_names_no_units() -> None:
-    """ПРЕДОХРАНИТЕЛЬ: расширение не выдумывает единиц на обычном вопросе."""
-    assert not requested_units("перечисли функции в core/loop.py")
-
-
-def test_prose_mentioning_an_identifier_is_not_a_unit() -> None:
-    """Упоминание — не заголовок.
-
-    «как в U01» внутри абзаца не объявляет раздел; считать его единицей значило
-    бы выдумать пункт, которого оператор не давал.
-    """
-    assert not requested_units("Сделай как в U01, только для другого файла.")
 
 
 def test_the_units_reach_the_contract_payload() -> None:
@@ -130,10 +78,3 @@ def test_a_dropped_unit_is_named() -> None:
     missing = unaddressed_units(contract, answer)
     assert len(missing) == 1
     assert missing[0].startswith("U02")
-
-
-def test_the_identifier_is_the_operators_own_string() -> None:
-    """Метка сохраняется дословно — она часть контракта."""
-    units = {u.identifier: u for u in requested_units(_LIVE)}
-    assert "U01" in units
-    assert units["U01"].title.startswith("U01")

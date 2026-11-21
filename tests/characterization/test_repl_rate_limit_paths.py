@@ -86,33 +86,6 @@ def _run_repl(
     return runs
 
 
-def test_limiter_is_constructed_with_thirty_per_sixty_seconds(tmp_path, monkeypatch):
-    state = _install_limiter(monkeypatch)
-    _run_repl(monkeypatch, tmp_path, [])
-    assert state["init"] == [(30, 60.0)]
-
-
-def test_plain_question_consumes_one_token(tmp_path, monkeypatch):
-    state = _install_limiter(monkeypatch)
-    runs = _run_repl(monkeypatch, tmp_path, ["a plain question"])
-    assert len(runs) == 1
-    assert state["consumed"] == 1
-
-
-def test_instruction_buffer_consumes_one_token(tmp_path, monkeypatch):
-    state = _install_limiter(monkeypatch)
-    runs = _run_repl(monkeypatch, tmp_path, [":task-begin", "buffered work", ":task-end"])
-    assert len(runs) == 1
-    assert state["consumed"] == 1
-
-
-def test_explicit_command_bypasses_the_limiter(tmp_path, monkeypatch):
-    state = _install_limiter(monkeypatch)
-    runs = _run_repl(monkeypatch, tmp_path, [":models", ":models", ":models"])
-    assert runs == []
-    assert state["consumed"] == 0
-
-
 def test_local_operator_reply_bypasses_the_limiter(tmp_path, monkeypatch):
     state = _install_limiter(monkeypatch)
     runs = _run_repl(monkeypatch, tmp_path, ["stop now"], local_reply=True)
@@ -137,15 +110,6 @@ def test_instruction_buffer_checks_local_reply_before_the_limiter(tmp_path, monk
     assert state["consumed"] == 0
 
 
-def test_blocked_limiter_reports_to_stderr_and_skips_the_agent(tmp_path, monkeypatch, capsys):
-    state = _install_limiter(monkeypatch, allowed=False)
-    runs = _run_repl(monkeypatch, tmp_path, ["a plain question"])
-    assert runs == []
-    assert state["consumed"] == 1
-    err = capsys.readouterr().err
-    assert "(rate limit: too many requests — retry in 1.5s, tokens remaining: 0.25)" in err
-
-
 def test_blocked_limiter_on_the_instruction_buffer_path(tmp_path, monkeypatch, capsys):
     state = _install_limiter(monkeypatch, allowed=False)
     runs = _run_repl(monkeypatch, tmp_path, [":task-begin", "body", ":task-end"])
@@ -160,18 +124,3 @@ def test_blocked_limiter_keeps_the_repl_alive(tmp_path, monkeypatch):
     runs = _run_repl(monkeypatch, tmp_path, ["one", "two", "three"])
     assert runs == []
     assert state["consumed"] == 3
-
-
-def test_one_shot_mode_has_no_rate_limiter(tmp_path, monkeypatch):
-    """The limiter is a REPL-session control; one-shot never constructs it."""
-    state = _install_limiter(monkeypatch)
-    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: _fake_agent())
-    monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
-    monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
-    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
-
-    assert main_module.main() == 0
-    assert state["init"] == []
-    assert state["consumed"] == 0

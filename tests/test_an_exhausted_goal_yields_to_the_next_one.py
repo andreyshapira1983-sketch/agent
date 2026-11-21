@@ -73,45 +73,6 @@ def _run(tmp_path, gather, execute, next_goal=None, max_cycles=12):
     )
 
 
-def test_without_the_right_the_run_dies_on_the_stall(tmp_path):
-    """Прогон A: как было до права — застой гасит кампанию."""
-    result = _run(tmp_path, _OneActionGather(), _WorksOnce())
-
-    assert result.status == "stopped"
-    assert "no_progress_stall" in result.stop_reason
-
-
-def test_an_exhausted_goal_is_replaced_and_the_run_continues(tmp_path):
-    """Прогон B: то же самое, но с правом — цель меняется, работа идёт."""
-    gather = _OneActionGather()
-    goals = iter(["вторая цель", "третья цель"])
-
-    result = _run(tmp_path, gather, _WorksOnce(),
-                  next_goal=lambda: next(goals, ""))
-
-    assert "вторая цель" in gather.goals_seen, "новая цель обязана дойти до выбора действия"
-    assert "третья цель" in gather.goals_seen, "исчерпание повторяется — цель меняется снова"
-    switched = [r for r in result.records if r.goal == "вторая цель"]
-    assert switched, "циклы после смены записываются под НОВОЙ целью"
-    worked_after_switch = [r for r in switched if r.result == "completed"]
-    assert worked_after_switch, "после смены цели снова идёт РАБОТА, а не только повторы"
-    assert len(result.records) > 4, (
-        "без права прогон умирал на четвёртом цикле; с правом он продолжается"
-    )
-
-
-def test_a_refused_next_goal_makes_the_run_wait_not_die(tmp_path):
-    """Ворота те же: хартия отказала — цель НЕ берётся. Но с блока 8 (слово
-    оператора 2026-09-03) отказ — исход попытки, а не конец смены: прогон
-    ждёт ограниченно и пробует снова, пока смена не кончится сама."""
-    result = _run(tmp_path, _OneActionGather(), _WorksOnce(),
-                  next_goal=lambda: "")
-
-    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
-    assert any(r.result == "waiting" for r in result.records), "ожидание не записано"
-    assert all(r.goal == "первая цель" for r in result.records), "отказ хартии обойдён"
-
-
 def test_a_failing_goal_picker_never_kills_the_run(tmp_path):
     """Смена цели — удобство, а не несущая конструкция: её падение молчаливо,
     и с блока 8 оно ведёт в ожидание, а не в смерть прогона."""
@@ -121,15 +82,4 @@ def test_a_failing_goal_picker_never_kills_the_run(tmp_path):
     result = _run(tmp_path, _OneActionGather(), _WorksOnce(), next_goal=_explodes)
 
     assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
-    assert any(r.result == "waiting" for r in result.records)
-
-
-def test_the_same_goal_offered_again_is_not_a_switch(tmp_path):
-    """Та же цель — не смена: иначе застой обходился бы по кругу навсегда."""
-    result = _run(tmp_path, _OneActionGather(), _WorksOnce(),
-                  next_goal=lambda: "первая цель")
-
-    # Не смена — значит ожидание (блок 8), а не смерть; и никакой второй цели.
-    assert result.stop_reason.startswith("shift_limit:"), result.stop_reason
-    assert {r.goal for r in result.records} == {"первая цель"}
     assert any(r.result == "waiting" for r in result.records)

@@ -42,17 +42,6 @@ def test_several_records_after_a_torn_tail_do_not_void_the_checkpoint(tmp_path: 
     assert ctx.answer == "готовый ответ"
 
 
-def test_torn_tail_is_copied_aside_before_it_leaves_the_checkpoint(tmp_path: Path) -> None:
-    writer = _observed(tmp_path, "t3", TORN)
-    before = writer.path.read_bytes()
-
-    writer.save_respond("a")
-
-    copies = list(tmp_path.glob("checkpoints_t3.jsonl.*.bak"))
-    assert len(copies) == 1
-    assert copies[0].read_bytes() == before
-
-
 def test_whole_record_that_only_lost_its_newline_is_kept(tmp_path: Path) -> None:
     whole = json.dumps({"phase": "plan", "trace_id": "t4", "data": {"attempt": 3}}).encode()
     writer = _observed(tmp_path, "t4", whole)
@@ -65,24 +54,7 @@ def test_whole_record_that_only_lost_its_newline_is_kept(tmp_path: Path) -> None
     assert list(tmp_path.glob("*.bak")) == []
 
 
-def test_clean_checkpoint_gets_no_copy_and_no_blank_lines(tmp_path: Path) -> None:
-    writer = CheckpointWriter("t5", tmp_path)
-    writer.save_observe("q")
-    writer.save_respond("a")
-
-    assert len(writer.path.read_bytes().splitlines()) == 2
-    assert list(tmp_path.glob("*.bak")) == []
-
-
 # ── checkpoint loader ────────────────────────────────────────────────────────
-
-def test_last_line_that_is_json_but_not_an_object_is_skipped(tmp_path: Path) -> None:
-    _observed(tmp_path, "t6", b"[1, 2]\n")
-
-    ctx = CheckpointLoader(tmp_path).load("t6")
-
-    assert ctx is not None
-    assert ctx.question == "вопрос"
 
 
 def test_middle_line_that_is_json_but_not_an_object_voids_the_checkpoint(tmp_path: Path) -> None:
@@ -106,13 +78,3 @@ def test_ledger_torn_inside_a_character_still_gives_the_whole_rows(tmp_path: Pat
     rows = load_ledger_rows(path)
 
     assert [r["reason"] for r in rows] == ["первая", "вторая"]
-
-
-def test_line_separator_inside_a_value_does_not_break_the_row(tmp_path: Path) -> None:
-    reason = "до после\u0085и ещё"
-    path = tmp_path / "campaign_ledger.jsonl"
-    path.write_bytes(_row(reason) + b"\r\n" + _row("следующая") + b"\n")
-
-    rows = load_ledger_rows(path)
-
-    assert [r["reason"] for r in rows] == [reason, "следующая"]

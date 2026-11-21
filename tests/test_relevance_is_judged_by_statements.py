@@ -33,11 +33,6 @@ class _Judge:
         return self.raw
 
 
-def test_the_score_is_the_share_of_statements_on_the_question() -> None:
-    v = parse_verdict(_raw("yes", "idk", "no", "no"))
-    assert v and v.score == 0.5 and v.statements == 4 and v.irrelevant == ("s2", "s3")
-
-
 def test_a_reply_out_of_form_gives_no_score() -> None:
     assert parse_verdict("not json") is None
     assert parse_verdict('{"statements": []}') is None

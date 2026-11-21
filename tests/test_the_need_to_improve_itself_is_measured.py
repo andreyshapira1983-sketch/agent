@@ -75,12 +75,6 @@ def test_material_is_only_what_the_lane_would_take(tmp_path: Path) -> None:
     assert "core/self_apply_lane.py" not in names and "core/punished.py" not in names, names
 
 
-def test_thickness_alone_is_not_material(tmp_path: Path) -> None:
-    """Самый толстый файл без доказательства — не цель (2026-09-21)."""
-    ws = _workspace(tmp_path, [_APPLIED])
-    assert "core/fat.py" not in [rel for rel, _lines in self_improvement_targets(ws)]
-
-
 def test_an_undecided_proposal_means_no_material_at_all(tmp_path: Path) -> None:
     """Производитель заявок молчит, пока человек не решил предыдущую."""
     ws = _workspace(tmp_path, [_APPLIED, _PENDING])

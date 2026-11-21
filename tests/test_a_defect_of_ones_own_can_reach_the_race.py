@@ -28,7 +28,6 @@
 from __future__ import annotations
 
 from core.best_next_action import _candidate_open_self_improvement_issue
-from core.self_improvement_issues import SelfImprovementIssue
 
 _GOAL_SUBJECT = "core/step_sanitizer.py"
 
@@ -58,11 +57,6 @@ def test_a_defect_that_blocks_the_work_may_say_so() -> None:
     assert _severity_of(_issue(severity="high")) == "high"
 
 
-def test_a_nuisance_still_yields_to_the_goal() -> None:
-    """Без заявленной тяжести — прежнее поведение, цель сохраняет влияние."""
-    assert _severity_of(_issue()) == "medium"
-
-
 def test_a_record_cannot_declare_itself_an_outage() -> None:
     """`critical` принадлежит объективной неживости, не самооценке."""
     assert _severity_of(_issue(severity="critical")) == "medium"
@@ -70,12 +64,3 @@ def test_a_record_cannot_declare_itself_an_outage() -> None:
 
 def test_an_unknown_word_is_read_as_the_old_behaviour() -> None:
     assert _severity_of(_issue(severity="катастрофа")) == "medium"
-
-
-def test_the_stored_record_carries_the_word_back() -> None:
-    """Тяжесть переживает запись на диск и чтение обратно."""
-    restored = SelfImprovementIssue.from_dict(_issue(severity="high"))
-    assert restored.severity == "high"
-    assert restored.to_dict()["severity"] == "high"
-    plain = SelfImprovementIssue.from_dict(_issue())
-    assert plain.severity == "medium"

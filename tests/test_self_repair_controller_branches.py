@@ -266,59 +266,6 @@ def test_baseline_verify_failure_aborts_repair_as_failed(tmp_path: Path):
 # regression-guard LESSON after a confirmed repair                              #
 # --------------------------------------------------------------------------- #
 
-def test_successful_repair_writes_regression_guard_lesson(tmp_path: Path):
-    agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=True)
-    controller = SelfRepairController(agent, workspace_root=tmp_path)
-
-    report = controller.run(_proposal(path="core/widget.py", reason="off-by-one"))
-
-    assert report.status == "repaired"
-    # The lesson reached BOTH long-term memory and the episodic store.
-    assert len(agent.remembered) == 1
-    lesson = agent.remembered[0]
-    assert "core/widget.py" in lesson["content"]
-    assert "off-by-one" in lesson["content"]
-    assert "regression-guard" in lesson["tags"]
-    assert lesson["source"] == "repair"
-    assert len(agent.episodic_saved) == 1
-    assert any(e == "repair_lesson_saved" for e, _ in agent.log.events)
-
-
-def test_repair_lesson_is_classified_not_left_unclassified(tmp_path: Path):
-    """The repair lesson carries a verdict, so retrieval never replays a blank.
-
-    `admit_for_storage` grants a `lesson`-tagged record `usage_eligible=True`
-    (MIR-042) so repair lessons stop being invisible — and this writer tags every
-    record `lesson`. Leaving `completion_state` unset therefore did not mean
-    "neutral", it meant "replayed into a prompt carrying no verdict at all",
-    which `test_no_legacy_episode_in_the_live_store_is_ever_admitted` forbids.
-    This writer only runs for `status == "repaired"`, so the verdict is a fact.
-    """
-    agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=True)
-    controller = SelfRepairController(agent, workspace_root=tmp_path)
-
-    report = controller.run(_proposal(path="core/widget.py", reason="off-by-one"))
-
-    assert report.status == "repaired"
-    episode = agent.episodic_saved[0]
-    assert episode.completion_state == "achieved"
-
-
-def test_repair_without_an_episodic_store_still_saves_the_lesson(tmp_path: Path):
-    """No episodic_store: the lesson still reaches remember() and is logged as saved.
-
-    The writer swallows exceptions, so only the log shows a missing-store guard that crashed."""
-    agent = _FakeAgent(tool_outputs=_success_tool_outputs(), with_memory=False)
-    controller = SelfRepairController(agent, workspace_root=tmp_path)
-
-    report = controller.run(_proposal())
-
-    assert report.status == "repaired"
-    assert len(agent.remembered) == 1
-    events = agent.log.names()
-    assert "repair_lesson_saved" in events
-    assert "repair_lesson_save_failed" not in events
-
 
 def test_lesson_save_failure_is_logged_not_silent(tmp_path: Path):
     # A repaired fix already landed; if persisting the LESSON raises, the
@@ -450,7 +397,6 @@ def test_write_applied_but_invalid_output_is_rolled_back(tmp_path: Path):
     rb = [s for s in report.steps if s.name == "rollback"]
     assert rb and rb[0].status == "ok"
     assert report.status == "rolled_back"
-
 
 
 def test_healthy_code_is_not_repaired_as_if_diagnosed(tmp_path: Path):

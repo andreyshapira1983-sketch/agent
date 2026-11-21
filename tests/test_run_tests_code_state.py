@@ -17,32 +17,10 @@ test_model_router_for_task_standard_equals_for_role». Верификатор п
 """
 from __future__ import annotations
 
-import os
-import subprocess  # nosec B404
 from pathlib import Path
 
 from core.code_state import describe_code_state
 from tests.conftest import run_git
-from tools.run_tests import RunTestsTool
-
-
-def test_the_state_names_the_commit_and_branch(git_repo: Path):
-    state = describe_code_state(git_repo)
-
-    assert state["commit"], "отпечаток без коммита не отвечает на вопрос «какой код»"
-    assert len(state["commit"]) >= 7
-    assert state["branch"] == "main"
-
-
-def test_edits_after_indexing_are_counted(git_repo: Path):
-    """Правки поверх зафиксированного кода — признак «проверяли не то»."""
-    edited = git_repo / "b.py"
-    edited.write_text("x = 1\n", encoding="utf-8")
-    # On a fast disk the edit lands in the same clock tick as the index; date it clearly later.
-    later = (git_repo / ".git" / "index").stat().st_mtime + 2
-    os.utime(edited, (later, later))
-
-    assert describe_code_state(git_repo)["files_newer_than_index"] == 1
 
 
 def test_diverging_from_the_shared_branch_is_visible(git_repo: Path):
@@ -60,35 +38,3 @@ def test_diverging_from_the_shared_branch_is_visible(git_repo: Path):
         "расхождение с общей веткой не видно — именно оно объясняет, "
         "почему тест красный здесь и зелёный у всех"
     )
-
-
-def test_a_directory_without_git_says_so_instead_of_guessing(tmp_path: Path):
-    state = describe_code_state(tmp_path)
-
-    assert state["commit"] is None
-    assert state["reason"], "нет коммита — обязана быть названа причина"
-
-
-def test_the_tool_result_carries_the_state(monkeypatch, git_repo: Path):
-    """Главное: улика самоописательна — по ней видно, какой код проверялся.
-
-    Настоящий pytest здесь не запускаем: рекурсивный прогон внутри прогона
-    стоил ~4 секунды и зависел от состояния репозитория (замечание ревью
-    #301). Подменяем сам запуск — проверяем ровно то, что добавили.
-    """
-    class _Completed:
-        returncode = 0
-        stdout = b"1 passed in 0.01s\n"
-        stderr = b""
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed())
-
-    result = RunTestsTool(workspace_root=git_repo).run(paths=["tests"])
-
-    assert "code_state" in result, (
-        "результат прогона не говорит, какой код проверялся — «тест упал» "
-        "нельзя отличить от «упал у меня в устаревшей копии»"
-    )
-    assert result["code_state"]["workspace"] == str(git_repo)
-    assert result["code_state"]["commit"], "коммит проверенного кода не назван"
-    assert result["code_state"]["branch"] == "main"

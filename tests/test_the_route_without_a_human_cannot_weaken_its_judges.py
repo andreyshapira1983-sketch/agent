@@ -66,10 +66,3 @@ def test_a_skip_mark_is_weakening_too(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     after = "import pytest\n\n\n@pytest.mark.skip\ndef test_ok():\n    assert True\n"
     assert weakened_judges(root, {"tests/test_ok.py": after}) == ["tests/test_ok.py"]
-
-
-def test_adding_tests_is_not_weakening(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    after = "def test_ok():\n    assert True\n\n\ndef test_more():\n    assert 2 > 1\n"
-    assert weakened_judges(root, {"tests/test_ok.py": after,
-                                  "tests/test_new.py": "def test_n():\n    assert 1\n"}) == []

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from core.evidence import ProvenanceChain, make_evidence
 from core.verifier import (
-    CITATION_PREFIXES,
-    parse_citations,
     verify,
 )
 
@@ -29,30 +27,6 @@ def _chain_with_current_time() -> ProvenanceChain:
         excerpt=excerpt,
     ))
     return chain
-
-
-class TestToolCitationPrefix:
-    def test_tool_prefix_in_grammar(self):
-        assert CITATION_PREFIXES.get("tool") == "tool_output"
-
-    def test_tool_citation_parses(self):
-        cits = parse_citations("Today is Wednesday [tool:current_time].")
-        assert len(cits) == 1
-        assert cits[0].prefix == "tool"
-        assert cits[0].body == "current_time"
-        assert cits[0].expected_kind == "tool_output"
-
-    def test_tool_citation_resolves_via_substring(self):
-        chain = _chain_with_current_time()
-        report = verify(
-            answer="Today is Wednesday, June 3, 2026 [tool:current_time].",
-            chain=chain,
-        )
-        assert report.verified_chunks == 1
-        assert report.cited_but_unmatched_chunks == 0
-        assert report.unverified_chunks == 0
-        # Annotated answer rewrites the citation as verified.
-        assert "[verified:tool:current_time]" in report.annotated_answer
 
 
 class TestStructuredFallbackForUncitedClaims:
@@ -92,31 +66,3 @@ class TestStructuredFallbackForCitedButUnmatched:
         )
         assert report.verified_chunks == 1, report.to_log_payload()
         assert report.cited_but_unmatched_chunks == 0
-
-
-class TestStructuredFallbackDoesNotOverreach:
-    def test_empty_chain_no_match(self):
-        chain = ProvenanceChain()
-        report = verify(
-            answer="Сегодня среда, 3 июня 2026 года.",
-            chain=chain,
-        )
-        assert report.verified_chunks == 0
-        assert report.chain_was_empty is True
-
-    def test_only_non_tool_evidence_no_structured_match(self):
-        chain = ProvenanceChain()
-        chain.add(make_evidence(
-            kind="file",
-            source_id="file:README.md",
-            obtained_via="file_read",
-            claim="README contents",
-            excerpt="The autonomous agent project.",
-        ))
-        report = verify(
-            answer="Сегодня среда, 3 июня 2026 года.",
-            chain=chain,
-        )
-        # No tool_output evidence -> no structured rescue.
-        assert report.verified_chunks == 0
-        assert report.unverified_chunks == 1

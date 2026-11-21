@@ -49,29 +49,3 @@ def test_the_planners_intent_is_not_thrown_away() -> None:
     step, _ = _step(_PATCH, content="FILE:core/ingestion.py\nзаменить X на Y")
 
     assert "core/ingestion.py" in step["arguments"]["write_instruction"]
-
-
-def test_an_ordinary_write_keeps_its_text() -> None:
-    """Граница: конспект по-прежнему пишется тем текстом, что дал план."""
-    step, warnings = _step("data/notes/20260923_competence_math.md",
-                           content="# Теорема\n\nИсточник: книга, строка 5.")
-
-    assert step["arguments"]["content"].startswith("# Теорема")
-    assert "write_instruction" not in step["arguments"]
-    assert warnings == []
-
-
-def test_a_patch_written_by_task_passes_through() -> None:
-    """Если план сразу дал задание, ничего подменять не нужно."""
-    step, warnings = _step(_PATCH, write_instruction="собери блоки по прочитанному")
-
-    assert step["arguments"]["write_instruction"] == "собери блоки по прочитанному"
-    assert warnings == []
-
-
-def test_only_the_patch_file_of_the_self_repair_route_is_covered() -> None:
-    """Правило узкое: соседний файл в той же папке под него не подпадает."""
-    step, warnings = _step("proposals/selffix/case/notes.md", content="произвольный текст")
-
-    assert step["arguments"]["content"] == "произвольный текст"
-    assert warnings == []

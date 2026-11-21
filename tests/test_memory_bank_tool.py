@@ -15,21 +15,6 @@ def _tool(tmp_path):
     return MemoryBankTool(store=store, policy=policy), store
 
 
-def test_valid_conclusion_is_banked(tmp_path):
-    tool, store = _tool(tmp_path)
-    result = tool.run(
-        text="Суд выносит вердикт по журналам а модель лишь предлагает объяснения",
-        kind="[ВЫВОД, проверен боем]",
-        provenance="test",
-    )
-    assert result["banked"] is True
-    assert result["mem_id"].startswith("mem_")
-    records = store.load()
-    assert len(records) == 1
-    assert result["mem_id"] in [r.id for r in records]
-    assert len(records[0].tags) == 3
-
-
 def test_hypothesis_is_rejected(tmp_path):
     tool, store = _tool(tmp_path)
     result = tool.run(

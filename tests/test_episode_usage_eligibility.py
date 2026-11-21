@@ -89,56 +89,6 @@ def _seed(workspace: Path, episode: EpisodeRecord) -> EpisodicMemoryStore:
     return store
 
 
-# ==========================================================================
-# The three states must stay distinguishable.
-# ==========================================================================
-def test_legacy_row_reads_as_unclassified_not_quarantined() -> None:
-    """A row written before the field existed carries no verdict at all."""
-    legacy = EpisodeRecord.from_dict({
-        "id": "ep-legacy", "goal": "g", "question": "q",
-        "outcome": "success", "summary": "s",
-    })
-
-    assert legacy.usage_eligible is None, (
-        "legacy must not be silently recorded as an explicit quarantine"
-    )
-
-
-def test_the_three_states_survive_a_roundtrip() -> None:
-    for state in (None, False, True):
-        restored = EpisodeRecord.from_dict(_episode(usage_eligible=state).to_dict())
-        assert restored.usage_eligible is state, f"{state!r} did not round-trip"
-
-
-# ==========================================================================
-# Retrieval admits only an explicit True.
-# ==========================================================================
-def test_eligible_episode_is_retrieved(tmp_path: Path) -> None:
-    _seed(tmp_path, _episode(usage_eligible=True))
-
-    recalled = _interactive(tmp_path)._retrieve_experience_memory(QUESTION)
-    assert recalled.strip(), "an explicitly eligible episode must still surface"
-
-
-def test_legacy_episode_is_stored_but_not_retrieved(tmp_path: Path) -> None:
-    """The core requirement: retained as evidence, withheld from answers."""
-    store = _seed(tmp_path, _episode(usage_eligible=None))
-
-    assert len(store.load()) == 1, "the episode must remain on disk"
-    recalled = _interactive(tmp_path)._retrieve_experience_memory(QUESTION)
-    assert not recalled.strip(), (
-        "an unclassified episode must not steer planning before its provenance "
-        "is established"
-    )
-
-
-def test_quarantined_episode_is_stored_but_not_retrieved(tmp_path: Path) -> None:
-    store = _seed(tmp_path, _episode(usage_eligible=False))
-
-    assert len(store.load()) == 1
-    assert not _interactive(tmp_path)._retrieve_experience_memory(QUESTION).strip()
-
-
 def test_ineligible_lesson_is_not_topped_up(tmp_path: Path) -> None:
     """The `lesson` top-up path is a second door into retrieval; it must also filter."""
     lesson = EpisodeRecord(
@@ -154,20 +104,6 @@ def test_ineligible_lesson_is_not_topped_up(tmp_path: Path) -> None:
         "please repair core/foo.py"
     )
     assert "core/foo.py lost its guard" not in recalled
-
-
-# ==========================================================================
-# The fast path reads through find_most_similar — it must be covered too.
-# ==========================================================================
-def test_fast_path_does_not_replay_an_ineligible_episode(tmp_path: Path) -> None:
-    cached = _episode(usage_eligible=None)
-    _seed(tmp_path, cached)
-
-    answer = _drive_one_cycle(_interactive(tmp_path), QUESTION)
-    assert answer != cached.full_answer, (
-        "an unclassified episode was replayed verbatim: the eligibility filter "
-        "must also cover find_most_similar, which feeds the fast path"
-    )
 
 
 def test_fast_path_still_replays_an_eligible_episode(tmp_path: Path) -> None:

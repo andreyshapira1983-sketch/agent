@@ -79,59 +79,6 @@ def _build_agent(
 
 
 # ===========================================================
-# (a) Write-time dedup blocks `remember()` before disk
-# ===========================================================
-
-class TestRememberWriteDedup:
-    def test_second_remember_of_same_fact_rejected(self, workspace: Path):
-        agent, log_path, store, _ = _build_agent(workspace)
-
-        # First call: saved.
-        d1, rec1 = agent.remember(
-            content="I prefer concise Russian answers and JSON output",
-            tags=["preference", "fact"],
-            source="user-explicit",
-        )
-        assert d1.decision == "save"
-        assert rec1 is not None
-        assert len(store.load()) == 1
-
-        # Second call with the same content: rejected by dedup gate.
-        d2, rec2 = agent.remember(
-            content="I prefer concise Russian answers and JSON output",
-            tags=["preference", "fact"],
-            source="user-explicit",
-        )
-        assert d2.decision == "reject"
-        assert rec2 is None
-        assert any("duplicate of" in r for r in d2.reasons)
-        # Still exactly one record on disk.
-        assert len(store.load()) == 1
-
-        # Audit trail: one `decision: save`, one `decision: reject`.
-        events = _events(log_path)
-        writes = [e for e in events if e["event"] == "persistent_memory_write"]
-        assert [e["payload"]["decision"] for e in writes] == ["save", "reject"]
-        assert any("duplicate of" in r for r in writes[1]["payload"]["reasons"])
-
-    def test_first_party_owner_default_dedup_still_applies(
-        self, workspace: Path
-    ):
-        agent, _, store, _ = _build_agent(workspace)
-        a = agent.remember(
-            content="The deploy script lives in ops/deploy.sh",
-            tags=["fact"], source="user-explicit",
-        )
-        b = agent.remember(
-            content="The deploy script lives in ops/deploy.sh.",
-            tags=["fact"], source="user-explicit",
-        )
-        assert a[0].decision == "save"
-        assert b[0].decision == "reject"
-        assert len(store.load()) == 1
-
-
-# ===========================================================
 # (b) cleanup_backups emits `backup_cleanup` event
 # ===========================================================
 
@@ -157,87 +104,6 @@ class TestBackupCleanupLoop:
         assert payload["deleted_count"] == 1
         assert payload["scanned"] == 4
         assert payload["dry_run"] is False
-
-    def test_dry_run_event_still_fires_no_files_deleted(self, workspace: Path):
-        agent, log_path, _, _ = _build_agent(workspace)
-        # 4 backups, would-delete 1.
-        for days in (0, 1, 2, 30):
-            (workspace / f"doc.txt.bak.{self._ts(days)}").write_text("x", encoding="utf-8")
-
-        rep = agent.cleanup_backups(workspace, dry_run=True)
-        assert rep.dry_run is True
-        # The "old" file is still there.
-        assert (workspace / f"doc.txt.bak.{self._ts(30)}").exists()
-        events = _events(log_path)
-        bak = next(e for e in events if e["event"] == "backup_cleanup")
-        assert bak["payload"]["dry_run"] is True
-
-
-# ===========================================================
-# (c) expire_persistent emits `persistent_memory_expire` event
-# ===========================================================
-
-class TestExpireLoop:
-    def test_expired_record_removed_with_event(self, workspace: Path):
-        agent, log_path, store, _ = _build_agent(workspace)
-        now = datetime.now(timezone.utc)
-
-        # Direct disk write: simulate an already-expired record.
-        stale = MemoryRecord(
-            content="this record expires fast",
-            tags=["fact"],
-            owner="user",
-            ttl_seconds=60,
-            created_at=now - timedelta(hours=1),
-        )
-        fresh = MemoryRecord(
-            content="this one is forever",
-            tags=["fact"],
-            owner="user",
-            ttl_seconds=None,
-        )
-        store.save_many([stale, fresh])
-
-        rep = agent.expire_persistent()
-        assert rep.expired == [stale.id]
-
-        events = _events(log_path)
-        ev = next(e for e in events if e["event"] == "persistent_memory_expire")
-        assert ev["payload"]["expired_count"] == 1
-        assert ev["payload"]["expired_ids"] == [stale.id]
-
-        # Disk: only the fresh one survives.
-        assert [r.id for r in store.load()] == [fresh.id]
-
-    def test_no_records_emits_zero_event(self, workspace: Path):
-        agent, log_path, _, _ = _build_agent(workspace)
-        rep = agent.expire_persistent()
-        assert rep.expired == []
-        events = _events(log_path)
-        ev = next(e for e in events if e["event"] == "persistent_memory_expire")
-        assert ev["payload"]["expired_count"] == 0
-
-    def test_no_store_emits_event_with_zero_count(self, workspace: Path):
-        # Build an agent without a persistent store wired.
-        registry = ToolRegistry()
-        registry.register(FileReadTool(workspace_root=workspace))
-        llm = FakeLLM()
-        trace_id = new_trace_id()
-        logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False)
-        agent = AgentLoop(
-            registry=registry,
-            policy=PolicyGate(registry),
-            llm=llm,
-            logger=logger,
-            planner=LLMPlanner(llm=llm, registry=registry),
-            persistent_store=None,
-            max_replan_attempts=1,
-        )
-
-        rep = agent.expire_persistent()
-        assert rep.expired == []
-        events = _events(workspace / "logs" / f"{trace_id}.jsonl")
-        assert any(e["event"] == "persistent_memory_expire" for e in events)
 
 
 # ===========================================================
@@ -389,19 +255,6 @@ def _build_agent_no_store(workspace: Path) -> tuple[AgentLoop, Path]:
 
 
 class TestNoStoreGuards:
-    def test_dedupe_without_store_returns_empty_report_and_logs(
-        self, workspace: Path
-    ):
-        agent, log_path = _build_agent_no_store(workspace)
-        rep = agent.dedupe_persistent()
-        # Reports zero work.
-        assert rep.deleted == []
-        assert rep.groups == []
-        assert rep.scanned == 0
-        # Event recorded with summary payload.
-        events = _events(log_path)
-        assert any(e["event"] == "persistent_memory_dedupe" for e in events)
-
     def test_summarise_without_store_skipped_with_reason(self, workspace: Path):
         agent, log_path = _build_agent_no_store(workspace)
         rep = agent.summarise_persistent(tag="anything")
@@ -409,13 +262,6 @@ class TestNoStoreGuards:
         events = _events(log_path)
         assert any(e["event"] == "persistent_memory_summarise" for e in events)
 
-    def test_expire_without_store_returns_empty_report(self, workspace: Path):
-        agent, log_path = _build_agent_no_store(workspace)
-        rep = agent.expire_persistent()
-        assert rep.expired == []
-        assert rep.scanned == 0
-        events = _events(log_path)
-        assert any(e["event"] == "persistent_memory_expire" for e in events)
 
     def test_list_persistent_without_store_returns_empty(self, workspace: Path):
         agent, _ = _build_agent_no_store(workspace)

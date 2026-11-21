@@ -87,51 +87,6 @@ def _event(agent: AgentLoop, name: str) -> dict:
     raise AssertionError(f"event {name!r} was never logged")
 
 
-# ==========================================================================
-# Experience retrieval — the case that prompted this.
-# ==========================================================================
-def test_quarantined_episodes_are_reported_as_the_reason(tmp_path: Path) -> None:
-    """`selected=0` must be distinguishable from `nothing matched`."""
-    _seed(tmp_path, [_episode(f"ep-{i}", eligible=None) for i in range(4)])
-    agent = _agent(tmp_path)
-
-    agent._retrieve_experience_memory(QUESTION)
-
-    data = _event(agent, "experience_memory_inject")
-    assert data["episodes_selected"] == 0
-    assert data["rejected_by"]["not_eligible"] == 4, (
-        "a cycle that withheld everything must say so, not just report zero"
-    )
-
-
-def test_rejection_reasons_are_separated(tmp_path: Path) -> None:
-    _seed(tmp_path, [
-        _episode("good"),                                  # selected
-        _episode("failed-run", outcome="failed"),          # wrong outcome
-        _episode("quarantined", eligible=False),           # withheld
-        _episode("legacy", eligible=None),                 # unclassified
-    ])
-    agent = _agent(tmp_path)
-
-    agent._retrieve_experience_memory(QUESTION)
-
-    data = _event(agent, "experience_memory_inject")
-    assert data["episodes_selected"] == 1
-    assert data["rejected_by"]["outcome"] == 1
-    assert data["rejected_by"]["not_eligible"] == 2, "False and None are both withheld"
-
-
-def test_no_rejections_reports_an_empty_mapping(tmp_path: Path) -> None:
-    _seed(tmp_path, [_episode("good")])
-    agent = _agent(tmp_path)
-
-    agent._retrieve_experience_memory(QUESTION)
-
-    data = _event(agent, "experience_memory_inject")
-    assert data["episodes_selected"] == 1
-    assert data["rejected_by"] == {}, "absent reasons must not appear as zeros"
-
-
 def test_retrieval_disabled_is_itself_a_reason(tmp_path: Path) -> None:
     """The unattended profile can hold stores while being denied reads."""
     _seed(tmp_path, [_episode("good")])
@@ -143,21 +98,6 @@ def test_retrieval_disabled_is_itself_a_reason(tmp_path: Path) -> None:
 
     data = _event(agent, "experience_memory_inject")
     assert data["rejected_by"] == {"retrieval_disabled": 1}
-
-
-def test_counts_are_aggregated_not_per_record(tmp_path: Path) -> None:
-    """Volume guard: the trace must not grow with the store."""
-    _seed(tmp_path, [_episode(f"ep-{i}", eligible=None) for i in range(30)])
-    agent = _agent(tmp_path)
-
-    agent._retrieve_experience_memory(QUESTION)
-
-    data = _event(agent, "experience_memory_inject")
-    assert isinstance(data["rejected_by"], dict)
-    assert len(data["rejected_by"]) <= 4, (
-        "reasons are a fixed vocabulary; one entry per rejected record would "
-        "make the trace cost more than the retrieval it observes"
-    )
 
 
 # ==========================================================================

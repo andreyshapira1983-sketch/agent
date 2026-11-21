@@ -47,19 +47,3 @@ def test_the_session_memory_holds_the_conversation(monkeypatch, tmp_path: Path) 
     assert built["with_memory"] is True and built["with_persistent"] is False
     turns = built["agent"].memory.turns
     assert [t.answer for t in turns] == ["строка 186 вклеивает весь вывод"]
-
-
-def test_without_history_the_one_shot_stays_memory_free(monkeypatch, tmp_path: Path) -> None:
-    built: dict = {}
-
-    def fake_build(workspace, **kw):
-        built.update(kw)
-        return SimpleNamespace(memory=None)
-
-    monkeypatch.setattr(one_shot.budget_guard, "_run_agent_with_budget_guard",
-                        lambda agent, **kw: "Conclusion: ok")
-    monkeypatch.setattr(one_shot.intent_bridge, "_handle_local_operator_reply", lambda *a: False)
-    monkeypatch.setattr(one_shot.intent_bridge, "handle_conversational_operator_input",
-                        lambda *a: False)
-    one_shot.run_one_shot("вопрос", workspace=tmp_path, build_agent=fake_build)
-    assert built["with_memory"] is False

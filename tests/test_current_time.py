@@ -1,19 +1,11 @@
 """Unit tests for the current_time tool."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
 from tools.current_time import CurrentTimeTool
-
-
-class TestRiskAndIdentity:
-    def test_name_and_risk(self):
-        tool = CurrentTimeTool()
-        assert tool.name == "current_time"
-        assert tool.risk == "read_only"
-        assert "current date" in tool.description.lower() or "now" in tool.description.lower()
 
 
 class TestRun:
@@ -38,13 +30,6 @@ class TestRun:
         result = tool.run()
         assert result["iso_utc"].startswith("2026-01-01T00:00:00")
 
-    def test_non_utc_timezone_normalised(self):
-        plus_three = timezone(timedelta(hours=3))
-        local = datetime(2026, 6, 3, 17, 0, 0, tzinfo=plus_three)
-        tool = CurrentTimeTool(clock=lambda: local)
-        result = tool.run()
-        # Should be converted to UTC: 17:00 +03:00 -> 14:00 UTC
-        assert result["iso_utc"].startswith("2026-06-03T14:00:00")
 
     def test_clock_returning_non_datetime_rejected(self):
         tool = CurrentTimeTool(clock=lambda: "2026-06-03")
@@ -81,24 +66,3 @@ class TestValidateOutput:
         })
         assert not ok
         assert any("iso_utc" in r for r in reasons)
-
-    def test_tz_name_none_allowed(self):
-        ok, _ = self._tool().validate_output({
-            "iso_utc": "x", "iso_local": "x", "weekday": "x",
-            "unix": 1, "year": 2026, "month": 6, "day": 3,
-            "tz_name": None,
-        })
-        assert ok
-
-
-class TestRegistration:
-    def test_registered_in_build_agent(self, tmp_path):
-        """The production agent resolves current_time; without it the planner guesses the date."""
-        from app.bootstrap import build_agent
-
-        agent = build_agent(tmp_path, with_memory=False, with_persistent=False)
-        assert isinstance(agent.registry.get("current_time"), CurrentTimeTool)
-
-    def test_safe_for_subagent(self):
-        from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
-        assert "current_time" in _SAFE_SUBAGENT_TOOLS

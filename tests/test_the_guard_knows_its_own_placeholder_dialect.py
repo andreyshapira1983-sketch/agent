@@ -45,26 +45,6 @@ class TestUnfilledForms:
 
 
 class TestLegalForms:
-    def test_todo_comment_first_line_of_real_file(self):
-        # A "# TODO: ..." first line of an ordinary multi-line file is a legal
-        # comment — the guard must not flag it.
-        content = (
-            "# TODO: refactor this later\n"
-            "def f(x):\n"
-            "    return x + 1\n"
-        )
-        assert looks_like_unfilled_content(content) is False
-
-    def test_real_test_with_imports_and_asserts(self):
-        # A real test file with real imports and asserts is not a stub.
-        content = (
-            "from __future__ import annotations\n"
-            "\n"
-            "def test_x():\n"
-            "    assert 1 == 1\n"
-        )
-        assert looks_like_unfilled_content(content) is False
-
     def test_documentation_comments_only(self):
         # A file of only documentation comments, no statements at all, is NOT
         # a stub by our contract: it has no executable placeholder to trip the

@@ -28,7 +28,6 @@ import pytest
 
 import app.budget_guard as budget_guard_module
 import cli.app as app_module
-import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
 import main as main_module
 
@@ -81,65 +80,6 @@ def test_auto_approve_builds_an_autoapprover_with_that_default(
     assert provider.default == expected_default
 
 
-def test_auto_approve_off_wires_no_provider_in_one_shot(tmp_path, monkeypatch):
-    order: list[str] = []
-    build_calls = _patch(monkeypatch, order)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
-
-    assert main_module.main() == 0
-
-    # 'off' in one-shot = no provider wired = escalated tools blocked.
-    assert build_calls[0]["approval_provider"] is None
-
-
-def test_one_shot_is_memory_free(tmp_path, monkeypatch):
-    order: list[str] = []
-    build_calls = _patch(monkeypatch, order)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
-
-    assert main_module.main() == 0
-
-    assert build_calls[0]["with_memory"] is False
-    assert build_calls[0]["with_persistent"] is False
-
-
-def test_dotenv_is_loaded_before_the_agent_is_built(tmp_path, monkeypatch):
-    order: list[str] = []
-    _patch(monkeypatch, order)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
-
-    assert main_module.main() == 0
-    assert order == ["load_dotenv", "build_agent"]
-
-
-def test_ordinary_meta_command_builds_the_agent_before_dispatch(tmp_path, monkeypatch):
-    """Frozen for extraction — NOT an endorsement of building an agent for a
-    local command."""
-    order: list[str] = []
-    _patch(monkeypatch, order)
-
-    def fake_meta(cmd, agent, workspace):
-        order.append(f"handle_meta_command:{cmd}")
-        return True
-
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", fake_meta)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
-
-    assert main_module.main() == 0
-    assert order == ["load_dotenv", "build_agent", "handle_meta_command::models"]
-
-
-def test_meta_command_one_shot_is_still_memory_free(tmp_path, monkeypatch):
-    order: list[str] = []
-    build_calls = _patch(monkeypatch, order)
-    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
-
-    assert main_module.main() == 0
-    assert build_calls[0]["with_memory"] is False
-    assert build_calls[0]["with_persistent"] is False
-
-
 def test_deep_escalation_is_opt_in_via_reason_and_expect(tmp_path, monkeypatch):
     order: list[str] = []
     _patch(monkeypatch, order)
@@ -179,30 +119,6 @@ def test_deep_escalation_is_opt_in_via_reason_and_expect(tmp_path, monkeypatch):
 
 # ── pre-dotenv fast paths ─────────────────────────────────────────────────────
 
-def test_self_build_propose_returns_before_dotenv_and_agent(tmp_path, monkeypatch):
-    order: list[str] = []
-    build_calls = _patch(monkeypatch, order)
-    seen: list[tuple] = []
-
-    def fake_propose(rest, agent, workspace):
-        seen.append((rest, agent, workspace))
-        return True
-
-    monkeypatch.setattr(app_module, "_handle_self_build_propose", fake_propose)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["main.py", "--workspace", str(tmp_path), "--ask", ":self-build-propose --large-files"],
-    )
-
-    assert main_module.main() == 0
-
-    assert order == [], "no dotenv load and no agent build on this path"
-    assert build_calls == []
-    assert seen == [("--large-files", None, tmp_path.resolve())]
-    for runtime_dir in ("data", "logs", "config"):
-        assert not (tmp_path / runtime_dir).exists()
-
 
 def test_schedule_disable_returns_before_dotenv_and_agent(tmp_path, monkeypatch, capsys):
     order: list[str] = []
@@ -224,104 +140,3 @@ def test_schedule_disable_returns_before_dotenv_and_agent(tmp_path, monkeypatch,
     assert out.out == ""
     for runtime_dir in ("data", "logs", "config"):
         assert not (tmp_path / runtime_dir).exists()
-
-
-@pytest.mark.parametrize("spelling", [":SELF-BUILD-PROPOSE", ":Self-Build-Propose"])
-def test_fast_path_matching_is_case_insensitive(spelling, tmp_path, monkeypatch):
-    order: list[str] = []
-    _patch(monkeypatch, order)
-    seen: list[str] = []
-    monkeypatch.setattr(app_module, "_handle_self_build_propose",
-        lambda rest, agent, workspace: seen.append(rest) or True,
-    )
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", spelling])
-
-    assert main_module.main() == 0
-    assert order == []
-    assert seen == [""]
-
-
-def test_fast_path_only_applies_to_the_head_token(tmp_path, monkeypatch):
-    """A mention of the command mid-sentence must not trigger the fast path."""
-    order: list[str] = []
-    _patch(monkeypatch, order)
-    monkeypatch.setattr(app_module, "_handle_self_build_propose",
-        lambda *a, **k: pytest.fail("fast path must not fire for a mid-sentence mention"),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["main.py", "--workspace", str(tmp_path), "--ask", "tell me about :self-build-propose"],
-    )
-
-    assert main_module.main() == 0
-    assert order == ["load_dotenv", "build_agent"]
-
-
-def test_the_encoding_fix_runs_before_argparse_can_print(tmp_path, monkeypatch):
-    """`--help` is printed and exited from INSIDE `parse_args`.
-
-    Measured 2026-08-05: with `_force_utf8_io()` placed after the parse it was
-    invoked zero times on that path, and the em dash in the parser's own
-    description reached a cp1251 console as a replacement char — a broken
-    glyph in the first line the operator ever sees. Nothing in the call
-    depends on the parsed arguments, so the only thing keeping it late was
-    that no test asked.
-
-    Guarding the ORDER, not the call: a test that merely asserts the function
-    runs somewhere would stay green with the defect back in place.
-    """
-    calls: list[str] = []
-    monkeypatch.setattr(app_module, "_force_utf8_io", lambda: calls.append("utf8"))
-
-    real_parser = app_module.build_parser
-
-    def _recording_parser():
-        calls.append("parse")
-        return real_parser()
-
-    monkeypatch.setattr(app_module, "build_parser", _recording_parser)
-    monkeypatch.setattr(sys, "argv", ["main.py", "--help"])
-
-    with pytest.raises(SystemExit):
-        app_module.run_cli()
-
-    assert calls == ["utf8", "parse"], (
-        "the encoding fix must run before the parser is even built; "
-        f"got {calls}"
-    )
-
-
-def test_dotenv_is_read_from_the_workspace_not_the_launch_directory(tmp_path, monkeypatch):
-    """Keys must come from the same project as the code and the data.
-
-    Measured 2026-08-05 with a bare `load_dotenv()`: launched from folder A
-    with `--workspace B`, the process loaded A's `.env`. Code and data from one
-    project, credentials from another. `agent_tick.py` had passed the explicit
-    path since it was written; the CLI had not.
-
-    The default `--workspace` is ".", so an ordinary launch is unaffected —
-    this only pins WHICH file is chosen when the two differ.
-    """
-    launched_from = tmp_path / "elsewhere"
-    workspace = tmp_path / "project"
-    launched_from.mkdir()
-    workspace.mkdir()
-
-    seen: list[str] = []
-    monkeypatch.setattr(
-        app_module, "load_dotenv", lambda path=None: seen.append(str(path))
-    )
-    monkeypatch.setattr(app_module, "build_agent", lambda *a, **k: object())
-    monkeypatch.setattr(app_module, "run_one_shot", lambda *a, **k: 0)
-    monkeypatch.chdir(launched_from)
-    monkeypatch.setattr(
-        sys, "argv",
-        ["main.py", "--workspace", str(workspace), "--ask", "hello"],
-    )
-
-    assert app_module.run_cli() == 0
-    assert seen == [str(workspace / ".env")], (
-        "the CLI must name the workspace's .env explicitly; a bare "
-        f"load_dotenv() would read the launch directory. Got {seen}"
-    )

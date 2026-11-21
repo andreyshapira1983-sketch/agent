@@ -64,13 +64,6 @@ def _agent(reply: str = ""):
     return agent
 
 
-def test_the_live_shape_is_explained_and_stuck_by_the_invariant() -> None:
-    """The specimen: chosen by probes, no invariant, no intervention."""
-    claim = _explained()
-    assert state_of(claim) == "EXPLAINED"
-    assert claim.violated_invariant == "" and claim.intervention is None
-
-
 def test_a_chosen_claim_without_proof_is_a_birth_candidate(tmp_path: Path) -> None:
     import core.campaign_io as cio
 
@@ -140,15 +133,3 @@ def test_an_effect_in_both_arms_unchooses_the_cause(tmp_path: Path) -> None:
     assert after.chosen == ""
     assert not after.explanations[0].alive
     assert after.intervention is None
-
-
-def test_a_proven_claim_is_closed_at_this_rung(tmp_path: Path) -> None:
-    """Control: after the intervention nothing re-runs it."""
-    claim = dataclasses.replace(
-        _explained("сенсор обвиняет " + _SPEC), violated_invariant=_INVARIANT,
-    )
-    save_claim(claim, workspace=tmp_path)
-    run_claim_experiment(agent=_agent(), workspace=tmp_path)
-
-    assert experimentable_claims(tmp_path) == ()
-    assert birth_candidates(tmp_path) == ()

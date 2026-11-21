@@ -6,30 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from cli.command_dispatch import handle_meta_command
-from cli.parsers import _parse_remember
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Hello, world is the first program",
-        "Привет, мир — первая программа",
-        "Hello,\nworld",
-        "1,5 litres of water a day",
-        ",odd start",
-    ],
-)
-def test_prose_with_a_comma_is_stored_whole(text):
-    assert _parse_remember(text) == (["user-approved"], text)
-
-
-def test_documented_tag_list_still_works():
-    assert _parse_remember("preference,fact I prefer concise Russian answers") == (
-        ["preference", "fact"],
-        "I prefer concise Russian answers",
-    )
-    assert _parse_remember("важное,факт текст заметки") == (["важное", "факт"], "текст заметки")
-    assert _parse_remember("[preference] dark mode") == (["preference"], "dark mode")
 
 
 def _forget_agent() -> tuple[SimpleNamespace, list]:

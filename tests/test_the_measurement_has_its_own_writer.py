@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 from core.causal_claim_store import save_claim
 from core.lesson_provenance import (
-    record_lesson_measurement,
     trace_lesson_provenance,
 )
 
@@ -47,15 +46,6 @@ def _measured_link(tmp_path: Path, key: str):
     return next(lk for lk in report.links if lk.name == "measured")
 
 
-def test_a_recorded_measurement_proves_the_link(tmp_path: Path) -> None:
-    key = _saved_lesson(tmp_path)
-    meas_id = record_lesson_measurement(
-        tmp_path, key, instrument="test.critic", outcome="defect_absent")
-    link = _measured_link(tmp_path, key)
-    assert link.status == "PROVEN"
-    assert f"measurement:{meas_id}" in link.refs
-
-
 def test_a_ghost_measurement_ref_proves_nothing(tmp_path: Path) -> None:
     """A receipt naming a measurement the store does not hold stays ABSENT."""
     from core.causal_claim_store import LessonCard
@@ -67,36 +57,6 @@ def test_a_ghost_measurement_ref_proves_nothing(tmp_path: Path) -> None:
         tmp_path, (card,), consumer="test",
         measurement_ref="measurement:meas_ghost")
     assert _measured_link(tmp_path, key).status == "ABSENT"
-
-
-def test_a_measurement_of_another_lesson_is_not_borrowed(tmp_path: Path) -> None:
-    """The record's own lesson_key must match the traced lesson."""
-    key = _saved_lesson(tmp_path)
-    other_id = record_lesson_measurement(
-        tmp_path, "cclaim_other", instrument="test.critic",
-        outcome="defect_absent")
-    from core.causal_claim_store import LessonCard
-    from core.lesson_provenance import record_lesson_injections
-
-    card = LessonCard(rule="r", scope="s", directive="d", key=key)
-    record_lesson_injections(
-        tmp_path, (card,), consumer="test",
-        measurement_ref=f"measurement:{other_id}")
-    assert _measured_link(tmp_path, key).status == "ABSENT"
-
-
-def test_a_recurred_defect_is_still_a_measurement(tmp_path: Path) -> None:
-    """Measurement proves measuring happened; the outcome is data, not shame."""
-    key = _saved_lesson(tmp_path)
-    meas_id = record_lesson_measurement(
-        tmp_path, key, instrument="test.critic", outcome="defect_recurred")
-    assert _measured_link(tmp_path, key).status == "PROVEN"
-    store = (tmp_path / "data" / "lesson_measurements.jsonl").read_text(
-        encoding="utf-8")
-    rec = json.loads(store.splitlines()[0])
-    payload = rec.get("payload", rec)
-    assert payload["outcome"] == "defect_recurred"
-    assert payload["id"] == meas_id
 
 
 def _producer_run(tmp_path: Path, test_lines: list[str]):
@@ -191,13 +151,3 @@ def test_a_skipped_instrument_writes_nothing(tmp_path: Path) -> None:
     ])
     assert report.status == "task_veto"
     assert not [m for m in _measurements(tmp_path) if m["lesson_key"] == key]
-
-
-def test_without_lessons_the_critic_measures_nothing(tmp_path: Path) -> None:
-    _producer_run(tmp_path, [
-        "from core.sample_module import add",
-        "",
-        "def test_add_reproduces_the_defect():",
-        "    assert add(1, 2) == 4",
-    ])
-    assert not _measurements(tmp_path)

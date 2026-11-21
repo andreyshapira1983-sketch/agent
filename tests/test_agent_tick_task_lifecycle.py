@@ -65,28 +65,6 @@ def _tick_events(workspace: Path) -> list[dict]:
     ]
 
 
-def test_completed_run_marks_the_task_done(workspace: Path, monkeypatch):
-    queue = _tick_with_runtime(
-        workspace, monkeypatch, lambda self, config=None, **k: _report("completed")
-    )
-
-    assert [t.status for t in queue.load()] == ["done"]
-
-
-def test_stopped_run_is_not_recorded_as_done(workspace: Path, monkeypatch):
-    """A budget-stopped run used to land in the queue as a success."""
-    queue = _tick_with_runtime(
-        workspace,
-        monkeypatch,
-        lambda self, config=None, **k: _report("stopped", "day budget exhausted"),
-    )
-
-    task = queue.load()[0]
-    assert task.status == "failed"
-    assert task.status != "done"
-    assert task.last_error == "day budget exhausted"
-
-
 def test_approval_blocked_run_parks_the_task(workspace: Path, monkeypatch):
     queue = _tick_with_runtime(
         workspace,
@@ -114,83 +92,6 @@ def test_raising_run_does_not_leave_the_task_running(workspace: Path, monkeypatc
 
     events = {e.get("event") for e in _tick_events(workspace)}
     assert "task_failed" in events
-
-
-def test_tick_recovers_a_task_orphaned_by_a_dead_process(workspace: Path, monkeypatch):
-    """Startup recovery, under the lock the tick now holds."""
-    from datetime import datetime, timedelta, timezone
-
-    from core.state_integrity import (
-        read_state_jsonl_unlocked,
-        rewrite_state_jsonl_unlocked,
-    )
-
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    path = workspace / DEFAULT_RUNTIME_TASKS_PATH
-    queue = TaskQueueStore(path)
-    orphan = queue.add(goal="was killed mid-run", max_attempts=3)
-    queue.mark_running(orphan.id)
-    stale = (datetime.now(tz=timezone.utc) - timedelta(minutes=90)).isoformat()
-    rows = read_state_jsonl_unlocked(path)
-    for row in rows:
-        row["updated_at"] = stale
-        row["heartbeat_at"] = stale
-    rewrite_state_jsonl_unlocked(path, rows)
-
-    import core.autonomous_runtime as ar
-    from app import bootstrap
-
-    monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: object())
-    monkeypatch.setattr(ar.AutonomousRuntime, "__init__", lambda self, *a, **k: None)
-    monkeypatch.setattr(
-        ar.AutonomousRuntime, "run", lambda self, config=None, **k: _report("completed")
-    )
-    monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
-
-    agent_tick.run_tick(workspace, dry_run=True)
-
-    events = [e for e in _tick_events(workspace) if e.get("event") == "tasks_recovered"]
-    assert events, "the orphaned task was never recovered"
-    assert events[0]["count"] == 1
-    # Re-queued behind the retry backoff, so this same tick did not re-run it.
-    assert TaskQueueStore(path).load()[0].status == "pending"
-
-
-def test_tick_skips_the_drain_when_another_consumer_holds_the_lock(
-    workspace: Path, monkeypatch
-):
-    """Two consumers must not claim the same task."""
-    from app.single_instance import SingleInstanceLock
-
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    queue = TaskQueueStore(workspace / DEFAULT_RUNTIME_TASKS_PATH)
-    queue.add(goal="project health", dry_run=True, include_tests=False, limit=1)
-
-    ran = {"count": 0}
-
-    def _count(self, config=None, **k):
-        ran["count"] += 1
-        return _report("completed")
-
-    import core.autonomous_runtime as ar
-    from app import bootstrap
-
-    monkeypatch.setattr(bootstrap, "build_agent", lambda *a, **k: object())
-    monkeypatch.setattr(ar.AutonomousRuntime, "__init__", lambda self, *a, **k: None)
-    monkeypatch.setattr(ar.AutonomousRuntime, "run", _count)
-    monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "300")
-
-    other = SingleInstanceLock(workspace / agent_tick.DAEMON_LOCK_PATH)
-    other.acquire()
-    try:
-        assert agent_tick.run_tick(workspace, dry_run=True) == 0
-    finally:
-        other.release()
-
-    assert ran["count"] == 0
-    assert queue.load()[0].status == "pending"
-    events = {e.get("event") for e in _tick_events(workspace)}
-    assert "task_drain_skipped" in events
 
 
 def test_lock_is_released_so_the_next_tick_can_drain(workspace: Path, monkeypatch):

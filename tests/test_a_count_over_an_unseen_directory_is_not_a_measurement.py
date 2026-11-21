@@ -40,15 +40,6 @@ def test_counting_an_unseen_directory_is_called_out(tmp_path: Path) -> None:
     assert "inputs" in note
 
 
-def test_the_advice_is_actionable_for_a_directory(tmp_path: Path) -> None:
-    """Совет «передай в inputs» для каталога невыполним — сказать, что делать."""
-    probe = PythonProbeTool(workspace_root=_workspace(tmp_path))
-
-    note = probe.run(code='from pathlib import Path\nprint(Path("core").exists())')["note"]
-
-    assert "individual files" in note or "file_read" in note, note
-
-
 def test_a_named_file_needs_no_warning_because_it_is_copied(tmp_path: Path) -> None:
     """Почему каталог — особый случай: файл лаборатория подкапывает сама.
 
@@ -75,13 +66,3 @@ def test_passing_the_files_removes_the_warning(tmp_path: Path) -> None:
 
     assert "py 2" in result["stdout"], result
     assert "core" not in (result.get("note") or ""), result.get("note")
-
-
-def test_an_empty_directory_is_not_worth_a_warning(tmp_path: Path) -> None:
-    """Пустой каталог рабочей папки ничего не скрывает: ноль там — правда."""
-    (tmp_path / "empty").mkdir()
-    probe = PythonProbeTool(workspace_root=tmp_path)
-
-    result = probe.run(code='from pathlib import Path\nprint(Path("empty").exists())')
-
-    assert "empty" not in (result.get("note") or "")

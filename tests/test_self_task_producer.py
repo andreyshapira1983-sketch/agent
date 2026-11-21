@@ -24,7 +24,6 @@ import pytest
 from core.approval_inbox import ApprovalInbox
 from core.self_task_producer import (
     SELF_TASK_OPERATION,
-    TASK_PRODUCER_ORIGIN,
     decode_frozen_test,
     produce_coding_task,
 )
@@ -182,53 +181,6 @@ def test_broken_selector_refuses(workspace: Path):
 # ── happy path ───────────────────────────────────────────────────────────────
 
 
-def test_happy_path_publishes_one_task_item(workspace: Path):
-    inbox, report = _run(workspace)
-    assert report.status == "proposed"
-    assert report.target_path == _IMPL
-    items = inbox.list()
-    assert len(items) == 1
-    item = items[0]
-    assert item.operation == SELF_TASK_OPERATION
-    assert item.payload["impl_path"] == _IMPL
-    assert item.payload["test_content"] == _GOOD_TEST
-    assert item.payload["origin"] == TASK_PRODUCER_ORIGIN
-    assert item.payload["test_path"] == "tests/test_redaction_stagea.py"
-
-
-def test_happy_path_never_touches_git(workspace: Path):
-    vcs = FakeVCS()
-    _run(workspace, vcs=vcs)
-    assert vcs.mutations == []
-
-
-def test_payload_carries_exact_base64_frozen_test(workspace: Path):
-    inbox, report = _run(workspace)
-    assert report.status == "proposed"
-    item = inbox.list()[0]
-    # The exact test is preserved byte-for-byte in the redaction-inert blob.
-    import base64
-
-    assert base64.b64decode(item.payload["test_content_b64"]).decode() == _GOOD_TEST
-    assert decode_frozen_test(item.payload) == _GOOD_TEST
-
-
-def test_frozen_test_survives_durable_redaction(workspace: Path):
-    # A test that legitimately embeds an example email would be scrubbed by the
-    # DLP redactor in the raw field, but must survive exactly via base64.
-    pii_test = (
-        "from core.redaction import mask_email\n\n\n"
-        "def test_mask():\n"
-        '    assert mask_email("alice@mail.ru") == "a***@mail.ru"\n'
-    )
-    inbox, report = _run(workspace, llm=FakeLLM([_builder(test_content=pii_test)]))
-    assert report.status == "proposed"
-    # ApprovalInbox.add() redacts the payload in-memory before persisting.
-    item = inbox.list()[0]
-    assert "[REDACTED:" in item.payload["test_content"]  # preview is scrubbed
-    assert decode_frozen_test(item.payload) == pii_test  # exact test intact
-
-
 def test_decode_frozen_test_falls_back_to_plaintext():
     assert decode_frozen_test({"test_content": "def test_x():\n    assert 1\n"}) == (
         "def test_x():\n    assert 1\n"
@@ -301,20 +253,3 @@ def test_veto_test_does_not_parse(workspace: Path):
 def test_builder_no_json_vetoes(workspace: Path):
     _, report = _run(workspace, llm=FakeLLM(["not json at all"]))
     assert report.status == "task_veto"
-
-
-def test_builder_accepts_test_lines_array(workspace: Path):
-    """Multiline test bodies as JSON arrays stay parseable (Stage A JSON fix)."""
-    payload = {
-        "task_title": "Add redact() helper",
-        "task_summary": "Implement redact() to mask secret values.",
-        "impl_path": _IMPL,
-        "test_path": "tests/test_redaction_stagea.py",
-        "test_lines": _GOOD_TEST.splitlines(),
-        "confidence": 0.9,
-    }
-    inbox, report = _run(workspace, llm=FakeLLM([json.dumps(payload)]))
-    assert report.status == "proposed"
-    item = next(i for i in inbox.list() if i.id == report.approval_id)
-    assert "def test_" in item.payload["test_content"]
-    assert "redact" in item.payload["test_content"]

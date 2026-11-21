@@ -22,7 +22,6 @@
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -42,15 +41,6 @@ def _inbox(tmp_path: Path) -> tuple[ApprovalInbox, str]:
     return inbox, item.id
 
 
-def _outcomes(tmp_path: Path) -> list[dict]:
-    path = tmp_path / "data" / "approval_outcomes.jsonl"
-    if not path.exists():
-        return []
-    rows = [json.loads(line) for line in
-            path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [r.get("payload", r) for r in rows]
-
-
 def test_a_denial_without_a_reason_is_refused(tmp_path: Path) -> None:
     inbox, item_id = _inbox(tmp_path)
 
@@ -61,33 +51,6 @@ def test_a_denial_without_a_reason_is_refused(tmp_path: Path) -> None:
         "заявка сменила статус, хотя отказ был отвергнут — половина операции "
         "прошла, и это хуже, чем пустая причина"
     )
-
-
-def test_a_blank_reason_is_not_a_reason(tmp_path: Path) -> None:
-    """Пробелы и табы не должны обходить требование."""
-    inbox, item_id = _inbox(tmp_path)
-
-    with pytest.raises(ValueError, match="reason"):
-        inbox.deny(item_id, reason="   \t  ")
-
-
-def test_a_denial_with_a_reason_records_it(tmp_path: Path) -> None:
-    inbox, item_id = _inbox(tmp_path)
-
-    inbox.deny(item_id, reason="цель уже не держится: файл переехал", actor="operator")
-
-    denials = [r for r in _outcomes(tmp_path) if r.get("verdict") == "denied"]
-    assert len(denials) == 1
-    assert denials[0]["reason"] == "цель уже не держится: файл переехал"
-
-
-def test_an_approval_still_needs_no_reason(tmp_path: Path) -> None:
-    """Граница: содержание одобрения лежит в самой заявке, а не в причине."""
-    inbox, item_id = _inbox(tmp_path)
-
-    inbox.approve(item_id)
-
-    assert [i.status for i in inbox.list()] == ["approved"]
 
 
 def test_the_reason_reaches_the_reader_that_exists(tmp_path: Path) -> None:

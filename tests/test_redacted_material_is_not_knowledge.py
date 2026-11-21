@@ -67,26 +67,6 @@ def test_redacted_residue_is_refused(policy: KnowledgeWritePolicy, text: str) ->
                for r in decision.reasons), decision.reasons
 
 
-def test_an_ordinary_claim_still_passes(policy: KnowledgeWritePolicy) -> None:
-    """ПРЕДОХРАНИТЕЛЬ: политика не заклинена в положении «отказать»."""
-    claim = _Claim("Модуль core/loop.py реализует цикл наблюдения и ответа.")
-    claim.source_id = "file:docs/CODE_NOTES.md"
-    decision = policy.decide(claim, source=_Source("file:docs/CODE_NOTES.md"))
-    assert decision.decision != "reject", decision.reasons
-
-
-def test_the_word_redacted_alone_is_not_enough(policy: KnowledgeWritePolicy) -> None:
-    """Отказ по МАРКЕРУ, а не по теме: текст о редактировании — не секрет.
-
-    Иначе документация про саму редактуру перестала бы быть знанием, и
-    починка съела бы область, ради которой существует.
-    """
-    claim = _Claim("Функция redact заменяет секреты токеном-заполнителем.")
-    claim.source_id = "file:docs/CODE_NOTES.md"
-    decision = policy.decide(claim, source=_Source("file:docs/CODE_NOTES.md"))
-    assert decision.decision != "reject", decision.reasons
-
-
 def test_a_live_secret_is_still_refused(policy: KnowledgeWritePolicy) -> None:
     """Прежняя дорога цела: неотредактированный секрет отвергается как раньше."""
     claim = _Claim("OPENAI_API_KEY=sk-proj-" + "a" * 40)

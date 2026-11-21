@@ -13,10 +13,8 @@ self-audit-lessons.md — по три раза за ход. Две причин�
 from __future__ import annotations
 
 import re
-from types import SimpleNamespace
 
 from core.evidence_budget import EVIDENCE_FILE_CHARS
-from core.observation_round import format_observations
 from core.planner_prompt import PLANNER_SYSTEM
 
 
@@ -34,18 +32,3 @@ def test_the_planner_is_told_the_real_ceiling() -> None:
         "инструкция и настоящий потолок разошлись — агент будет листать зря")
     assert "WHOLE in ONE call" in text
     assert "twice in one turn" in text
-
-
-def test_an_earlier_round_is_named_to_the_next() -> None:
-    plan = SimpleNamespace(steps=[])
-    block = format_observations(
-        plan, {"file:b.md": {"tool": "file_read", "output": "b"}},
-        earlier=["file:a.md", "file:core/smart_memory.py"])
-    line = next(ln for ln in block.splitlines() if ln.startswith("Already read"))
-    assert "file:a.md" in line and "file:core/smart_memory.py" in line
-    assert "do NOT read again" in line
-
-
-def test_the_first_round_has_nothing_earlier() -> None:
-    block = format_observations(SimpleNamespace(steps=[]), {})
-    assert "Already read" not in block

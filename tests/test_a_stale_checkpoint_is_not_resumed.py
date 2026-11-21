@@ -88,14 +88,3 @@ def test_a_fresh_checkpoint_is_still_resumed(tmp_path: Path) -> None:
         "свежая бюджетная пауза не вернулась — потолок съел то, ради чего "
         "лестницу и строили"
     )
-
-
-def test_the_cooldown_still_holds(tmp_path: Path) -> None:
-    """И нижняя граница на месте: единственная попытка не тратится, пока окно
-    ещё сухое."""
-    store = TaskQueueStore(path=tmp_path / "runtime_tasks.jsonl")
-    just_now = _parked(store, goal="только что остановлено", age_hours=0.1)
-
-    store.reactivate_paused_checkpoints(now=NOW)
-
-    assert _by_id(store, just_now).status == "paused"

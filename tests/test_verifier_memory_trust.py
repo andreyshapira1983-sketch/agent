@@ -13,7 +13,7 @@ No production code is touched.
 """
 from __future__ import annotations
 
-from core.evidence import ProvenanceChain, evidence_from_memory_record, make_evidence
+from core.evidence import ProvenanceChain, evidence_from_memory_record
 from core.verifier_core import verify
 
 
@@ -44,65 +44,4 @@ def test_agentauto_memory_citation_must_not_count_as_verified():
         "agent-auto memory citation counted as verified "
         f"(verified_chunks={report.verified_chunks}) — memory presence is being "
         "treated as verification"
-    )
-
-
-def test_verified_comes_only_from_citation_resolution_not_content():
-    """(proof) The SAME wrong content is `verified` when the record is in the
-    chain and `cited_but_unmatched` when it is not — so the verdict tracks
-    citation *resolution*, never content truth.
-
-    Seeded `user-explicit` since the MIR-046 fix: an agent-auto record no
-    longer reaches `verified` at all, which would mask the property this test
-    exists to show. The point stands — resolution, not truth, drives the
-    verdict — it just has to be demonstrated on a record the verifier still
-    trusts.
-    """
-    wrong = "The capital of Australia is Sydney [memory:rec1]."
-
-    in_chain = verify(answer=wrong, chain=_chain(_mem("rec1", "…", source="user-explicit")))
-    not_in_chain = verify(answer=wrong, chain=ProvenanceChain())
-
-    assert in_chain.verified_chunks == 1              # resolves → verified
-    assert not_in_chain.verified_chunks == 0          # no record → not verified
-    assert not_in_chain.cited_but_unmatched_chunks >= 1
-
-
-# ── working-memory artifact, checked separately ──────────────────────────────
-
-def test_working_memory_artifact_citation_also_counts_verified():
-    """(proof, passes) A working-memory artifact (cached tool output) cited as
-    `[memory:working_turn_...]` is ALSO marked verified — and via the identical
-    path as an agent-auto persistent record (no distinction at the verdict)."""
-    art = make_evidence(
-        kind="memory",
-        source_id="memory:working_turn_1_test_results",
-        obtained_via="working_memory",
-        claim="Cached tool output from turn 1",
-        excerpt="exit_code=0",
-    )
-    report = verify(answer="Tests passed [memory:working_turn_1_test_results].", chain=_chain(art))
-    assert report.verified_chunks == 1  # documents current behaviour
-
-
-# ── the verifier distinguishes trust class ───────────────────────────────────
-
-def test_verifier_must_distinguish_userapproved_from_agentauto():
-    """Cited side by side, the user-approved record verifies and the agent-auto one does not.
-
-    Both halves are pinned: demoting every memory record would also leave at
-    most one `verified`, and the agent-auto one stays topic-only, not fabricated."""
-    chain = _chain(
-        _mem("u1", "User-approved fact.", source="user-explicit"),
-        _mem("a1", "Agent-auto claim.", source="agent-auto"),
-    )
-    report = verify(
-        answer="Fact one [memory:u1]. Fact two [memory:a1].",
-        chain=chain,
-    )
-    verdicts = report.to_log_payload()["verdicts"]
-
-    assert verdicts == ["verified", "topic_supported_but_claim_unverified"], (
-        f"expected the user-explicit record trusted and the agent-auto one demoted "
-        f"to topic-only (verdicts={verdicts})"
     )

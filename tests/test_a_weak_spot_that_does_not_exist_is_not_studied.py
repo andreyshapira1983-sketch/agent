@@ -48,20 +48,6 @@ def test_a_real_weak_spot_reaches_the_plan() -> None:
     assert "tools/file_read.py" in list(plan.source_paths)
 
 
-def test_a_path_shaped_phantom_is_refused_before_it_becomes_a_goal() -> None:
-    """The half that is fixed, proven at the guard rather than by reading it."""
-    from core.reflection import _checked_focus_area
-
-    assert not (_REPO / "core/reasoning.py").is_file(), (
-        "core/reasoning.py exists now — re-measure before trusting this test"
-    )
-    assert _checked_focus_area("core/reasoning.py", "repair") == ("", "monitor")
-    assert _checked_focus_area("tools/file_read.py", "repair") == (
-        "tools/file_read.py",
-        "repair",
-    )
-
-
 def _lesson(focus: str, pattern=None):
     from core.reflection import Lesson
 

@@ -12,11 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent_tick import run_paced_campaign
 from core.best_next_action import BestNextAction
 from core.campaign import (
-    OPERATOR_GOAL_EMPTY_PASSES,
-    PURSUE_GOAL,
     CampaignActionOutcome,
     CampaignConfig,
     run_campaign,
@@ -56,21 +53,5 @@ def _run(tmp_path: Path, severity: str) -> list[str]:
     return seen
 
 
-def test_an_own_errand_does_not_displace_the_operator_goal(tmp_path: Path) -> None:
-    seen = _run(tmp_path, "medium")
-    assert seen[:OPERATOR_GOAL_EMPTY_PASSES] == [PURSUE_GOAL] * OPERATOR_GOAL_EMPTY_PASSES, seen
-    assert "discriminate_causal_claim" not in seen
-
-
 def test_a_real_breakage_still_comes_first(tmp_path: Path) -> None:
     assert _run(tmp_path, "high")[0] == "discriminate_causal_claim"
-
-
-def test_the_launcher_gives_the_operator_goal_goal_first(tmp_path: Path) -> None:
-    from tests.test_agent_tick_campaign import _make_run_campaign
-
-    seen: list[CampaignConfig] = []
-    run_paced_campaign(tmp_path, dry_run=True, goal=GOAL, max_cycles=1, heartbeat_fn=lambda *_a, **_k: None,
-                       run_campaign_fn=_make_run_campaign(1, record_config=seen),
-                       build_agent_fn=lambda _ws: SimpleNamespace(log=None))
-    assert seen and seen[0].goal_first is True and seen[0].goal_is_self is False

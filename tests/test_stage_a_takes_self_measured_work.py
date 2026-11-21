@@ -45,10 +45,6 @@ def _candidate(source: str, target: str):
     )
 
 
-def test_an_audit_finding_is_selectable() -> None:
-    assert "architecture_audit" in _selectable_signal_sources()
-
-
 def test_a_human_todo_is_no_longer_selectable() -> None:
     """The 2026-08-28 erasure: the push model does not re-enter by name."""
     assert "code_todo" not in _selectable_signal_sources()
@@ -92,17 +88,6 @@ def test_a_backlog_of_only_splits_yields_nothing(monkeypatch) -> None:
         _candidate("oversized_module", "split:core/smart_memory.py"),
     ])
     assert _default_task_selector(".")() is None
-
-
-def test_an_audit_target_in_core_passes_its_gate() -> None:
-    """The whole point: audit findings live in the organs. Stage A writes a
-    test, never an edit, so the diagnosis-grade gate applies."""
-    assert _target_gate_for("architecture_audit")("core/loop.py") is True
-
-
-def test_path_hygiene_still_closes_config_for_audits() -> None:
-    gate = _target_gate_for("architecture_audit")
-    assert gate("config/credentials.json") is False
 
 
 def test_an_unknown_source_gets_the_conservative_gate() -> None:

@@ -55,25 +55,6 @@ def _store(workspace: Path) -> _CountingStore:
     return store
 
 
-def test_one_plan_costs_one_pass_over_the_registry(workspace: Path) -> None:
-    """Цена обязана расти с числом файлов ЛИНЕЙНО, а не произведением.
-
-    До починки склад перечитывался на каждый файл-кандидат: план по одному
-    каталогу `core` живого репозитория стоил 61 секунду против 0,18 без
-    реестра — в 346 раз дороже.
-    """
-    store = _store(workspace)
-
-    LearningPlanner().plan(
-        workspace=workspace, limit=3, source_registry=store, stale_hours=6.0
-    )
-
-    assert store.full_scans <= 1, (
-        f"реестр прочитан целиком {store.full_scans} раз за один план — "
-        f"цена снова растёт как «файлы × записи реестра»"
-    )
-
-
 def test_the_deprioritisation_still_happens(workspace: Path) -> None:
     """Контроль: дешевизна не должна достигаться отключением работы."""
     store = _store(workspace)

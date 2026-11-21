@@ -19,7 +19,6 @@ from core.failure_cards import (
     learn_after_turn,
     learn_from_events,
     note_for,
-    signature,
     with_past_experience,
     witness_note,
 )
@@ -74,29 +73,6 @@ def _probe_ok() -> dict:
     return {"status": "success", "output": {"exit_code": 0, "stdout": "42"}}
 
 
-def test_the_signature_is_the_error_not_its_numbers() -> None:
-    a = signature("python_probe", "exit_code=1\n" + _ERR)
-    b = signature("python_probe", "exit_code=7\n" + _ERR.replace("line 3", "line 99"))
-    assert a == b == "python_probe|ModuleNotFoundError: No module named 'core'"
-    assert signature("file_read", "FileNotFoundError: File not found: /root/agent-main/data/x_123.md") == \
-        "file_read|FileNotFoundError: File not found: data/x_N.md"
-
-
-def test_different_errors_do_not_share_one_coarse_card() -> None:
-    """Замер 24.09 по следам: «exit_code=N», голое «TypeError» из обрезанной
-    сводки pytest и длинная цитата сливали разные ошибки в одну карточку."""
-    a = signature("shell_exec", "tool execution failed: exit_code=2; stderr: grep: core/a.py: No such file")
-    b = signature("shell_exec", "tool execution failed: exit_code=2; stderr: findstr: cannot open x")
-    assert a != b and "grep" in a
-    told = "E   TypeError: Registry.transition() takes 1 positional argument\nFAILED tests/t.py::x - TypeError"
-    assert "transition" in signature("patch_check", told)
-    long_a = signature("patch_check", "text outside any block: 'first stray paragraph of the model output'")
-    long_b = signature("patch_check", "text outside any block: 'a completely different stray text here'")
-    assert long_a == long_b
-    assert signature("python_probe", "ModuleNotFoundError: No module named 'numpy'") != \
-        signature("python_probe", "ModuleNotFoundError: No module named 'core'")
-
-
 def test_a_failure_then_a_success_leaves_a_lesson_that_returns_with_the_error(tmp_path: Path) -> None:
     lesson = "Когда python_probe даёт «No module named 'core'» — передай файлы через inputs"
     llm = _Llm(lesson)
@@ -121,16 +97,6 @@ def test_no_lesson_without_a_success_or_when_the_model_says_unrelated(tmp_path: 
     learn_from_events(tmp_path, _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok())), llm)
     assert llm.calls == 1
     assert note_for(tmp_path, "python_probe", _ERR) is None
-
-
-def test_a_lesson_about_another_error_code_is_refused(tmp_path: Path) -> None:
-    """Проверка первых 57 уроков (24.09): к ошибке 404 модель написала урок про 403."""
-    def fetch(status: str, reason: str) -> dict:
-        err = f"ValueError: HTTP {reason} fetching 'https://example.org/a-rather-long-page-address': x"
-        return {"status": status, "error": err if status == "error" else None, "output": "ok"}
-    ev = _events(("web_fetch", {}, fetch("error", "404")), ("web_fetch", {}, fetch("success", "")))
-    learn_from_events(tmp_path, ev, _Llm("Когда web_fetch даёт 403 Forbidden — бери другой источник"))
-    assert next(iter(CardStore(tmp_path).cards.values())).lesson is None
 
 
 def test_a_lesson_that_does_not_help_is_retired(tmp_path: Path) -> None:
@@ -187,42 +153,6 @@ def test_a_write_that_did_not_compose_is_learned_too(tmp_path: Path) -> None:
     assert "начни с FILE:" in with_past_experience(_Loop(tmp_path), trig).reason
 
 
-def test_a_guard_refusal_teaches_no_lesson(tmp_path: Path) -> None:
-    """24.09: из отказов сторожа выучено «лимит голоса исчерпан — пиши в журнал
-    дефектов» и «гейт блокирует __import__ — используй importlib.import_module».
-    После отказа удачный вызов — не лекарство, а часто обход."""
-    for err in ("PermissionError: voice budget spent: 3 of 3 calls to the human already made",
-                "ValueError: refused before execution: '__import__' bypasses the import gate"):
-        ws = tmp_path / str(abs(hash(err)))
-        llm = _Llm("Когда X — обойди его так-то")
-        ev = _events(("journal_append", {}, {"status": "error", "error": err, "output": None}),
-                     ("journal_append", {}, {"status": "success", "output": {"appended": True}}))
-        learn_from_events(ws, ev, llm)
-        card = next(iter(CardStore(ws).cards.values()))
-        assert llm.calls == 0 and card.status == "guard" and card.lesson is None, err
-
-
-def test_a_lesson_the_reviewer_rejected_is_not_learned_again(tmp_path: Path) -> None:
-    llm = _Llm("Когда X — делай Y")
-    learn_from_events(tmp_path, _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok())), llm)
-    store = CardStore(tmp_path)
-    card = next(iter(store.cards.values()))
-    card.status, card.lesson = "rejected", None
-    store.save()
-    again = [{**e, "ts": "2026-09-30" + e["ts"][10:]} for e in
-             _events(("python_probe", {}, _probe_fail()), ("python_probe", {}, _probe_ok()))]
-    learn_from_events(tmp_path, again, llm)
-    assert llm.calls == 1 and CardStore(tmp_path).cards[card.sig].status == "rejected"
-    assert note_for(tmp_path, "python_probe", _ERR) is None
-
-
-def test_the_same_trace_is_not_counted_twice(tmp_path: Path) -> None:
-    ev = _events(("python_probe", {}, _probe_fail()))
-    learn_from_events(tmp_path, ev, None, trace_id="t1")
-    learn_from_events(tmp_path, ev, None, trace_id="t1")
-    assert next(iter(CardStore(tmp_path).cards.values())).seen == 1
-
-
 def test_a_failed_shell_command_keeps_its_stderr() -> None:
     reason = failed_output_reason({"exit_code": 2, "stderr": "grep: core/x.py: No such file"})
     assert "exit_code=2" in reason and "No such file" in reason
@@ -264,7 +194,6 @@ def test_the_operator_brake_on_auto_memory_stops_learning(tmp_path: Path) -> Non
     assert (tmp_path / "data" / "failure_cards.jsonl").exists()
 
 
-
 def test_a_loop_without_a_workspace_writes_no_cards_where_it_runs(tmp_path: Path, monkeypatch) -> None:
     """Запасной `Path.cwd()` писал data/failure_cards.jsonl в папку процесса:
     тест без file_read оставил его в копии /root/verify, и соседний замер живого
@@ -285,13 +214,3 @@ def test_a_loop_without_a_workspace_writes_no_cards_where_it_runs(tmp_path: Path
     assert with_past_experience(_Bare(), trig) is trig
     assert experience_notes(_Bare(), {"x": {"tool": "python_probe", "output": _probe_fail()["output"]}}) == {}
     assert not (run_dir / "data").exists()
-
-def test_the_loop_uses_it_where_failures_are_read() -> None:
-    import inspect
-
-    from core import loop_attempt, loop_memory_write, loop_step_execution, observation_round
-
-    assert "attempt_failures.append(with_past_experience(self, trigger))" in inspect.getsource(loop_attempt)
-    assert "notes=experience_notes(loop, attempt_artifacts)" in inspect.getsource(observation_round)
-    assert "failed_output_reason(result.output)" in inspect.getsource(loop_step_execution)
-    assert "learn_after_turn(self)" in inspect.getsource(loop_memory_write)

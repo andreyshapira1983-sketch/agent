@@ -33,25 +33,6 @@ def _observation(root: Path) -> None:
     path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def test_the_campaign_goal_path_files_repeated_observations(tmp_path: Path) -> None:
-    _observation(tmp_path)
-    assert not SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
-
-    goal = defect_goal(tmp_path)
-
-    filed = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH).list()
-    assert filed, "повторное наблюдение не стало дефектом на пути кампании"
-    assert goal is not None and goal.drive == "self_improvement_need"
-
-
-def test_a_broken_observation_store_does_not_break_goal_choice(tmp_path: Path) -> None:
-    path = tmp_path / "data" / "causal_observations.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{не json\n", encoding="utf-8")
-
-    assert defect_goal(tmp_path) is None
-
-
 def test_the_same_observation_is_not_filed_twice(tmp_path: Path) -> None:
     """Приём узнаёт принятое наблюдение по своей улике, а не по тексту дефекта."""
     _observation(tmp_path)

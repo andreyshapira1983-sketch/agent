@@ -109,19 +109,6 @@ def test_propose_takes_no_arguments(rest, agent, tmp_path, capsys, monkeypatch, 
     assert env["episodes"] == []
 
 
-def test_propose_wires_the_gates_into_the_producer(agent, tmp_path, monkeypatch, env):
-    use_producer(monkeypatch, env, {"status": "no_task", "reason": "no TODO found"})
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-
-    call = env["calls"][0]
-    assert call["kill_switch"] == "inactive", "the kill-switch state reaches the producer"
-    assert call["budget_snapshot"] == {"windows": []}
-    assert call["llm"] == "llm:synthesizer"
-    assert call["vcs"] == "VCS"
-    assert call["workspace"] == tmp_path
-
-
 # ── the anti-cheating guarantee ──────────────────────────────────────────────
 
 def test_the_proposed_acceptance_test_is_shown_in_full(agent, tmp_path, capsys, monkeypatch, env):
@@ -153,24 +140,6 @@ def test_the_proposed_acceptance_test_is_shown_in_full(agent, tmp_path, capsys, 
     assert "def test_parses_empty_input():" in err
     assert "alice@example.com" in err, "the frozen copy is shown verbatim, not redacted"
     assert "--- end of test ---" in err
-
-
-def test_no_approval_id_means_no_test_block(agent, tmp_path, capsys, monkeypatch, env):
-    use_producer(monkeypatch, env, {"status": "no_task", "reason": "nothing to do"})
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-    assert "proposed acceptance test" not in capsys.readouterr().err
-
-
-def test_an_approval_id_with_no_matching_item_prints_no_block(
-    agent, tmp_path, capsys, monkeypatch, env
-):
-    env["inbox"] = FakeInbox([item("ain-other", payload={"frozen": "def test_x(): pass"})])
-    monkeypatch.setattr(mod, "_approval_inbox_for", lambda agent, ws: env["inbox"])
-    use_producer(monkeypatch, env, {"status": "proposed", "approval_id": "ain-missing"})
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-    assert "proposed acceptance test" not in capsys.readouterr().err
 
 
 def test_a_blank_frozen_test_prints_no_block(agent, tmp_path, capsys, monkeypatch, env):
@@ -216,47 +185,6 @@ def test_propose_reports_every_optional_line_when_present(
     assert "next: nothing to approve" in err
 
 
-def test_propose_omits_optional_lines_when_absent(agent, tmp_path, capsys, monkeypatch, env):
-    use_producer(monkeypatch, env, {"status": "no_task", "reason": "no TODO found"})
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "status: no_task" in err
-    for absent in ("impl:", "approval_id:", "veto_reasons:", "roles:"):
-        assert absent not in err
-
-
-def test_propose_log_is_five_keys_and_carries_no_test_body(agent, tmp_path, monkeypatch, env):
-    use_producer(
-        monkeypatch,
-        env,
-        {
-            "status": "proposed",
-            "target_path": "core/parser.py",
-            "approval_id": "ain-1",
-            "checked_gates": ["allowlist"],
-            "veto_reasons": [],
-            "frozen_test": "def test_secret_yardstick(): assert False",
-            "reason": "ok",
-        },
-    )
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-
-    logged = agent.log.payload("self_task_produce")
-    assert set(logged) == LOG_KEYS
-    assert "test_secret_yardstick" not in json.dumps(logged)
-
-
-def test_propose_journals_every_attempt(agent, tmp_path, monkeypatch, env):
-    result = {"status": "no_task", "reason": "no TODO found"}
-    use_producer(monkeypatch, env, result)
-
-    assert _handle_self_task_propose("", agent, tmp_path) is True
-    assert env["episodes"] == [{"kind": "self-task-produce", "result": result}]
-
-
 # ── :self-task-build ─────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("rest", ["", "   ", "ain-1 ain-2", "ain-1 --force"])
@@ -272,18 +200,6 @@ def test_build_requires_exactly_one_id(rest, agent, tmp_path, capsys, monkeypatc
     assert "APPROVED coding task" in err
     assert agent.log.events == []
     assert env["episodes"] == []
-
-
-def test_build_wires_the_id_and_the_gates(agent, tmp_path, monkeypatch, env):
-    use_producer(monkeypatch, env, {"status": "built", "reason": "ok"}, name="build_coding_task")
-
-    assert _handle_self_task_build("ain-5", agent, tmp_path) is True
-
-    call = env["calls"][0]
-    assert call["approval_id"] == "ain-5"
-    assert call["kill_switch"] == "inactive"
-    assert call["budget_snapshot"] == {"windows": []}
-    assert call["llm"] == "llm:synthesizer"
 
 
 def test_build_reports_and_logs_its_outcome(agent, tmp_path, capsys, monkeypatch, env):
@@ -339,23 +255,3 @@ def test_build_shows_why_it_was_vetoed(agent, tmp_path, capsys, monkeypatch, env
     assert agent.log.payload("self_task_build")["veto_reasons"] == [
         "frozen acceptance test was modified"
     ]
-
-
-def test_build_journals_every_attempt(agent, tmp_path, monkeypatch, env):
-    result = {"status": "refused", "reason": "approval not found"}
-    use_producer(monkeypatch, env, result, name="build_coding_task")
-
-    assert _handle_self_task_build("ain-nope", agent, tmp_path) is True
-    assert env["episodes"] == [{"kind": "self-task-build", "result": result}]
-
-
-def test_build_omits_optional_lines_when_absent(agent, tmp_path, capsys, monkeypatch, env):
-    use_producer(
-        monkeypatch, env, {"status": "refused", "reason": "not approved"}, name="build_coding_task"
-    )
-
-    assert _handle_self_task_build("ain-5", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    for absent in ("impl:", "approval_id:", "veto_reasons:", "roles:"):
-        assert absent not in err

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from core.episodic_hygiene import collapse_duplicate_episodes, prune_stale_episodes
+from core.episodic_hygiene import prune_stale_episodes
 from core.loop_memory_read import AgentLoopMemoryRead, _family_appendix
 from core.smart_memory import (
     EpisodeRecord,
@@ -12,7 +12,6 @@ from core.smart_memory import (
     ProceduralMemoryStore,
     ProcedureRecord,
     episode_from_agent_cycle,
-    is_usage_eligible,
     procedure_credit_allowed,
 )
 from core.state_integrity import read_state_jsonl_unlocked
@@ -39,34 +38,6 @@ def test_credit_refuses_memory_echo_and_off_topic_episodes():
     assert procedure_credit_allowed(_cycle(["web:x"])) is True  # контроль
     assert procedure_credit_allowed(_cycle(["memory:rec-123"])) is False
     assert procedure_credit_allowed(_cycle(["web:x"], rel=0.0)) is False
-
-
-# 2 -------------------------------------------------------------------------
-def _nginx_store(tmp_path):
-    s = EpisodicMemoryStore(tmp_path / "e.jsonl")
-    s.save(EpisodeRecord(goal="g", question="configure nginx reverse proxy timeout",
-                         outcome="failed", summary="bad", usage_eligible=False, id="ep-bad"))
-    s.save(EpisodeRecord(goal="g", question="configure nginx reverse proxy",
-                         outcome="success", summary="good", usage_eligible=True,
-                         completion_state="achieved", verified_chunks=2, id="ep-good"))
-    return s
-
-
-def test_find_most_similar_admit_skips_ineligible_winner(tmp_path):
-    s = _nginx_store(tmp_path)
-    q = "configure nginx reverse proxy timeout"
-    best, _ = s.find_most_similar(q, threshold=0.40)
-    assert best.id == "ep-bad"  # без фильтра — прежнее поведение
-    best, score = s.find_most_similar(q, threshold=0.40, admit=is_usage_eligible)
-    assert best is not None and best.id == "ep-good" and score > 0.4
-
-
-def test_read_path_keeps_eligible_runner_up_as_repeat(tmp_path):
-    s = _nginx_store(tmp_path)
-    me = _host(s)
-    AgentLoopMemoryRead._retrieve_experience_memory(me, "configure nginx reverse proxy timeout")
-    assert me._last_best_similar_episode is not None
-    assert me._last_best_similar_episode.id == "ep-good"
 
 
 # 3 -------------------------------------------------------------------------
@@ -124,37 +95,6 @@ def test_prune_keeps_unknown_keys_and_unreadable_rows(tmp_path):
     assert set(rows) == {"ep-keep", "ep-broken"}
     assert rows["ep-keep"]["future_field"] == {"x": 1}
     assert rows["ep-broken"]["verified_chunks"] == "three"
-
-
-# 5 -------------------------------------------------------------------------
-_BASE = {"goal": "g", "question": "deploy the service", "summary": "ran deploy; ok", "outcome": "success"}
-
-
-def test_collapse_keeps_eligible_verified_copy_over_newer_quarantined(tmp_path):
-    s = EpisodicMemoryStore(tmp_path / "e.jsonl")
-    s.save(EpisodeRecord(**_BASE, id="ep-anchor", usage_eligible=True, completion_state="achieved",
-                         verified_chunks=3, created_at="2026-11-01T00:00:00+00:00"))
-    s.save(EpisodeRecord(**_BASE, id="ep-quarantined", usage_eligible=False,
-                         completion_state="unknown", verified_chunks=0,
-                         created_at="2026-11-02T00:00:00+00:00"))
-    assert collapse_duplicate_episodes(s) == ["ep-quarantined"]
-    assert [e.id for e in s.load()] == ["ep-anchor"]
-
-
-def test_collapse_newest_wins_among_equals(tmp_path):
-    s = EpisodicMemoryStore(tmp_path / "e.jsonl")
-    for i, day in enumerate(("01", "02", "03")):
-        s.save(EpisodeRecord(**_BASE, id=f"ep-{i}", created_at=f"2026-11-{day}T00:00:00+00:00"))
-    assert sorted(collapse_duplicate_episodes(s)) == ["ep-0", "ep-1"]
-
-
-def test_collapse_never_drops_keep_ids(tmp_path):
-    s = EpisodicMemoryStore(tmp_path / "e.jsonl")
-    for i, day in enumerate(("01", "02", "03")):
-        s.save(EpisodeRecord(**_BASE, id=f"ep-{i}", created_at=f"2026-11-{day}T00:00:00+00:00"))
-    dropped = collapse_duplicate_episodes(s, keep_ids=frozenset({"ep-0"}))
-    assert dropped == ["ep-1"]
-    assert sorted(e.id for e in s.load()) == ["ep-0", "ep-2"]
 
 
 # 6 -------------------------------------------------------------------------

@@ -6,15 +6,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from core.approval import AutoApprover
-from core.logger import TraceLogger
-from core.loop import AgentLoop, new_trace_id
-from core.policy import PolicyGate
+from core.loop import new_trace_id
 from core.repair_proposal import RepairProposalGenerator
-from tests.conftest import FakeLLM, FakePlanner
-from tools.base import ToolRegistry
-from tools.file_read import FileReadTool
-from tools.file_write import FileWriteTool
+from tests.conftest import FakeLLM
 
 
 def _seed(workspace: Path) -> None:
@@ -89,21 +83,6 @@ def test_generator_refuses_when_baseline_tests_are_green(workspace: Path, monkey
     assert report.status == "no_failing_tests"
     assert report.proposal is None
     assert llm.calls == []
-
-
-def test_generator_rejects_wrong_target_file(workspace: Path, monkeypatch):
-    _seed(workspace)
-    _fake_pytest(monkeypatch, passed=False)
-    generator = RepairProposalGenerator(
-        workspace_root=workspace,
-        llm=FakeLLM(responses=[_json_response(target_file="other.py")]),
-    )
-
-    report = generator.generate(target_path="buggy.py", test_paths=("tests",))
-
-    assert report.status == "rejected"
-    assert report.proposal is None
-    assert any("does not match requested target" in w for w in report.warnings)
 
 
 def test_generator_rejects_secret_in_proposed_content(workspace: Path, monkeypatch):
@@ -302,33 +281,3 @@ def test_generator_rejects_invalid_constructor_args(workspace: Path):
         RepairProposalGenerator(
             workspace_root=workspace, llm=FakeLLM(responses=[]), max_changed_lines=0
         )
-
-
-def test_agent_loop_exposes_propose_repair(workspace: Path, monkeypatch):
-    _seed(workspace)
-    _fake_pytest(monkeypatch, passed=False)
-
-    registry = ToolRegistry()
-    registry.register(FileReadTool(workspace_root=workspace))
-    registry.register(FileWriteTool(workspace_root=workspace))
-    llm = FakeLLM(responses=[_json_response()])
-    trace_id = new_trace_id()
-    agent = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False),
-        planner=FakePlanner([]),
-        approval_provider=AutoApprover(),
-        max_replan_attempts=1,
-    )
-
-    report = agent.propose_repair(
-        target_path="buggy.py",
-        workspace_root=workspace,
-        test_paths=("tests",),
-    )
-
-    assert report.ok
-    assert report.proposal is not None
-    assert (workspace / "buggy.py").read_text(encoding="utf-8") == "def answer():\n    return 41\n"

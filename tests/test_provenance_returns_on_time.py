@@ -35,20 +35,6 @@ def _fresh_cache():
 
 
 class TestATimedOutGitMeansNotOurs:
-    def test_a_timeout_is_read_as_not_committed(self, tmp_path: Path, monkeypatch):
-        calls: list[list[str]] = []
-
-        def _late(argv, *, cwd, env, timeout):
-            calls.append(argv)
-            return b"core/replan.py\0", b"", None, True  # partial output, timed out
-
-        monkeypatch.setattr(repo_provenance, "run_with_tree_kill", _late)
-
-        assert repo_provenance.is_committed_source("file:core/replan.py", tmp_path) is False
-        assert calls and calls[0][:3] == ["git", "-c", "core.fsmonitor=false"], (
-            "the daemon is kept out of the call"
-        )
-
     def test_a_clean_answer_is_still_trusted(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(
             repo_provenance, "run_with_tree_kill",

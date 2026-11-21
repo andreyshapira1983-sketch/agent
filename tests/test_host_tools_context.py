@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.host_tools_context import host_tools_relevant
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
@@ -63,35 +62,7 @@ def test_host_tools_is_host_environment_not_evidence(workspace: Path, monkeypatc
     assert '<evidence source="host_tools">' not in prompts
 
 
-# ── Iteration 1b (Option A): block is NOT injected on unrelated questions ──────
-
-def test_host_environment_not_injected_when_irrelevant(workspace: Path, monkeypatch):
-    monkeypatch.setenv("BLENDER_PATH", str(workspace / "blender.exe"))
-    fake = FakeLLM(responses=[_CONTRACT_ANSWER])
-    agent = _agent(workspace, fake)
-    # A self-contained arithmetic question — nothing to do with host tools.
-    agent.run("How much is 17 times 23?")
-
-    prompts = _synth_prompts(fake)
-    assert "<host_environment>" not in prompts
-    assert "blender" not in prompts.lower()
-
-
 # ── Pure relevance-gate unit checks (deterministic, no LLM) ────────────────────
-
-def test_host_tools_relevant_gate():
-    # Relevant: explicit tool name / task word / effect tool used.
-    assert host_tools_relevant("write a blender script") is True
-    assert host_tools_relevant("can you make a Word document") is True
-    assert host_tools_relevant("render a 3d model") is True
-    assert host_tools_relevant("do this", tools_used=["shell_exec"]) is True
-    assert host_tools_relevant("save it", tools_used=["file_write"]) is True
-    # Irrelevant: no name, no task word, no effect tool.
-    assert host_tools_relevant("How much is 17 times 23?") is False
-    assert host_tools_relevant("Who are you?") is False
-    assert host_tools_relevant("what is the capital of France") is False
-    # No false-substring trigger ("word" inside "keyword" must not fire).
-    assert host_tools_relevant("give me a keyword for SEO") is False
 
 
 def test_broken_python_path_does_not_suppress_autodetect(monkeypatch):

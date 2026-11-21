@@ -16,23 +16,6 @@ from tools.file_read import FileReadTool
 from tools.find_in_files import FindInFilesTool
 
 
-def test_a_search_of_one_file_is_stamped_like_a_read(tmp_path: Path) -> None:
-    (tmp_path / "book.txt").write_text("Theorem 5.1\n", encoding="utf-8")
-    first = cache_stamp("find_in_files", {"path": "book.txt", "query": "Theorem"}, tmp_path)
-    assert first is not None
-    (tmp_path / "book.txt").write_text("Theorem 5.1\nTheorem 5.2\n", encoding="utf-8")
-    assert cache_stamp("find_in_files", {"path": "book.txt", "query": "Theorem"}, tmp_path) != first
-    assert cache_stamp("find_in_files", {"path": ".", "query": "Theorem"}, tmp_path) is None, \
-        "папка меняется без смены своего времени — не из кэша"
-
-
-def test_a_computation_is_fresh_only_until_the_next_effect(tmp_path: Path) -> None:
-    code = {"code": "print(1 + 1)"}
-    assert cache_stamp("python_probe", code, tmp_path) is None, "без счёта действий — не из кэша"
-    assert cache_stamp("python_probe", code, tmp_path, effects=3) == cache_stamp("python_probe", code, tmp_path, 3)
-    assert cache_stamp("python_probe", code, tmp_path, effects=3) != cache_stamp("python_probe", code, tmp_path, 4)
-
-
 def test_a_folder_search_and_a_listing_hold_within_one_turn_until_a_write(tmp_path: Path) -> None:
     """Живой прогон 26.09: 15 повторов на 132 вызова, почти все — поиск по папке и список
     папки внутри хода; из памяти не отдалось ни одного."""

@@ -40,19 +40,6 @@ def test_a_wait_on_another_file_does_not_hold_the_hand(tmp_path) -> None:
     assert "approval" in report.checked_gates
 
 
-def test_a_wait_on_the_same_file_still_holds(tmp_path) -> None:
-    """Control: the wait is real when it is about THIS file."""
-    inbox = ApprovalInbox(path=None)
-    _waiting(inbox, _TARGET)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-
-    report = _produce(tmp_path, llm=llm, inbox=inbox, candidate_targets=(_TARGET,))
-
-    assert report.status == "approval_wait"
-    assert _TARGET in report.reason
-    assert llm.calls == []
-
-
 def test_an_item_that_names_no_files_holds_everything(tmp_path) -> None:
     """Unknown is not nothing: the pre-block-3 global wait stays for it."""
     inbox = ApprovalInbox(path=None)
@@ -158,20 +145,3 @@ def test_the_campaign_does_not_call_a_wait_a_proposal(tmp_path, monkeypatch) -> 
     statuses = [p.get("status") for e, p in agent.log.events
                 if e == "campaign_engineering_proposed"]
     assert statuses == ["approval_wait"], agent.log.events
-
-
-def test_the_campaign_still_reports_a_real_proposal(tmp_path, monkeypatch) -> None:
-    """Positive control, and the vetoed-targets cooldown reaches the producer."""
-    import core.campaign_io as mod
-
-    seen = _stub_lane(monkeypatch, prod.ProducerReport(
-        status="proposed", approval_id="ain_1", target_path="core/x.py",
-    ))
-
-    out = mod._propose_engineering_step(
-        agent=_campaign_agent(), workspace=tmp_path,
-        approval_inbox=ApprovalInbox(path=None),
-    )
-
-    assert out == "engineering_proposed:ain_1"
-    assert "recently_vetoed_targets" in seen

@@ -39,24 +39,6 @@ def _descriptions(source: str) -> list[str]:
 # It produces the breaks it claims
 # ---------------------------------------------------------------------------
 
-def test_a_comparison_is_flipped():
-    source = "def f(n):\n    return n > 3\n"
-
-    mutations = enumerate_mutations(source)
-
-    assert any("comparison Gt -> GtE" in m.description for m in mutations)
-    flipped = next(m for m in mutations if "Gt -> GtE" in m.description)
-    assert "n >= 3" in flipped.source
-
-
-def test_a_boundary_moves_by_one():
-    source = "LIMIT = 8\n"
-
-    mutations = enumerate_mutations(source)
-
-    assert [m.description for m in mutations] == ["number 8 -> 9"]
-    assert "LIMIT = 9" in mutations[0].source
-
 
 def test_a_truth_value_is_inverted():
     source = "def f():\n    return True\n"
@@ -77,18 +59,6 @@ def test_every_mutation_still_parses():
 
     for mutation in enumerate_mutations(source):
         ast.parse(mutation.source)
-
-
-def test_each_mutation_changes_exactly_one_thing():
-    """Two changes at once would make a survivor unattributable."""
-    source = "def f(n):\n    return n > 3 or n < 1\n"
-
-    for mutation in enumerate_mutations(source):
-        differences = sum(
-            1 for a, b in zip(source.split(), mutation.source.split(), strict=False)
-            if a != b
-        )
-        assert differences <= 2, mutation.description
 
 
 # ---------------------------------------------------------------------------

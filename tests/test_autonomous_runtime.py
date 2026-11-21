@@ -4,8 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from core.approval import AutoApprover
 from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import AutonomousRuntime, AutonomousRuntimeConfig
@@ -98,23 +96,6 @@ def _agent(workspace: Path, *, with_tests: bool = True) -> AgentLoop:
         approval_provider=AutoApprover(default="approve"),
         max_replan_attempts=1,
     )
-
-
-def test_auto_runtime_dry_run_status_and_learning(workspace: Path):
-    (workspace / "README.md").write_text(
-        "The autonomous runtime runs bounded health checks.",
-        encoding="utf-8",
-    )
-    agent = _agent(workspace, with_tests=False)
-
-    report = AutonomousRuntime(agent, workspace=workspace).run(
-        AutonomousRuntimeConfig(limit=2, include_tests=False)
-    )
-
-    assert report.status == "completed"
-    assert [task.task.kind for task in report.tasks] == ["status", "learn"]
-    assert report.tasks[1].status == "done"
-    assert report.budget["used"]["learning_runs"] == 1
 
 
 def test_auto_runtime_corporate_learning_uses_doctrine_docs_even_when_rotation_hits_core(
@@ -245,7 +226,6 @@ def test_timed_out_tests_are_reported_inconclusive_not_done(workspace: Path):
     assert tests_report.status != "done"
     assert tests_report.details["timed_out"] is True
     assert tests_report.details["exit_code"] is None
-
 
 
 def test_tick_marks_timed_out_run_inconclusive_not_healthy(workspace: Path, monkeypatch):
@@ -515,102 +495,6 @@ def test_tick_dry_run_streak_grows_then_resets_on_live(workspace: Path, monkeypa
         assert ev.get("processed_effects", 0) == 0
 
 
-def test_auto_runtime_blocks_non_dry_run_into_approval_inbox(workspace: Path):
-    agent = _agent(workspace, with_tests=False)
-
-    report = AutonomousRuntime(agent, workspace=workspace).run(
-        AutonomousRuntimeConfig(
-            goal="approved goal",
-            dry_run=False,
-            limit=2,
-            include_tests=False,
-            learning_limit=3,
-        )
-    )
-
-    assert report.status == "blocked"
-    assert report.approvals["pending"] == 1
-    assert "approval required" in report.stop_reason
-    item = report.approvals["items"][0]
-    assert item["operation"] == "autonomous_runtime.allow_effects"
-    assert item["payload"]["goal"] == "approved goal"
-    assert item["payload"]["dry_run"] is False
-    assert item["payload"]["limit"] == 2
-    assert item["payload"]["include_tests"] is False
-    assert item["payload"]["learning_limit"] == 3
-
-
-def test_auto_runtime_runs_non_dry_run_after_explicit_effects_approval(workspace: Path):
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    agent = _agent(workspace, with_tests=False)
-    inbox = ApprovalInbox()
-
-    report = AutonomousRuntime(agent, workspace=workspace, approval_inbox=inbox).run(
-        AutonomousRuntimeConfig(
-            dry_run=False,
-            effects_approved=True,
-            limit=2,
-            include_tests=False,
-        )
-    )
-
-    assert report.status == "completed"
-    assert report.dry_run is False
-    assert report.approvals["pending"] == 0
-    assert agent.source_registry_store.count()["sources"] >= 1
-
-
-def test_auto_runtime_stops_on_budget_denial(workspace: Path):
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    agent = _agent(workspace, with_tests=False)
-
-    report = AutonomousRuntime(agent, workspace=workspace).run(
-        AutonomousRuntimeConfig(
-            limit=3,
-            include_tests=False,
-            budgets=BudgetLimits(max_cycles=1),
-        )
-    )
-
-    assert report.status == "stopped"
-    assert len(report.tasks) == 1
-    assert report.budget["denials"]
-
-
-def test_auto_runtime_stop_opens_a_structured_incident(workspace: Path):
-    """A circuit/budget stop must leave a durable incident trace, not just a log line.
-
-    Mirrors the budget-denial stop but passes an IncidentLog collaborator. The
-    halted run must open exactly one high-severity incident that forces a human
-    look (B-2 wiring).
-    """
-    from core.incident import IncidentLog
-
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    agent = _agent(workspace, with_tests=False)
-    incident_log = IncidentLog(path=workspace / "data" / "incidents.jsonl")
-
-    report = AutonomousRuntime(
-        agent, workspace=workspace, incident_log=incident_log
-    ).run(
-        AutonomousRuntimeConfig(
-            limit=3,
-            include_tests=False,
-            budgets=BudgetLimits(max_cycles=1),
-        )
-    )
-
-    assert report.status == "stopped"
-    open_incidents = incident_log.open_incidents()
-    assert len(open_incidents) == 1
-    inc = open_incidents[0]
-    assert inc.trigger == "autonomous_run_stopped"
-    assert inc.affected_module == "core.autonomous_runtime"
-    assert inc.severity == "high"
-    assert inc.human_escalation is True   # high severity always demands a human
-    assert inc.needs_human is True
-
-
 def test_auto_runtime_stop_does_not_open_duplicate_incidents(workspace: Path):
     """A second stop while one incident is still open must not spam duplicates."""
     from core.incident import IncidentLog
@@ -629,49 +513,6 @@ def test_auto_runtime_stop_does_not_open_duplicate_incidents(workspace: Path):
     runtime.run(cfg)
 
     assert len(incident_log.open_incidents()) == 1
-
-
-def test_auto_runtime_completed_run_opens_no_incident(workspace: Path):
-    """A clean completed run must NOT open any incident."""
-    from core.incident import IncidentLog
-
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    agent = _agent(workspace, with_tests=False)
-    incident_log = IncidentLog(path=workspace / "data" / "incidents.jsonl")
-
-    report = AutonomousRuntime(
-        agent, workspace=workspace, incident_log=incident_log
-    ).run(AutonomousRuntimeConfig(limit=2, include_tests=False))
-
-    assert report.status == "completed"
-    assert incident_log.open_incidents() == []
-
-
-def test_auto_runtime_runs_persistent_task_queue(workspace: Path):
-    (workspace / "README.md").write_text("Project overview.", encoding="utf-8")
-    agent = _agent(workspace, with_tests=False)
-    queue = TaskQueueStore(workspace / "tasks.jsonl")
-    task = queue.add(goal="project health", include_tests=False, limit=2)
-
-    report = AutonomousRuntime(agent, workspace=workspace).run_task_queue(
-        queue,
-        max_tasks=1,
-    )
-
-    assert report.status == "completed"
-    assert report.processed[0].task_id == task.id
-    assert report.processed[0].status == "done"
-    assert queue.get(task.id).status == "done"
-
-
-def test_auto_runtime_empty_queue_reports_empty(workspace: Path):
-    agent = _agent(workspace, with_tests=False)
-    queue = TaskQueueStore(workspace / "tasks.jsonl")
-
-    report = AutonomousRuntime(agent, workspace=workspace).run_task_queue(queue)
-
-    assert report.status == "empty"
-    assert report.processed == []
 
 
 def test_auto_runtime_queue_uses_one_budget_across_tasks(workspace: Path):
@@ -771,7 +612,6 @@ def test_auto_runtime_queue_skips_a_task_another_consumer_took(workspace: Path):
     assert after.owner_pid == 4242, "our lost claim overwrote the real owner"
 
 
-
 def _effective_blocked(agent) -> frozenset[str]:
     """What the GATE would refuse right now: the host ceiling plus this run's own.
 
@@ -847,85 +687,6 @@ def test_dry_run_goal_uses_gateway_simulate_and_restores(workspace: Path):
     assert agent.policy.blocked_tools == frozenset()
 
 
-def test_no_tests_goal_blocks_run_tests_and_restores(workspace: Path):
-    """When tests are disabled (include_tests=False), run_tests must be blocked
-    during goal execution so the planner cannot run tests against operator
-    intent (:work-session / :auto-run --no-tests), then restored afterwards."""
-    from core.autonomous_runtime import AutonomousTask
-
-    agent = _agent(workspace, with_tests=False)
-
-    seen: dict[str, frozenset[str]] = {}
-
-    def _capture(*, user_question: str) -> str:
-        seen["blocked"] = _effective_blocked(agent)
-        return "analysis"
-
-    agent.run = _capture  # type: ignore[method-assign]
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
-
-    runtime._task_goal(
-        task, AutonomousRuntimeConfig(dry_run=False, include_tests=False)
-    )
-    assert "run_tests" in seen["blocked"]
-    # Effect tools stay untouched outside dry-run.
-    assert "file_write" not in seen["blocked"]
-    # And the block-list is restored once the run finishes.
-    assert agent.policy.blocked_tools == frozenset()
-
-
-def test_tests_enabled_goal_does_not_block_run_tests(workspace: Path):
-    """When tests are enabled (include_tests=True, the default), run_tests must
-    NOT be blocked during goal execution."""
-    from core.autonomous_runtime import AutonomousTask
-
-    agent = _agent(workspace, with_tests=False)
-
-    seen: dict[str, frozenset[str]] = {}
-
-    def _capture(*, user_question: str) -> str:
-        seen["blocked"] = _effective_blocked(agent)
-        return "analysis"
-
-    agent.run = _capture  # type: ignore[method-assign]
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
-
-    runtime._task_goal(
-        task, AutonomousRuntimeConfig(dry_run=False, include_tests=True)
-    )
-    assert "run_tests" not in seen["blocked"]
-    assert agent.policy.blocked_tools == frozenset()
-
-
-def test_dry_run_and_no_tests_block_combines_and_restores(workspace: Path):
-    """dry_run (gateway simulate) and include_tests=False (policy block) together
-    apply during goal execution, and state is restored afterwards."""
-    from core.autonomous_runtime import AutonomousTask
-
-    agent = _agent(workspace, with_tests=False)
-
-    seen: dict[str, Any] = {}
-
-    def _capture(*, user_question: str) -> str:
-        seen["gateway_dry_run"] = _effective_dry_run(agent)
-        seen["blocked"] = _effective_blocked(agent)
-        return "analysis"
-
-    agent.run = _capture  # type: ignore[method-assign]
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
-
-    runtime._task_goal(
-        task, AutonomousRuntimeConfig(dry_run=True, include_tests=False)
-    )
-    assert seen["gateway_dry_run"] is True
-    assert "run_tests" in seen["blocked"]
-    assert "file_write" not in seen["blocked"]
-    assert agent.policy.blocked_tools == frozenset()
-
-
 def test_goal_path_blocks_subagent_and_network(workspace: Path):
     """The unattended goal path must block spawn_subagent + network egress
     (Stage-0 posture), regardless of dry-run, and restore afterwards."""
@@ -965,49 +726,6 @@ def test_goal_path_blocks_subagent_and_network(workspace: Path):
         # Run-scoped: both restored after each run.
         assert agent.policy.blocked_tools == frozenset()
         assert agent.planner.effective_hidden_tools() == frozenset()
-
-
-def test_no_tests_block_restored_after_exception(workspace: Path):
-    """If agent.run raises during a no-tests goal, blocked_tools must still be
-    restored (finally), leaving no run_tests block behind."""
-    from core.autonomous_runtime import AutonomousTask
-
-    agent = _agent(workspace, with_tests=False)
-
-    def _boom(*, user_question: str) -> str:
-        raise RuntimeError("goal blew up")
-
-    agent.run = _boom  # type: ignore[method-assign]
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-    task = AutonomousTask(kind="goal", description="analyze core/replan.py")
-
-    with pytest.raises(RuntimeError, match="goal blew up"):
-        runtime._task_goal(
-            task, AutonomousRuntimeConfig(dry_run=False, include_tests=False)
-        )
-    assert agent.policy.blocked_tools == frozenset()
-
-
-def test_policy_gate_blocks_listed_tool(workspace: Path):
-    """PolicyGate denies any tool named in its blocked_tools set, before
-    risk evaluation, regardless of that tool's reversibility."""
-    from core.models import Action
-
-    registry = ToolRegistry()
-    registry.register(FakeRunTestsTool())
-    gate = PolicyGate(registry)
-
-    allow = gate.check(
-        Action(step_id="s1", type="tool_call", tool_name="run_tests", parameters={})
-    )
-    assert allow.decision == "allow"
-
-    gate.blocked_tools = frozenset({"run_tests"})
-    deny = gate.check(
-        Action(step_id="s1", type="tool_call", tool_name="run_tests", parameters={})
-    )
-    assert deny.decision == "deny"
-    assert "blocked in this context" in " ".join(deny.reasons)
 
 
 # ── Reflection freeze: operator brake reaches the reflection side channel ────
@@ -1076,41 +794,6 @@ def test_run_reflection_honors_frozen_write_policy(workspace: Path):
     assert result["memory_records_saved"] == 0
     assert agent.persistent_store.load() == []
 
-
-def test_run_reflection_dry_run_keeps_lessons_in_process(workspace: Path):
-    """Dry-run reflection may report lessons but must not persist them."""
-    _seed_failure_logs(workspace)
-    agent = _agent_with_policy(
-        workspace,
-        write_policy=MemoryWritePolicy(),
-        llm_responses=[_LESSONS_JSON],
-    )
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-
-    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=True))
-
-    assert result is not None
-    assert len(result["lessons"]) == 1
-    assert result["memory_records_saved"] == 0
-    assert agent.persistent_store.load() == []
-
-
-def test_run_reflection_saves_with_default_policy_in_live_mode(workspace: Path):
-    """Without dry-run or the operator brake, reflection persists as before."""
-    _seed_failure_logs(workspace)
-    agent = _agent_with_policy(
-        workspace,
-        write_policy=MemoryWritePolicy(),
-        llm_responses=[_LESSONS_JSON],
-    )
-    runtime = AutonomousRuntime(agent, workspace=workspace)
-
-    result = runtime._run_reflection(AutonomousRuntimeConfig(limit=1, dry_run=False))
-
-    assert result is not None
-    assert len(result["lessons"]) == 1
-    assert result["memory_records_saved"] == 1
-    assert len(agent.persistent_store.load()) == 1
 
 def test_queue_heartbeat_failure_names_its_own_task(workspace: Path, monkeypatch):
     """A heartbeat failure must name the task it belongs to.

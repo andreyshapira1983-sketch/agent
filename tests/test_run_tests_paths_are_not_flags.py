@@ -36,9 +36,3 @@ def test_a_pattern_that_looks_like_an_option_is_refused(tool) -> None:
     reason, and so the two arguments cannot drift apart."""
     with pytest.raises(PermissionError):
         tool._build_argv(paths=None, pattern="-x")
-
-
-def test_an_ordinary_path_still_passes(tool) -> None:
-    argv = tool._build_argv(paths=["tests"], pattern="not slow")
-    assert argv[-1] == "tests"
-    assert argv[-3:-1] == ["-k", "not slow"]

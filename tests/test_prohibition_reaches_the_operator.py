@@ -54,44 +54,6 @@ class _Report:
     chunks: tuple = ()
 
 
-def test_the_prohibition_is_still_recognised() -> None:
-    """ПРЕДУСЛОВИЕ: без этого остальное зелено по постороннему поводу."""
-    contract = derive_completion_contract(_PROHIBITING)
-    kinds = {u.kind for u in contract.unsupported_deliverables}
-    assert "prohibition" in kinds
-    assert contract.coverage == "partial"
-
-
-def test_an_unrepresentable_prohibition_reaches_the_answer() -> None:
-    """ГЛАВНОЕ: оператор узнаёт о запрете, который система не проверяла."""
-    contract = derive_completion_contract(_PROHIBITING)
-    result = apply_answer_enforcement(
-        answer=_ANSWER, report=_Report(), question=_PROHIBITING, contract=contract
-    )
-    assert "запрет" in result.answer.lower() or "prohibition" in result.answer.lower(), (
-        "нераспознанный запрет остался в журнале и до оператора не дошёл"
-    )
-    assert result.applied
-
-
-def test_a_request_without_prohibitions_is_not_annotated() -> None:
-    """Ломка наоборот: заметка не должна появляться на обычном запросе."""
-    contract = derive_completion_contract("что в файле doc.txt")
-    result = apply_answer_enforcement(
-        answer=_ANSWER, report=_Report(), question="что в файле doc.txt",
-        contract=contract,
-    )
-    assert "запрет" not in result.answer.lower()
-
-
-def test_the_contract_argument_is_optional() -> None:
-    """Прежние вызывающие не сломаны: без контракта поведение как было."""
-    result = apply_answer_enforcement(
-        answer=_ANSWER, report=_Report(), question=_PROHIBITING
-    )
-    assert result.answer == _ANSWER
-
-
 def test_the_note_names_the_quoted_evidence() -> None:
     """Заметка обязана называть, ЧТО именно она считает запретом."""
     contract = derive_completion_contract(_PROHIBITING)

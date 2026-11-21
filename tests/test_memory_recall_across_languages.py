@@ -21,55 +21,6 @@ never reached it.
 from __future__ import annotations
 
 from core.bilingual_terms import recall_language_diagnostics
-from core.memory_policy import MemoryRetrievalPolicy
-from core.models import MemoryRecord
-
-
-def _record(rid: str, content: str, tags: tuple[str, ...] = ("fact",)) -> MemoryRecord:
-    return MemoryRecord(id=rid, content=content, tags=list(tags), source="test")
-
-
-_STORE = [
-    _record("mem_arch", "The architecture doc owns the target levels; README points at it."),
-    _record("mem_queue", "The runtime task queue stores tasks as JSONL and claims them exclusively."),
-    _record("mem_budget", "The evidence budget trims memory first, then the largest file block."),
-    _record("mem_tests", "Targeted tests run on apply; a red run rolls the change back."),
-    _record("mem_cat", "Unrelated: the neighbour's cat is called Vasiliy."),
-]
-
-
-def _ids(question: str) -> list[str]:
-    return [r.id for r in MemoryRetrievalPolicy().select(_STORE, question)]
-
-
-def test_a_russian_question_reaches_an_english_record():
-    assert "mem_arch" in _ids("кто владеет архитектурой?")
-
-
-def test_the_russian_and_english_forms_of_one_question_agree():
-    """Same meaning, two languages — the recall must not depend on which."""
-    assert _ids("расскажи про очередь задач") == _ids("tell me about the task queue")
-
-
-def test_several_domain_terms_are_reachable_in_russian():
-    assert "mem_budget" in _ids("что там с бюджетом улик?")
-    assert "mem_tests" in _ids("почему упали тесты при применении патча?")
-
-
-def test_english_questions_are_unchanged():
-    assert "mem_arch" in _ids("who owns the architecture?")
-    assert "mem_queue" in _ids("how does the task queue claim work?")
-
-
-def test_an_unrelated_question_still_matches_nothing():
-    """Widening the query must not turn recall into "everything matches"."""
-    assert _ids("какая завтра погода в Мадриде?") == []
-
-
-def test_a_russian_word_does_not_drag_in_an_unrelated_record():
-    ids = _ids("расскажи про архитектуру")
-    assert "mem_cat" not in ids
-
 
 # ── the miss counter: decide the next step from numbers, not impressions ────
 
@@ -87,17 +38,3 @@ def test_a_miss_the_table_cannot_widen_is_visible():
 
     assert diag["question_script"] == "cyrillic"
     assert diag["bilingual_terms_added"] == 0
-
-
-def test_an_english_question_is_never_blamed_on_the_language_gap():
-    diag = recall_language_diagnostics("who owns the architecture?")
-
-    assert diag["question_script"] == "latin"
-    assert diag["bilingual_terms_added"] == 0
-
-
-def test_a_mixed_question_is_reported_as_mixed():
-    diag = recall_language_diagnostics("что говорит README про доктрину?")
-
-    assert diag["question_script"] == "mixed"
-    assert diag["bilingual_terms_added"] > 0

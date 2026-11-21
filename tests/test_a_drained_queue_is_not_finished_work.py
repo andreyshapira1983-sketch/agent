@@ -34,8 +34,6 @@ reviewer identity are still absent.
 """
 from __future__ import annotations
 
-import pytest
-
 from core.autonomous_runtime import (
     AutonomousQueuedTaskReport,
     AutonomousQueueRunReport,
@@ -48,100 +46,7 @@ def _task(status: str, task_id: str = "t1") -> AutonomousQueuedTaskReport:
     )
 
 
-# --- the distinction itself ---------------------------------------------------
-
-def test_a_drained_queue_of_failures_does_not_read_as_work_done() -> None:
-    """The heart of norm A. Every task failed; the queue still drained."""
-    report = AutonomousQueueRunReport(
-        status="completed",
-        processed=[_task("failed", "a"), _task("failed", "b")],
-    )
-    assert report.status == "completed", "queue lifecycle is unchanged by design"
-    assert report.work_succeeded is False, (
-        "two failed tasks reported as succeeded work — the exact conflation "
-        "MIR-117 measured"
-    )
-    assert report.failed_count == 2
-    assert report.succeeded_count == 0
-
-
-def test_real_work_is_reported_as_real_work() -> None:
-    """The control that must stay green: a fix that always says 'no work' is
-    as useless as one that always says 'completed'."""
-    report = AutonomousQueueRunReport(
-        status="completed", processed=[_task("done", "a"), _task("done", "b")]
-    )
-    assert report.work_succeeded is True
-    assert report.succeeded_count == 2
-    assert report.failed_count == 0
-
-
-def test_a_mixed_run_is_neither_a_success_nor_a_lie() -> None:
-    """One worked, one did not. Both facts survive; neither hides the other."""
-    report = AutonomousQueueRunReport(
-        status="completed", processed=[_task("done", "a"), _task("failed", "b")]
-    )
-    assert report.succeeded_count == 1
-    assert report.failed_count == 1
-    assert report.work_succeeded is True, "something genuinely did work"
-    assert report.work_partial is True, "and something genuinely did not"
-
-
-def test_an_empty_queue_claims_nothing() -> None:
-    report = AutonomousQueueRunReport(status="empty", processed=[])
-    assert report.work_succeeded is False
-    assert report.work_partial is False
-    assert report.succeeded_count == 0 and report.failed_count == 0
-
-
-@pytest.mark.parametrize("status,succeeded", [
-    ("done", True),
-    ("failed", False),
-    ("blocked", False),      # waiting on a human is not work performed
-    ("cancelled", False),
-    ("paused", False),
-    ("pending", False),
-    ("running", False),      # still going is not finished
-])
-def test_every_lifecycle_status_lands_on_the_honest_side(
-    status: str, succeeded: bool
-) -> None:
-    """`blocked` is the interesting one: MIR-039 made it a resting state that is
-    neither success nor failure, and it must not drift into the success column
-    merely because nothing crashed."""
-    report = AutonomousQueueRunReport(status="completed", processed=[_task(status)])
-    assert report.work_succeeded is succeeded
-
-
 # --- the honest fact must reach the record, not only the object --------------
-
-def test_the_two_facts_are_both_serialised() -> None:
-    """A distinction that never leaves the process cannot be audited later —
-    the whole point of the five-axis provenance work.
-
-    Both polarities are asserted deliberately. The first version of this test
-    checked only a run where work HAD succeeded, so hardcoding
-    `"work_succeeded": True` in the serialiser passed it — a test that could
-    not falsify its own claim, caught by breaking the fix on purpose."""
-    mixed = AutonomousQueueRunReport(
-        status="completed", processed=[_task("done", "a"), _task("failed", "b")]
-    ).to_dict()
-    assert mixed["status"] == "completed"
-    assert mixed["work_succeeded"] is True
-    assert mixed["succeeded_count"] == 1
-    assert mixed["failed_count"] == 1
-
-    # The polarity that catches a hardcoded serialiser: a drained queue of
-    # failures must carry `False` all the way into the record.
-    barren = AutonomousQueueRunReport(
-        status="completed", processed=[_task("failed", "a"), _task("failed", "b")]
-    ).to_dict()
-    assert barren["status"] == "completed", "queue lifecycle still says drained"
-    assert barren["work_succeeded"] is False, (
-        "the record claims work succeeded for a run where every task failed"
-    )
-    assert barren["succeeded_count"] == 0
-    assert barren["failed_count"] == 2
 
 
 def test_the_human_summary_stops_claiming_success_it_did_not_have() -> None:

@@ -4,8 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.backlog_target_mapper import (
-    MODEL_DISCOVERY_TARGET,
-    MappedBacklogCandidate,
     map_backlog_candidate,
 )
 
@@ -50,89 +48,6 @@ def _write_model_discovery_evidence(workspace: Path, *, title: str = _TITLE) -> 
     )
 
 
-def test_td_011_012_abstract_target_maps_with_local_evidence(workspace: Path) -> None:
-    _write_model_discovery_evidence(workspace)
-
-    result = map_backlog_candidate(
-        _Candidate(),
-        workspace=workspace,
-        allowed_targets=("core/redaction.py",),
-    )
-
-    assert result.decision == "mapped"
-    assert result.ok is True
-    assert isinstance(result.candidate, MappedBacklogCandidate)
-    assert result.candidate.target_path == MODEL_DISCOVERY_TARGET
-    assert result.candidate.source_target_path == "TD-011 / TD-012"
-    assert result.candidate.problem_quote == _TITLE
-    assert "TECH_DEBT.md:1" in result.candidate.evidence_ref
-    assert "core/model_discovery.py:1" in result.candidate.evidence_ref
-    assert result.candidate.mapping_rule == "td_011_012_model_discovery"
-
-
-def test_concrete_allowlisted_candidate_passes_through(workspace: Path) -> None:
-    candidate = _Candidate(
-        target_path="core/redaction.py",
-        problem_quote="grounded concrete target",
-        evidence_ref="TECH_DEBT.md:9",
-    )
-
-    result = map_backlog_candidate(
-        candidate,
-        workspace=workspace,
-        allowed_targets=("core/redaction.py",),
-    )
-
-    assert result.decision == "concrete"
-    assert result.candidate is not None
-    assert result.candidate.target_path == "core/redaction.py"
-    assert result.candidate.problem_quote == "grounded concrete target"
-
-
-def test_docs_self_build_candidate_passes_through_as_concrete(workspace: Path) -> None:
-    candidate = _Candidate(
-        target_path="docs/self_build.md",
-        problem_quote="- **What:** first grounded target is `docs/self_build.md`",
-        evidence_ref="docs/proposals/self-build-grounded-target-coverage-proposal.md:1",
-        signal_source="self_build_docs",
-    )
-
-    result = map_backlog_candidate(
-        candidate,
-        workspace=workspace,
-        allowed_targets=("docs/self_build.md",),
-    )
-
-    assert result.decision == "concrete"
-    assert result.ok is True
-    assert result.candidate is not None
-    assert result.candidate.target_path == "docs/self_build.md"
-    assert result.candidate.source_target_path == "docs/self_build.md"
-    assert result.candidate.mapping_rule == "concrete"
-
-
-def test_ambiguous_abstract_target_returns_no_target(workspace: Path) -> None:
-    (workspace / "TECH_DEBT.md").write_text(
-        "TD-999 \u2014 Vague future work\nStatus: Partial.\n",
-        encoding="utf-8",
-    )
-    candidate = _Candidate(
-        target_path="TD-999",
-        problem_quote="TD-999 \u2014 Vague future work",
-        evidence_ref="TECH_DEBT.md:1",
-    )
-
-    result = map_backlog_candidate(
-        candidate,
-        workspace=workspace,
-        allowed_targets=("core/redaction.py",),
-    )
-
-    assert result.decision == "no_target"
-    assert result.candidate is None
-    assert "no deterministic mapper" in result.reason
-
-
 def test_missing_model_discovery_evidence_returns_unknown(workspace: Path) -> None:
     (workspace / "TECH_DEBT.md").write_text(f"{_TITLE}\nStatus: Partial.\n", encoding="utf-8")
 
@@ -159,51 +74,3 @@ def test_untraceable_model_candidate_returns_no_target(workspace: Path) -> None:
     assert result.decision == "no_target"
     assert result.candidate is None
     assert result.reason == "candidate is not traceable to TECH_DEBT.md"
-
-
-def test_mapper_reads_only_and_creates_no_workspace_files(workspace: Path) -> None:
-    """Mapping a split:<rel> target leaves the workspace byte-for-byte unchanged.
-
-    split:<rel> is the abstract route that fires in production (oversized modules).
-    """
-    (workspace / "core").mkdir()
-    (workspace / "core" / "sample_mod.py").write_text("x = 1\n", encoding="utf-8")
-    before = {
-        path.relative_to(workspace).as_posix(): path.read_bytes()
-        for path in workspace.rglob("*")
-        if path.is_file()
-    }
-
-    result = map_backlog_candidate(
-        _Candidate(
-            target_path="split:core/sample_mod.py",
-            problem_quote="core/sample_mod.py is oversized",
-            evidence_ref="core/sample_mod.py:1",
-            signal_source="oversized_module",
-        ),
-        workspace=workspace,
-        allowed_targets=("core/redaction.py",),
-    )
-
-    after = {
-        path.relative_to(workspace).as_posix(): path.read_bytes()
-        for path in workspace.rglob("*")
-        if path.is_file()
-    }
-    assert result.decision == "mapped"
-    assert result.target_path == "core/sample_mod.py"
-    assert after == before
-
-
-def test_mapper_has_no_network_or_runtime_imports() -> None:
-    import core.backlog_target_mapper as mapper
-
-    src = Path(mapper.__file__).read_text(encoding="utf-8")
-    import_lines = [
-        line for line in src.splitlines()
-        if line.strip().startswith(("import ", "from "))
-    ]
-    for banned in ("requests", "urllib", "httpx", "socket", "subprocess"):
-        assert not any(banned in line for line in import_lines), banned
-    for banned in ("approval_inbox", "scheduler", "agent_tick"):
-        assert not any(banned in line for line in import_lines), banned

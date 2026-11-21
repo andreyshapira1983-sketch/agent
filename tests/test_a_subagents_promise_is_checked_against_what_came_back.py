@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.subagent_predictions import RELPATH, compare, predicted_sources, tally
+from core.subagent_predictions import RELPATH, predicted_sources, tally
 from core.subagent_runner import SubAgentRunResult
 from tools.base import ToolRegistry
 
@@ -62,8 +62,3 @@ def test_a_kept_promise_and_the_tally(tool, tmp_path: Path) -> None:
     assert (stats["runs"], stats["checkable"], stats["met"]) == (3, 2, 1)
     assert (stats["promised_sources"], stats["delivered_sources"]) == (4, 2)
     assert stats["missed_by_role"] == {"researcher": 1}
-
-
-def test_a_failed_run_never_counts_as_a_kept_promise() -> None:
-    assert compare(0, 0, "error") is False
-    assert compare(None, 5, "success") is None

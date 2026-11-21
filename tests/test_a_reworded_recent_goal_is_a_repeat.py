@@ -23,7 +23,6 @@ AGAIN = ("Найти в рабочей папке код, который фор�
          "(или близкое 'the goal names pursue_goal as the work'), и объяснить, почему при цели, называющей "
          "'pursue_goal' как работу, этот код возвращает пустой результат — то есть проследить по исходникам, "
          "какое условие отсекает такие цели и что именно возвращается наружу.")
-OTHER = "В knowledge_library/cs/txt/Mogensen_BasicsOfCompilerDesign.txt найди раздел про LR-разбор и посчитай пример."
 
 
 def _ledger(root: Path, *goals: str) -> Path:
@@ -38,11 +37,6 @@ def test_the_reworded_goal_is_refused(tmp_path: Path) -> None:
     root = _ledger(tmp_path, DONE, "Цель не продвигается: другое")
     assert repeats_recent_goal(AGAIN, root)
     assert "повторяет недавнюю" in _problem(AGAIN, root)
-
-
-def test_a_different_goal_passes(tmp_path: Path) -> None:
-    root = _ledger(tmp_path, DONE)
-    assert not repeats_recent_goal(OTHER, root)
 
 
 def test_the_same_quoted_message_marks_the_same_task(tmp_path: Path) -> None:

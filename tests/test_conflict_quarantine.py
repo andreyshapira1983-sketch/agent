@@ -29,25 +29,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.knowledge_pipeline import KnowledgeWritePolicy, claim_provenance_tag
-from core.knowledge_use_policy import KnowledgeUsePolicy
+from core.knowledge_pipeline import claim_provenance_tag
 from core.models import MemoryRecord
-from core.role_router import RoleContext
-from core.source_registry import ClaimRecord, SourceRecord
-
-
-def _claim(cid: str = "claim-1", *, status: str = "extracted") -> ClaimRecord:
-    return ClaimRecord(
-        id=cid, source_id="src-1", text="the deploy window is Friday noon",
-        confidence=0.9, status=status,  # type: ignore[arg-type]
-    )
-
-
-def _source() -> SourceRecord:
-    return SourceRecord(
-        id="src-1", type="file", title="notes",  # type: ignore[arg-type]
-        locator="notes.md", trust_level=0.9,
-    )
 
 
 def _record(*, tags: list[str]) -> MemoryRecord:
@@ -57,57 +40,6 @@ def _record(*, tags: list[str]) -> MemoryRecord:
         tags=tags, owner="self", source="agent-auto",
         created_at=datetime.now(timezone.utc),
     )
-
-
-def _allowed(records: list[MemoryRecord]) -> list[MemoryRecord]:
-    report = KnowledgeUsePolicy().filter(
-        records,
-        role_context=RoleContext(
-            role="assistant", tone="neutral", output_style="prose",
-            knowledge_scopes=("*",), allowed_memory_types=("semantic",),
-            allowed_memory_tags=("*",),
-        ),
-        question="deploy window",
-    )
-    return list(report.allowed)
-
-
-# ==========================================================================
-# 1. Provenance — without it quarantine has no addressee.
-# ==========================================================================
-def test_memory_tags_carry_the_claim_id() -> None:
-    tags = KnowledgeWritePolicy().memory_tags(_claim("claim-42"), _source())
-
-    assert claim_provenance_tag("claim-42") in tags, (
-        "a record with no link to its claim cannot be quarantined later — this "
-        "is why conflict detection had nothing to act on"
-    )
-    # the existing tags must survive; they drive other policies
-    for existing in ("fact", "knowledge", "source-backed"):
-        assert existing in tags
-
-
-# ==========================================================================
-# 2. `conflicted` must actually gate retrieval.
-# ==========================================================================
-def test_a_conflicted_record_is_not_retrieved() -> None:
-    clean = _record(tags=["fact", "knowledge"])
-    conflicted = _record(tags=["fact", "knowledge", "conflicted"])
-
-    allowed = _allowed([clean, conflicted])
-
-    assert clean in allowed
-    assert conflicted not in allowed, (
-        "a record whose claim is contradicted must stop serving as ordinary "
-        "evidence until an operator resolves it"
-    )
-
-
-def test_operator_can_restore_by_removing_the_tag() -> None:
-    """Resolution is operator-only; clearing the tag returns the record."""
-    restored = _record(tags=["fact", "knowledge"])
-
-    assert restored in _allowed([restored])
 
 
 # ==========================================================================

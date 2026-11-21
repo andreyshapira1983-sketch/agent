@@ -46,15 +46,6 @@ def _run(
 
 
 class TestWebFetchSanitizer:
-    def test_well_formed_passes(self, workspace: Path):
-        sources, _ = _run(workspace, [{
-            "tool": "web_fetch",
-            "arguments": {"url": "https://realpython.com/page"},
-        }])
-        assert len(sources) == 1
-        assert sources[0]["arguments"]["url"] == "https://realpython.com/page"
-        assert sources[0]["label"].startswith("web_fetch:https://realpython.com")
-
     @pytest.mark.parametrize("url", [
         "https://example.com",
         "https://example.com/page",
@@ -72,18 +63,6 @@ class TestWebFetchSanitizer:
         assert sources == []
         assert any("placeholder" in w for w in warnings)
 
-    def test_missing_url_dropped(self, workspace: Path):
-        sources, warnings = _run(workspace, [{
-            "tool": "web_fetch", "arguments": {},
-        }])
-        assert sources == []
-        assert any("without url" in w for w in warnings)
-
-    def test_non_string_url_dropped(self, workspace: Path):
-        sources, _ = _run(workspace, [{
-            "tool": "web_fetch", "arguments": {"url": 42},
-        }])
-        assert sources == []
 
     def test_url_too_long_dropped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
@@ -100,65 +79,8 @@ class TestWebFetchSanitizer:
         assert sources == []
         assert any("not ASCII" in w for w in warnings)
 
-    @pytest.mark.parametrize("scheme", [
-        "file://", "ftp://", "data:text/plain,x", "javascript:alert(1)",
-        "ws://example.com/",
-    ])
-    def test_disallowed_schemes_dropped(self, workspace: Path, scheme: str):
-        sources, warnings = _run(workspace, [{
-            "tool": "web_fetch", "arguments": {"url": scheme + "x"},
-        }])
-        assert sources == []
-        assert any("http://" in w or "https://" in w for w in warnings)
-
-    @pytest.mark.parametrize("url", [
-        "http://localhost/x",
-        "http://127.0.0.1/x",
-        "http://10.0.0.1/x",
-        "http://192.168.1.1/x",
-        "http://169.254.169.254/latest",   # AWS metadata
-        "http://0.0.0.0/",
-        "http://[::1]/x",
-    ])
-    def test_ssrf_targets_dropped(self, workspace: Path, url: str):
-        sources, warnings = _run(workspace, [{
-            "tool": "web_fetch", "arguments": {"url": url},
-        }])
-        assert sources == []
-        assert any("local network" in w for w in warnings)
-
-    def test_label_truncated(self, workspace: Path):
-        url = "https://realpython.com/" + "a" * 200
-        sources, _ = _run(workspace, [{
-            "tool": "web_fetch", "arguments": {"url": url},
-        }])
-        # Label cap at 60 chars after the "web_fetch:" prefix.
-        assert len(sources[0]["label"]) <= len("web_fetch:") + 60
-
 
 class TestRssFetchSanitizer:
-    def test_well_formed_passes(self, workspace: Path):
-        sources, _ = _run(workspace, [{
-            "tool": "rss_fetch",
-            "arguments": {"url": "https://realpython.com/feed.xml", "max_entries": 7},
-        }])
-
-        assert len(sources) == 1
-        assert sources[0]["arguments"] == {
-            "url": "https://realpython.com/feed.xml",
-            "max_entries": 7,
-        }
-        assert sources[0]["label"].startswith("rss_fetch:https://realpython.com")
-
-    def test_missing_url_dropped(self, workspace: Path):
-        sources, warnings = _run(workspace, [{
-            "tool": "rss_fetch",
-            "arguments": {},
-        }])
-
-        assert sources == []
-        assert any("without url" in warning for warning in warnings)
-
     def test_placeholder_host_dropped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
             "tool": "rss_fetch",

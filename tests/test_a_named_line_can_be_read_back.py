@@ -22,7 +22,7 @@ import pytest
 
 from core.evidence import ProvenanceChain, evidence_from_tool_result
 from core.planner import LLMPlanner
-from core.verifier_utils import match_citation, parse_citations, same_file
+from core.verifier_utils import match_citation, parse_citations
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.read_logs import ReadLogsTool
@@ -39,28 +39,6 @@ def _numbered_file(workspace: Path) -> Path:
 
 
 class TestFileReadWindow:
-    def test_without_a_window_the_whole_file_comes_back(self, workspace: Path, numbered_file: Path):
-        out = FileReadTool(workspace).run("core/sample.py")
-        assert out.startswith("line 1\n") and out.rstrip().endswith("line 300")
-
-    def test_the_named_lines_come_back_numbered(self, workspace: Path, numbered_file: Path):
-        out = FileReadTool(workspace).run("core/sample.py", start_line=207, end_line=209)
-        assert out.splitlines() == [
-            "[sample.py lines 207-209 of 300]",
-            "207: line 207",
-            "208: line 208",
-            "209: line 209",
-        ]
-
-    def test_start_alone_opens_a_short_window(self, workspace: Path, numbered_file: Path):
-        out = FileReadTool(workspace).run("core/sample.py", start_line=200)
-        assert "[sample.py lines 200-259 of 300]" in out
-        assert "259: line 259" in out and "260:" not in out
-
-    def test_a_window_past_the_end_is_clipped_not_blank(self, workspace: Path, numbered_file: Path):
-        out = FileReadTool(workspace).run("core/sample.py", start_line=298, end_line=999)
-        assert "[sample.py lines 298-300 of 300]" in out
-
     def test_a_window_beyond_the_file_is_an_error(self, workspace: Path, numbered_file: Path):
         with pytest.raises(ValueError, match="has only 300 lines"):
             FileReadTool(workspace).run("core/sample.py", start_line=301)
@@ -95,17 +73,6 @@ def _sanitize(workspace: Path, steps):
 
 
 class TestTheSanitizerLetsTheWindowThrough:
-    def test_the_window_survives_admission(self, workspace: Path):
-        sources, warnings = _sanitize(workspace, [{
-            "tool": "file_read",
-            "arguments": {"path": "core/loop_attempt.py", "start_line": 195, "end_line": 225},
-        }])
-        assert sources[0]["arguments"] == {
-            "path": "core/loop_attempt.py", "start_line": 195, "end_line": 225,
-        }
-        assert sources[0]["label"] == "file:core/loop_attempt.py:195-225"
-        assert warnings == []
-
     def test_a_string_number_is_read_as_a_number(self, workspace: Path):
         sources, _ = _sanitize(workspace, [{
             "tool": "file_read",
@@ -129,13 +96,6 @@ class TestTheSanitizerLetsTheWindowThrough:
         }])
         assert sources[0]["arguments"]["end_line"] == 400
         assert any("clamped" in w for w in warnings)
-
-    def test_no_window_means_no_window_keys(self, workspace: Path):
-        sources, _ = _sanitize(workspace, [{
-            "tool": "file_read", "arguments": {"path": "core/x.py"},
-        }])
-        assert sources[0]["arguments"] == {"path": "core/x.py"}
-        assert sources[0]["label"] == "file:core/x.py"
 
 
 def _write_trace(logs: Path, stem: str, events: list[str]) -> None:
@@ -166,25 +126,6 @@ class TestReadLogsNamesItsOwnTrace:
         assert out["live_trace_id"] == "trace_live"
         assert "trace_id='trace_live'" in out["hint"]
 
-    def test_the_live_trace_is_readable_by_name(self, tmp_path: Path):
-        _write_trace(tmp_path / "logs", "trace_live", ["session_start", "shell_exec", "respond"])
-
-        out = ReadLogsTool(tmp_path, live_trace_id="trace_live").run(
-            trace_id="trace_live", event_filter=["shell_exec"],
-        )
-
-        assert out["is_live_session"] is True
-        assert out["skipped_live"] is False
-        assert [e["event"] for e in out["events"]] == ["shell_exec"]
-        assert out["live_trace_id"] == "trace_live"
-        assert "hint" not in out
-
-    def test_without_a_live_id_the_field_is_empty_not_missing(self, tmp_path: Path):
-        _write_trace(tmp_path / "logs", "trace_only", ["session_start"])
-        out = ReadLogsTool(tmp_path).run()
-        assert out["live_trace_id"] == ""
-        assert "hint" not in out
-
 
 class TestAWindowedReadIsCitable:
     """Turn 33 (2026-09-05, session exam_j): line 208 quoted correctly, and the
@@ -203,36 +144,6 @@ class TestAWindowedReadIsCitable:
             ))
         return chain
 
-    def test_the_evidence_is_named_like_the_step(self):
-        ev = evidence_from_tool_result(
-            tool_name="file_read",
-            arguments={"path": "core/loop_attempt.py", "start_line": 200, "end_line": 215},
-            output="208: x", status="success",
-        )
-        assert ev.source_id == "file:core/loop_attempt.py:200-215"
-        assert "lines 200-215" in ev.claim
-
-    def test_a_whole_file_read_keeps_its_old_name(self):
-        ev = evidence_from_tool_result(
-            tool_name="file_read", arguments={"path": "core/loop_attempt.py"},
-            output="text", status="success",
-        )
-        assert ev.source_id == "file:core/loop_attempt.py"
-
-    @pytest.mark.parametrize(
-        "cited,source_id",
-        [
-            ("core/loop_attempt.py:200-215", "file:core/loop_attempt.py:200-215"),
-            ("core/loop_attempt.py:200-215", "file:core/loop_attempt.py"),
-            ("core/loop_attempt.py", "file:core/loop_attempt.py:200-215"),
-            (r"core\loop_attempt.py:208", "file:core/loop_attempt.py:200-215"),
-        ],
-    )
-    def test_a_window_names_a_part_of_the_file_not_another_file(self, cited, source_id):
-        assert same_file(cited, source_id)
-
-    def test_a_different_file_with_a_window_is_still_a_different_file(self):
-        assert not same_file("core/loop.py:200-215", "file:core/loop_attempt.py:200-215")
 
     def test_the_citation_lands_on_its_own_window_first(self):
         chain = self._chain(

@@ -118,12 +118,6 @@ def test_the_estimate_is_checked_before_the_money_leaves() -> None:
         )
 
 
-def test_without_an_envelope_the_gate_behaves_exactly_as_before() -> None:
-    ledger = ModelUsageLedger(limits=ModelUsageLimits())
-    ledger.records.append(_spent(10_000))
-    ledger.assert_can_start(role="planner", provider="openai", model="m")
-
-
 # --- the campaign wires the two together ------------------------------------
 
 def _action(name: str) -> BestNextAction:
@@ -187,22 +181,3 @@ def test_the_campaign_hands_each_cycle_its_remaining_budget(workspace) -> None:
         f"the cycles saw ceilings {probe.seen} — the campaign budget did not "
         "reach the moment of spend"
     )
-
-
-def test_an_agent_without_a_usage_ledger_still_runs_the_loop(workspace) -> None:
-    """No ledger to measure the session by → no envelope, and the loop's
-    between-cycle check keeps working as before. The fix must not make a
-    campaign impossible for a host that cannot count."""
-    probe = _CeilingProbe(cost_per_cycle=63)
-    result = run_campaign(
-        CampaignConfig(goal="probe", max_cycles=5, max_cost_units=8,
-                       max_idle_streak=3, cycle_pause_seconds=0),
-        agent=SimpleNamespace(log=None),
-        workspace=str(workspace),
-        gather_signals=_TwoActions(),
-        execute_action=probe,
-        ledger=CampaignLedger(),
-    )
-    assert probe.seen == [None]
-    assert result.status == "stopped"
-    assert "cost_units=63/8" in result.stop_reason

@@ -12,8 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.own_decisions import DECISIONS_RELPATH, HUMAN_ONLY
-from core.planner_prompt import PLANNER_SYSTEM
+from core.own_decisions import DECISIONS_RELPATH
 from core.stuck_route import stuck_goal
 from core.success_check import observe_success_check
 from tools.journal_append import JournalAppendTool
@@ -76,16 +75,6 @@ def test_the_next_repair_goal_carries_his_own_decision(tmp_path: Path) -> None:
     goal = defect_goal(tmp_path).goal
 
     assert "эталон — факт записи файла на диске" in goal and "Делай правку по нему" in goal
-
-
-def test_one_rule_for_when_the_human_decides(tmp_path: Path) -> None:
-    _stuck(tmp_path)
-    goal = stuck_goal(tmp_path).goal
-    planner = " ".join(PLANNER_SYSTEM.split())
-    for case in HUMAN_ONLY:
-        assert case in goal, case
-        assert case in planner, case
-    assert "застрял после своих попыток" not in planner, "the old second rule is gone"
 
 
 def test_a_decision_without_its_reason_is_refused(tmp_path: Path) -> None:

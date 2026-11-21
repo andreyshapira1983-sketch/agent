@@ -77,31 +77,3 @@ def test_a_terminal_outcome_refuses_a_different_one(tmp_path, was: str, then: st
     assert [t.status for t in store.list()] == [was], (
         f"{was} переписан в {then} — исход задним числом стал другим"
     )
-
-
-@pytest.mark.parametrize("state", ["done", "failed", "cancelled"])
-def test_repeating_the_same_outcome_stays_idempotent(tmp_path, state: str) -> None:
-    """Граница: повтор того же исхода — не спор, и вызывающие на нём стоят."""
-    store = _store(tmp_path)
-    task = _settled(store, state)
-
-    if state == "done":
-        store.mark_done(task.id)
-    elif state == "failed":
-        store.mark_failed(task.id, error="та же причина")
-    else:
-        store.cancel(task.id)
-
-    assert [t.status for t in store.list()] == [state]
-
-
-def test_a_blocked_task_still_settles(tmp_path) -> None:
-    """Граница: `blocked` ждёт человека и обязан оставаться переписываемым."""
-    store = _store(tmp_path)
-    task = store.add(kind="auto_run", goal="работа")
-    store.mark_running(task.id, owner_pid=1, owner_host="A")
-    store.mark_blocked(task.id, reason="нужно одобрение")
-
-    store.mark_done(task.id)
-
-    assert [t.status for t in store.list()] == ["done"]

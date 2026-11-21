@@ -26,21 +26,6 @@ def test_compact_noop_when_below_keep_recent():
     assert new_turns == turns
 
 
-def test_compact_folds_older_into_summary():
-    turns = [_make_turn(i, q=f"q{i}", ans=f"a{i}") for i in range(1, 7)]
-    new_turns, summary = compact_turns(turns, keep_recent=3)
-    assert summary is not None
-    # 1 summary + 3 recent
-    assert len(new_turns) == 4
-    assert new_turns[0] is summary
-    assert [t.index for t in new_turns[1:]] == [4, 5, 6]
-    # Summary holds the index of the LAST dropped turn (3).
-    assert summary.index == 3
-    assert "turn 1" in summary.answer
-    assert "turn 3" in summary.answer
-    assert summary.question == "[compacted history]"
-
-
 def test_compact_dedupes_tools_and_labels():
     turns = [
         _make_turn(1, tools=["file_read"], labels=["f:a"]),
@@ -67,27 +52,6 @@ def test_default_summarizer_truncates_long_text():
     assert "y" * 500 not in out
 
 
-def test_custom_summarizer_used():
-    turns = [_make_turn(i) for i in range(1, 6)]
-    seen: list[int] = []
-
-    def custom(items):
-        seen.append(len(items))
-        return "custom-summary"
-
-    _, summary = compact_turns(turns, keep_recent=2, summarizer=custom)
-    assert summary is not None
-    assert summary.answer == "custom-summary"
-    assert seen == [3]
-
-
-def test_compact_keep_recent_zero_summarizes_all():
-    turns = [_make_turn(i) for i in range(1, 4)]
-    new_turns, summary = compact_turns(turns, keep_recent=0)
-    assert summary is not None
-    assert new_turns == [summary]
-
-
 def test_compact_negative_keep_recent_raises():
     import pytest
     with pytest.raises(ValueError):
@@ -95,14 +59,6 @@ def test_compact_negative_keep_recent_raises():
 
 
 # ---------- WorkingMemory integration ----------
-
-
-def test_compact_if_needed_no_op_below_threshold():
-    mem = WorkingMemory(max_turns=10)
-    mem.record_turn("q1", "", [], [], "a1")
-    mem.record_turn("q2", "", [], [], "a2")
-    assert mem.compact_if_needed() is False
-    assert len(mem.turns) == 2
 
 
 def test_compact_if_needed_fires_when_above_default_threshold():

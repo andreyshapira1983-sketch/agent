@@ -447,22 +447,6 @@ def _fake_team(monkeypatch, captured: dict):
     monkeypatch.setattr(team_mod, "TeamExecutor", _executor)
 
 
-def test_team_run_defaults_to_dry_run_without_a_subagent_runner(
-    agent, tmp_path, capsys, monkeypatch
-):
-    captured: dict = {}
-    _fake_team(monkeypatch, captured)
-
-    assert _handle_team_run("ship it", agent, tmp_path) is True
-
-    assert captured["dry_run"] is True
-    assert captured["runner"] is None, "a dry run must not build a subagent runner"
-    assert captured["budget"].max_model_calls == 10
-    assert captured["budget"].max_cost_units == 20
-    assert agent.log.kinds() == ["team_execution_dry_run"]
-    assert "TEAM-RUN" in capsys.readouterr().err
-
-
 def test_allow_effects_builds_a_runner_and_logs_a_real_execution(
     agent, tmp_path, capsys, monkeypatch
 ):

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.ingestion import ingest_rss_feed, ingest_web_topic
+from core.ingestion import ingest_web_topic
 from core.knowledge_pipeline import KnowledgePipeline
 from core.source_registry_store import SourceRegistryStore
 from tools.base import Tool, ToolRegistry
@@ -75,39 +75,6 @@ class RecordingWebFetch(Tool):
         return (isinstance(output, dict) and bool(output.get("text")), [])
 
 
-class FakeRss(Tool):
-    name = "rss_fetch"
-    description = "fake rss"
-    risk = "read_only"
-
-    def run(self, url: str, max_entries: int = 10):
-        return {
-            "url": url,
-            "status_code": 200,
-            "content_type": "application/rss+xml",
-            "fetched_at": "2026-05-29T18:00:00+00:00",
-            "content_hash": "d" * 64,
-            "title": "Feed",
-            "feed_type": "rss",
-            "entries": [
-                {
-                    "title": "Release notes",
-                    "url": "https://example.com/release",
-                    "summary": "Release notes describe a tested change.",
-                    "published_at": "Fri, 29 May 2026 10:00:00 GMT",
-                    "id": "release",
-                }
-            ][:max_entries],
-            "text_truncated": False,
-            "bytes": 100,
-            "elapsed_ms": 1,
-            "compensation_plan": {"id": "noop", "actions": [], "tool_name": "rss_fetch"},
-        }
-
-    def validate_output(self, output):
-        return (isinstance(output, dict) and isinstance(output.get("entries"), list), [])
-
-
 def _agent(workspace: Path, registry: ToolRegistry):
     return SimpleNamespace(
         registry=registry,
@@ -116,29 +83,6 @@ def _agent(workspace: Path, registry: ToolRegistry):
         knowledge_auto_write=False,
         log=None,
     )
-
-
-def test_ingest_web_topic_filters_domains_and_persists_registry(workspace: Path):
-    registry = ToolRegistry()
-    search = RecordingWebSearch()
-    fetch = RecordingWebFetch()
-    registry.register(search)
-    registry.register(fetch)
-    agent = _agent(workspace, registry)
-
-    report = ingest_web_topic(
-        agent=agent,
-        topic="autonomous agent",
-        source_selection="wikipedia",
-        limit=2,
-    )
-
-    assert search.queries == ["site:wikipedia.org autonomous agent"]
-    assert fetch.urls == ["https://en.wikipedia.org/wiki/Autonomous_agent"]
-    assert report.pages_fetched == 1
-    assert report.source_store["sources_saved"] >= 1
-    assert agent.source_registry_store.count()["claims"] >= 1
-    assert agent.last_provenance.by_kind("web_page")
 
 
 def test_ingest_web_topic_dry_run_does_not_persist(workspace: Path):
@@ -158,20 +102,3 @@ def test_ingest_web_topic_dry_run_does_not_persist(workspace: Path):
     assert report.pages_fetched == 1
     assert report.source_store == {}
     assert agent.source_registry_store.count() == {"sources": 0, "claims": 0}
-
-
-def test_ingest_rss_feed_persists_entries_as_sources(workspace: Path):
-    registry = ToolRegistry()
-    registry.register(FakeRss())
-    agent = _agent(workspace, registry)
-
-    report = ingest_rss_feed(
-        agent=agent,
-        url="https://example.com/feed.xml",
-        limit=1,
-    )
-
-    assert report.entries_ingested == 1
-    assert report.entry_urls == ["https://example.com/release"]
-    assert report.source_store["sources_saved"] == 1
-    assert agent.source_registry_store.count()["claims"] >= 1

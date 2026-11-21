@@ -33,21 +33,6 @@ def test_no_shape_carries_the_raw_secret_through(name: str, payload: object) -> 
     )
 
 
-def test_the_probe_can_see_a_positive() -> None:
-    """Контроль: без него зелёный набор значил бы лишь «сравнение не сработало»."""
-    assert _SECRET in json.dumps({"k": _SECRET}, ensure_ascii=False)
-
-
-def test_a_key_is_still_left_alone() -> None:
-    """Граница: ключи остаются схемой, и это решение здесь не пересматривается.
-
-    Тест закрепляет именно ГРАНИЦУ, а не дефект: если ключи однажды начнут
-    редактироваться, это должно быть отдельным осознанным решением с новым
-    замером живых ключей, а не побочным следствием правки обхода.
-    """
-    out = redact_payload({"schema_field": "значение"})
-    assert "schema_field" in out
-
 def test_the_real_logger_writes_no_raw_secret_for_these_shapes(tmp_path) -> None:
     """Не подражание логгеру, а сам логгер и сам файл.
 

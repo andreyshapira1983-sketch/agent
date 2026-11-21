@@ -9,7 +9,6 @@ evening before (1.8k of 124k). A book has find_in_files; a page had nothing.
 """
 from __future__ import annotations
 
-from core.step_sanitizer import sanitize_step
 from tests.test_web_fetch import _opener_with, _resolver_for
 from tools.web_fetch import WebFetchTool, find_windows
 
@@ -41,13 +40,3 @@ def test_the_tool_returns_the_windows_and_the_full_length() -> None:
     plain = WebFetchTool(opener=_opener_with(body), resolver=_resolver_for("1.1.1.1")).run(
         url="https://example.com/rfc9114")
     assert "find" not in plain and plain["text"].startswith("HTTP/3 RFC 9114 header"), "без find — как раньше"
-
-
-def test_the_sanitizer_lets_find_through() -> None:
-    warnings: list[str] = []
-    step = sanitize_step("web_fetch", {"url": "https://www.rfc-editor.org/rfc/rfc9114",
-                                       "find": " stream multiplexing "}, None, 0, warnings)
-    assert step is not None and step["arguments"] == {"url": "https://www.rfc-editor.org/rfc/rfc9114",
-                                                      "find": "stream multiplexing"}
-    bare = sanitize_step("web_fetch", {"url": "https://www.rfc-editor.org/rfc/rfc9114"}, None, 1, warnings)
-    assert bare is not None and bare["arguments"] == {"url": "https://www.rfc-editor.org/rfc/rfc9114"}

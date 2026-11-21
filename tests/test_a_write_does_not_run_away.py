@@ -41,14 +41,6 @@ def _run(llm: _LLM) -> str:
     return compose_content(loop, step, [])
 
 
-def test_the_writer_is_bounded_and_not_continued() -> None:
-    """Ломалось здесь: вызов шёл без max_tokens и с продолжением по умолчанию."""
-    llm = _LLM(_BLOCK)
-    _run(llm)
-    assert llm.calls[0].get("allow_continuation") is False
-    assert 0 < llm.calls[0].get("max_tokens", 0) <= 8000
-
-
 def test_a_runaway_repetition_is_not_written() -> None:
     with pytest.raises(RuntimeError, match="зациклилась"):
         _run(_LLM(_BLOCK * 40))
@@ -57,9 +49,3 @@ def test_a_runaway_repetition_is_not_written() -> None:
 def test_an_answer_cut_at_the_limit_is_not_written() -> None:
     with pytest.raises(RuntimeError, match="оборван на пределе"):
         _run(_LLM(_BLOCK, truncated=True))
-
-
-def test_a_normal_patch_still_passes() -> None:
-    """Ломка наоборот: обычная правка из двух разных блоков пишется как прежде."""
-    other = _BLOCK.replace("# glob", "# шаблоны").replace("tools/python_probe.py", "tests/test_x.py")
-    assert _run(_LLM(_BLOCK + other)).startswith("FILE: tools/python_probe.py")

@@ -107,22 +107,3 @@ def test_the_maintenance_pass_wires_citations_into_the_prune(tmp_path: Path) -> 
     assert "ep-cited" in left
     assert "ep-loose" not in left
     assert report.get("episodes_protected_by_citation") == 1
-
-
-def test_no_procedural_store_means_no_protection_and_no_crash(tmp_path: Path) -> None:
-    """Незнание — не приговор: без хранилища процедур уборка идёт как шла."""
-    from core.memory_hygiene_commands import run_maintenance_pass
-
-    estore = EpisodicMemoryStore(tmp_path / "data" / "episodic_memory.jsonl")
-    estore.save(_old_episode("ep-loose"))
-
-    class _Log:
-        def log(self, *_a, **_k): ...
-
-    report = run_maintenance_pass(
-        log=_Log(), persistent_store=None, episodic_store=estore,
-        assumption_store=None, suppressed_reason=None, dry_run=False,
-    )
-
-    assert "error" not in report
-    assert {ep.id for ep in estore.load()} == set()

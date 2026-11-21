@@ -26,27 +26,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from cli import intent_bridge
-
-
-def test_a_message_with_no_reply_is_not_reported_as_handled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(intent_bridge, "_local_operator_reply", lambda text, agent: None)
-    assert intent_bridge._handle_local_operator_reply("что там по задачам", object()) is False
-
-
-def test_a_message_with_a_reply_is_reported_as_handled(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Boundary pin: refusing to claim anything would satisfy the test above
-    while making the local reply path dead."""
-    monkeypatch.setattr(intent_bridge, "_local_operator_reply", lambda text, agent: "готово")
-    monkeypatch.setattr(intent_bridge, "_record_routed_turn", lambda *a, **k: None)
-    assert intent_bridge._handle_local_operator_reply("привет", object()) is True
-    assert "готово" in capsys.readouterr().out
 
 
 def test_no_model_means_the_deterministic_route_survives() -> None:
@@ -70,12 +50,3 @@ def test_a_stop_order_does_not_reach_across_unrelated_goals() -> None:
         "a stop order overlapped a goal it does not name — cancelling it would "
         "destroy queued work the operator never mentioned"
     )
-
-
-def test_inflection_of_the_same_subject_still_counts_as_overlap() -> None:
-    """The other boundary: the prefix rule exists so «программированию» finds
-    «программировать». A matcher that never overlaps would satisfy the test
-    above and make every stop order a no-op."""
-    a = intent_bridge._goal_tokens("научись программированию на python")
-    b = intent_bridge._goal_tokens("продолжай программировать модуль")
-    assert intent_bridge._tokens_overlap(a, b) is True

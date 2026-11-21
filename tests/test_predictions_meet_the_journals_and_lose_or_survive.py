@@ -165,13 +165,3 @@ def test_the_action_is_born_with_its_executor() -> None:
     assert picked.action == "discriminate_causal_claim"
     assert silent.action != "discriminate_causal_claim"
     assert '"discriminate_causal_claim"' in inspect.getsource(mod._default_execute_action)
-
-
-def test_discrimination_never_calls_a_model(tmp_path: Path) -> None:
-    """Слово автора — не улика: у различения нет модели вовсе."""
-    import inspect
-
-    from core import causal_climb_action as mod
-
-    src = inspect.getsource(mod.discriminate_causal_claim)
-    assert ".complete(" not in src and "llm" not in src

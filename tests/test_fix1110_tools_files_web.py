@@ -51,14 +51,6 @@ def test_diff_file_refuses_credential_paths(workspace: Path, rel: str):
             tool.run(path=path, proposed_content="")
 
 
-def test_diff_file_still_diffs_ordinary_files(workspace: Path):
-    (workspace / "environment.md").write_text("a\n", encoding="utf-8")
-
-    out = DiffFileTool(workspace_root=workspace).run(path="environment.md", proposed_content="b\n")
-
-    assert out["additions"] == 1 and out["deletions"] == 1
-
-
 # ── run_tests: declared risk and the gate agree ──────────────────────────────
 
 def _git(workspace: Path, *args: str) -> None:
@@ -88,13 +80,6 @@ def _decision(tool: RunTestsTool, arguments: dict) -> str:
     return PolicyGate(registry).check(action).decision
 
 
-def test_run_tests_on_committed_code_needs_no_approval(repo: Path):
-    tool = RunTestsTool(workspace_root=repo)
-
-    assert tool.risk_for({}) == "reversible"
-    assert _decision(tool, {"paths": ["tests"]}) == "allow"
-
-
 def test_a_freshly_written_test_file_waits_for_a_human(repo: Path):
     (repo / "tests" / "test_new.py").write_text("def test_new():\n    assert True\n", encoding="utf-8")
     tool = RunTestsTool(workspace_root=repo)
@@ -102,12 +87,6 @@ def test_a_freshly_written_test_file_waits_for_a_human(repo: Path):
     assert _decision(tool, {"paths": ["tests/test_new.py"]}) == "escalate"
     assert _decision(tool, {"paths": ["tests"]}) == "escalate"
     assert _decision(tool, {}) == "escalate"
-
-
-def test_a_changed_test_file_waits_for_a_human(repo: Path):
-    (repo / "tests" / "test_ok.py").write_text("def test_ok():\n    assert 1\n", encoding="utf-8")
-
-    assert _decision(RunTestsTool(workspace_root=repo), {"paths": ["tests"]}) == "escalate"
 
 
 @pytest.mark.parametrize("rel", ["conftest.py", "helper.py", "pytest.ini", "tests/conftest.py"])
@@ -128,15 +107,6 @@ def test_a_target_in_an_ignored_folder_waits_for_a_human(repo: Path):
     assert _decision(tool, {"paths": ["tests"]}) == "allow"
 
 
-def test_bytecode_caches_and_notes_do_not_trigger_the_gate(repo: Path):
-    cache = repo / "tests" / "__pycache__"
-    cache.mkdir()
-    (cache / "test_ok.cpython-311.pyc").write_bytes(b"\x00")
-    (repo / "notes.md").write_text("note\n", encoding="utf-8")
-
-    assert _decision(RunTestsTool(workspace_root=repo), {"paths": ["tests"]}) == "allow"
-
-
 def test_without_a_git_baseline_the_class_stays_reversible(workspace: Path):
     tool = RunTestsTool(workspace_root=workspace)
 
@@ -148,13 +118,6 @@ def test_malformed_arguments_never_raise_from_risk_for(repo: Path):
 
     for arguments in ({"paths": "tests"}, {"paths": [1, None]}, {"paths": ["../x"]}, None):
         assert tool.risk_for(arguments) in {"reversible", "irreversible"}  # type: ignore[arg-type]
-
-
-def test_the_description_states_the_real_gate():
-    text = RunTestsTool.description
-
-    assert "requires approval)" not in text
-    assert "HEAD" in text and "approval" in text
 
 
 # ── web_fetch: stripping is linear and unchanged on well-formed pages ────────

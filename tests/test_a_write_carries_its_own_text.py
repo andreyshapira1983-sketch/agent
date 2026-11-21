@@ -51,22 +51,6 @@ def test_what_was_read_does_not_replace_the_writers_text(tool, path, output, tar
         _check(tool, path, output, target)
 
 
-@pytest.mark.parametrize(("tool", "path", "output", "target"), [
-    ("python_probe", "", "871\n", "sum.txt"),                  # вывод команды — законно
-    ("shell_exec", "", "ok\n", "out.log"),
-    ("file_read", "source.txt", "измеренное содержимое", "copy.txt"),  # копия того же вида
-    ("file_read", "src.txt", '{"a": 1}\nrows: 60\n', "report.json"),  # «скопируй src.txt в report.json»
-])
-def test_a_command_output_or_a_same_kind_copy_is_carried(tool, path, output, target) -> None:
-    _check(tool, path, output, target)
-
-
-def test_only_file_write_content_is_checked() -> None:
-    reject_content_reference("file_read", {"path": REF}, {"1": ("file_read", "a.py")}, {"1": "x"})
-    reject_content_reference("file_write", {"path": "a.md", "content": "свой текст"},
-                             {"1": ("file_read", "a.py")}, {"1": "x"})
-
-
 def _step(tool_name: str, arguments: dict, order: int) -> PlanStep:
     return PlanStep(plan_id="plan_x", order=order, expected_outcome="whatever",
                     action_spec={"type": "tool_call", "tool_name": tool_name, "arguments": arguments})

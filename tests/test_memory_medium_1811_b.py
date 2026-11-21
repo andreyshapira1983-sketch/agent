@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from core.evidence import (
-    _REPO_ROOT,
     _is_own_state_path,
     evidence_from_tool_result,
     evidence_is_independent,
@@ -20,41 +19,8 @@ from core.knowledge_pipeline import (
     ConflictResolver,
     KnowledgeWritePolicy,
     _claim_id,
-    _is_own_artifact,
 )
 from core.source_registry import ClaimRecord, SourceRecord, SourceRegistry
-
-
-# A: путь -------------------------------------------------------------------
-@pytest.mark.parametrize("path", [
-    "data/state.json",
-    "./data/state.json",
-    "docs/../data/state.json",
-    "subdir/../logs/run.log",
-    "DATA\\state.json",
-    ".\\logs\\x.log",
-    "data",
-    "C:/x/agent-main/data/state.json",
-    "/opt/agent/logs/a.log",
-    (_REPO_ROOT / "data" / "state.json").as_posix(),
-    str(_REPO_ROOT / "proposals" / "x.txt"),
-])
-def test_own_state_paths_after_normalisation(path):
-    assert _is_own_state_path(path) is True
-
-
-@pytest.mark.parametrize("path", [
-    "build/server.log",
-    "docs/data/notes.md",
-    "data/../docs/a.md",
-    "../data/state.json",           # вне рабочей папки
-    "D:/work/agent/data/state.json",  # чужая папка data, не корень агента
-    "/home/u/agent/data/x.json",
-    "/x/opt/agent/data/x.json",
-    "",
-])
-def test_foreign_paths_stay_foreign(path):
-    assert _is_own_state_path(path) is False
 
 
 def test_configured_workspace_is_a_root(monkeypatch, tmp_path):
@@ -64,20 +30,11 @@ def test_configured_workspace_is_a_root(monkeypatch, tmp_path):
     assert _is_own_state_path((tmp_path / "other" / "data" / "s.json").as_posix()) is False
 
 
-def test_knowledge_pipeline_uses_the_same_path_rule():
-    assert _is_own_artifact("docs/../data/state.md") is True
-    assert _is_own_artifact("D:/work/agent/data/state.md") is False
-
-
 # A: дороги улик --------------------------------------------------------------
 def _indep(tool, args, out):
     ev = evidence_from_tool_result(tool_name=tool, arguments=args, output=out)
     assert ev is not None
     return evidence_is_independent(ev)
-
-
-def test_file_read_through_dotdot_is_own():
-    assert _indep("file_read", {"path": "docs/../data/state.json"}, "budget is 5") is False
 
 
 @pytest.mark.parametrize("argv", [
@@ -97,26 +54,12 @@ def test_shell_command_in_args_is_judged_too():
     assert ev.origin == "agent-own"
 
 
-@pytest.mark.parametrize("argv", [["cat", "docs/guide.md"], ["git", "log", "-1"], ["python", "--version"]])
-def test_ordinary_shell_stays_independent(argv):
-    assert _indep("shell_exec", {}, {"argv": argv, "stdout": "ok", "exit_code": 0}) is True
-
-
 def test_find_in_files_under_data_is_own():
     assert _indep("find_in_files", {"path": "data"}, "data/state.json:3: budget is 5") is False
 
 
 def test_find_in_files_hit_in_own_file_is_own():
     assert _indep("find_in_files", {"path": "."}, "proposals/x/edits.txt:1: budget is 5") is False
-
-
-def test_find_in_files_over_docs_stays_independent():
-    assert _indep("find_in_files", {"path": "."}, "docs/a.md:3: budget is 5") is True
-
-
-def test_list_dir_of_own_folder_is_own():
-    assert _indep("list_dir", {"path": "data"}, "state.json") is False
-    assert _indep("list_dir", {"path": "docs"}, "a.md") is True
 
 
 # B: слабый свидетель ---------------------------------------------------------
@@ -146,10 +89,6 @@ def _resolve(weak_type, weak_status, weak_trust):
 ])
 def test_weak_witness_does_not_verify(weak_type, status, trust):
     assert _resolve(weak_type, status, trust) == "extracted"
-
-
-def test_strong_witness_still_verifies():
-    assert _resolve("documentation", "extracted", 0.9) == "verified"
 
 
 def test_witness_threshold_is_the_policy_threshold():

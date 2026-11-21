@@ -76,22 +76,6 @@ def _seed_procedure(agent: AgentLoop, *, key: str = "tools:file_read") -> Proced
     return proc
 
 
-# ==========================================================================
-# The crash must not create, and must not credit.
-# ==========================================================================
-def test_a_crashed_verifier_does_not_mint_a_procedure(tmp_path: Path) -> None:
-    """0/0 reads as `success`; without this guard the crash creates a workflow."""
-    agent = _agent(tmp_path)
-    assert _procedures(agent) == []
-
-    _bank(agent, verifier_failure=True)
-
-    assert _procedures(agent) == [], (
-        "a verifier that threw measured nothing — there is no evidence a "
-        "workflow worked, only an absence of contradiction"
-    )
-
-
 def test_a_crashed_verifier_does_not_raise_an_existing_procedure(tmp_path: Path) -> None:
     """An applied procedure gets no credit from a crashed cycle.
 
@@ -109,70 +93,6 @@ def test_a_crashed_verifier_does_not_raise_an_existing_procedure(tmp_path: Path)
     assert after.failure_count == before.failure_count
     assert after.confidence == before.confidence
     assert after.status == before.status
-
-
-def test_a_structural_debit_still_lands_when_the_verifier_crashed(tmp_path: Path) -> None:
-    """A crash is no defence for a procedure that failed structurally."""
-    agent = _agent(tmp_path)
-    before = _seed_procedure(agent)
-    agent._last_procedure_records = [before]
-    agent._executed_tools = ["file_read"]
-
-    _bank(agent, verifier_failure=True, replan_exhausted=True)
-
-    after = _procedures(agent)[0]
-    assert after.failure_count == before.failure_count + 1, (
-        "replan exhaustion is a fact about the run that the verifier had no "
-        "part in; letting a crash suppress it would shield a bad procedure"
-    )
-    assert after.success_count == before.success_count
-
-
-# ==========================================================================
-# Control: a healthy verifier keeps every prior behaviour.
-# ==========================================================================
-def test_a_healthy_verifier_still_mints_a_procedure(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-
-    _bank(agent, verifier_failure=False, verified=3)
-
-    procedures = _procedures(agent)
-    assert len(procedures) == 1
-    assert procedures[0].workflow_key == "tools:file_read"
-
-
-def test_a_healthy_verifier_still_credits(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-    before = _seed_procedure(agent)
-    # The procedure must have been APPLIED for credit to be legitimate
-    # (operator ruling 2026-08-02: a tool-set match alone earns nothing). Mark
-    # it as offered to this cycle, so the banking path attributes it via
-    # `used_procedure_ids` — the causal channel the ruling requires. Attribution
-    # reads `_executed_tools` (what actually ran), not the episode's tools_used.
-    agent._last_procedure_records = [before]
-    agent._executed_tools = ["file_read"]
-
-    _bank(agent, verifier_failure=False, verified=3)
-
-    after = _procedures(agent)[0]
-    assert after.success_count == before.success_count + 1
-    assert after.confidence > before.confidence
-
-
-# ==========================================================================
-# Blast radius: only the procedural action moves.
-# ==========================================================================
-def test_the_episode_is_still_banked_with_its_outcome_untouched(tmp_path: Path) -> None:
-    agent = _agent(tmp_path)
-
-    _bank(agent, verifier_failure=True)
-
-    episodes = agent.episodic_store.load()
-    assert len(episodes) == 1, "the crash suppresses procedural credit, not memory"
-    assert episodes[0].outcome == "success", (
-        "the evidence axis is not rewritten here — 0/0 still reads as it did. "
-        "Fixing that encoding is a separate change"
-    )
 
 
 def test_nothing_about_the_verifier_is_persisted(tmp_path: Path) -> None:

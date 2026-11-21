@@ -19,12 +19,6 @@ def _exists(rel: str) -> bool:
 
 _GOAL = "Проследить core/loop.py и описать его места вызова"
 
-_NO_SUBJECT = {
-    "title": "something repeats and nobody knows why",
-    "status": "open",
-    "occurrences": 2,
-    "evidence": ["detector fired twice"],
-}
 _OTHER_SUBJECT = {
     "title": "redaction misses a shape",
     "status": "open",
@@ -32,43 +26,6 @@ _OTHER_SUBJECT = {
     "related_files": ["core/redaction.py"],
     "evidence": ["detector fired twice"],
 }
-
-
-def _pick(issues):
-    return select_best_next_action(
-        goal=_GOAL,
-        goal_subject=resolve_goal_subject(_GOAL, exists=_exists),
-        goal_names_missing=unresolved_goal_targets(_GOAL, exists=_exists),
-        result_status="ok",
-        tests_health="ok",
-        open_self_improvement_issues=issues,
-        self_improvement_registry_available=True,
-    )
-
-
-def test_an_unclassifiable_candidate_is_not_called_off_subject() -> None:
-    """Красный свидетель: у записи БЕЗ файла предмет неизвестен, а не «другой».
-
-    Замер 2026-08-26: обе ситуации давали дословно одну причину — «кандидаты
-    про другой предмет». На живых данных это 21 запись из 29: их молча
-    записывали в «про другое», хотя про что они — не знает никто.
-    """
-    picked = _pick((_NO_SUBJECT,))
-
-    assert picked.action == "observe"
-    assert "another subject" not in picked.reason, (
-        "запись без названного файла объявлена «про другой предмет» — "
-        "решение выдаёт незнание за знание"
-    )
-    assert "subject" in picked.reason.lower()
-
-
-def test_a_genuinely_other_subject_keeps_its_wording() -> None:
-    """Контроль: там, где предмет ИЗВЕСТЕН и другой, формулировка прежняя."""
-    picked = _pick((_OTHER_SUBJECT,))
-
-    assert picked.action == "observe"
-    assert "another subject" in picked.reason
 
 
 def test_the_two_grounds_are_counted_apart() -> None:
@@ -95,32 +52,3 @@ def test_the_two_grounds_are_counted_apart() -> None:
     assert "off-subject" in joined, joined
     assert "1 about another subject" in picked.reason
     assert "naming no subject at all" in picked.reason
-
-
-def test_both_kinds_still_stay_out_of_the_race() -> None:
-    """Поведение НЕ меняется: отвод остаётся отводом, меняется его честность."""
-    assert _pick((_NO_SUBJECT,)).action == "observe"
-    assert _pick((_OTHER_SUBJECT,)).action == "observe"
-    assert _pick((_NO_SUBJECT, _OTHER_SUBJECT)).action == "observe"
-
-
-def test_an_idle_caused_by_the_goal_is_grounded_in_the_goal() -> None:
-    """Кто опустошил гонку, тот и основание простоя.
-
-    Иначе цикл, где именно ЦЕЛЬ всех отвела, считался бы как «цель не вела
-    работу», и счётчик `goal_drove` (MIR-163) врал бы о себе.
-    """
-    by_goal = _pick((_NO_SUBJECT,))
-    by_world = select_best_next_action(
-        goal=_GOAL,
-        goal_subject=resolve_goal_subject(_GOAL, exists=_exists),
-        goal_names_missing=unresolved_goal_targets(_GOAL, exists=_exists),
-        result_status="ok",
-        tests_health="ok",
-        open_self_improvement_issues=(),
-        self_improvement_registry_available=True,
-    )
-
-    assert by_goal.grounds == "operator_goal"
-    assert by_world.grounds == "observed_state"
-

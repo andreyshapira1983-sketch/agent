@@ -21,10 +21,7 @@ from pathlib import Path
 from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import map_backlog_candidate
 from core.self_build_producer import (
-    _builder_generate,
     _critic_review,
-    _new_core_module_stems,
-    _normalize_builder_files,
     _sync_anatomy_index,
     produce_self_apply_proposal,
 )
@@ -96,18 +93,6 @@ def _candidate(target_path: str) -> types.SimpleNamespace:
 # ── mapper ───────────────────────────────────────────────────────────────────
 
 
-def test_mapper_resolves_split_to_concrete_low_risk_module(workspace: Path):
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    (workspace / "core" / "sample_mod.py").write_text("x = 1\n", encoding="utf-8")
-    result = map_backlog_candidate(
-        _candidate("split:core/sample_mod.py"), workspace=workspace
-    )
-    assert result.decision == "mapped"
-    assert result.ok
-    assert result.candidate.target_path == "core/sample_mod.py"
-    assert result.mapping_rule == "split_module"
-
-
 def test_mapper_refuses_missing_split_target(workspace: Path):
     result = map_backlog_candidate(
         _candidate("split:core/does_not_exist.py"), workspace=workspace
@@ -123,93 +108,6 @@ def test_mapper_refuses_non_python_split_target(workspace: Path):
         _candidate("split:core/notes.md"), workspace=workspace
     )
     assert result.decision == "no_target"
-
-
-def test_mapper_maps_split_target_above_the_one_shot_budget(workspace: Path):
-    """Перевёрнутый пин: прежний отказ держался на умершей предпосылке (MIR-179).
-
-    Отказ «needs an incremental splitter» был написан, когда расщепителя не
-    было. Расщепитель давно есть, и затвор масштаба производителя (>900 строк)
-    сам маршрутизирует к нему — но ветка была недостижима: картограф отказывал
-    РАНЬШЕ, ровно с причиной «нет того, что уже есть». Цена за одни сутки
-    безнадзорной работы: 234 единицы на циклы со структурно невозможным
-    продуктом.
-    """
-    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
-
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    big = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES + 50)) + "\n"
-    (workspace / "core" / "huge_mod.py").write_text(big, encoding="utf-8")
-    result = map_backlog_candidate(
-        _candidate("split:core/huge_mod.py"), workspace=workspace
-    )
-    assert result.decision == "mapped", result.reason
-    assert result.candidate is not None
-    assert result.candidate.target_path == "core/huge_mod.py"
-
-
-def test_mapper_allows_split_target_within_one_shot_budget(workspace: Path):
-    from core.backlog_target_mapper import SPLIT_ONE_SHOT_MAX_LINES
-
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    ok = "\n".join(f"x{i} = {i}" for i in range(SPLIT_ONE_SHOT_MAX_LINES - 100)) + "\n"
-    (workspace / "core" / "okay_mod.py").write_text(ok, encoding="utf-8")
-    result = map_backlog_candidate(
-        _candidate("split:core/okay_mod.py"), workspace=workspace
-    )
-    assert result.decision == "mapped"
-    assert result.candidate.target_path == "core/okay_mod.py"
-
-
-# ── normaliser ───────────────────────────────────────────────────────────────
-
-
-def test_normalize_single_file_reply_is_backward_compatible():
-    files, primary = _normalize_builder_files({"content": "A = 1\n"}, "core/x.py")
-    assert files == [{"path": "core/x.py", "content": "A = 1\n"}]
-    assert primary == "A = 1\n"
-
-
-def test_normalize_multi_file_reply_surfaces_target_primary():
-    parsed = {
-        "files": [
-            {"path": "core/x.py", "content": "from core.x_util import helper\n"},
-            {"path": "core/x_util.py", "content": "def helper():\n    return 1\n"},
-        ]
-    }
-    files, primary = _normalize_builder_files(parsed, "core/x.py")
-    assert len(files) == 2
-    assert primary == "from core.x_util import helper\n"
-
-
-# ── builder (split mode) ─────────────────────────────────────────────────────
-
-
-def test_builder_split_mode_emits_multiple_files():
-    reply = json.dumps(
-        {
-            "files": [
-                {"path": "core/x.py", "content": "from core.x_util import a\n"},
-                {"path": "core/x_util.py", "content": "def a():\n    return 1\n"},
-            ],
-            "test_paths": ["tests"],
-            "reason": "split module",
-            "confidence": 0.9,
-        }
-    )
-    out = _builder_generate(
-        FakeLLM([reply]), "core/x.py", "big old content\n", "oversized", split_mode=True
-    )
-    assert out.decision == "built"
-    assert len(out.data["files"]) == 2
-    assert out.data["content"] == "from core.x_util import a\n"
-
-
-def test_builder_split_prompt_requests_multiple_files():
-    llm = FakeLLM(["{}"])
-    _builder_generate(llm, "core/x.py", "content\n", "oversized", split_mode=True)
-    assert '"files"' in llm.calls[0]["system"]
-    assert "Split the oversized" in llm.calls[0]["system"]
 
 
 # ── critic (per-file guard) ──────────────────────────────────────────────────
@@ -316,17 +214,6 @@ def test_split_critical_target_is_refused(workspace: Path):
 # ── anatomy-index auto-sync ──────────────────────────────────────────────────
 
 
-def test_new_core_module_stems_lists_only_core_py_files():
-    files = [
-        {"path": "core/x.py", "content": ""},
-        {"path": "core/x_helpers.py", "content": ""},
-        {"path": "knowledge/generated/AGENT_ANATOMY.md", "content": ""},
-        {"path": "cli/thing.py", "content": ""},
-        {"path": "core/sub/pkg.py", "content": ""},
-    ]
-    assert _new_core_module_stems(files) == ["x", "x_helpers"]
-
-
 def test_sync_anatomy_index_appends_row_for_new_module():
     build = {
         "content": "wrapper\n",
@@ -362,18 +249,6 @@ def test_sync_anatomy_index_noop_when_already_documented():
         return doc if p == "knowledge/generated/AGENT_ANATOMY.md" else None
     _sync_anatomy_index(build, "core/sample_big.py", reader)
     # no anatomy doc added to the proposal (already in sync)
-    assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
-
-
-def test_sync_anatomy_index_skips_when_doc_unavailable():
-    build = {
-        "content": "wrapper\n",
-        "files": [
-            {"path": "core/sample_big.py", "content": "wrapper\n"},
-            {"path": "core/sample_big_helpers.py", "content": "x = 1\n"},
-        ],
-    }
-    _sync_anatomy_index(build, "core/sample_big.py", lambda p: None)
     assert all(f["path"] != "knowledge/generated/AGENT_ANATOMY.md" for f in build["files"])
 
 

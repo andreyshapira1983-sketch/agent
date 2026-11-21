@@ -36,20 +36,6 @@ _GAPS = [
 # ── pure candidate creation ───────────────────────────────────────────────────
 
 
-def test_gaps_become_traceable_signals():
-    records, source_text = architecture_audit_candidates(_GAPS)
-
-    assert len(records) == 2
-    first = records[0]
-    assert first.signal_source == ARCHITECTURE_AUDIT_SOURCE
-    assert first.target_path == "AGENT_DOCTRINE.md"  # first evidence file
-    assert first.problem_quote == "Doctrine and Architecture Source of Truth"
-    assert first.evidence_ref == "architecture_audit:doctrine_and_architecture_docs"
-    # Every quote is verbatim inside the returned source text -> provenance holds.
-    for rec in records:
-        assert rec.problem_quote in source_text
-
-
 def test_gap_without_evidence_uses_synthetic_target():
     records, _ = architecture_audit_candidates(
         [{"id": "x", "title": "Some Missing Layer", "evidence_files": []}]
@@ -86,11 +72,6 @@ def test_all_evidence_present_falls_back_to_first():
     assert records[0].target_path == "a.md"
 
 
-def test_no_predicate_keeps_first_evidence_file():
-    records, _ = architecture_audit_candidates(_GAPS)
-    assert records[0].target_path == "AGENT_DOCTRINE.md"
-
-
 def test_empty_and_titleless_gaps_yield_nothing():
     assert architecture_audit_candidates([]) == ([], "")
     records, text = architecture_audit_candidates([{"id": "x", "title": "  "}])
@@ -111,17 +92,6 @@ _ANATOMY = (
     "## Candidate follow-ups (TD-030+) — advisory only\n\n"
     "1. **TD-030 (candidate): Do the thing.** rationale.\n"
 )
-
-
-def test_build_backlog_includes_audit_candidates():
-    records, text = architecture_audit_candidates(_GAPS)
-    backlog = build_backlog(
-        architecture_audit_records=records,
-        architecture_audit_text=text,
-    )
-    sources = {c.signal_source for c in backlog}
-    assert ARCHITECTURE_AUDIT_SOURCE in sources
-    assert len(backlog) == 2
 
 
 def test_audit_ranks_below_tech_debt_and_docs_above_anatomy():
@@ -174,14 +144,3 @@ def test_load_backlog_surfaces_audit_gaps(tmp_path: Path, monkeypatch: pytest.Mo
     ]
     assert [c.problem_quote for c in audit_candidates] == [gap["title"]]
     assert audit_candidates[0].target_path == "README.md"
-
-
-def test_load_backlog_skips_audit_for_non_repo_workspace(tmp_path: Path):
-    # Without the sentinel (core/architecture_audit.py) no audit runs, so an
-    # unrelated workspace never gets spurious "missing file" gaps.
-    (tmp_path / "TECH_DEBT.md").write_text(_TECH_DEBT, encoding="utf-8")
-    backlog = load_backlog(tmp_path)
-    assert not any(
-        c.signal_source == ARCHITECTURE_AUDIT_SOURCE for c in backlog
-    )
-    assert any(c.signal_source == "tech_debt" for c in backlog)

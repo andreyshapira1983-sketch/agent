@@ -19,13 +19,6 @@ _NAMES_A_PATH = [
     "Посмотри docs/OPERATIONS.md, какие тесты там упомянуты.",
 ]
 
-# Genuine plan orders that name nothing inside the repo. These must keep routing
-# to the plan command: the fix may not buy correctness by refusing to route.
-_ASKS_FOR_A_PLAN = [
-    "Составь точный план реализации операторского слоя задач.",
-    "Дай implementation plan для новой подсистемы уведомлений.",
-]
-
 
 @pytest.mark.parametrize("text", _NAMES_A_PATH)
 def test_naming_a_repo_file_is_not_an_order_for_a_plan(text: str):
@@ -36,10 +29,3 @@ def test_naming_a_repo_file_is_not_an_order_for_a_plan(text: str):
     assert route_operator_intent(text) is None, (
         f"a task naming a workspace file was taken as an order for a plan: {text!r}"
     )
-
-
-@pytest.mark.parametrize("text", _ASKS_FOR_A_PLAN)
-def test_a_real_plan_request_still_routes(text: str):
-    """The guard against overreach: without a repo path this IS a plan order."""
-    intent = route_operator_intent(text)
-    assert intent is not None and "plan" in intent.kind

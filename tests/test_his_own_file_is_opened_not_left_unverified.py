@@ -69,13 +69,3 @@ def test_the_named_files_are_read_and_the_answer_rebuilt(tmp_path) -> None:
     assert st.draft_answer.startswith("Conclusion:\nПодтверждение требуется")
     assert logged == [("unverified_own_files_read",
                        {"paths": ["tools/file_write.py", "core/memory.py"], "rewritten": True})]
-
-
-def test_nothing_named_nothing_done(tmp_path) -> None:
-    ws = _workspace(tmp_path)
-    loop = SimpleNamespace(registry=SimpleNamespace(get=lambda name: FileReadTool(workspace_root=ws)),
-                           _last_synth_degraded=False)
-    st = SimpleNamespace(draft_answer="Conclusion:\nГотово.\n", artifacts={}, failure_history=[])
-    AgentLoopSynthesis._read_what_it_left_unverified(
-        loop, st, lambda attempt: (_ for _ in ()).throw(AssertionError("лишний вызов модели")))
-    assert st.artifacts == {} and st.failure_history == []

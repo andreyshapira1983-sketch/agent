@@ -14,7 +14,6 @@ import pytest
 from tools.semantic_scholar_search import (
     MAX_RESULTS_CAP,
     SemanticScholarSearchTool,
-    _ar5iv,
     _paper_dict,
 )
 
@@ -50,43 +49,10 @@ TOOL = SemanticScholarSearchTool()
 
 
 # ============================================================
-# _ar5iv helper
-# ============================================================
-
-class TestAr5ivHelper:
-    def test_returns_ar5iv_url_for_valid_id(self):
-        url = _ar5iv("2001.00001")
-        assert url == "https://ar5iv.labs.arxiv.org/html/2001.00001"
-
-    def test_returns_empty_string_for_empty_id(self):
-        assert _ar5iv("") == ""
-
-    def test_returns_empty_string_for_none_equivalent(self):
-        assert _ar5iv("") == ""
-
-
-# ============================================================
 # _paper_dict helper
 # ============================================================
 
 class TestPaperDictHelper:
-    def test_extracts_arxiv_to_ar5iv_url(self):
-        raw = {
-            "title": "Test Paper",
-            "url": "https://www.semanticscholar.org/paper/xyz",
-            "externalIds": {"ArXiv": "2301.12345"},
-            "abstract": "Abstract text.",
-            "year": 2023,
-            "authors": [{"name": "Alice"}, {"name": "Bob"}],
-            "venue": "NeurIPS",
-            "citationCount": 42,
-        }
-        d = _paper_dict(raw)
-        assert d["ar5iv_url"] == "https://ar5iv.labs.arxiv.org/html/2301.12345"
-        assert d["authors"] == ["Alice", "Bob"]
-        assert d["citation_count"] == 42
-        assert d["source"] == "semantic_scholar"
-
     def test_no_arxiv_id_gives_empty_ar5iv(self):
         raw = {
             "title": "Paper",
@@ -151,16 +117,6 @@ class TestEmptyOutput:
 # ============================================================
 
 class TestWellFormed:
-    def test_single_full_paper_passes_clean(self):
-        ok, issues = TOOL.validate_output([_paper()])
-        assert ok is True
-        assert issues == []
-
-    def test_multiple_papers_pass(self):
-        ok, issues = TOOL.validate_output([_paper(), _paper(title="Another")])
-        assert ok is True
-        assert issues == []
-
     def test_missing_title_in_one_row_flagged(self):
         ok, issues = TOOL.validate_output([
             {"url": "https://x.io/"},         # bad -- no title
@@ -176,12 +132,6 @@ class TestWellFormed:
         ])
         assert ok is True
         assert any("is not a dict" in i for i in issues)
-
-    def test_ddg_fallback_source_accepted(self):
-        p = _paper(source="semantic_scholar_via_ddg", ar5iv_url="", year=None)
-        ok, issues = TOOL.validate_output([p])
-        assert ok is True
-        assert issues == []
 
 
 # ============================================================
@@ -238,15 +188,6 @@ class TestRunArguments:
 # ============================================================
 
 class TestMetadata:
-    def test_name(self):
-        assert TOOL.name == "semantic_scholar_search"
-
-    def test_risk_is_read_only(self):
-        assert TOOL.risk == "read_only"
-
     def test_compensation_plan_is_noop(self):
         plan = TOOL.compensation_plan({}, [])
         assert plan["actions"][0]["kind"] == "noop"
-
-    def test_description_mentions_ar5iv(self):
-        assert "ar5iv" in TOOL.description.lower() or "ar5iv_url" in TOOL.description

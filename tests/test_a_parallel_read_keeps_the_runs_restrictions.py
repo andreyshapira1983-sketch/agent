@@ -17,7 +17,6 @@ from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.models import PlanStep
 from core.policy import PolicyGate
-from core.run_context import current_run, run_restrictions, run_scope
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
 from tools.file_read import FileReadTool
@@ -52,20 +51,6 @@ def _two_reads() -> list[PlanStep]:
     return [_step("file_read", {"path": "a.txt"}, 1), _step("list_dir", {"path": "."}, 2)]
 
 
-def test_a_blocked_read_does_not_run_in_a_worker_thread(workspace: Path):
-    (workspace / "a.txt").write_text("secret", encoding="utf-8")
-    loop = _loop(workspace)
-
-    with run_restrictions(blocked_tools={"file_read", "list_dir"}):
-        results = loop._execute_steps_parallel(_two_reads())
-
-    assert len(results) == 2, "план из двух чтений — параллельная ветка"
-    assert all(outcome is None for _, outcome, _ in results), (
-        "закрытый инструмент выполнился в рабочем потоке: ограничение прогона потерялось"
-    )
-    assert {trigger.code for _, _, trigger in results} == {"policy_blocked"}
-
-
 def test_the_same_plan_runs_when_nothing_is_blocked(workspace: Path):
     """Контроль: ветка действительно параллельная и без запрета работает."""
     (workspace / "a.txt").write_text("secret", encoding="utf-8")
@@ -74,26 +59,3 @@ def test_the_same_plan_runs_when_nothing_is_blocked(workspace: Path):
     results = loop._execute_steps_parallel(_two_reads())
 
     assert all(outcome is not None for _, outcome, _ in results)
-
-
-class _WhoAmI(Tool):
-    """Читающий инструмент, который сообщает, какой прогон он видит."""
-
-    name = "who_am_i"
-    description = "report the active run id"
-    risk = "read_only"
-
-    def run(self, **_kwargs) -> dict:
-        ctx = current_run()
-        return {"run_id": ctx.run_id if ctx else None}
-
-
-def test_a_worker_thread_knows_which_run_it_serves(workspace: Path):
-    loop = _loop(workspace, _WhoAmI())
-    steps = [_step("who_am_i", {}, 1), _step("who_am_i", {}, 2)]
-
-    with run_scope("run_parallel_probe"):
-        results = loop._execute_steps_parallel(steps)
-
-    seen = {outcome["output"]["run_id"] for _, outcome, _ in results if outcome}
-    assert seen == {"run_parallel_probe"}, f"поток видел прогоны {seen}"

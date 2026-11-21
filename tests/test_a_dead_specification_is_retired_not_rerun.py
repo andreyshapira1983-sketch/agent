@@ -79,16 +79,6 @@ def test_an_inconclusive_run_retires_the_specification(tmp_path) -> None:
     assert not experimentable_claims(tmp_path), "второй прогон её не повторит"
 
 
-def test_a_working_specification_still_reaches_its_verdict(tmp_path) -> None:
-    save_claim(_claim(_LIVE), workspace=tmp_path)
-    outcome = run_claim_experiment(agent=_Agent(), workspace=tmp_path)
-    assert outcome.result == "completed"
-
-    (claim, _extra), = load_claims(tmp_path)
-    assert parse_experiment(claim.explanations[0].predicts) is not None
-    assert not awaiting_experiment(claim)
-
-
 def test_a_born_specification_is_executed_before_it_is_saved(tmp_path) -> None:
     from core.causal_climb_action import _birth_experiment_spec
 

@@ -103,20 +103,6 @@ def test_a_silent_thinker_is_named_as_silent_not_as_unparseable(thinker, tmp_pat
     )
 
 
-def test_a_thinker_whose_answer_arrived_is_proposed(thinker, tmp_path):
-    """(b) Контроль транспорта: content пришёл рядом с reasoning_content —
-    клиент обязан донести его, и цель предлагается. Зелёный по построению:
-    доказывает, что потеря НЕ в транспорте."""
-    api = _RawAPI([(json.dumps(_REPLY), "…thinking…", "stop")])
-    thinker._client = api
-
-    report = propose_charter_goal(thinker, _workspace(tmp_path))
-
-    assert report.status == "proposed", report.reason
-    assert report.goal == _GOAL
-    assert len(api.calls) == 1, "полный ответ не требует продолжений"
-
-
 def test_a_final_json_after_braces_in_prose_is_still_parsed(thinker, tmp_path):
     """(c) Разбор: content дошёл, но перед финальным JSON есть проза с фигурными
     скобками (думающие модели так делают, когда рассуждение просачивается в

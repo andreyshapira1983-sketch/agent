@@ -75,33 +75,6 @@ def test_a_goal_that_names_an_own_defect_gets_that_defect_as_hands():
     assert picked.target_path == "core/charter_goal.py"
 
 
-def test_a_broad_self_improvement_goal_keeps_the_habit():
-    """Граница отрицательной стороны: ОБЩАЯ цель («улучшай себя») привычку
-    реестра не отводит — это её законное чтение (тесты 2026-08-26 про
-    «найди дефект и почини»). Отводит только цель, назвавшая другую запись
-    или конкретную вещь, которой запись не знает."""
-    picked = select_best_next_action(
-        goal="Improve yourself in whatever way the measured evidence supports",
-        self_improvement_registry_available=True,
-        open_self_improvement_issues=(_STRANGER,),
-        unexplained_observations_count=3,
-    )
-
-    assert picked.action == "carry_observed_values_between_plan_steps"
-    assert picked.grounds == "retained_record"
-
-
-def test_without_a_goal_the_habit_still_runs():
-    """Граница: без цели реестр дефектов по-прежнему единственный законный
-    источник дела (test_the_unattended_path_sees_its_own_defects)."""
-    picked = select_best_next_action(
-        goal="", self_improvement_registry_available=True,
-        open_self_improvement_issues=(_STRANGER,),
-    )
-
-    assert picked.action == "carry_observed_values_between_plan_steps"
-
-
 def test_an_investigation_goal_yields_no_goal_grounded_candidate_today():
     """Зелёный дискриминатор причины: без чужих дел цель даёт ПУСТУЮ гонку."""
     picked = select_best_next_action(

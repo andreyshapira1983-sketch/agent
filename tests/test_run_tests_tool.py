@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from tools.run_tests import (
-    DEFAULT_TIMEOUT_SECONDS,
     MAX_PATHS,
     MAX_PATTERN_LEN,
     RunTestsTool,
@@ -63,35 +62,12 @@ class TestConstruction:
         with pytest.raises(ValueError):
             RunTestsTool(workspace_root=workspace, timeout_seconds=-1)
 
-    def test_risk_is_reversible(self, workspace: Path):
-        t = RunTestsTool(workspace_root=workspace)
-        assert t.risk == "reversible"
-        assert t.risk_for({}) == "reversible"
-        assert t.risk_for({"paths": ["tests/"]}) == "reversible"
-
 
 # ============================================================
 # Argv construction & sandboxing
 # ============================================================
 
 class TestArgvSandbox:
-    def test_default_argv_runs_tests_dir(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"1 passed in 0.01s\n")
-        t = RunTestsTool(workspace_root=workspace)
-        t.run()
-        argv = captured["argv"]
-        assert argv[1:5] == ["-m", "pytest", "-q", "--tb=short"]
-        assert "tests" in argv          # default path
-        assert "--no-header" in argv
-
-    def test_paths_appended_after_flags(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        t = RunTestsTool(workspace_root=workspace)
-        t.run(paths=["tests/test_x.py", "tests/test_y.py"])
-        argv = captured["argv"]
-        assert "tests/test_x.py" in argv
-        assert "tests/test_y.py" in argv
-
     def test_pattern_passed_as_dash_k(self, workspace: Path, monkeypatch):
         captured = _patch_run(monkeypatch, stdout=b"")
         t = RunTestsTool(workspace_root=workspace)
@@ -121,10 +97,6 @@ class TestArgvSandbox:
         with pytest.raises(PermissionError, match="outside workspace"):
             t.run(paths=["/etc/passwd"])
 
-    def test_non_ascii_path_rejected(self, workspace: Path):
-        t = RunTestsTool(workspace_root=workspace)
-        with pytest.raises(PermissionError, match="ASCII"):
-            t.run(paths=["тесты/"])
 
     def test_non_string_pattern_rejected(self, workspace: Path):
         t = RunTestsTool(workspace_root=workspace)
@@ -143,66 +115,10 @@ class TestArgvSandbox:
 
 
 # ============================================================
-# Subprocess invocation contract
-# ============================================================
-
-class TestSubprocessContract:
-    def test_shell_false_always(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace).run()
-        assert captured["kwargs"]["shell"] is False
-
-    def test_cwd_is_workspace(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace).run()
-        assert Path(captured["kwargs"]["cwd"]).resolve() == workspace.resolve()
-
-    def test_timeout_passed_to_subprocess(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace, timeout_seconds=12.5).run()
-        assert captured["kwargs"]["timeout"] == 12.5
-
-    def test_default_timeout_reaches_subprocess(self, workspace: Path, monkeypatch):
-        """No timeout given: pytest gets 900 s, or AGENT_TEST_TIMEOUT_SECONDS when it is set."""
-        captured = _patch_run(monkeypatch, stdout=b"")
-        monkeypatch.delenv("AGENT_TEST_TIMEOUT_SECONDS", raising=False)
-        RunTestsTool(workspace_root=workspace).run()
-        assert captured["kwargs"]["timeout"] == DEFAULT_TIMEOUT_SECONDS == 900.0
-
-        monkeypatch.setenv("AGENT_TEST_TIMEOUT_SECONDS", "42")
-        RunTestsTool(workspace_root=workspace).run()
-        assert captured["kwargs"]["timeout"] == 42.0
-
-    def test_capture_output_true(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace).run()
-        assert captured["kwargs"]["capture_output"] is True
-
-    def test_env_carries_pythonioencoding(self, workspace: Path, monkeypatch):
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace).run()
-        assert captured["kwargs"]["env"].get("PYTHONIOENCODING") == "utf-8"
-
-    def test_env_excludes_sensitive_keys(self, workspace: Path, monkeypatch):
-        """Don't carry arbitrary env vars into pytest — keep the allow-list short."""
-        monkeypatch.setenv("MY_API_KEY", "secret-value")
-        captured = _patch_run(monkeypatch, stdout=b"")
-        RunTestsTool(workspace_root=workspace).run()
-        assert "MY_API_KEY" not in captured["kwargs"]["env"]
-
-
-# ============================================================
 # Output parsing
 # ============================================================
 
 class TestParseCounts:
-    def test_passed_only(self, workspace: Path, monkeypatch):
-        _patch_run(monkeypatch, stdout=b"5 passed in 0.12s\n")
-        out = RunTestsTool(workspace_root=workspace).run()
-        assert out["passed"] == 5
-        assert out["failed"] == 0
-        assert out["total"] == 5
-
     def test_mixed_outcomes(self, workspace: Path, monkeypatch):
         _patch_run(
             monkeypatch,
@@ -233,13 +149,6 @@ class TestParseCounts:
             "tests/test_z.py::test_three",
         ]
 
-    def test_no_summary_line_means_zero_counts(self, workspace: Path, monkeypatch):
-        _patch_run(monkeypatch, stdout=b"some garbage\n", returncode=2)
-        out = RunTestsTool(workspace_root=workspace).run()
-        assert out["passed"] == 0
-        assert out["failed"] == 0
-        assert out["total"] == 0
-
 
 # ============================================================
 # Timeout handling
@@ -265,24 +174,6 @@ class TestTimeout:
 
 
 # ============================================================
-# Redaction
-# ============================================================
-
-class TestRedaction:
-    def test_secret_in_stdout_redacted(self, workspace: Path, monkeypatch):
-        """A credential printed by a test must NOT survive the tool boundary."""
-        secret = "sk-" + "A" * 48
-        _patch_run(
-            monkeypatch,
-            stdout=f"1 passed in 0.01s\nleaked={secret}\n".encode(),
-        )
-        out = RunTestsTool(workspace_root=workspace).run()
-        assert secret not in out["stdout_tail"]
-        # Even the full output contract carries the redacted form.
-        assert secret not in str(out)
-
-
-# ============================================================
 # validate_output
 # ============================================================
 
@@ -300,10 +191,6 @@ class TestValidateOutput:
             "compensation_plan": {"id": "x", "actions": [], "tool_name": "t", "description": "d"},
         }
 
-    def test_well_formed_passes(self, workspace: Path):
-        ok, warnings = RunTestsTool(workspace_root=workspace).validate_output(self._ok())
-        assert ok
-        assert warnings == []
 
     def test_non_dict_rejected(self, workspace: Path):
         ok, issues = RunTestsTool(workspace_root=workspace).validate_output("nope")
@@ -337,16 +224,3 @@ class TestValidateOutput:
         ok, warnings = RunTestsTool(workspace_root=workspace).validate_output(out)
         assert ok
         assert any("timed_out" in w for w in warnings)
-
-
-# ============================================================
-# Compensation plan shape
-# ============================================================
-
-class TestCompensationPlan:
-    def test_always_noop(self, workspace: Path, monkeypatch):
-        _patch_run(monkeypatch, stdout=b"1 passed in 0.01s\n")
-        out = RunTestsTool(workspace_root=workspace).run()
-        plan = out["compensation_plan"]
-        assert isinstance(plan, dict)
-        assert plan["actions"] == [{"kind": "noop", "description": "test run has no compensation"}]

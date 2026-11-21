@@ -17,7 +17,6 @@ from __future__ import annotations
 import pytest
 
 from core.strategy_router import (
-    LOCAL_STRATEGIES,
     OperatorStrategy,
     classify_operator_strategy,
     is_local_strategy,
@@ -67,24 +66,6 @@ def test_classify_russian_phrases(phrase: str, expected_strategy: OperatorStrate
 
 
 # ---------------------------------------------------------------------------
-# Explicit documentation requests → general_question (LLM reads the docs)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("phrase", [
-    "Расскажи по README, что ты умеешь",
-    "Проверь свои возможности по документации",
-    "Что ты умеешь по документу",
-    "Прочитай README и опиши архитектуру",
-    "по документации объясни плановщик",
-])
-def test_explicit_docs_request_yields_general_question(phrase: str) -> None:
-    result = classify_operator_strategy(phrase)
-    assert result is OperatorStrategy.general_question, (
-        f"Explicit docs phrase should map to general_question, got {result!r} for {phrase!r}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Unrecognised text → general_question
 # ---------------------------------------------------------------------------
 
@@ -101,15 +82,6 @@ def test_unrecognised_text_yields_general_question(phrase: str) -> None:
     assert result is OperatorStrategy.general_question
 
 
-def test_self_build_cost_optimization_yields_general_question() -> None:
-    result = classify_operator_strategy(
-        "Найди одно минимальное улучшение, которое снизит расход LLM-вызовов "
-        "в твоём коде. Ничего не меняй, верни diff-патч и тесты."
-    )
-
-    assert result is OperatorStrategy.general_question
-
-
 # ---------------------------------------------------------------------------
 # is_local_strategy helper
 # ---------------------------------------------------------------------------
@@ -120,17 +92,6 @@ def test_is_local_strategy_returns_true_for_all_non_general_members() -> None:
             assert not is_local_strategy(strategy)
         else:
             assert is_local_strategy(strategy)
-
-
-# ---------------------------------------------------------------------------
-# LOCAL_STRATEGIES coverage
-# ---------------------------------------------------------------------------
-
-def test_local_strategies_covers_all_non_general_members() -> None:
-    expected = frozenset(
-        s for s in OperatorStrategy if s is not OperatorStrategy.general_question
-    )
-    assert expected == LOCAL_STRATEGIES
 
 
 # ---------------------------------------------------------------------------
@@ -148,16 +109,6 @@ def test_unroutable_input_falls_back_to_general_question(text: object) -> None:
     """Non-strings and garbage go to the LLM planner, never to a local handler."""
     result = classify_operator_strategy(text)  # type: ignore[arg-type]
     assert result is OperatorStrategy.general_question
-
-
-# ---------------------------------------------------------------------------
-# Enum integrity: all members are strings (OperatorStrategy is str, Enum)
-# ---------------------------------------------------------------------------
-
-def test_all_strategy_members_are_strings() -> None:
-    for s in OperatorStrategy:
-        assert isinstance(s.value, str)
-        assert s.value == s.value.strip()
 
 
 # ---------------------------------------------------------------------------

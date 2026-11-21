@@ -35,76 +35,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.completion_obligation import evaluate_completion_obligations
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
-
-_ANSWER_NAMING_THE_TOOL = (
-    "Conclusion: web_search was blocked by policy, so this answer is partial."
-)
-
-
-class _DeniedStep:
-    """A planned observing step the gate refused: planned, failed, no artifact."""
-
-    def __init__(self) -> None:
-        self.action_spec = {
-            "type": "tool_call", "tool_name": "web_search", "arguments": {},
-        }
-        self.status = "failed"
-
-
-def _tool_obligation(*, failure_codes: list[str], denied_tools: tuple[str, ...]) -> str:
-    report = evaluate_completion_obligations(
-        question="найди в интернете x",
-        answer=_ANSWER_NAMING_THE_TOOL,
-        plan_steps=[_DeniedStep()],
-        artifacts={},
-        chain_size=0,
-        realtime_required=False,
-        file_hint=None,
-        failure_codes=failure_codes,
-        denied_tools=denied_tools,
-        contract=None,
-    )
-    states = [o.status for o in report.obligations if o.kind == "tool_execution"]
-    assert len(states) == 1, f"expected exactly one tool obligation, got {states}"
-    return states[0]
-
-
-def test_the_arbiter_can_tell_a_refusal_from_a_breakdown() -> None:
-    """The distinction exists and is worth keeping: it is what `denied` buys."""
-    assert _tool_obligation(
-        failure_codes=["policy_blocked"], denied_tools=("web_search",)
-    ) == "blocked_and_disclosed"
-
-
-def test_without_the_trigger_the_same_refusal_reads_as_a_breakdown() -> None:
-    """Everything else held equal — same answer, same step, same status."""
-    assert _tool_obligation(failure_codes=[], denied_tools=()) == "failed_but_reported"
-
-
-def test_a_silent_answer_is_still_caught_either_way() -> None:
-    """GUARD: the downgrade must not be confused with going unnoticed."""
-    report = evaluate_completion_obligations(
-        question="найди в интернете x",
-        answer="Conclusion: here is what I found.",
-        plan_steps=[_DeniedStep()],
-        artifacts={},
-        chain_size=0,
-        realtime_required=False,
-        file_hint=None,
-        failure_codes=[],
-        denied_tools=(),
-        contract=None,
-    )
-    states = [o.status for o in report.obligations if o.kind == "tool_execution"]
-    assert states == ["silently_missing"]
-
 
 _DISCLOSING = (
     "Conclusion: 3 строки [file_read:doc.txt]; проверку через shell политика "

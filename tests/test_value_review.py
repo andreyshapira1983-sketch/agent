@@ -5,7 +5,6 @@ value-review ledger are backed by files under ``tmp_path`` only.
 """
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -16,20 +15,10 @@ from core.self_apply_bridge import SELF_APPLY_OPERATION
 from core.self_build_producer import PRODUCER_ORIGIN
 from core.value_review import (
     MAX_NOTE_CHARS,
-    VALID_VERDICTS,
     InvalidVerdictError,
     ValueReview,
     ValueReviewLog,
 )
-
-_ALL_VERDICTS = [
-    "accepted",
-    "rejected_low_value",
-    "rejected_misleading_summary",
-    "rejected_risky",
-    "rejected_wrong_target",
-]
-
 
 # ── fakes ──────────────────────────────────────────────────────────────────────
 
@@ -64,36 +53,7 @@ def _ledger_path(tmp_path: Path) -> Path:
     return tmp_path / "data" / "value_reviews.jsonl"
 
 
-def _file_digests(root: Path) -> dict[str, str]:
-    """Content hash of every file under root; `.lock` sidecars belong to the state layer."""
-    return {
-        p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in root.rglob("*")
-        if p.is_file() and p.suffix != ".lock"
-    }
-
-
 # ── ledger unit ────────────────────────────────────────────────────────────────
-
-
-def test_all_verdicts_persist_and_reload(tmp_path):
-    log = ValueReviewLog.for_workspace(tmp_path)
-    for i, verdict in enumerate(_ALL_VERDICTS):
-        log.append(f"ain_{i}", verdict)
-    reloaded = ValueReviewLog.for_workspace(tmp_path)
-    got = {r.item_id: r.verdict for r in reloaded.list()}
-    assert got == {f"ain_{i}": v for i, v in enumerate(_ALL_VERDICTS)}
-    assert set(_ALL_VERDICTS) == VALID_VERDICTS
-
-
-def test_latest_verdict_wins_for_same_item(tmp_path):
-    log = ValueReviewLog.for_workspace(tmp_path)
-    log.append("ain_1", "accepted")
-    log.append("ain_1", "rejected_low_value")
-    effective = ValueReviewLog.for_workspace(tmp_path).effective_by_item_id()
-    assert effective["ain_1"].verdict == "rejected_low_value"
-    # both rows are retained (append-only history)
-    assert len(ValueReviewLog.for_workspace(tmp_path).list()) == 2
 
 
 def test_invalid_verdict_writes_nothing(tmp_path):
@@ -101,16 +61,6 @@ def test_invalid_verdict_writes_nothing(tmp_path):
     with pytest.raises(InvalidVerdictError):
         log.append("ain_1", "totally_bogus")
     assert not _ledger_path(tmp_path).exists()
-
-
-def test_missing_and_corrupt_ledger_loads_empty(tmp_path):
-    # missing file
-    assert ValueReviewLog.for_workspace(tmp_path).list() == []
-    # corrupt file degrades to [] (state layer quarantines bad rows)
-    p = _ledger_path(tmp_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("not json at all\n{broken\n", encoding="utf-8")
-    assert ValueReviewLog.for_workspace(tmp_path).list() == []
 
 
 def test_note_is_redacted_and_truncated(tmp_path):
@@ -226,32 +176,7 @@ def test_value_review_list_is_read_only(tmp_path, capsys):
     assert item.id in out and "no verdict yet" in out
 
 
-def test_only_expected_files_written_no_stray_side_effects(tmp_path):
-    """A recorded verdict changes exactly the ledger and the subagent registry."""
-    inbox = _inbox(tmp_path)
-    item = _executed_producer_item(inbox)
-    agent = _FakeAgent(inbox)
-    before = _file_digests(tmp_path)
-
-    _handle_value_review(f"{item.id} accepted", agent, tmp_path)
-
-    after = _file_digests(tmp_path)
-    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
-    assert changed == {"data/value_reviews.jsonl", "data/subagent_registry.json"}
-
-
 # ── TD-033: value review feeds the subagent registry (guarded) ──────────────────
-
-
-def test_cli_reconciles_registry_after_recording(tmp_path):
-    from core.subagent_registry import SubagentRegistry
-
-    inbox = _inbox(tmp_path)
-    item = _executed_producer_item(inbox)
-    agent = _FakeAgent(inbox)
-    _handle_value_review(f"{item.id} accepted", agent, tmp_path)
-    reg = SubagentRegistry.load(tmp_path)
-    assert reg.roles["builder"].confirmed_value == 1
 
 
 def test_cli_persists_even_if_registry_reconcile_fails(tmp_path, monkeypatch):

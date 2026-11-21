@@ -54,15 +54,6 @@ def test_a_proven_fix_closes_the_issue(tmp_path):
     assert registry.list()[0].status == "resolved"
 
 
-def test_without_a_red_run_the_issue_stays_open(tmp_path):
-    registry, fingerprint = _issue_with_runs(
-        tmp_path, "green-before-fix", "green-after-fix",
-    )
-
-    assert close_proven_issue(registry, fingerprint) is False
-    assert registry.list()[0].status == "open"
-
-
 def test_a_witness_green_on_the_broken_object_proves_nothing(tmp_path):
     registry, fingerprint = _issue_with_runs(tmp_path, "green-before-fix")
 

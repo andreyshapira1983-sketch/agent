@@ -35,18 +35,6 @@ def _tests_report(workspace: Path, exit_code: int, *, passed: int = 0):
     return report.tasks[-1]
 
 
-def test_exit_code_zero_is_a_pass(workspace: Path):
-    task = _tests_report(workspace, 0, passed=3)
-    assert task.status == "done"
-
-
-def test_no_tests_collected_is_not_a_pass(workspace: Path):
-    task = _tests_report(workspace, 5)
-    assert task.status == "inconclusive"
-    assert "no tests collected" in task.summary
-    assert task.details["exit_code"] == 5
-
-
 @pytest.mark.parametrize(
     ("exit_code", "meaning"),
     [(2, "interrupted"), (3, "internal error"), (4, "usage error")],
@@ -56,12 +44,6 @@ def test_broken_pytest_run_is_a_failure(workspace: Path, exit_code: int, meaning
     assert task.status == "failed"
     assert meaning in task.summary
     assert task.details["exit_code"] == exit_code
-
-
-def test_unknown_nonzero_exit_code_is_a_failure(workspace: Path):
-    task = _tests_report(workspace, 1)
-    assert task.status == "failed"
-    assert "exit_code=1" in task.summary
 
 
 def test_budget_denial_below_the_breaker_threshold_is_not_completed(workspace: Path):

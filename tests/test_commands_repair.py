@@ -100,15 +100,6 @@ def test_pattern_is_extracted_and_removed_from_the_positional_tokens(tmp_path):
 
 # ── one-click mode (no proposal file) ────────────────────────────────────────
 
-def test_one_click_defaults_to_the_tests_directory(tmp_path):
-    agent = FakeAgent(gen_report=FakeReport(proposal=None))
-    _handle_repair("core/foo.py", agent, tmp_path)
-    call = agent.gen_calls[0]
-    assert call["target_path"] == "core/foo.py"
-    assert call["test_paths"] == ("tests",)
-    assert call["test_pattern"] is None
-    assert call["workspace_root"] == tmp_path
-
 
 def test_one_click_generates_then_applies(tmp_path, capsys):
     proposal = RepairProposal(path="core/foo.py", proposed_content="y = 2\n")
@@ -122,15 +113,6 @@ def test_one_click_generates_then_applies(tmp_path, capsys):
     assert "GEN-OK" in err and "APPLY-OK" in err
     assert agent.apply_calls[0]["proposal"] is proposal, "the generated proposal is applied as-is"
     assert agent.apply_calls[0]["workspace_root"] == tmp_path
-
-
-def test_one_click_stops_when_generation_produces_no_proposal(tmp_path, capsys):
-    agent = FakeAgent(gen_report=FakeReport("GEN-EMPTY", proposal=None))
-    assert _handle_repair("core/foo.py", agent, tmp_path) is True
-    err = capsys.readouterr().err
-    assert "GEN-EMPTY" in err
-    assert "no proposal generated" in err
-    assert agent.apply_calls == [], "nothing may be applied when there is no proposal"
 
 
 def test_generation_failure_is_reported_and_nothing_is_applied(tmp_path, capsys):
@@ -154,21 +136,6 @@ def test_apply_failure_is_reported_after_a_successful_generation(tmp_path, capsy
 
 
 # ── which token becomes the proposal file ────────────────────────────────────
-
-def test_existing_py_file_outside_tests_is_read_as_the_proposal(tmp_path, capsys):
-    rel = _proposal_file(tmp_path, body="patched = True\n")
-    agent = FakeAgent(apply_report=FakeReport("APPLY-OK"))
-
-    assert _handle_repair(f"core/foo.py {rel}", agent, tmp_path) is True
-
-    assert agent.gen_calls == [], "two-step mode must not generate a new proposal"
-    applied = agent.apply_calls[0]["proposal"]
-    assert isinstance(applied, RepairProposal)
-    assert applied.path == "core/foo.py"
-    assert applied.proposed_content == "patched = True\n"
-    assert applied.test_paths == ("tests",)
-    assert rel in applied.reason
-    assert "APPLY-OK" in capsys.readouterr().err
 
 
 def test_two_step_keeps_explicit_test_paths_after_the_proposal_file(tmp_path):

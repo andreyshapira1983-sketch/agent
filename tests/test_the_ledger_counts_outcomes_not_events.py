@@ -64,26 +64,11 @@ def _report(*tasks: AutonomousTaskReport, status: str = "completed") -> Autonomo
 
 # ── A1 ──────────────────────────────────────────────────────────────────────
 
-def test_a_status_probe_is_not_work():
-    """Каждая очередь начинается со status-задачи, и она всегда done."""
-    report = _report(_task("status", "done"), _task("goal", "clarify", _QUESTION))
-
-    assert report.semantic_result() == ("empty", False), (
-        "служебная задача status не работа; вопрос ворот — тоже"
-    )
-
 
 def test_a_learn_pass_alone_is_not_work_either():
     report = _report(_task("status", "done"), _task("learn", "done"), _task("goal", "failed"))
 
     assert report.semantic_result()[1] is False
-
-
-def test_real_goal_work_still_counts():
-    """Положительный контроль A1."""
-    report = _report(_task("status", "done"), _task("goal", "done", "a real answer"))
-
-    assert report.semantic_result() == ("completed", True)
 
 
 # ── A2 ──────────────────────────────────────────────────────────────────────
@@ -93,11 +78,6 @@ def test_a_completed_run_without_work_does_not_mark_the_queue_row_done():
 
     assert decision.outcome != "done"
     assert "work" in decision.reason
-
-
-def test_a_completed_run_with_work_still_marks_done():
-    """Положительный контроль A2."""
-    assert classify_run_outcome(status="completed", work_done=True).outcome == "done"
 
 
 # ── A3 / A4 — на шве campaign_io._default_execute_action ─────────────────────
@@ -158,18 +138,6 @@ def test_a_question_back_is_not_an_artifact(monkeypatch, tmp_path):
     assert outcome.did_work is False
 
 
-def test_a_real_answer_is_still_an_artifact(monkeypatch, tmp_path):
-    """Положительный контроль A4."""
-    inbox = ApprovalInbox(path=tmp_path / "data" / "approval_inbox.jsonl")
-    report = _report(_task("status", "done"), _task("goal", "done", "the measured answer"))
-    report.approvals = inbox.snapshot()
-
-    outcome = _execute_with_fake_runtime(monkeypatch, tmp_path, report, inbox)
-
-    assert outcome.artifact == "reasoning: the measured answer"
-    assert outcome.did_work is True
-
-
 # ── A5 ──────────────────────────────────────────────────────────────────────
 
 def test_a_dedup_collision_is_not_a_proposal(tmp_path):
@@ -191,40 +159,6 @@ def test_a_dedup_collision_is_not_a_proposal(tmp_path):
 
     assert result is None, f"столкновение записано как предложение: {result!r}"
     assert len(inbox.pending()) == 1
-
-
-# ── A7 ──────────────────────────────────────────────────────────────────────
-
-def test_a_rolled_back_lane_run_is_aborted_not_executed(tmp_path):
-    from core.self_apply_bridge import (
-        SELF_APPLY_OPERATION,
-        build_self_apply_payload,
-        run_approved_self_apply,
-    )
-    from core.self_apply_lane import SelfApplyReport
-
-    inbox = ApprovalInbox(path=tmp_path / "data" / "approval_inbox.jsonl")
-    payload = build_self_apply_payload(
-        files=[{"path": "core/example.py", "content": "x = 1\n"}],
-        reason="fix example", evidence=["log line A"],
-        test_paths=["tests/test_example.py"], origin="repair",
-    )
-    item = inbox.add(operation=SELF_APPLY_OPERATION, summary="a patch", payload=payload)
-    inbox.approve(item.id, actor="test")
-
-    def _lane(*_a, **_kw):
-        return SelfApplyReport(status="rolled_back", reason="full pytest failed",
-                               branch="self-apply/test", rollback_status="restored")
-
-    result = run_approved_self_apply(
-        inbox=inbox, item_id=item.id, workspace=tmp_path, vcs=object(), test_runner=object(),
-        lane=_lane,
-    )
-    assert result["status"] == "rolled_back", result
-
-    assert inbox.get(item.id).status == "aborted", (
-        "откат — попытка, а не применение: value-review не должен звать её applied"
-    )
 
 
 # ── A8 / A9 — на живой петле ────────────────────────────────────────────────

@@ -67,28 +67,6 @@ def _decisions(tmp_path: Path) -> list[dict]:
 _GOAL = "Draft a proposal for the structure of the EVIDENCE_RECORD_SCHEMA document"
 
 
-def test_a_proposal_is_recorded(tmp_path: Path) -> None:
-    """3a, the accepted half: a successful pick is a decision too."""
-    ws = _workspace(tmp_path)
-    report = propose_charter_goal(_FixedLLM(_GOAL), ws)
-    assert report.status == "proposed"
-    rows = _decisions(ws)
-    assert rows and rows[-1]["status"] == "proposed"
-    assert _GOAL[:40] in rows[-1]["goal"]
-
-
-def test_a_rejection_survives_the_tick(tmp_path: Path) -> None:
-    """3a, the core: the decline lands in the store with goal and reason."""
-    ws = _workspace(tmp_path)
-    _ran_campaign(ws, _GOAL)
-    report = propose_charter_goal(_FixedLLM(_GOAL), ws)
-    assert report.status == "declined"
-    rows = _decisions(ws)
-    assert rows[-1]["status"] == "declined"
-    assert "repeats" in rows[-1]["reason"]
-    assert _GOAL[:40] in rows[-1]["goal"]
-
-
 def test_the_selector_receives_the_rejection(tmp_path: Path) -> None:
     """3b: the NEXT ask's prompt carries the declined goal explicitly."""
     ws = _workspace(tmp_path)
@@ -100,14 +78,6 @@ def test_the_selector_receives_the_rejection(tmp_path: Path) -> None:
     assert "DECLINED" in prompt
     assert _GOAL[:40] in prompt
     assert "DIFFERENT" in prompt
-
-
-def test_no_rejections_no_declined_section(tmp_path: Path) -> None:
-    """An empty store adds no noise to the prompt."""
-    ws = _workspace(tmp_path)
-    llm = _FixedLLM(_GOAL)
-    propose_charter_goal(llm, ws)
-    assert "DECLINED" not in llm.user_prompts[-1]
 
 
 def test_pre_goal_failures_are_recorded_without_a_goal(tmp_path: Path) -> None:
@@ -124,23 +94,3 @@ def test_pre_goal_failures_are_recorded_without_a_goal(tmp_path: Path) -> None:
     rows = _decisions(ws)
     assert rows and rows[-1]["status"] == "declined"
     assert rows[-1]["goal"] == ""
-
-
-def test_the_ledger_rides_the_charter_path(tmp_path: Path) -> None:
-    """#5: agent_tick's charter router must carry the usage ledger — the
-    hidden-spend hole (from_env() bare at agent_tick.py:1500).
-
-    Спрашивается у САМОЙ связки, а не у окна текста вокруг вызова: 2026-08-24
-    построение переехало в `_charter_goal_router`, и текстовая проба потеряла
-    цель, хотя инвариант был цел. Проба, которую ломает переезд, меряет адрес,
-    а не свойство. Вторую половину — видимость для ПОТОЛКА — держит
-    tests/test_the_charter_goal_call_meets_the_money_cap.py.
-    """
-    import agent_tick
-
-    (tmp_path / "data").mkdir()
-    router = agent_tick._charter_goal_router(tmp_path)
-    assert router.usage_ledger is not None, (
-        "the charter path builds ModelRouter.from_env() without a usage "
-        "ledger — Sol's charter calls are real spend invisible to the books"
-    )

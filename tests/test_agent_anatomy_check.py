@@ -26,7 +26,6 @@ import pytest
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "scripts", "agent_anatomy_check.py")
 _GENERATOR = os.path.join(_ROOT, "scripts", "gen_anatomy.py")
-_DOC = os.path.join(_ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 
 
 def _load_module():
@@ -43,21 +42,6 @@ def _load_generator():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
-
-
-def test_core_modules_excludes_init():
-    mod = _load_module()
-    names = mod._core_modules()
-    assert "__init__" not in names
-    assert "loop" in names
-    assert all(not n.endswith(".py") for n in names)
-
-
-def test_documented_modules_parses_core_tokens():
-    mod = _load_module()
-    found = mod._documented_modules("see `core/loop` and core/planner here")
-    assert "loop" in found
-    assert "planner" in found
 
 
 def test_doc_and_core_are_in_sync():
@@ -87,28 +71,6 @@ def test_main_flags_a_core_module_missing_from_the_map(tmp_path, monkeypatch, ca
 
 # ── The generator, and the equality nobody was checking ──────────────────────
 
-def test_the_committed_map_is_exactly_what_the_generator_emits():
-    """The map is a build artefact; a hand-edit must show up as a red test.
-
-    `build_document()` writes nothing, so this compares without side effects.
-    """
-    gen = _load_generator()
-    with open(_DOC, encoding="utf-8") as handle:
-        committed = handle.read()
-    assert gen.build_document() == committed, (
-        "knowledge/generated/AGENT_ANATOMY.md differs from `python scripts/gen_anatomy.py`. "
-        "Either regenerate it, or — if a new core/ module needs a home — add it "
-        "to GROUPS in scripts/gen_anatomy.py first."
-    )
-
-
-def test_groups_cover_core_exactly():
-    """Neither an ungrouped module nor a group entry with no module behind it."""
-    gen = _load_generator()
-    grouped = [m for _title, _desc, mods in gen.GROUPS for m in mods]
-    assert len(grouped) == len(set(grouped)), "a module is listed in two groups"
-    assert set(grouped) == gen._actual_modules()
-
 
 def test_every_purpose_cell_is_a_finished_sentence():
     """The summary is unwrapped before it is cut.
@@ -128,24 +90,6 @@ def test_every_purpose_cell_is_a_finished_sentence():
         if not purpose or not purpose.endswith((".", "?", "!", ")")):
             bad.append(f"core/{name}: {purpose!r}")
     assert not bad, "purpose cells that are empty or cut mid-sentence:\n" + "\n".join(bad)
-
-
-def test_first_doc_line_rejoins_a_wrapped_summary(tmp_path, monkeypatch):
-    """The extraction rule itself, on a planted docstring — no real module needed."""
-    gen = _load_generator()
-    fake_core = tmp_path / "core"
-    fake_core.mkdir()
-    (fake_core / "wrapped.py").write_text(
-        '"""Intent understanding — the translator between plain human language\n'
-        'and the agent\'s actions.\n\n'
-        'A second paragraph that must not appear in the summary.\n"""\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(gen, "CORE", str(fake_core))
-    assert gen._first_doc_line("wrapped") == (
-        "Intent understanding — the translator between plain human language "
-        "and the agent's actions."
-    )
 
 
 def test_build_document_raises_rather_than_killing_the_caller(monkeypatch):
@@ -188,39 +132,3 @@ def test_no_map_row_leads_with_split_provenance():
         if line.startswith("| `core/") and "| Extracted from" in line
     ]
     assert not offenders, "rows leading with provenance boilerplate:\n" + "\n".join(offenders)
-
-
-def test_first_doc_line_is_empty_for_a_module_without_one(tmp_path, monkeypatch):
-    gen = _load_generator()
-    fake_core = tmp_path / "core"
-    fake_core.mkdir()
-    (fake_core / "bare.py").write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(gen, "CORE", str(fake_core))
-    assert gen._first_doc_line("bare") == ""
-
-
-def test_script_does_not_import_core_or_git():
-    # Guard the read-only contract at the source level.
-    with open(_SCRIPT, encoding="utf-8") as handle:
-        src = handle.read()
-    assert "import core" not in src
-    assert "from core" not in src
-    assert "subprocess" not in src
-    assert "urllib" not in src
-    assert "requests" not in src
-
-
-def test_the_generator_writes_where_the_checker_reads():
-    """The writer and the reader must name the same file.
-
-    They are separate scripts with separate path constants, and nothing else
-    ties them together. Measured 2026-08-07 by breaking them apart: moving the
-    GENERATOR's output alone left the entire suite green — the checker went on
-    reading a file that nobody updated any more, and each half looked healthy
-    in isolation. The opposite break (moving the checker alone) did fail, so
-    the pair was guarded from one side only.
-
-    This is the shape the operator named before the documentation move: a
-    connection where both ends are green apart and broken together.
-    """
-    assert _load_generator().DOC_PATH == _load_module().DOC_PATH

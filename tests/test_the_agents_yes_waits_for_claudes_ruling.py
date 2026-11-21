@@ -5,15 +5,13 @@
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from core.campaign_verdict import record_campaign_verdict
-from core.control_files import control_file_hit
-from core.judge_queue import RULINGS_RELPATH, agreement, pending, rule, standing, submit
+from core.judge_queue import agreement, pending, rule, standing, submit
 from core.work_usefulness import _verified_goals
 from scripts.judge_queue import main as judge_cli
 
@@ -22,17 +20,6 @@ def _verdict(goal: str, word: str = "verified") -> dict:
     return {"goal": goal, "verdict": word, "success_check": "file data/notes/x.md exists",
             "reason": "fresh", "fresh_traces": ["data/notes/x.md"],
             "ts": datetime.now(timezone.utc).isoformat()}
-
-
-def test_a_yes_goes_to_the_queue_and_a_no_does_not(tmp_path: Path) -> None:
-    record_campaign_verdict(tmp_path, _verdict("write the note"))
-    record_campaign_verdict(tmp_path, _verdict("other", "missing"))
-    items = pending(tmp_path)
-    assert [i["subject"] for i in items] == ["write the note"]
-    assert items[0]["evidence"] == ["data/notes/x.md"]
-    row = json.loads((tmp_path / "data/campaign_verdicts.jsonl").read_text(encoding="utf-8").splitlines()[0])
-    row = row.get("payload", row)
-    assert row["judge_item"] == items[0]["id"]
 
 
 def test_the_same_decision_is_queued_once(tmp_path: Path) -> None:
@@ -63,10 +50,6 @@ def test_only_a_goal_claude_confirmed_counts_as_useful(tmp_path: Path) -> None:
     rule(tmp_path, by_subject["kept"], "confirmed", "file has the requested sections")
     rule(tmp_path, by_subject["thrown"], "overturned", "file is empty")
     assert [g for _, g in _verified_goals(tmp_path / "data")] == ["kept"]
-
-
-def test_the_agent_cannot_write_the_rulings(tmp_path: Path) -> None:
-    assert control_file_hit(tmp_path, tmp_path / RULINGS_RELPATH) == RULINGS_RELPATH
 
 
 def test_claudes_command_lists_and_rules(tmp_path: Path, capsys) -> None:

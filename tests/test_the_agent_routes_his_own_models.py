@@ -149,24 +149,6 @@ def test_the_usage_ledger_carries_the_policy_id_and_no_secret(tmp_path, monkeypa
     assert "sk-live-secret-value" not in (tmp_path / "policy.jsonl").read_text(encoding="utf-8")
 
 
-def test_a_new_decision_is_picked_up_without_a_restart(tmp_path, monkeypatch):
-    from core.model_router import ModelRole, ModelRoute, ModelRouter
-    from core.model_usage import ModelUsageLedger
-
-    for name in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
-        monkeypatch.setenv(name, "present")
-    store = RoutingPolicyStore(tmp_path / "policy.jsonl")
-    ledger = ModelUsageLedger(path=tmp_path / "usage.jsonl")
-    router = ModelRouter(
-        default_provider="openai", default_model="gpt-default",
-        routes={ModelRole.PLANNER: ModelRoute(role="planner", provider="openai", model="gpt", reason="env:AGENT_PLANNER")},
-        llm_factory=_LLM, usage_ledger=ledger, routing_policy=store,
-    )
-    assert router.for_role("planner").provider == "openai"
-    store.set_route(role="planner", provider="deepseek", model="deepseek-chat", reason="cheaper", env=dict(_ENV))
-    assert router.for_role("planner").provider == "deepseek", "the cached client must be dropped when the policy moves"
-
-
 def test_the_tool_needs_a_reason_refuses_secrets_names_the_pool_and_caps_itself(tmp_path, monkeypatch):
     from tools.model_route import ModelRouteTool
 
@@ -187,17 +169,6 @@ def test_the_tool_needs_a_reason_refuses_secrets_names_the_pool_and_caps_itself(
     assert tool.run(role="verifier", provider="release", reason="back to defaults")["set"]
     capped = tool.run(role="memory_summary", provider="deepseek", model="deepseek-chat", reason="cheap")
     assert not capped["set"] and "ceiling" in capped["refused_by"]
-
-
-def test_the_door_is_wired_and_classified_for_the_unattended_path():
-    import inspect
-
-    from app import bootstrap
-    from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-
-    src = inspect.getsource(bootstrap.build_agent)
-    assert "ModelRouteTool(" in src and "routing_policy=" in src
-    assert "model_route" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
 
 
 def test_the_eye_shows_his_decision_under_the_routers_role_name_and_the_measured_table(tmp_path, monkeypatch):

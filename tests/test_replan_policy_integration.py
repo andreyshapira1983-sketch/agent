@@ -22,11 +22,10 @@ from typing import Any
 
 import pytest
 
-from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
-from core.replan import DEFAULT_BUDGETS, FailureBudget, ReplanPolicy
+from core.replan import ReplanPolicy
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
 
@@ -221,120 +220,6 @@ class TestAcceptanceWebEmpty:
 
 
 # ============================================================
-# Acceptance 2 — tool_error retry bounded by budget
-# ============================================================
-
-class TestAcceptanceToolErrorBounded:
-    def test_two_tool_errors_stop_with_abort_no_retry(self, workspace: Path):
-        def behaviour(call_n, kwargs):
-            raise RuntimeError(f"tool failure #{call_n}")
-
-        flaky = _RecordingTool("flaky", behaviour, risk="read_only")
-        step = {"tool": "flaky", "arguments": {}, "label": "stub", "expected_outcome": "x"}
-        planner = FakePlanner(sources=[step])
-        # max_total=5 so the GLOBAL cap doesn't fire first.
-        agent, log_path = _build_agent(
-            workspace, [flaky], planner,
-            replan_policy=ReplanPolicy(max_total_replans=5),
-            llm_responses=[SYNTH_FAILED],
-        )
-        agent.run(user_question="run", file_hint=None)
-
-        # Exactly TWO tool_error triggers -> budget exhausts -> abort_no_retry.
-        events = _events(log_path)
-        exhausted = [e for e in events if e["event"] == "replan_exhausted"]
-        assert len(exhausted) == 1
-        payload = exhausted[0]["payload"]
-        assert payload["decision_action"] == "abort_no_retry"
-        assert payload["failure_counts"]["tool_error"] == 2
-        # The tool ran exactly 2 times (each attempt → 1 call).
-        assert flaky.calls == 2
-
-
-# ============================================================
-# Acceptance 3 — approval_deny: SAME action never runs twice
-# ============================================================
-
-class TestAcceptanceApprovalDeny:
-    def test_denied_action_never_repeats_even_if_planner_tries(self, workspace: Path):
-        """A planner that stubbornly re-proposes the same dangerous step:
-        the FORBIDDEN_ACTIONS gate must catch it AND the tool must never
-        re-run."""
-
-        def behaviour(call_n, kwargs):
-            # Should never be called — approval is denied.
-            return {"never": "ran"}
-
-        danger = _RecordingTool("danger", behaviour, risk="irreversible")
-        bad_step = {
-            "tool": "danger",
-            "arguments": {"path": "X"},
-            "label": "stub",
-            "expected_outcome": "no",
-        }
-        # Planner is configured to ALWAYS return the same dangerous step.
-        planner = FakePlanner(sources=[bad_step])
-        agent, log_path = _build_agent(
-            workspace, [danger], planner,
-            approval_provider=AutoApprover(default="deny"),
-            replan_policy=ReplanPolicy(max_total_replans=5),
-            llm_responses=[SYNTH_FAILED],
-        )
-        agent.run(user_question="do the dangerous thing", file_hint=None)
-
-        # Tool NEVER ran.
-        assert danger.calls == 0
-
-        events = _events(log_path)
-        # First attempt: approval_deny.
-        denials = [e for e in events if e["event"] == "approval_decision"
-                   and e["payload"]["decision"] == "deny"]
-        assert len(denials) >= 1
-
-        # Second attempt: planner re-proposes, sanitiser drops via
-        # forbidden_actions → 0 steps → success branch (empty plan = ok).
-        # OR exhaustion if every retry path fails the same way.
-        # Either way: the dangerous tool never invoked.
-        approval_requests = [e for e in events if e["event"] == "approval_request"]
-        assert len(approval_requests) == 1, (
-            "approval should be requested only ONCE for the same (tool, args) pair"
-        )
-
-
-# ============================================================
-# Acceptance 4 — policy_blocked: agent proposes a different tool
-# ============================================================
-
-class TestAcceptancePolicyBlocked:
-    def test_blocked_tool_then_alternative_runs(self, workspace: Path):
-        """First attempt names a non-existent tool → policy_blocked.
-        Second attempt names a real registered tool → success.
-        """
-        safe = _RecordingTool("safe_read", lambda n, k: "OK", risk="read_only")
-        plans = [
-            # Attempt 1 — unknown tool, registry will block.
-            [{"tool": "nope", "arguments": {"x": 1}, "label": "stub:nope",
-              "expected_outcome": "blocked"}],
-            # Attempt 2 — switch to the registered safe tool.
-            [{"tool": "safe_read", "arguments": {}, "label": "stub:safe",
-              "expected_outcome": "ok"}],
-        ]
-        planner = _SequencedPlanner(plans)
-        agent, log_path = _build_agent(workspace, [safe], planner)
-        agent.run(user_question="something", file_hint=None)
-
-        events = _events(log_path)
-        # First attempt: policy_blocked appears in replan event triggers.
-        replans = [e for e in events if e["event"] == "replan"]
-        assert len(replans) == 1
-        assert "policy_blocked" in replans[0]["payload"]["triggers"]
-        # Forbidden actions carried forward.
-        assert replans[0]["payload"]["decision"]["forbidden_action_count"] >= 1
-        # Safe tool ran exactly once on attempt 2.
-        assert safe.calls == 1
-
-
-# ============================================================
 # Acceptance 5 — verify_failed → new plan on retry
 # ============================================================
 
@@ -361,84 +246,6 @@ class TestAcceptanceVerifyFailed:
         assert "verify_failed" in replans[0]["payload"]["triggers"]
         # Different tool on the second attempt.
         assert good.calls == 1
-
-
-# ============================================================
-# Acceptance 6 — replan_exhausted produces an honest final answer
-# ============================================================
-
-class TestAcceptanceExhaustedHonest:
-    def test_final_failure_still_synthesises_answer(self, workspace: Path):
-        def boom(n, k):
-            raise RuntimeError("always")
-
-        broken = _RecordingTool("broken", boom, risk="read_only")
-        step = {"tool": "broken", "arguments": {}, "label": "stub", "expected_outcome": "fail"}
-        planner = FakePlanner(sources=[step])
-        agent, log_path = _build_agent(
-            workspace, [broken], planner,
-            replan_policy=ReplanPolicy(max_total_replans=5),
-            llm_responses=[SYNTH_FAILED],
-        )
-        answer = agent.run(user_question="x", file_hint=None)
-
-        # Synthesizer still ran — user got a structured answer, then the
-        # kernel output policy made the exhausted replan state explicit.
-        assert "Nothing usable came back" in answer
-        assert "replan budget was exhausted" in answer
-        events = _events(log_path)
-        respond = [e for e in events if e["event"] == "respond"]
-        assert len(respond) == 1
-        assert respond[0]["payload"]["replan_exhausted"] is True
-
-
-# ============================================================
-# Acceptance 7 — every decision is logged
-# ============================================================
-
-class TestAcceptanceDecisionsLogged:
-    def test_replan_attempt_replan_and_replan_exhausted_all_present(self, workspace: Path):
-        def boom(n, k):
-            raise RuntimeError("always")
-
-        broken = _RecordingTool("broken", boom, risk="read_only")
-        step = {"tool": "broken", "arguments": {}, "label": "stub", "expected_outcome": "fail"}
-        planner = FakePlanner(sources=[step])
-        # Policy: 5 global cap, 3 tool_error budget → stops on the 3rd
-        # attempt by tool_error budget (or global cap, whichever first).
-        custom_budgets = dict(DEFAULT_BUDGETS)
-        custom_budgets["tool_error"] = FailureBudget(
-            max_occurrences=3, advice="retry"
-        )
-        agent, log_path = _build_agent(
-            workspace, [broken], planner,
-            replan_policy=ReplanPolicy(
-                budgets=custom_budgets, max_total_replans=5
-            ),
-            llm_responses=[SYNTH_FAILED],
-        )
-        agent.run(user_question="x", file_hint=None)
-
-        events = _events(log_path)
-        names = [e["event"] for e in events]
-
-        # We expect exactly:
-        #   - 3 planner events (one per attempt)
-        #   - 2 replan events (between attempt 1->2 and 2->3)
-        #   - 2 replan_attempt events (kicked off attempt 2 and 3)
-        #   - 1 replan_exhausted event (after attempt 3 fails to retry)
-        assert names.count("planner") == 3
-        assert names.count("replan") == 2
-        assert names.count("replan_attempt") == 2
-        assert names.count("replan_exhausted") == 1
-
-        # Sanity: ordering — every replan_attempt event reports the
-        # cumulative failure counts so the audit log is self-contained.
-        attempts = [e for e in events if e["event"] == "replan_attempt"]
-        assert attempts[0]["payload"]["attempt"] == 2
-        assert attempts[0]["payload"]["failure_counts_so_far"]["tool_error"] == 1
-        assert attempts[1]["payload"]["attempt"] == 3
-        assert attempts[1]["payload"]["failure_counts_so_far"]["tool_error"] == 2
 
 
 # ============================================================

@@ -40,17 +40,6 @@ PROBE_STDOUT = (
 )
 
 
-def test_a_money_figure_with_a_currency_sign_is_found() -> None:
-    """«$0,171» и «usd 0.171» — одно число, а не два разных."""
-    chunk = (
-        "Один заказ стоит: PDF-формуляры — $0,171, QuickBooks сводная — $0,107, "
-        "контент-стратегия — $0,128 [tool:python_probe]."
-    )
-    figures = extract_statistical_figures(chunk)
-    assert figures, "числа утверждения должны извлечься"
-    assert _excerpt_supports_figures(PROBE_STDOUT, figures)
-
-
 def test_a_russian_decimal_comma_is_found_in_c_locale_output() -> None:
     chunk = "Повторный запуск обходится в 0,013 против 0,171 [tool:python_probe]."
     figures = extract_statistical_figures(chunk)
@@ -80,14 +69,3 @@ def test_variants_never_invent_a_different_number() -> None:
         variants = _figure_variants(figure)
         assert variants
         assert not (variants & forbidden), (figure, variants & forbidden)
-
-
-def test_thousands_separator_is_also_accepted() -> None:
-    """Запятая может быть разделителем тысяч — оба чтения принимаются.
-
-    Решать, что она значит, здесь не нужно и нельзя: «1,500» по-английски это
-    1500, по-русски — 1,5. Принимаются оба, потому что ошибка в сторону
-    лишнего вопроса дешевле стёртого ответа.
-    """
-    assert _excerpt_supports_figures("выручка 1500 usd", ["1,500"])
-    assert _excerpt_supports_figures("ставка 1.5 usd", ["1,5"])

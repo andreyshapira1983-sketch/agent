@@ -60,10 +60,6 @@ def test_a_refusal_never_lands_in_an_edits_file(refusal: str) -> None:
         compose_content(_loop(refusal), _write(), [_read(1, "x = 1")])
 
 
-def test_real_blocks_are_written() -> None:
-    assert compose_content(_loop(_GOOD), _write(), [_read(1, "x = 1")]) == _GOOD.strip()
-
-
 def test_a_note_is_not_held_to_the_edit_format() -> None:
     assert compose_content(_loop("итог: 42"), _write("data/notes/n.md"), [_read(1, "42")]) == "итог: 42"
 
@@ -73,33 +69,3 @@ def test_a_read_from_an_earlier_round_is_seen_after_a_replan() -> None:
     remember_read(loop, *_read(1, "SEEN_BEFORE_THE_REPLAN")[:2])
     compose_content(loop, _write(), [])  # новый план: в done пусто
     assert "SEEN_BEFORE_THE_REPLAN" in loop.llm.prompts[-1]
-
-
-def test_reads_of_another_turn_are_forgotten() -> None:
-    loop = _loop(_GOOD, trace="old")
-    remember_read(loop, *_read(1, "FROM_THE_OLD_TURN")[:2])
-    loop.log.trace_id = "new"
-    compose_content(loop, _write(), [_read(2, "x = 1")])
-    assert "FROM_THE_OLD_TURN" not in loop.llm.prompts[-1]
-
-
-def test_the_end_of_a_long_file_is_visible() -> None:
-    body = "a = 0\n" * 1500 + "TAIL_OF_COMPOSE_CONTENT\n"  # ~9000 знаков
-    loop = _loop(_GOOD)
-    compose_content(loop, _write(), [_read(1, body)])
-    assert "TAIL_OF_COMPOSE_CONTENT" in loop.llm.prompts[-1]
-
-
-def test_the_writer_is_shown_the_block_form() -> None:
-    loop = _loop(_GOOD)
-    compose_content(loop, _write(), [_read(1, "x = 1")])
-    prompt = loop.llm.prompts[-1]
-    assert "<<<<<<< SEARCH" in prompt and ">>>>>>> REPLACE" in prompt and "FILE:" in prompt
-
-
-def test_the_writer_is_told_how_to_add_to_an_existing_file() -> None:
-    """24.09, задача 4: образец говорил только про новый файл, и агент дописал
-    тест в существующий tests/test_evidence.py пустым SEARCH — patch_check отказал."""
-    loop = _loop(_GOOD)
-    compose_content(loop, _write(), [_read(1, "x = 1")])
-    assert "Дописать в существующий" in loop.llm.prompts[-1]

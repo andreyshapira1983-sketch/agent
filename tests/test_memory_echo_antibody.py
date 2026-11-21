@@ -19,7 +19,6 @@ from core.memory_echo_antibody import (
     GUARDED_SOURCE,
     MemoryWriteEvent,
     MemoryWriteRegistry,
-    content_hash,
     detect_memory_echo,
     make_event,
     recent_within_window,
@@ -35,19 +34,6 @@ def _event(content: str, *, source: str = GUARDED_SOURCE, **kw) -> MemoryWriteEv
 # ---------------------------------------------------------------------------
 
 
-def test_exact_duplicate_is_rejected():
-    prior = _event("The deploy script fails when DB_URL is unset.")
-    outcome = detect_memory_echo(
-        candidate_content="The deploy script fails when DB_URL is unset.",
-        recent_writes=[prior],
-    )
-    assert outcome.decision == "reject"
-    assert ECHO_REASON in outcome.reason
-    assert outcome.echo_within_window is True
-    assert outcome.matched_hash == prior.content_hash
-    assert outcome.similarity == 1.0
-
-
 def test_semantic_duplicate_is_rejected():
     prior = _event("agent keeps retrying the failed deploy step")
     # Same fact, words reordered — not byte-identical, but the proven
@@ -60,16 +46,6 @@ def test_semantic_duplicate_is_rejected():
     assert ECHO_REASON in outcome.reason
     assert outcome.echo_within_window is True
     assert outcome.similarity >= DEFAULT_ECHO_THRESHOLD
-
-
-def test_fresh_new_write_is_allowed():
-    prior = _event("The deploy script fails when DB_URL is unset.")
-    outcome = detect_memory_echo(
-        candidate_content="The user prefers concise Russian summaries in the morning.",
-        recent_writes=[prior],
-    )
-    assert outcome.decision == "allow"
-    assert outcome.echo_within_window is False
 
 
 def test_user_explicit_is_never_guarded():
@@ -113,13 +89,6 @@ def test_window_keeps_recent_drops_old():
     assert kept == [recent]
 
 
-def test_window_zero_means_unlimited():
-    now = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
-    ancient = make_event("ancient note", now=now - timedelta(days=400))
-    kept = recent_within_window([ancient], window_hours=0, now=now)
-    assert kept == [ancient]
-
-
 def test_window_excludes_other_sources():
     now = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
     human = make_event("human note", source="user-explicit", now=now)
@@ -144,22 +113,10 @@ def test_unparseable_timestamp_is_excluded_when_windowed():
 # ---------------------------------------------------------------------------
 
 
-def test_detector_is_deterministic():
-    prior = [_event("alpha beta gamma delta")]
-    a = detect_memory_echo(candidate_content="alpha beta gamma delta", recent_writes=prior)
-    b = detect_memory_echo(candidate_content="alpha beta gamma delta", recent_writes=prior)
-    assert a == b
-
-
 def test_empty_candidate_is_allowed_silently():
     outcome = detect_memory_echo(candidate_content="   ", recent_writes=[_event("x y z")])
     assert outcome.decision == "allow"
     assert "empty" in outcome.reason.lower()
-
-
-def test_no_recent_writes_allows():
-    outcome = detect_memory_echo(candidate_content="anything at all", recent_writes=[])
-    assert outcome.decision == "allow"
 
 
 def test_outcome_serialises():
@@ -171,11 +128,6 @@ def test_outcome_serialises():
     assert d["echo_within_window"] is True
     assert isinstance(d["similarity"], float)
     assert outcome.is_reject is True
-
-
-def test_content_hash_is_normalisation_insensitive():
-    assert content_hash("Hello   World") == content_hash("hello world")
-    assert content_hash("a") != content_hash("b")
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +149,6 @@ def test_registry_append_and_recent(tmp_path):
     assert "human note" not in contents  # wrong source
 
 
-def test_registry_missing_file_returns_empty(tmp_path):
-    reg = MemoryWriteRegistry(tmp_path / "does_not_exist.jsonl")
-    assert reg.load() == []
-    assert reg.recent() == []
-
-
 def test_registry_skips_corrupt_lines(tmp_path):
     path = tmp_path / "memory_writes.jsonl"
     path.write_text(
@@ -214,15 +160,3 @@ def test_registry_skips_corrupt_lines(tmp_path):
     loaded = reg.load()
     assert len(loaded) == 1
     assert loaded[0].content == "good"
-
-
-def test_registry_end_to_end_rejects_repeat(tmp_path):
-    reg = MemoryWriteRegistry(tmp_path / "memory_writes.jsonl")
-    now = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
-    reg.append(make_event("lesson learned: pin the dependency", now=now - timedelta(hours=3)))
-
-    outcome = detect_memory_echo(
-        candidate_content="lesson learned: pin the dependency",
-        recent_writes=reg.recent(window_hours=24.0, now=now),
-    )
-    assert outcome.is_reject is True

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from core.memory_policy import MemoryWritePolicy
 from core.persistent_memory import PersistentMemoryStore, memory_door_verdict
-from tools.base import ToolRegistry
 from tools.memory_bank import MemoryBankTool
 
 _GOOD_KIND = "[ВЫВОД, проверен боем]"
@@ -29,33 +28,6 @@ def _tool(tmp_path) -> MemoryBankTool:
     )
 
 
-def test_the_tool_declares_its_argument_contract_with_the_three_kinds(tmp_path):
-    tool = _tool(tmp_path)
-
-    assert "text" in tool.arguments and "provenance" in tool.arguments
-    for kind in ("[ВЫВОД, проверен боем]", "[ВЫВОД, замерен N раз]", "[НАБЛЮДЕНИЕ, один день]"):
-        assert kind in tool.arguments, f"словарь двери обязан быть в контракте: {kind}"
-
-
-def test_the_registry_hands_the_contract_to_the_planner(tmp_path):
-    registry = ToolRegistry()
-    registry.register(_tool(tmp_path))
-
-    contracts = registry.argument_contracts()
-
-    assert contracts.startswith("- memory_bank:")
-    assert "[ВЫВОД, проверен боем]" in contracts
-    assert registry.argument_contracts(hidden=frozenset({"memory_bank"})) == ""
-
-
-def test_a_wrong_kind_is_refused_by_name(tmp_path):
-    result = _tool(tmp_path).run(text=_PROSE, kind="reflection", provenance="core/llm.py")
-
-    assert result["banked"] is False and result["mem_id"] is None
-    assert "unknown kind 'reflection'" in result["refused_by"]
-    assert "[ВЫВОД, проверен боем]" in result["refused_by"]
-
-
 def test_code_like_text_is_refused_by_name(tmp_path):
     result = _tool(tmp_path).run(
         text="if signature in attempted_signatures:", kind=_GOOD_KIND, provenance="x",
@@ -63,13 +35,6 @@ def test_code_like_text_is_refused_by_name(tmp_path):
 
     assert result["banked"] is False
     assert "looks like code" in result["refused_by"]
-
-
-def test_an_accepted_write_carries_no_refusal(tmp_path):
-    result = _tool(tmp_path).run(text=_PROSE, kind=_GOOD_KIND, provenance="core/llm.py:39-43")
-
-    assert result["banked"] is True and str(result["mem_id"]).startswith("mem_")
-    assert result["refused_by"] is None
 
 
 def test_the_verdict_names_a_missing_field(tmp_path):

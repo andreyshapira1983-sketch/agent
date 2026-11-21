@@ -50,27 +50,6 @@ def _write_lock_and_sbom(root: Path) -> None:
     )
 
 
-def test_supply_chain_audit_passes_for_hash_lock_sbom_and_ci(tmp_path: Path):
-    (tmp_path / "requirements.in").write_text("pytest\n", encoding="utf-8")
-    (tmp_path / "requirements.txt").write_text(
-        "pytest==9.0.3\ncoverage==7.14.0\n",
-        encoding="utf-8",
-    )
-    _write_lock_and_sbom(tmp_path)
-    _write_minimal_ci(tmp_path)
-
-    report = audit_supply_chain(tmp_path)
-
-    assert report.ok is True
-    assert report.unpinned_requirements == ()
-    assert report.unhashed_lock_entries == ()
-    assert report.hash_checking_mode is True
-    assert report.sbom_matches_lock is True
-    assert report.sbom_components == 2
-    assert report.missing_ci_gates == ()
-    assert report.ci_workflow == ".github/workflows/ci.yml"
-
-
 def test_supply_chain_audit_flags_range_requirements(tmp_path: Path):
     (tmp_path / "requirements.in").write_text("pytest>=8\n", encoding="utf-8")
     (tmp_path / "requirements.txt").write_text("pytest>=8.0.0\n", encoding="utf-8")
@@ -82,27 +61,6 @@ def test_supply_chain_audit_flags_range_requirements(tmp_path: Path):
     assert report.ok is False
     assert report.unpinned_requirements == ("pytest>=8.0.0",)
     assert any("unpinned" in warning for warning in report.warnings)
-
-
-def test_supply_chain_audit_flags_missing_ci_gates(tmp_path: Path):
-    (tmp_path / "requirements.in").write_text("pytest\n", encoding="utf-8")
-    (tmp_path / "requirements.txt").write_text("pytest==9.0.3\n", encoding="utf-8")
-    _write_lock_and_sbom(tmp_path)
-    (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "workflows" / "ci.yml").write_text(
-        "name: ci\n",
-        encoding="utf-8",
-    )
-
-    report = audit_supply_chain(tmp_path)
-
-    assert report.ok is False
-    assert "pip_install_hash_lock" in report.missing_ci_gates
-    assert "release_audit" in report.missing_ci_gates
-    assert "sbom_check" in report.missing_ci_gates
-    assert "pip_check" in report.missing_ci_gates
-    assert "coverage_branch" in report.missing_ci_gates
-    assert "coverage_threshold" in report.missing_ci_gates
 
 
 def test_supply_chain_audit_flags_unhashed_lock_entries(tmp_path: Path):

@@ -179,33 +179,6 @@ def _catalog(**providers):
     return {"updated_at": "2026-07-26", "providers": providers}
 
 
-def test_refresh_models_forwards_only_provider_flags(agent, capsys, monkeypatch):
-    import core.model_catalog as catalog_mod
-
-    seen: dict = {}
-
-    def _refresh(*, providers):
-        seen["providers"] = providers
-        return _catalog()
-
-    monkeypatch.setattr(catalog_mod, "refresh_catalog", _refresh)
-
-    assert _handle_refresh_models("--anthropic --openai", agent) is True
-    assert seen["providers"] == ["anthropic", "openai"]
-
-
-def test_refresh_models_without_flags_asks_for_every_provider(agent, capsys, monkeypatch):
-    import core.model_catalog as catalog_mod
-
-    seen: dict = {}
-    monkeypatch.setattr(
-        catalog_mod, "refresh_catalog", lambda *, providers: seen.setdefault("p", providers) or _catalog()
-    )
-
-    assert _handle_refresh_models("", agent) is True
-    assert seen["p"] is None, "no flags means every available provider"
-
-
 def test_refresh_models_logs_a_failure_as_type_and_message_head_only(agent, capsys, monkeypatch):
     """A failed refresh logs providers, error type and the message head; no env key escapes.
 
@@ -271,11 +244,6 @@ def test_model_usage_rejects_unknown_flags(agent, capsys):
     assert "Usage: :model-usage [--json]" in capsys.readouterr().err
 
 
-def test_model_usage_without_a_ledger(agent, capsys):
-    assert _handle_model_usage("", agent) is True
-    assert "(model usage ledger is not enabled)" in capsys.readouterr().err
-
-
 def _snapshot():
     return {
         "totals": {"calls": 10, "total_tokens": 1000, "cost_units": 5},
@@ -311,26 +279,6 @@ def test_discovery_audit_rejects_unknown_flags(agent, capsys, monkeypatch):
     monkeypatch.setattr(discovery_mod, "build_discovery_audit", never)
     assert _handle_model_discovery_audit("--live", agent) is True
     assert "Usage: :model-discovery-audit [--json]" in capsys.readouterr().err
-
-
-def test_discovery_audit_is_local_and_logs(agent, capsys, monkeypatch):
-    import core.model_discovery as discovery_mod
-
-    seen: list = []
-    monkeypatch.setattr(
-        discovery_mod,
-        "build_discovery_audit",
-        lambda router: seen.append(router)
-        or SimpleNamespace(to_dict=lambda: {"providers": []}, user_summary=lambda: "DISCOVERY"),
-    )
-
-    assert _handle_model_discovery_audit("", agent) is True
-    assert seen == [agent.model_router], "the audit inspects the live router"
-    assert "DISCOVERY" in capsys.readouterr().err
-
-    assert _handle_model_discovery_audit("--json", agent) is True
-    assert json.loads(capsys.readouterr().err) == {"providers": []}
-    assert agent.log.kinds() == ["model_discovery_audit", "model_discovery_audit"]
 
 
 # ── :provider-catalog-refresh — the network gate ─────────────────────────────

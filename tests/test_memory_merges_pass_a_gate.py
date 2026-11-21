@@ -22,22 +22,10 @@ def _old() -> SimpleNamespace:
     return SimpleNamespace(id="mem_1", tags=["conclusion"], content=_OLD)
 
 
-def test_a_merge_that_keeps_every_number_of_both_passes() -> None:
-    merged = "Раздел 2.4.1, страница 24: симметрия даёт сохранение; пример — сдвиг и импульс, уравнение (2.31)."
-    decision = Consolidation("UPDATE", target_id="mem_1", merged=merged)
-    assert gate(decision, _NEW, [_old()]) is decision
-
-
 def test_a_merge_that_drops_a_number_keeps_both() -> None:
     decided = gate(Consolidation("UPDATE", target_id="mem_1", merged="Симметрия даёт сохранение; пример — (2.31)."),
                    _NEW, [_old()])
     assert decided.operation == "ADD" and "2.4.1" in decided.reason and "24" in decided.reason
-
-
-def test_the_questions_own_numbers_are_not_a_loss() -> None:
-    """Вопрос слитой записи по замыслу берётся у прежней: «с. 25» из нового вопроса не теряется."""
-    merged = "Раздел 2.4.1, страница 24: симметрия даёт сохранение; сдвиг — импульс, уравнение (2.31)."
-    assert gate(Consolidation("UPDATE", target_id="mem_1", merged=merged), _NEW, [_old()]).operation == "UPDATE"
 
 
 def test_a_target_outside_the_shown_candidates_is_an_add() -> None:

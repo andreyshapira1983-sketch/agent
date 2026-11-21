@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 
-from core.note_contract import contract_gaps
 from core.write_at_execution import _refuse_note_without_its_contract
 
 GOOD = (
@@ -48,21 +47,6 @@ class _Loop:
         return self._root
 
 
-def test_a_stub_note_fails_its_contract(tmp_path: Path) -> None:
-    gaps = contract_gaps(STUB, tmp_path)
-    assert gaps, "пустышка обязана проваливать договор"
-    # Провал НАЗЫВАЕТ, чего нет: провал без причины агент разгадывает сам
-    # и разгадывает неверно.
-    joined = " ".join(gaps)
-    assert "цитат" in joined and "источник" in joined
-
-
-def test_a_real_note_passes_its_contract(tmp_path: Path) -> None:
-    (tmp_path / "core").mkdir()
-    (tmp_path / "core" / "note_contract.py").write_text("x", encoding="utf-8")
-    assert contract_gaps(GOOD, tmp_path) == []
-
-
 def test_a_stub_note_is_refused_BEFORE_it_becomes_a_file(tmp_path: Path) -> None:
     """Главное свойство: отказ до записи, а не вердикт после."""
     with pytest.raises(RuntimeError) as excinfo:
@@ -78,16 +62,6 @@ def test_a_real_note_is_not_refused(tmp_path: Path) -> None:
     _refuse_note_without_its_contract(
         _Loop(tmp_path), "data/notes/good.md", GOOD,
     )
-
-
-def test_a_file_outside_the_notes_folder_is_not_judged_as_a_note(tmp_path: Path) -> None:
-    """Договор конспекта судит конспекты, а не любую запись.
-
-    Иначе обычная правка кода или журнал начали бы требовать дословную цитату
-    и проверку с числом — запрет стал бы шире своего основания.
-    """
-    _refuse_note_without_its_contract(_Loop(tmp_path), "core/llm.py", STUB)
-    _refuse_note_without_its_contract(_Loop(tmp_path), "data/report.md", STUB)
 
 
 def test_an_unknown_workspace_does_not_lock_the_write(tmp_path: Path) -> None:

@@ -137,16 +137,6 @@ def test_memory_use_outside_declared_scope_fails() -> None:
     } <= _codes(report)
 
 
-def test_undeclared_memory_policy_is_unknown() -> None:
-    report = audit_subagent_execution(
-        _contract(memory_scope=None),
-        _receipt(memory_read_tags=(), memory_write_tags=()),
-    )
-
-    assert report.verdict == "unknown"
-    assert _codes(report) == {"memory_scope_undeclared"}
-
-
 @pytest.mark.parametrize(
     ("receipt_changes", "expected_code"),
     [

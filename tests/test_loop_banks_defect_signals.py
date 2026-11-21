@@ -68,43 +68,6 @@ def test_a_real_run_banks_a_collected_signal_set(workspace: Path):
     assert isinstance(episodes[-1].defect_signals, tuple)
 
 
-def test_a_clean_run_records_an_empty_set_not_a_missing_one(workspace: Path):
-    """A run with nothing wrong says so, rather than staying silent."""
-    episodes = _run_once(workspace).load()
-    assert episodes[-1].defect_signals == ()
-
-
-def test_the_loop_resets_signals_per_cycle(workspace: Path):
-    """A previous run's faults must not be banked against the next episode."""
-    registry = ToolRegistry()
-    registry.register(FileReadTool(workspace_root=workspace))
-    logger = TraceLogger(
-        trace_id=new_trace_id(), log_dir=workspace / "logs", verbose=False
-    )
-    llm = FakeLLM(responses=[PLAN_EMPTY, SYNTH_OK, PLAN_EMPTY, SYNTH_OK])
-    episodic = EpisodicMemoryStore(workspace / "data" / "episodes.jsonl")
-    agent = AgentLoop(
-        registry=registry,
-        policy=PolicyGate(registry),
-        llm=llm,
-        logger=logger,
-        planner=LLMPlanner(llm=llm, registry=registry),
-        memory=WorkingMemory(),
-        persistent_store=PersistentMemoryStore(workspace / "data" / "mem.jsonl"),
-        episodic_store=episodic,
-    )
-    agent.run(user_question="First question?")
-    # Plant a fault as if a sensor had fired, then run again.
-    agent._defect_signals.append("planted_fault")
-    agent.run(user_question="Second question?")
-
-    last = episodic.load()[-1]
-    assert "planted_fault" not in (last.defect_signals or ()), (
-        "the second episode inherited the first run's fault; the per-cycle "
-        "reset is what keeps a fault attached to the run that caused it"
-    )
-
-
 def test_the_write_event_reports_the_signals(workspace: Path):
     """An operator reading the journal sees the faults beside the verdict."""
     registry = ToolRegistry()

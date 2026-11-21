@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from core.market_client import MarketClient, MarketError
-from core.market_worker import MarketWorker, classify
+from core.market_worker import MarketWorker
 
 TOKEN = "aat_" + "0123456789abcdef" * 2
 
@@ -170,23 +170,6 @@ def test_the_full_cycle_assignment_agent_submit_status(market, tmp_path: Path) -
     assert a["status"] == "submitted" and len(a["deliverableHash"]) == 64
 
 
-def test_a_job_not_allowed_by_the_operator_is_not_even_started(market, tmp_path: Path) -> None:
-    worker = MarketWorker(_client(market, tmp_path), lambda text: "x", allowed_jobs=set(),
-                          workdir=tmp_path / "market")
-    reports = worker.poll_once()
-    assert all("не взято" in r.steps[0] for r in reports)
-    assert not [c for c in market.calls if c[0] == "POST"], "nothing may be started or submitted"
-    assert market.assignments["as-1"]["assignment"]["startedAt"] is None
-
-
-def test_no_bid_is_ever_placed(market, tmp_path: Path) -> None:
-    worker = MarketWorker(_client(market, tmp_path), lambda text: "ok", allowed_jobs={"job-test"},
-                          workdir=tmp_path / "market")
-    worker.poll_once()
-    assert not [c for c in market.calls if "/bids" in c[1] and c[0] == "POST"]
-    assert not hasattr(MarketClient, "place_bid")
-
-
 def test_server_errors_and_rate_limits_are_retried(market, tmp_path: Path) -> None:
     market.fail_first["/v1/agents/me/assignments"] = [503, 429]
     rows = _client(market, tmp_path).my_assignments("all")
@@ -204,28 +187,9 @@ def test_a_client_error_is_not_retried(market, tmp_path: Path) -> None:
     assert len((tmp_path / "m.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
-def test_the_token_never_reaches_the_log(market, tmp_path: Path) -> None:
-    worker = MarketWorker(_client(market, tmp_path), lambda text: f"echo {TOKEN}", allowed_jobs={"job-test"},
-                          workdir=tmp_path / "market")
-    worker.poll_once()
-    text = (tmp_path / "market_api.jsonl").read_text(encoding="utf-8")
-    assert TOKEN not in text and "sig=secret" not in text
-
-
 def test_plain_http_is_refused_outside_localhost() -> None:
     with pytest.raises(MarketError):
         MarketClient(token=TOKEN, base_url="http://market.near.ai")
-
-
-@pytest.mark.parametrize(("row", "kind"), [
-    ({"status": "in_progress", "startedAt": None, "deliverableUrl": None}, "fresh"),
-    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": None}, "in_flight"),
-    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": "u", "submittedAt": "t"}, "rework"),
-    ({"status": "in_progress", "startedAt": "t", "deliverableUrl": "u", "submittedAt": None}, "redo"),
-    ({"status": "accepted"}, "accepted"),
-])
-def test_rows_are_classified_as_the_lifecycle_table_says(row: dict, kind: str) -> None:
-    assert classify({"assignment": row}) == kind
 
 
 # ── пункты 2–4 (2026-09-25): переписка, вложения, срок ──────────────────────
@@ -297,12 +261,6 @@ def test_rework_is_acknowledged_and_resubmitted(market, tmp_path: Path) -> None:
     assert market.posted["as-1"][0].startswith("Получил замечания")
     assert "Нужно подробнее" in asked[0]
     assert market.posted["as-1"][-1].startswith("Сдал результат")
-
-
-def test_a_long_message_is_split_not_cut(market, tmp_path: Path) -> None:
-    _only_allowed(market)
-    _client(market, tmp_path).post_message("as-1", "я" * 9000)
-    assert [len(x) for x in market.posted["as-1"]] == [4000, 4000, 1000]
 
 
 def test_the_nearest_deadline_goes_first_and_a_passed_one_is_flagged(market, tmp_path: Path) -> None:

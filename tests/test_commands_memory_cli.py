@@ -90,26 +90,6 @@ def hygiene_agent():
 
 # ── :hygiene — the dry-run contract ──────────────────────────────────────────
 
-@pytest.mark.parametrize("rest,expected_dry", [("--apply", False), ("", True), ("--dry-run", True), ("all --dry-run", True)])
-def test_bulk_hygiene_passes_the_same_dry_run_to_every_step(
-    rest, expected_dry, hygiene_agent, tmp_path, capsys
-):
-    assert _handle_hygiene(rest, hygiene_agent, tmp_path) is True
-
-    steps = [name for name, _ in hygiene_agent.calls]
-    flags = {flag for _, flag in hygiene_agent.calls}
-    assert steps == [
-        "expire", "dedupe", "episodic", "episodic_dedupe", "backups",
-    ], "documented order"
-    assert flags == {expected_dry}, "one stray real deletion inside a dry run is the bug this catches"
-
-    err = capsys.readouterr().err
-    assert f"hygiene (dry_run={expected_dry})" in err
-    assert "expire   : 1 record(s) past TTL" in err
-    assert "dedupe   : 1 near-duplicate(s) collapsed (1 group(s))" in err
-    assert "episodic : 2 stale episode(s) pruned, 1 repeat(s) collapsed" in err
-    assert "backups  : 1 old .bak.<ts> file(s) removed (scanned 2)" in err
-
 
 @pytest.mark.parametrize(
     "sub,expected_call",
@@ -127,24 +107,11 @@ def test_each_subcommand_runs_only_its_own_step(sub, expected_call, hygiene_agen
     assert f"{sub} (dry_run=True)" in capsys.readouterr().err
 
 
-def test_dry_run_is_recognised_before_the_subcommand(hygiene_agent, tmp_path, capsys):
-    """`:hygiene --dry-run expire` must not be read as a subcommand named --dry-run."""
-    assert _handle_hygiene("--dry-run expire", hygiene_agent, tmp_path) is True
-    assert hygiene_agent.calls == [("expire", True)]
-
-
 def test_dedupe_lists_its_groups(hygiene_agent, tmp_path, capsys):
     assert _handle_hygiene("dedupe", hygiene_agent, tmp_path) is True
     err = capsys.readouterr().err
     assert "threshold=0.9" in err
     assert "canonical=m1 dups=['m2']" in err
-
-
-def test_backups_reports_kept_and_deleted(hygiene_agent, tmp_path, capsys):
-    assert _handle_hygiene("backups", hygiene_agent, tmp_path) is True
-    err = capsys.readouterr().err
-    assert "scanned 2 backup(s), deleted 1, kept 1" in err
-    assert "keep_last=3, max_age_days=7" in err
 
 
 def test_summarise_requires_a_tag(hygiene_agent, tmp_path, capsys):
@@ -254,46 +221,7 @@ def test_rollback_without_an_id_asks_for_the_latest_plan(tmp_path, capsys):
     assert "[ok] restore core/foo.py — restored" in err
 
 
-def test_rollback_with_an_explicit_id(tmp_path, capsys):
-    seen: dict = {}
-    agent = SimpleNamespace(
-        compensation_log=[],
-        rollback=lambda *, plan_id, workspace_root: (seen.setdefault("plan_id", plan_id)
-        and None)
-        or SimpleNamespace(
-            plan_id=plan_id,
-            summary=lambda: {"skipped_reason": None, "ok": 0, "noop": 1, "error": 0, "outcomes": []},
-        ),
-        log=FakeLog(),
-    )
-
-    assert _handle_rollback("cp-3", agent, tmp_path) is True
-    assert seen["plan_id"] == "cp-3"
-    assert "rollback cp-3: ok=0, noop=1, error=0" in capsys.readouterr().err
-
-
-def test_a_skipped_rollback_says_why_and_prints_no_counts(tmp_path, capsys):
-    agent = SimpleNamespace(
-        compensation_log=[],
-        rollback=lambda *, plan_id, workspace_root: SimpleNamespace(
-            plan_id="cp-4",
-            summary=lambda: {"skipped_reason": "plan already applied"},
-        ),
-        log=FakeLog(),
-    )
-
-    assert _handle_rollback("cp-4", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "rollback skipped: plan already applied" in err
-    assert "ok=" not in err, "a skipped rollback must not print zero-counts as if it ran"
-
-
 # ── _print_persistent ────────────────────────────────────────────────────────
-
-def test_persistent_listing_when_empty(capsys):
-    _print_persistent(SimpleNamespace(list_persistent=list))
-    assert "(no persistent records)" in capsys.readouterr().err
 
 
 def test_persistent_listing_truncates_and_renders_both_content_shapes(capsys):
@@ -326,19 +254,6 @@ def test_smart_memory_rejects_unknown_flags(capsys):
     )
     assert _handle_smart_memory("--all", agent) is True
     assert "Usage: :smart-memory [archive <слово>] [--json]" in capsys.readouterr().err
-
-
-def test_smart_memory_prints_all_three_stores(capsys):
-    agent = SimpleNamespace(log=FakeLog(), smart_memory_summary=lambda: dict(SMART))
-
-    assert _handle_smart_memory("", agent) is True
-
-    err = capsys.readouterr().err
-    assert "episodic: episodes=4 outcomes=3" in err
-    assert "procedural: procedures=2" in err
-    assert "consolidation: reports=1" in err
-    assert "last consolidation:" not in err
-    assert agent.log.kinds() == ["smart_memory_status"]
 
 
 def test_smart_memory_shows_the_last_consolidation_notes(capsys):

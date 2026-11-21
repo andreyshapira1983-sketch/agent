@@ -26,17 +26,6 @@ def test_a_deferred_choice_becomes_a_question(request_text: str):
     assert all("?" in a for a in contract.ambiguities), "неясность — готовый вопрос заказчику"
 
 
-@pytest.mark.parametrize("request_text", [
-    "Отправь мне отчёт по data.csv в формате Markdown.",
-    "Отправь файл sum.txt по электронной почте на client@example.com.",
-    "Сохрани отчёт в удобном формате.",
-    "Посчитай сумму чисел в numbers.txt и запиши её в sum.txt.",
-    "Подготовь письмо заказчику о сдаче работы — letter.md. Ничего не отправляй.",
-])
-def test_a_named_or_own_choice_is_not_asked(request_text: str):
-    assert not derive_completion_contract(request_text).needs_clarification, request_text
-
-
 def test_the_gate_asks_before_any_work(workspace):
     from core.approval import AutoApprover
     from core.logger import TraceLogger

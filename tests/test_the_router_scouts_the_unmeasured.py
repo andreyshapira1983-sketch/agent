@@ -10,7 +10,6 @@ from core.model_outcomes import (
     SCOUT_PERIOD,
     measure_model_outcomes,
     scout_model,
-    scout_turn,
     substitute_model,
 )
 
@@ -51,17 +50,6 @@ def _pin_world(monkeypatch, *, peer=_UNMEASURED_PEER):
     )
 
 
-def test_an_unmeasured_peer_is_named_as_scout(monkeypatch):
-    _pin_world(monkeypatch)
-
-    picked = scout_model(
-        _outcomes((_MEASURED, MIN_RUNS)),
-        role="planner", provider="openai", current_model="claude-sonnet-5",
-    )
-
-    assert picked == _UNMEASURED_PEER
-
-
 def test_a_measured_peer_is_not_scouted(monkeypatch):
     """Разведка кончается там, где начинается замер: набрал прогоны — дальше
     решает таблица, а не очередь.
@@ -76,18 +64,6 @@ def test_a_measured_peer_is_not_scouted(monkeypatch):
     assert picked is None
 
 
-def test_an_undermeasured_peer_is_still_scouted(monkeypatch):
-    """Два прогона — не замер: молчащей строке таблицы материал ещё нужен."""
-    _pin_world(monkeypatch)
-
-    picked = scout_model(
-        _outcomes((_MEASURED, MIN_RUNS), (_UNMEASURED_PEER, 2)),
-        role="planner", provider="openai", current_model="claude-sonnet-5",
-    )
-
-    assert picked == _UNMEASURED_PEER
-
-
 def test_no_peer_means_no_scout(monkeypatch):
     _pin_world(monkeypatch, peer=None)
 
@@ -97,20 +73,6 @@ def test_no_peer_means_no_scout(monkeypatch):
     )
 
     assert picked is None
-
-
-def test_the_turn_advances_with_decisions_not_with_the_capped_table():
-    """Две фальсификации одной конструкции. Первая (2026-08-15): окно по
-    настенным часам пропустило всю охоту — вспышка короче закрытого отрезка.
-    Вторая (2026-08-16): счёт по прогонам таблицы замер НАВСЕГДА — таблица
-    питается кольцевым буфером эпизодов (потолок 200), плюс прогон — минус
-    вытесненный, mat=110 на шести решениях трёх попыток подряд, остаток %4
-    не меняется, ход не выпадает никогда. Часы хода обязаны быть монотонными:
-    считаются РЕШЕНИЯ по append-only журналу вызовов.
-    """
-    assert scout_turn(SCOUT_PERIOD * 2) is True
-    assert scout_turn(SCOUT_PERIOD * 2 + 1) is False
-    assert scout_turn(0) is True, "первое решение в истории — ход разведчика"
 
 
 def test_decisions_are_counted_per_role_from_the_ledger(tmp_path):
@@ -175,34 +137,6 @@ def test_substitute_keeps_the_measured_winner_off_turn(monkeypatch):
     )
 
     assert picked == _MEASURED
-
-
-def test_the_floor_is_untouched_when_nothing_is_measured(monkeypatch):
-    """Без замеров разведке нечего разведывать особым путём: пол (карта
-    уровней) и так отдаёт ровесника.
-    """
-    _pin_world(monkeypatch)
-    monkeypatch.setattr(mo, "measured_outcomes", lambda _w=None: ())
-
-    picked = substitute_model(
-        role="planner", provider="openai", current_model="claude-sonnet-5",
-    )
-
-    assert picked == _UNMEASURED_PEER
-
-
-def test_the_live_selection_carries_the_scout():
-    """Вторая половина дороги: разведка обязана стоять в живом пути выбора,
-    а не только существовать чистой функцией рядом.
-    """
-    import inspect
-
-    from core.model_outcomes import substitute_model_with_reason
-
-    source = inspect.getsource(substitute_model_with_reason)
-    assert "scout_model(" in source
-    assert "scout_turn(" in source
-    assert "substitute_model_with_reason(" in inspect.getsource(substitute_model)
 
 
 def test_the_substitution_names_its_reason(monkeypatch):

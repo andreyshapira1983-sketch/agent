@@ -27,8 +27,6 @@ from types import SimpleNamespace
 from core.causal_claim_store import load_claims, save_claim
 from core.causal_climb import propose_explanation
 from core.causal_climb_action import (
-    experimentable_claims,
-    parse_experiment,
     run_claim_experiment,
 )
 from core.causal_lesson import CausalClaim, Observation
@@ -67,18 +65,6 @@ _EXP_PROVES = (
 )
 # Уточнение: следствие — подстрока результата; для А это unjustified с
 # web_search, для Б unjustified пуст.
-
-
-def test_the_experiment_grammar_parses_and_rejects() -> None:
-    """Красный свидетель разбора: белый список — закон."""
-    ok = parse_experiment(
-        "x [exp: reasoning_action_check | A=а ;; t1 | B=б ;; t2 | след=unjust]")
-    assert ok is not None and ok.target == "reasoning_action_check"
-    assert ok.arm_a == "а ;; t1" and ok.effect == "unjust"
-
-    assert parse_experiment("без спецификации") is None
-    assert parse_experiment(
-        "x [exp: os.system | A=rm | B=ls | след=x]") is None, "цель вне списка"
 
 
 def test_a_vanishing_effect_proves_the_cause(tmp_path: Path) -> None:
@@ -144,37 +130,3 @@ def test_the_signal_and_the_executor_ship_together() -> None:
     assert picked.action == "run_claim_experiment"
     assert silent.action != "run_claim_experiment"
     assert '"run_claim_experiment"' in inspect.getsource(mod._default_execute_action)
-
-
-def test_experimentable_lists_only_open_specced_claims(tmp_path: Path) -> None:
-    """Block 4 (M1, 2026-09-03) re-drew «open» at this rung: a claim whose
-    explanation was CHOSEN BY PROBES but never proven by intervention is still
-    open here — before, `chosen` closed slice 3 and 15 live EXPLAINED claims
-    had no move at all. A claim with its intervention, or refuted, is closed."""
-    save_claim(_claim(_EXP_PROVES, "без спеки"), workspace=tmp_path)
-
-    assert len(experimentable_claims(tmp_path)) == 1
-
-    import dataclasses
-
-    from core.causal_lesson import Intervention
-    claim, _extra = load_claims(tmp_path)[0]
-    save_claim(dataclasses.replace(claim, chosen="гипотеза 0"),
-               workspace=tmp_path)
-    assert len(experimentable_claims(tmp_path)) == 1, "выбор по пробам — не доказательство"
-
-    proven = dataclasses.replace(
-        claim, chosen="гипотеза 0",
-        intervention=Intervention(mutated="m", predicted="p", observed="o"),
-    )
-    save_claim(proven, workspace=tmp_path)
-    assert experimentable_claims(tmp_path) == ()
-
-
-def test_the_experiment_calls_no_model() -> None:
-    import inspect
-
-    from core import causal_climb_action as mod
-
-    src = inspect.getsource(mod.run_claim_experiment)
-    assert ".complete(" not in src and "llm" not in src

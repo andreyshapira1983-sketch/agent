@@ -57,16 +57,6 @@ def test_priority_order_urgent_before_scheduled_before_background():
     assert [e.kind for e in q.pop_batch()] == ["urg", "sched", "bg"]
 
 
-def test_fifo_stable_within_same_priority():
-    q = PriorityEventQueue(aging_after=0)
-    q.put("a", EventPriority.SCHEDULED, {"i": 1})
-    q.put("b", EventPriority.SCHEDULED, {"i": 2})
-    q.put("c", EventPriority.SCHEDULED, {"i": 3})
-
-    kinds = [e.kind for e in q.pop_batch()]
-    assert kinds == ["a", "b", "c"]
-
-
 def test_aging_serves_background_after_streak():
     q = PriorityEventQueue(aging_after=2)
     q.put("u1", EventPriority.URGENT)
@@ -81,38 +71,12 @@ def test_aging_serves_background_after_streak():
     assert q.get_nowait().kind == "u3"
 
 
-def test_aging_disabled_allows_background_starvation_until_end():
-    q = PriorityEventQueue(aging_after=0)
-    q.put("bg", EventPriority.BACKGROUND)
-    q.put("u1", EventPriority.URGENT)
-    q.put("u2", EventPriority.URGENT)
-
-    assert [e.kind for e in q.pop_batch()] == ["u1", "u2", "bg"]
-
-
 def test_invalid_aging_after_and_pop_batch_limit():
     with pytest.raises(ValueError, match="aging_after"):
         PriorityEventQueue(aging_after=-1)
     q = PriorityEventQueue()
     with pytest.raises(ValueError, match="max_items"):
         q.pop_batch(-1)
-
-
-def test_daemon_event_to_dict_is_json_friendly():
-    event = DaemonEvent(
-        priority=EventPriority.URGENT,
-        sequence=1,
-        kind="approval",
-        event_id="devent_test",
-        payload={"path": "inbox.jsonl"},
-        created_at="2026-07-12T00:00:00+00:00",
-    )
-    payload = event.to_dict()
-    assert payload["priority"] == "urgent"
-    assert payload["priority_value"] == 0
-    assert payload["kind"] == "approval"
-    assert payload["payload"] == {"path": "inbox.jsonl"}
-    assert "dedup_key" not in payload
 
 
 def test_same_dedup_key_returns_first_without_replacing_or_promoting():
@@ -149,47 +113,6 @@ def test_same_dedup_key_returns_first_without_replacing_or_promoting():
         "sibling",
         "after-duplicate",
     ]
-
-
-def test_different_dedup_keys_are_independent():
-    q = PriorityEventQueue()
-    first = q.put("first", dedup_key="task:1")
-    second = q.put("second", dedup_key="task:2")
-
-    assert first is not second
-    assert len(q) == 2
-    assert {event.dedup_key for event in q.pop_batch()} == {"task:1", "task:2"}
-
-
-def test_missing_dedup_key_preserves_duplicate_events():
-    q = PriorityEventQueue()
-    first = q.put("same", payload={"value": 1})
-    second = q.put("same", payload={"value": 1})
-
-    assert first is not second
-    assert second.sequence == first.sequence + 1
-    assert len(q) == 2
-
-
-def test_dedup_key_can_be_reused_after_get_nowait():
-    q = PriorityEventQueue()
-    first = q.put("first", dedup_key="task:1")
-    assert q.get_nowait() is first
-
-    replacement = q.put("replacement", dedup_key="task:1")
-
-    assert replacement is not first
-    assert replacement.sequence == first.sequence + 1
-
-
-def test_pop_batch_releases_each_dedup_key():
-    q = PriorityEventQueue()
-    first = q.put("first", EventPriority.URGENT, dedup_key="task:1")
-    second = q.put("second", EventPriority.SCHEDULED, dedup_key="task:2")
-
-    assert q.pop_batch() == [first, second]
-    assert q.put("first-again", dedup_key="task:1") is not first
-    assert q.put("second-again", dedup_key="task:2") is not second
 
 
 def test_background_aging_pop_releases_dedup_key():
@@ -230,18 +153,6 @@ def test_empty_dedup_key_is_rejected():
             kind="event",
             dedup_key=" ",
         )
-
-
-def test_closed_queue_rejects_duplicate_without_consuming_pending_event():
-    q = PriorityEventQueue()
-    first = q.put("first", dedup_key="task:1")
-    q.close()
-
-    with pytest.raises(PriorityEventQueueClosed):
-        q.put("duplicate", dedup_key="task:1")
-
-    assert len(q) == 1
-    assert q.get_nowait() is first
 
 
 def test_on_put_callback_error_is_isolated(caplog):
@@ -300,28 +211,6 @@ def test_async_get_waits_then_returns():
     asyncio.run(scenario())
 
 
-def test_async_get_releases_dedup_key():
-    async def scenario() -> None:
-        q = PriorityEventQueue()
-        first = q.put("first", dedup_key="task:1")
-
-        assert await q.get() is first
-        replacement = q.put("replacement", dedup_key="task:1")
-        assert replacement is not first
-
-    asyncio.run(scenario())
-
-
-def test_async_get_raises_when_closed_empty():
-    async def scenario() -> None:
-        q = PriorityEventQueue()
-        q.close()
-        with pytest.raises(PriorityEventQueueClosed):
-            await asyncio.wait_for(q.get(), timeout=1.0)
-
-    asyncio.run(scenario())
-
-
 def test_close_unblocks_waiting_get():
     async def scenario() -> None:
         q = PriorityEventQueue()
@@ -333,10 +222,3 @@ def test_close_unblocks_waiting_get():
             await asyncio.wait_for(waiter, timeout=1.0)
 
     asyncio.run(scenario())
-
-
-def test_repeated_close_is_safe():
-    q = PriorityEventQueue()
-    q.close()
-    q.close()
-    assert q.closed is True

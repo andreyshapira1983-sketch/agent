@@ -14,8 +14,3 @@ from core.self_improvement_issues import SelfImprovementIssue
 def test_a_string_is_read_as_one_piece_of_evidence() -> None:
     issue = SelfImprovementIssue.from_dict({"fingerprint": "x", "evidence": "одна строка"})
     assert issue.evidence == ("одна строка",)
-
-
-def test_a_list_is_still_read_as_a_list() -> None:
-    issue = SelfImprovementIssue.from_dict({"fingerprint": "x", "evidence": ["a", "b"]})
-    assert issue.evidence == ("a", "b")

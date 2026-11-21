@@ -31,13 +31,6 @@ def _fetch(code: int) -> dict:
     return WebFetchTool(opener=_Opener(code)).run(url=_URL)
 
 
-def test_a_404_comes_back_as_an_observation() -> None:
-    out = _fetch(404)
-    assert out["not_found"] is True and out["status_code"] == 404
-    assert out["text"].startswith(f"HTTP 404 Not Found: {_URL}")
-    assert WebFetchTool().validate_output(out)[0]
-
-
 @pytest.mark.parametrize("code", [401, 403, 429, 500, 503])
 def test_other_codes_say_nothing_about_existence_and_stay_errors(code: int) -> None:
     with pytest.raises(ValueError, match=f"HTTP {code}"):

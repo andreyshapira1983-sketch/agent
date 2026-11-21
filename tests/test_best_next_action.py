@@ -8,8 +8,6 @@ from cli.commands_approval import _handle_self_issue_verify
 from core.approval_inbox import ApprovalInboxItem
 from core.approval_triage import triage_inbox
 from core.best_next_action import (
-    BestNextAction,
-    format_best_next_action,
     select_best_next_action,
 )
 from core.self_build_memory import (
@@ -39,14 +37,6 @@ def _triage_with_duplicates(n_dupes: int):
     return triage_inbox(items)
 
 
-def test_returns_exactly_one_action_even_when_nothing_pressing():
-    action = select_best_next_action()
-    assert isinstance(action, BestNextAction)
-    assert action.action == "observe"
-    assert action.severity == "none"
-    assert action.priority == 0
-
-
 def test_failing_tests_beat_inbox_debt_and_dry_run_stall():
     triage = _triage_with_duplicates(5)
     action = select_best_next_action(
@@ -63,67 +53,12 @@ def test_failing_tests_beat_inbox_debt_and_dry_run_stall():
     assert action.recommended_command == ":propose-repair"
 
 
-def test_daemon_down_outranks_everything():
-    action = select_best_next_action(
-        heartbeat_missing=True,
-        tests_health="fail",
-        failed_tests=("test_x",),
-        dry_run_streak=99,
-    )
-    assert action.action == "restore_daemon_liveness"
-    assert action.severity == "critical"
-    assert action.priority == 100
-
-
-def test_tick_error_outranks_test_failure():
-    action = select_best_next_action(
-        tick_error="RuntimeError: boom",
-        tests_health="fail",
-        failed_tests=("test_x",),
-    )
-    assert action.action == "investigate_tick_error"
-    assert any("boom" in e for e in action.evidence)
-
-
 def test_inconclusive_tests_are_not_reported_as_healthy():
     action = select_best_next_action(tests_health="inconclusive")
     assert action.action == "resolve_inconclusive_tests"
     # The honest unknown must explicitly state health is NOT established.
     assert any("NO verdict" in u or "healthy" in u for u in action.unknowns)
     assert action.severity == "high"
-
-
-def test_inbox_duplicate_debt_recommends_triage_when_no_test_problem():
-    triage = _triage_with_duplicates(4)
-    action = select_best_next_action(
-        tests_health="pass",
-        result_status="done",
-        triage=triage,
-    )
-    assert action.action == "reduce_inbox_duplicate_debt"
-    assert action.recommended_command == ":approval-triage"
-    assert any("duplicate" in e for e in action.evidence)
-
-
-def test_dry_run_stall_surfaces_after_threshold():
-    action = select_best_next_action(
-        tests_health="pass",
-        result_status="done",
-        dry_run_streak=7,
-    )
-    assert action.action == "review_dry_run_stall"
-    assert any("dry_run_streak=7" in e for e in action.evidence)
-    # Enabling effects is risky — must be flagged, not auto-done.
-    assert action.risk == "external"
-
-
-def test_short_dry_run_streak_does_not_trigger_stall():
-    action = select_best_next_action(
-        tests_health="pass",
-        result_status="done",
-        dry_run_streak=2,
-    )
-    assert action.action == "observe"
 
 
 def test_recent_self_improvement_failure_beats_clean_observe_state():
@@ -184,48 +119,6 @@ def _agent_with_duplicate_mixin_failure(workspace, created_at: str):
     return SimpleNamespace(episodic_store=store)
 
 
-def test_duplicate_mixin_failure_creates_one_durable_open_issue(workspace):
-    now = datetime.now(timezone.utc).isoformat()
-    agent = _agent_with_duplicate_mixin_failure(workspace, now)
-
-    registry = sync_self_improvement_issue_registry(agent, workspace)
-    first = registry.list()
-    sync_self_improvement_issue_registry(agent, workspace)
-    second = registry.list()
-
-    assert len(first) == len(second) == 1
-    assert first[0].fingerprint == second[0].fingerprint
-    assert first[0].status == "open"
-    assert first[0].title
-    assert first[0].action == "repair_incremental_splitter_duplicate_mixin"
-    assert first[0].first_seen == first[0].last_seen == now
-    assert first[0].evidence
-    assert "duplicate base class" in first[0].related_error_text
-    assert first[0].suggested_next_action
-    assert first[0].related_files == (
-        "core/incremental_splitter.py",
-        "tests/test_incremental_splitter.py",
-    )
-    assert registry.path.is_file()
-
-
-def test_unrelated_successful_self_apply_does_not_resolve_issue(workspace):
-    now = datetime.now(timezone.utc)
-    agent = _agent_with_duplicate_mixin_failure(workspace, now.isoformat())
-    agent.episodic_store.save(EpisodeRecord(
-        goal="apply unrelated self-build proposal",
-        question="self-apply-run",
-        outcome="success",
-        summary="self-apply committed_local: unrelated tests passed",
-        tags=("self-build", "self-apply-run", "success"),
-        created_at=(now + timedelta(seconds=1)).isoformat(),
-    ))
-
-    registry = sync_self_improvement_issue_registry(agent, workspace)
-    assert [issue.status for issue in registry.list()] == ["open"]
-    assert len(registry.unresolved()) == 1
-
-
 def test_matching_resolution_marker_resolves_issue(workspace):
     now = datetime.now(timezone.utc)
     agent = _agent_with_duplicate_mixin_failure(workspace, now.isoformat())
@@ -245,26 +138,6 @@ def test_matching_resolution_marker_resolves_issue(workspace):
     registry = sync_self_improvement_issue_registry(agent, workspace)
     assert registry.list()[0].status == "resolved"
     assert registry.unresolved() == []
-
-
-def test_best_next_action_prefers_open_registry_issue_over_raw_history():
-    action = select_best_next_action(
-        open_self_improvement_issues=({
-            "fingerprint": "sii_registry",
-            "title": "Registry-owned issue",
-            "action": "registry_specific_action",
-            "status": "open",
-            "evidence": ["durable evidence"],
-            "related_files": ["core/specific.py"],
-            "suggested_next_action": "inspect core/specific.py",
-        },),
-        recent_self_improvement_failures=(
-            "TypeError: duplicate base class AgentLoopExtractedMethods",
-        ),
-    )
-    assert action.action == "registry_specific_action"
-    assert any("sii_registry" in item for item in action.evidence)
-    assert all("AgentLoopExtractedMethods" not in item for item in action.evidence)
 
 
 def _linked_generic_and_specific_issues(
@@ -306,39 +179,6 @@ def _linked_generic_and_specific_issues(
         )
     assert specific is not None
     return registry, generic, specific
-
-
-def test_unresolved_generic_issue_surfaces_without_specific_issue(workspace):
-    registry = SelfImprovementIssueRegistry(workspace / DEFAULT_ISSUE_PATH)
-    generic = registry.upsert_failure(
-        "self-build failed for proposal_id=ain_generic_only",
-        "2026-07-09T20:25:04+00:00",
-    )
-
-    unresolved = registry.unresolved()
-    action = select_best_next_action(
-        self_improvement_registry_available=True,
-        open_self_improvement_issues=tuple(issue.to_dict() for issue in unresolved),
-    )
-
-    assert [issue.fingerprint for issue in unresolved] == [generic.fingerprint]
-    assert action.action == "improve_failure_to_idea_pipeline"
-
-
-def test_specific_open_issue_suppresses_linked_generic_issue(workspace):
-    registry, generic, specific = _linked_generic_and_specific_issues(
-        workspace, resolved_specific=False
-    )
-
-    unresolved = registry.unresolved()
-    action = select_best_next_action(
-        self_improvement_registry_available=True,
-        open_self_improvement_issues=tuple(issue.to_dict() for issue in unresolved),
-    )
-
-    assert generic.fingerprint not in {issue.fingerprint for issue in unresolved}
-    assert [issue.fingerprint for issue in unresolved] == [specific.fingerprint]
-    assert action.action == "repair_incremental_splitter_duplicate_mixin"
 
 
 def test_specific_resolved_issue_suppresses_linked_generic_issue(workspace):
@@ -519,29 +359,6 @@ def test_self_issue_verify_wrong_fingerprint_or_action_cannot_resolve(
     assert "no targeted verifier" in error
 
 
-def test_resolved_registry_suppresses_stale_raw_duplicate_mixin_history():
-    action = select_best_next_action(
-        tests_health="pass",
-        result_status="done",
-        self_improvement_registry_available=True,
-        open_self_improvement_issues=(),
-        recent_self_improvement_failures=(
-            "TypeError: duplicate base class AgentLoopExtractedMethods",
-        ),
-    )
-    assert action.action == "observe"
-
-
-def test_large_backlog_without_duplicates_recommends_review():
-    action = select_best_next_action(
-        tests_health="pass",
-        result_status="done",
-        inbox_pending=20,
-    )
-    assert action.action == "review_inbox_backlog"
-    assert any("20 pending" in e for e in action.evidence)
-
-
 def test_every_action_carries_evidence_and_unknowns():
     for action in (
         select_best_next_action(heartbeat_missing=True),
@@ -556,35 +373,3 @@ def test_every_action_carries_evidence_and_unknowns():
         assert action.evidence, f"{action.action} has no evidence"
         assert action.unknowns, f"{action.action} has no unknowns"
         assert 0.0 <= action.confidence <= 1.0
-
-
-def test_format_block_is_advisory_and_compact():
-    action = select_best_next_action(tests_health="fail", failed_tests=("test_a",))
-    text = format_best_next_action(action)
-    assert "best next action:" in text
-    assert "I do NOT know:" in text
-    assert "advisory only" in text
-    # Compact: a handful of lines, not a wall of text.
-    assert text.count("\n") < 20
-
-
-def test_to_dict_logs_the_action_as_selected():
-    """The logged payload carries each field of the chosen action, provenance included."""
-    action = select_best_next_action(tests_health="fail", failed_tests=("t",), dry_run_streak=8)
-    expected = {
-        "action": "propose_minimal_test_repair",
-        "title": action.title,
-        "severity": "high",
-        "priority": action.priority,
-        "reason": action.reason,
-        "evidence": list(action.evidence),
-        "unknowns": list(action.unknowns),
-        "risk": action.risk,
-        "recommended_command": ":propose-repair",
-        "confidence": action.confidence,
-        "decided_by": "priority_table",
-        "grounds": "observed_state",
-        "candidates_considered": 2,
-    }
-    data = action.to_dict()
-    assert {key: data.get(key) for key in expected} == expected

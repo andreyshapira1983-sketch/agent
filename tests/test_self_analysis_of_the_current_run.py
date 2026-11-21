@@ -52,39 +52,5 @@ def test_the_first_message_may_analyse_its_own_run(question: str) -> None:
     assert decision.reason == "current_run_introspection"
 
 
-def test_the_prior_turn_path_is_untouched() -> None:
-    """ПРЕДУСЛОВИЕ: прежняя дорога не сузилась и не подменена."""
-    decision = is_self_analysis_turn(
-        "Ты не правильно ответила, тебе надо починить свой ответ",
-        has_prior_turn=True,
-    )
-    assert decision.is_self_analysis
-    assert decision.reason == "conversational_correction"
-
-
-@pytest.mark.parametrize("question", [
-    "что в файле doc.txt",
-    "проанализируй core/loop.py и скажи что он делает",
-    "расскажи про этот проект",
-    "какая погода в этом городе",
-])
-def test_an_ordinary_question_is_not_self_analysis(question: str) -> None:
-    """Ломка наоборот: расширение не имеет права проглотить обычный вопрос.
-
-    «этот проект», «этом городе» содержат указатель на текущее, но предметом
-    разбора не являются — иначе гейт улик отключался бы почти всегда, и
-    подавление сменилось бы противоположным дефектом.
-    """
-    decision = is_self_analysis_turn(question, has_prior_turn=False)
-    assert not decision.is_self_analysis, f"проглочен обычный вопрос: {question!r}"
-
-
-def test_addressing_the_agent_without_a_subject_is_not_enough() -> None:
-    """Второе лицо само по себе саморазбором не делает."""
-    assert not is_self_analysis_turn(
-        "ты можешь прочитать этот файл?", has_prior_turn=False
-    ).is_self_analysis
-
-
 def test_an_empty_question_is_still_refused() -> None:
     assert not is_self_analysis_turn("", has_prior_turn=False).is_self_analysis

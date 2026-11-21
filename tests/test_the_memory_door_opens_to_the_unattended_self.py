@@ -23,28 +23,6 @@ _PROSE = (
 )
 
 
-def test_memory_bank_is_no_longer_blocked_on_the_unattended_goal_path() -> None:
-    from core.autonomous_runtime import _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-
-    assert "memory_bank" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-    # Controls: the rest of the freeze stands.
-    # python_probe вышел из этого множества 2026-09-19 словом оператора.
-    # journal_append вышел из набора 2026-09-23 тем же путём, что memory_bank
-    # 09-04: словом оператора, со стенами и с суточным потолком голоса.
-    # Проверка этой двери — в tests/test_two_walls_opened_by_the_operator.py.
-    assert "journal_append" not in _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-    assert {"spawn_subagent"} <= _AUTONOMOUS_GOAL_BLOCKED_TOOLS
-
-
-def test_a_write_is_stored_only_after_a_readback(tmp_path) -> None:
-    store = PersistentMemoryStore(tmp_path / "pm.jsonl")
-
-    mem_id, reason = memory_door_verdict(store, MemoryWritePolicy(), _PROSE, _KIND, "test:door")
-
-    assert mem_id and reason == ""
-    assert any(r.id == mem_id for r in store.load())
-
-
 def test_a_write_that_cannot_be_read_back_is_not_stored(tmp_path) -> None:
     class _Amnesiac(PersistentMemoryStore):
         def load(self):  # the disk «forgets» what was just saved

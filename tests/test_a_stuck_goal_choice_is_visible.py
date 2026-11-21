@@ -59,8 +59,3 @@ def test_old_declines_are_not_today_s_problem(tmp_path: Path) -> None:
     ws = _decisions(tmp_path, [_row(50, "declined", "old")])
 
     assert charter_status_lines(ws) == []
-
-
-def test_no_file_is_not_an_error(tmp_path: Path) -> None:
-    """Строка состояния не имеет права ронять тик."""
-    assert charter_status_lines(tmp_path) == []

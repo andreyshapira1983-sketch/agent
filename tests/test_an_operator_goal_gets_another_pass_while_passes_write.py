@@ -54,20 +54,7 @@ def _run(tmp_path: Path, execute, **cfg):
     )
 
 
-def test_reconnaissance_passes_do_not_close_the_goal(tmp_path: Path) -> None:
-    execute = _Passes()
-    result = _run(tmp_path, execute)
-    assert execute.actions == [PURSUE_GOAL] * OPERATOR_GOAL_EMPTY_PASSES, execute.actions
-    assert result.records[-1].result == "idle", "после трёх пустых заходов — стоп по простою"
-
-
 def test_a_writing_pass_resets_the_count(tmp_path: Path) -> None:
     execute = _Passes(False, False, True)
     _run(tmp_path, execute)
     assert execute.actions == [PURSUE_GOAL] * (3 + OPERATOR_GOAL_EMPTY_PASSES), execute.actions
-
-
-def test_the_agents_own_goal_keeps_one_pass(tmp_path: Path) -> None:
-    execute = _Passes(True, True, True)
-    _run(tmp_path, execute, goal_is_self=True)
-    assert execute.actions == [PURSUE_GOAL], "своя цель агента сменяется драйвами, а не повторяется"

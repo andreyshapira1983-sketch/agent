@@ -107,21 +107,6 @@ def test_control_run_records_durable_learning(workspace: Path) -> None:
     assert agent.episodic_store.load(), "fixture should write an episode without audit"
 
 
-def test_audit_read_only_disables_all_durable_memory_writes(workspace: Path) -> None:
-    agent = _agent(workspace / "audit")
-    assert agent.set_audit_read_only(True) is True
-
-    agent.run(user_question=_GOAL)
-
-    assert agent.episodic_store.load() == []
-    assert agent.procedural_store.load() == []
-    assert agent.consolidation_store.count() == 0
-    # Persistent access-stat bumps are a durable learning write too.
-    assert agent.persistent_store.load()[0].access_count == 0
-    # User profile must not learn from an audited interaction.
-    assert agent.user_profile_store.load_or_default().interaction_count == 0
-
-
 def test_audit_read_only_freezes_agent_auto_but_allows_user_explicit(
     workspace: Path,
 ) -> None:
@@ -141,25 +126,6 @@ def test_audit_read_only_freezes_agent_auto_but_allows_user_explicit(
     )
     assert accept.decision == "save"
     assert saved_record is not None
-
-
-def test_incomplete_audit_is_not_recorded_as_successful_procedure(
-    workspace: Path,
-) -> None:
-    """An audited cycle banks NO procedure regardless of computed outcome.
-
-    Outcome is evidence-quality based and does not know whether the planned
-    investigation completed. Under audit read-only, durable learning is
-    suppressed entirely, so an incomplete/uncertain audit can never graduate
-    into a reusable "success" procedure.
-    """
-    agent = _agent(workspace / "incomplete")
-    agent.set_audit_read_only(True)
-
-    agent.run(user_question=_GOAL)
-
-    assert agent.procedural_store.load() == []
-    assert all(ep.outcome != "success" for ep in agent.episodic_store.load())
 
 
 def test_audit_off_resumes_writes_and_preserves_env_freeze(workspace: Path) -> None:

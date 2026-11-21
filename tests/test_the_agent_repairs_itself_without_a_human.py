@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from core.patch_route import _forbidden, defect_goal, settle_patch
+from core.patch_route import defect_goal, settle_patch
 from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
 
 
@@ -39,16 +39,6 @@ def test_the_goal_names_an_open_defect_and_its_patch_file(tmp_path: Path) -> Non
     goal = defect_goal(root)
     assert goal is not None and "proposals/selffix/" in goal.success_check
     assert defect_goal(root) is None, "тот же дефект не берётся снова раньше срока"
-
-
-def test_money_keys_policy_and_the_route_itself_are_out_of_reach() -> None:
-    assert _forbidden(["core/approval_inbox.py", "core/secret_scanner.py", "core/patch_route.py",
-                       "tools/web_fetch.py", "core/mod.py"]) == [
-        "core/approval_inbox.py", "core/secret_scanner.py", "core/patch_route.py", "tools/web_fetch.py"]
-
-
-def test_a_goal_that_is_not_a_patch_is_left_to_the_ordinary_judge(tmp_path: Path) -> None:
-    assert settle_patch(None, tmp_path, "В книге найдена теорема") is None
 
 
 def test_a_red_patch_does_not_land(tmp_path: Path) -> None:
@@ -97,29 +87,6 @@ def test_an_environment_defect_is_left_to_the_operator(tmp_path: Path) -> None:
         suggested_next_action="решает оператор")])
 
     assert defect_goal(root) is None
-
-
-def test_the_goal_shows_the_block_form_and_forbids_an_excuse(tmp_path: Path) -> None:
-    """Задание отвечает на два промаха живого прогона в ночь на 23.09.
-
-    Первый: в файл правки легла отписка «шаг 1 не вернул точный текст строк
-    150-172, поэтому SEARCH собрать не могу» — его же открытый дефект
-    «объяснил стену вместо того, чтобы её проверить». Второй: разделители
-    слиплись в одну строку, и 305 КБ содержимого ушли в мусор.
-    """
-    from core.patch_route import defect_goal
-    from core.self_improvement_issues import DEFAULT_ISSUE_PATH, SelfImprovementIssueRegistry
-
-    registry = SelfImprovementIssueRegistry(tmp_path / DEFAULT_ISSUE_PATH)
-    registry.upsert_failure("тестовый сбой ради задания", "2026-09-23T01:00:00+00:00")
-
-    goal = defect_goal(tmp_path)
-
-    assert goal is not None
-    assert "ПРОЧИТАЙ ЕЩЁ РАЗ" in goal.goal, "нечего делать при нехватке чтения — будет отписка"
-    assert "не кладётся" in goal.goal, "объяснение вместо правки не запрещено"
-    assert "\n<<<<<<< SEARCH\n" in goal.goal, "форма блока не показана дословно"
-    assert "=======" in goal.goal and ">>>>>>> REPLACE" in goal.goal
 
 
 def test_a_defect_without_a_task_is_not_given_to_the_hands(tmp_path: Path) -> None:

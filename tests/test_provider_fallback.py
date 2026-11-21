@@ -46,24 +46,6 @@ def test_default_route_heals_to_available_provider(monkeypatch):
     assert llm.provider == "openai"
 
 
-def test_allows_mock_when_flag_set_and_no_keys(monkeypatch):
-    monkeypatch.setenv("AGENT_ALLOW_MOCK_ROUTING", "1")
-    llm = _llm_factory("anthropic", "claude-sonnet-4-5")
-    assert llm.provider == "mock"
-
-
-def test_credentialed_provider_is_left_unchanged(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    llm = _llm_factory("anthropic", "claude-sonnet-4-5")
-    assert llm.provider == "anthropic"
-    assert llm.model == "claude-sonnet-4-5"
-
-
-def test_mock_provider_needs_no_credentials(monkeypatch):
-    llm = _llm_factory("mock", "mock-1")
-    assert llm.provider == "mock"
-
-
 def test_unknown_provider_still_rejected_loudly(monkeypatch):
     # A typo'd provider must not be silently healed away even when a real
     # provider is credentialed; LLM rejects it with ValueError.

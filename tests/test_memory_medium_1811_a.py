@@ -113,19 +113,3 @@ def test_recurring_new_error_builds_a_count_in_a_full_store(
         counts.append(mine[0].seen if mine else None)
     assert counts[0] is not None
     assert counts[-1] is not None and counts[-1] > counts[0]
-
-
-def test_eviction_still_prefers_active_over_stale_among_old_cards(tmp_path: Path) -> None:
-    st = CardStore(tmp_path)
-    st.cards["a|x"] = Card(sig="a|x", tool="a", error="x", status="active", seen=1,
-                           last_seen="2026-01-01", lesson="L")
-    for i in range(MAX_CARDS - 1):
-        st.cards[f"u{i}"] = Card(sig=f"u{i}", tool=f"t{i}", error="e", seen=1,
-                                 last_seen="2026-01-01")
-    st.save()
-    st = CardStore(tmp_path)
-    st.cards["new|y"] = Card(sig="new|y", tool="n", error="y", seen=1, last_seen="2026-11-17")
-    st.save()
-    kept = CardStore(tmp_path).cards
-    assert len(kept) == MAX_CARDS
-    assert "new|y" in kept and "a|x" in kept

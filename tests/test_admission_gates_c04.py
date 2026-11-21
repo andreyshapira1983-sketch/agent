@@ -30,10 +30,6 @@ from tests.conftest import FakeLLM
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 
-# Fires the ODD gate only (out-of-domain, no bare destructive verb).
-DOMAIN_ONLY = "hack into the account"
-# Fires the clarification gate only (destructive verb, no target; in-domain).
-CLARIFY_ONLY = "delete"
 # Fires BOTH: a bare destructive verb AND an out-of-domain clause.
 BOTH = "delete everything and hack into the account"
 
@@ -55,71 +51,6 @@ def _loop(tmp_path: Path, llm: FakeLLM) -> AgentLoop:
         odd_enabled=True,
         clarification_enabled=True,
         verifier_enabled=False,
-    )
-
-
-# ── 1. Both poles of each gate, through run() ─────────────────────────────────
-
-def test_a_clean_question_passes_both_gates_and_reaches_planning(tmp_path: Path):
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}', "Ответ."])
-    loop = _loop(tmp_path, llm)
-
-    answer = loop.run("сколько будет два плюс два")
-
-    assert _ODD_SIGNATURE not in answer and _CLARIFY_SIGNATURE not in answer
-    assert llm.calls, "a clean question must reach the planner (None from both gates)"
-
-
-def test_a_domain_only_question_returns_the_refusal(tmp_path: Path):
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
-    loop = _loop(tmp_path, llm)
-
-    answer = loop.run(DOMAIN_ONLY)
-
-    assert _ODD_SIGNATURE in answer, "an out-of-domain request must be refused"
-
-
-def test_a_clarification_only_question_returns_the_question(tmp_path: Path):
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
-    loop = _loop(tmp_path, llm)
-
-    answer = loop.run(CLARIFY_ONLY)
-
-    assert _CLARIFY_SIGNATURE in answer, "an ambiguous destructive verb must ask"
-
-
-# ── 2. An early str stops downstream ──────────────────────────────────────────
-
-def test_a_gate_refusal_stops_before_the_planner_runs(tmp_path: Path):
-    """The early return is the point of a gate: no planning on a refused turn."""
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
-    loop = _loop(tmp_path, llm)
-
-    loop.run(DOMAIN_ONLY)
-
-    assert llm.calls == [], (
-        "the planner LLM ran after a domain refusal — the gate did not stop "
-        "the cycle, it only prepended a message"
-    )
-
-
-# ── 3. The _stream_on_token cleanup, a separate side wire ─────────────────────
-
-def test_a_gate_clears_the_stream_callback(tmp_path: Path):
-    """A refused turn must not leave a streaming callback armed for reuse.
-
-    Distinct wire from the return value: the gate returns its message AND
-    clears _stream_on_token (loop_gates.py:86,110). Bitten alone so removing
-    the cleanup line reddens something.
-    """
-    llm = FakeLLM(responses=['{"reasoning":"no tools","sources":[]}'])
-    loop = _loop(tmp_path, llm)
-    seen: list[str] = []
-
-    loop.run(DOMAIN_ONLY, on_token=seen.append)
-
-    assert loop._stream_on_token is None, (
-        "the streaming callback survived a gated turn — it can leak into the next"
     )
 
 

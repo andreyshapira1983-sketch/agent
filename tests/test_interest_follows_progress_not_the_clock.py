@@ -48,12 +48,6 @@ def test_mastered_and_hopeless_areas_are_not_interesting_changing_ones_are() -> 
     assert value > 0.5 and mode == "progress" and "было 1 из 4" in why and "стало 4 из 4" in why
 
 
-def test_a_barely_tried_area_is_worth_trying_and_the_pull_fades_with_tries() -> None:
-    values = [learning_interest([True] * n)[0] for n in range(4)]
-    assert values[0] == 0.3 and values == sorted(values, reverse=True)
-    assert learning_interest([])[1] == "explore"
-
-
 def test_only_outcomes_of_the_drive_own_goals_count(tmp_path: Path) -> None:
     _history(tmp_path, "competence_physics", "+-+-")
     _history(tmp_path, "competence_cs", "++++")

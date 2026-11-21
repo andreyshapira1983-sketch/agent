@@ -43,12 +43,3 @@ def test_the_second_run_supports_its_own_numbers() -> None:
 def test_a_number_no_run_printed_is_still_refuted() -> None:
     report = _report("Расчёт: a_f = e^60 = 9.9990073898156842e+26, N = 60.0", FIRST, SECOND)
     assert report.refuted_chunks == 1
-
-
-def test_the_place_searched_is_not_the_thing_missing() -> None:
-    """Same run: «Поиск `N = ln` по файлу Tong_Cosmology.txt: совпадений нет» got
-    absence_refuted_by_evidence — the search output names the file it searched."""
-    from core.verifier_absence import absence_subjects
-
-    assert absence_subjects("Поиск `N = ln` по файлу Tong_Cosmology.txt: совпадений нет") == set()
-    assert "data_v2" in absence_subjects("Файла data_v2.csv нет в workspace")

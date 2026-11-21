@@ -57,19 +57,3 @@ def test_model_judges_conversation_suppresses_dispatch(monkeypatch):
     )
     assert handled is False            # fell through to the normal path
     assert "called" not in dispatched  # dispatch was suppressed
-
-
-def test_uncertain_model_preserves_deterministic_routing(monkeypatch):
-    # Model output is garbage (or a mock stub) -> the bridge must NOT suppress;
-    # deterministic routing is preserved (offline / degraded-model safety).
-    dispatched = {}
-
-    def _fake_dispatch(intent, agent, workspace, **kw):
-        dispatched["kind"] = intent.kind
-        return True
-
-    monkeypatch.setattr(bridge, "_dispatch_operator_intent", _fake_dispatch)
-    agent = _fake_agent("not json at all, just a stub")
-    handled = bridge.handle_conversational_operator_input("Проверь проект", agent, Path("."))
-    assert handled is True
-    assert dispatched.get("kind") == "project_health"

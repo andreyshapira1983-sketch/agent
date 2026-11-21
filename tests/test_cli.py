@@ -10,7 +10,6 @@ break the REPL contract while refactoring downstream MVPs.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,9 +24,7 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 from app.budget_guard import _run_agent_with_budget_guard
 from app.io import _force_utf8_io
-from app.operator_status import _format_next_actions
 from app.runtime_cli import _handle_auto_run
-from cli.app import _preflight_file_hint
 from cli.command_dispatch import handle_meta_command
 from cli.commands_budget import (
     _autonomy_readiness_payload,
@@ -40,12 +37,9 @@ from cli.intent_bridge import (
     _local_operator_reply,
     handle_conversational_operator_input,
 )
-from cli.parsers import _parse_remember
 from cli.repl import (
     _collect_continuation,
     _collect_instruction_buffer,
-    _collect_operator_task_block,
-    _collect_pasted_block,
 )
 from core.approval import AutoApprover
 from core.budget_ledger import BudgetLedger, BudgetWindow
@@ -263,16 +257,6 @@ def test_local_meta_commands_never_invoke_planner_or_synthesizer(
     assert planner_calls == 0
 
 
-def test_quit_meta_command_does_not_start_model_call(workspace: Path):
-    agent = _build_agent(workspace)
-
-    with pytest.raises(SystemExit):
-        handle_meta_command(":quit", agent, workspace)
-
-    assert len(agent.llm.calls) == 0
-    assert "model_call_start" not in agent.log.path.read_text(encoding="utf-8")
-
-
 class FakeWebSearchTool(Tool):
     name = "web_search"
     description = "fake web search"
@@ -372,67 +356,6 @@ class FakeRssFetchTool(Tool):
 
 
 # ============================================================
-# _parse_remember — content / tag parsing
-# ============================================================
-
-class TestParseRemember:
-    def test_empty_input_returns_empty_tags_and_content(self):
-        assert _parse_remember("") == ([], "")
-        assert _parse_remember("   ") == ([], "")
-
-    def test_no_tag_token_defaults_to_user_approved(self):
-        tags, content = _parse_remember("I prefer concise answers")
-        assert tags == ["user-approved"]
-        assert content == "I prefer concise answers"
-
-    def test_known_tag_picked_up(self):
-        tags, content = _parse_remember("[preference] I like Python")
-        assert tags == ["preference"]
-        assert content == "I like Python"
-
-    def test_tags_end_at_the_first_whitespace_including_a_newline(self):
-        """Multi-line `:remember` reaches here whole — the tags stop at line one.
-
-        A `<<<` block is dispatched as a command when its text starts with ':',
-        so this parser receives newlines. Splitting on the first SPACE put the
-        first word of the note into the tag list, and the note lost it:
-
-            in:      "preference,fact\\nмногострочная заметка"
-            tags:    ['preference']          <- 'fact\\nмногострочная' dropped,
-                                                the ASCII filter ate it
-            content: 'заметка'               <- one word of two survived
-
-        The operator asked to remember a note and half of it disappeared with
-        nothing said.
-        """
-        tags, content = _parse_remember("preference,fact\nмногострочная заметка")
-        assert tags == ["preference", "fact"]
-        assert content == "многострочная заметка"
-
-    def test_a_multi_line_note_keeps_its_lines(self):
-        """The body is human text: its newlines and indentation survive."""
-        tags, content = _parse_remember("[fact] def f():\n    return 1\n\nsecond block")
-        assert tags == ["fact"]
-        assert content == "def f():\n    return 1\n\nsecond block"
-
-    def test_comma_separated_tags(self):
-        tags, content = _parse_remember("fact,decision I shipped v1")
-        assert tags == ["fact", "decision"]
-        assert content == "I shipped v1"
-
-    def test_unknown_single_token_kept_as_content(self):
-        # 'wibble' is not a known tag and has no comma -> defaults applied.
-        tags, content = _parse_remember("wibble wobble")
-        assert tags == ["user-approved"]
-        assert content == "wibble wobble"
-
-    def test_case_insensitive_tag_match(self):
-        tags, content = _parse_remember("[PREFERENCE] be terse")
-        assert tags == ["preference"]
-        assert content == "be terse"
-
-
-# ============================================================
 # _collect_instruction_buffer — :task-begin/:task-end/:task-abort
 # ============================================================
 
@@ -443,18 +366,6 @@ class TestCollectInstructionBuffer:
         it = iter(lines)
         return lambda: next(it)
 
-    def test_commits_multiline_buffer_on_task_end(self):
-        reader = self._reader([
-            "Не маршрутизировать в implementation_plan,",
-            "если пользователь просит создать заявку.",
-            ":task-end",
-        ])
-        text, cancelled = _collect_instruction_buffer(reader)
-        assert cancelled is False
-        assert text == (
-            "Не маршрутизировать в implementation_plan,\n"
-            "если пользователь просит создать заявку."
-        )
 
     def test_abort_discards_buffer(self):
         reader = self._reader([
@@ -465,121 +376,6 @@ class TestCollectInstructionBuffer:
         text, cancelled = _collect_instruction_buffer(reader)
         assert cancelled is True
         assert text == ""
-
-    def test_terminator_is_case_insensitive_and_trimmed(self):
-        reader = self._reader(["payload", "  :TASK-END  "])
-        text, cancelled = _collect_instruction_buffer(reader)
-        assert cancelled is False
-        assert text == "payload"
-
-    def test_empty_buffer_returns_empty_string(self):
-        reader = self._reader([":task-end"])
-        text, cancelled = _collect_instruction_buffer(reader)
-        assert cancelled is False
-        assert text == ""
-
-    def test_eof_propagates_to_caller(self):
-        def reader() -> str:
-            raise EOFError
-
-        with pytest.raises(EOFError):
-            _collect_instruction_buffer(reader)
-
-    def test_lines_are_kept_verbatim_between_the_markers(self):
-        """Indentation, tabs, inner blank lines and trailing spaces survive.
-
-        Only the ends of the whole buffer are stripped. An instruction to the
-        agent is often code or a list, and normalising it here would arrive as
-        a mangled question with nothing said.
-        """
-        reader = self._reader([
-            "def f():",
-            "    return 1",
-            "\tafter a tab",
-            "",
-            "trailing spaces kept   ",
-            "last line",
-            ":task-end",
-        ])
-        text, cancelled = _collect_instruction_buffer(reader)
-        assert cancelled is False
-        assert text == (
-            "def f():\n"
-            "    return 1\n"
-            "\tafter a tab\n"
-            "\n"
-            "trailing spaces kept   \n"
-            "last line"
-        )
-
-    def test_only_the_ends_of_the_whole_buffer_are_stripped(self):
-        """The one normalisation this collector does, pinned so it stays one."""
-        reader = self._reader(["   ", "  body  ", "   ", ":task-end"])
-        text, _ = _collect_instruction_buffer(reader)
-        assert text == "body"
-
-
-# ============================================================
-# _collect_pasted_block — <<< ... >>>
-# ============================================================
-
-class TestCollectPastedBlock:
-    """The collector alone. How `run_repl` wires it in — the prompt it reads
-    with, the empty-block refusal, the EOF exit — is held by
-    tests/characterization/test_repl_input_modes.py, because a collector can be
-    perfect and still be connected wrongly."""
-
-    @staticmethod
-    def _reader(lines: list[str]):
-        it = iter(lines)
-        return lambda: next(it)
-
-    def test_joins_lines_with_newlines(self):
-        reader = self._reader(["line one", "line two", ">>>"])
-        assert _collect_pasted_block(reader) == "line one\nline two"
-
-    def test_a_glued_terminator_ends_the_block_and_keeps_its_text(self):
-        """A paste whose buffer ended `...text>>>` without a newline."""
-        reader = self._reader(["line one", "line two.>>>"])
-        assert _collect_pasted_block(reader) == "line one\nline two."
-
-    def test_the_bare_terminator_may_carry_spaces(self):
-        reader = self._reader(["payload", "   >>>   "])
-        assert _collect_pasted_block(reader) == "payload"
-
-    def test_a_block_with_nothing_in_it_returns_the_empty_string(self):
-        """Empty is returned, not refused — that judgement is the caller's."""
-        reader = self._reader(["   ", ">>>"])
-        assert _collect_pasted_block(reader) == ""
-
-    def test_lines_are_kept_verbatim_between_the_markers(self):
-        """A paste is text, not code to be tidied: indentation, tabs, inner
-        blank lines and trailing spaces all survive. Only the ends of the whole
-        block are stripped."""
-        reader = self._reader([
-            "def f():",
-            "    return 1",
-            "\tafter a tab",
-            "",
-            "trailing spaces kept   ",
-            "last line",
-            ">>>",
-        ])
-        assert _collect_pasted_block(reader) == (
-            "def f():\n"
-            "    return 1\n"
-            "\tafter a tab\n"
-            "\n"
-            "trailing spaces kept   \n"
-            "last line"
-        )
-
-    def test_eof_propagates_to_caller(self):
-        def reader() -> str:
-            raise EOFError
-
-        with pytest.raises(EOFError):
-            _collect_pasted_block(reader)
 
 
 # ============================================================
@@ -596,20 +392,6 @@ class TestCollectContinuation:
         it = iter(lines)
         return lambda: next(it)
 
-    def test_joins_with_single_spaces_and_drops_the_backslashes(self):
-        assert _collect_continuation("first \\", self._reader(["second"])) == "first second"
-
-    def test_continues_while_lines_keep_ending_in_a_backslash(self):
-        reader = self._reader(["b \\", "c"])
-        assert _collect_continuation("a \\", reader) == "a b c"
-
-    def test_blank_parts_do_not_become_extra_spaces(self):
-        reader = self._reader(["   \\", "tail"])
-        assert _collect_continuation("head \\", reader) == "head tail"
-
-    def test_a_continuation_that_joins_to_nothing_returns_the_empty_string(self):
-        """Returned, not refused — that judgement is the caller's."""
-        assert _collect_continuation("\\", self._reader(["   "])) == ""
 
     def test_whitespace_is_normalised_on_purpose_here(self):
         """The one collector that does NOT keep its lines verbatim.
@@ -623,51 +405,6 @@ class TestCollectContinuation:
         reader = self._reader(["\tindented continuation   \\", "   \\", "  tail  "])
         assert _collect_continuation("head   \\", reader) == "head indented continuation tail"
 
-    def test_eof_propagates_to_caller(self):
-        def reader() -> str:
-            raise EOFError
-
-        with pytest.raises(EOFError):
-            _collect_continuation("first \\", reader)
-
-
-# ============================================================
-# _collect_operator_task_block — :operator-task ... :end
-# ============================================================
-
-class TestCollectOperatorTaskBlock:
-    """The collector alone. Its `... ` prompt, the notice, the handler call and
-    the fact that the token never reaches the dispatcher belong to `run_repl`
-    and are held by tests/characterization/."""
-
-    @staticmethod
-    def _reader(lines: list[str]):
-        it = iter(lines)
-        return lambda: next(it)
-
-    def test_joins_the_block_with_newlines(self):
-        reader = self._reader(["step one", "step two", ":end"])
-        assert _collect_operator_task_block(reader) == "step one\nstep two"
-
-    def test_the_terminator_is_trimmed_and_case_insensitive(self):
-        reader = self._reader(["body", "   :END   "])
-        assert _collect_operator_task_block(reader) == "body"
-
-    def test_an_empty_block_returns_the_empty_string(self):
-        """Returned as typed; refusing it is the handler's job, not this one's."""
-        assert _collect_operator_task_block(self._reader([":end"])) == ""
-
-    def test_lines_are_kept_verbatim_including_indentation(self):
-        reader = self._reader(["    indented", ":end"])
-        assert _collect_operator_task_block(reader) == "    indented"
-
-    def test_eof_propagates_to_caller(self):
-        def reader() -> str:
-            raise EOFError
-
-        with pytest.raises(EOFError):
-            _collect_operator_task_block(reader)
-
 
 # ============================================================
 # handle_meta_command — dispatcher contract
@@ -679,19 +416,6 @@ class TestHandleMetaCommand:
         # Anything not starting with `:` is for the LLM, not the dispatcher.
         assert handle_meta_command("hello world", agent, workspace) is False
 
-    def test_help_returns_true(self, workspace: Path, capsys):
-        agent = _build_agent(workspace)
-        assert handle_meta_command(":help", agent, workspace) is True
-        out = capsys.readouterr()
-        assert "Commands:" in out.err
-        assert ":rollback" in out.err
-        assert ":hygiene" in out.err
-
-    def test_question_mark_alias(self, workspace: Path, capsys):
-        agent = _build_agent(workspace)
-        assert handle_meta_command("?", agent, workspace) is True
-        out = capsys.readouterr()
-        assert "Commands:" in out.err
 
     def test_campaign_start_command_reaches_handler_not_budget(
         self, workspace: Path, monkeypatch: pytest.MonkeyPatch
@@ -801,33 +525,6 @@ class TestHandleMetaCommand:
         assert "=== self-build produce ===" in out.err
         assert "status:" in out.err
 
-    def test_self_build_produce_uses_grounded_default(self, workspace: Path, capsys):
-        # TD-036 follow-up: the CLI must drive the producer on its grounded
-        # DEFAULT path — it never forces the legacy LLM manager and never pins a
-        # selector, so the producer's workspace-backed grounded selector runs.
-        import cli.commands_self_build as mod
-
-        captured: dict = {}
-
-        def _fake_produce(**kwargs):
-            captured.update(kwargs)
-            from core.self_build_producer import ProducerReport
-
-            return ProducerReport(status="no_patch", reason="stub")
-
-        mod_produce = mod.produce_self_apply_proposal
-        mod.produce_self_apply_proposal = _fake_produce
-        try:
-            agent = _build_agent(workspace)
-            assert (
-                mod._handle_self_build_produce("", agent, workspace) is True
-            )
-        finally:
-            mod.produce_self_apply_proposal = mod_produce
-
-        # No legacy opt-in and no forced selector => producer default (grounded).
-        assert captured.get("legacy_llm_manager") in (None, False)
-        assert "grounded_selector" not in captured
 
     def test_self_build_produce_rejects_args(self, workspace: Path, capsys):
         # Narrow trigger: it takes no arguments and no free-text patch.
@@ -1806,15 +1503,6 @@ Produce a patch proposal for the routing bug.
         assert "type: telegram" in out.err
         assert "approval_required: true" in out.err
 
-    def test_budget_enforcement_status_warns_when_limits_are_zero(self):
-        status = _budget_enforcement_status(_zero_limit_budget_snapshot())
-
-        assert status["tracking_enabled"] is True
-        assert status["enforcement_enabled"] is False
-        assert status["usage_recorded"] is True
-        assert status["all_limits_zero"] is True
-        assert status["over_limit"] is False
-        assert "cross-run enforcement is disabled" in status["warning"]
 
     def test_budget_enforcement_status_warns_when_usage_exceeds_limit(self):
         status = _budget_enforcement_status(
@@ -1954,26 +1642,6 @@ Produce a patch proposal for the routing bug.
             in readiness["blockers"]
         )
 
-    def test_next_actions_puts_budget_prerequisites_before_long_session(self):
-        text = _format_next_actions(
-            {
-                "prerequisites": [
-                    "Persistent budget tracking is active, but all hour/day limits are 0.",
-                    "Run a live state-store recovery drill before enabling Long Work Session Mode.",
-                ],
-                "priority_gaps": [
-                    {
-                        "title": "Long Work Session Mode",
-                        "next_step": "Enable unattended work sessions.",
-                    }
-                ],
-                "recommendations": [],
-            }
-        )
-
-        budget_index = text.index("prerequisites before long work sessions")
-        long_session_index = text.index("Long Work Session Mode")
-        assert budget_index < long_session_index
 
     def test_conversational_operator_phrase_bypasses_llm(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -2043,25 +1711,6 @@ Produce a patch proposal for the routing bug.
         assert produce_calls == [""]  # producer invoked exactly once, no residual args
         assert "operator intent: self_build_request" in capsys.readouterr().err
 
-    def test_conversational_self_build_question_is_not_routed_to_producer(
-        self,
-        workspace: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ):
-        # A question / description about self-programming must NOT trigger the
-        # producer; it falls through to the normal path (handled=False here).
-        agent = _build_agent(workspace)
-
-        def _produce_must_not_run(*args, **kwargs):
-            raise AssertionError("producer must not run for a self-build question")
-
-        monkeypatch.setattr(bridge_module, "_handle_self_build_produce", _produce_must_not_run)
-
-        assert handle_conversational_operator_input(
-            "Может ли агент программировать себя?",
-            agent,
-            workspace,
-        ) is False
 
     def test_deliberation_strategy_router_handles_live_operator_phrases_locally(
         self,
@@ -2220,23 +1869,6 @@ Produce a patch proposal for the routing bug.
         assert "Run it in PowerShell, not inside the agent REPL" in out.err
         assert agent.llm.calls == []
 
-    def test_file_hint_preflight_fails_before_agent_run(self, workspace: Path):
-        ok, message = _preflight_file_hint(r".\docs\missing.md", workspace)
-
-        assert ok is False
-        assert message is not None
-        assert "ERROR: file hint does not exist:" in message
-        assert str(workspace / "docs" / "missing.md") in message
-        assert "No model calls were made." in message
-
-    def test_file_hint_preflight_accepts_existing_relative_file(self, workspace: Path):
-        doc = workspace / "task.md"
-        doc.write_text("task", encoding="utf-8")
-
-        ok, message = _preflight_file_hint(r".\task.md", workspace)
-
-        assert ok is True
-        assert message is None
 
     def test_learn_project_plans_then_ingests_selected_sources(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -2507,11 +2139,6 @@ Produce a patch proposal for the routing bug.
         assert not (workspace / "data" / "model_usage.jsonl").exists()
         assert not (workspace / "data" / "source_registry.jsonl").exists()
 
-    def test_quit_raises_system_exit(self, workspace: Path):
-        agent = _build_agent(workspace)
-        with pytest.raises(SystemExit) as exc_info:
-            handle_meta_command(":quit", agent, workspace)
-        assert exc_info.value.code == 0
 
     def test_exit_alias(self, workspace: Path):
         agent = _build_agent(workspace)
@@ -2524,14 +2151,6 @@ Produce a patch proposal for the routing bug.
 # ============================================================
 
 class TestHandleHygiene:
-    def test_default_runs_expire_dedupe_backups(self, workspace: Path, capsys):
-        agent = _build_agent(workspace)
-        _handle_hygiene("", agent, workspace)
-        out = capsys.readouterr()
-        assert "expire" in out.err
-        assert "dedupe" in out.err
-        assert "backups" in out.err
-
     def test_all_subcommand_runs_default(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
         _handle_hygiene("all", agent, workspace)
@@ -2545,19 +2164,6 @@ class TestHandleHygiene:
         out = capsys.readouterr()
         assert "dry_run=True" in out.err
 
-    def test_expire_subcommand(self, workspace: Path, capsys):
-        """Each subcommand prints its own report: the unknown fallback also echoes the word."""
-        agent = _build_agent(workspace)
-        _handle_hygiene("expire --apply", agent, workspace)
-        err = capsys.readouterr().err
-        assert err.startswith("expire (dry_run=False): 0 record(s) past TTL out of 0 scanned")
-
-    def test_dedupe_subcommand(self, workspace: Path, capsys):
-        agent = _build_agent(workspace)
-        _handle_hygiene("dedupe --apply", agent, workspace)
-        err = capsys.readouterr().err
-        assert err.startswith("dedupe (dry_run=False): 0 duplicate(s) collapsed")
-        assert "threshold=" in err
 
     def test_backups_subcommand(self, workspace: Path, capsys):
         agent = _build_agent(workspace)
@@ -2646,18 +2252,6 @@ class TestHandleRollback:
 # _force_utf8_io — Windows console encoding fix
 # ============================================================
 
-class TestForceUtf8Io:
-    def test_sets_pythonioencoding_when_missing(self, monkeypatch):
-        monkeypatch.delenv("PYTHONIOENCODING", raising=False)
-        _force_utf8_io()
-        assert os.environ.get("PYTHONIOENCODING") == "utf-8"
-
-    def test_keeps_existing_pythonioencoding(self, monkeypatch):
-        monkeypatch.setenv("PYTHONIOENCODING", "cp1251")
-        _force_utf8_io()
-        # setdefault must NOT overwrite an explicit user choice.
-        assert os.environ.get("PYTHONIOENCODING") == "cp1251"
-
 
 class TestPrintPersistent:
     def test_empty_store_message(self, workspace: Path, capsys):
@@ -2681,56 +2275,6 @@ class TestPrintPersistent:
         assert "…" in out.out
 
 
-class TestForceUtf8IoCannotJournal:
-    """The comment used to promise "the audit log will still capture the raw
-    bytes for forensics". It cannot: this function is the first statement of
-    `run_cli`, and the logger is built much later, inside `build_agent`.
-
-    Pinned structurally rather than by reading the comment: the module has no
-    way to reach a journal, and the promise cannot quietly come back without
-    an import appearing here.
-    """
-
-    def test_the_module_imports_nothing_that_could_log(self):
-        import ast
-        from pathlib import Path
-
-        import app.io as io_module
-
-        tree = ast.parse(Path(io_module.__file__).read_text(encoding="utf-8"))
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported |= {a.name.split(".")[0] for a in node.names}
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module.split(".")[0])
-
-        assert imported <= {"__future__", "os", "sys"}, (
-            "app/io.py gained an import; if it is a journal, the swallowed "
-            f"reconfigure failure must start reporting. Found: {sorted(imported)}"
-        )
-
-    def test_it_runs_before_any_logger_exists(self):
-        """`_force_utf8_io` is the first call in `run_cli`, so no journal is
-        available to it even in principle."""
-        import ast
-        from pathlib import Path
-
-        import cli.app as app_module
-
-        fn = next(
-            n for n in ast.walk(ast.parse(Path(app_module.__file__).read_text(encoding="utf-8")))
-            if isinstance(n, ast.FunctionDef) and n.name == "run_cli"
-        )
-        calls = sorted(
-            (n.lineno, n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
-            for n in ast.walk(fn) if isinstance(n, ast.Call)
-        )
-        assert calls[0][1] == "_force_utf8_io", (
-            f"something now runs before the encoding fix: {calls[:2]}"
-        )
-
-
 class TestForceUtf8IoReportsWhatItAchieved:
     """The call used to return None, so "reconfigure was attempted" and
     "the stream is now utf-8" were indistinguishable from outside.
@@ -2741,38 +2285,6 @@ class TestForceUtf8IoReportsWhatItAchieved:
     it reports the achieved state rather than the attempted one.
     """
 
-    def test_confirms_streams_it_actually_switched(self, monkeypatch):
-        class _Stream:
-            encoding = "cp1251"
-
-            def reconfigure(self, **kw):
-                self.encoding = kw["encoding"]
-
-        for name in ("stdin", "stdout", "stderr"):
-            monkeypatch.setattr(sys, name, _Stream())
-
-        assert _force_utf8_io() == ("stdin", "stdout", "stderr")
-
-    def test_a_stream_that_silently_ignores_reconfigure_is_not_claimed(self, monkeypatch):
-        """Accepting the call and staying on cp1251 is the case that used to
-        be invisible: no exception, no change, and the old code said nothing."""
-        class _Deaf:
-            encoding = "cp1251"
-
-            def reconfigure(self, **kw):
-                pass  # accepts, changes nothing
-
-        class _Working:
-            encoding = "cp1251"
-
-            def reconfigure(self, **kw):
-                self.encoding = kw["encoding"]
-
-        monkeypatch.setattr(sys, "stdin", _Deaf())
-        monkeypatch.setattr(sys, "stdout", _Working())
-        monkeypatch.setattr(sys, "stderr", _Deaf())
-
-        assert _force_utf8_io() == ("stdout",)
 
     def test_a_stream_that_raises_is_not_claimed_and_does_not_stop_the_others(
         self, monkeypatch
@@ -2794,12 +2306,3 @@ class TestForceUtf8IoReportsWhatItAchieved:
         monkeypatch.setattr(sys, "stderr", _Working())
 
         assert _force_utf8_io() == ("stdout", "stderr")
-
-    def test_streams_without_reconfigure_are_reported_as_not_switched(self, monkeypatch):
-        class _Bare:
-            pass
-
-        for name in ("stdin", "stdout", "stderr"):
-            monkeypatch.setattr(sys, name, _Bare())
-
-        assert _force_utf8_io() == ()

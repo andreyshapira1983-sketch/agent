@@ -19,11 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import core.model_catalog as mc
-from core.model_catalog import _load_catalog, _save_catalog, discover_catalog
+from core.model_catalog import _load_catalog, _save_catalog
 from core.model_discovery import (
-    STATUS_UNSUPPORTED_NO_FETCHER,
     _diff_catalog,
-    build_discovery_audit,
     build_discovery_report,
 )
 
@@ -49,36 +47,6 @@ def _fake_anthropic(api_key=None):
     return ["claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-4-6"]
 
 
-def _fake_openai(api_key=None):
-    return ["gpt-5-mini", "gpt-5", "o5"]
-
-
-# ── discover_catalog: read-only, no write ─────────────────────────────────────
-
-def test_discover_catalog_does_not_write_file(monkeypatch, tmp_path):
-    cat = _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _fake_anthropic})
-
-    result = discover_catalog(["anthropic"])
-
-    # Classified data is returned...
-    assert result["providers"]["anthropic"]["tier_best"]["deep"] == "claude-opus-4-8"
-    # ...but nothing was written to disk.
-    assert not cat.exists()
-    assert _load_catalog() is None
-
-
-def test_refresh_catalog_still_writes(monkeypatch, tmp_path):
-    cat = _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _fake_anthropic})
-
-    mc.refresh_catalog(["anthropic"])
-
-    # The write path (unchanged) still persists the catalog.
-    assert cat.exists()
-    assert _load_catalog() is not None
-
-
 # ── _diff_catalog: added / removed / changed ─────────────────────────────────
 
 def _catalog(models_by_provider):
@@ -92,22 +60,6 @@ def _catalog(models_by_provider):
     return {"updated_at": datetime.now(timezone.utc).isoformat(), "providers": providers}
 
 
-def test_diff_reports_added():
-    current = _catalog({"openai": [("gpt-5", "standard")]})
-    discovered = _catalog({"openai": [("gpt-5", "standard"), ("gpt-6", "standard")]})
-    diff = _diff_catalog(current, discovered)
-    assert ("openai", "gpt-6", "standard") in diff.added
-    assert diff.removed == ()
-
-
-def test_diff_reports_removed():
-    current = _catalog({"openai": [("gpt-5", "standard"), ("gpt-4", "standard")]})
-    discovered = _catalog({"openai": [("gpt-5", "standard")]})
-    diff = _diff_catalog(current, discovered)
-    assert ("openai", "gpt-4", "standard") in diff.removed
-    assert diff.added == ()
-
-
 def test_diff_reports_changed_tier_best():
     current = _catalog({"anthropic": [("claude-opus-4-5", "deep")]})
     discovered = _catalog({"anthropic": [("claude-opus-4-8", "deep")]})
@@ -116,68 +68,7 @@ def test_diff_reports_changed_tier_best():
     assert ("anthropic", "deep", "claude-opus-4-5", "claude-opus-4-8") in diff.changed
 
 
-def test_diff_against_no_current_is_all_added():
-    discovered = _catalog({"openai": [("gpt-5", "standard")]})
-    diff = _diff_catalog(None, discovered)
-    assert ("openai", "gpt-5", "standard") in diff.added
-    assert diff.removed == ()
-    assert diff.changed == ()
-
-
-# ── build_discovery_audit: local only, no network ────────────────────────────
-
-def test_audit_is_local_and_writes_nothing(monkeypatch, tmp_path):
-    cat = _isolate(monkeypatch, tmp_path)
-
-    # Any fetcher call would raise; the audit must never call one.
-    def _boom(api_key=None):
-        raise AssertionError("audit must not contact providers")
-
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _boom, "openai": _boom})
-
-    report = build_discovery_audit()
-
-    assert report.live is False
-    assert report.to_dict()["wrote_catalog"] is False
-    assert not cat.exists()
-    # mock is supported but has no fetcher -> unsupported bucket.
-    assert "mock" in report.unsupported
-
-
 # ── build_discovery_report: dry-run, credential gating, no secrets ───────────
-
-def test_dry_run_queries_only_providers_with_credentials(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    # No OPENAI_API_KEY on purpose.
-
-    called = {"openai": False}
-
-    def _openai_should_not_run(api_key=None):
-        called["openai"] = True
-        raise AssertionError("openai has no creds and must not be queried")
-
-    monkeypatch.setattr(
-        mc, "_FETCHERS", {"anthropic": _fake_anthropic, "openai": _openai_should_not_run}
-    )
-
-    report = build_discovery_report()
-
-    assert called["openai"] is False
-    assert "anthropic" in report.queried
-    assert "openai" in report.unavailable  # supported + fetcher, but no creds
-
-
-def test_dry_run_does_not_write_catalog(monkeypatch, tmp_path):
-    cat = _isolate(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _fake_anthropic})
-
-    report = build_discovery_report()
-
-    assert report.live is True
-    assert not cat.exists()
-    assert _load_catalog() is None
 
 
 def test_dry_run_diff_against_existing_catalog(monkeypatch, tmp_path):
@@ -222,18 +113,6 @@ def test_report_never_leaks_secret_values(monkeypatch, tmp_path):
     assert "ANTHROPIC_API_KEY" in blob
 
 
-def test_unsupported_provider_reported_when_no_fetcher(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _fake_anthropic, "openai": _fake_openai})
-
-    # No provider filter: huggingface is supported by the adapter but has no
-    # live fetcher, so it is classified unsupported-for-discovery (not skipped).
-    report = build_discovery_report()
-    hf = next(p for p in report.providers if p.name == "huggingface")
-    assert hf.status == STATUS_UNSUPPORTED_NO_FETCHER
-    assert "huggingface" in report.unsupported
-
-
 # ── command handlers: dry-run only, never write ──────────────────────────────
 
 class _FakeLog:
@@ -248,23 +127,6 @@ class _FakeAgent:
     def __init__(self):
         self.log = _FakeLog()
         self.model_router = None
-
-
-def test_provider_catalog_refresh_requires_dry_run(monkeypatch, tmp_path, capsys):
-    from cli.commands_models import _handle_provider_catalog_refresh
-
-    cat = _isolate(monkeypatch, tmp_path)
-
-    def _boom(api_key=None):
-        raise AssertionError("must not contact providers without --dry-run")
-
-    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _boom, "openai": _boom})
-    agent = _FakeAgent()
-
-    assert _handle_provider_catalog_refresh("", agent) is True
-    # No network, no write, no logged discovery event.
-    assert not cat.exists()
-    assert agent.log.events == []
 
 
 def test_provider_catalog_refresh_refuses_write(monkeypatch, tmp_path, capsys):

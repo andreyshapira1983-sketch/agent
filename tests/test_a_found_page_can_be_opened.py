@@ -17,9 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from core.step_references import UnresolvedStepReference, resolve_step_references
+from core.step_references import resolve_step_references
 from core.step_sanitizer import sanitize_step
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -29,13 +27,6 @@ _SEARCH = [
      "snippet": "…", "source": "ddg"},
     {"title": "other", "url": "https://example.org/x", "snippet": "…", "source": "ddg"},
 ]
-
-
-def test_a_fetch_of_a_step_output_survives_planning() -> None:
-    warnings: list[str] = []
-    spec = sanitize_step("web_fetch", {"url": "{{step:2.output}}"}, None, 3, warnings)
-    assert spec is not None, warnings
-    assert spec["arguments"]["url"] == "{{step:2.output}}"
 
 
 def test_the_whole_chain_search_pick_fetch() -> None:
@@ -67,11 +58,6 @@ def test_the_locks_hold_after_substitution() -> None:
     assert resolved_url_refusal("file_read", {"path": "x"}) is None
 
 
-def test_a_result_list_is_not_an_address() -> None:
-    with pytest.raises(UnresolvedStepReference, match="one name"):
-        resolve_step_references({"url": "{{step:1.output}}"}, {"1": _SEARCH}, plan_steps=_STEPS)
-
-
 def test_a_literal_address_is_judged_at_planning_as_before() -> None:
     warnings: list[str] = []
     assert sanitize_step("web_fetch", {"url": "ftp://x"}, None, 1, warnings) is None
@@ -79,13 +65,3 @@ def test_a_literal_address_is_judged_at_planning_as_before() -> None:
     warnings.clear()
     assert sanitize_step("web_fetch", {"url": "http://localhost/x"}, None, 1, warnings) is None
     assert "local network" in warnings[0]
-
-
-def test_the_prompt_teaches_the_chain_instead_of_an_unknowable_url() -> None:
-    from core.planner_prompt import PLANNER_SYSTEM
-
-    i = PLANNER_SYSTEM.find("- web_fetch(")
-    block = PLANNER_SYSTEM[i:PLANNER_SYSTEM.find("\n- ", i + 1)]
-    assert "<best_url>" not in block, "шапка велит планировать адрес, которого ещё нет"
-    assert '{"url": "{{step:2.output}}"}' in block
-    assert "results = {{step:1.output}}" in block

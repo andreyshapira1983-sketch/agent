@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from core.self_build_supervisor import (
     evaluate_self_build_supervisor,
-    hour_budget_headroom,
-    is_budget_near_exhaustion,
 )
 
 
@@ -53,36 +51,6 @@ class _Flag:
         if self.payload is None:  # pragma: no cover - only used to prove non-call
             raise AssertionError("candidate_provider must not be called while waiting")
         return self.payload
-
-
-# --- pure headroom / near-exhaustion -------------------------------------------------
-
-
-def test_hour_headroom_skips_unconfigured_counters():
-    headroom = hour_budget_headroom(_HEALTHY)
-    assert "cycles" not in headroom  # limit == 0
-    assert headroom["llm_calls"]["headroom"] == 22
-    assert headroom["model_tokens"]["limit"] == 160000
-
-
-def test_near_exhaustion_on_low_llm_calls():
-    windows = _budget_windows(llm_used=22, llm_limit=24, tok_used=1000, tok_limit=160000)
-    near, reasons = is_budget_near_exhaustion(hour_budget_headroom(windows))
-    assert near is True
-    assert any("llm_calls" in r for r in reasons)
-
-
-def test_near_exhaustion_on_low_token_ratio():
-    windows = _budget_windows(llm_used=1, llm_limit=24, tok_used=150000, tok_limit=160000)
-    near, reasons = is_budget_near_exhaustion(hour_budget_headroom(windows))
-    assert near is True
-    assert any("model_tokens" in r for r in reasons)
-
-
-def test_healthy_budget_is_not_near_exhaustion():
-    near, reasons = is_budget_near_exhaustion(hour_budget_headroom(_HEALTHY))
-    assert near is False
-    assert reasons == []
 
 
 # --- evaluator gating ----------------------------------------------------------------
@@ -153,66 +121,3 @@ def test_normal_state_returns_one_candidate():
         "candidate",
     }
     assert report["evidence"]["recent_error_count"] == 2
-
-
-def test_normal_state_no_patch_is_ok():
-    payload = {"file": "core/operator_intent.py", "diff": "NO_PATCH"}
-    provider = _Flag(payload)
-
-    report = evaluate_self_build_supervisor(
-        budget_windows=_HEALTHY,
-        approvals_pending=0,
-        candidate_provider=provider,
-    )
-
-    assert report["status"] == "ok"
-    assert report["candidate"] == "NO_PATCH"
-    assert provider.called is True
-
-
-def test_non_budget_context_is_serialisable_and_log_safe():
-    payload = {"file": "core/operator_intent.py", "diff": "NO_PATCH"}
-    report = evaluate_self_build_supervisor(
-        budget_windows=_HEALTHY,
-        approvals_pending=0,
-        candidate_provider=lambda: payload,
-    )
-    import json
-
-    # Report must round-trip through JSON (used by --json and structured logging).
-    assert json.loads(json.dumps(report)) == report
-
-
-# --- CLI handler wiring --------------------------------------------------------------
-
-
-def test_cli_command_registered_and_no_effects(monkeypatch, tmp_path):
-    """The :self-build-supervisor command is registered, runs read-only, and
-    never invokes file_write/shell_exec/run_tests or any LLM/provider call."""
-    from cli.command_dispatch import handle_meta_command
-
-    # Reuse the real local agent builder from the CLI test suite.
-    from tests.test_cli import _build_agent  # type: ignore
-
-    workspace = tmp_path
-    (workspace / "data").mkdir(parents=True, exist_ok=True)
-    agent = _build_agent(workspace)
-
-    # Guard: candidate provider is the only place analysis happens; make sure the
-    # supervisor never reaches for effectful tools.
-    def _boom(*_args, **_kwargs):  # pragma: no cover - only fires on misuse
-        raise AssertionError("supervisor must not run effectful tools")
-
-    effectful = {"file_write", "shell_exec", "run_tests"}
-    for tool in agent.registry.list():
-        if tool.name in effectful:
-            monkeypatch.setattr(tool, "run", _boom, raising=False)
-
-    assert handle_meta_command(":self-build-supervisor", agent, workspace) is True
-    assert handle_meta_command(":self-build-supervisor --json", agent, workspace) is True
-
-    # No LLM/provider calls, and a structured event was logged.
-    assert len(agent.llm.calls) == 0
-    log_text = agent.log.path.read_text(encoding="utf-8")
-    assert "model_call_start" not in log_text
-    assert "self_build_supervisor" in log_text

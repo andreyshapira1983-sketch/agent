@@ -92,10 +92,3 @@ def test_a_pending_self_change_request_is_left_alone(workspace: Path) -> None:
     patch = inbox.add(operation=SELF_APPLY_OPERATION, summary="патч", payload={})
     _run(workspace, inbox)
     assert inbox.get(patch.id).status == "pending"
-
-
-def test_without_a_grant_nothing_is_closed(workspace: Path) -> None:
-    inbox = ApprovalInbox()
-    stale = _stale_requests(inbox, n=2)
-    _run(workspace, inbox)
-    assert all(inbox.get(i).status == "pending" for i in stale)

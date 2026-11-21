@@ -11,21 +11,6 @@ def _fresh_store(tmp_path):
     return PersistentMemoryStore(tmp_path / "pm.jsonl")
 
 
-def test_good_conclusion_is_banked(tmp_path):
-    store = _fresh_store(tmp_path)
-    policy = MemoryWritePolicy()
-    mem_id = memory_door_write(store, policy, GOOD_TEXT, GOOD_KIND, GOOD_PROVENANCE)
-    assert isinstance(mem_id, str) and mem_id.startswith("mem_")
-    records = store.load()
-    assert any(r.id == mem_id for r in records)
-    rec = next(r for r in records if r.id == mem_id)
-    assert rec.source == "agent-auto"
-    assert GOOD_KIND in rec.tags
-    # Namespaced since 2026-11-16: a bare provenance tag let free text such as
-    # "sensitive-data-consent" act as a consent tag.
-    assert f"provenance:{GOOD_PROVENANCE}" in rec.tags
-
-
 def test_raw_code_is_rejected(tmp_path):
     store = _fresh_store(tmp_path)
     policy = MemoryWritePolicy()

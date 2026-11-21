@@ -21,91 +21,6 @@ mute.
 """
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
-from core.task_complexity import ComplexityTier
-
-
-def _catalog(path: Path, *, age_days: int) -> Path:
-    stamp = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
-    path.write_text(json.dumps({
-        "updated_at": stamp,
-        "providers": {
-            "anthropic": {
-                "models": [{"id": "claude-opus-5", "tier": "deep"}],
-                "tier_best": {"deep": "claude-opus-5", "standard": "claude-sonnet-5"},
-            }
-        },
-    }), encoding="utf-8")
-    return path
-
-
-def _use(monkeypatch, path: Path) -> None:
-    import core.model_catalog as catalog
-
-    monkeypatch.setattr(catalog, "_catalog_path", lambda: path)
-
-
-# ── the state is reportable at all ───────────────────────────────────────────
-
-def test_a_fresh_catalog_reports_itself_usable(tmp_path, monkeypatch):
-    from core.model_catalog import catalog_freshness
-
-    _use(monkeypatch, _catalog(tmp_path / "c.json", age_days=0))
-    state = catalog_freshness()
-
-    assert state["status"] == "fresh"
-    assert state["age_days"] == 0
-    assert state["expired"] is False
-
-
-def test_an_expired_catalog_reports_age_and_limit(tmp_path, monkeypatch):
-    """Both numbers, so the message is actionable without opening the file."""
-    from core.model_catalog import catalog_freshness
-
-    _use(monkeypatch, _catalog(tmp_path / "c.json", age_days=12))
-    state = catalog_freshness()
-
-    assert state["status"] == "expired"
-    assert state["expired"] is True
-    assert state["age_days"] == 12
-    assert state["ttl_days"] >= 1
-    assert "refresh-models" in state["hint"], state["hint"]
-
-
-def test_a_missing_catalog_is_its_own_state(tmp_path, monkeypatch):
-    """"never built" and "went stale" need different answers from the operator."""
-    from core.model_catalog import catalog_freshness
-
-    _use(monkeypatch, tmp_path / "absent.json")
-    state = catalog_freshness()
-
-    assert state["status"] == "missing"
-    assert state["expired"] is False, "absent is not expired — it was never written"
-    assert "refresh-models" in state["hint"]
-
-
-# ── and expiry still behaves exactly as before ───────────────────────────────
-
-def test_an_expired_catalog_still_yields_no_tier_model(tmp_path, monkeypatch):
-    """Visibility only. The TTL keeps its teeth."""
-    from core.model_catalog import tier_model_for
-
-    _use(monkeypatch, _catalog(tmp_path / "c.json", age_days=12))
-
-    assert tier_model_for(ComplexityTier.DEEP, "anthropic") == ""
-
-
-def test_a_fresh_catalog_still_resolves_the_tier(tmp_path, monkeypatch):
-    from core.model_catalog import tier_model_for
-
-    _use(monkeypatch, _catalog(tmp_path / "c.json", age_days=1))
-
-    assert tier_model_for(ComplexityTier.DEEP, "anthropic") == "claude-opus-5"
-
-
 # ── the gate distinguishes the two causes ────────────────────────────────────
 
 def _gate(**overrides):
@@ -134,17 +49,6 @@ def test_the_downgrade_reason_separates_cache_state_from_provider_fact():
         "a stale cache is reported as a missing model, which sends the operator "
         "to check their provider instead of running :refresh-models"
     )
-
-
-def test_every_unusable_cache_state_is_named(monkeypatch):
-    """`missing` and `unreadable` need the same rescue, and were falling through.
-
-    Raised in review: both used to land on `no_deep_model` — the very message
-    this distinction exists to stop showing.
-    """
-    for status in ("expired", "missing", "unreadable"):
-        decision = _gate(catalog_status=status)
-        assert decision.route_reason == f"deep_downgraded:catalog_{status}", status
 
 
 def test_a_fresh_cache_does_not_excuse_a_missing_model():

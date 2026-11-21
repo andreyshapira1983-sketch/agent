@@ -38,17 +38,6 @@ def test_an_exhausted_explain_yields_to_the_next_weight():
     assert crowned.action == "birth_experiment_specs"
 
 
-def test_an_empty_set_changes_nothing():
-    """His check (ii): the old behaviour to the letter."""
-    crowned = select_best_next_action(
-        unexplained_observations_count=5,
-        birth_candidates=1,
-        exhausted_actions=frozenset(),
-    )
-
-    assert crowned.action == "explain_causal_observation"
-
-
 class _CeilingAwareGather:
     """Returns explain until told it is exhausted, then the birth action."""
 

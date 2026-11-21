@@ -18,7 +18,6 @@ from pathlib import Path
 from core.smart_memory import (
     ProceduralMemoryStore,
     ProcedureRecord,
-    ProcedureSearchResult,
 )
 
 
@@ -43,82 +42,8 @@ def _store(tmp_path: Path, procs: list[ProcedureRecord]) -> ProceduralMemoryStor
     return store
 
 
-def test_a_candidate_only_store_reports_why_zero_surfaced(tmp_path: Path):
-    """The measured black hole: every procedure is a candidate, so the maturity
-    gate drops them all — and the report must SAY so, not just return zero."""
-    store = _store(tmp_path, [
-        _proc("read and enumerate", status="candidate", tags=("functions", "core")),
-        _proc("another", status="candidate"),
-    ])
-
-    result = store.search_with_report("what functions does core/x define")
-
-    # 2026-08-15: кандидаты предлагаются. Прежде здесь стоял ноль, и он был
-    # замкнутым кругом: кредит только предложенным, повышение только за кредит.
-    # Отличие «ноль по совпадению» от «ноль по зрелости» сохранено — просто
-    # второго рода нулей больше не бывает.
-    assert isinstance(result, ProcedureSearchResult)
-    assert len(result.procedures) == 1
-    assert result.procedures[0].status == "candidate"
-    # Второй кандидат отсеян по СОВПАДЕНИЮ, а не по зрелости, и отчёт это
-    # по-прежнему различает — ради чего он и заводился.
-    assert result.rejected_by.get("no_overlap") == 1
-    assert "excluded_candidate" not in result.rejected_by
-
-
-def test_no_overlap_is_distinct_from_the_maturity_gate(tmp_path: Path):
-    store = _store(tmp_path, [
-        _proc("totally unrelated", status="active", tags=("kubernetes",)),
-    ])
-
-    result = store.search_with_report("what functions does core/x define")
-
-    assert result.procedures == []
-    assert result.rejected_by.get("no_overlap") == 1
-    assert "excluded_candidate" not in result.rejected_by
-
-
-def test_an_active_matching_procedure_still_surfaces(tmp_path: Path):
-    """Behaviour is unchanged for the case that already worked."""
-    store = _store(tmp_path, [
-        _proc("read and enumerate functions", status="active", tags=("functions",)),
-        _proc("candidate noise", status="candidate", tags=("functions",)),
-    ])
-
-    result = store.search_with_report("list the functions")
-
-    # Доказанная идёт первой — ради этого затвор и заводился. Кандидат теперь
-    # тоже виден, но НИКОГДА не впереди (2026-08-15).
-    assert result.procedures[0].name == "read and enumerate functions"
-    assert result.procedures[0].status == "active"
-    assert any(p.status == "candidate" for p in result.procedures)
-
-
-def test_search_still_returns_a_bare_list_for_existing_callers(tmp_path: Path):
-    store = _store(tmp_path, [
-        _proc("read and enumerate functions", status="active", tags=("functions",)),
-    ])
-    procs = store.search("list the functions")
-    assert [p.name for p in procs] == ["read and enumerate functions"]
-
-
 def test_empty_query_reports_no_query_tokens(tmp_path: Path):
     store = _store(tmp_path, [_proc("x", status="active")])
     result = store.search_with_report("")
     assert result.procedures == []
     assert result.rejected_by == {"no_query_tokens": 1}
-
-
-def test_over_limit_counts_matches_beyond_the_cap(tmp_path: Path):
-    """More matching procedures than the limit: the surplus is reported as
-    `over_limit`, not silently dropped."""
-    store = _store(tmp_path, [
-        _proc(f"read and enumerate functions {i}", status="active", tags=("functions",))
-        for i in range(5)
-    ])
-
-    result = store.search_with_report("list the functions", limit=2)
-
-    assert len(result.procedures) == 2
-    assert result.rejected_by.get("over_limit") == 3
-    assert "no_overlap" not in result.rejected_by

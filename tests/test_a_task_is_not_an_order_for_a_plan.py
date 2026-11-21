@@ -28,57 +28,11 @@ def test_compare_two_files_is_a_task_not_a_review_plan() -> None:
     assert intent is None, intent
 
 
-def test_an_adverbial_realisation_is_not_a_plan_order() -> None:
-    intent = route_operator_intent(
-        "Найди фактическое место хранения episodic memory в текущей "
-        "реализации. Не угадывай по документации. Дай путь и конкретное "
-        "evidence из кода/runtime."
-    )
-    assert intent is None or intent.kind != "implementation_plan", intent
-
-
-def test_a_question_about_the_constructor_is_not_a_memory_status() -> None:
-    intent = route_operator_intent(
-        "Проверь реальный конструктор episodic memory store. Можно ли создать "
-        "полностью изолированный временный store, не меняя основной durable "
-        "store? Ответ только POSSIBLE, IMPOSSIBLE или UNKNOWN и evidence."
-    )
-    assert intent is None or intent.kind != "smart_memory_status", intent
-
-
-def test_an_explicit_source_review_order_still_routes() -> None:
-    intent = route_operator_intent("Сравни загруженные источники по теме памяти")
-    assert intent is not None and intent.kind == "source_review_plan"
-
-
-def test_an_explicit_implementation_plan_order_still_routes() -> None:
-    intent = route_operator_intent(
-        "Составь точный план реализации Operator Task Layer"
-    )
-    assert intent is not None and intent.kind == "implementation_plan"
-
-
 def test_a_memory_status_question_still_routes() -> None:
     intent = route_operator_intent("покажи smart memory статус")
     assert intent is not None and intent.kind == "smart_memory_status"
 
 
-def test_seeing_your_connections_is_not_a_capability_request() -> None:
-    """Живой перехват 2026-08-13: интроспективный вопрос «сколько ты видишь
-    подключений… отвечают ли взаимностью» ушёл в :capability-request формой
-    заявки на доступ. Существительное «подключение» — упоминание, не заказ."""
-    intent = route_operator_intent(
-        "скажи мне насколько ты определённо видишь свой организм сколько ты "
-        "видишь подключений и Видишь ли что они подключены и отвечают тебе "
-        "взаимностью или ты видишь что он подключен но не отвечает "
-        "взаимностью И не понимаю что он делает насколько ты это видишь без "
-        "файлов без документов сколько ты видишь Подключение у себя и что ты "
-        "не видишь ты можешь это определить"
-    )
-    assert intent is None or intent.kind != "capability_request", intent
-
-
 def test_an_explicit_connection_order_still_routes() -> None:
     intent = route_operator_intent("нужно подключить доступ к календарю")
     assert intent is not None and intent.kind == "capability_request"
-

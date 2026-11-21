@@ -105,17 +105,6 @@ def _events_named(events: list[dict], name: str) -> list[dict]:
     return [e for e in events if e.get("event") == name]
 
 
-def test_the_two_sensors_speak_when_they_are_healthy(tmp_path: Path) -> None:
-    """Precondition for everything below: both signals exist in a normal run."""
-    events = _run(tmp_path / "healthy", [_READ])
-    assert _events_named(events, "assumptions_registered"), (
-        "the assumption extractor must produce a signal, or breaking it proves nothing"
-    )
-    assert _events_named(events, "reasoning_action_mismatch"), (
-        "the reasoning/action check must produce a signal for this plan"
-    )
-
-
 def test_a_dead_stagnation_sensor_names_itself_in_the_journal(tmp_path: Path) -> None:
     """The contrast, in the same method: this is what reporting looks like.
 

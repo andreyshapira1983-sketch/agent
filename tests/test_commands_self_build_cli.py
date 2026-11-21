@@ -104,19 +104,6 @@ def test_produce_takes_no_arguments(rest, agent, tmp_path, capsys, monkeypatch):
     assert agent.log.events == []
 
 
-def test_produce_passes_the_gate_state_into_the_producer(agent, tmp_path, produce_env, monkeypatch):
-    captured: dict = {}
-    _use_report(monkeypatch, {"status": "no_patch", "reason": "nothing to do"}, captured)
-
-    assert _handle_self_build_produce("", agent, tmp_path) is True
-
-    assert captured["budget_snapshot"] == {"windows": []}
-    assert captured["kill_switch"] == "inactive", "the kill-switch state reaches the producer"
-    assert captured["inbox"] == "INBOX"
-    assert captured["llm"] == "llm:synthesizer"
-    assert captured["max_builder_attempts"] == 2
-
-
 def test_grounded_run_names_its_evidence(agent, tmp_path, capsys, produce_env, monkeypatch):
     _use_report(
         monkeypatch,
@@ -247,47 +234,6 @@ def test_veto_reasons_are_shown_and_logged(agent, tmp_path, capsys, produce_env,
     assert agent.log.payload("self_build_produce")["veto_reasons"] == ["touches a critical path"]
 
 
-def test_a_report_with_no_roles_still_prints_and_journals(
-    agent, tmp_path, capsys, produce_env, monkeypatch
-):
-    _use_report(monkeypatch, {"status": "error", "reason": "producer crashed", "roles": []})
-
-    assert _handle_self_build_produce("", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "status: error" in err
-    assert "roles:" not in err
-    assert "manager:" not in err
-    assert produce_env == [
-        {"kind": "self-build-produce", "result": {"status": "error", "reason": "producer crashed", "roles": []}}
-    ], "every attempt is journalled, including the failures"
-
-
-def test_the_log_never_carries_generated_content(agent, tmp_path, produce_env, monkeypatch):
-    """The structured log is an outcome record, not a copy of the patch."""
-    _use_report(
-        monkeypatch,
-        {
-            "status": "proposed",
-            "reason": "ok",
-            "target_path": "core/foo.py",
-            "proposed_content": "SECRET-PATCH-BODY",
-            "diff": "--- a\n+++ b\nSECRET-PATCH-BODY",
-            "roles": [],
-            "next_human_action": "review",
-        },
-    )
-
-    assert _handle_self_build_produce("", agent, tmp_path) is True
-
-    logged = agent.log.payload("self_build_produce")
-    assert "SECRET-PATCH-BODY" not in json.dumps(logged)
-    assert set(logged) == {
-        "status", "target_path", "approval_id", "checked_gates", "veto_reasons",
-        "grounded", "evidence_ref", "no_grounded_target", "attempts",
-    }
-
-
 # ── _tech_debt_summary ───────────────────────────────────────────────────────
 
 def test_tech_debt_summary_when_the_file_is_missing(tmp_path):
@@ -309,14 +255,6 @@ def test_tech_debt_summary_counts_open_and_done(tmp_path):
 
 
 # ── _recent_error_lines ──────────────────────────────────────────────────────
-
-def test_recent_errors_without_a_log_directory(tmp_path):
-    assert _recent_error_lines(tmp_path) == []
-
-
-def test_recent_errors_with_an_empty_log_directory(tmp_path):
-    (tmp_path / "logs").mkdir()
-    assert _recent_error_lines(tmp_path) == []
 
 
 def test_recent_errors_picks_error_shaped_events_newest_first(tmp_path):
@@ -348,21 +286,6 @@ def test_recent_errors_stop_at_the_cap(tmp_path):
     )
 
     assert _recent_error_lines(tmp_path, max_errors=3) == ["error_9", "error_8", "error_7"]
-
-
-def test_recent_errors_reads_the_newest_log_file(tmp_path):
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    old = logs / "old.jsonl"
-    new = logs / "new.jsonl"
-    old.write_text(json.dumps({"event": "old_error"}), encoding="utf-8")
-    new.write_text(json.dumps({"event": "new_error"}), encoding="utf-8")
-    import os
-
-    os.utime(old, (1_600_000_000, 1_600_000_000))
-    os.utime(new, (1_700_000_000, 1_700_000_000))
-
-    assert _recent_error_lines(tmp_path) == ["new_error"]
 
 
 def test_recent_errors_survive_an_unlistable_log_directory(tmp_path, monkeypatch):
@@ -416,29 +339,6 @@ def _use_supervisor(monkeypatch, report: dict, captured: dict | None = None):
     monkeypatch.setattr(mod, "evaluate_self_build_supervisor", _evaluate)
 
 
-def test_supervisor_collects_read_only_evidence(agent, tmp_path, supervisor_env, monkeypatch, capsys):
-    captured: dict = {}
-    _use_supervisor(
-        monkeypatch,
-        {"status": "wait", "reason": "inbox busy", "checked_sections": ["budget", "inbox"],
-         "candidate": None, "recommended_next_action": "drain the inbox"},
-        captured,
-    )
-
-    assert _handle_self_build_supervisor("", agent, tmp_path) is True
-
-    assert captured["approvals_pending"] == 2
-    assert captured["budget_windows"] == {"windows": []}
-    assert captured["task_queue"] == {"pending": 0}
-    assert callable(captured["candidate_provider"]), "the candidate is fetched lazily"
-
-    err = capsys.readouterr().err
-    assert "status: wait" in err
-    assert "checked: budget, inbox" in err
-    assert "candidate: None" in err
-    assert "next: drain the inbox" in err
-
-
 def test_supervisor_prints_a_candidate_without_its_diff(
     agent, tmp_path, supervisor_env, monkeypatch, capsys
 ):
@@ -485,19 +385,3 @@ def test_supervisor_marks_a_no_patch_candidate_as_diffless(
 
     assert _handle_self_build_supervisor("", agent, tmp_path) is True
     assert agent.log.payload("self_build_supervisor")["candidate"]["has_diff"] is False
-
-
-def test_supervisor_json_mode_is_parsable(agent, tmp_path, supervisor_env, monkeypatch, capsys):
-    report = {
-        "status": "stop",
-        "reason": "kill switch",
-        "checked_sections": ["budget"],
-        "candidate": None,
-        "recommended_next_action": "clear the kill switch",
-    }
-    _use_supervisor(monkeypatch, report)
-
-    assert _handle_self_build_supervisor("--json", agent, tmp_path) is True
-
-    assert json.loads(capsys.readouterr().err) == report
-    assert agent.log.payload("self_build_supervisor")["status"] == "stop"

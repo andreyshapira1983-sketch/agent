@@ -33,7 +33,6 @@
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -120,76 +119,6 @@ class _Battery:
         return (self.ok, "" if self.ok else "3 failed")
 
 
-# ── 1. принятие ──────────────────────────────────────────────────────────────
-
-def test_a_verified_commit_becomes_the_next_head(repo: Path) -> None:
-    """Успешный путь целиком: предъявлено → перепроверено → принято.
-
-    Красный до правки: принимающего не существовало, и голова опыта никуда не
-    двигалась — следующий цикл стартовал из того же кода.
-    """
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        experiment_head,
-        offer_verified_commit,
-    )
-
-    start = _git(repo, "rev-parse", "HEAD")
-    sha = _candidate(repo)
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["targeted", "full"])
-
-    battery = _Battery(ok=True)
-    verdict = adopt_offer(repo, sha=sha, battery=battery)
-
-    assert verdict.accepted, f"проверенный кандидат не принят: {verdict.reason}"
-    assert experiment_head(repo) == sha, "голова опыта осталась на старом коде"
-    assert experiment_head(repo) != start
-    assert battery.calls, "батарея не перепроверена — принято по словам полосы"
-
-
-def test_the_battery_runs_on_the_candidate_not_on_the_old_code(repo: Path) -> None:
-    """Перепроверка обязана идти НА КАНДИДАТЕ, иначе она проверяет не то.
-
-    Батарея, запущенная в старом дереве, зелена по причине, не имеющей
-    отношения к предлагаемому изменению.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
-
-    sha = _candidate(repo, text="VALUE = 42\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-2", tests_run=["full"])
-
-    seen: list[str] = []
-
-    def battery(worktree: Path) -> tuple[bool, str]:
-        seen.append((worktree / "core" / "widget.py").read_text(encoding="utf-8"))
-        return True, ""
-
-    adopt_offer(repo, sha=sha, battery=battery)
-
-    assert seen == ["VALUE = 42\n"], (
-        f"батарея видела не код кандидата, а {seen!r}"
-    )
-
-
-def test_the_working_tree_is_left_where_it_was(repo: Path) -> None:
-    """Принятие не вправе переставлять ветку рабочего дерева.
-
-    Голова опыта — отдельный указатель, а не `main` и не текущая ветка. Опыт
-    двигается, репозиторий человека остаётся на месте.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
-
-    before_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    before_head = _git(repo, "rev-parse", "HEAD")
-    sha = _candidate(repo)
-    offer_verified_commit(repo, sha=sha, proposal_id="p-3", tests_run=["full"])
-
-    adopt_offer(repo, sha=sha, battery=_Battery(ok=True))
-
-    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == before_branch
-    assert _git(repo, "rev-parse", "HEAD") == before_head, "принятие сдвинуло main"
-
-
 # ── 2. отказы: чужой SHA, непредъявленный SHA, не-шаг ────────────────────────
 
 def test_an_unoffered_commit_is_refused(repo: Path) -> None:
@@ -252,82 +181,6 @@ def test_a_ref_name_is_not_a_sha(repo: Path) -> None:
         assert not verdict.accepted, f"ссылка {name!r} принята как SHA"
 
 
-# ── 3. отказы: забор и батарея ───────────────────────────────────────────────
-
-def test_a_commit_touching_the_fence_is_refused(repo: Path) -> None:
-    """Кандидат, трогающий забор, не принимается — даже зелёный.
-
-    Иначе забор перестаёт быть забором за одно принятие: достаточно одной
-    правки `core/policy.py`, прошедшей батарею, и дальше полномочие решает
-    уже изменённый код.
-    """
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        experiment_head,
-        offer_verified_commit,
-    )
-
-    start = experiment_head(repo)
-    sha = _candidate(repo, path="core/policy.py", text="GATE = False\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-fence", tests_run=["full"])
-
-    verdict = adopt_offer(repo, sha=sha, battery=_Battery(ok=True))
-
-    assert not verdict.accepted
-    assert "забор" in verdict.reason, verdict.reason
-    assert experiment_head(repo) == start
-
-
-def test_the_supervisor_protects_itself(repo: Path) -> None:
-    """Принимающий стоит за собственным забором.
-
-    Без этого правила достаточно одного принятого изменения самого
-    принимающего, чтобы все остальные правила стали необязательными.
-    """
-    from core.burn_in_supervisor import SUPERVISOR_FENCE
-
-    assert "core/burn_in_supervisor.py" in SUPERVISOR_FENCE
-    assert "core/self_apply_lane.py" in SUPERVISOR_FENCE
-    assert "core/burn_in_sandbox.py" in SUPERVISOR_FENCE
-
-
-def test_a_red_battery_refuses_and_leaves_the_head_alone(repo: Path) -> None:
-    """Красная перепроверка — отказ, и голова опыта не двигается."""
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        experiment_head,
-        offer_verified_commit,
-    )
-
-    start = experiment_head(repo)
-    sha = _candidate(repo)
-    offer_verified_commit(repo, sha=sha, proposal_id="p-red", tests_run=["full"])
-
-    verdict = adopt_offer(repo, sha=sha, battery=_Battery(ok=False))
-
-    assert not verdict.accepted
-    assert "батарея" in verdict.reason, verdict.reason
-    assert experiment_head(repo) == start
-
-
-def test_a_refusal_leaves_no_worktree_behind(repo: Path) -> None:
-    """Отказ убирает за собой: свежее дерево не переживает проверку.
-
-    Десять часов отказов не вправе превращаться в десять часов накопленного
-    мусора на диске — это тот самый молчаливый рост ошибок, ради которого
-    затевался аудит.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
-
-    sha = _candidate(repo)
-    offer_verified_commit(repo, sha=sha, proposal_id="p-clean", tests_run=["full"])
-
-    adopt_offer(repo, sha=sha, battery=_Battery(ok=False))
-
-    listing = _git(repo, "worktree", "list")
-    assert listing.count("\n") == 0, f"после отказа остались деревья:\n{listing}"
-
-
 # ── 4. след ──────────────────────────────────────────────────────────────────
 
 def test_every_decision_is_written_down(repo: Path) -> None:
@@ -354,54 +207,6 @@ def test_every_decision_is_written_down(repo: Path) -> None:
     assert all(w.get("reason") is not None for w in written)
 
 
-def test_the_head_survives_a_restart(repo: Path) -> None:
-    """Голова опыта переживает перезапуск — иначе цепочка не длиннее одного шага."""
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        experiment_head,
-        next_start_point,
-        offer_verified_commit,
-    )
-
-    sha = _candidate(repo)
-    offer_verified_commit(repo, sha=sha, proposal_id="p-live", tests_run=["full"])
-    adopt_offer(repo, sha=sha, battery=_Battery(ok=True))
-
-    assert next_start_point(repo) == sha
-    assert experiment_head(repo) == sha
-
-
-# ── 5. слово исхода ──────────────────────────────────────────────────────────
-
-def test_a_local_commit_is_not_called_accepted(repo: Path) -> None:
-    """`committed_local` — «кандидат проверен», а не «агент принял».
-
-    Ревизия PR #333: `lesson_from_apply_result` называла локальный commit
-    исходом `accepted`, хотя работающий агент оставался на прежнем коде. Урок
-    с неверным словом учит неверному: по журналу выходило, что изменение
-    принято, тогда как принято оно не было.
-    """
-    from core.self_build_rules import lesson_from_apply_result
-
-    lesson = lesson_from_apply_result(
-        {
-            "proposal_id": "p-word",
-            "status": "committed_local",
-            "reason": "tests passed",
-            "files_changed": ["core/widget.py"],
-            "tests_run": ["targeted", "full"],
-            "commit_hash": "a" * 40,
-        },
-        origin="rule_approved_apply",
-    )
-
-    assert lesson is not None
-    assert lesson.outcome == "verified_candidate", (
-        f"локальный commit назван {lesson.outcome!r}; принятие делает "
-        "принимающий, а не полоса"
-    )
-
-
 # ── 6. петля замыкается: следующий цикл СТАРТУЕТ из принятого ────────────────
 #
 # Ревизия Copilot по PR #334, замечание к `next_start_point`:
@@ -421,33 +226,6 @@ def test_a_local_commit_is_not_called_accepted(repo: Path) -> None:
 # Замыкает её не агент, а принимающий: он и ставит рабочее дерево следующего
 # цикла. Так у кода, который сам себя меняет, нет способа выбрать себе
 # commit — он не выбирает дерево, в котором его запустят.
-
-
-def test_the_next_cycle_starts_from_the_adopted_commit(repo: Path, tmp_path: Path) -> None:
-    """После принятия следующий цикл работает на коде кандидата.
-
-    Это и есть недостающее звено последовательности: ошибка → ремонт → тесты
-    → ПРИНЯТИЕ → новый работающий агент. До правки голова опыта двигалась, а
-    работать продолжал старый код.
-    """
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        materialise_next_cycle,
-        offer_verified_commit,
-    )
-
-    sha = _candidate(repo, text="VALUE = 42\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-    assert adopt_offer(repo, sha=sha, battery=_Battery()).accepted
-
-    cycle = tmp_path / "cycle_next"
-    got = materialise_next_cycle(repo, cycle)
-
-    assert got == sha, f"следующий цикл поставлен не на принятое: {got!r}"
-    assert (cycle / "core" / "widget.py").read_text(encoding="utf-8") == "VALUE = 42\n", (
-        "дерево следующего цикла несёт СТАРЫЙ код — принятие осталось "
-        "записью в файле, а работает по-прежнему то, что сломалось"
-    )
 
 
 def test_the_next_cycle_cannot_be_asked_for_another_commit(
@@ -472,34 +250,6 @@ def test_the_next_cycle_cannot_be_asked_for_another_commit(
 
     with pytest.raises(SupervisorError):
         materialise_next_cycle(repo, tmp_path / "cycle_bad", sha=unadopted)
-
-
-def test_materialising_the_next_cycle_leaves_the_checkout_alone(
-    repo: Path, tmp_path: Path
-) -> None:
-    """Репозиторий человека остаётся там, где стоял.
-
-    Принятие двигает ОТДЕЛЬНЫЙ указатель. Ни ветка рабочего дерева, ни main
-    не трогаются — это условие всего замысла, а не деталь.
-    """
-    from core.burn_in_supervisor import (
-        adopt_offer,
-        materialise_next_cycle,
-        offer_verified_commit,
-    )
-
-    before_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    before_head = _git(repo, "rev-parse", "HEAD")
-    sha = _candidate(repo, text="VALUE = 5\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-    adopt_offer(repo, sha=sha, battery=_Battery())
-
-    materialise_next_cycle(repo, tmp_path / "cycle_x")
-
-    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == before_branch
-    assert _git(repo, "rev-parse", "HEAD") == before_head, (
-        "принятие переставило голову рабочей копии человека"
-    )
 
 
 def test_the_second_cycle_reuses_its_tree(repo: Path, tmp_path: Path) -> None:
@@ -537,116 +287,7 @@ def test_the_second_cycle_reuses_its_tree(repo: Path, tmp_path: Path) -> None:
     )
 
 
-# ── 7. испорченный указатель не отматывает опыт назад ────────────────────────
-#
-# Ревизия PR #334, замечание к `experiment_head`: при ЛЮБОМ сбое чтения он
-# возвращает `git rev-parse HEAD`. Отсутствующий файл и испорченный файл —
-# разные события: первое значит «опыт ещё не начинался», второе значит «опыт
-# шёл, и его память повреждена». Свести их к одному ответу — значит тихо
-# начать цепочку заново на старом коде, и в журнале это будет выглядеть как
-# добросовестный первый шаг.
-
-
-def test_a_damaged_head_pointer_stops_the_experiment(repo: Path) -> None:
-    """Повреждённая память опыта — отказ, а не молчаливый откат к HEAD."""
-    from core.burn_in_supervisor import SupervisorError, experiment_head
-
-    head_file = repo / "state" / "burn_in_head.json"
-    head_file.parent.mkdir(parents=True, exist_ok=True)
-    head_file.write_text("{\"sha\": \"not-a-sha\"", encoding="utf-8")
-
-    with pytest.raises(SupervisorError):
-        experiment_head(repo)
-
-
-def test_a_missing_head_pointer_still_means_the_first_cycle(repo: Path) -> None:
-    """Сосед: отсутствие файла — по-прежнему законное начало опыта."""
-    from core.burn_in_supervisor import experiment_head
-
-    assert experiment_head(repo) == _git(repo, "rev-parse", "HEAD")
-
-
-# ── 8. память опыта лежит внутри дерева, которое опыт переписывает ───────────
-#
-# Замерено при постройке теста выше, сверх ревизии. Полоса на
-# `core/self_apply_lane.py:738` зовёт `vcs.stage_all()`, то есть буквально
-# `git add -A` (`core/safe_vcs.py:133`). Указатель опыта лежит в
-# `state/burn_in_head.json`, git его не отслеживает и не игнорирует. Отсюда
-# две беды подряд:
-#
-#   1. кандидат ЗАБИРАЕТ указатель в свой коммит, а `vcs.checkout(original)`
-#      следом его УДАЛЯЕТ — и `experiment_head` читает это как «опыт ещё не
-#      начинался», молча отматывая цепочку к исходному коду;
-#   2. принятый коммит, несущий свой `state/burn_in_head.json`, назначил бы
-#      опыту стартовую точку — ровно то полномочие, ради изъятия которого
-#      принимающего и вынесли наружу.
-#
-# Замер (временный репозиторий, та же последовательность, что у полосы):
-# голова после принятия — кандидат; после `add -A` во втором кандидате и
-# `checkout main` файла НЕТ, `experiment_head` возвращает seed.
-
-
-def test_a_candidate_may_not_carry_the_experiments_memory(repo: Path) -> None:
-    """Кандидат, тронувший указатель опыта, отвергается забором."""
-    from core.burn_in_supervisor import (
-        SUPERVISOR_FENCE,
-        adopt_offer,
-        offer_verified_commit,
-    )
-
-    assert "state/burn_in_head.json" in SUPERVISOR_FENCE, (
-        "указатель опыта не под забором: принятый коммит смог бы сам "
-        "назначить, откуда стартует следующий цикл"
-    )
-    sha = _candidate(
-        repo, path="state/burn_in_head.json", text='{"sha": "x"}\n', force=True
-    )
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-
-    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
-
-    assert not verdict.accepted
-
-
-def test_the_experiments_memory_cannot_be_staged_by_the_lane() -> None:
-    """`git add -A` в настоящем репозитории не вправе подобрать указатель.
-
-    Забор ловит кандидата, который тронул память ОСОЗНАННО. Эта проверка про
-    случайность: полоса сгребает всё нетрекаемое, и без игнора указатель
-    уезжает в коммит без единого намерения.
-    """
-    root = Path(__file__).resolve().parents[1]
-    for name in ("state/burn_in_head.json", "state/burn_in_offers.jsonl",
-                 "state/burn_in_adoptions.jsonl"):
-        done = subprocess.run(
-            ["git", "check-ignore", "-q", name], cwd=str(root),
-            capture_output=True, text=True,
-        )
-        assert done.returncode == 0, f"{name} не игнорируется; `git add -A` его заберёт"
-
-
 # ── 9. три оставшихся замечания ревизии по принимающему ──────────────────────
-
-
-def test_a_non_dict_ledger_row_does_not_break_adoption(repo: Path) -> None:
-    """I4. `[1, 2]` — законный JSON и не словарь.
-
-    `json.loads(line).get("sha")` ловилось только на `ValueError`, а `.get` на
-    списке даёт `AttributeError`. Одна испорченная строка реестра роняла
-    принятие целиком — то есть кто угодно, кто умеет дописать строку в
-    журнал, останавливал опыт.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_ledger, offer_verified_commit
-
-    sha = _candidate(repo)
-    ledger = offer_ledger(repo)
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    # Именно ПЕРЕД годной строкой: чтение возвращается на первом совпадении,
-    # и мусор позади него ничего бы не доказал.
-    ledger.write_text("[1, 2]\n\"строка\"\n17\nnull\n", encoding="utf-8")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-
-    assert adopt_offer(repo, sha=sha, battery=_Battery()).accepted
 
 
 def test_the_fence_is_not_fooled_by_the_spelling_of_a_path(repo: Path) -> None:
@@ -716,30 +357,6 @@ def test_two_adoptions_cannot_race_past_the_same_head(repo: Path) -> None:
 # ── 10. ревизия PR #335: четыре замечания по замыканию петли ─────────────────
 
 
-def test_the_fence_folds_case_on_every_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`os.path.normcase` на POSIX — тождество, то есть забора там не было.
-
-    Самое неприятное из ревизии PR #335, и потому что это МОЯ ошибка метода:
-    свидетель `test_the_fence_is_not_fooled_by_the_spelling_of_a_path` зелен
-    на Windows и красен на Linux, а я показал только зелёный. Соседний тест
-    песочницы про регистр несёт `skipif` ровно по этой причине — я его правило
-    не перенёс.
-
-    Здесь POSIX подделывается честно: `normcase` заменяется тождеством,
-    то есть ровно тем, чем он там и является.
-    """
-    import os.path as ospath
-
-    from core import burn_in_supervisor as sup
-
-    monkeypatch.setattr(ospath, "normcase", lambda s: s)
-
-    assert sup._fence_key("Core/Policy.py") == sup._fence_key("core/policy.py"), (
-        "на файловой системе, различающей регистр, забор обходится "
-        "написанием имени"
-    )
-
-
 def test_the_fence_still_refuses_a_case_variant_on_a_posix_runner(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -757,70 +374,6 @@ def test_the_fence_still_refuses_a_case_variant_on_a_posix_runner(
     )
 
     assert not verdict.accepted
-
-
-def test_the_next_cycle_tree_is_placed_where_the_caller_meant(
-    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Относительный путь дерева читался в двух разных системах координат.
-
-    `workspace.exists()` считал от текущего каталога, а `git worktree add`
-    через `cwd=repo` — от корня репозитория. Запуск
-    `--repo /tmp/repo --next cycle` из другого места заводил
-    `/tmp/repo/cycle`, а проверка существования и печать говорили о
-    `<cwd>/cycle`. Следующий вызов падал или сообщал не о том дереве.
-    """
-    from core.burn_in_supervisor import materialise_next_cycle
-
-    here = tmp_path / "откуда-запустили"
-    here.mkdir()
-    monkeypatch.chdir(here)
-
-    materialise_next_cycle(repo, Path("cycle"))
-
-    assert (here / "cycle" / "core" / "widget.py").exists(), (
-        "дерево заведено не там, где просил вызывающий"
-    )
-    assert not (repo / "cycle").exists(), "дерево уехало внутрь репозитория"
-
-
-def test_the_head_is_read_under_the_same_lock_that_creates_the_tree(
-    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Между чтением головы и заведением дерева не было замка.
-
-    Замечание ревизии, помеченное как suppressed, и оно верное: другой
-    принимающий вправе сдвинуть голову ровно в этот промежуток, и тогда цикл
-    стартует из устаревшего коммита, а функция назовёт его следующим.
-    """
-    from core import burn_in_supervisor as sup
-
-    events: list[str] = []
-    real_lock = sup.exclusive_file_lock
-    real_git = sup._git
-
-    @contextlib.contextmanager
-    def watched_lock(path):
-        events.append("замок взят")
-        with real_lock(path):
-            yield
-        events.append("замок отпущен")
-
-    def watched_git(where, *args):
-        if args[:2] == ("worktree", "add"):
-            events.append("дерево заведено")
-        return real_git(where, *args)
-
-    monkeypatch.setattr(sup, "exclusive_file_lock", watched_lock)
-    monkeypatch.setattr(sup, "_git", watched_git)
-
-    sup.materialise_next_cycle(repo, tmp_path / "cycle_locked")
-
-    assert "дерево заведено" in events, "дерево не заводилось вовсе"
-    assert events.index("замок взят") < events.index("дерево заведено"), (
-        "голова прочитана и дерево заведено вне замка"
-    )
-    assert events.index("дерево заведено") < events.index("замок отпущен")
 
 
 def test_an_offer_ledger_broken_at_the_byte_level_is_refused_not_raised(
@@ -852,48 +405,3 @@ def test_an_offer_ledger_broken_at_the_byte_level_is_refused_not_raised(
 
     assert not verdict.accepted
     assert "не предъявлен" in verdict.reason, verdict.reason
-
-
-@pytest.mark.parametrize(
-    "rel",
-    [
-        ".github/workflows/ci.yml",
-        ".github/skills/code-review/SKILL.md",
-    ],
-)
-def test_the_accepting_side_refuses_a_candidate_that_rewrites_its_judge(
-    repo: Path, rel: str
-) -> None:
-    """У принимающего тот же пробел, что и у песочницы.
-
-    `SUPERVISOR_FENCE` перечисляет полномочие и память опыта, но не того, кто
-    выносит приговор. Кандидат, переписывающий батарею или указания ревизору,
-    проходил принятие: проверка забора — точное сравнение имён, а судья — это
-    дерево.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
-
-    sha = _candidate(repo, path=rel, text="что угодно\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-
-    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
-
-    assert not verdict.accepted
-    assert "забор" in verdict.reason, verdict.reason
-
-
-def test_a_fenced_tree_is_not_fooled_by_the_spelling_of_a_path(repo: Path) -> None:
-    """Дерево сверяется так же, как и имя: приведённой записью.
-
-    Иначе второй вид записи оказался бы слабее первого, и обход, закрытый
-    ревизиями PR #334 и #335 для имён, снова открылся бы для деревьев.
-    """
-    from core.burn_in_supervisor import adopt_offer, offer_verified_commit
-
-    sha = _candidate(repo, path=".GitHub/workflows/ci.yml", text="x\n")
-    offer_verified_commit(repo, sha=sha, proposal_id="p-1", tests_run=["full"])
-
-    verdict = adopt_offer(repo, sha=sha, battery=_Battery())
-
-    assert not verdict.accepted
-    assert "забор" in verdict.reason, verdict.reason

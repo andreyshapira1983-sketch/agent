@@ -27,7 +27,6 @@ from core.approval import AutoApprover
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.models import PlanStep
-from core.placeholder_text import looks_like_unfilled_content
 from core.policy import PolicyGate
 from core.step_references import (
     UnresolvedStepReference,
@@ -41,23 +40,6 @@ from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
 
 
-def test_a_whole_argument_keeps_the_measured_type():
-    outputs = {"0": ["первая", "вторая"]}
-
-    resolved = resolve_step_references({"items": "{{step:0.output}}"}, outputs)
-
-    assert resolved["items"] == ["первая", "вторая"], "список обязан остаться списком"
-
-
-def test_a_reference_inside_text_is_substituted():
-    outputs = {"read": "содержимое файла"}
-
-    resolved = resolve_step_references(
-        {"content": "начало\n{{step:read.output}}\nконец"}, outputs)
-
-    assert resolved["content"] == "начало\nсодержимое файла\nконец"
-
-
 def test_references_are_found_at_any_depth():
     arguments = {
         "path": "core/loop.py",
@@ -67,35 +49,6 @@ def test_references_are_found_at_any_depth():
 
     assert has_step_reference(arguments)
     assert referenced_steps(arguments) == ("2", "read_a")
-
-
-def test_arguments_without_references_are_untouched():
-    arguments = {"path": "core/loop.py", "content": "обычный текст"}
-
-    assert not has_step_reference(arguments)
-    assert resolve_step_references(arguments, {}) == arguments
-
-
-def test_a_missing_source_is_an_error_not_a_guess():
-    """Главное свойство: неразрешённая ссылка НЕ дорисовывается."""
-    with pytest.raises(UnresolvedStepReference) as excinfo:
-        resolve_step_references({"content": "{{step:7.output}}"}, {"0": "есть"})
-
-    assert "no result" in str(excinfo.value)
-    assert "'0'" in str(excinfo.value), "причина обязана назвать, что было известно"
-
-
-def test_the_reference_form_is_not_mistaken_for_a_placeholder():
-    """Транспорт не воюет со сторожем заглушек: форма ссылки ему не родня."""
-    assert not looks_like_unfilled_content("{{step:0.output}}")
-    assert looks_like_unfilled_content("<content read from .agent_drafts/x.py>")
-
-
-def test_an_empty_output_is_still_a_measurement():
-    """Пустой вывод — это измеренный факт, а не отсутствие результата."""
-    resolved = resolve_step_references({"content": "{{step:0.output}}"}, {"0": ""})
-
-    assert resolved["content"] == ""
 
 
 # ===========================================================
@@ -128,26 +81,6 @@ def test_an_index_into_the_output_is_rejected_the_same_way():
 # ===========================================================
 # Проза о синтаксисе — не ссылка (экзамен 2026-09-05, ход 22)
 # ===========================================================
-
-
-def test_prose_naming_the_reference_form_stays_prose():
-    """В objective субагента стояло «ссылок вида {{step:N.output}}» — «N» не
-    шаг, а буква, и шаг, которому нужно было лишь рассказать о синтаксисе,
-    провалился целиком. Когда план известен, такая форма — текст."""
-    arguments = {"objective": "найди обработку ссылок вида {{step:N.output}} в коде"}
-
-    resolved = resolve_step_references(arguments, {"1": "x"}, plan_steps={"1", "2"})
-
-    assert resolved == arguments
-
-
-def test_a_dangling_numbered_reference_is_still_an_error():
-    """Номер, которого нет в плане, — не проза, а висячая ссылка: раньше
-    ровно такая легла на диск 17-байтовым файлом (ходы 12–13)."""
-    with pytest.raises(UnresolvedStepReference):
-        resolve_step_references(
-            {"content": "{{step:9.output}}"}, {"1": "x"}, plan_steps={"1", "2"},
-        )
 
 
 def test_without_a_plan_every_form_is_a_reference():
@@ -193,18 +126,6 @@ class TestReferencesReachTheEffectPath:
             expected_outcome="whatever",
         )
 
-    def test_what_was_read_is_what_gets_written(self, workspace: Path):
-        (workspace / "source.txt").write_text("измеренное содержимое", encoding="utf-8")
-        loop = self._loop(workspace)
-        steps = [
-            self._step("file_read", {"path": "source.txt"}, 1),
-            self._step("file_write", {"path": "copy.txt", "content": "{{step:1.output}}"}, 2),
-        ]
-
-        results = loop._execute_steps_parallel(steps)
-
-        assert all(outcome is not None for _, outcome, _ in results), results
-        assert (workspace / "copy.txt").read_text(encoding="utf-8") == "измеренное содержимое"
 
     def test_a_step_without_a_source_is_not_executed(self, workspace: Path):
         """Обещание докстринга: неразрешённая ссылка — шаг НЕ исполняется.

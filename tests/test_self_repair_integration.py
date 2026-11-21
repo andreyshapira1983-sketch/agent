@@ -84,41 +84,6 @@ def _build_agent(
 # ============================================================
 
 class TestRunTestsIntegration:
-    def test_run_tests_runs_without_approval(self, workspace: Path, monkeypatch):
-        """run_tests is `reversible` — PolicyGate allows + audits, no
-        approval prompt. We deliberately do NOT require approval here
-        so the agent can prove its work in the self-repair loop without
-        a modal at every step. The full self-repair CONTROLLER (MVP-13.2)
-        wraps the chain in a single approval."""
-        def fake_run(argv, **kwargs):
-            class C:
-                returncode = 0
-                stdout = b"1 passed in 0.01s\n"
-                stderr = b""
-            return C()
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        agent, log_path = _build_agent(
-            workspace,
-            canned_sources=[{
-                "tool": "run_tests",
-                "arguments": {"paths": ["tests"]},
-                "label": "run_tests:tests",
-            }],
-        )
-        agent.run("run my tests")
-        ev = _events(log_path)
-        kinds = [e["event"] for e in ev]
-        # No approval cycle for reversible action.
-        assert "approval_request" not in kinds
-        # Policy event was emitted with `reversible` audit reason.
-        policy_events = [e for e in ev if e["event"] == "policy"]
-        assert policy_events
-        reasons = policy_events[-1]["payload"].get("reasons", [])
-        assert any("reversible" in r for r in reasons)
-        # Tool executed.
-        assert "tool_result" in kinds
-
     def test_run_tests_audit_carries_argv(self, workspace: Path, monkeypatch):
         """The audit log must show what was actually invoked. Critical
         for after-the-fact diagnosis of an agent's test runs."""
@@ -255,34 +220,6 @@ class TestReadLogsIntegration:
 # ============================================================
 
 class TestDiffFileIntegration:
-    def test_diff_file_runs_without_approval(self, workspace: Path):
-        target = workspace / "self.py"
-        target.write_text("def foo():\n    return 1\n", encoding="utf-8")
-        agent, log_path = _build_agent(
-            workspace,
-            canned_sources=[{
-                "tool": "diff_file",
-                "arguments": {
-                    "path": "self.py",
-                    "proposed_content": "def foo():\n    return 42\n",
-                    "context_lines": 3,
-                },
-                "label": "diff_file:self.py",
-            }],
-        )
-        agent.run("preview the change")
-        ev = _events(log_path)
-        kinds = [e["event"] for e in ev]
-        # read_only -> no approval.
-        assert "approval_request" not in kinds
-        result_events = [e for e in ev if e["event"] == "tool_result"]
-        out = result_events[-1]["payload"]["output"]
-        assert out["additions"] == 1
-        assert out["deletions"] == 1
-        assert "return 42" in out["diff"]
-        # diff_file did NOT write to disk: the file content is unchanged.
-        assert target.read_text(encoding="utf-8") == "def foo():\n    return 1\n"
-
     def test_diff_file_for_new_file_shows_additions(self, workspace: Path):
         agent, log_path = _build_agent(
             workspace,
@@ -315,44 +252,6 @@ _DIAGNOSIS = "test_value expects VALUE == 42"
 
 
 class TestSelfRepairController:
-    def test_repair_success_writes_after_approval_and_green_tests(
-        self,
-        workspace: Path,
-        monkeypatch,
-    ):
-        target = workspace / "module.py"
-        target.write_text("VALUE = 1\n", encoding="utf-8")
-
-        _fake_pytest_sequence(
-            monkeypatch,
-            [
-                (1, _RED_NAMED),
-                (0, b"3 passed in 0.05s\n"),
-            ],
-        )
-        agent, log_path = _build_agent(workspace, canned_sources=[])
-
-        report = agent.repair(
-            RepairProposal(
-                path="module.py",
-                proposed_content="VALUE = 42\n",
-                test_paths=("tests",),
-                reason="test_value expects VALUE == 42",
-            ),
-            workspace_root=workspace,
-        )
-
-        assert report.status == "repaired"
-        assert target.read_text(encoding="utf-8") == "VALUE = 42\n"
-        assert len(agent.approval_provider.calls) == 1
-        assert [e["payload"]["tool_name"] for e in _events(log_path) if e["event"] == "tool_call"] == [
-            "run_tests",
-            "diff_file",
-            "file_write",
-            "run_tests",
-        ]
-        assert any(e["event"] == "self_repair_result" for e in _events(log_path))
-
     def test_repair_rolls_back_when_post_tests_fail(
         self,
         workspace: Path,

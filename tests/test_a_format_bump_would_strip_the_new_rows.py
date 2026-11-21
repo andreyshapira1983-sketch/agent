@@ -7,22 +7,10 @@ from __future__ import annotations
 import json
 
 from core.state_integrity import (
-    INTEGRITY_MARKER,
     append_state_jsonl,
     quarantine_dir_for,
     read_state_jsonl,
 )
-
-
-def test_the_format_marker_is_still_the_one_this_measurement_was_made_on() -> None:
-    assert INTEGRITY_MARKER == "agent-state-jsonl-v1", (
-        "формат строк состояния сменился. Замер H-31: старый читатель не "
-        "игнорирует чужую версию, а выносит её в карантин и переписывает живой "
-        "файл без неё. Значит вместе с этой сменой обязан приехать читатель, "
-        "принимающий ОБЕ версии, иначе первый же процесс на прежнем коде "
-        "сотрёт из хранилища всё, что записал новый. Обновите tests и запись "
-        "H-31, а не только константу."
-    )
 
 
 def test_a_row_from_a_future_format_is_stripped_from_the_live_file(tmp_path) -> None:

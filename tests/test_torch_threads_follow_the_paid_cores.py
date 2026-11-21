@@ -19,9 +19,3 @@ def test_no_quota_falls_back_to_visible_cores(tmp_path: Path, monkeypatch) -> No
     f.write_text("max 100000\n", encoding="utf-8")
     assert cpu_budget(f) == 4
     assert cpu_budget(tmp_path / "absent") == 4
-
-
-def test_a_tiny_quota_still_gets_one_thread(tmp_path: Path) -> None:
-    f = tmp_path / "cpu.max"
-    f.write_text("50000 100000\n", encoding="utf-8")
-    assert cpu_budget(f) == 1

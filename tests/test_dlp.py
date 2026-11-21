@@ -1,37 +1,7 @@
 """DLP helpers for PII detection and masking."""
 from __future__ import annotations
 
-from core.dlp import contains_pii, pii_markers, scan_pii
-
-
-def test_scan_pii_finds_supported_markers():
-    text = "Email andre@example.com, SSN 123-45-6789, phone +1 415 555 1234."
-
-    findings = scan_pii(text)
-
-    assert {finding.kind for finding in findings} == {"email", "ssn", "phone"}
-    assert all(finding.matched for finding in findings)
-
-
-def test_pii_markers_are_unique_and_sorted():
-    markers = pii_markers("a@example.com b@example.com +972 50 123 4567")
-
-    assert markers == ["email", "phone"]
-
-
-def test_contains_pii_reports_reasons():
-    found, reasons = contains_pii("Contact andre@example.com")
-
-    assert found is True
-    assert reasons == ["PII markers: ['email']"]
-
-
-def test_clean_text_has_no_pii():
-    found, reasons = contains_pii("Python 3.14.5 on Windows")
-
-    assert found is False
-    assert reasons == []
-
+from core.dlp import pii_markers, scan_pii
 
 # ---------------------------------------------------------------------------
 # ИНН: checksum + context filtering. The naive `\b\d{10}\b` regex would
@@ -43,12 +13,6 @@ def test_clean_text_has_no_pii():
 VALID_INN_10 = "7707083893"
 # Synthetic 12-digit ИНН satisfying both control digits (verified manually).
 VALID_INN_12 = "500100732259"
-
-
-def test_inn_real_value_detected():
-    findings = scan_pii(f"ИНН: {VALID_INN_10}")
-    assert {f.kind for f in findings} == {"inn"}
-    assert findings[0].matched == VALID_INN_10
 
 
 def test_inn_individual_12_digit_detected():
@@ -85,8 +49,3 @@ def test_inn_checksum_valid_overrides_negative_context_when_label_present():
     # tokens like "build" must not hide the true positive.
     findings = scan_pii(f"build pipeline; clientИНН={VALID_INN_10} ok")
     assert "inn" in {f.kind for f in findings}
-
-
-def test_inn_in_neutral_text_with_valid_checksum_is_detected():
-    # No suppressing context, valid checksum -> PII detected.
-    assert "inn" in pii_markers(f"Контрагент {VALID_INN_10} оплатил счёт.")

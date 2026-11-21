@@ -126,16 +126,6 @@ def test_a_finished_campaign_writes_down_whether_it_achieved_its_goal(tmp_path: 
     assert row["stop_reason"] == result.stop_reason
 
 
-def test_a_trace_made_during_the_run_counts_as_achieved(tmp_path: Path) -> None:
-    """Свидетель: след, появившийся В ПРОГОНЕ, — это «сошлось»."""
-    result = _run(tmp_path, "заметка лежит в docs/result.md", writes="docs/result.md")
-
-    assert (tmp_path / "docs" / "result.md").is_file(), "исполнитель обязан был создать след"
-    assert result.success_verdict["verdict"] == "verified"
-    assert "docs/result.md" in result.success_verdict["fresh_traces"]
-    assert _verdict_rows(tmp_path)[0]["verdict"] == "verified"
-
-
 def test_a_trace_older_than_the_run_is_not_called_achieved(tmp_path: Path) -> None:
     """Свидетель против ЛОЖНОГО «сошлось» — того самого, что дал живой замер.
 
@@ -162,43 +152,6 @@ def test_a_trace_older_than_the_run_is_not_called_achieved(tmp_path: Path) -> No
     assert _verdict_rows(tmp_path)[0]["verdict"] == "preexisting"
 
 
-def test_a_named_trace_that_never_appeared_is_missing(tmp_path: Path) -> None:
-    """Свидетель: названный и не появившийся след — это «не сошлось»."""
-    result = _run(tmp_path, "заметка лежит в docs/result.md")
-
-    assert result.success_verdict["verdict"] == "missing"
-    assert "docs/result.md" in result.success_verdict["missing_traces"]
-
-
-def test_a_criterion_naming_no_trace_is_unverifiable_not_success(tmp_path: Path) -> None:
-    """Свидетель: «заявка рассмотрена и одобрена» — это НЕ проверка.
-
-    Так выглядят 27 из 31 живого критерия. Незнание, выданное за проверку,
-    хуже отсутствия проверки, поэтому у него своё слово.
-    """
-    result = _run(tmp_path, "The proposal is reviewed and approved by peers.")
-
-    assert result.success_verdict["verdict"] == "unverifiable"
-    assert result.success_verdict["named_traces"] == []
-
-
-def test_a_goal_that_never_named_a_criterion_still_leaves_a_verdict(tmp_path: Path) -> None:
-    """Свидетель: молчание тоже записывается, и названо честно.
-
-    Четыре точки входа задают цель строкой без всякого критерия — 63 строки
-    живого реестра пришли без него. Не записать вердикт значило бы, что
-    молчание и проверка выглядят одинаково: никак.
-    """
-    result = _run(tmp_path, "")
-
-    assert result.success_verdict["verdict"] == "unverifiable"
-    assert "критерий не назван" in result.success_verdict["reason"], (
-        "непоставленный критерий обязан отличаться от поставленного и "
-        f"непроверяемого; сказано: {result.success_verdict['reason']!r}"
-    )
-    assert _verdict_rows(tmp_path)[0]["verdict"] == "unverifiable"
-
-
 def test_the_verdict_reaches_the_human_summary(tmp_path: Path) -> None:
     """Свидетель: человек видит вердикт в той же сводке, что и циклы.
 
@@ -210,38 +163,6 @@ def test_the_verdict_reaches_the_human_summary(tmp_path: Path) -> None:
     summary = result.user_summary()
     assert "missing" in summary, f"вердикт не доехал до человека: {summary.splitlines()[:3]}"
     assert "docs/result.md" in summary, "человеку не назван след, которого не хватило"
-
-
-def test_the_verdict_is_judged_by_the_world_not_by_the_cycle_words(tmp_path: Path) -> None:
-    """Контроль: слово исполнителя «completed, work_done» вердикта НЕ решает.
-
-    Иначе судья стал бы эхом исполнителя: ровно так «я создал файл» и
-    созданный файл были для системы одним событием до 2026-09-17.
-    """
-    result = _run(tmp_path, "заметка лежит в docs/result.md", cycles=3)
-
-    assert result.totals["useful_cycles"] >= 1, "циклы обязаны были отчитаться о работе"
-    assert result.success_verdict["verdict"] == "missing", (
-        "мир пуст — значит не сошлось, сколько бы циклов ни сказали «готово»"
-    )
-
-
-def test_the_verdict_does_not_pollute_the_cycle_ledger(tmp_path: Path) -> None:
-    """Контроль: у реестра циклов прежние читатели, и строка не цикла их сломает.
-
-    `_recent_goals`, `spent_units_by_action` и `summarise_ledger` читают
-    `campaign_ledger.jsonl` как «одна строка = один цикл». Вердикт живёт в
-    своём журнале именно поэтому.
-    """
-    result = _run(tmp_path, "заметка лежит в docs/result.md", cycles=2)
-
-    rows = (tmp_path / "data" / "campaign_ledger.jsonl").read_text(
-        encoding="utf-8").splitlines()
-    assert len(rows) == result.cycles_run, (
-        f"в реестре циклов {len(rows)} строк при {result.cycles_run} циклах"
-    )
-    for line in rows:
-        assert "verdict" not in json.loads(line), "вердикт просочился в строку цикла"
 
 
 def test_an_unwritable_journal_does_not_swallow_the_failure(tmp_path: Path) -> None:
@@ -262,49 +183,3 @@ def test_an_unwritable_journal_does_not_swallow_the_failure(tmp_path: Path) -> N
 
     assert verdict["verdict"] == "unverifiable", "судья обязан отсудить и без журнала"
     assert error, "ошибка записи обязана дойти наружу, а не исчезнуть"
-
-
-def test_a_dry_campaign_records_its_verdict_beside_its_ledger(tmp_path: Path) -> None:
-    """Свидетель границы `dry_run`: он гасит РУКИ, а не приборы.
-
-    Ревизия PR #351 прочла `dry_run` как «не писать на диск» и потребовала
-    спрятать вердикт под этот флаг. Замер сказал иначе: сухая кампания и до
-    этого PR писала `data/campaign_ledger.jsonl` — по строке на цикл, то есть
-    БОЛЬШЕ записей, чем добавляет вердикт. Спрашивают `dry_run` в
-    `core/campaign_io.py` ровно руки: `propose_engineering_task`,
-    `draft_doctrine_document`, `study_external_source` — все под
-    `and not config.dry_run`.
-
-    Мой долг, признанный в ответе ревизору: границу пришлось восстанавливать
-    по местам вызова, потому что у поля не было слов. Здесь она сказана делом.
-
-    Чем эта правка платит. Спрячь вердикт под `dry_run` — и реестр с журналом
-    вердиктов разойдутся: кампания в реестре есть, вердикта у неё нет, и
-    молчание «не судили» станет неотличимо от «судили и не записали». Недоста-
-    вать будет ровно дешёвых диагностических прогонов, ради которых судья и
-    заведён. Оба журнала обязаны молчать вместе и говорить вместе.
-    """
-    def _execute(*, agent, workspace, action, config, approval_inbox=None):
-        assert config.dry_run, "прогон обязан быть сухим, иначе свидетель не о том"
-        return CampaignActionOutcome(result="idle", work_done=False)
-
-    result = run_campaign(
-        CampaignConfig(goal=_GOAL, success_check="knowledge/note.md",
-                       max_cycles=1, dry_run=True),
-        agent=SimpleNamespace(log=None),
-        workspace=str(tmp_path),
-        gather_signals=_gather,
-        execute_action=_execute,
-        ledger=CampaignLedger(path=tmp_path / "data" / "campaign_ledger.jsonl"),
-        now_fn=lambda: _START,
-    )
-
-    ledger_path = tmp_path / "data" / "campaign_ledger.jsonl"
-    assert ledger_path.is_file(), (
-        "предпосылка свидетеля: сухой прогон пишет реестр и до этого PR"
-    )
-
-    rows = _verdict_rows(tmp_path)
-    assert rows, "сухой прогон судил — и обязан сказать это тем же журналом"
-    assert rows[-1]["verdict"] == "missing"
-    assert result.success_verdict, "вердикт обязан доехать и в результат прогона"

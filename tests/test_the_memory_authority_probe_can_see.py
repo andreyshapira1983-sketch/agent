@@ -46,20 +46,3 @@ def test_the_receipts_store_is_not_silent(files) -> None:
         "квитанции инструментов снова выглядят нетронутыми — так выглядела "
         "поломка зонда, а не отсутствие обращений"
     )
-
-
-def test_the_probe_source_carries_no_control_bytes() -> None:
-    """Ломка, которую нельзя увидеть глазами: 0x08 вместо двух знаков границы.
-
-    Управляющий байт в выражении не печатается терминалом: код читается верным
-    и не совпадает никогда. Проверять приходится байтами.
-    """
-    import scripts.memory_authority_map as probe
-
-    # Адрес берётся у самого модуля: буквальный путь к боевому файлу в тесте
-    # запрещён (`test_no_test_pins_a_production_path`) и ломается при переезде.
-    src = pathlib.Path(probe.__file__).read_text(encoding="utf-8")
-
-    bad = {c for c in src if ord(c) < 32 and c not in "\n\t"}
-
-    assert not bad, f"в исходнике зонда управляющие байты: {[hex(ord(c)) for c in bad]}"

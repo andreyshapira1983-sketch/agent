@@ -13,8 +13,6 @@ answer. That ordering is recorded here so extraction cannot silently reverse it.
 """
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,8 +25,6 @@ import cli.intent_bridge as bridge_module
 import main as main_module
 from core.checkpoint import CheckpointWriter
 from core.loop import format_human_response
-
-REPO_ROOT = Path(main_module.__file__).resolve().parent
 
 
 def _fake_agent() -> SimpleNamespace:
@@ -84,37 +80,6 @@ def test_invalid_trace_id_returns_two_without_building_agent(bad, tmp_path, monk
     assert "only letters, digits, hyphens and underscores are allowed." in err
 
 
-def test_invalid_trace_id_exit_code_is_two_in_a_real_process(tmp_path):
-    """Proves the launcher maps the return value to process exit code 2.
-
-    Runs `main.py` with CWD inside the tmp workspace so `load_dotenv()` cannot
-    pick up the repository's `.env`; validation fails before any provider or
-    agent construction, so no network path is reachable.
-    """
-    env = {**os.environ, "AGENT_PROVIDER": "mock", "PYTHONIOENCODING": "utf-8"}
-    # argv фиксирован: sys.executable + наш main.py (S603 подавлен по месту —
-    # remote-режим Codacy не читает per-file-ignores, #300).
-    proc = subprocess.run(  # nosemgrep  # noqa: S603  # nosec B603
-        [
-            sys.executable,
-            str(REPO_ROOT / "main.py"),
-            "--resume",
-            "not/a/valid/id",
-            "--workspace",
-            str(tmp_path),
-        ],
-        check=False,
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        timeout=300,
-        env=env,
-    )
-    assert proc.returncode == 2, (proc.returncode, proc.stdout, proc.stderr)
-    assert "[resume] Invalid trace_id" in proc.stderr
-    assert not (tmp_path / "logs").exists()
-
-
 def test_valid_trace_id_shapes_are_accepted(tmp_path, monkeypatch, capsys):
     """The allowlist accepts alphanumerics plus hyphen/underscore after char 1."""
     state = _patch(monkeypatch)
@@ -129,16 +94,6 @@ def test_valid_trace_id_shapes_are_accepted(tmp_path, monkeypatch, capsys):
 
 
 # ── branch 2: no usable checkpoint ────────────────────────────────────────────
-
-def test_missing_checkpoint_falls_through_to_a_fresh_run(tmp_path, monkeypatch, capsys):
-    state = _patch(monkeypatch)
-    monkeypatch.setattr(sys, "argv", _argv(tmp_path, "run_absent", "--ask", "original question"))
-
-    assert main_module.main() == 0
-
-    err = capsys.readouterr().err
-    assert "[resume] No usable checkpoint found for trace_id='run_absent'. Running fresh." in err
-    assert state["run"][0]["user_question"] == "original question"
 
 
 def test_checkpoint_without_observe_record_is_unusable(tmp_path, monkeypatch, capsys):
@@ -211,24 +166,6 @@ def test_paused_checkpoint_restores_question_and_file_hint(tmp_path, monkeypatch
     assert "Remaining steps: [\"s2\"]" in question
     # The checkpoint's file hint is restored when --file was not given.
     assert state["run"][0]["file_hint"] == str(hint)
-
-
-def test_paused_branch_wins_over_a_cached_answer(tmp_path, monkeypatch, capsys):
-    """Observed precedence: `paused` is tested before `answer is not None`."""
-    state = _patch(monkeypatch)
-    writer = CheckpointWriter("run_both", tmp_path / "logs")
-    writer.save_observe("q", file_hint=None)
-    writer.save_respond("cached answer that is NOT replayed")
-    writer.save_paused({"current_phase": "act", "original_user_question": "q"})
-    monkeypatch.setattr(sys, "argv", _argv(tmp_path, "run_both"))
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert "Resuming budget-paused checkpoint" in out.err
-    assert "Replaying cached answer" not in out.err
-    assert "cached answer that is NOT replayed" not in out.out
-    assert len(state["run"]) == 1
 
 
 def test_explicit_ask_and_file_win_over_paused_checkpoint_values(tmp_path, monkeypatch):

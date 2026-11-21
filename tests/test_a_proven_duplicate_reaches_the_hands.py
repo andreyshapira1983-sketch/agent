@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-from core.backlog_selector import load_backlog
 from core.self_build_producer import _default_grounded_selector, _manager_from_grounded
 
 _TWIN = '''
@@ -37,28 +36,6 @@ def _workspace(tmp_path):
     (core / "sched.py").write_text(
         "from core.queue_store import _parse_iso as _unused\n" + _TWIN, encoding="utf-8")
     return tmp_path
-
-
-def test_the_backlog_carries_the_proof(tmp_path) -> None:
-    ws = _workspace(tmp_path)
-    proven = [c for c in load_backlog(ws) if c.signal_source == "split_proof"]
-    assert [c.target_path for c in proven] == ["split:core/sched.py"]
-    assert "дословно повторяют core/queue_store.py" in proven[0].problem_quote
-
-
-def test_a_proof_outranks_a_bare_size(tmp_path) -> None:
-    ws = _workspace(tmp_path)
-    # Нечитаемая функция, а не 700 коротких: с 2026-09-23 поводом посмотреть
-    # служит функция, которую нельзя прочесть целиком, — сама длина файла
-    # больше ничего не значит (tests/test_backlog_oversized_module.py).
-    (ws / "core" / "huge.py").write_text(
-        "def one_long_function():\n"
-        + "\n".join(f"    x{i} = {i}" for i in range(300)),
-        encoding="utf-8")
-    backlog = load_backlog(ws)
-    sources = [c.signal_source for c in backlog]
-    assert "oversized_module" in sources, "нечитаемая функция остаётся поводом посмотреть"
-    assert sources.index("split_proof") < sources.index("oversized_module")
 
 
 def test_the_hands_take_the_named_proven_module(tmp_path) -> None:

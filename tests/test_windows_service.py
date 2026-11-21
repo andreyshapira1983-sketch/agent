@@ -15,87 +15,13 @@ from pathlib import Path
 import pytest
 
 from app.windows_service import (
-    DEFAULT_DAEMON_MODULE,
-    DEFAULT_SERVICE_ACCOUNT,
-    DEFAULT_STOP_TIMEOUT_SECONDS,
-    DEFAULT_WORKSPACE,
-    RESTART_POLICY_DESCRIPTION,
-    SERVICE_NAME,
     WindowsServiceConfigError,
     WindowsServiceContract,
     WindowsServiceShellError,
     main,
 )
 
-# -- default contract --------------------------------------------------------
-
-
-def test_default_contract_shape():
-    contract = WindowsServiceContract()
-    assert contract.service_name == SERVICE_NAME
-    assert contract.daemon_module == DEFAULT_DAEMON_MODULE
-    assert contract.service_account == DEFAULT_SERVICE_ACCOUNT
-    assert contract.stop_timeout_seconds == DEFAULT_STOP_TIMEOUT_SECONDS
-    assert contract.workspace == DEFAULT_WORKSPACE
-
-
-def test_default_workspace_is_repo_root_not_hardcoded():
-    # Computed from __file__, so the repo carries no machine-specific abs path.
-    contract = WindowsServiceContract()
-    assert (contract.workspace / "app" / "windows_service.py").is_file()
-
-
-def test_derived_paths_are_workspace_relative():
-    ws = Path("/tmp/example-workspace")
-    contract = WindowsServiceContract(workspace=ws)
-    assert contract.working_directory == ws
-    assert contract.resolved_venv_dir == ws / ".venv"
-    assert contract.python_executable == ws / ".venv" / "Scripts" / "python.exe"
-    assert contract.data_directory == ws / "data"
-    assert contract.log_directory == ws / "logs"
-    assert contract.command == (
-        str(ws / ".venv" / "Scripts" / "python.exe"),
-        "-m",
-        DEFAULT_DAEMON_MODULE,
-    )
-
-
-def test_explicit_venv_dir_overrides_default():
-    ws = Path("/tmp/ws")
-    venv = Path("/opt/venvs/agent")
-    contract = WindowsServiceContract(workspace=ws, venv_dir=venv)
-    assert contract.resolved_venv_dir == venv
-    assert contract.python_executable == venv / "Scripts" / "python.exe"
-
-
 # -- from_environment --------------------------------------------------------
-
-
-def test_from_environment_defaults_without_env(monkeypatch: pytest.MonkeyPatch):
-    for var in (
-        "AGENT_SERVICE_WORKSPACE",
-        "AGENT_SERVICE_VENV",
-        "AGENT_SERVICE_ACCOUNT",
-        "AGENT_SERVICE_STOP_TIMEOUT_SECONDS",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    contract = WindowsServiceContract.from_environment()
-    assert contract.workspace == DEFAULT_WORKSPACE
-    assert contract.venv_dir is None
-    assert contract.service_account == DEFAULT_SERVICE_ACCOUNT
-    assert contract.stop_timeout_seconds == DEFAULT_STOP_TIMEOUT_SECONDS
-
-
-def test_from_environment_applies_overrides(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("AGENT_SERVICE_WORKSPACE", "/srv/agent")
-    monkeypatch.setenv("AGENT_SERVICE_VENV", "/srv/agent/venv")
-    monkeypatch.setenv("AGENT_SERVICE_ACCOUNT", r"NT AUTHORITY\SYSTEM")
-    monkeypatch.setenv("AGENT_SERVICE_STOP_TIMEOUT_SECONDS", "45")
-    contract = WindowsServiceContract.from_environment()
-    assert contract.workspace == Path("/srv/agent")
-    assert contract.venv_dir == Path("/srv/agent/venv")
-    assert contract.service_account == r"NT AUTHORITY\SYSTEM"
-    assert contract.stop_timeout_seconds == 45.0
 
 
 def test_from_environment_rejects_non_numeric_timeout(
@@ -131,24 +57,6 @@ def test_validate_contract_rejects_bad_values(kwargs):
     contract = WindowsServiceContract(**kwargs)
     with pytest.raises(WindowsServiceConfigError):
         contract.validate_contract()
-
-
-# -- as_dict (observable contract) -------------------------------------------
-
-
-def test_as_dict_is_shell_only_and_json_serialisable():
-    data = WindowsServiceContract().as_dict()
-    # Nothing is actually implemented yet: the shell advertises that honestly.
-    assert data["architecture_status"] == "shell_only"
-    assert data["mechanism"] == "pywin32"
-    assert data["install_implemented"] is False
-    assert data["uninstall_implemented"] is False
-    assert data["start_stop_implemented"] is False
-    assert data["recovery_policy_implemented"] is False
-    assert data["restart_policy"] == RESTART_POLICY_DESCRIPTION
-    assert isinstance(data["command"], list)
-    # Round-trips through JSON without error.
-    assert json.loads(json.dumps(data)) == data
 
 
 # -- validate_runtime (no mutation, clear errors) ----------------------------

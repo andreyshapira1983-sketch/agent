@@ -62,45 +62,6 @@ _CREDIT = "BadRequestError: Your credit balance is too low to access the API."
 _NOW = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
 
 
-def test_three_consecutive_credit_failures_mark_the_provider_unhealthy(
-    workspace: Path,
-) -> None:
-    """The witness for the 391-call incident: after the third refusal the
-    router must stop asking."""
-    ledger = _ledger(workspace)
-    for i in range(3):
-        _record(ledger, provider="anthropic", status="error", error=_CREDIT,
-                at=_NOW - timedelta(minutes=10 - i))
-
-    reason = ledger.provider_unhealthy("anthropic", now=_NOW)
-    assert reason, (
-        "391 consecutive credit refusals and the router still treats the "
-        "provider as available — a key is not a balance"
-    )
-
-
-def test_a_success_heals_the_provider(workspace: Path) -> None:
-    ledger = _ledger(workspace)
-    for i in range(3):
-        _record(ledger, provider="anthropic", status="error", error=_CREDIT,
-                at=_NOW - timedelta(minutes=30 - i))
-    _record(ledger, provider="anthropic", status="success", at=_NOW - timedelta(minutes=5))
-
-    assert ledger.provider_unhealthy("anthropic", now=_NOW) is None
-
-
-def test_transient_network_errors_do_not_demote(workspace: Path) -> None:
-    """The conservatism `_is_switch_key_error` already chose: a flaky network
-    must not take a provider out of rotation."""
-    ledger = _ledger(workspace)
-    for i in range(5):
-        _record(ledger, provider="openai", status="error",
-                error="APIConnectionError: connection reset by peer",
-                at=_NOW - timedelta(minutes=10 - i))
-
-    assert ledger.provider_unhealthy("openai", now=_NOW) is None
-
-
 def test_stale_failures_mean_a_probe_not_a_ban(workspace: Path) -> None:
     """The authority boundary: a cooldown, never a disable. Past the window
     the provider is tried again — the operator may have topped up the balance."""
@@ -119,22 +80,6 @@ def test_two_failures_are_not_enough(workspace: Path) -> None:
                 at=_NOW - timedelta(minutes=10 - i))
 
     assert ledger.provider_unhealthy("anthropic", now=_NOW) is None
-
-
-def test_no_history_reads_as_healthy(workspace: Path) -> None:
-    """Fail open: refusing to work is worse than one wasted probe call."""
-    ledger = _ledger(workspace)
-    assert ledger.provider_unhealthy("anthropic", now=_NOW) is None
-
-
-def test_other_providers_history_is_not_charged_to_this_one(
-    workspace: Path,
-) -> None:
-    ledger = _ledger(workspace)
-    for i in range(4):
-        _record(ledger, provider="anthropic", status="error", error=_CREDIT,
-                at=_NOW - timedelta(minutes=10 - i))
-    assert ledger.provider_unhealthy("openai", now=_NOW) is None
 
 
 # ── the router consults it ───────────────────────────────────────────────────

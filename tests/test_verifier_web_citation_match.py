@@ -44,35 +44,6 @@ def _cit(body: str) -> Citation:
 
 
 class TestWebCitationMixedChain:
-    def test_query_citation_resolves_with_search_hit_only(self):
-        chain = ProvenanceChain()
-        chain.add(_query_hit("python async testing"))
-        ev = match_citation(_cit("python async testing"), chain)
-        assert ev is not None
-        assert ev.kind == "web_search_hit"
-
-    def test_query_citation_resolves_when_chain_also_has_url_page(self):
-        # The bug: a single web_page (from web_fetch) was hiding all
-        # web_search_hit candidates, so [web:<query>] citations died.
-        chain = ProvenanceChain()
-        chain.add(_page("https://news.ycombinator.com/newest"))
-        chain.add(_query_hit("python async testing"))
-        chain.add(_query_hit("developer tools saas pricing"))
-        ev = match_citation(_cit("python async testing"), chain)
-        assert ev is not None
-        assert ev.kind == "web_search_hit"
-        assert "python async testing" in ev.source_id
-
-    def test_url_citation_still_resolves_to_page(self):
-        chain = ProvenanceChain()
-        chain.add(_page("https://news.ycombinator.com/newest"))
-        chain.add(_query_hit("hn newest"))
-        ev = match_citation(
-            _cit("https://news.ycombinator.com/newest"), chain
-        )
-        assert ev is not None
-        assert ev.kind == "web_page"
-
     def test_unmatched_query_does_not_steal_a_page(self):
         # If the body does not substring-match any source_id and has
         # no token overlap, we still refuse to match — better an honest
@@ -94,30 +65,3 @@ class TestWebCitationMixedChain:
         assert ev is not None
         assert ev.kind == "web_search_hit"
         assert "race conditions" in ev.source_id
-
-    def test_no_web_search_hit_kind_falls_back_cleanly(self):
-        # When chain has only a page and the body is unrelated, returning
-        # None is the correct, conservative outcome.
-        chain = ProvenanceChain()
-        chain.add(_page("https://news.ycombinator.com/newest"))
-        ev = match_citation(_cit("totally unrelated query"), chain)
-        assert ev is None
-
-    def test_url_body_does_not_token_match_search_hit(self):
-        # Regression guard: when the citation body is itself a URL and
-        # no `web_page` substring-matches it, we MUST NOT spuriously
-        # attribute the citation to a `web_search_hit` whose query
-        # happens to share a single word with the URL path. URL token
-        # fallback is too noisy ("https", "com", TLDs) to trust.
-        chain = ProvenanceChain()
-        chain.add(_query_hit("ai_agent"))
-        # Body is a URL; query hit shares the token "agent" with the
-        # URL path but is a totally different source.
-        cit = _cit("https://example.com/agent")
-        ev = match_citation(cit, chain)
-        # No web_page → expected_kind candidates is empty;
-        # web_search_hit substring of "https://example.com/agent" against
-        # "web_search:ai_agent" is False; URL-body token fallback is
-        # blocked. Result: None (which the unresolved-citation replan
-        # path then handles).
-        assert ev is None

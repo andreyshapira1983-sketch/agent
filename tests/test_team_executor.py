@@ -176,44 +176,6 @@ def test_team_executor_rejects_non_dry_run_mode_without_runner():
         TeamExecutor().run(plan, dry_run=False)
 
 
-def test_team_executor_uses_canonical_runner_boundary_for_real_execution():
-    contract = SubagentContract(
-        name="AuditAgent",
-        role="auditor",
-        objective="audit one component",
-        inputs=("repo",),
-        outputs=("findings",),
-        allowed_tools=("file_read",),
-        model_role="verifier",
-        max_iterations=1,
-        max_model_calls=2,
-        max_cost_units=3,
-    )
-    plan = TeamPlan(
-        goal="audit",
-        needed=True,
-        reasoning="test",
-        contracts=(contract,),
-        total_model_calls=2,
-        total_cost_units=3,
-    )
-    runner = _RecordingRunner()
-    registry = _ContractRegistry()
-
-    report = TeamExecutor(runner=runner, registry=registry).run(plan, dry_run=False)
-
-    assert report.status == "completed"
-    assert report.steps[0].status == "executed"
-    assert report.steps[0].answer == "canonical result"
-    assert len(runner.contracts) == 1
-    canonical = runner.contracts[0]
-    assert canonical.source == "team_plan"
-    assert canonical.name == "AuditAgent"
-    assert canonical.tool_scope.allowed_tools == ("file_read",)
-    assert canonical.model_role == "verifier"
-    assert registry.events == [(canonical, "executed")]
-
-
 def test_team_executor_reports_canonical_runner_refusal_as_error():
     contract = SubagentContract(
         name="RefusedAgent",

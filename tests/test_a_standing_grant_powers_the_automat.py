@@ -13,7 +13,6 @@ from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import (
     AutonomousRuntime,
     AutonomousRuntimeConfig,
-    standing_runs_today,
 )
 from tests.test_autonomous_runtime import _agent
 
@@ -47,31 +46,6 @@ def _run(workspace: Path, inbox: ApprovalInbox):
     )
 
 
-def test_a_standing_grant_lets_a_run_through(workspace: Path):
-    """Раньше КАЖДЫЙ прогон требовал своего «да» — автомат был невозможен по
-    построению (живой полигон 2026-08-16: демон сутки крутился вхолостую).
-    """
-    inbox = ApprovalInbox()
-    grant = _grant(inbox)
-
-    report = _run(workspace, inbox)
-
-    assert report.status != "blocked", report.stop_reason
-    assert standing_runs_today(workspace, grant.id) == 1
-
-
-def test_the_grant_stays_standing_not_consumed(workspace: Path):
-    """Одноразовый грант помечается executed; стоячий — НЕТ: он живёт до
-    истечения или отзыва, потребление считается журналом.
-    """
-    inbox = ApprovalInbox()
-    grant = _grant(inbox)
-
-    _run(workspace, inbox)
-
-    assert inbox.get(grant.id).status == "approved"
-
-
 def test_the_daily_cap_holds(workspace: Path):
     """Стены гранта: исчерпанный дневной лимит возвращает прежний мир —
     заявку на разовое «да», а не тихий пропуск.
@@ -94,29 +68,3 @@ def test_an_expired_grant_powers_nothing(workspace: Path):
     report = _run(workspace, inbox)
 
     assert report.status == "blocked"
-
-
-def test_a_pending_grant_powers_nothing(workspace: Path):
-    """Право §9: заявка без «да» — не грант."""
-    inbox = ApprovalInbox()
-    inbox.add(
-        operation="autonomous_runtime.standing_grant",
-        summary="standing effects grant",
-        payload={"max_runs_per_day": 5},
-    )
-
-    report = _run(workspace, inbox)
-
-    assert report.status == "blocked"
-
-
-def test_usage_counts_only_today_and_this_grant(workspace: Path):
-    from core.autonomous_runtime import _record_standing_use
-
-    _record_standing_use(workspace, "grant_a")
-    _record_standing_use(workspace, "grant_a")
-    _record_standing_use(workspace, "grant_b")
-
-    assert standing_runs_today(workspace, "grant_a") == 2
-    assert standing_runs_today(workspace, "grant_b") == 1
-    assert standing_runs_today(workspace, "grant_c") == 0

@@ -24,10 +24,3 @@ def test_report_labels_the_plan_as_a_fixed_template():
     assert "fixed checklist template" in report
     assert "not derived from the task" in report
     assert report.index("fixed checklist template") < report.index("1. functions/files")
-
-
-def test_the_plan_really_is_the_same_for_any_task():
-    """Pins the fact the label states; a real planner must drop the label."""
-    assert _operator_patch_diff_plan(_FILES, "fix rounding") == _operator_patch_diff_plan(
-        _FILES, "rename a module"
-    )

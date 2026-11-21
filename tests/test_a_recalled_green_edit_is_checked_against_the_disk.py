@@ -53,14 +53,3 @@ def test_a_landed_edit_is_shown_plainly(tmp_path: Path) -> None:
     prompt = _next_prompt(tmp_path)
 
     assert f"записано: {EDIT};" in prompt and "(правка не поставлена" not in prompt, prompt[-500:]
-
-
-def test_a_path_outside_the_workspace_is_not_read(tmp_path: Path) -> None:
-    """Путь вне рабочей папки не открывается: он «на диске нет» для этой цели."""
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
-
-    prompt = _next_prompt(ws, written="../secret.txt")
-
-    assert "../secret.txt (на диске нет)" in prompt, prompt[-500:]

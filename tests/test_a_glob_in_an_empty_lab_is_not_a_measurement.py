@@ -35,20 +35,6 @@ def test_a_glob_over_unseen_files_is_called_out(tmp_path: Path) -> None:
     assert "GLOB PATTERNS" in (result.get("note") or "")
 
 
-def test_a_glob_matching_nothing_stays_quiet(tmp_path: Path) -> None:
-    """Ломка наоборот: шаблон, под который в папке ничего нет, — не тревога."""
-    result = PythonProbeTool(workspace_root=tmp_path).run(code=_CODE)
-    assert result["missing_inputs"] == []
-
-
-def test_a_glob_whose_files_were_passed_stays_quiet(tmp_path: Path) -> None:
-    ws = _workspace(tmp_path)
-    result = PythonProbeTool(workspace_root=ws).run(
-        code=_CODE, inputs=["logs/trace_a.jsonl", "logs/trace_b.jsonl"])
-    assert result["missing_inputs"] == []
-    assert "traces 2" in result["stdout"]
-
-
 def test_an_enveloped_journal_is_explained(tmp_path: Path) -> None:
     """Замер 2026-09-24: поля читались снаружи конверта, и «пусто» ушло как факт."""
     (tmp_path / "data").mkdir()

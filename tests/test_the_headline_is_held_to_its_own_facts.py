@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from core.answer_contradiction import headline_contradicts_facts
 from core.evidence import Evidence, make_evidence
-from core.smart_memory import DISQUALIFYING_DEFECT_SIGNALS
 from core.verifier_absence import absence_reason
 
 _TEST_FILE = (
@@ -80,23 +79,6 @@ def test_the_headline_that_denies_its_own_facts_is_named() -> None:
     found = headline_contradicts_facts(_ANSWER)
     assert found, "заголовок утверждает наличие того, чьё отсутствие называют факты"
     assert found[0].subject == "python_probe_workspace_import"
-
-
-def test_agreeing_headline_and_facts_are_not_accused() -> None:
-    agreeing = _ANSWER.replace(
-        "присутствует в обоих файлах: в коде инструмента и в тесте",
-        "есть только в тесте, в коде инструмента его нет")
-    assert headline_contradicts_facts(agreeing) == ()
-
-
-def test_a_denial_of_a_different_object_is_not_a_contradiction() -> None:
-    other = _ANSWER.replace(
-        f"- {_TRUE_FACT}", "- В коде инструмента нет функции `_load_switch`: её не писали")
-    assert headline_contradicts_facts(other) == ()
-
-
-def test_the_signal_observes_and_does_not_quarantine() -> None:
-    assert "headline_contradicts_facts" not in DISQUALIFYING_DEFECT_SIGNALS
 
 
 def test_the_operator_sees_it_under_the_answer() -> None:

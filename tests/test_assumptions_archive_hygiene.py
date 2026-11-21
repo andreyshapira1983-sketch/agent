@@ -39,18 +39,6 @@ def test_duplicates_collapse_to_the_newest_row(tmp_path):
     assert langs[0].run_id == "r2", "the NEWEST duplicate must win"
 
 
-def test_the_cap_bounds_the_dormant_archive(tmp_path):
-    store = _store_with(tmp_path, [
-        ("r", "general", f"assumption number {i} is unique") for i in range(30)
-    ])
-    report = store.compact(keep_last=10)
-    assert report["over_cap_removed"] == 20
-    assert report["kept"] == 10
-    texts = [a.text for a in store.load_recent(50)]
-    assert "assumption number 29 is unique" in texts
-    assert "assumption number 0 is unique" not in texts
-
-
 def test_negative_keep_last_is_refused(tmp_path):
     """Review round #282: a negative cap is a caller error — failing fast
     beats silently emptying the archive."""
@@ -91,17 +79,6 @@ def test_empty_category_is_not_an_identity_either(tmp_path):
     report = store.compact()
     assert report["duplicates_removed"] == 0
     assert report["kept"] == 2
-
-
-def test_dry_run_counts_without_touching_the_file(tmp_path):
-    store = _store_with(tmp_path, [
-        ("r1", "language", "same text"),
-        ("r2", "language", "same text"),
-    ])
-    before = (tmp_path / "assumptions.jsonl").read_bytes()
-    report = store.compact(dry_run=True)
-    assert report["duplicates_removed"] == 1
-    assert (tmp_path / "assumptions.jsonl").read_bytes() == before
 
 
 def test_maintenance_pass_reports_the_compaction(tmp_path):

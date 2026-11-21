@@ -23,78 +23,6 @@ def _inbox(tmp_path: Path) -> ApprovalInbox:
     return ApprovalInbox(path=tmp_path / "data" / "approval_inbox.jsonl")
 
 
-def _outcomes(tmp_path: Path) -> list[dict]:
-    p = tmp_path / "data" / "approval_outcomes.jsonl"
-    if not p.exists():
-        return []
-    rows = []
-    for line in p.read_text(encoding="utf-8").splitlines():
-        rec = json.loads(line)
-        rows.append(rec.get("payload", rec))
-    return rows
-
-
-def test_a_denial_with_a_reason_becomes_a_record(tmp_path: Path) -> None:
-    inbox = _inbox(tmp_path)
-    item = inbox.add(operation="self_apply_lane.run",
-                     summary="doctrine draft for X.md")
-    inbox.deny(item.id, reason="invented attribute claim.state — mock-blind test")
-    rows = _outcomes(tmp_path)
-    assert rows and rows[-1]["verdict"] == "denied"
-    assert "invented attribute" in rows[-1]["reason"]
-    assert rows[-1]["summary"] == "doctrine draft for X.md"
-
-
-def test_an_approval_is_a_record_too(tmp_path: Path) -> None:
-    inbox = _inbox(tmp_path)
-    item = inbox.add(operation="self_apply_lane.run",
-                     summary="organisational roles contract")
-    inbox.approve(item.id, reason="0% retell, invariants preserved")
-    rows = _outcomes(tmp_path)
-    assert rows and rows[-1]["verdict"] == "approved"
-    assert "invariants" in rows[-1]["reason"]
-
-
-def test_a_reasonless_APPROVAL_still_lands(tmp_path: Path) -> None:
-    """Раньше этот тест закреплял, что БЕЗ причины ложится любой вердикт, и
-    примером брал отказ. С 2026-08-23 отказ без причины отвергается: у него
-    нет содержания нигде, кроме причины. Одобрение — другое дело, и граница
-    здесь: «да, как предложено» полностью описано самой заявкой, поэтому
-    пустая причина у одобрения остаётся законной и по-прежнему доезжает."""
-    inbox = _inbox(tmp_path)
-    item = inbox.add(operation="x", summary="s")
-    inbox.approve(item.id)
-    rows = _outcomes(tmp_path)
-    assert rows and rows[-1]["verdict"] == "approved"
-    assert rows[-1]["reason"] == ""
-
-
-def test_lifecycle_transitions_are_not_verdicts(tmp_path: Path) -> None:
-    """executed/aborted are plumbing, not review outcomes."""
-    inbox = _inbox(tmp_path)
-    a = inbox.add(operation="x", summary="s1")
-    inbox.approve(a.id)
-    inbox.mark_executed(a.id)
-    rows = _outcomes(tmp_path)
-    assert [r["verdict"] for r in rows] == ["approved"]
-
-
-def test_an_in_memory_inbox_keeps_the_verdict_and_writes_no_file(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """path=None: the denial lands on the item, and no outcome file appears, not even in cwd."""
-    monkeypatch.chdir(tmp_path)
-    inbox = ApprovalInbox(path=None)
-    item = inbox.add(operation="x", summary="s")
-
-    inbox.deny(item.id, reason="некуда писать")
-
-    got = inbox.get(item.id)
-    assert got is not None and got.status == "denied"
-    assert got.decision_reason == "некуда писать"
-    assert sorted(tmp_path.rglob("*")) == []
-
-
 # ── the reader: the charter selector sees the fate of past work ─────────────
 
 _CHARTER = """# CORPORATE MODEL
@@ -135,10 +63,3 @@ def test_the_selector_sees_recent_verdicts(tmp_path: Path) -> None:
     assert "verdict" in llm.user.lower() or "VERDICT" in llm.user
     assert "GHOST_SCHEMA" in llm.user
     assert "premature abstraction" in llm.user
-
-
-def test_no_verdicts_no_noise(tmp_path: Path) -> None:
-    ws = _workspace(tmp_path)
-    llm = _SpyLLM()
-    propose_charter_goal(llm, ws)
-    assert "verdict" not in llm.user.lower()

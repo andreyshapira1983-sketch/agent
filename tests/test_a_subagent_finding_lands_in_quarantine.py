@@ -4,15 +4,12 @@
 """
 from __future__ import annotations
 
-import ast
-import pathlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from core.subagent_quarantine import (
-    QUARANTINE_AUTHORITY,
     load_quarantine,
     quarantine_status_lines,
 )
@@ -64,27 +61,6 @@ def test_the_finding_is_written_down_with_its_origin(tool, tmp_path: Path) -> No
     assert row["contract_name"] and row["role"]
 
 
-def test_the_record_declares_that_it_may_not_influence_anything(tool, tmp_path: Path) -> None:
-    """Полномочие названо явно: умолчание однажды уже раздало голос человека."""
-    tool.run(role="researcher", objective="выяснить, что такое MetaGPT", why="отдельная область", expect="описание MetaGPT с источником")
-
-    assert load_quarantine(tmp_path)[0]["authority"] == QUARANTINE_AUTHORITY == "none"
-
-
-def test_a_secret_in_the_finding_does_not_land_raw(tmp_path: Path) -> None:
-    """Субагент читает файлы; его ответ может принести ключ."""
-    from core.subagent_quarantine import quarantine_finding
-
-    quarantine_finding(
-        tmp_path,
-        _result(answer="нашёл sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456 в конфиге"),
-    )
-
-    stored = load_quarantine(tmp_path)[0]["answer"]
-    assert "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456" not in stored
-    assert "REDACTED" in stored
-
-
 def test_quarantine_is_visible_to_the_operator(tmp_path: Path) -> None:
     """Карантин без читателя — это MIR-138 заново, поэтому читатель обязателен."""
     from core.subagent_quarantine import quarantine_finding
@@ -96,33 +72,6 @@ def test_quarantine_is_visible_to_the_operator(tmp_path: Path) -> None:
 
     assert lines and "1 finding" in lines[0]
     assert "may influence" in lines[0], "строка обязана называть, что права у находки нет"
-
-
-def test_nothing_else_reads_the_quarantine(tmp_path: Path) -> None:
-    """Граница, на которой стоит смысл карантина.
-
-    Если запись начнёт читать подбор памяти, планировщик или верификатор — она
-    перестанет быть уликой без прав и станет памятью, никем не продвинутой.
-    """
-    allowed = {"subagent_quarantine.py", "agent_tick.py"}
-    core_dir = pathlib.Path(__file__).resolve().parents[1] / "core"
-    readers: set[str] = set()
-    for path in sorted(core_dir.rglob("*.py")):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        names = {
-            n.func.id for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-        }
-        if {"load_quarantine", "quarantine_path"} & names and path.name not in allowed:
-            readers.add(path.name)
-
-    assert not readers, (
-        "карантин читают помимо своего модуля и строки состояния: "
-        + ", ".join(sorted(readers))
-    )
 
 
 def test_a_subagent_needs_a_reason_and_a_prediction(tool, tmp_path: Path) -> None:

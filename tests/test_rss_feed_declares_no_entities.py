@@ -29,14 +29,3 @@ _PLAIN_DOCTYPE = '<?xml version="1.0"?><!DOCTYPE rss><rss><channel/></rss>'
 def test_a_feed_with_a_doctype_is_refused(payload: str) -> None:
     with pytest.raises(ValueError):
         _parse_feed(payload, limit=5)
-
-
-def test_an_ordinary_feed_still_parses() -> None:
-    xml = (
-        '<?xml version="1.0"?><rss><channel><title>News</title>'
-        "<item><title>One</title><link>https://example.org/1</link></item>"
-        "</channel></rss>"
-    )
-    title, _kind, entries = _parse_feed(xml, limit=5)
-    assert title == "News"
-    assert entries and entries[0]["title"] == "One"

@@ -70,23 +70,3 @@ def test_no_named_target_leaves_the_producer_free(monkeypatch, tmp_path: Path) -
     assert not seen.get("candidate_targets"), (
         "цель не называла предмета, а рукам всё равно навязали список"
     )
-
-
-def test_the_socket_is_not_satisfied_by_a_hollow_keyword(monkeypatch, tmp_path: Path) -> None:
-    """Инвариант нельзя закрыть, передавая пустоту.
-
-    Проверка по РАЗБОРУ (`test_some_machine_road_hands_the_producer_a_target`)
-    видит только имя аргумента и была бы довольна вечным `None`. Здесь
-    проверяется значение.
-    """
-    seen = _capture(monkeypatch)
-
-    _propose_engineering_step(
-        agent=_agent(),
-        workspace=tmp_path,
-        approval_inbox=MagicMock(),
-        target="core/loop.py",
-    )
-
-    targets = seen.get("candidate_targets")
-    assert targets and all(isinstance(t, str) and t for t in targets)

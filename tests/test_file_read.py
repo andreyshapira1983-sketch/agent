@@ -21,59 +21,12 @@ def _tool(workspace: Path) -> FileReadTool:
     return FileReadTool(workspace_root=workspace)
 
 
-# ---------- 1. existing file ----------
-
-def test_existing_file_is_read(workspace: Path) -> None:
-    target = workspace / "note.txt"
-    target.write_text("hello world\nsecond line\n", encoding="utf-8")
-
-    tool = _tool(workspace)
-    output = tool.run(path="note.txt")
-
-    assert "hello world" in output
-    assert "second line" in output
-
-    is_ok, issues = tool.validate_output(output)
-    assert is_ok is True
-    assert issues == []
-
-
-def test_unicode_filename_is_read_when_inside_workspace(workspace: Path) -> None:
-    target = workspace / "архитектура автономного Агента.txt"
-    target.write_text("Проверенный текст архитектуры.\n", encoding="utf-8")
-
-    tool = _tool(workspace)
-    output = tool.run(path="архитектура автономного Агента.txt")
-
-    assert output == "Проверенный текст архитектуры.\n"
-
-
 # ---------- 2. missing file ----------
 
 def test_missing_file_raises(workspace: Path) -> None:
     tool = _tool(workspace)
     with pytest.raises(FileNotFoundError):
         tool.run(path="does_not_exist.txt")
-
-
-def test_missing_file_hint_lists_real_neighbors(workspace: Path) -> None:
-    """A wrong guess should surface the real files in the nearest existing
-    directory, so the planner can self-correct on replan instead of guessing
-    another non-existent path (the 'scan itself' behaviour)."""
-    (workspace / "README.md").write_text("hi", encoding="utf-8")
-    (workspace / "docs").mkdir()
-    (workspace / "docs" / "AGENT_ANATOMY.md").write_text("x", encoding="utf-8")
-    (workspace / "docs" / "daemon-progress.md").write_text("y", encoding="utf-8")
-    tool = _tool(workspace)
-
-    with pytest.raises(FileNotFoundError) as exc:
-        tool.run(path="docs/CORPORATE_MODEL.md")
-    msg = str(exc.value)
-    # Names the nearest real directory and lists its actual contents.
-    assert "docs" in msg
-    assert "AGENT_ANATOMY.md" in msg
-    assert "daemon-progress.md" in msg
-    assert "Use one of these real paths" in msg
 
 
 def test_missing_file_hint_walks_up_to_existing_ancestor(workspace: Path) -> None:

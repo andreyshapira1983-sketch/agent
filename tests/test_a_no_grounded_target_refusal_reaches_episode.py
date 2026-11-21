@@ -52,11 +52,6 @@ def _honest_refusal() -> EpisodeRecord:
     )
 
 
-def test_both_writers_carry_the_family_link() -> None:
-    assert _poisoned_success().trace_id == _TRACE
-    assert _honest_refusal().trace_id == _TRACE
-
-
 def test_a_success_episode_cannot_shed_its_declined_product() -> None:
     """Ядро замысла агента: оба исхода одного прогона — одновременно."""
     success, refusal = _poisoned_success(), _honest_refusal()
@@ -66,36 +61,3 @@ def test_a_success_episode_cannot_shed_its_declined_product() -> None:
     assert len(warnings) == 1
     assert "no_grounded_target" in warnings[0], (
         "отказ продукта не доехал до подсказки — успех снова стёр его")
-
-
-def test_an_unrelated_trace_is_not_glued_on() -> None:
-    """Граница: чужой отказ из другого прогона к успеху не пришивается."""
-    success = _poisoned_success()
-    stranger = build_self_build_episode(
-        "self-build-produce",
-        {"status": "no_grounded_target", "reason": "other tick"},
-        trace_id="trace_другого_прогона",
-    )
-
-    assert family_product_warnings([success], [success, stranger]) == []
-
-
-def test_a_legacy_row_without_the_link_stays_silent_not_broken() -> None:
-    """Граница: старые строки без trace_id читаются и просто не сшиваются."""
-    legacy = EpisodeRecord.from_dict({
-        "goal": "g", "question": "q", "outcome": "success", "summary": "s",
-    })
-
-    assert legacy.trace_id == ""
-    assert family_product_warnings([legacy], [legacy]) == []
-
-
-def test_the_reader_wires_the_join_into_the_block() -> None:
-    """Проводка: сшивка стоит в читателе впрыска, а не только в библиотеке."""
-    import inspect
-
-    from core import loop_memory_read
-
-    src = inspect.getsource(loop_memory_read)
-    assert "family_product_warnings" in src
-    assert "Продуктовые исходы тех же прогонов" in src

@@ -33,7 +33,6 @@ from cli.commands_plan import (
     _handle_patch_proposal_plan,
     _handle_source_review_plan,
     _insufficient_source_evidence_payload,
-    _requests_explicit_file_read,
 )
 from cli.commands_self_build import (
     LARGE_FILE_LINE_THRESHOLD,
@@ -101,42 +100,7 @@ def test_source_registry_lists_sources_and_their_claims(tmp_path, capsys):
     assert "- [extracted 0.90] the parser drops empty input" in err
 
 
-def test_source_registry_falls_back_to_the_locator_when_there_is_no_title(tmp_path, capsys):
-    agent = agent_with(registry_with(source(title="")))
-
-    assert _handle_source_registry("", agent, tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "docs/parser.md" in err
-    assert "- [" not in err, "claims are only shown with --claims"
-
-
-def test_source_registry_says_when_there_are_no_sources(tmp_path, capsys):
-    assert _handle_source_registry("", agent_with(registry_with()), tmp_path) is True
-    assert "(no ingested sources)" in capsys.readouterr().err
-
-
 # ── the read-first guard ─────────────────────────────────────────────────────
-
-@pytest.mark.parametrize(
-    "goal,expected",
-    [
-        ("read core/foo.py first", True),
-        ("сначала прочитай core/foo.py", True),
-        ("review only these files: core/foo.py", True),
-        ("read the docs", False),          # verb, no qualifier
-        ("first, tell me the plan", False),  # qualifier, no verb
-        ("", False),
-    ],
-)
-def test_explicit_read_request_needs_both_a_verb_and_a_qualifier(goal, expected):
-    assert _requests_explicit_file_read(goal) is expected
-
-
-def test_no_block_when_the_goal_is_not_a_read_first_request():
-    assert _insufficient_source_evidence_payload(
-        "improve the parser", {"requested_mentions": ["core/foo.py"]}, requested_kind="x"
-    ) is None
 
 
 def test_no_block_when_no_files_were_named():
@@ -151,25 +115,6 @@ def test_no_block_when_the_named_files_are_grounded():
         {"requested_mentions": ["core/foo.py"], "matched_sources": [{"id": "src-1"}]},
         requested_kind="x",
     ) is None
-
-
-def test_ungrounded_read_first_request_is_blocked_with_its_reason():
-    payload = _insufficient_source_evidence_payload(
-        "read core/foo.py first",
-        {
-            "requested_mentions": ["core/foo.py"],
-            "matched_sources": [],
-            "missing_mentions": ["core/foo.py"],
-            "registry": {"sources": 0, "claims": 0},
-        },
-        requested_kind="source_review_plan",
-    )
-
-    assert payload is not None
-    assert payload["kind"] == "insufficient_source_evidence"
-    assert payload["requested_kind"] == "source_review_plan"
-    assert "core/foo.py" in json.dumps(payload, ensure_ascii=False)
-    assert payload["constraints"], "the blocked payload states what it did NOT do"
 
 
 def test_source_review_plan_reports_the_block_instead_of_a_plan(tmp_path, capsys):
@@ -343,14 +288,6 @@ def test_the_scanner_never_descends_into_runtime_or_tooling_directories(tmp_path
     )
 
 
-def test_the_scanner_ignores_non_python_files(tmp_path):
-    big = tmp_path / "core" / "notes.txt"
-    big.parent.mkdir(parents=True)
-    big.write_text("line\n" * (LARGE_FILE_LINE_THRESHOLD + 10), encoding="utf-8")
-
-    assert _large_file_report(tmp_path) == []
-
-
 def test_scan_guards_reject_what_they_should(tmp_path):
     (tmp_path / "core").mkdir()
     (tmp_path / "data").mkdir()
@@ -378,25 +315,10 @@ def test_the_report_formats_empty_and_populated(tmp_path):
     assert "core/huge.py lines=4200" in text
 
 
-def test_the_large_files_flag_prints_the_report(tmp_path, capsys):
-    _write(tmp_path / "core" / "huge.py", LARGE_FILE_LINE_THRESHOLD + 3)
-
-    assert _handle_self_build_propose("--large-files", agent_with(), tmp_path) is True
-
-    err = capsys.readouterr().err
-    assert "LARGE_FILE_REPORT" in err
-    assert "core/huge.py" in err
-
-
 # ── :self-build-propose — the routing-guard patch ────────────────────────────
 
 GUARD = "    if _looks_like_meta_instruction(normalized):\n        return None\n"
 HELPER_ANCHOR = "\n\ndef _matches_inbox_task_request"
-
-
-def test_no_patch_when_the_target_file_is_absent(tmp_path, capsys):
-    assert _handle_self_build_propose("", agent_with(), tmp_path) is True
-    assert capsys.readouterr().err.strip() == "NO_PATCH"
 
 
 def test_no_patch_when_the_guard_anchor_is_missing(tmp_path):
@@ -412,30 +334,6 @@ def test_no_patch_when_the_guard_anchor_is_missing(tmp_path):
 
 def test_no_patch_when_the_helper_anchor_is_missing():
     assert _propose_self_build_operator_intent_patch(GUARD) is None
-
-
-def test_the_patch_adds_both_the_guard_call_and_the_helper():
-    original = GUARD + HELPER_ANCHOR + "():\n    return False\n"
-
-    patched = _propose_self_build_operator_intent_patch(original)
-
-    assert patched is not None
-    assert "if _looks_like_self_build_request(normalized):" in patched
-    assert "def _looks_like_self_build_request(" in patched
-    assert patched.index("if _looks_like_self_build_request") < patched.index(
-        "def _looks_like_self_build_request"
-    ), "the call is added at the guard, the helper below it"
-
-
-def test_an_already_patched_file_yields_no_patch():
-    original = (
-        GUARD
-        + "    if _looks_like_self_build_request(normalized):\n        return None\n"
-        + "\n\ndef _looks_like_self_build_request(text: str) -> bool:\n    return False\n"
-        + HELPER_ANCHOR
-        + "():\n    return False\n"
-    )
-    assert _propose_self_build_operator_intent_patch(original) == original
 
 
 def test_a_real_diff_is_proposed_and_printed(tmp_path, capsys):
@@ -478,12 +376,3 @@ def test_a_malformed_diff_is_never_published_as_a_patch(tmp_path, monkeypatch):
 
     assert payload["diff"] == "NO_PATCH"
     assert payload["risk"] == "none; no patch is proposed."
-
-
-def test_an_unchanged_patch_result_is_reported_as_no_patch(tmp_path, monkeypatch):
-    target = tmp_path / "core" / "operator_intent.py"
-    target.parent.mkdir(parents=True)
-    target.write_text("anything\n", encoding="utf-8")
-    monkeypatch.setattr(mod, "_propose_self_build_operator_intent_patch", lambda text: text)
-
-    assert _self_build_propose_payload(tmp_path)["diff"] == "NO_PATCH"

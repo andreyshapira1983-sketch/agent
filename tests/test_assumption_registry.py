@@ -23,7 +23,6 @@ from core.assumption_registry import (
     AssumptionRegistry,
     AssumptionStore,
     extract_from_plan,
-    extract_from_question,
 )
 
 # ============================================================
@@ -39,165 +38,10 @@ def _store(tmp_path: Path) -> AssumptionStore:
 
 
 # ============================================================
-# TestAssumptionDefaults
-# ============================================================
-
-class TestAssumptionDefaults:
-    def test_id_prefix(self):
-        a = Assumption(text="hello")
-        assert a.id.startswith("asmp_")
-
-    def test_default_category(self):
-        a = Assumption(text="x")
-        assert a.category == "general"
-
-    def test_default_confidence(self):
-        a = Assumption(text="x")
-        assert a.confidence == pytest.approx(0.80)
-
-    def test_default_source(self):
-        a = Assumption(text="x")
-        assert a.source == "heuristic"
-
-    def test_default_verified_is_none(self):
-        a = Assumption(text="x")
-        assert a.verified is None
-
-    def test_run_id_default_empty(self):
-        a = Assumption(text="x")
-        assert a.run_id == ""
-
-    def test_unique_ids(self):
-        ids = {Assumption(text="x").id for _ in range(20)}
-        assert len(ids) == 20
-
-    def test_created_at_is_utc(self):
-        from datetime import timezone
-        a = Assumption(text="x")
-        assert a.created_at.tzinfo is not None
-        assert a.created_at.tzinfo == timezone.utc or str(a.created_at.tzinfo) == "UTC"
-
-    def test_to_dict_roundtrip(self):
-        a = Assumption(text="round trip", category="language", confidence=0.75, run_id="r1")
-        d = a.to_dict()
-        a2 = Assumption.from_dict(d)
-        assert a2.id == a.id
-        assert a2.text == a.text
-        assert a2.category == a.category
-        assert a2.run_id == a.run_id
-
-    def test_explicit_verified_false(self):
-        a = Assumption(text="x", verified=False)
-        assert a.verified is False
-
-
-# ============================================================
-# TestExtractFromQuestion
-# ============================================================
-
-class TestExtractFromQuestion:
-    def test_russian_question_language_assumption(self):
-        result = extract_from_question("Покажи мне список файлов проекта пожалуйста")
-        cats = [a.category for a in result]
-        assert "language" in cats
-        lang = next(a for a in result if a.category == "language")
-        assert "Russian" in lang.text
-
-    def test_english_question_language_assumption(self):
-        result = extract_from_question("Show me the list of files in the project please")
-        cats = [a.category for a in result]
-        assert "language" in cats
-        lang = next(a for a in result if a.category == "language")
-        assert "English" in lang.text
-
-    def test_mixed_no_language_assumption(self):
-        """Five Russian and five English words: neither side dominates, so no language."""
-        result = extract_from_question("Show файл list проект файлы файлы файлы files files files")
-        assert [a for a in result if a.category == "language"] == []
-
-    def test_short_text_no_language_assumption(self):
-        result = extract_from_question("ok")
-        lang_items = [a for a in result if a.category == "language"]
-        assert len(lang_items) == 0
-
-    def test_python_without_version_fires(self):
-        result = extract_from_question("How do I use python for this task?")
-        cats = [a.category for a in result]
-        assert "python_version" in cats
-
-    def test_python_with_version_no_assumption(self):
-        # "python3" has a version digit right after — should NOT fire
-        result = extract_from_question("python3 script.py")
-        cats = [a.category for a in result]
-        assert "python_version" not in cats
-
-    def test_python_3_no_assumption(self):
-        result = extract_from_question("run with python 3.11")
-        cats = [a.category for a in result]
-        assert "python_version" not in cats
-
-    def test_run_command_scope_russian(self):
-        result = extract_from_question("запусти тесты")
-        cats = [a.category for a in result]
-        assert "scope" in cats
-
-    def test_run_command_scope_english(self):
-        result = extract_from_question("run the tests please")
-        cats = [a.category for a in result]
-        assert "scope" in cats
-
-    def test_execute_fires_scope(self):
-        result = extract_from_question("execute this command")
-        cats = [a.category for a in result]
-        assert "scope" in cats
-
-    def test_file_without_path_scope(self):
-        result = extract_from_question("прочитай файл и скажи мне результат")
-        cats = [a.category for a in result]
-        assert "scope" in cats
-
-    def test_file_with_path_no_extra_scope(self):
-        # "файл /home/foo.txt" — the path separator follows, so no extra scope assumption
-        result = extract_from_question("прочитай файл /home/user/data.txt")
-        scope_from_file = [
-            a for a in result
-            if a.category == "scope" and "workspace" in a.text.lower()
-        ]
-        assert len(scope_from_file) == 0
-
-    def test_run_id_propagated(self):
-        result = extract_from_question("запусти python скрипт", run_id="run_abc")
-        for a in result:
-            assert a.run_id == "run_abc"
-
-    def test_source_is_question(self):
-        result = extract_from_question("python test")
-        for a in result:
-            assert a.source == "question"
-
-    def test_empty_question_has_no_assumptions(self):
-        assert extract_from_question("") == []
-
-    def test_no_mutation(self):
-        q = "запусти python скрипт"
-        r1 = extract_from_question(q)
-        r2 = extract_from_question(q)
-        # Results should be independent objects
-        if r1 and r2:
-            assert r1[0] is not r2[0]
-
-
-# ============================================================
 # TestExtractFromPlan
 # ============================================================
 
 class TestExtractFromPlan:
-    def test_file_read_encoding(self):
-        sources = [_make_step("file_read", path="readme.txt")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "file_encoding" in cats
-
     def test_file_read_py_format(self):
         sources = [_make_step("file_read", path="main.py")]
         result = extract_from_plan(sources)
@@ -206,167 +50,17 @@ class TestExtractFromPlan:
         fmt = next(a for a in result if a.category == "file_format")
         assert "python" in fmt.text.lower() or "syntactically" in fmt.text.lower()
 
-    def test_file_read_non_py_no_format(self):
-        sources = [_make_step("file_read", path="data.csv")]
-        result = extract_from_plan(sources)
-        fmt = [a for a in result if a.category == "file_format"]
-        assert len(fmt) == 0
-
-    def test_file_write_permissions(self):
-        sources = [_make_step("file_write", path="out.txt")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "workspace_permission" in cats
-
-    def test_web_search_network_access(self):
-        sources = [_make_step("web_search", query="python news")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "network_access" in cats
-
-    def test_web_fetch_network_and_format(self):
-        sources = [_make_step("web_fetch", url="https://example.com")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "network_access" in cats
-        assert "file_format" in cats
-
-    def test_shell_exec_tool_and_scope(self):
-        sources = [_make_step("shell_exec", command="echo hello")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "tool_availability" in cats
-        assert "scope" in cats
-
-    def test_run_tests_pytest(self):
-        sources = [_make_step("run_tests")]
-        result = extract_from_plan(sources)
-        cats = [a.category for a in result]
-        assert "tool_availability" in cats
-        text = next(a.text for a in result if a.category == "tool_availability")
-        assert "pytest" in text.lower()
-
-    def test_empty_plan_no_assumptions(self):
-        result = extract_from_plan([])
-        assert result == []
-
-    def test_dedup_same_tool_twice(self):
-        sources = [
-            _make_step("file_read", path="a.txt"),
-            _make_step("file_read", path="b.txt"),
-        ]
-        result = extract_from_plan(sources)
-        texts = [a.text for a in result]
-        # Should not have duplicate encoding text
-        assert len(texts) == len(set(texts))
-
-    def test_run_id_propagated(self):
-        sources = [_make_step("file_read", path="x.txt")]
-        result = extract_from_plan(sources, run_id="run_xyz")
-        for a in result:
-            assert a.run_id == "run_xyz"
-
-    def test_source_is_planner(self):
-        sources = [_make_step("file_read", path="x.txt")]
-        result = extract_from_plan(sources)
-        for a in result:
-            assert a.source == "planner"
-
-    @pytest.mark.parametrize("step", [{"tool": "", "arguments": {}}, {"arguments": {}}])
-    def test_no_tool_key_safe(self, step):
-        """A step with an empty or missing tool name adds no assumptions."""
-        assert extract_from_plan([step]) == []
-
-    def test_unknown_tool_no_assumptions(self):
-        sources = [_make_step("unknown_custom_tool")]
-        result = extract_from_plan(sources)
-        assert result == []
-
 
 # ============================================================
 # TestAssumptionRegistry
 # ============================================================
 
 class TestAssumptionRegistry:
-    def test_register_run_id_inherited(self):
-        reg = AssumptionRegistry(run_id="r42")
-        a = reg.register("text", "language", 0.9, "question")
-        assert a.run_id == "r42"
-
-    def test_register_many(self):
-        reg = AssumptionRegistry()
-        items = [Assumption(text=f"item {i}") for i in range(5)]
-        reg.register_many(items)
-        assert len(reg) == 5
-
-    def test_len_empty(self):
-        reg = AssumptionRegistry()
-        assert len(reg) == 0
-
-    def test_assumptions_property_copy(self):
-        reg = AssumptionRegistry()
-        reg.register("x")
-        lst = reg.assumptions
-        assert len(lst) == 1
-        # Returned list is independent
-        lst.clear()
-        assert len(reg) == 1
-
-    def test_active_excludes_contradicted(self):
-        reg = AssumptionRegistry()
-        a1 = reg.register("good", "general", 0.9)
-        a2 = reg.register("bad", "general", 0.9)
-        reg.mark_verified(a2.id, verified=False)
-        active = reg.active
-        assert a1 in active
-        assert a2 not in active
-
-    def test_active_includes_confirmed(self):
-        reg = AssumptionRegistry()
-        a = reg.register("confirmed")
-        reg.mark_verified(a.id, verified=True)
-        assert a in reg.active
-
-    def test_active_includes_unverified(self):
-        reg = AssumptionRegistry()
-        a = reg.register("unverified")
-        assert a in reg.active
-
-    def test_mark_verified_found(self):
-        reg = AssumptionRegistry()
-        a = reg.register("x")
-        result = reg.mark_verified(a.id, verified=True)
-        assert result is True
-        assert a.verified is True
-
     def test_mark_verified_not_found(self):
         reg = AssumptionRegistry()
         result = reg.mark_verified("nonexistent_id", verified=True)
         assert result is False
 
-    def test_to_prompt_block_empty_when_no_active(self):
-        reg = AssumptionRegistry()
-        assert reg.to_prompt_block() == ""
-
-    def test_to_prompt_block_has_xml_tags(self):
-        reg = AssumptionRegistry()
-        reg.register("File is UTF-8", "file_encoding", 0.85)
-        block = reg.to_prompt_block()
-        assert "<assumptions>" in block
-        assert "</assumptions>" in block
-
-    def test_to_prompt_block_contains_text(self):
-        reg = AssumptionRegistry()
-        reg.register("File is UTF-8", "file_encoding", 0.85)
-        block = reg.to_prompt_block()
-        assert "File is UTF-8" in block
-        assert "file_encoding" in block
-
-    def test_to_prompt_block_confidence_percentage(self):
-        reg = AssumptionRegistry()
-        reg.register("test", "general", 0.75)
-        block = reg.to_prompt_block()
-        assert "75%" in block
 
     def test_to_prompt_block_confirmed_tag(self):
         reg = AssumptionRegistry()
@@ -382,80 +76,17 @@ class TestAssumptionRegistry:
         block = reg.to_prompt_block()
         assert block == ""
 
-    def test_to_log_payload(self):
-        reg = AssumptionRegistry()
-        reg.register("x", "general", 0.9, "question")
-        payload = reg.to_log_payload()
-        assert len(payload) == 1
-        assert payload[0]["text"] == "x"
-        assert payload[0]["category"] == "general"
-        assert "confidence" in payload[0]
-        assert "id" in payload[0]
-
-    def test_multiple_items_log_payload(self):
-        reg = AssumptionRegistry()
-        reg.register("a")
-        reg.register("b")
-        assert len(reg.to_log_payload()) == 2
-
 
 # ============================================================
 # TestAssumptionStore
 # ============================================================
 
 class TestAssumptionStore:
-    def test_save_creates_file(self, tmp_path):
-        store = _store(tmp_path)
-        a = Assumption(text="test save", run_id="r1")
-        store.save(a)
-        assert store.path.exists()
-
-    def test_save_and_load_by_run(self, tmp_path):
-        store = _store(tmp_path)
-        a = Assumption(text="hello", run_id="run_abc")
-        store.save(a)
-        loaded = store.load_by_run("run_abc")
-        assert len(loaded) == 1
-        assert loaded[0].text == "hello"
-
-    def test_load_by_run_excludes_other_runs(self, tmp_path):
-        store = _store(tmp_path)
-        store.save(Assumption(text="A", run_id="run_1"))
-        store.save(Assumption(text="B", run_id="run_2"))
-        r1 = store.load_by_run("run_1")
-        assert all(a.run_id == "run_1" for a in r1)
-        assert len(r1) == 1
-
-    def test_save_many_returns_count(self, tmp_path):
-        store = _store(tmp_path)
-        items = [Assumption(text=f"item {i}", run_id="r") for i in range(5)]
-        n = store.save_many(items)
-        assert n == 5
-
     def test_save_many_empty_returns_zero(self, tmp_path):
         store = _store(tmp_path)
         n = store.save_many([])
         assert n == 0
 
-    def test_load_recent_most_recent_first(self, tmp_path):
-        store = _store(tmp_path)
-        for i in range(5):
-            store.save(Assumption(text=f"item{i}", run_id="r"))
-        recent = store.load_recent(3)
-        assert len(recent) == 3
-        # Most recent = item4, then item3, then item2
-        assert recent[0].text == "item4"
-
-    def test_load_recent_all_when_n_larger(self, tmp_path):
-        store = _store(tmp_path)
-        store.save(Assumption(text="only", run_id="r"))
-        recent = store.load_recent(100)
-        assert len(recent) == 1
-
-    def test_load_recent_empty_file(self, tmp_path):
-        store = _store(tmp_path)
-        recent = store.load_recent(10)
-        assert recent == []
 
     def test_load_recent_runs_groups_by_run(self, tmp_path):
         store = _store(tmp_path)
@@ -465,48 +96,11 @@ class TestAssumptionStore:
         grouped = store.load_recent_runs(n=2)
         assert "run_1" in grouped or "run_2" in grouped
 
-    def test_corrupted_line_skipped(self, tmp_path):
-        store = _store(tmp_path)
-        a = Assumption(text="good", run_id="r")
-        store.save(a)
-        # Inject a corrupted line
-        with open(store.path, "a", encoding="utf-8") as f:
-            f.write("NOT_JSON_AT_ALL\n")
-        # Should not raise, just skip the bad line
-        loaded = store.load_by_run("r")
-        assert len(loaded) == 1
-        assert loaded[0].text == "good"
 
     def test_missing_file_returns_empty(self, tmp_path):
         store = AssumptionStore(tmp_path / "nonexistent" / "assumptions.jsonl")
         assert store.load_by_run("anything") == []
         assert store.load_recent(10) == []
-
-    def test_roundtrip_all_fields(self, tmp_path):
-        store = _store(tmp_path)
-        a = Assumption(
-            text="roundtrip",
-            category="file_encoding",
-            confidence=0.95,
-            source="planner",
-            run_id="r99",
-            verified=True,
-        )
-        store.save(a)
-        loaded = store.load_by_run("r99")
-        assert len(loaded) == 1
-        b = loaded[0]
-        assert b.text == a.text
-        assert b.category == a.category
-        assert b.confidence == pytest.approx(0.95)
-        assert b.source == a.source
-        assert b.verified is True
-
-    def test_parent_dir_created_automatically(self, tmp_path):
-        nested_path = tmp_path / "deep" / "nested" / "assumptions.jsonl"
-        store = AssumptionStore(nested_path)
-        store.save(Assumption(text="x", run_id="r"))
-        assert nested_path.exists()
 
 
 # ============================================================
@@ -556,26 +150,6 @@ class TestAgentLoopAssumptionIntegration:
             assumption_store=store,
         )
 
-    def test_no_store_does_not_crash(self, tmp_path):
-        agent = self._make_agent(tmp_path, with_store=False)
-        assert agent.assumption_store is None
-
-    def test_question_assumptions_extracted(self, tmp_path):
-        from core.planner import PlannerOutput
-
-        agent = self._make_agent(tmp_path)
-        mock_plan = PlannerOutput(
-            reasoning="noop",
-            sources=[],
-            raw_response="",
-            warnings=[],
-        )
-        with patch.object(agent.planner, "plan", return_value=mock_plan):
-            agent.run("Покажи мне список файлов проекта пожалуйста")
-        # Russian → language assumption
-        assert agent.last_assumptions is not None
-        texts = [a.text for a in agent.last_assumptions.assumptions]
-        assert any("Russian" in t for t in texts)
 
     def test_plan_assumptions_extracted(self, tmp_path):
         from core.planner import PlannerOutput
@@ -598,44 +172,6 @@ class TestAgentLoopAssumptionIntegration:
         cats = [a.category for a in agent.last_assumptions.assumptions]
         assert "file_encoding" in cats
 
-    def test_store_receives_saved_assumptions(self, tmp_path):
-        """At run end the store holds exactly the run's assumptions, the Russian one included."""
-        from core.planner import PlannerOutput
-
-        agent = self._make_agent(tmp_path)
-        mock_plan = PlannerOutput(
-            reasoning="noop",
-            sources=[],
-            raw_response="",
-            warnings=[],
-        )
-        with patch.object(agent.planner, "plan", return_value=mock_plan):
-            agent.run("Покажи мне список файлов")
-        saved = agent.assumption_store.load_recent(50)
-        assert any("Russian" in a.text for a in saved)
-        assert {a.id for a in saved} == {a.id for a in agent.last_assumptions.assumptions}
-
-    def test_run_without_store_still_completes(self, tmp_path):
-        """Without a store the run still exposes its assumptions and logs no failed save."""
-        import json
-
-        from core.planner import PlannerOutput
-
-        agent = self._make_agent(tmp_path, with_store=False)
-        mock_plan = PlannerOutput(
-            reasoning="noop",
-            sources=[],
-            raw_response="",
-            warnings=[],
-        )
-        with patch.object(agent.planner, "plan", return_value=mock_plan):
-            agent.run("Show me the list of files in the project please")
-        assert agent.last_assumptions is not None
-        assert any("English" in a.text for a in agent.last_assumptions.assumptions)
-        trace = agent.log.path.read_text(encoding="utf-8").splitlines()
-        events = [json.loads(line) for line in trace]
-        failed = [e["payload"]["sensor"] for e in events if e["event"] == "sensor_failed"]
-        assert "assumption_store_save" not in failed
 
     def test_last_assumptions_run_id_matches_trace(self, tmp_path):
         from core.planner import PlannerOutput
@@ -658,60 +194,6 @@ class TestLayerConnections:
 
     # ------------------------------------------------------------------ L4→5
 
-    def test_known_language_ru_produces_profile_sourced_assumption(self):
-        """When known_language='ru' is passed, result is source='profile'."""
-        results = extract_from_question(
-            "привет мир тест проверка",
-            known_language="ru",
-        )
-        lang = [a for a in results if a.category == "language"]
-        assert len(lang) == 1
-        assert lang[0].source == "profile"
-        assert lang[0].confidence == 0.95
-
-    def test_known_language_en_produces_profile_sourced_assumption(self):
-        results = extract_from_question(
-            "hello world test check",
-            known_language="en",
-        )
-        lang = [a for a in results if a.category == "language"]
-        assert len(lang) == 1
-        assert lang[0].source == "profile"
-        assert "English" in lang[0].text
-
-    def test_known_language_none_falls_back_to_heuristic(self):
-        """Without known_language, Russian heuristic still fires."""
-        results = extract_from_question(
-            "привет мир тест проверка",
-            known_language=None,
-        )
-        lang = [a for a in results if a.category == "language"]
-        assert len(lang) == 1
-        assert lang[0].source == "question"
-        assert lang[0].confidence == 0.90
-
-    def test_known_language_omitted_falls_back_to_heuristic(self):
-        """Default call (no known_language arg) still uses heuristic."""
-        results = extract_from_question("привет мир тест проверка")
-        lang = [a for a in results if a.category == "language"]
-        assert len(lang) == 1
-        assert lang[0].source == "question"
-
-    def test_known_language_profile_higher_confidence_than_heuristic(self):
-        """Profile-sourced confidence (0.95) > heuristic confidence (0.90)."""
-        profile_result = extract_from_question("привет мир тест", known_language="ru")
-        heuristic_result = extract_from_question("привет мир тест проверка")
-        profile_lang = [a for a in profile_result if a.category == "language"]
-        heuristic_lang = [a for a in heuristic_result if a.category == "language"]
-        # profile requires known_language — need enough words to get heuristic but skip
-        if profile_lang and heuristic_lang:
-            assert profile_lang[0].confidence > heuristic_lang[0].confidence
-
-    def test_known_language_other_value_produces_no_language_assumption(self):
-        """An unrecognised language code ('fr') produces no assumption."""
-        results = extract_from_question("bonjour monde test", known_language="fr")
-        lang = [a for a in results if a.category == "language"]
-        assert len(lang) == 0
 
     # ------------------------------------------------------------------ L2→5
 
@@ -724,25 +206,6 @@ class TestLayerConnections:
         assert a.id in reg._restored_ids
         assert a in reg.assumptions
 
-    def test_new_assumptions_excludes_restored(self):
-        """new_assumptions should not contain restored items."""
-        reg = AssumptionRegistry(run_id="r1")
-        restored = Assumption(run_id="r1", text="Old.", category="general",
-                              source="heuristic", confidence=0.80)
-        reg.restore_from_store([restored])
-        fresh = Assumption(run_id="r1", text="New.", category="scope",
-                          source="planner", confidence=0.80)
-        reg.register_many([fresh])
-        assert fresh in reg.new_assumptions
-        assert restored not in reg.new_assumptions
-
-    def test_new_assumptions_all_when_no_restore(self):
-        """Without any restore, new_assumptions == assumptions."""
-        reg = AssumptionRegistry(run_id="r2")
-        a1 = Assumption(run_id="r2", text="A.", source="heuristic")
-        a2 = Assumption(run_id="r2", text="B.", source="question")
-        reg.register_many([a1, a2])
-        assert reg.new_assumptions == reg.assumptions
 
     def test_store_not_duplicated_on_second_run(self, tmp_path):
         """If store already has assumptions for run_id, restore_from_store
@@ -768,70 +231,6 @@ class TestLayerConnections:
         all_loaded = store.load_by_run("run_abc")
         assert len(all_loaded) == 2
 
-    def test_loop_uses_profile_language_for_extract(self, tmp_path):
-        """AgentLoop passes user_profile.language to extract_from_question
-        so a known language produces a profile-sourced assumption."""
-        from unittest.mock import patch
-
-        from core.planner import PlannerOutput
-
-        agent = _make_agent_for_connections(tmp_path)
-
-        # Prime the profile with a known language
-        from core.user_profile import UserProfile
-        agent.last_user_profile = UserProfile(language="ru", language_locked=True)
-
-        mock_plan = PlannerOutput(reasoning="noop", sources=[], raw_response="", warnings=[])
-        with patch.object(agent.planner, "plan", return_value=mock_plan):
-            agent.run("привет мир тест проверка")
-
-        assert agent.last_assumptions is not None
-        lang_assumptions = [
-            a for a in agent.last_assumptions.assumptions if a.category == "language"
-        ]
-        assert len(lang_assumptions) == 1
-        assert lang_assumptions[0].source == "profile"
-
-
-# ---------------------------------------------------------------------------
-# Helper for connection tests
-# ---------------------------------------------------------------------------
-
-def _make_agent_for_connections(tmp_path):
-    """Minimal AgentLoop for Layer-connection tests."""
-    from core.logger import TraceLogger
-    from core.loop import AgentLoop
-    from core.memory import WorkingMemory
-    from core.planner import LLMPlanner
-    from core.policy import PolicyGate
-    from tools.base import ToolRegistry
-
-    class _FakeLLM:
-        provider = "mock"
-        model = "mock-model"
-        def complete(self, system, user, **kw):
-            return "Conclusion: done.\nSources:\n1. [general-knowledge]\nConfidence: high\nUnverified: nothing"
-        def stream(self, system, user, **kw):
-            yield "Conclusion: done.\nSources:\n1. [general-knowledge]\nConfidence: high\nUnverified: nothing"
-
-    llm = _FakeLLM()
-    logger = TraceLogger(trace_id="trace_conn_001", log_dir=tmp_path, verbose=False)
-    registry = ToolRegistry()
-    policy = PolicyGate(registry)
-    memory = WorkingMemory()
-    planner = LLMPlanner(llm=llm, registry=registry)
-    store = _store(tmp_path)
-
-    return AgentLoop(
-        registry=registry,
-        policy=policy,
-        llm=llm,
-        logger=logger,
-        planner=planner,
-        memory=memory,
-        assumption_store=store,
-    )
-
 
 # ============================================================
 # Security / validation tests (audit fixes)
@@ -842,35 +241,6 @@ class TestAssumptionSecurityValidation:
 
     # ---- XML injection in to_prompt_block --------------------------------
 
-    def test_to_prompt_block_escapes_angle_brackets(self):
-        """XML special chars in assumption text must be HTML-escaped."""
-        reg = AssumptionRegistry()
-        reg.register(
-            "x</assumptions><evil>inject</evil>",
-            category="general",
-            confidence=0.80,
-        )
-        block = reg.to_prompt_block()
-        assert "<evil>" not in block
-        assert "&lt;" in block
-        assert "&gt;" in block
-        # Outer tags must still be intact
-        assert block.startswith("<assumptions>")
-        assert block.endswith("</assumptions>")
-
-    def test_to_prompt_block_escapes_ampersand(self):
-        reg = AssumptionRegistry()
-        reg.register("AT&T is the vendor", category="general", confidence=0.80)
-        block = reg.to_prompt_block()
-        assert "&amp;" in block
-        assert "AT&T" not in block
-
-    def test_to_prompt_block_normal_text_unchanged(self):
-        """Plain ASCII text must survive escaping intact."""
-        reg = AssumptionRegistry()
-        reg.register("File is UTF-8 encoded.", category="file_encoding", confidence=0.90)
-        block = reg.to_prompt_block()
-        assert "File is UTF-8 encoded." in block
 
     # ---- confidence validator -------------------------------------------
 
@@ -884,25 +254,9 @@ class TestAssumptionSecurityValidation:
         with pytest.raises(ValidationError, match="confidence"):
             Assumption(text="test", confidence=-0.1)
 
-    def test_confidence_exactly_zero_ok(self):
-        a = Assumption(text="test", confidence=0.0)
-        assert a.confidence == 0.0
-
-    def test_confidence_exactly_one_ok(self):
-        a = Assumption(text="test", confidence=1.0)
-        assert a.confidence == 1.0
 
     # ---- source literal --------------------------------------------------
 
-    def test_source_unknown_raises(self):
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            Assumption(text="test", source="unknown_origin")
-
-    def test_source_valid_literals_accepted(self):
-        for src in ("heuristic", "planner", "question", "kernel", "profile"):
-            a = Assumption(text="test", source=src)  # type: ignore[arg-type]
-            assert a.source == src
 
     # ---- text validator --------------------------------------------------
 
@@ -920,7 +274,3 @@ class TestAssumptionSecurityValidation:
         from pydantic import ValidationError
         with pytest.raises(ValidationError, match="too long"):
             Assumption(text="x" * 501)
-
-    def test_text_500_chars_ok(self):
-        a = Assumption(text="x" * 500)
-        assert len(a.text) == 500

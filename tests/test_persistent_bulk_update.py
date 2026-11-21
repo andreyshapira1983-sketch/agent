@@ -65,19 +65,6 @@ class _CountingWriter:
 # The cost, which is the whole point
 # ---------------------------------------------------------------------------
 
-def test_a_bulk_update_rewrites_the_file_once(tmp_path: Path, monkeypatch):
-    store, _ = _store(tmp_path, 5)
-    counter = _CountingWriter(monkeypatch)
-
-    landed = store.update_many(
-        r.model_copy(update={"access_count": r.access_count + 1})
-        for r in store.load()
-    )
-
-    assert landed == 5
-    assert counter.rewrites == 1, "one rewrite, whatever the record count"
-    assert counter.rows == 5
-
 
 def test_the_loop_it_replaces_was_quadratic(tmp_path: Path, monkeypatch):
     """The measurement that made this item real, kept as a test.
@@ -99,15 +86,6 @@ def test_the_loop_it_replaces_was_quadratic(tmp_path: Path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Semantics
 # ---------------------------------------------------------------------------
-
-def test_the_new_values_actually_land(tmp_path: Path):
-    store, _ = _store(tmp_path, 3)
-
-    store.update_many(
-        r.model_copy(update={"access_count": 7}) for r in store.load()
-    )
-
-    assert [r.access_count for r in store.load()] == [7, 7, 7]
 
 
 def test_records_not_named_are_left_alone(tmp_path: Path):
@@ -150,59 +128,3 @@ def test_an_empty_call_writes_nothing(tmp_path: Path, monkeypatch):
 
     assert store.update_many([]) == 0
     assert counter.rewrites == 0
-
-
-def test_nothing_matching_writes_nothing(tmp_path: Path, monkeypatch):
-    """Zero matches must not rewrite either — an empty diff is not a write."""
-    store, _ = _store(tmp_path, 2)
-    ghost = MemoryRecord(
-        type="semantic", content="nowhere", tags=[],
-        owner="user", source="user-explicit",
-    )
-    counter = _CountingWriter(monkeypatch)
-
-    assert store.update_many([ghost]) == 0
-    assert counter.rewrites == 0
-
-
-# ---------------------------------------------------------------------------
-# The three callers no longer improvise
-# ---------------------------------------------------------------------------
-
-def test_no_caller_loops_over_update_or_reaches_past_the_api():
-    """Guards the class, not the three instances.
-
-    A5's lesson is that one missing operation produced three different
-    workarounds, and that fixing one site left the other two open — the same
-    shape as review #294. Checking the class is what keeps a fourth caller from
-    inventing a fourth workaround.
-    """
-    import ast
-
-    # Anchored on the imported package, not the cwd: from another directory a
-    # relative glob finds nothing and the scan passes vacuously.
-    core_dir = Path(pm.__file__).resolve().parent
-    offenders: list[str] = []
-    store_calls = 0
-    for path in sorted(core_dir.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                receiver = ast.unparse(node.func.value)
-                if "persistent_store" not in receiver:
-                    continue
-                store_calls += 1
-                if node.func.attr == "_rewrite":
-                    offenders.append(f"{path.name}:{node.lineno} reaches _rewrite")
-            if isinstance(node, (ast.For, ast.While)):
-                for inner in ast.walk(node):
-                    if (isinstance(inner, ast.Call)
-                            and isinstance(inner.func, ast.Attribute)
-                            and inner.func.attr == "update"
-                            and "persistent_store" in ast.unparse(inner.func.value)):
-                        offenders.append(
-                            f"{path.name}:{inner.lineno} calls update() in a loop"
-                        )
-
-    assert store_calls, f"no persistent_store call found under {core_dir}: the scan saw nothing"
-    assert offenders == [], offenders

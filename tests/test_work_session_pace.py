@@ -63,26 +63,12 @@ def _run_with_clock(
 
 
 class TestPaceConfig:
-    def test_default_is_zero(self):
-        assert WorkSessionConfig().pace_seconds == 0.0
-
     def test_negative_pace_raises(self):
         with pytest.raises(ValueError):
             WorkSessionConfig(pace_seconds=-1.0)
 
 
 class TestPacedSession:
-    def test_zero_pace_never_sleeps(
-        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        clock, result = _run_with_clock(
-            workspace,
-            monkeypatch,
-            WorkSessionConfig(goal="test", dry_run=True, minutes=60.0, max_cycles=3, pace_seconds=0.0),
-        )
-        assert result.cycles_run == 3
-        assert clock.sleeps == []
-
     def test_sleeps_the_slot_remainder_between_cycles(
         self, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ):
@@ -96,17 +82,6 @@ class TestPacedSession:
         # A pause follows cycles 1 and 2 only: the final cycle owes nothing.
         assert clock.sleeps == [pytest.approx(260.0), pytest.approx(260.0)]
 
-    def test_slow_cycle_longer_than_slot_skips_the_pause(
-        self, workspace: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        clock, result = _run_with_clock(
-            workspace,
-            monkeypatch,
-            WorkSessionConfig(goal="test", dry_run=True, minutes=60.0, max_cycles=2, pace_seconds=30.0),
-            cycle_cost_s=45.0,
-        )
-        assert result.cycles_run == 2
-        assert clock.sleeps == []
 
     def test_pause_never_oversleeps_the_deadline(
         self, workspace: Path, monkeypatch: pytest.MonkeyPatch

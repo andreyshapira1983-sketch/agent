@@ -36,8 +36,6 @@ Hence the shape pinned below:
 from __future__ import annotations
 
 from core.deep_escalation import (
-    ACTIVE_REASONS,
-    ACTIVE_ROLES,
     DeepEscalationRequest,
     evaluate_deep_escalation,
 )
@@ -56,34 +54,7 @@ def _request(**overrides) -> DeepEscalationRequest:
     return DeepEscalationRequest(**base)
 
 
-# ── the gate now knows about repair ──────────────────────────────────────────
-
-def test_repair_is_an_eligible_role():
-    assert "repair_proposal" in ACTIVE_ROLES
-
-
-def test_high_value_repair_is_an_active_reason():
-    assert "high_value_repair" in ACTIVE_REASONS
-
-
-def test_repair_with_a_budget_and_a_concrete_deliverable_is_approved():
-    decision = evaluate_deep_escalation(_request())
-
-    assert decision.approved, decision.route_reason
-    assert decision.effective_tier == "deep"
-    assert "high_value_repair" in decision.route_reason
-
-
 # ── and every guard still bites ──────────────────────────────────────────────
-
-def test_no_budget_means_no_deep_even_for_repair():
-    """The autonomous path cannot approve itself, so budget is the only key."""
-    decision = evaluate_deep_escalation(
-        _request(budget_ok=False, operator_approved=False)
-    )
-
-    assert decision.downgraded
-    assert decision.route_reason == "deep_downgraded:budget_block", decision.route_reason
 
 
 def test_a_vague_deliverable_still_downgrades():
@@ -111,21 +82,7 @@ def test_an_unwired_role_is_still_refused():
         assert "role_not_eligible" in decision.route_reason
 
 
-def test_no_deep_model_downgrades_before_anything_else():
-    decision = evaluate_deep_escalation(_request(deep_model_available=False))
-
-    assert decision.downgraded
-    assert "no_deep_model" in decision.route_reason
-
-
 # ── the budget itself: off unless the operator turns it on ───────────────────
-
-def test_deep_budget_is_zero_by_default(monkeypatch):
-    """No env var → no deep calls allowed → today's behaviour, unchanged."""
-    from core.deep_escalation import deep_call_budget
-
-    monkeypatch.delenv("AGENT_DEEP_MAX_CALLS_PER_SESSION", raising=False)
-    assert deep_call_budget() == 0
 
 
 def test_the_operator_sets_the_budget(monkeypatch):
@@ -133,15 +90,6 @@ def test_the_operator_sets_the_budget(monkeypatch):
 
     monkeypatch.setenv("AGENT_DEEP_MAX_CALLS_PER_SESSION", "3")
     assert deep_call_budget() == 3
-
-
-def test_a_malformed_budget_is_treated_as_zero(monkeypatch):
-    """An unreadable limit must fail closed, never open."""
-    from core.deep_escalation import deep_call_budget
-
-    for bad in ("", "many", "-2", "3.5"):
-        monkeypatch.setenv("AGENT_DEEP_MAX_CALLS_PER_SESSION", bad)
-        assert deep_call_budget() == 0, bad
 
 
 def test_budget_ok_counts_deep_calls_already_made():

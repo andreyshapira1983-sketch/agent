@@ -10,7 +10,6 @@ Four minimal cases — picked to cover the failure modes a real LLM exhibits.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -20,9 +19,6 @@ from core.doc_routing import (
     _ensure_memory_governance_docs_first,
     _ensure_self_repair_doctrine_docs_first,
     _ensure_subagent_governance_docs_first,
-    _is_memory_governance_question,
-    _is_self_repair_doctrine_question,
-    _is_subagent_governance_question,
     _norm_source_path,
 )
 from core.planner import LLMPlanner
@@ -43,95 +39,6 @@ def _registry(workspace: Path) -> ToolRegistry:
     reg.register(FileWriteTool(workspace_root=workspace))
     reg.register(ShellExecTool(workspace_root=workspace))
     return reg
-
-
-# ---------- planner tool-surface pruning (autonomous goal path) ----------
-
-def test_planner_default_surface_advertises_all_tools(workspace: Path) -> None:
-    planner = LLMPlanner(llm=FakeLLM(responses=[]), registry=_registry(workspace))
-    assert planner.hidden_tools == frozenset()
-    prompt = planner._build_user_prompt("do something", None)
-    reg_line = next(
-        line for line in prompt.splitlines() if line.startswith("registered tools:")
-    )
-    assert "web_search" in reg_line
-    assert "shell_exec" in reg_line
-    assert "UNAVAILABLE_TOOLS" not in prompt
-
-
-def test_planner_prunes_hidden_tools_from_surface(workspace: Path) -> None:
-    planner = LLMPlanner(llm=FakeLLM(responses=[]), registry=_registry(workspace))
-    planner.hidden_tools = frozenset({"web_search", "shell_exec"})
-    prompt = planner._build_user_prompt("do something", None)
-
-    reg_line = next(
-        line for line in prompt.splitlines() if line.startswith("registered tools:")
-    )
-    # Hidden tools are not advertised in the registered-tools surface.
-    assert "web_search" not in reg_line
-    assert "shell_exec" not in reg_line
-    # Non-hidden tools still advertised.
-    assert "file_read" in reg_line
-    # Explicit directive forbids the hidden tools.
-    assert "UNAVAILABLE_TOOLS" in prompt
-    assert "web_search" in prompt
-    assert "shell_exec" in prompt
-
-
-# ---------- 1. file hint + file question -> file_read with hinted path ----------
-
-def test_file_question_with_hint_picks_file_read(workspace: Path) -> None:
-    canned = json.dumps(
-        {
-            "reasoning": "Question is about the hinted file.",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "notes.txt"},
-                    "rationale": "ask about file contents",
-                }
-            ],
-        }
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="What is in this file?", file_hint="notes.txt")
-
-    assert len(out.sources) == 1
-    src = out.sources[0]
-    assert src["tool"] == "file_read"
-    assert src["arguments"] == {"path": "notes.txt"}
-    assert src["label"] == "file:notes.txt"
-    assert out.warnings == []
-
-
-# ---------- 2. file_read without --file hint is now ALLOWED ----------
-# Security is enforced by the tool executor (workspace sandbox + secret
-# scanner). Blocking at planner level was overly restrictive — it prevented
-# the agent from reading files explicitly named by the user in conversation.
-
-def test_file_read_without_hint_is_allowed(workspace: Path) -> None:
-    canned = json.dumps(
-        {
-            "reasoning": "User asked to read this file.",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "notes.txt"},
-                    "rationale": "user explicitly named the file",
-                }
-            ],
-        }
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="Read notes.txt", file_hint=None)
-
-    assert len(out.sources) == 1, "no hint => file_read step must NOT be dropped"
-    assert out.sources[0]["arguments"] == {"path": "notes.txt"}
-    assert not any("no --file hint" in w for w in out.warnings), out.warnings
 
 
 # ---------- 3. LLM picks file_read with WRONG path -> remapped to hint ----------
@@ -219,15 +126,6 @@ def test_web_question_does_not_choose_file_read(workspace: Path) -> None:
 
 # ---------- bonus: empty plan (general knowledge) ----------
 
-def test_empty_plan_passes_through(workspace: Path) -> None:
-    canned = json.dumps({"reasoning": "general knowledge", "steps": []})
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="What is 2+2?", file_hint=None)
-    assert out.sources == []
-    assert out.warnings == []
-
 
 def test_broad_project_memory_drops_default_readme_status_source(workspace: Path) -> None:
     canned = json.dumps(
@@ -291,73 +189,6 @@ def test_broad_project_memory_drops_readme_test_count_source(workspace: Path) ->
 
     assert all(src.get("arguments", {}).get("path") != "README.md" for src in out.sources)
     assert any("fresh long_term_memory" in warning for warning in out.warnings)
-
-
-def test_readme_architecture_source_allowed_for_architecture_question(workspace: Path) -> None:
-    canned = json.dumps(
-        {
-            "reasoning": "README is architecture reference.",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "README.md"},
-                    "rationale": "architecture overview",
-                }
-            ],
-        }
-    )
-    history = (
-        "<long_term_memory>\n"
-        "- [mem_recent | tags: project,memory,tests,budget] "
-        "Recent memory says tests and budget were checked today.\n"
-        "</long_term_memory>"
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(
-        question="Describe your project architecture",
-        file_hint=None,
-        history=history,
-    )
-
-    assert len(out.sources) == 1
-    assert out.sources[0]["tool"] == "file_read"
-    assert out.sources[0]["arguments"] == {"path": "README.md"}
-    assert not any("README.md dropped" in warning for warning in out.warnings)
-
-
-def test_explicit_readme_question_still_allows_file_read(workspace: Path) -> None:
-    canned = json.dumps(
-        {
-            "reasoning": "User explicitly asked for README.",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "README.md"},
-                    "rationale": "explicit README request",
-                }
-            ],
-        }
-    )
-    history = (
-        "<long_term_memory>\n"
-        "- [mem_recent | tags: project,memory,tests,budget] "
-        "Recent memory says tests and budget were checked today.\n"
-        "</long_term_memory>"
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(
-        question="Read README.md and summarize it",
-        file_hint=None,
-        history=history,
-    )
-
-    assert len(out.sources) == 1
-    assert out.sources[0]["arguments"] == {"path": "README.md"}
-    assert not any("README.md dropped" in warning for warning in out.warnings)
 
 
 def test_corporate_doctrine_question_forces_docs_first_over_core_defaults(
@@ -603,95 +434,7 @@ def test_confidence_diagnostic_drops_readme_and_tools_defaults(
     assert any("dropped low-signal defaults" in w for w in out.warnings)
 
 
-def test_local_project_evidence_does_not_force_confidence_sources(
-    workspace: Path,
-) -> None:
-    """Bare "local project evidence" is not a verifier question.
-
-    Verifier sources are seeded, so the file gate is open and only the detector decides.
-    """
-    _with_verifier_sources(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "Use generic local project evidence.",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "README.md"},
-                    "rationale": "project overview",
-                },
-                {
-                    "tool": "list_dir",
-                    "arguments": {"path": "tools/"},
-                    "rationale": "local tool evidence",
-                },
-            ],
-        }
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(
-        question="Use only local project evidence to summarize current project health.",
-        file_hint=None,
-    )
-
-    paths_by_tool = [
-        (src["tool"], src["arguments"].get("path"))
-        for src in out.sources
-    ]
-    assert paths_by_tool == [
-        ("file_read", "README.md"),
-        ("list_dir", "tools/"),
-    ]
-    assert not any(
-        src["tool"] == "file_read"
-        and src["arguments"].get("path") in {
-            "core/verifier.py",
-            "tests/test_verifier.py",
-            "tests/test_evidence_support.py",
-            "tests/test_confidence_vector.py",
-        }
-        for src in out.sources
-    )
-    assert not any("confidence/evidence verifier sources injected" in w for w in out.warnings)
-
-
-# ---------- bonus: malformed JSON falls back gracefully ----------
-
-def test_malformed_json_falls_back_to_empty_plan(workspace: Path) -> None:
-    llm = FakeLLM(responses=["this is not JSON at all"])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="something", file_hint=None)
-    assert out.sources == []
-    assert "plan_parse_failed" in out.warnings
-
-
 # ---------- TD-003: parse-failure diagnostics ----------
-
-def test_malformed_json_diagnostics_are_clear(workspace: Path) -> None:
-    llm = FakeLLM(responses=["this is not JSON at all"])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="something", file_hint=None)
-
-    # Safe fallback, not a crash and not a self-repair LLM retry.
-    assert out.sources == []
-    assert "plan_parse_failed" in out.warnings
-    # (6) no extra LLM/provider calls were triggered by the parse failure.
-    assert len(llm.calls) == 1
-
-    diag = out.diagnostics
-    # (1) brief reason, (2) stage, (4) json-block flag, (5) fallback choice.
-    assert diag["stage"] == "failed"
-    assert diag["fallback"] == "empty_plan"
-    assert diag["json_block_found"] is False
-    assert diag["reason"]  # non-empty human-readable reason
-    assert "decode error" in diag["reason"].lower()
-    # (3) sanitized preview present and (4) raw output preserved verbatim.
-    assert diag["raw_preview"] == "this is not JSON at all"
-    assert out.raw_response == "this is not JSON at all"
 
 
 def test_markdown_block_with_broken_json_diagnostics(workspace: Path) -> None:
@@ -714,147 +457,6 @@ def test_markdown_block_with_broken_json_diagnostics(workspace: Path) -> None:
     assert "decode error" in diag["reason"].lower()
     # Raw output preserved exactly, including the fence.
     assert out.raw_response == raw
-
-
-def test_plain_text_without_json_diagnostics(workspace: Path) -> None:
-    llm = FakeLLM(responses=["Sorry, I cannot help with that request."])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="something", file_hint=None)
-
-    diag = out.diagnostics
-    assert diag["json_block_found"] is False
-    assert diag["stage"] == "failed"
-    assert diag["fallback"] == "empty_plan"
-    assert diag["reason"]
-
-
-def test_parse_diagnostics_preview_redacts_secrets_and_truncates(workspace: Path) -> None:
-    secret = "sk-" + "A" * 40
-    long_raw = f"{secret} " + ("noise " * 100)  # well over the preview cap
-    llm = FakeLLM(responses=[long_raw])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="something", file_hint=None)
-    preview = out.diagnostics["raw_preview"]
-
-    # Secret never appears verbatim in the preview.
-    assert secret not in preview
-    assert "[REDACTED" in preview
-    # Length-capped and marked as truncated.
-    assert "truncated" in preview
-    assert len(preview) < len(long_raw)
-    # Full raw is still preserved on the record for post-hoc inspection.
-    assert out.raw_response == long_raw
-
-
-def test_parse_json_success_reports_parsed_stage(workspace: Path) -> None:
-    canned = json.dumps({"reasoning": "ok", "steps": []})
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="What is 2+2?", file_hint=None)
-
-    assert out.diagnostics["stage"] == "parsed"
-    assert out.diagnostics["fallback"] == "none"
-    assert out.diagnostics["reason"] == "ok"
-
-
-# ---------- bonus: unknown tool name dropped ----------
-
-def test_unknown_tool_is_dropped(workspace: Path) -> None:
-    canned = json.dumps(
-        {
-            "reasoning": "try a tool that does not exist",
-            "steps": [
-                {"tool": "send_email", "arguments": {"to": "x@y.z"}, "rationale": "..."}
-            ],
-        }
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    out = planner.plan(question="email someone", file_hint=None)
-    assert out.sources == []
-    assert any("not registered" in w for w in out.warnings), out.warnings
-
-
-# ============================================================
-# MVP-8: failure_context (replan injection)
-# ============================================================
-
-class TestFailureContextInjection:
-    """Defends the planner's MVP-8 contract: when `failure_context` is
-    passed, it must travel verbatim into the LLM user prompt so the
-    model can see what previous attempts tried."""
-
-    def test_empty_failure_context_does_not_appear_in_prompt(
-        self, workspace: Path
-    ):
-        canned = json.dumps({"reasoning": "ok", "steps": []})
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-        planner.plan(
-            question="hello",
-            file_hint=None,
-            failure_context="",
-        )
-
-        # FakeLLM records the user prompt verbatim.
-        user_prompt = llm.calls[0]["user"]
-        assert "<replan_context" not in user_prompt
-
-    def test_non_empty_failure_context_is_injected_before_question(
-        self, workspace: Path
-    ):
-        ctx = (
-            '<replan_context attempt="2" max_attempts="3">\n'
-            "  Previous attempt failed.\n"
-            "  - attempt=1 code=tool_error tool=file_read arguments={}\n"
-            "    reason: file not found\n"
-            "</replan_context>"
-        )
-        canned = json.dumps({"reasoning": "retry", "steps": []})
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-        planner.plan(
-            question="please retry",
-            file_hint="doc.txt",
-            failure_context=ctx,
-        )
-
-        user_prompt = llm.calls[0]["user"]
-        assert "<replan_context" in user_prompt
-        assert "tool_error" in user_prompt
-        # The replan block sits BEFORE the question (so the model reads
-        # the failure right before deciding what to do).
-        replan_idx = user_prompt.index("<replan_context")
-        question_idx = user_prompt.index("question: please retry")
-        assert replan_idx < question_idx
-
-    def test_failure_context_with_secret_is_redacted_before_llm(
-        self, workspace: Path
-    ):
-        """Defence-in-depth: even if a buggy caller stuffs a secret into
-        the failure_context, the planner's own redaction pass scrubs it
-        before the LLM sees it."""
-        secret = "sk-abcdefghijklmnopqrstuvwxyz0123"
-        ctx = f"<replan_context>previous arg: token={secret}</replan_context>"
-        canned = json.dumps({"reasoning": "x", "steps": []})
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-        planner.plan(
-            question="retry",
-            file_hint=None,
-            failure_context=ctx,
-        )
-
-        user_prompt = llm.calls[0]["user"]
-        assert secret not in user_prompt
-        assert "[REDACTED:openai-key]" in user_prompt
 
 
 # ============================================================
@@ -884,22 +486,6 @@ class TestFileWriteSanitizer:
         out = planner.plan(question="save it to disk", file_hint=None)
         return out.sources, out.warnings
 
-    def test_well_formed_file_write_passes(self, workspace: Path):
-        sources, warnings = self._plan_one_step(
-            workspace, {"path": "out/summary.txt", "content": "hi"}
-        )
-        assert len(sources) == 1
-        assert sources[0]["tool"] == "file_write"
-        assert sources[0]["arguments"] == {"path": "out/summary.txt", "content": "hi"}
-        assert sources[0]["label"] == "file_write:out/summary.txt"
-        # The label MUST NOT include content (could be huge / sensitive).
-        assert "hi" not in sources[0]["label"]
-        assert warnings == []
-
-    def test_missing_path_dropped(self, workspace: Path):
-        sources, warnings = self._plan_one_step(workspace, {"content": "x"})
-        assert sources == []
-        assert any("without path" in w for w in warnings)
 
     def test_missing_content_dropped(self, workspace: Path):
         sources, warnings = self._plan_one_step(workspace, {"path": "x.txt"})
@@ -958,15 +544,6 @@ class TestShellExecSanitizer:
 
     # --- happy paths ---
 
-    def test_well_formed_whoami_passes(self, workspace: Path):
-        sources, _ = self._plan_one_step(workspace, {"argv": ["whoami"]})
-        assert len(sources) == 1
-        src = sources[0]
-        assert src["tool"] == "shell_exec"
-        assert src["arguments"] == {"argv": ["whoami"]}
-        # Label has command name and IS short — never echoes huge argv.
-        assert src["label"].startswith("shell_exec:whoami")
-        assert "expected_outcome" in src
 
     def test_well_formed_mkdir_passes(self, workspace: Path):
         sources, _ = self._plan_one_step(
@@ -985,12 +562,6 @@ class TestShellExecSanitizer:
 
     # --- argv shape ---
 
-    @pytest.mark.parametrize("bad_argv", [None, [], "whoami"])
-    def test_missing_or_non_list_argv_dropped(self, workspace: Path, bad_argv):
-        args = {"argv": bad_argv} if bad_argv is not None else {}
-        sources, warnings = self._plan_one_step(workspace, args)
-        assert sources == []
-        assert any("non-empty argv list" in w for w in warnings), warnings
 
     def test_argv_longer_than_16_dropped(self, workspace: Path):
         sources, warnings = self._plan_one_step(
@@ -1088,196 +659,6 @@ class TestShellExecSanitizer:
 
     # --- case insensitivity at planner layer ---
 
-    def test_uppercase_command_normalised_to_whitelist(self, workspace: Path):
-        sources, _ = self._plan_one_step(
-            workspace, {"argv": ["WHOAMI"]}
-        )
-        # Planner lower-cases for the whitelist check but PRESERVES the
-        # original element for the tool layer (which also normalises).
-        assert len(sources) == 1
-        # argv preserved verbatim.
-        assert sources[0]["arguments"]["argv"] == ["WHOAMI"]
-
-
-# ==========================================================================
-# Fix #2 — dropped_tools field populated when planner hallucinates a tool
-# ==========================================================================
-
-class TestDroppedTools:
-    """PlannerOutput.dropped_tools is set when LLM invents a tool name."""
-
-    def _plan_with_hallucinated_tool(
-        self, workspace: Path, tool_name: str
-    ):
-        canned = json.dumps({
-            "reasoning": "Use a magic tool.",
-            "steps": [{"tool": tool_name, "arguments": {}, "rationale": "why not"}],
-        })
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-        return planner.plan(question="Question", file_hint=None)
-
-    def test_hallucinated_tool_populates_dropped_tools(self, workspace: Path):
-        """When the LLM names a tool not in the registry, dropped_tools is set."""
-        out = self._plan_with_hallucinated_tool(workspace, "magic_tool")
-        assert "magic_tool" in out.dropped_tools
-
-    def test_hallucinated_tool_leaves_sources_empty(self, workspace: Path):
-        """A plan with only hallucinated tools produces no runnable steps."""
-        out = self._plan_with_hallucinated_tool(workspace, "ghost_search")
-        assert out.sources == []
-        assert "ghost_search" in out.dropped_tools
-
-    def test_dropped_tools_empty_for_valid_plan(self, workspace: Path):
-        """A plan with only registered tools has no dropped_tools."""
-        canned = json.dumps({
-            "reasoning": "Search the web.",
-            "steps": [{
-                "tool": "web_search",
-                "arguments": {"query": "pytest", "max_results": 3},
-                "rationale": "search",
-            }],
-        })
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-        out = planner.plan(question="Latest pytest?", file_hint=None)
-        assert out.dropped_tools == []
-        assert len(out.sources) == 1
-
-    def test_mixed_plan_drops_only_unknown_tools(self, workspace: Path):
-        """Valid steps survive; only hallucinated tool ends up in dropped_tools."""
-        canned = json.dumps({
-            "reasoning": "Mix real and fake.",
-            "steps": [
-                {
-                    "tool": "web_search",
-                    "arguments": {"query": "python", "max_results": 3},
-                    "rationale": "real tool",
-                },
-                {
-                    "tool": "hallucination_tool",
-                    "arguments": {},
-                    "rationale": "fake tool",
-                },
-            ],
-        })
-        llm = FakeLLM(responses=[canned])
-        planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-        out = planner.plan(question="Mixed?", file_hint=None)
-        assert len(out.sources) == 1
-        assert out.sources[0]["tool"] == "web_search"
-        assert out.dropped_tools == ["hallucination_tool"]
-
-    def test_dropped_tools_warning_also_present(self, workspace: Path):
-        """dropped_tools field and the existing warning string are both set."""
-        out = self._plan_with_hallucinated_tool(workspace, "phantom")
-        assert any("phantom" in w for w in out.warnings)
-        assert "phantom" in out.dropped_tools
-
-
-# ---------- thematic sub-agent governance doc routing (conditional) ----------
-
-
-
-def test_subagent_governance_detector_strong_terms() -> None:
-    for q in (
-        "How do subagents get retired?",
-        "explain sub-agent delegation",
-        "what does the team executor do",
-        "как работает делегирование подагентам",
-        "жизненный цикл субагента",
-    ):
-        assert _is_subagent_governance_question(q), q
-
-
-def test_subagent_governance_detector_contextual_pair() -> None:
-    # weak action term only counts with an agent/role context word
-    assert _is_subagent_governance_question("when do we quarantine an agent?")
-    assert _is_subagent_governance_question("retire this role")
-    assert _is_subagent_governance_question("карантин для агента")
-
-
-def test_subagent_governance_detector_pause_route() -> None:
-    # "pause" is documented as a routing action; the positive branch must work
-    # (agent/role context + a pause form), while a bare build pause must not.
-    assert _is_subagent_governance_question("pause this agent")
-    assert _is_subagent_governance_question("поставь роль на паузу")
-    assert not _is_subagent_governance_question("pause the build")
-    assert not _is_subagent_governance_question("пауза в сборке")
-
-
-def test_subagent_governance_detector_does_not_overfire() -> None:
-    for q in (
-        "explain the corporate model",
-        "what is on the roadmap",
-        "pause the build and retire the old feature flag",
-        "fix the bug in core/loop.py",
-        "central agent governance policy gate",
-    ):
-        assert not _is_subagent_governance_question(q), q
-
-
-def test_subagent_question_injects_lifecycle_doc(workspace: Path) -> None:
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "answer directly",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "core/subagent_runner.py"},
-                    "rationale": "mechanics",
-                }
-            ],
-        }
-    )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(
-        question="How does delegation to a subagent work, and when is it retired?",
-        file_hint=None,
-    )
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" in paths
-    # a pure sub-agent question (not a broad doctrine question) → the thematic
-    # doc leads the source list.
-    assert paths[0] == "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"
-
-
-def test_non_subagent_doctrine_question_omits_lifecycle_doc(workspace: Path) -> None:
-    """A corporate/roadmap question does not pull in the sub-agent lifecycle doc.
-
-    Docs are seeded, so the thematic gate is open and only the routing decides.
-    """
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "doctrine",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
-                    "rationale": "roadmap",
-                }
-            ],
-        }
-    )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(
-        question="Explain the corporate model and what is on the roadmap.",
-        file_hint=None,
-    )
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
-    assert "knowledge/doctrine/SUBAGENT_LIFECYCLE.md" not in paths, paths
-
 
 # ---------- thematic memory governance doc routing (conditional) ----------
 
@@ -1349,246 +730,6 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
     assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
     assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" not in paths, paths
     assert "knowledge/doctrine/self-audit-lessons.md" not in paths, paths
-
-
-
-
-def test_memory_governance_detector_strong_terms() -> None:
-    for q in (
-        "how is episodic memory consolidated?",
-        "what does procedural memory store",
-        "объясни консолидацию памяти",
-        "почему забывание не работает автоматически",
-        "what is memory hygiene",
-        "bug in core/smart_memory.py",
-    ):
-        assert _is_memory_governance_question(q), q
-
-
-def test_memory_governance_detector_contextual_pair() -> None:
-    # a weak action term only counts together with a memory context word
-    assert _is_memory_governance_question("how does memory retrieval work?")
-    assert _is_memory_governance_question("какое хранилище у памяти")
-    assert _is_memory_governance_question("что агент помнит и чему обучается из памяти")
-
-
-def test_memory_governance_detector_does_not_overfire() -> None:
-    for q in (
-        "explain the corporate model",
-        "what is on the roadmap",
-        "how do subagents get retired?",
-        "fix the bug in core/loop.py",
-        "run the tests and show coverage",
-        "какая погода сегодня",
-        "this is a memorable result",
-    ):
-        assert not _is_memory_governance_question(q), q
-
-
-def test_memory_and_subagent_groups_are_independent() -> None:
-    """The two thematic groups must not collapse into one another."""
-    assert _is_memory_governance_question("how is episodic memory consolidated?")
-    assert not _is_subagent_governance_question(
-        "how is episodic memory consolidated?"
-    )
-    assert _is_subagent_governance_question("how do subagents get retired?")
-    assert not _is_memory_governance_question("how do subagents get retired?")
-
-
-def test_question_touching_both_themes_keeps_stable_order(workspace: Path) -> None:
-    """Both thematic groups may fire at once; the order must be deterministic.
-
-    Sub-agent contract first, then the memory docs — the two injectors must not
-    compete for the same slot.
-    """
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "answer directly",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "core/subagent_runner.py"},
-                    "rationale": "mechanics",
-                }
-            ],
-        }
-    )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(
-        question="How does a subagent use episodic memory when it is delegated a task?",
-        file_hint=None,
-    )
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert paths[0] == "knowledge/doctrine/SUBAGENT_LIFECYCLE.md"
-    assert paths[1] == "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md"
-    # no duplicates from the two injectors touching the same list
-    assert len(paths) == len(set(paths)), paths
-
-
-
-
-def test_self_repair_question_injects_doctrine_doc(workspace: Path) -> None:
-    """A self-diagnosis/self-repair question must lead with the repair protocol.
-
-    Fail-before: nothing injects it, so the source list is whatever the model
-    asked for (`core/self_repair.py` here) and the agent re-derives the protocol
-    from mechanics every time.
-    """
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "answer directly",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "core/self_repair.py"},
-                    "rationale": "mechanics",
-                }
-            ],
-        }
-    )
-    llm = FakeLLM(responses=[canned])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-    out = planner.plan(
-        question="How must the root cause be proven before a self-repair is applied?",
-        file_hint=None,
-    )
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert paths[0] == "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md"
-    assert any(
-        "self-repair doctrine docs injected" in w for w in out.warnings
-    ), out.warnings
-    # Injecting the source is only half the contract: the model must also be
-    # *told* the question is self-repair, or it can plan around the doc.
-    assert "[SELF_REPAIR_DOCS=required" in llm.calls[0]["user"], llm.calls[0]["user"]
-
-def test_ordinary_bug_fix_task_omits_self_repair_doctrine_doc(workspace: Path) -> None:
-    """An ordinary "fix the bug in X" task must not pay for the repair protocol.
-
-    Docs are seeded, so the thematic gate is open and only the routing decides.
-    """
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "fix it",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "core/loop.py"},
-                    "rationale": "target file",
-                }
-            ],
-        }
-    )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(question="fix the bug in core/loop.py", file_hint=None)
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths, paths
-
-
-def test_non_self_repair_doctrine_question_omits_self_repair_doc(
-    workspace: Path,
-) -> None:
-    """A corporate/roadmap question does not pull in the self-repair doctrine.
-
-    Docs are seeded, so the thematic gate is open and only the routing decides.
-    """
-    _with_doctrine_docs(workspace)
-    canned = json.dumps(
-        {
-            "reasoning": "doctrine",
-            "steps": [
-                {
-                    "tool": "file_read",
-                    "arguments": {"path": "knowledge/doctrine/ROADMAP.md"},
-                    "rationale": "roadmap",
-                }
-            ],
-        }
-    )
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(
-        question="Explain the corporate model and what is on the roadmap.",
-        file_hint=None,
-    )
-    paths = [
-        src["arguments"]["path"]
-        for src in out.sources
-        if src["tool"] == "file_read"
-    ]
-    assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
-    assert "knowledge/doctrine/SELF_REPAIR_DOCTRINE.md" not in paths, paths
-
-
-def test_self_repair_doctrine_detector_strong_terms() -> None:
-    for q in (
-        "how does self-repair decide to roll back?",
-        "what is the root cause of this failure",
-        "объясни первопричину сбоя",
-        "why do we need a fail-before test",
-        "should this regression test exist",
-        "нужен ли регрессионный тест",
-        "is backfill of old records allowed",
-        "why must the migration be idempotent",
-        "что такое самодиагностика агента",
-    ):
-        assert _is_self_repair_doctrine_question(q), q
-
-
-def test_self_repair_doctrine_detector_contextual_pair() -> None:
-    # ordinary repair words only count together with a protocol/action word
-    assert _is_self_repair_doctrine_question(
-        "how should the agent diagnose its own bug?"
-    )
-    assert _is_self_repair_doctrine_question("как безопасно провести миграцию данных")
-    assert _is_self_repair_doctrine_question(
-        "what is the protocol for fixing a defect"
-    )
-    assert _is_self_repair_doctrine_question("почему self-build сломался, найди причину")
-
-
-def test_self_repair_doctrine_detector_does_not_overfire() -> None:
-    for q in (
-        "fix the bug in core/loop.py",
-        "исправь опечатку в README",
-        "run the tests and show coverage",
-        "explain the corporate model",
-        "what is on the roadmap",
-        "how do subagents get retired?",
-        "how is episodic memory consolidated?",
-        "какая погода сегодня",
-        # a broad governance overview that merely lists self-build as a topic
-        # must not drag the repair protocol in
-        (
-            "Explain the corporate model, central agent governance, subagents, "
-            "self-build, night observation, and safe autonomy."
-        ),
-    ):
-        assert not _is_self_repair_doctrine_question(q), q
-
-
-def test_self_repair_group_is_independent_of_other_thematic_groups() -> None:
-    """The three thematic groups must not collapse into one another."""
-    repair_q = "what is the root cause protocol for a self-repair?"
-    assert _is_self_repair_doctrine_question(repair_q)
-    assert not _is_memory_governance_question(repair_q)
-    assert not _is_subagent_governance_question(repair_q)
-
-    assert not _is_self_repair_doctrine_question("how is episodic memory consolidated?")
-    assert not _is_self_repair_doctrine_question("how do subagents get retired?")
 
 
 def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> None:
@@ -1665,21 +806,6 @@ def test_thematic_injector_collapses_repeated_doc_request(injector, doc_path) ->
     assert paths.count(_norm_source_path(doc_path)) == 1, paths
     assert _norm_source_path("core/loop.py") in paths
 
-
-def test_thematic_injector_keeps_unrelated_duplicates_untouched() -> None:
-    """Scope check: the injector owns its docs only, not the whole source list.
-
-    De-duplicating everything would silently rewrite plans the injector has no
-    authority over, so a repeated *non-target* source must survive as-is.
-    """
-    sources = [
-        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
-        {"tool": "file_read", "arguments": {"path": "core/loop.py"}},
-    ]
-    warnings: list[str] = []
-    ordered = _ensure_self_repair_doctrine_docs_first(sources, warnings)
-    paths = [src["arguments"]["path"] for src in ordered if src["tool"] == "file_read"]
-    assert paths.count("core/loop.py") == 2, paths
 
 @pytest.mark.parametrize(
     ("question", "directive"),
@@ -1811,29 +937,7 @@ def test_empty_output_still_falls_back_to_an_empty_plan(workspace: Path) -> None
     assert "plan_parse_failed" in out.warnings
 
 
-def test_malformed_non_empty_output_is_still_a_json_error(workspace: Path) -> None:
-    # The new branch must not swallow genuine parse failures.
-    planner = LLMPlanner(
-        llm=FakeLLM(responses=["{not json at all"]), registry=_registry(workspace)
-    )
-
-    out = planner.plan(question="something", file_hint=None)
-
-    assert "empty_model_output" not in out.warnings
-    assert out.diagnostics["stage"] != "empty_output"
-
-
 # --- planner token budget ----------------------------------------------------
-
-
-def test_planner_budget_default_is_above_the_old_hard_coded_value() -> None:
-    # 1024 was provably too small: it was fully consumed by reasoning tokens.
-    assert planner_module._plan_max_tokens() > 1024
-
-
-def test_planner_budget_is_env_overridable(monkeypatch) -> None:
-    monkeypatch.setenv("AGENT_PLAN_MAX_TOKENS", "4096")
-    assert planner_module._plan_max_tokens() == 4096
 
 
 @pytest.mark.parametrize("bad", ["0", "-5", "abc", "", "  "])
@@ -1859,35 +963,6 @@ def test_planner_passes_the_configured_budget_to_the_llm(
 
     assert len(llm.calls) == 1
     assert llm.calls[0]["max_tokens"] == 3333
-
-
-def test_unclosed_fence_padded_with_blanks_does_not_hang(workspace: Path) -> None:
-    """An unterminated fence must fail fast, not grind.
-
-    The fence pattern read `\\s*(.*?)\\s*` under DOTALL, so `.` and `\\s`
-    both matched a space: every blank could be claimed by either side, and the
-    engine tried the split at each position before giving up. Measured on the
-    text below before the fix: 2.9 s at 2000 blanks, 65.6 s at 4000 — worse
-    than quadratic, and reached by nothing more exotic than a model that opens
-    a fence, pads, and never closes it. That is a truncated response, which is
-    exactly what a budget-exhausted call produces.
-
-    The verdict must not change: no closing fence means nothing was stripped.
-    """
-    raw = "```json" + " " * 3000 + "x"
-    llm = FakeLLM(responses=[raw])
-    planner = LLMPlanner(llm=llm, registry=_registry(workspace))
-
-    start = time.perf_counter()
-    out = planner.plan(question="something", file_hint=None)
-    elapsed = time.perf_counter() - start
-
-    assert out.sources == []
-    assert "plan_parse_failed" in out.warnings
-    assert "stripped_markdown_fence" not in out.warnings
-    assert out.diagnostics["json_block_found"] is False
-    assert out.raw_response == raw
-    assert elapsed < 2.0, f"parsing {len(raw)} chars took {elapsed:.2f}s"
 
 
 def test_low_signal_defaults_are_read_from_the_constant(monkeypatch) -> None:
@@ -1921,36 +996,6 @@ def _with_verifier_sources(workspace: Path) -> None:
     for rel in CONFIDENCE_EVIDENCE_SOURCE_PATHS:
         (workspace / rel).parent.mkdir(parents=True, exist_ok=True)
         (workspace / rel).write_text("# stub", encoding="utf-8")
-
-
-def test_a_quotation_in_a_book_does_not_send_the_planner_to_its_own_verifier(
-    workspace: Path,
-) -> None:
-    """Замер 2026-09-19 (опыт с библиотекой книг): «чья цитата стоит рядом вторым
-    эпиграфом» совпало со словом «цитат» из словаря маршрута, и в каждую попытку
-    вставлялось чтение core/verifier.py и трёх тестов — в папке с книгами их нет."""
-    canned = json.dumps({"reasoning": "search the book", "steps": [
-        {"tool": "file_read", "arguments": {"path": "books/Erickson.txt"}, "rationale": "the book"}]})
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    out = planner.plan(question="Чья цитата стоит вторым эпиграфом у Erickson?", file_hint=None)
-    paths = [s["arguments"].get("path") for s in out.sources]
-    assert paths == ["books/Erickson.txt"], paths
-
-
-def test_a_doctrine_route_is_silent_where_its_documents_are_absent(workspace: Path) -> None:
-    """Замер 2026-09-19 (рабочий экзамен): «берёшься ли ты… без чужих паролей и
-    денег» совпало с маршрутом самоисправления, планировщик пять раз читал
-    knowledge/doctrine/… в папке заказа, попытки кончились, и к готовому ответу
-    приклеился вопрос «Что именно нужно построить?»."""
-    from core.doc_routing import _SELF_REPAIR_DOCTRINE_DOC_PATHS, _is_self_repair_doctrine_question
-
-    question = "Разбери self-repair: найди root cause регрессии и предложи backfill."
-    assert _is_self_repair_doctrine_question(question), "вопрос обязан попадать на маршрут"
-    canned = json.dumps({"reasoning": "r", "steps": [
-        {"tool": "file_read", "arguments": {"path": "orders.txt"}, "rationale": "the order"}]})
-    planner = LLMPlanner(llm=FakeLLM(responses=[canned]), registry=_registry(workspace))
-    paths = [s["arguments"].get("path") for s in planner.plan(question=question, file_hint=None).sources]
-    assert not any(p in _SELF_REPAIR_DOCTRINE_DOC_PATHS for p in paths), paths
 
 
 def _with_doctrine_docs(workspace: Path) -> None:

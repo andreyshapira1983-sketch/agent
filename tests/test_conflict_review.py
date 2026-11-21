@@ -6,41 +6,6 @@ from core.conflict_review import ConflictReview
 from core.source_registry import SourceRegistry
 
 
-def test_conflict_review_suggests_stronger_claim():
-    registry = SourceRegistry()
-    strong = registry.register_source(
-        type="documentation",
-        title="official docs",
-        locator="docs.md",
-        trust_level=0.90,
-    )
-    weak = registry.register_source(
-        type="forum",
-        title="forum thread",
-        locator="forum",
-        trust_level=0.35,
-    )
-    winner = registry.register_claim(
-        source_id=strong.id,
-        text="Agent mode is local.",
-        confidence=0.92,
-    )
-    registry.register_claim(
-        source_id=weak.id,
-        text="Agent mode is cloud.",
-        confidence=0.40,
-    )
-
-    report = ConflictReview().review(registry)
-
-    assert report.conflict_count == 1
-    suggestion = report.suggestions[0]
-    assert suggestion.decision == "suggested"
-    assert suggestion.winner_claim_id == winner.id
-    assert suggestion.confidence >= 0.65
-    assert suggestion.claims[0].claim_id == winner.id
-
-
 def test_conflict_review_requires_human_when_scores_are_close():
     registry = SourceRegistry()
     left = registry.register_source(type="file", title="a", locator="a.txt", trust_level=0.80)

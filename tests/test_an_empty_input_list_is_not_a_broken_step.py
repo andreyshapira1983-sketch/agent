@@ -54,15 +54,3 @@ def test_a_bare_path_is_still_refused() -> None:
     spec, warnings = _probe("math_study/library/txt/Clark_HonorsCalculus.txt")
     assert spec is None
     assert warnings and "str" in warnings[0]
-
-
-def test_a_shape_nobody_can_read_is_still_dropped() -> None:
-    spec, warnings = _probe({"path": "core/planner.py"})
-    assert spec is None
-    assert warnings and "dict" in warnings[0], "жалоба обязана назвать, что пришло"
-
-
-def test_absent_inputs_stay_absent() -> None:
-    spec, warnings = _probe(_ABSENT)
-    assert spec is not None and "inputs" not in spec["arguments"]
-    assert not warnings

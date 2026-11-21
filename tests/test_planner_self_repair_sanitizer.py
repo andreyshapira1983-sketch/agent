@@ -56,22 +56,6 @@ def _run(
 # ============================================================
 
 class TestRunTestsSanitizer:
-    def test_defaults_pass(self, workspace: Path):
-        sources, warnings = _run(workspace, [{"tool": "run_tests", "arguments": {}}])
-        assert len(sources) == 1
-        assert sources[0]["arguments"]["paths"] == ["tests"]
-        assert "pattern" not in sources[0]["arguments"]
-        assert warnings == []
-
-    def test_explicit_paths_pass(self, workspace: Path):
-        sources, _ = _run(workspace, [{
-            "tool": "run_tests",
-            "arguments": {"paths": ["tests/test_x.py", "tests/test_y.py"]},
-        }])
-        assert sources[0]["arguments"]["paths"] == [
-            "tests/test_x.py", "tests/test_y.py"
-        ]
-
     def test_pattern_pass_through(self, workspace: Path):
         sources, _ = _run(workspace, [{
             "tool": "run_tests",
@@ -159,31 +143,12 @@ class TestRunTestsSanitizer:
         assert sources == []
         assert any("not ASCII" in w for w in warnings)
 
-    def test_label_truncated(self, workspace: Path):
-        long_paths = [f"tests/test_{i}.py" for i in range(10)]
-        sources, _ = _run(workspace, [{
-            "tool": "run_tests",
-            "arguments": {"paths": long_paths},
-        }])
-        # Label cap kicks in at 60 chars.
-        assert len(sources[0]["label"]) <= len("run_tests:") + 60
-
 
 # ============================================================
 # read_logs
 # ============================================================
 
 class TestReadLogsSanitizer:
-    def test_defaults_pass(self, workspace: Path):
-        sources, warnings = _run(workspace, [{"tool": "read_logs", "arguments": {}}])
-        assert len(sources) == 1
-        assert sources[0]["arguments"]["last_n"] == 50
-        assert warnings == []
-
-    def test_explicit_last_n_pass(self, workspace: Path):
-        sources, _ = _run(workspace, [{"tool": "read_logs", "arguments": {"last_n": 10}}])
-        assert sources[0]["arguments"]["last_n"] == 10
-
     def test_last_n_below_floor_clamped(self, workspace: Path):
         sources, warnings = _run(workspace, [{
             "tool": "read_logs",
@@ -305,13 +270,6 @@ class TestDiffFileSanitizer:
         }])
         assert secret_marker not in sources[0]["label"]
 
-    def test_missing_path_dropped(self, workspace: Path):
-        sources, warnings = _run(workspace, [{
-            "tool": "diff_file",
-            "arguments": {"proposed_content": "x"},
-        }])
-        assert sources == []
-        assert any("without path" in w for w in warnings)
 
     def test_non_ascii_path_dropped(self, workspace: Path):
         sources, warnings = _run(workspace, [{

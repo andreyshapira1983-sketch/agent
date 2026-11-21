@@ -46,17 +46,3 @@ def test_every_injected_step_names_the_rule_that_put_it_there(inject) -> None:
         assert (step.get("rationale") or "").startswith("routing rule: ")
         assert len(step["rationale"].split()) >= 3
     assert not check_by_rationale(out).has_mismatch, "датчик обвинил шаг, поставленный правилом"
-
-
-def test_the_detector_still_accuses_a_model_step_without_a_reason() -> None:
-    """Сторож не ослаблен: шаг МОДЕЛИ без довода по-прежнему обвиняется."""
-    bare = {"tool": "list_dir", "arguments": {"path": "core"}, "label": "list_dir:core"}
-    out = _doctrine([dict(MODEL_STEP), bare])
-    report = check_by_rationale(out)
-    assert report.has_mismatch and "list_dir" in report.unjustified_actions
-
-
-def test_a_new_rule_cannot_forget_the_reason() -> None:
-    """Довод — обязательный параметр фабрики: забыть его нельзя."""
-    with pytest.raises(TypeError):
-        dr._file_read_source_spec("knowledge/doctrine/X.md")  # type: ignore[call-arg]

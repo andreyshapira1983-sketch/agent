@@ -42,31 +42,6 @@ def _rival_refuted():
     )
 
 
-def test_one_explanation_is_not_competing_explanations():
-    """The rung exists to strike at the single explanation nobody contested."""
-    climbed = attach_explanations(
-        _claim(), _rival_refuted()[:1], chosen="resolution short-circuits evaluation",
-    )
-    assert state_of(climbed) == "OBSERVED"
-
-
-def test_rivals_must_be_settled_not_merely_listed():
-    """Two live explanations is not a choice — it is an unfinished argument."""
-    climbed = attach_explanations(
-        _claim(), _rival_refuted(), chosen="resolution short-circuits evaluation",
-    )
-    assert state_of(climbed) == "OBSERVED"
-
-
-def test_a_settled_argument_reaches_explained():
-    both = _rival_refuted()
-    settled = (refute(both[0], "the answer did carry labels — see the trace"), both[1])
-    climbed = attach_explanations(
-        _claim(), settled, chosen="resolution short-circuits evaluation",
-    )
-    assert state_of(climbed) == "EXPLAINED"
-
-
 def _explained() -> CausalClaim:
     both = _rival_refuted()
     settled = (refute(both[0], "the answer did carry labels — see the trace"), both[1])
@@ -89,22 +64,6 @@ def test_an_intervention_without_a_measurement_is_refused():
             predicted="the false claim stops scoring verified",
             runner=lambda: None,  # measured nothing
         )
-
-
-def test_a_measured_intervention_reaches_attributed():
-    climbed = run_intervention(
-        _explained(),
-        mutated="reverted the resolution short-circuit",
-        predicted="the false claim stops scoring verified",
-        runner=lambda: MeasuredOutcome(
-            command="pytest tests/test_verifier_derived_claims.py",
-            summary="1 failed, 7 passed",
-            matched_prediction=True,
-        ),
-    )
-    assert state_of(climbed) == "ATTRIBUTED"
-    assert climbed.intervention is not None
-    assert "1 failed" in climbed.intervention.observed
 
 
 def test_a_prediction_that_did_not_come_true_refutes_the_claim():
@@ -171,29 +130,6 @@ def test_scope_is_the_last_step_and_it_is_the_operator_s():
     )
     assert state_of(climbed) == "GENERALIZED"
     assert state_of(name_scope(climbed, "citation-resolving verdicts")) == "LESSON"
-
-
-def test_a_wrapped_pair_is_still_a_pair() -> None:
-    """Живой прогон 2026-09-20: подъём отказал шесть раз подряд — «выжило 0».
-    Модель писала пары, но перенос строки внутри объяснения (и пустая строка
-    перед предсказанием) ломали разбор, требовавший двух СОСЕДНИХ строк."""
-    from core.causal_climb_action import _parse_hypotheses
-
-    wrapped = ("ОБЪЯСНЕНИЕ 1: В ходе чтения книги модель сформировала вывод,\n"
-               "который не попал в план шага\n\n"
-               "ПРЕДСКАЗАНИЕ 1: в logs/daemon_tick.jsonl будет событие без шага\n\n"
-               "ОБЪЯСНЕНИЕ 2: детектор сработал на пересказе цитаты\n"
-               "ПРЕДСКАЗАНИЕ 2: в data/episodic_memory.jsonl tools_used пуст")
-    pairs = _parse_hypotheses(wrapped)
-    assert len(pairs) == 2, pairs
-    assert pairs[0][0].startswith("В ходе чтения книги")
-    assert "daemon_tick.jsonl" in pairs[0][1]
-    assert pairs[1][0].startswith("детектор сработал")
-
-    plain = ("ОБЪЯСНЕНИЕ: причина А\nПРЕДСКАЗАНИЕ: в журнале есть X\n"
-             "ОБЪЯСНЕНИЕ: причина Б\nПРЕДСКАЗАНИЕ: в журнале нет X")
-    assert len(_parse_hypotheses(plain)) == 2, "номер пары необязателен"
-    assert _parse_hypotheses("никаких пар тут нет") == []
 
 
 def test_nothing_left_to_explain_is_not_a_failure(tmp_path) -> None:

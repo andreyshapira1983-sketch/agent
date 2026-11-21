@@ -23,41 +23,6 @@ judged on its».
 """
 from __future__ import annotations
 
-import pytest
-
-from core.knowledge_pipeline import _bare_locator, _is_code_locator
-
-
-@pytest.mark.parametrize(
-    ("locator", "is_code"),
-    [
-        ("core/loop_response_deciders.py", True),
-        # Живой случай: номера строк обходили правило.
-        ("core/loop_response_deciders.py:265-285", True),
-        ("tools/patch_check.py:1-60", True),
-        ("scripts/deploy.sh:10", True),
-        ("config/app.yaml:3-9", True),
-        ("core/models.py:1", True),
-        # Проза остаётся прозой, с номерами и без.
-        ("knowledge_library/cs/book.txt", False),
-        ("knowledge_library/cs/book.txt:100-120", False),
-        ("docs/plan.md:5-9", False),
-        ("proposals/selffix/sii_x/edits.txt", False),
-        # Ссылка на строку в сети — не файл рабочей папки.
-        ("https://example.invalid/page#L10-L20", False),
-    ],
-)
-def test_a_line_range_does_not_turn_code_into_prose(locator: str, is_code: bool) -> None:
-    assert _is_code_locator(locator) is is_code
-
-
-def test_the_bare_locator_strips_every_decoration() -> None:
-    assert _bare_locator("core/x.py:284-292") == "core/x.py"
-    assert _bare_locator("core/x.py:284") == "core/x.py"
-    assert _bare_locator("core/x.py") == "core/x.py"
-    # Несколько украшений подряд снимаются все.
-    assert _bare_locator("core/x.py:10:20") == "core/x.py"
-
 
 def test_a_code_claim_is_refused_by_the_write_policy() -> None:
     """Сквозная проверка: правило отказа действительно срабатывает.

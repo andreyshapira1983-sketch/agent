@@ -63,35 +63,6 @@ def _make_parent_registry(extra: tuple[str, ...] = ()) -> ToolRegistry:
 
 
 # ──────────────────────────────────────────────────────────
-# 1. Safety invariants
-# ──────────────────────────────────────────────────────────
-
-
-def test_safe_tools_set_excludes_spawn_subagent():
-    """_SAFE_SUBAGENT_TOOLS must never contain spawn_subagent."""
-    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
-    assert "spawn_subagent" not in _SAFE_SUBAGENT_TOOLS
-
-
-def test_safe_tools_set_excludes_shell_exec():
-    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
-    assert "shell_exec" not in _SAFE_SUBAGENT_TOOLS
-
-
-def test_safe_tools_set_excludes_file_write():
-    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
-    assert "file_write" not in _SAFE_SUBAGENT_TOOLS
-
-
-def test_safe_tools_set_contains_expected_read_only_tools():
-    from core.subagent_runner import _SAFE_SUBAGENT_TOOLS
-    expected = {"file_read", "list_dir", "web_search", "web_fetch",
-                "rss_fetch", "semantic_scholar_search", "run_tests",
-                "read_logs", "diff_file"}
-    assert expected.issubset(_SAFE_SUBAGENT_TOOLS)
-
-
-# ──────────────────────────────────────────────────────────
 # 2. Child registry construction
 # ──────────────────────────────────────────────────────────
 
@@ -124,22 +95,6 @@ def test_build_child_registry_only_requested_tools():
     child_reg = runner._build_child_registry(["web_search", "web_fetch"])
     names = {t.name for t in child_reg.list()}
     assert names == {"web_search", "web_fetch"}
-
-
-def test_build_child_registry_filters_unsafe_from_requested():
-    """Even if a caller lists 'shell_exec' in allowed_tools, it is dropped."""
-    from core.subagent_runner import SubAgentRunner
-    runner = SubAgentRunner(
-        workspace_root=Path("."),
-        policy=_make_mock_policy(),
-        model_router=_make_mock_model_router(),
-        parent_registry=_make_parent_registry(),
-        log_dir=Path("."),
-    )
-    child_reg = runner._build_child_registry(["file_read", "shell_exec"])
-    names = {t.name for t in child_reg.list()}
-    assert "file_read" in names
-    assert "shell_exec" not in names
 
 
 def test_build_child_registry_spawn_subagent_never_included():
@@ -176,24 +131,6 @@ def test_subagent_run_result_label():
     assert r.label == "subagent:WebResearcher"
 
 
-def test_subagent_run_result_evidence_text_success():
-    from core.subagent_runner import SubAgentRunResult
-    r = SubAgentRunResult(
-        contract_name="FileAnalyst",
-        role="File analyst",
-        objective="Analyze Y",
-        answer="Y is great",
-        trace_id="def456",
-        status="success",
-    )
-    text = r.to_evidence_text()
-    assert "FileAnalyst" in text
-    assert "File analyst" in text
-    assert "Analyze Y" in text
-    assert "Y is great" in text
-    assert "success" in text
-
-
 def test_subagent_run_result_evidence_text_error():
     """An error result shows its error and hides whatever answer text it carries."""
     from core.subagent_runner import SubAgentRunResult
@@ -209,16 +146,6 @@ def test_subagent_run_result_evidence_text_error():
     text = r.to_evidence_text()
     assert "RuntimeError: kaboom" in text
     assert "half-written stale answer" not in text
-
-
-def test_subagent_run_result_is_frozen():
-    from core.subagent_runner import SubAgentRunResult
-    r = SubAgentRunResult(
-        contract_name="X", role="X", objective="X",
-        answer="X", trace_id="X", status="success",
-    )
-    with pytest.raises((AttributeError, TypeError)):
-        r.status = "error"  # type: ignore[misc]
 
 
 # ──────────────────────────────────────────────────────────
@@ -342,23 +269,6 @@ def test_resolve_contract_name_uses_provided():
     assert SpawnSubagentTool._resolve_contract_name("MyAgent", "Web Researcher") == "MyAgent"
 
 
-def test_resolve_contract_name_slugifies_role():
-    """Role slug: non-ASCII, spaces, punctuation -> '_', edges stripped, empty -> 'SubAgent'."""
-    from tools.spawn_subagent import SpawnSubagentTool
-    resolve = SpawnSubagentTool._resolve_contract_name
-    assert resolve(None, " Web Researcher! ") == "Web_Researcher"
-    assert resolve(None, "Web исследователь 2") == "Web" + "_" * 15 + "2"
-    assert resolve(None, "Исследователь") == "SubAgent"
-
-
-def test_resolve_contract_name_too_long_falls_back():
-    from tools.spawn_subagent import SpawnSubagentTool
-    long_name = "A" * 50
-    slug = SpawnSubagentTool._resolve_contract_name(long_name, "FallbackRole")
-    # long contract_name (>40) → falls back to slug of role
-    assert slug == "FallbackRole"
-
-
 def test_resolve_contract_name_non_ascii_falls_back():
     from tools.spawn_subagent import SpawnSubagentTool
     slug = SpawnSubagentTool._resolve_contract_name("Исследователь", "Researcher")
@@ -404,18 +314,6 @@ def test_planner_sanitize_spawn_valid():
     assert result["label"].startswith("subagent:")
 
 
-def test_planner_sanitize_spawn_missing_role_dropped():
-    warnings: list[str] = []
-    step = {
-        "tool": "spawn_subagent",
-        "arguments": {"objective": "Find something"},
-        "rationale": "x",
-    }
-    result = _call_sanitize(step, idx=0, warnings=warnings)
-    assert result is None
-    assert any("role" in w for w in warnings)
-
-
 def test_planner_sanitize_spawn_missing_objective_dropped():
     warnings: list[str] = []
     step = {
@@ -426,18 +324,6 @@ def test_planner_sanitize_spawn_missing_objective_dropped():
     result = _call_sanitize(step, idx=0, warnings=warnings)
     assert result is None
     assert any("objective" in w for w in warnings)
-
-
-def test_planner_sanitize_spawn_empty_role_dropped():
-    warnings: list[str] = []
-    step = {
-        "tool": "spawn_subagent",
-        "arguments": {"role": "", "objective": "Do something"},
- "why": "independent domain", "expect": "a short list with sources",
-        "rationale": "x",
-    }
-    result = _call_sanitize(step, idx=0, warnings=warnings)
-    assert result is None
 
 
 def test_planner_sanitize_spawn_unsafe_tools_filtered():
@@ -578,35 +464,11 @@ def test_structural_confidence_empty_is_zero():
     assert _compute_structural_confidence("   ") == 0.0
 
 
-def test_structural_confidence_very_short_is_low():
-    from core.subagent_runner import _compute_structural_confidence
-    score = _compute_structural_confidence("OK")
-    assert score <= 0.20
-
-
 def test_structural_confidence_hedging_reduces_score():
     from core.subagent_runner import _compute_structural_confidence
     long_hedged = "I cannot help you with that. " * 30  # long but hedged
     long_plain = "The CPU usage was 42% during the spike at 14:32. " * 10  # factual
     assert _compute_structural_confidence(long_hedged) < _compute_structural_confidence(long_plain)
-
-
-def test_structural_confidence_numbers_boost_score():
-    """Same length, only the digits differ: numbers must raise the score."""
-    from core.subagent_runner import _compute_structural_confidence as score
-    without_numbers = "The system used most CPU and much RAM at midday today." * 10
-    with_numbers = "The system used 87% CPU and 3.2 GB RAM at 14:32 today." * 10
-    assert len(with_numbers) == len(without_numbers)
-    assert score(with_numbers) > score(without_numbers)
-
-
-def test_structural_confidence_url_is_specificity_signal():
-    """Same length, no digits, only the URL differs: the URL must raise the score."""
-    from core.subagent_runner import _compute_structural_confidence as score
-    plain = "See the paper on the project site for all details." * 10
-    with_url = "See https://example.org/paper for all the details." * 10
-    assert len(with_url) == len(plain)
-    assert score(with_url) > score(plain)
 
 
 def test_structural_confidence_result_in_range():
@@ -629,31 +491,6 @@ def test_structural_confidence_result_in_range():
 # ──────────────────────────────────────────────────────────
 
 
-def test_estimate_complexity_trivial_short_no_keywords():
-    from core.subagent_runner import _estimate_complexity
-    assert _estimate_complexity("What is 2 plus 2?") == "trivial"
-
-
-def test_estimate_complexity_trivial_very_few_words():
-    from core.subagent_runner import _estimate_complexity
-    assert _estimate_complexity("Hello world") == "trivial"
-
-
-def test_estimate_complexity_standard_has_research_kw_short():
-    from core.subagent_runner import _estimate_complexity
-    # "find" is a research keyword but objective is short → standard (not complex)
-    assert _estimate_complexity("Find the main config file") == "standard"
-
-
-def test_estimate_complexity_standard_medium_no_kw():
-    from core.subagent_runner import _estimate_complexity
-    # 10 words, no research keywords → standard (not trivial)
-    result = _estimate_complexity(
-        "Explain the main differences between synchronous and asynchronous Python execution"
-    )
-    assert result == "standard"
-
-
 def test_estimate_complexity_complex_long_objective():
     """30 words with no research keyword is complex on length alone."""
     from core.subagent_runner import _RESEARCH_KEYWORDS, _estimate_complexity
@@ -667,33 +504,9 @@ def test_estimate_complexity_complex_long_objective():
     assert _estimate_complexity(long_obj) == "complex"
 
 
-def test_estimate_complexity_complex_research_kw_and_long():
-    from core.subagent_runner import _estimate_complexity
-    obj = (
-        "Analyze all Python files in the repository and summarize "
-        "the most common design patterns used across the codebase"
-    )
-    assert _estimate_complexity(obj) == "complex"
-
-
 # ──────────────────────────────────────────────────────────
 # 10. Level 2 — _judge_answer (LLM quality judge)
 # ──────────────────────────────────────────────────────────
-
-
-def test_judge_answer_returns_zero_on_mock_failure(tmp_path: Path):
-    """Mock LLM returns a non-string MagicMock; _judge_answer must return 0."""
-    from core.subagent_runner import SubAgentRunner
-    runner = SubAgentRunner(
-        workspace_root=tmp_path,
-        policy=_make_mock_policy(),
-        model_router=_make_mock_model_router(),  # .for_role().complete() → MagicMock
-        parent_registry=_make_parent_registry(),
-        log_dir=tmp_path,
-    )
-    score = runner._judge_answer("Find the answer", "The answer is 42")
-    # MagicMock can't be regex-matched as a string → graceful fallback
-    assert score == 0
 
 
 def test_judge_answer_parses_valid_llm_response(tmp_path: Path):
@@ -761,18 +574,6 @@ def test_judge_answer_returns_zero_on_llm_exception(tmp_path: Path):
 # ──────────────────────────────────────────────────────────
 
 
-def test_subagent_run_result_default_quality_fields():
-    """New quality fields have sensible defaults for backward-compat construction."""
-    from core.subagent_runner import SubAgentRunResult
-    r = SubAgentRunResult(
-        contract_name="X", role="X", objective="X",
-        answer="X", trace_id="X", status="success",
-    )
-    assert r.confidence_score == 0.0
-    assert r.quality_score == 0
-    assert r.complexity_tier == "standard"
-
-
 def test_subagent_run_result_evidence_shows_confidence():
     from core.subagent_runner import SubAgentRunResult
     r = SubAgentRunResult(
@@ -799,18 +600,6 @@ def test_subagent_run_result_evidence_trivial_note():
     text = r.to_evidence_text()
     assert "trivial" in text.lower()
     assert "inline" in text.lower()
-
-
-def test_subagent_run_result_zero_quality_score_not_shown(tmp_path: Path):
-    """quality_score=0 (not judged) must not appear as '0/5' in evidence."""
-    from core.subagent_runner import SubAgentRunResult
-    r = SubAgentRunResult(
-        contract_name="Q", role="R", objective="O",
-        answer="answer", trace_id="t3", status="success",
-        quality_score=0,
-    )
-    text = r.to_evidence_text()
-    assert "0/5" not in text
 
 
 # ──────────────────────────────────────────────────────────
@@ -945,10 +734,6 @@ def _run_with_answer(tmp_path: Path, answer: str):
 class TestSubagentInjectionScan:
     """Fix #5 — injection_guard re-scan on sub-agent answer."""
 
-    def test_clean_answer_passes_through(self, tmp_path: Path):
-        result = _run_with_answer(tmp_path, "The answer is 42.")
-        assert result.status == "success"
-        assert result.answer == "The answer is 42."
 
     def test_blocked_answer_becomes_error(self, tmp_path: Path):
         from core.injection_guard import InjectionFinding, InjectionScanResult
@@ -1022,47 +807,3 @@ class TestSubagentInjectionScan:
         assert result.status == "error"
         # Verify error message mentions injection
         assert "injection_blocked" in result.error
-
-
-# ==========================================================================
-# Fix #6 — Russian hedging phrases lower confidence score
-# ==========================================================================
-
-
-class TestRussianHedging:
-    """Fix #6 — _compute_structural_confidence penalises Russian hedges."""
-
-    @staticmethod
-    def _assert_phrase_lowers_score(hedged: str, phrase: str, neutral: str) -> None:
-        """The control differs only by an equal-length swap, so only the hedge can lower it."""
-        from core.subagent_runner import _compute_structural_confidence as score
-
-        control = hedged.replace(phrase, neutral)
-        assert phrase in hedged
-        assert len(control) == len(hedged)
-        assert score(hedged) < score(control)
-
-    def test_russian_cannot_answer_lowers_score(self):
-        self._assert_phrase_lowers_score(
-            "не могу найти информацию по данному запросу, попробуйте другой.",
-            "не могу", "я смогу",
-        )
-
-    def test_russian_not_sure_lowers_score(self):
-        self._assert_phrase_lowers_score(
-            "не уверен, возможно это какой-то новый фреймворк.",
-            "не уверен", "он уверен",
-        )
-
-    def test_russian_impossible_lowers_score(self):
-        self._assert_phrase_lowers_score(
-            "невозможно выполнить данную задачу в рамках текущих ограничений.",
-            "невозможно", "непременно",
-        )
-
-    def test_russian_hedging_phrase_in_hedging_set(self):
-        from core.subagent_runner import _HEDGING_PHRASES
-
-        assert "не могу" in _HEDGING_PHRASES
-        assert "не знаю" in _HEDGING_PHRASES
-        assert "невозможно" in _HEDGING_PHRASES

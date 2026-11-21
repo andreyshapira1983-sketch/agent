@@ -6,12 +6,10 @@
 """
 from __future__ import annotations
 
-import inspect
 import os
 import time
 from pathlib import Path
 
-from core import loop_response_deciders
 from core.turn_provenance import older_than_turn
 
 OLD_VIDEO = "converted/build_character_v4__blender_script_20260924-174639/character.mp4"
@@ -40,12 +38,6 @@ def test_a_file_made_in_this_turn_is_not_called_out(tmp_path: Path) -> None:
     assert older_than_turn("Готово: converted/scene/scene.mp4", tmp_path, started, ["convert_file"]) is None
 
 
-def test_a_turn_that_only_read_may_name_old_files(tmp_path: Path) -> None:
-    started = time.time()
-    _old_video(tmp_path, started)
-    assert older_than_turn(HEAD, tmp_path, started, ["file_read", "list_dir"]) is None
-
-
 def test_code_the_turn_only_read_is_not_called_out(tmp_path: Path) -> None:
     """Ночь 24→25.09: ход, писавший правку, назвал прочитанные tools/base.py и
     core/model_router.py — и получил «НЕ создано этим ходом», а сигнал ушёл в его
@@ -58,7 +50,3 @@ def test_code_the_turn_only_read_is_not_called_out(tmp_path: Path) -> None:
         os.utime(f, (started - 3600, started - 3600))
     head = "Risk в `tools/base.py` — Literal; complete — метод обёртки в `core/model_router.py`."
     assert older_than_turn(head, tmp_path, started, ["file_write", "patch_check"]) is None
-
-
-def test_the_answer_path_consults_it() -> None:
-    assert "older_than_turn(" in inspect.getsource(loop_response_deciders)

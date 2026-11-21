@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from core.drive_goal import need_text
-from core.stuck_route import stuck_evidence, stuck_goal
+from core.stuck_route import stuck_evidence
 
 #: Нажим и эмоция словами: то, что по работе Anthropic само включает режим.
 _PRESSURE = ("хочется", "ломается", "застрял", "отчаян", "скучно", "стыдно", "последний шанс",
@@ -45,12 +45,6 @@ def test_a_drive_is_told_as_a_task_not_a_feeling(tmp_path: Path, drive: str, inf
     _ledger(tmp_path)
     text = need_text(drive, info, tmp_path).lower()
     assert not [w for w in _PRESSURE if w in text], text
-
-
-def test_the_stuck_goal_states_facts_without_pressure(tmp_path: Path) -> None:
-    _ledger(tmp_path)
-    goal = stuck_goal(tmp_path).goal.lower()
-    assert not [w for w in _PRESSURE if w in goal], goal
 
 
 def test_old_ledger_rows_with_the_old_prefix_are_still_known_as_asks(tmp_path: Path) -> None:

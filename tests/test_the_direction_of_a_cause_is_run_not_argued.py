@@ -34,7 +34,6 @@ from core.causal_climb_action import (
     _EXPERIMENT_TARGETS,
     parse_experiment,
     spec_is_executable,
-    target_contracts,
 )
 
 #: Рукав A несёт причину (medium — не критично), рукав B её устраняет.
@@ -42,12 +41,6 @@ _SPEC = ("[exp: goal_first | "
          "A=severity=medium ;; action=improve_failure_to_idea_pipeline | "
          "B=severity=high ;; action=improve_failure_to_idea_pipeline | "
          "след=action=pursue_goal]")
-
-
-def test_the_target_is_registered_with_its_contract() -> None:
-    assert "goal_first" in _EXPERIMENT_TARGETS
-    contract = target_contracts()
-    assert "goal_first" in contract and "severity=" in contract
 
 
 def test_the_arms_disagree_and_the_effect_names_the_cause() -> None:
@@ -61,15 +54,6 @@ def test_the_arms_disagree_and_the_effect_names_the_cause() -> None:
     # вытесняет цель именно НЕ-критичность, а не ранний возврат.
     assert spec.effect in out_a, out_a
     assert spec.effect not in out_b, out_b
-
-
-def test_the_inverted_claim_is_refuted_by_the_same_run() -> None:
-    """Вывод агента: «из-за раннего возврата при critical/high»."""
-    run = _EXPERIMENT_TARGETS["goal_first"]
-    critical = run("severity=critical ;; action=improve_failure_to_idea_pipeline")
-    assert "action=improve_failure_to_idea_pipeline" in critical, (
-        "при critical действие ОСТАЁТСЯ — значит ранний возврат его не губит"
-    )
 
 
 def test_a_goal_with_its_own_action_wins_over_the_menu() -> None:

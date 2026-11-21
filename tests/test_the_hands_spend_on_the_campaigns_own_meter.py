@@ -150,28 +150,6 @@ def _no_failure(rig) -> None:
     assert not broken, f"цикл ушёл в обработчик отказа: {rig.log.events}"
 
 
-def test_what_the_engineering_hands_spend_reaches_the_cycles_bill(_rig) -> None:
-    """Девятнадцать вызовов рук записались в реестр и не записались в цикл.
-
-    Числа взяты из живого прогона один к одному: 19 вызовов, 114 единиц. Если
-    счётчик снимается до рук, разность равна нулю при любой трате.
-    """
-    _rig.monkeypatch.setattr(
-        _rig.mod, "_engineering_hands",
-        lambda **kw: (_rig.ledger.spend(calls=19, cost=114),
-                      "engineering_proposed:ain_test")[1],
-    )
-
-    outcome = _rig.run()
-
-    _no_failure(_rig)
-    assert outcome.llm_calls_spent == 19, (
-        "руки сделали 19 вызовов, цикл записал "
-        f"{outcome.llm_calls_spent}: счётчик снят до рук"
-    )
-    assert outcome.cost_units_spent == 114, outcome.cost_units_spent
-
-
 def test_what_the_repair_hands_spend_reaches_the_cycles_bill(_rig) -> None:
     """Тот же шов, другие руки — чтобы правка не оказалась заплаткой на одном.
 

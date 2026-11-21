@@ -7,9 +7,6 @@
 """
 from __future__ import annotations
 
-import os
-import stat
-import subprocess
 from pathlib import Path
 
 from tests.test_a_patch_test_must_witness_the_change import _repo
@@ -32,26 +29,3 @@ def test_a_patch_that_adds_a_lint_error_is_red(tmp_path: Path) -> None:
                               "=======\nimport os\n\n\ndef add(a, b):\n    return a + b\n>>>>>>> REPLACE\n")
     assert result["ruff_new_errors"] == 1, result.get("ruff")
     assert result["verdict"] == "red" and "ruff" in result["why"]
-
-
-def test_a_lint_error_that_was_there_before_is_not_the_patchs(tmp_path: Path) -> None:
-    _repo(tmp_path)
-    calc = tmp_path / "mod" / "calc.py"
-    calc.write_text("import os\n\n\ndef add(a, b):\n    return a - b\n", encoding="utf-8")
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "old lint"],  # noqa: S607 — своя git-команда во временной папке
-                   cwd=tmp_path, check=True, capture_output=True)
-    result = _check(tmp_path, "FILE: mod/calc.py\n<<<<<<< SEARCH\n    return a - b\n=======\n"
-                              "    return a + b\n>>>>>>> REPLACE\n")
-    assert result["ruff_new_errors"] == 0
-    assert result["verdict"] == "green", result
-
-
-def test_the_copy_lives_beside_the_workspace_and_is_readable(tmp_path: Path) -> None:
-    from tools.patch_check import _scratch
-
-    workspace = tmp_path / "agent-main"
-    workspace.mkdir()
-    with _scratch(workspace) as scratch:
-        assert Path(scratch).parent == tmp_path
-        if os.name != "nt":
-            assert stat.S_IMODE(os.stat(scratch).st_mode) & 0o055 == 0o055

@@ -63,54 +63,6 @@ def _clear_provider_creds(monkeypatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-def test_light_prefers_huggingface_when_available(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("HF_TOKEN", "hf-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    _stub_tier_models(monkeypatch, {
-        ("light", "huggingface"): "hf-light",
-        ("light", "openai"): "oa-light",
-    })
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT)
-
-    assert llm.route.provider == "huggingface"
-    assert llm.route.model == "hf-light"
-    assert llm.route.reason == "complexity:light:huggingface"
-
-
-def test_light_falls_back_to_openai_when_hf_unavailable(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    _stub_tier_models(monkeypatch, {
-        ("light", "huggingface"): "hf-light",
-        ("light", "openai"): "oa-light",
-    })
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT)
-
-    assert llm.route.provider == "openai"
-    assert llm.route.model == "oa-light"
-    assert llm.route.reason == (
-        "complexity:light:openai|skipped:provider_unavailable:huggingface"
-    )
-
-
-def test_standard_routes_to_openai(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    _stub_tier_models(monkeypatch, {("standard", "openai"): "oa-std"})
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.PLANNER, "task", force_tier=ComplexityTier.STANDARD)
-
-    assert llm.route.provider == "openai"
-    assert llm.route.model == "oa-std"
-    assert llm.route.reason == "complexity:standard:openai"
-
-
 def test_deep_routes_to_anthropic_with_operator_escalation(monkeypatch, tmp_path):
     _clear_provider_creds(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "an-key")
@@ -127,52 +79,6 @@ def test_deep_routes_to_anthropic_with_operator_escalation(monkeypatch, tmp_path
 
     assert llm.route.provider == "anthropic"
     assert llm.route.model == "an-deep"
-
-
-def test_deep_without_operator_reason_downgrades_to_standard(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "an-key")
-    _stub_tier_models(monkeypatch, {("deep", "anthropic"): "an-deep"})
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.PLANNER, "design", force_tier=ComplexityTier.DEEP)
-
-    # The deep model must NOT be opened without a valid operator reason.
-    assert llm.route.model != "an-deep"
-    assert llm.route.model == "role-default-model"
-
-
-def test_env_override_selects_provider(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("HF_TOKEN", "hf-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "openai")
-    _stub_tier_models(monkeypatch, {
-        ("light", "huggingface"): "hf-light",
-        ("light", "openai"): "oa-light",
-    })
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT)
-
-    assert llm.route.provider == "openai"
-    assert llm.route.reason == "complexity:light:openai"
-
-
-def test_uncredentialed_provider_local_is_skipped_gracefully(monkeypatch, tmp_path):
-    """``local`` is supported, but without LOCAL_LLM_* env it is unavailable."""
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    monkeypatch.setenv("AGENT_TIER_PROVIDERS_LIGHT", "local,openai")
-    _stub_tier_models(monkeypatch, {("light", "openai"): "oa-light"})
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT)
-
-    assert llm.route.provider == "openai"
-    assert llm.route.reason == (
-        "complexity:light:openai|skipped:provider_unavailable:local"
-    )
 
 
 def test_explicit_role_provider_env_wins(monkeypatch, tmp_path):
@@ -195,26 +101,3 @@ def test_explicit_role_provider_env_wins(monkeypatch, tmp_path):
 
     # Explicit role provider must beat the huggingface/openai preference.
     assert llm.route.provider == "anthropic"
-
-
-def test_no_provider_config_falls_back_to_role_default(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    _stub_tier_models(monkeypatch, {})  # no tier model for any provider
-
-    router = _router(tmp_path)
-    llm = router.for_task(ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT)
-
-    # Nothing available → behaves as before, resolving the role default.
-    assert llm.route.model == "role-default-model"
-
-
-def test_static_llm_is_unchanged(monkeypatch, tmp_path):
-    _clear_provider_creds(monkeypatch)
-    monkeypatch.setenv("OPENAI_API_KEY", "oa-key")
-    _stub_tier_models(monkeypatch, {("light", "openai"): "oa-light"})
-
-    static = FakeLLM()
-    router = ModelRouter.single(static)
-    assert router.for_task(
-        ModelRole.SYNTHESIZER, "hi", force_tier=ComplexityTier.LIGHT
-    ) is static

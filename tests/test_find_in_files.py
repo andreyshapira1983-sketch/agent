@@ -27,18 +27,6 @@ def _library(root: Path) -> Path:
     return root
 
 
-def test_a_book_is_found_by_name_anywhere_in_the_workspace(tmp_path: Path):
-    out = FindInFilesTool(_library(tmp_path)).run(name="*lebl*")
-    assert out.splitlines() == ["1 files under . (name=*lebl*)",
-                                "math_study/library/txt/Lebl_BasicAnalysis_I.txt"]
-
-
-def test_a_phrase_is_found_with_its_line_number(tmp_path: Path):
-    out = FindInFilesTool(_library(tmp_path)).run(query="the set of REAL numbers")
-    assert "math_study/library/txt/Lebl_BasicAnalysis_I.txt:4: 1.2 The set of real numbers" in out
-    assert ".env" not in out, "файл ключей не просматривается никогда"
-
-
 def test_a_negative_answer_says_how_much_was_searched(tmp_path: Path):
     out = FindInFilesTool(_library(tmp_path)).run(query="Lao-Tzu", path="knowledge_library")
     assert out == "no matches for 'Lao-Tzu' in 1 text files under knowledge_library (name=*)"

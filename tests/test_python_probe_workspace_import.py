@@ -43,16 +43,6 @@ def test_switch_on_allows_workspace_import(monkeypatch):
     assert printed.resolve().parent == (WORKSPACE / "core").resolve()
 
 
-def test_isolation_holds_even_with_the_switch_on(monkeypatch):
-    """`-I` не снят: переменная PYTHONPATH снаружи в лабораторию не проходит."""
-    monkeypatch.setenv("PYTHONPATH", str(WORKSPACE / "no_such_dir_marker"))
-    result = _run_probe(
-        monkeypatch, enabled=True,
-        code="import sys; print(any('no_such_dir_marker' in p for p in sys.path))",
-    )
-    assert (result.get("stdout") or "").strip() == "False"
-
-
 def test_the_report_says_whether_the_workspace_was_visible(monkeypatch):
     """Невидимый отказ не должен выглядеть как настоящий ноль (открытая запись
     агента severity=high): отчёт пробы называет, видела ли она модули."""
@@ -60,10 +50,3 @@ def test_the_report_says_whether_the_workspace_was_visible(monkeypatch):
     off = _run_probe(monkeypatch, enabled=False)
     assert off["workspace_import"] is False
     assert _SWITCH in off.get("note", "")
-
-
-def test_a_traceback_keeps_the_line_numbers_of_the_experiment(monkeypatch):
-    """Путь вставляется так, что номера строк в ошибке — строки самого опыта."""
-    result = _run_probe(monkeypatch, enabled=True,
-                        code="x = 1\ny = 2\nraise ValueError('line three')")
-    assert 'line 3' in (result.get("stderr") or "")

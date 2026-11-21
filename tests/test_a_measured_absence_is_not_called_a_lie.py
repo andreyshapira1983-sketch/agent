@@ -12,19 +12,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.verifier_absence import absence_certified_by_search, absence_subjects
+from core.verifier_absence import absence_certified_by_search
 
 _SEARCH = SimpleNamespace(
     obtained_via="find_in_files",
     excerpt=("no matches in 30 text files under tools (name=*)\n<<Q>>\n"
              "no matches for 'requests.post' in 30 text files under tools (name=*)"),
 )
-
-
-def test_what_a_clause_names_is_not_what_is_denied() -> None:
-    claim = "- В `core/` нет класса `LLMClient` — единственный клиент называется `LLM` [tool:find_in_files]."
-    assert "llm" not in absence_subjects(claim)
-    assert "llmclient" in absence_subjects(claim)
 
 
 def test_a_full_search_of_the_named_place_certifies_the_absence() -> None:

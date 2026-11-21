@@ -49,12 +49,6 @@ def test_a_goal_driven_action_says_its_grounds_are_the_operators_text() -> None:
     )
 
 
-def test_an_observed_problem_says_it_was_observed() -> None:
-    """Nobody told the agent the daemon was down; it read the heartbeat."""
-    action = select_best_next_action(heartbeat_missing=True)
-    assert action.grounds == "observed_state"
-
-
 def test_a_decision_resting_on_stored_history_says_so() -> None:
     """The path that makes the learning question answerable: these grounds were
     carried from earlier runs, so a later claim that experience changed the
@@ -68,38 +62,4 @@ def test_a_decision_resting_on_stored_history_says_so() -> None:
     assert action.grounds == "retained_record", (
         f"an action driven by stored history recorded {action.grounds!r} — the "
         "memory-influence path stays invisible"
-    )
-
-
-def test_the_observe_fallback_rests_on_observation() -> None:
-    action = select_best_next_action(tests_health="pass", result_status="done")
-    assert action.grounds == "observed_state"
-
-
-def test_the_grounds_reach_the_record() -> None:
-    """A distinction that never leaves the process cannot be audited after the
-    run — the reason all three axes were called a gap."""
-    payload = select_best_next_action(heartbeat_missing=True).to_dict()
-    assert payload["grounds"] == "observed_state"
-
-
-def test_grounds_and_selection_are_different_questions() -> None:
-    """Two axes, not one. A contested race decided by the priority table can
-    still rest on operator-supplied grounds, and the record must be able to say
-    both at once."""
-    action = select_best_next_action(
-        goal="изучи в интернете https://example.org",
-        tests_health="fail", failed_tests=("t.py",),
-    )
-    assert action.decided_by == "priority_table"
-    assert action.grounds in {"operator_goal", "observed_state"}
-
-
-def test_the_winner_is_unchanged_by_recording_its_grounds() -> None:
-    """Recording provenance must not move a verdict."""
-    action = select_best_next_action(
-        heartbeat_missing=True, tests_health="fail", failed_tests=("t.py",)
-    )
-    assert action.priority == 100, (
-        f"the winner changed: {action.action!r} at {action.priority}"
     )

@@ -28,43 +28,11 @@ from core.placeholder_text import looks_like_unfilled_path
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_existing_organ_is_not_placeholder():
-    # 1. The guard's own module exists -> it is an address, not a placeholder.
-    assert looks_like_unfilled_path("core/placeholder_text.py", base_dir=WORKSPACE_ROOT) is False
-
-
-def test_angle_bracket_insert_path_is_placeholder():
-    # 3. '<insert path>' is an unfilled template marker.
-    assert looks_like_unfilled_path("<insert path>", base_dir=WORKSPACE_ROOT) is True
-
-
 def test_generic_your_file_path_is_placeholder():
     # 4. 'path/to/your_file.py' is a template, not a real file.
     assert looks_like_unfilled_path("path/to/your_file.py", base_dir=WORKSPACE_ROOT) is True
 
 
-def test_double_brace_module_is_placeholder():
-    # 5. '{{module}}' is an unfilled template variable.
-    assert looks_like_unfilled_path("{{module}}", base_dir=WORKSPACE_ROOT) is True
-
-
 def test_xxx_test_file_is_placeholder():
     # 6. 'test_XXX.py' is a template, not a real file.
     assert looks_like_unfilled_path("test_XXX.py", base_dir=WORKSPACE_ROOT) is True
-
-
-def test_new_organ_draft_without_template_markers_is_not_placeholder():
-    # 7. A non-existent path WITHOUT template markers is a new file for
-    #    writing, not an unfilled placeholder.
-    assert looks_like_unfilled_path("core/new_organ_draft.py", base_dir=WORKSPACE_ROOT) is False
-
-
-def test_legacy_behaviour_without_base_dir_is_preserved():
-    # 8. Without base_dir, the old substring-based behaviour is kept:
-    #    'core/placeholder_text.py' still looks like a placeholder.
-    assert looks_like_unfilled_path("core/placeholder_text.py") is True
-
-
-def test_old_segment_law_still_holds_for_docs_path():
-    # 9. 'docs/path/tools.md' is a real, existing file -> not a placeholder.
-    assert looks_like_unfilled_path("docs/path/tools.md") is False

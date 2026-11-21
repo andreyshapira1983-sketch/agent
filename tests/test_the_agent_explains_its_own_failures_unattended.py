@@ -17,7 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.best_next_action import select_best_next_action
 from core.causal_claim_store import load_claims, save_claim
 from core.causal_climb_action import (
     explain_causal_observation,
@@ -96,24 +95,6 @@ def test_an_uncovered_observation_is_listed_most_recurrent_first(tmp_path: Path)
     assert covered.fingerprint not in fps
     assert fps[0] == naked_hot.fingerprint, "повторяемость ведёт очередь"
     assert naked_rare.fingerprint in fps
-
-
-def test_the_signal_births_the_action_and_zero_births_none() -> None:
-    picked = select_best_next_action(unexplained_observations_count=3)
-    silent = select_best_next_action(unexplained_observations_count=0)
-
-    assert picked.action == "explain_causal_observation"
-    assert silent.action != "explain_causal_observation"
-
-
-def test_the_action_never_ships_without_its_executor() -> None:
-    """Анти-MIR-179: имя, которое рождает выбиратель, знает исполнитель."""
-    import inspect
-
-    from core import campaign_io as mod
-
-    src = inspect.getsource(mod._default_execute_action)
-    assert '"explain_causal_observation"' in src
 
 
 def test_two_falsifiable_hypotheses_become_a_claim_with_no_winner(tmp_path: Path) -> None:

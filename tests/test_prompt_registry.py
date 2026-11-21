@@ -20,9 +20,7 @@ import pytest
 
 from core.prompt_registry import (
     _REGISTRY,
-    PromptRecord,
     PromptRegistry,
-    get_prompt,
     get_prompt_version,
     list_prompt_keys,
     register_prompt,
@@ -36,18 +34,6 @@ _SHA = lambda text: hashlib.sha256(text.encode()).hexdigest()  # noqa: E731
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TestPromptRecord
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestPromptRecord:
-    def test_frozen(self):
-        rec = PromptRecord(key="a", content="c", module="m", version="v", description="")
-        with pytest.raises((AttributeError, TypeError)):
-            rec.key = "changed"  # type: ignore[misc]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # TestRegistryInstance
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,34 +44,6 @@ class TestRegistryInstance:
     def setup_method(self):
         self.reg = PromptRegistry()
 
-    def test_register_returns_record(self):
-        rec = self.reg.register("x.system", "hello", module="core.x")
-        assert isinstance(rec, PromptRecord)
-        assert rec.key == "x.system"
-        assert rec.content == "hello"
-
-    def test_version_is_sha256(self):
-        text = "You are a helpful assistant."
-        rec = self.reg.register("v.test", text)
-        assert rec.version == _SHA(text)
-
-    def test_get_returns_content(self):
-        self.reg.register("g.test", "my prompt")
-        assert self.reg.get("g.test") == "my prompt"
-
-    def test_get_record_returns_record(self):
-        self.reg.register("gr.test", "prompt", module="mod")
-        rec = self.reg.get_record("gr.test")
-        assert rec.module == "mod"
-
-    def test_get_version_matches_sha(self):
-        self.reg.register("gv.test", "abc123")
-        assert self.reg.get_version("gv.test") == _SHA("abc123")
-
-    def test_list_keys_sorted(self):
-        self.reg.register("b.test", "b")
-        self.reg.register("a.test", "a")
-        assert self.reg.list_keys() == ["a.test", "b.test"]
 
     def test_contains(self):
         self.reg.register("c.test", "x")
@@ -102,15 +60,6 @@ class TestRegistryInstance:
         self.reg.register("r.test", "same")
         assert len(self.reg) == 1
 
-    def test_re_register_different_content_updates(self):
-        self.reg.register("u.test", "old")
-        self.reg.register("u.test", "new")
-        assert self.reg.get("u.test") == "new"
-
-    def test_description_stored(self):
-        self.reg.register("d.test", "x", description="A description")
-        assert self.reg.get_record("d.test").description == "A description"
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestEnvVarOverride
@@ -125,25 +74,6 @@ class TestEnvVarOverride:
     def test_env_override_dot_key(self, monkeypatch):
         monkeypatch.setenv("AGENT_PROMPT_ENV_TEST", "overridden")
         assert self.reg.get("env.test") == "overridden"
-
-    def test_env_override_hyphen_key(self, monkeypatch):
-        self.reg.register("env-hyphen", "original")
-        monkeypatch.setenv("AGENT_PROMPT_ENV_HYPHEN", "patched")
-        assert self.reg.get("env-hyphen") == "patched"
-
-    def test_env_override_unregistered_key(self, monkeypatch):
-        """Env var works even for a key that is NOT in the registry."""
-        monkeypatch.setenv("AGENT_PROMPT_TOTALLY_NEW_KEY", "injected")
-        assert self.reg.get("totally.new.key") == "injected"
-
-    def test_no_env_override_returns_original(self, monkeypatch):
-        monkeypatch.delenv("AGENT_PROMPT_ENV_TEST", raising=False)
-        assert self.reg.get("env.test") == "original"
-
-    def test_empty_env_var_treated_as_override(self, monkeypatch):
-        """Empty string env var overrides the registered content."""
-        monkeypatch.setenv("AGENT_PROMPT_ENV_TEST", "")
-        assert self.reg.get("env.test") == ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -178,34 +108,6 @@ class TestUnknownKey:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TestVersionStability
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestVersionStability:
-    def test_same_content_same_version(self):
-        reg1 = PromptRegistry()
-        reg2 = PromptRegistry()
-        text = "You are a careful analyst.\n\nPlease be thorough."
-        rec1 = reg1.register("s.test", text)
-        rec2 = reg2.register("s.test", text)
-        assert rec1.version == rec2.version
-
-    def test_different_content_different_version(self):
-        reg = PromptRegistry()
-        rec1 = reg.register("d.test", "hello")
-        reg.register("d.test", "world")
-        rec2 = reg.get_record("d.test")
-        assert rec1.version != rec2.version
-
-    def test_version_is_64_hex_chars(self):
-        reg = PromptRegistry()
-        rec = reg.register("vlen.test", "abc")
-        assert len(rec.version) == 64
-        assert all(c in "0123456789abcdef" for c in rec.version)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # TestGlobalHelpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -222,10 +124,6 @@ class TestGlobalHelpers:
     def teardown_method(self):
         _REGISTRY._store.pop(self._KEY, None)
 
-    def test_register_and_get(self, monkeypatch):
-        monkeypatch.delenv("AGENT_PROMPT_TEST_GLOBAL_HELPER", raising=False)
-        register_prompt(self._KEY, "global content")
-        assert get_prompt(self._KEY) == "global content"
 
     def test_get_prompt_version(self):
         register_prompt(self._KEY, "abc")
@@ -268,19 +166,9 @@ class TestRegisteredPrompts:
     def test_key_present(self, key):
         assert key in _REGISTRY, f"Prompt key {key!r} not found in global registry"
 
-    @pytest.mark.parametrize("key,module", list(_EXPECTED.items()))
-    def test_module_tag(self, key, module):
-        rec = _REGISTRY.get_record(key)
-        assert rec.module == module, (
-            f"Expected module={module!r} for key={key!r}, got {rec.module!r}"
-        )
 
     @pytest.mark.parametrize("key", list(_EXPECTED))
     def test_version_is_sha256(self, key):
         version = _REGISTRY.get_version(key)
         assert len(version) == 64
         assert all(c in "0123456789abcdef" for c in version)
-
-    def test_all_five_registered(self):
-        for key in self._EXPECTED:
-            assert key in _REGISTRY

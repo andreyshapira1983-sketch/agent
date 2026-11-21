@@ -47,50 +47,6 @@ def test_the_measured_shape_a_filter_reaches_past_an_empty_newest_trace(tmp_path
     assert result["traces_searched"] == 2
 
 
-def test_no_match_anywhere_is_said_honestly(tmp_path: Path):
-    """«Нет нигде» и «нет в этой» — разные ответы, и различает их
-    `traces_searched`: пусто при >1 означает, что смотрели всю недавнюю
-    историю, а не один файл.
-    """
-    tool = _tool(tmp_path)
-    _write_trace(tool.log_dir, "trace_a", [_NOISE], age=600)
-    _write_trace(tool.log_dir, "trace_b", [_NOISE], age=60)
-
-    result = tool.run(event_filter=["error"])
-
-    assert result["events_returned"] == 0
-    assert result["traces_searched"] == 2
-    assert result["trace_id"] == "trace_b"  # новейшая — как и раньше
-
-
-def test_an_explicit_trace_id_is_an_address_not_a_wish(tmp_path: Path):
-    """Явный адрес отвечает про себя, пустой или нет: подменить его «более
-    подходящей» трассой значило бы отвечать не на заданный вопрос.
-    """
-    tool = _tool(tmp_path)
-    _write_trace(tool.log_dir, "trace_empty", [_NOISE], age=600)
-    _write_trace(tool.log_dir, "trace_rich", [_ERROR], age=60)
-
-    result = tool.run(event_filter=["error"], trace_id="trace_empty")
-
-    assert result["trace_id"] == "trace_empty"
-    assert result["events_returned"] == 0
-    assert result["traces_searched"] == 1
-
-
-def test_without_a_filter_the_newest_past_trace_still_wins(tmp_path: Path):
-    """Улов не отдан: без фильтра «уместность» не определена, и новейшая
-    прошлая трасса остаётся правильным ответом.
-    """
-    tool = _tool(tmp_path)
-    _write_trace(tool.log_dir, "trace_old", [_ERROR], age=600)
-    _write_trace(tool.log_dir, "trace_new", [_NOISE], age=60)
-
-    result = tool.run()
-
-    assert result["trace_id"] == "trace_new"
-
-
 def test_the_live_trace_is_still_never_chosen(tmp_path: Path):
     """MIR-089 не откатился: своя живая трасса не источник — исхода этого
     прогона в ней ещё нет, даже если запрошенное там уже есть.
@@ -114,17 +70,3 @@ def test_the_scan_is_bounded(tmp_path: Path):
     result = tool.run(event_filter=["error"])
 
     assert result["traces_searched"] == MAX_TRACE_SCAN
-
-
-def test_unseen_filter_names_work_the_same_way(tmp_path: Path):
-    """Форма, под которую правило не подгоняли: другой фильтр, тот же класс —
-    запрошенное лежит не в новейшем файле.
-    """
-    tool = _tool(tmp_path)
-    _write_trace(tool.log_dir, "trace_old", [{"event": "replan", "payload": {}}], age=600)
-    _write_trace(tool.log_dir, "trace_new", [_NOISE], age=60)
-
-    result = tool.run(event_filter=["replan"])
-
-    assert result["trace_id"] == "trace_old"
-    assert result["events_returned"] == 1

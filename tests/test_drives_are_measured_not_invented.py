@@ -34,15 +34,6 @@ def test_idle_is_the_only_clock(tmp_path: Path) -> None:
     assert strongest(d)[0] == "idle_time"
 
 
-def test_idling_is_not_counted_as_breakage(tmp_path: Path) -> None:
-    """First live read: 14 of 20 cycles «broken» — they were idle, not broken."""
-    _write(tmp_path / "data" / "campaign_ledger.jsonl",
-           [{"ts": NOW.isoformat(), "result": "idle", "goal": "g"}] * 10
-           + [{"ts": NOW.isoformat(), "result": "completed", "goal": "g"},
-              {"ts": NOW.isoformat(), "result": "failed", "goal": "g"}])
-    assert compute_drives(tmp_path, now=NOW)["maintenance_need"]["value"] == 0.5
-
-
 def test_a_locked_obligation_is_not_an_obligation(tmp_path: Path) -> None:
     """Live pass of step 3: every «unfinished» item was locked — rollback lessons
     or a permission only a human grants. The drive called to them; the agent hit

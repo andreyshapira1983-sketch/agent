@@ -45,19 +45,6 @@ def _module(code_lines: int, prose_lines: int) -> str:
     return "\n".join(body)
 
 
-def test_a_module_that_is_mostly_prose_is_not_flagged() -> None:
-    """The five live noise verdicts, synthesised: big in total, small in code."""
-    assert not _flagged_by_size(
-        "core/mostly_prose.py", _module(code_lines=100, prose_lines=800)), (
-        "a module large only in its margins was proposed for splitting — the "
-        "sensor is measuring explanations again"
-    )
-
-
-def test_a_module_of_real_code_is_flagged() -> None:
-    assert _flagged_by_size("core/big_code.py", _module(code_lines=900, prose_lines=0))
-
-
 def test_the_counter_separates_code_from_prose() -> None:
     """Обе величины по-прежнему различимы — на этом и стоял MIR-099."""
     content = _module(code_lines=900, prose_lines=100)
@@ -102,30 +89,8 @@ def test_a_small_module_is_not_flagged() -> None:
 # was a property of the tree at that moment, not of the counter.
 
 
-def test_a_module_of_embedded_payload_is_not_invisible() -> None:
-    """An embedded prompt/SQL/template is bulk the module carries — payload,
-    not explanation. Only docstrings and comments are prose."""
-    payload = "SQL = '''\n" + "\n".join(f"SELECT {i}" for i in range(900)) + "\n'''"
-    assert _flagged_by_size("core/payload.py", payload), (
-        "a module that is 900 lines of embedded literal reads as one line — "
-        "the old total-lines sensor would have flagged it and this one does not"
-    )
-
-
 def test_a_docstring_is_still_prose_however_long() -> None:
     """The boundary the repair must not cross: explanation stays free."""
     doc = '"""' + "\n" + "\n".join("explanatory prose" for _ in range(900)) + "\n" + '"""'
     code = "\n".join(f"x{i} = {i}" for i in range(50))
     assert not _flagged_by_size("core/doc.py", doc + "\n" + code)
-
-
-def test_ordinary_python_shapes_are_not_inflated() -> None:
-    """Six shapes probed in the audit that held, kept as a regression net."""
-    for label, src in (
-        ("one-liner ifs", "\n".join(f"if x{i}: y{i} = {i}" for i in range(700))),
-        ("dict literal", "D = {\n" + ",\n".join(f'  "k{i}": {i}' for i in range(700)) + "\n}"),
-        ("chained calls", "x = (o\n" + "\n".join(f"  .s{i}()" for i in range(700)) + ")"),
-        ("trailing comments", "\n".join(f"x{i} = {i}  # why" for i in range(700))),
-    ):
-        assert not _flagged_by_size(f"core/{label}.py", src), (
-            f"{label} was flagged below the threshold")

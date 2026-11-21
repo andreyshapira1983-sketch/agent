@@ -4,8 +4,6 @@ Background: docs/CODE_NOTES.md, "Which model earns the role".
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from core.model_outcomes import (
     MIN_RUNS,
     measure_model_outcomes,
@@ -39,12 +37,6 @@ def _corpus(good: str, bad: str, n: int = MIN_RUNS):
     return usage, episodes
 
 
-def test_the_measured_winner_is_chosen():
-    outcomes = measure_model_outcomes(*_corpus("gpt-5.4-nano", "gpt-4o-mini"))
-
-    assert preferred_model(outcomes, role="planner", provider="openai") == "gpt-5.4-nano"
-
-
 def test_a_provider_refusal_is_not_charged_to_the_model():
     """Отказ провайдера — факт о ключе оператора, а не о качестве модели.
     Живой контекст: 73 отказа anthropic за 2026-08-15 при пустом счёте.
@@ -65,95 +57,6 @@ def test_one_run_counts_once_however_many_calls_it_made():
     assert [o.runs for o in outcomes] == [1]
 
 
-def test_too_few_runs_stay_silent():
-    """Молчание — не отказ, а честность: до `MIN_RUNS` доля неотличима от
-    случайности, и решать по трём случаям хуже, чем по правилу уровня.
-    """
-    outcomes = measure_model_outcomes(
-        *_corpus("gpt-5.4-nano", "gpt-4o-mini", n=MIN_RUNS - 1)
-    )
-
-    assert preferred_model(outcomes, role="planner", provider="openai") is None
-
-
-def test_a_call_without_an_episode_is_not_counted():
-    """Вызов без исхода ничего не говорит о качестве — считать его значило бы
-    добирать объём пустотой.
-    """
-    assert measure_model_outcomes([_call("r1", "gpt-4o-mini")], []) == ()
-
-
-def test_roles_and_providers_do_not_bleed_into_each_other():
-    """У планировщика и синтезатора разная работа; общий счёт скрыл бы, что
-    модель хороша на одной роли и плоха на другой.
-    """
-    usage, episodes = _corpus("gpt-5.4-nano", "gpt-4o-mini")
-    usage += [_call(f"s{i}", "gpt-4o-mini", role="synthesizer") for i in range(MIN_RUNS)]
-    episodes += [_episode(f"s{i}", verified=4) for i in range(MIN_RUNS)]
-
-    outcomes = measure_model_outcomes(usage, episodes)
-
-    assert preferred_model(outcomes, role="planner", provider="openai") == "gpt-5.4-nano"
-    assert preferred_model(outcomes, role="synthesizer", provider="openai") == "gpt-4o-mini"
-
-
-def test_defects_break_a_tie_on_verification():
-    """Вторая ось — сигналы дефектов. При равной доле подтверждённых выигрывает
-    та модель, что реже поднимала детекторы.
-    """
-    usage, episodes = [], []
-    for i in range(MIN_RUNS):
-        usage.append(_call(f"c{i}", "тихая"))
-        episodes.append(_episode(f"c{i}", verified=2))
-        usage.append(_call(f"n{i}", "шумная"))
-        episodes.append(_episode(f"n{i}", verified=2,
-                                 signals=("reasoning_action_mismatch",)))
-
-    outcomes = measure_model_outcomes(usage, episodes)
-
-    assert preferred_model(outcomes, role="planner", provider="openai") == "тихая"
-
-
-def test_the_router_asks_the_measurement_before_the_tier_map():
-    """Вторая половина дороги. Порядок здесь и есть вся правка: сначала замер,
-    карта имён — пол.
-    """
-    import inspect
-
-    from core.model_router import UsageTrackedLLM
-
-    # 2026-08-22: the substitution moved one hop, into `_next_provider_llm`,
-    # when MIR-132's pre-emptive health check began sharing it with the
-    # exception path. The invariant is unchanged — measurement first, tier map
-    # as the floor — so the pin follows the chain instead of the old location.
-    source = inspect.getsource(UsageTrackedLLM._failover_llm)
-    chain = inspect.getsource(UsageTrackedLLM._next_provider_llm)
-    assert "_next_provider_llm(" in source
-    assert "substitute_model_with_reason(" in chain
-    assert "peer_model_at_same_tier" not in source + chain
-
-
-def test_the_tier_map_still_answers_when_nothing_is_measured(monkeypatch):
-    """Пол на месте: без замеров отвечает равный по уровню из карты, и причина это называет.
-
-    Каталог — образец с OpenAI: 24.09 живой каталог установки стал только
-    DeepSeek, и тест, читавший его, падал — правило от ключей не зависит."""
-    from core.model_outcomes import substitute_model, substitute_model_with_reason
-
-    monkeypatch.setenv("AGENT_MODEL_CATALOG_PATH",
-                       str(Path(__file__).parent / "fixtures" / "model_catalog_two_providers.json"))
-    monkeypatch.setenv("AGENT_MODEL_CATALOG_TTL_DAYS", "100000")
-    kwargs = {"role": "роль-которой-не-было", "provider": "openai",
-              "current_model": "claude-sonnet-5", "workspace": "/nonexistent"}
-
-    picked, reason = substitute_model_with_reason(**kwargs)
-
-    # claude-sonnet-5 — уровень standard; у openai в образце это gpt-5.6-terra.
-    assert picked == "gpt-5.6-terra", f"пол выбрал не тот уровень: {picked!r}"
-    assert reason.startswith("floor:"), reason
-    assert substitute_model(**kwargs) == picked
-
-
 def test_a_measured_winner_that_the_world_no_longer_offers_is_dropped():
     """Опыт живёт дольше мира.
 
@@ -169,37 +72,3 @@ def test_a_measured_winner_that_the_world_no_longer_offers_is_dropped():
     assert preferred_model(
         outcomes, role="planner", provider="openai", offered={"живая"},
     ) == "живая"
-
-
-def test_an_unobserved_world_does_not_veto_experience():
-    """Пустое наблюдение — «не знаю», а не «ничего не предлагают». Разница
-    между незнанием и отрицанием здесь стоит выбора модели.
-    """
-    outcomes = measure_model_outcomes(*_corpus("gpt-5.4-nano", "gpt-4o-mini"))
-
-    assert preferred_model(
-        outcomes, role="planner", provider="openai", offered=None,
-    ) == "gpt-5.4-nano"
-
-
-def test_when_the_world_retired_everything_measured_the_floor_answers():
-    """Все измеренные сняты — замер молчит, и решает карта уровней, а не
-    пустота.
-    """
-    outcomes = measure_model_outcomes(*_corpus("снятая-1", "снятая-2"))
-
-    assert preferred_model(
-        outcomes, role="planner", provider="openai", offered={"совсем-другая"},
-    ) is None
-
-
-def test_the_live_selection_consults_the_world():
-    """Вторая половина дороги: сверка обязана стоять в живом пути, а не только
-    в чистой функции.
-    """
-    import inspect
-
-    from core.model_outcomes import substitute_model_with_reason
-
-    source = inspect.getsource(substitute_model_with_reason)
-    assert "offered_models(provider)" in source

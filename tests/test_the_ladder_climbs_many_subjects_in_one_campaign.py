@@ -38,17 +38,6 @@ def _explain_action() -> BestNextAction:
     )
 
 
-def _plain_action() -> BestNextAction:
-    return BestNextAction(
-        action="draft_doctrine_document",
-        title="Draft the doctrine document",
-        severity="medium",
-        priority=58,
-        reason="the goal asks for a doctrine draft",
-        risk="reversible",
-    )
-
-
 class _AlwaysGather:
     def __init__(self, action: BestNextAction):
         self._action = action
@@ -95,16 +84,6 @@ def _run(action, execute, *, max_cycles=8, max_idle_streak=3):
     )
 
 
-def test_fresh_subjects_keep_the_ladder_climbing(tmp_path):
-    """His core promise: three different subjects — three executions, no repeat."""
-    execute = _SequencedExecute([_outcome("obs1"), _outcome("obs2"), _outcome("obs3")])
-
-    result = _run(_explain_action(), execute, max_cycles=3)
-
-    assert execute.calls == 3
-    assert [r.result for r in result.records] == ["completed"] * 3
-
-
 def test_a_stuck_subject_feeds_the_stall_sensor(tmp_path):
     """The same subject coming back means the queue did not advance."""
     execute = _SequencedExecute([_outcome("obs1")])  # obs1 forever
@@ -127,16 +106,3 @@ def test_the_step_ceiling_stops_a_monopolist(tmp_path):
     assert execute.calls == 10
     ceiling_repeats = [r for r in result.records if "потолок шагов" in (r.reason or "")]
     assert ceiling_repeats, "the ceiling never fired"
-
-
-def test_a_subjectless_action_keeps_the_old_bare_name_ban(tmp_path):
-    """Regression: non-subject actions are banked by bare name, as before."""
-    execute = _SequencedExecute([CampaignActionOutcome(
-        result="completed", llm_calls_spent=1, work_done=True,
-    )])
-
-    result = _run(_plain_action(), execute, max_cycles=4)
-
-    assert execute.calls == 1
-    repeats = [r for r in result.records if r.result == "repeat"]
-    assert repeats and "already attempted" in (repeats[0].reason or "")

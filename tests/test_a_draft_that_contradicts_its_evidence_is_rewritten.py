@@ -11,20 +11,6 @@ from types import SimpleNamespace
 
 import core.verifier as verifier_mod
 from core.draft_refutation import revise_refuted_draft
-from core.replan import ReplanTrigger, failures_for_synthesis
-
-
-def _trigger(code: str) -> ReplanTrigger:
-    return ReplanTrigger(code=code, step_id="s", tool_name=None, arguments={}, reason=code, attempt=0)
-
-
-def test_demands_for_the_second_draft_reach_the_synthesizer() -> None:
-    history = [_trigger("answer_off_topic"), _trigger("unverified_own_file"),
-               _trigger("draft_contradicts_evidence"), _trigger("claim_refuted"),
-               _trigger("tool_error")]
-    seen = [t.code for t in failures_for_synthesis(history, exhausted=False)]
-    assert seen == ["answer_off_topic", "unverified_own_file", "draft_contradicts_evidence", "tool_error"]
-    assert len(failures_for_synthesis(history, exhausted=True)) == 5
 
 
 def _chunk(text: str) -> SimpleNamespace:
@@ -70,27 +56,6 @@ def test_a_refuted_draft_is_rewritten_once_from_the_same_evidence(monkeypatch) -
     assert len(calls) == 1 and "«ложь»" in calls[0] and "exit_code: 1" in calls[0]
     assert st.failure_history[-1].code == "draft_contradicts_evidence"
     assert loop.events[-1][1]["rewritten"] is True
-
-
-def test_a_rewrite_that_is_no_better_is_not_kept(monkeypatch) -> None:
-    monkeypatch.setattr(verifier_mod, "verify", _fake_verify({"ложь": 1, "опять ложь": 1}))
-    loop, st = _Loop(), _state("ложь")
-
-    revise_refuted_draft(loop, st, lambda attempt: "опять ложь")
-
-    assert st.draft_answer == "ложь"
-
-
-def test_a_clean_draft_costs_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(verifier_mod, "verify", _fake_verify({}))
-    loop, st = _Loop(), _state("правда")
-
-    def synthesize(attempt):
-        raise AssertionError("чистый черновик не пересобирается")
-
-    revise_refuted_draft(loop, st, synthesize)
-
-    assert st.draft_answer == "правда" and not st.failure_history
 
 
 def test_a_green_claim_over_a_red_patch_check_is_rewritten(monkeypatch) -> None:

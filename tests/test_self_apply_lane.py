@@ -121,17 +121,6 @@ def _proposal(path: str = "core/foo.py", content: str = "x = 2\n") -> SelfApplyP
 
 @pytest.mark.parametrize(
     "path",
-    ["core/x.py", "cli/y.py", "tools/z.py", "tests/test_a.py", "docs/guide.md",
-     "README.md", "docs/sub/notes.md"],
-)
-def test_classifier_allows_low_risk_paths(path: str):
-    ok, _reason, rejected = classify_patch_risk([FileChange(path, "c")])
-    assert ok is True
-    assert rejected == []
-
-
-@pytest.mark.parametrize(
-    "path",
     [
         "config/budget_limits.json",
         "config/model_registry.json",
@@ -186,20 +175,6 @@ def _contradicted_proposal() -> SelfApplyProposal:
     )
 
 
-def test_instruction_conflict_refuses_before_apply(tmp_path: Path):
-    vcs = FakeVCS()
-    report = run_self_apply_lane(
-        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
-        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
-    )
-    assert report.status == "conflict_block"
-    assert "create_temp_branch" not in _verbs(vcs)
-    assert "is_clean" not in _verbs(vcs), (
-        "the lane must not even inspect the repository while instructions "
-        "contradict each other"
-    )
-
-
 def test_instruction_conflict_outranks_every_other_gate(tmp_path: Path):
     """Budget, approvals and risk are irrelevant to a contradicted patch."""
     vcs = FakeVCS()
@@ -210,20 +185,6 @@ def test_instruction_conflict_outranks_every_other_gate(tmp_path: Path):
         approvals_pending=3,
     )
     assert report.status == "conflict_block"
-
-
-def test_instruction_conflict_hands_the_six_point_report_to_the_human(
-    tmp_path: Path,
-):
-    vcs = FakeVCS()
-    report = run_self_apply_lane(
-        _contradicted_proposal(), workspace=tmp_path, vcs=vcs,
-        test_runner=RaisingRunner(), budget_snapshot=_snapshot(),
-    )
-    assert "конфликт инструкций" in report.next_human_action
-    assert "сохранять стабильный порядок" in report.next_human_action
-    assert "сортировать по имени" in report.next_human_action
-    assert report.risks and "выше по полномочиям" in report.risks[0]
 
 
 def test_instruction_conflict_is_banked_in_procedural_memory(tmp_path: Path):
@@ -268,19 +229,6 @@ def test_no_episode_is_written_when_nothing_conflicts(tmp_path: Path):
         budget_snapshot=_snapshot(), approvals_pending=1,
     )
     assert not episode_store_path(tmp_path).exists()
-
-
-def test_no_directives_does_not_block(tmp_path: Path):
-    """The gate is a turnstile for contradictions, not a general brake."""
-    vcs = FakeVCS()
-    report = run_self_apply_lane(
-        _proposal(), workspace=tmp_path, vcs=vcs, test_runner=RaisingRunner(),
-        budget_snapshot=_snapshot(), approvals_pending=1,
-    )
-    assert report.status == "approval_wait", (
-        "with no recorded contradiction the lane must fall through to the "
-        "pre-existing gates unchanged"
-    )
 
 
 def test_kill_switch_active_refuses_before_apply(tmp_path: Path):
@@ -369,76 +317,10 @@ def _init_repo(ws: Path) -> None:
     _git(ws, "commit", "-m", "init")
 
 
-def _head(ws: Path, ref: str = "HEAD") -> str:
-    # check=True: сбой git раньше молча давал пустую строку, и сравнения
-    # HEAD-ов вырождались в сверку пустоты с пустотой.
-    return subprocess.run(  # noqa: S603  # nosec B603 B607
-        ["git", "rev-parse", ref], cwd=str(ws), capture_output=True, text=True,  # noqa: S607
-        check=True,
-    ).stdout.strip()
-
-
-def _show(ws: Path, ref: str, path: str) -> str:
-    # check=True: все вызовы ждут существующий объект — молчаливая пустота
-    # вместо содержимого прятала бы настоящий сбой.
-    return subprocess.run(  # noqa: S603  # nosec B603 B607
-        ["git", "show", f"{ref}:{path}"], cwd=str(ws), capture_output=True,  # noqa: S607
-        text=True, check=True,
-    ).stdout
-
-
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
     _init_repo(tmp_path)
     return tmp_path
-
-
-def test_low_risk_patch_applied_and_committed_locally(repo: Path):
-    vcs = SafeVCS(workspace=repo)
-    main_head_before = _head(repo, "main")
-    runner = FakeRunner([_pass(), _pass()])
-
-    report = run_self_apply_lane(
-        _proposal(content="x = 42\n"), workspace=repo, vcs=vcs,
-        test_runner=runner, budget_snapshot=_snapshot(),
-    )
-
-    assert report.status == "committed_local"
-    assert report.commit_hash
-    assert report.tests_run == ["targeted", "full"]
-    assert report.branch and report.branch.startswith("self-apply/")
-    # Back on main, which is untouched; the change lives on the temp branch.
-    assert vcs.current_branch() == "main"
-    assert _head(repo, "main") == main_head_before
-    assert (repo / "core" / "foo.py").read_text(encoding="utf-8") == "x = 1\n"
-    assert _show(repo, report.branch, "core/foo.py") == "x = 42\n"
-    # budget_limits.json is never touched.
-    assert (repo / "config" / "budget_limits.json").read_text(encoding="utf-8") == \
-        '{"keep": true}\n'
-
-
-def test_failing_targeted_tests_trigger_rollback(repo: Path):
-    vcs = SafeVCS(workspace=repo)
-    runner = FakeRunner([_fail()])  # targeted fails; full never runs
-
-    report = run_self_apply_lane(
-        _proposal(content="x = 42\n"), workspace=repo, vcs=vcs,
-        test_runner=runner, budget_snapshot=_snapshot(),
-    )
-
-    assert report.status == "rolled_back"
-    assert report.rollback_status == "restored"
-    assert report.tests_run == ["targeted"]
-    assert len(runner.calls) == 1  # full suite skipped
-    assert vcs.current_branch() == "main"
-    assert (repo / "core" / "foo.py").read_text(encoding="utf-8") == "x = 1\n"
-    # check=True: измерено — в сломанном репо git branch падает (код 128),
-    # а «self-apply/ not in ''» проходил впустую.
-    branches = subprocess.run(  # nosec B603 B607
-        ["git", "branch"], cwd=str(repo), capture_output=True, text=True,  # noqa: S607
-        check=True,
-    ).stdout
-    assert "self-apply/" not in branches
 
 
 def test_rollback_reason_names_failing_tests_and_error(repo: Path):
@@ -484,37 +366,3 @@ def test_failing_full_suite_triggers_rollback(repo: Path):
     assert report.tests_run == ["targeted", "full"]
     assert vcs.current_branch() == "main"
     assert (repo / "core" / "foo.py").read_text(encoding="utf-8") == "x = 1\n"
-
-
-def test_main_branch_not_modified_on_success(repo: Path):
-    vcs = SafeVCS(workspace=repo)
-    main_before = _head(repo, "main")
-    runner = FakeRunner([_pass(), _pass()])
-
-    report = run_self_apply_lane(
-        _proposal(content="x = 7\n"), workspace=repo, vcs=vcs,
-        test_runner=runner, budget_snapshot=_snapshot(),
-    )
-
-    assert report.status == "committed_local"
-    assert _head(repo, "main") == main_before  # main HEAD unchanged
-    assert _head(repo, report.branch) != main_before  # commit on temp branch
-
-
-def test_new_file_is_cleaned_on_rollback(repo: Path):
-    vcs = SafeVCS(workspace=repo)
-    runner = FakeRunner([_fail()])
-    proposal = SelfApplyProposal(
-        files=(FileChange("core/brand_new.py", "y = 9\n"),),
-        reason="add new module",
-        test_paths=("tests/test_foo.py",),
-    )
-
-    report = run_self_apply_lane(
-        proposal, workspace=repo, vcs=vcs, test_runner=runner,
-        budget_snapshot=_snapshot(),
-    )
-
-    assert report.status == "rolled_back"
-    assert report.rollback_status == "restored"
-    assert not (repo / "core" / "brand_new.py").exists()

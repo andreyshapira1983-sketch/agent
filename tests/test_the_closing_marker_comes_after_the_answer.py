@@ -32,15 +32,6 @@ SYNTH = (
 )
 
 
-def _events(log_dir: Path) -> list[str]:
-    out: list[str] = []
-    for path in sorted(log_dir.glob("trace_*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                out.append(json.loads(line).get("event", ""))
-    return out
-
-
 def _run_turn(tmp_path: Path, *, verbose: bool) -> None:
     (tmp_path / "doc.txt").write_text("alpha beta\n", encoding="utf-8")
     llm = FakeLLM(responses=[PLAN, SYNTH])
@@ -54,14 +45,6 @@ def _run_turn(tmp_path: Path, *, verbose: bool) -> None:
         procedural_store=ProceduralMemoryStore(tmp_path / "pr.jsonl"),
     )
     agent.run(user_question="What is in doc.txt?", file_hint="doc.txt")
-
-
-def test_procedural_memory_update_is_the_last_event_and_comes_after_respond(tmp_path: Path):
-    _run_turn(tmp_path, verbose=False)
-
-    events = _events(tmp_path / "logs")
-    assert events[-1] == "procedural_memory_update", events[-5:]
-    assert events.index("respond") < events.index("episodic_memory_write") < events.index("procedural_memory_update")
 
 
 def test_the_drivers_wait_ends_on_the_loggers_console_after_the_answer(tmp_path: Path, capsys):

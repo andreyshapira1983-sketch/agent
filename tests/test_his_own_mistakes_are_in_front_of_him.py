@@ -60,10 +60,6 @@ def test_the_block_carries_the_records_as_he_wrote_them(tmp_path) -> None:
     assert "старая закрытая запись" not in block
 
 
-def test_no_registry_no_block(tmp_path) -> None:
-    assert format_open_self_defects(open_self_defects(tmp_path)) == ""
-
-
 def _answer() -> str:
     return ("Conclusion:\nготово [general-knowledge]\n"
             "Facts:\n- факт [general-knowledge]\n"

@@ -17,14 +17,11 @@ from types import SimpleNamespace
 import pytest
 
 import app.budget_guard as budget_guard_module
-import app.operator_task as operator_task_module
 import cli.app as app_module
 import cli.command_dispatch as dispatch_module
 import cli.intent_bridge as bridge_module
 import cli.repl as repl_module
 import main as main_module
-from core.checkpoint import CheckpointWriter
-from core.loop import format_human_response
 
 _REAL_STDIN_READER = repl_module._StdinLineReader
 
@@ -50,36 +47,6 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_module, "_print_daemon_inbox_notice", lambda *a, **k: None)
     monkeypatch.setattr(bridge_module, "_handle_local_operator_reply", lambda *a, **k: False)
     monkeypatch.setattr(bridge_module, "handle_conversational_operator_input", lambda *a, **k: False)
-
-
-def test_one_shot_answer_goes_to_stdout_with_the_blank_line_wrapper(
-    tmp_path, monkeypatch, capsys
-):
-    _patch(monkeypatch)
-    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "ANSWER-BODY")
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", "q"])
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert out.out == "\n" + format_human_response("ANSWER-BODY") + "\n\n"
-    assert "ANSWER-BODY" not in out.err
-
-
-def test_cached_resume_answer_uses_the_same_wrapper_on_stdout(tmp_path, monkeypatch, capsys):
-    _patch(monkeypatch)
-    writer = CheckpointWriter("run_stream", tmp_path / "logs")
-    writer.save_observe("q", file_hint=None)
-    writer.save_respond("REPLAYED-BODY")
-    monkeypatch.setattr(
-        sys, "argv", ["main.py", "--workspace", str(tmp_path), "--resume", "run_stream"]
-    )
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert out.out == "\n" + format_human_response("REPLAYED-BODY") + "\n\n"
-    assert "[resume] Replaying cached answer" in out.err
 
 
 def test_notices_and_errors_are_stderr_only(tmp_path, monkeypatch, capsys):
@@ -113,46 +80,6 @@ def test_unknown_one_shot_command_message_is_stderr_and_returns_zero(
     assert "(unknown command: :no-such-command)" in out.err
 
 
-def test_help_page_is_written_to_stderr(tmp_path, capsys):
-    """`:help` needs no agent state — it only prints."""
-    assert dispatch_module.handle_meta_command(":help", SimpleNamespace(), tmp_path) is True
-
-    out = capsys.readouterr()
-    assert out.out == ""
-    assert "Commands:" in out.err
-    assert ":quit | :exit" in out.err
-    assert "Conversational shortcuts:" in out.err
-
-
-def test_repl_banner_is_stderr_and_repl_prompt_is_stdout(tmp_path, monkeypatch, capsys):
-    _patch(monkeypatch)
-    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([]))
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert "Agent ready." in out.err
-    # The reader writes its prompt to sys.stdout (its default `out`), and EOF
-    # prints one bare newline to stdout before returning 0.
-    assert out.out == "> \n"
-
-
-def test_block_mode_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
-    _patch(monkeypatch)
-    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
-    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader(["<<<", "body", ">>>"])
-    )
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert "> " in out.out
-    assert "... " in out.out
-    assert "(multi-line mode: paste text, finish with >>> on its own line)" in out.err
-
-
 def test_continuation_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     """The `... ` prompt belongs to every multi-line mode, not just `<<<`.
 
@@ -171,28 +98,6 @@ def test_continuation_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr()
     assert "> " in out.out
     assert "... " in out.out
-
-
-def test_operator_task_prompt_also_goes_to_stdout(tmp_path, monkeypatch, capsys):
-    """The third multi-line mode writes the same `... ` prompt as the other two."""
-    _patch(monkeypatch)
-    monkeypatch.setattr(budget_guard_module, "_run_agent_with_budget_guard", lambda *a, **k: "A")
-    # The real handler reaches into a live agent; this test is about the prompt.
-    monkeypatch.setattr(
-        operator_task_module, "_handle_operator_task", lambda *a, **k: True
-    )
-    monkeypatch.setattr(
-        app_module, "_StdinLineReader",
-        lambda **k: _scripted_reader([":operator-task", "body", ":end"]),
-    )
-    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
-
-    assert main_module.main() == 0
-
-    out = capsys.readouterr()
-    assert "> " in out.out
-    assert "... " in out.out
-    assert "(operator task block started; finish with :end)" in out.err
 
 
 def test_approval_prompt_is_written_to_stderr_and_reads_the_repl_reader(

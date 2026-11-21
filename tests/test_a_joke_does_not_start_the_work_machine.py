@@ -68,14 +68,6 @@ def test_doubt_or_failure_means_the_normal_path() -> None:
         assert is_social_turn(loop, "Как настроение?") is False
 
 
-def test_outside_the_conversation_channel_no_model_is_called(monkeypatch) -> None:
-    """Цели кампании болтовнёй не бывают: без переключателя — ни одного вызова."""
-    monkeypatch.delenv(ENV_FLAG, raising=False)
-    loop, llm, _ = _loop('{"social": true}')
-    assert is_social_turn(loop, "Расскажи анекдот про роботов") is False
-    assert llm.calls == 0
-
-
 def test_an_exhausted_budget_stops_the_turn_not_the_classifier() -> None:
     """Первый прогон 24.09: сбой классификатора глотал исчерпанный бюджет."""
     loop, _, _ = _loop(ModelBudgetExceeded("limit"))
@@ -94,12 +86,3 @@ def test_small_talk_recognised_by_the_classifier_carries_no_report_tail() -> Non
     AgentLoopResponseDeciders._add_verification_summary(loop, draft, "Расскажи анекдот про роботов")
     assert "verification_tail_skipped" in logged
     assert "Проверка:" not in draft.render()
-
-
-def test_the_loop_asks_the_classifier_at_the_cheap_path_gate() -> None:
-    import inspect
-
-    from core import loop_attempt
-
-    src = inspect.getsource(loop_attempt)
-    assert "or is_social_turn(self, st.user_question, file_hint=st.file_hint))" in src

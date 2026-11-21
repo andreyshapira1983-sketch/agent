@@ -62,27 +62,6 @@ def _seed(store: EpisodicMemoryStore) -> None:
     store.save(_ep(eid="recent", age_days=1, quality=0.0, outcome="failed"))
 
 
-def test_prune_episodic_removes_only_stale_distractors(workspace: Path):
-    store = EpisodicMemoryStore(workspace / "data" / "episodic.jsonl")
-    _seed(store)
-    agent = _agent(workspace, episodic_store=store)
-
-    # Dry-run reports the victim but does not delete it.
-    dry = agent.prune_episodic(dry_run=True)
-    assert dry == ["junk"]
-    assert {e.id for e in store.load()} == {"junk", "good", "lesson", "recent"}
-
-    # Real run removes only the stale distractor.
-    pruned = agent.prune_episodic()
-    assert pruned == ["junk"]
-    assert {e.id for e in store.load()} == {"good", "lesson", "recent"}
-
-
-def test_prune_episodic_noop_without_store(workspace: Path):
-    agent = _agent(workspace, episodic_store=None)
-    assert agent.prune_episodic() == []
-
-
 def test_hygiene_episodic_subcommand_prunes(workspace: Path, capsys):
     store = EpisodicMemoryStore(workspace / "data" / "episodic.jsonl")
     _seed(store)

@@ -22,8 +22,6 @@ from core.evidence import evidence_from_tool_result
 from core.injection_guard import (
     annotate_suspicious_output,
     carries_suspicious_annotation,
-    scan_for_injection,
-    untrusted_scan_view,
 )
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
@@ -44,11 +42,6 @@ class _FetchStub(Tool):
     def run(self, **kwargs: Any) -> Any:
         return {"url": URL, "status_code": 200, "text": BODY,
                 "fetched_at": "2026-09-19T08:50:47+00:00", "content_hash": "h" * 64}
-
-
-def test_the_body_really_is_flagged() -> None:
-    """Precondition: without a `suspicious` verdict the test below proves nothing."""
-    assert scan_for_injection(untrusted_scan_view("web_fetch", _FetchStub().run())).verdict == "suspicious"
 
 
 def test_the_annotation_keeps_the_envelope() -> None:

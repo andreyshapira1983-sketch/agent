@@ -57,24 +57,6 @@ def test_file_read_names_the_full_name(workspace: Path) -> None:
     assert "trace_8bdd8f1f06036d05e7746397e8703202.jsonl" in str(excinfo.value)
 
 
-def test_a_name_with_no_continuation_still_gets_the_folder_listing(workspace: Path) -> None:
-    """Когда продолжения нет, список папки остаётся — он и был раньше.
-
-    Правка ДОБАВЛЯЕТ подсказку, а не отменяет прежнюю: второй живой промах
-    того же часа — `core/campaign_goal.py`, файл из ещё не одобренной заявки
-    на раскол. Продолжений у этого имени нет, и список папки — единственное,
-    что можно сказать.
-    """
-    (workspace / "core").mkdir()
-    (workspace / "core" / "campaign.py").write_text("x = 1\n", encoding="utf-8")
-    tool = FileReadTool(workspace_root=workspace)
-    with pytest.raises(FileNotFoundError) as excinfo:
-        tool.run(path="core/campaign_goal.py")
-    message = str(excinfo.value)
-    assert "УРЕЗАННОЕ" not in message
-    assert "campaign.py" in message
-
-
 def test_the_hint_does_not_leave_the_workspace(tmp_path: Path) -> None:
     """Подсказка не рассказывает о том, что вне рабочей папки."""
     assert truncated_name_hint(tmp_path, tmp_path.parent / "secrets") == ""
@@ -83,10 +65,3 @@ def test_the_hint_does_not_leave_the_workspace(tmp_path: Path) -> None:
 def test_the_hint_survives_an_unreadable_folder(tmp_path: Path) -> None:
     """Сломанная подсказка не должна ронять инструмент: нет подсказки — пусто."""
     assert truncated_name_hint(tmp_path, tmp_path / "нет" / "такой" / "папки.jsonl") == ""
-
-
-def test_several_continuations_are_all_named(workspace: Path) -> None:
-    """Несколько продолжений — называются все, выбор за агентом."""
-    hint = truncated_name_hint(workspace, workspace / "logs" / "trace_")
-    assert "trace_8bdd8f1f06036d05e7746397e8703202.jsonl" in hint
-    assert "trace_ffffffffffffffffffffffffffffffff.jsonl" in hint

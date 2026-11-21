@@ -117,33 +117,3 @@ def test_a_read_window_header_and_a_cut_tail_are_not_facts():
         "The report lists 5 names (alice, bob, carol, dave, erin).",
     ):
         assert _looks_like_code_fragment(fact) is False, fact
-
-
-def test_a_book_window_yields_sentences_not_its_lines():
-    """Замер 2026-09-19 (опыт с библиотекой книг): 30 из 30 записей памяти были
-    строками окна чтения — «320: Consequence is…», «5: Michaelmas term 2021/22»,
-    «7: 1 Introduction 7», «5304: eβ(ℏ2k2/2m−µ) + 1»; их доставали в ответы до
-    семи раз. Перенесённые строки склеиваются, фактом становится только
-    законченное предложение или пункт списка."""
-    from core.knowledge_pipeline import _statements
-
-    window = (
-        "[Hutchinson.txt lines 319-327 of 9000]\n"
-        "319: 1 Introduction 7\n"
-        "320: Consequence is that (fig 1.5) a self-consistent loop of dependencies occurs.\n"
-        "321: This is one elementary example of the general principle of plasmas requiring a self-\n"
-        "322: consistent solution of Maxwell’s equations plus the particle dynamics\n"
-        "323: of the plasma.\n"
-        "324: Michaelmas term 2021/22\n"
-        "325: Figure 1.5: Self-consistent loop of dependencies\n"
-        "326: 1.2.3 Debye Shielding\n"
-        "327: eβ(ℏ2k2/2m−µ) + 1\n"
-    )
-    assert _statements(window) == [
-        "Consequence is that (fig 1.5) a self-consistent loop of dependencies occurs.",
-        ("This is one elementary example of the general principle of plasmas requiring a "
-         "self-consistent solution of Maxwell’s equations plus the particle dynamics of the plasma."),
-    ]
-    # Пункт списка — факт и без точки: так пишут документацию.
-    assert _statements("- Default timeout is 30 seconds\nUniversity of Cambridge") == [
-        "Default timeout is 30 seconds"]

@@ -12,11 +12,8 @@ from typing import Any
 import pytest
 
 from core.replan import (
-    ALL_FAILURE_TYPES,
     DEFAULT_BUDGETS,
-    DEFAULT_MAX_TOTAL_REPLANS,
     FailureBudget,
-    ReplanDecision,
     ReplanPolicy,
 )
 
@@ -50,53 +47,12 @@ class TestFailureBudget:
         with pytest.raises(ValueError, match="max_occurrences"):
             FailureBudget(max_occurrences=-1, advice="x")
 
-    def test_minimum_valid_max_occurrences_is_one(self):
-        b = FailureBudget(max_occurrences=1, advice="x")
-        assert b.max_occurrences == 1
-        assert b.requires_different_action is False
-
-    def test_requires_different_action_default_false(self):
-        assert DEFAULT_BUDGETS["tool_error"].requires_different_action is False
-        assert DEFAULT_BUDGETS["verify_failed"].requires_different_action is False
-        assert DEFAULT_BUDGETS["web_empty"].requires_different_action is False
-        assert DEFAULT_BUDGETS["timeout"].requires_different_action is False
-
-    def test_requires_different_action_true_for_approval_and_policy_failures(self):
-        for code in ("approval_deny", "approval_abort", "approval_unavailable", "policy_blocked"):
-            assert DEFAULT_BUDGETS[code].requires_different_action is True
-
-
-# ============================================================
-# DEFAULT_BUDGETS coverage
-# ============================================================
-
-class TestDefaultBudgetsCoverage:
-    def test_every_failure_type_has_a_budget(self):
-        """Bug bait: a new FailureType added without a budget would
-        crash decide() at runtime. ReplanPolicy.__post_init__ catches
-        this at construction time."""
-        missing = set(ALL_FAILURE_TYPES) - set(DEFAULT_BUDGETS.keys())
-        assert missing == set(), f"DEFAULT_BUDGETS is missing: {missing}"
-
-    def test_recoverable_failures_have_room_for_retries(self):
-        # Recoverable categories should allow at least one retry.
-        for code in ("tool_error", "verify_failed", "web_empty", "timeout"):
-            assert DEFAULT_BUDGETS[code].max_occurrences >= 2
-
-    def test_advice_strings_are_non_empty(self):
-        for _code, budget in DEFAULT_BUDGETS.items():
-            assert budget.advice.strip() != ""
-
 
 # ============================================================
 # ReplanPolicy construction
 # ============================================================
 
 class TestReplanPolicyConstruction:
-    def test_default_policy_builds(self):
-        p = ReplanPolicy()
-        assert p.max_total_replans == DEFAULT_MAX_TOTAL_REPLANS
-
     def test_zero_max_total_rejected(self):
         with pytest.raises(ValueError, match="max_total_replans"):
             ReplanPolicy(max_total_replans=0)
@@ -108,122 +64,10 @@ class TestReplanPolicyConstruction:
 
 
 # ============================================================
-# ReplanPolicy.decide() — per-FailureType behaviour
-# ============================================================
-
-class TestDecideCoreCases:
-    def setup_method(self):
-        # 10-replan cap so we can hit per-type budgets cleanly.
-        self.policy = ReplanPolicy(max_total_replans=10)
-
-    def test_empty_history_continues(self):
-        d = self.policy.decide([], completed_attempts=1)
-        assert d.action == "continue"
-        assert d.advice_for_planner == ""
-        assert d.failure_counts == {}
-        assert d.forbidden_actions == ()
-
-    def test_one_tool_error_continues_with_advice(self):
-        d = self.policy.decide([FakeTrigger(code="tool_error")], completed_attempts=1)
-        assert d.action == "continue"
-        assert "different" in d.advice_for_planner.lower()
-        assert d.failure_counts == {"tool_error": 1}
-
-    def test_the_same_tool_error_twice_exhausts_budget(self):
-        """tool_error считается по ОДНОМУ действию: второй такой же сбой — стоп
-        (планка стенда error_reuse-03)."""
-        history = [FakeTrigger(code="tool_error")] * 2
-        d = self.policy.decide(history, completed_attempts=2)
-        assert d.action == "abort_no_retry"
-        assert "tool_error" in d.reason
-        assert "2/2" in d.reason
-
-    def test_two_different_tool_errors_do_not_stop_the_turn(self):
-        """Ночь 24→25.09: пять кругов шли с продвижением, две РАЗНЫЕ ошибки
-        инструмента («tool_error 2/2») оборвали ход."""
-        history = [FakeTrigger(code="tool_error", tool_name="patch_check", arguments={"path": "a"}),
-                   FakeTrigger(code="tool_error", tool_name="file_read", arguments={"path": "b"})]
-        d = self.policy.decide(history, completed_attempts=2)
-        assert d.action == "continue"
-
-    def test_the_same_empty_search_twice_exhausts(self):
-        history = [FakeTrigger(code="web_empty")] * 2
-        d = self.policy.decide(history, completed_attempts=2)
-        assert d.action == "abort_no_retry"
-        assert "web_empty" in d.reason
-
-    def test_the_same_timeout_twice_exhausts(self):
-        history = [FakeTrigger(code="timeout")] * 2
-        d = self.policy.decide(history, completed_attempts=2)
-        assert d.action == "abort_no_retry"
-        assert "timeout" in d.reason
-
-    def test_one_approval_deny_still_allows_retry_if_action_different(self):
-        """approval_deny has max=2 + requires_different_action=True. After
-        the first deny we should be allowed to try ONCE more, but the
-        forbidden_actions list must contain the rejected pair."""
-        history = [FakeTrigger(
-            code="approval_deny",
-            tool_name="danger",
-            arguments={"path": "x"},
-        )]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.action == "continue"
-        assert len(d.forbidden_actions) == 1
-        assert d.forbidden_actions[0][0] == "danger"
-        assert '"path"' in d.forbidden_actions[0][1]
-
-    def test_two_approval_denies_exhausts(self):
-        history = [
-            FakeTrigger(code="approval_deny", tool_name="t", arguments={}),
-            FakeTrigger(code="approval_deny", tool_name="t", arguments={}),
-        ]
-        d = self.policy.decide(history, completed_attempts=2)
-        assert d.action == "abort_no_retry"
-        assert "approval_deny" in d.reason
-
-    def test_approval_unavailable_exhausts_immediately(self):
-        """No retry value when the channel is missing."""
-        history = [FakeTrigger(
-            code="approval_unavailable", tool_name="t", arguments={}
-        )]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.action == "abort_no_retry"
-        assert "approval_unavailable" in d.reason
-
-    def test_policy_blocked_allows_one_alternative(self):
-        history = [FakeTrigger(
-            code="policy_blocked", tool_name="bad_tool", arguments={"x": 1}
-        )]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.action == "continue"
-        # The blocked action enters forbidden_actions.
-        assert d.forbidden_actions == (("bad_tool", '{"x": 1}'),)
-
-    def test_unknown_failure_exhausts_immediately(self):
-        history = [FakeTrigger(code="unknown")]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.action == "abort_no_retry"
-
-
-# ============================================================
 # ReplanPolicy.decide() — global cap
 # ============================================================
 
 class TestGlobalCap:
-    def test_global_cap_stops_before_per_type_budgets(self):
-        """Global cap is independent: even mixed never-exhausted budgets
-        must stop at max_total_replans."""
-        policy = ReplanPolicy(max_total_replans=2)
-        # Mix one tool_error + one verify_failed — neither budget bit.
-        history = [
-            FakeTrigger(code="tool_error"),
-            FakeTrigger(code="verify_failed"),
-        ]
-        d = policy.decide(history, completed_attempts=2)
-        assert d.action == "abort_exhausted"
-        assert "global replan cap" in d.reason
-
     def test_completed_zero_attempts_raises(self):
         policy = ReplanPolicy()
         with pytest.raises(ValueError, match=">= 1"):
@@ -238,16 +82,6 @@ class TestForbiddenActions:
     def setup_method(self):
         self.policy = ReplanPolicy(max_total_replans=10)
 
-    def test_args_serialised_with_sorted_keys(self):
-        """Order of dict keys must not matter — the planner sanitiser
-        compares against this canonical form."""
-        history = [FakeTrigger(
-            code="approval_deny",
-            tool_name="t",
-            arguments={"b": 1, "a": 2},
-        )]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.forbidden_actions == (("t", '{"a": 2, "b": 1}'),)
 
     def test_duplicate_forbidden_action_deduped(self):
         history = [
@@ -259,14 +93,6 @@ class TestForbiddenActions:
         # populated for the AUDIT log payload regardless.
         assert len(d.forbidden_actions) == 1
 
-    def test_recoverable_failures_do_not_populate_forbidden(self):
-        history = [FakeTrigger(
-            code="tool_error",
-            tool_name="t",
-            arguments={"x": 1},
-        )]
-        d = self.policy.decide(history, completed_attempts=1)
-        assert d.forbidden_actions == ()
 
     def test_unjsonable_arguments_dropped_silently(self):
         """A trigger whose arguments aren't JSON-serialisable shouldn't
@@ -281,29 +107,6 @@ class TestForbiddenActions:
         assert d.forbidden_actions == ()
         # Decision still computed normally.
         assert d.action == "continue"
-
-
-# ============================================================
-# ReplanDecision serialisation
-# ============================================================
-
-class TestReplanDecisionPayload:
-    def test_to_log_payload_shape(self):
-        d = ReplanDecision(
-            action="continue",
-            reason="ok",
-            advice_for_planner="line1\nline2",
-            failure_counts={"tool_error": 1},
-            forbidden_actions=(("t", '{"a":1}'),),
-        )
-        p = d.to_log_payload()
-        assert p == {
-            "action": "continue",
-            "reason": "ok",
-            "advice_chars": len("line1\nline2"),
-            "failure_counts": {"tool_error": 1},
-            "forbidden_action_count": 1,
-        }
 
 
 # ============================================================

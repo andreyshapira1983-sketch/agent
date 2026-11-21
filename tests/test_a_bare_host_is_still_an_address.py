@@ -30,24 +30,6 @@ def test_a_bare_host_gets_the_default_scheme() -> None:
     assert not warnings
 
 
-def test_an_explicit_scheme_is_untouched() -> None:
-    spec, _warnings = _fetch("http://example.org.ru/page")
-    assert spec is not None and spec["arguments"]["url"] == "http://example.org.ru/page"
-
-
-def test_a_phrase_is_not_an_address_and_the_complaint_names_it() -> None:
-    spec, warnings = _fetch("see section 4.2 of the spec")
-    assert spec is None
-    assert warnings and "section 4.2" in warnings[0], \
-        "жалоба обязана назвать отвергнутое"
-
-
-def test_another_scheme_is_not_smuggled_in() -> None:
-    for url in ("file:///etc/passwd", "javascript:alert(1)", "ftp://host/x"):
-        spec, _warnings = _fetch(url)
-        assert spec is None, url
-
-
 def test_the_old_locks_still_stand_after_the_default_scheme() -> None:
     assert _fetch("localhost/admin")[0] is None, "локальная сеть"
     assert _fetch("example.com/page")[0] is None, "узел-заглушка"

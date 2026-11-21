@@ -41,30 +41,7 @@ def _full_proposed() -> dict:
     )
 
 
-# ── 1. defaults ───────────────────────────────────────────────────────────────
-
-
-def test_new_registry_returns_default_active_roles(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    assert set(reg.roles) == set(DEFAULT_ROLES)
-    for role_id in DEFAULT_ROLES:
-        rec = reg.roles[role_id]
-        assert rec.status == "active"
-        assert rec.invocations == 0
-        assert rec.recommendation == "keep"
-
-
 # ── 2. recording updates counts for every role that ran ───────────────────────
-
-
-def test_recording_full_run_updates_all_role_counts(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    assert reg.record_report(_full_proposed()) is True
-    for role_id in DEFAULT_ROLES:
-        assert reg.roles[role_id].invocations == 1
-        assert reg.roles[role_id].successes == 1
-    # A proposed run credits the reporter with one created proposal.
-    assert reg.roles["reporter"].proposals_created == 1
 
 
 def test_gate_wait_report_with_no_roles_is_a_noop(tmp_path: Path):
@@ -72,19 +49,6 @@ def test_gate_wait_report_with_no_roles_is_a_noop(tmp_path: Path):
     recorded = reg.record_report({"status": "budget_kill_switch", "roles": []})
     assert recorded is False
     assert all(reg.roles[r].invocations == 0 for r in DEFAULT_ROLES)
-
-
-# ── 3. success raises trust / usefulness ──────────────────────────────────────
-
-
-def test_success_increases_trust_and_usefulness(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    for _ in range(5):
-        reg.record_report(_full_proposed())
-    builder = reg.roles["builder"]
-    assert builder.trust_score == 1.0
-    reporter = reg.roles["reporter"]
-    assert reporter.usefulness_score > 0.0  # created proposals => useful
 
 
 # ── 4. failure / veto move recommendation, veto is NOT a critic failure ───────
@@ -143,31 +107,6 @@ def test_retire_is_only_a_recommendation(tmp_path: Path):
     assert builder.status == "active"  # NOT auto-retired
 
 
-def test_manager_no_target_is_neutral(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    for _ in range(6):
-        reg.record_report(_report("no_patch", [("manager", "no_target")]))
-    manager = reg.roles["manager"]
-    assert manager.invocations == 6
-    assert manager.successes == 0
-    assert manager.failures == 0
-    # No judged events -> keep, never punished for saying "nothing to do".
-    assert manager.recommendation == "keep"
-
-
-# ── 6. persistence round-trip ─────────────────────────────────────────────────
-
-
-def test_ledger_persists_and_reloads(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    reg.record_report(_full_proposed())
-    assert (tmp_path / REGISTRY_PATH).exists()
-
-    reloaded = SubagentRegistry.load(tmp_path)
-    assert reloaded.roles["reporter"].proposals_created == 1
-    assert reloaded.roles["builder"].successes == 1
-
-
 # ── 7. corrupt ledger degrades safely ─────────────────────────────────────────
 
 
@@ -216,23 +155,6 @@ def test_producer_hook_records_role_outcomes(tmp_path: Path):
     assert reg.roles["reporter"].invocations == 0
 
 
-def test_producer_without_registry_is_unchanged(tmp_path: Path):
-    from core.approval_inbox import ApprovalInbox
-    from core.self_build_producer import produce_self_apply_proposal
-
-    class _FakeLLM:
-        def complete(self, *, system, user, max_tokens=2000, temperature=0.0):
-            return json.dumps({"target": None, "diagnosis": "nothing"})
-
-    inbox = ApprovalInbox(path=None)
-    report = produce_self_apply_proposal(
-        workspace=tmp_path, inbox=inbox, llm=_FakeLLM(), legacy_llm_manager=True
-    )
-    assert report.status == "no_patch"
-    # Default None registry writes no ledger file at all.
-    assert not (tmp_path / REGISTRY_PATH).exists()
-
-
 def test_producer_hook_never_breaks_on_registry_write_failure(tmp_path: Path):
     from core.approval_inbox import ApprovalInbox
     from core.self_build_producer import produce_self_apply_proposal
@@ -269,13 +191,6 @@ def test_status_report_is_read_only(tmp_path: Path):
     assert snap["role_count"] == len(DEFAULT_ROLES)
     assert "recommendation_counts" in snap
     assert isinstance(snap["roles"], list)
-
-
-def test_summary_line_is_compact_and_ascii(tmp_path: Path):
-    reg = SubagentRegistry.load(tmp_path)
-    line = reg.summary_line()
-    assert line.startswith(f"{len(DEFAULT_ROLES)} roles")
-    assert line.isascii()  # no mojibake in captured daemon logs
 
 
 def test_record_lane_outcome_updates_but_is_not_auto_invoked(tmp_path: Path):

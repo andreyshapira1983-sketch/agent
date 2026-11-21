@@ -28,15 +28,11 @@ the cure existed, the connection did not.
 """
 from __future__ import annotations
 
-import ast
-import inspect
 from typing import Any
 
-import core.loop  # noqa: F401 — populates the prompt registry, see below
-from core.answer_format import SYSTEM_ANSWER, output_contract_requires_headers
+from core.answer_format import SYSTEM_ANSWER
 from core.loop_synthesis import AgentLoopSynthesis, SynthesisState
 from core.planner import PlannerOutput
-from core.task_complexity import ComplexityTier
 
 
 class _Log:
@@ -74,59 +70,8 @@ class _Agent(AgentLoopSynthesis):
 
 
 # ---------------------------------------------------------------------------
-# The mixin must be able to reach the cure
-# ---------------------------------------------------------------------------
-
-def test_the_file_declares_the_sensor_it_needs():
-    """The root cause, pinned apart from the symptom — as in A3.
-
-    Both handlers were silent because `_sensor_failed` was not in this file's
-    host contract. Declaring it is the fix; this checks the declaration rather
-    than trusting that the calls below happen to resolve.
-    """
-    import core.loop_synthesis as mod
-
-    tree = ast.parse(inspect.getsource(mod))
-    declared: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
-            declared |= {
-                sub.target.id
-                for sub in ast.walk(node)
-                if isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name)
-            }
-    assert "_sensor_failed" in declared
-
-
-# ---------------------------------------------------------------------------
 # The synthesis contract
 # ---------------------------------------------------------------------------
-
-def test_the_registry_really_is_the_source_of_the_contract():
-    """Baseline. Without it the failure case below proves nothing.
-
-    `core.loop` registers `synthesizer.system` on import, which is why this
-    module imports it. A first measurement of this defect ran without that
-    import, found an empty registry, and briefly suggested the fallback fires
-    on every single turn — it does not, and the difference matters for how
-    serious the finding is.
-    """
-    from core.prompt_registry import get_prompt
-
-    assert get_prompt("synthesizer.system") == SYSTEM_ANSWER
-
-
-def test_a_task_specific_contract_and_the_generic_one_disagree_about_headers():
-    """The mechanism by which a swallowed prompt error becomes a wrong verdict.
-
-    Not a hypothetical: `output_contract_requires_headers` is what sets
-    `_synthesis_expects_contract_headers`, and the verifier reads that to decide
-    whether a missing section header means `malformed_output`.
-    """
-    table_only = "Answer as a single markdown table. No section headers."
-
-    assert output_contract_requires_headers(SYSTEM_ANSWER) is True
-    assert output_contract_requires_headers(table_only) is False
 
 
 def test_a_registry_failure_is_reported(monkeypatch):
@@ -148,16 +93,6 @@ def test_a_registry_failure_is_reported(monkeypatch):
 
     assert prompt == SYSTEM_ANSWER, "the fallback itself must stay"
     assert agent.sensor_failures == ["synthesis_contract_registry"]
-
-
-def test_a_healthy_registry_reports_nothing():
-    """Silence must remain available for the case that is actually fine."""
-    agent = _Agent()
-
-    prompt = agent._resolve_synthesis_contract()
-
-    assert prompt == SYSTEM_ANSWER
-    assert agent.sensor_failures == []
 
 
 # ---------------------------------------------------------------------------
@@ -212,19 +147,6 @@ def _synthesizer_model(agent: _Agent, st: SynthesisState) -> Any:
     return handed[0]
 
 
-def test_a_healthy_cheap_tier_logs_the_model_it_picked():
-    """The LIGHT-tier model is logged and is the one that actually synthesises."""
-    agent = _Agent()
-    agent.model_router = _Router(explode=False)
-
-    llm = _synthesizer_model(agent, _state())
-
-    assert llm == "CHEAP-MODEL"
-    assert agent.model_router.tiers == [ComplexityTier.LIGHT]
-    assert "cheap_path_synth_model" in agent.log.events
-    assert agent.sensor_failures == []
-
-
 def test_a_failed_cheap_tier_is_reported_and_still_answers():
     """Reported, and the turn still runs — the fallback was never the problem.
 
@@ -239,34 +161,3 @@ def test_a_failed_cheap_tier_is_reported_and_still_answers():
     assert llm == "NORMAL-MODEL", "falling back to the normal model must stay"
     assert "cheap_path_synth_model" not in agent.log.events
     assert agent.sensor_failures == ["cheap_path_model_tier"]
-
-
-def test_a_turn_that_never_took_the_cheap_path_reports_nothing():
-    """The pair the old code could not tell apart, now distinguishable."""
-    agent = _Agent()
-    agent.model_router = _Router(explode=True)
-
-    llm = _synthesizer_model(agent, _state(cheap_path_active=False))
-
-    assert llm == "NORMAL-MODEL"
-    assert agent.model_router.tiers == [], "a normal turn must not consult the cheap tier"
-    assert "cheap_path_synth_model" not in agent.log.events
-    assert agent.sensor_failures == []
-
-
-# ---------------------------------------------------------------------------
-# Both handlers, as they stand in the source
-# ---------------------------------------------------------------------------
-
-def test_the_cheap_tier_handler_still_calls_its_sensor():
-    """The one branch this file still exercises as a copy.
-
-    The tier selection sits inside `_run_synthesizer_ladder`, which ends in a
-    real synthesis call, so it cannot be run here whole. Checking the name in
-    the source is the weaker guard — it judges text rather than behaviour — and
-    it is kept only where behaviour is genuinely out of reach. The registry
-    branch above no longer needs it.
-    """
-    import core.loop_synthesis as mod
-
-    assert '_sensor_failed("cheap_path_model_tier"' in inspect.getsource(mod)

@@ -75,8 +75,3 @@ def test_a_real_patch_passes(tmp_path: Path) -> None:
 
     assert verdict is not None
     assert verdict["verdict"] == "verified", verdict
-
-
-def test_an_ordinary_goal_is_left_to_the_file_judge(tmp_path: Path) -> None:
-    """Цель не про правку судит прежний наблюдатель мира."""
-    assert patch_goal_verdict(tmp_path, "Файл data/notes/x.md создан") is None

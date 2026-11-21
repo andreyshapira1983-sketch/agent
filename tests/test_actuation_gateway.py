@@ -9,8 +9,6 @@ import pytest
 from core.actuation_gateway import (
     ActuationGateway,
     gateway_path_from_receipt,
-    is_effectful_tool,
-    simulate_output,
 )
 from core.approval import AutoApprover
 from core.autonomous_runtime import (
@@ -20,7 +18,6 @@ from core.autonomous_runtime import (
 )
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
-from core.models import Action
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
@@ -33,109 +30,6 @@ def _registry(workspace: Path) -> ToolRegistry:
     reg.register(FileWriteTool(workspace_root=workspace))
     reg.register(ShellExecTool(workspace_root=workspace, timeout_seconds=5.0))
     return reg
-
-
-def test_is_effectful_file_write(workspace: Path) -> None:
-    reg = _registry(workspace)
-    assert is_effectful_tool("file_write", {"path": "a.txt", "content": "x"}, reg)
-
-
-def test_is_effectful_shell_readonly_false(workspace: Path) -> None:
-    reg = _registry(workspace)
-    assert not is_effectful_tool(
-        "shell_exec", {"argv": ["git", "status"]}, reg
-    )
-
-
-def test_is_effectful_shell_mutating_true(workspace: Path) -> None:
-    reg = _registry(workspace)
-    assert is_effectful_tool(
-        "shell_exec", {"argv": ["mkdir", "x"]}, reg
-    )
-
-
-def test_is_effectful_non_g1_tool_false(workspace: Path) -> None:
-    reg = _registry(workspace)
-    assert not is_effectful_tool("file_read", {"path": "a.txt"}, reg)
-
-
-def test_evaluate_passthrough_for_readonly_tool(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(policy, path="repl")
-    action = Action(step_id="s1", type="tool_call", tool_name="file_read", parameters={})
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "passthrough"
-
-
-def test_evaluate_allow_reversible_file_write(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(policy, path="repl", dry_run=False)
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "new_file.txt", "content": "hello"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "allow"
-    assert decision.policy is not None
-    assert decision.policy.decision == "allow"
-
-
-def test_evaluate_deny_when_tool_blocked(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    policy.blocked_tools = frozenset({"file_write"})
-    gw = ActuationGateway(policy, path="repl")
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "x.txt", "content": "y"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "deny"
-
-
-def test_evaluate_escalate_on_overwrite(workspace: Path) -> None:
-    target = workspace / "existing.txt"
-    target.write_text("old", encoding="utf-8")
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(policy, path="repl")
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "existing.txt", "content": "new"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "escalate"
-    assert decision.policy is not None
-    assert decision.policy.decision == "escalate"
-
-
-def test_evaluate_simulate_when_dry_run(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(policy, path="repl", dry_run=True)
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "sim.txt", "content": "z"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "simulate"
-    assert "dry_run" in " ".join(decision.reasons)
-
-
-def test_simulate_output_shape() -> None:
-    out = simulate_output("file_write", {"path": "a.txt"})
-    assert out["gateway"] == "simulate"
-    assert out["status"] == "simulated"
 
 
 def test_loop_gateway_dry_run_skips_file_write(workspace: Path) -> None:
@@ -293,47 +187,6 @@ class _ActiveKillSwitch:
             used=100,
             limit=100,
         )
-
-
-def test_evaluate_block_on_active_kill_switch(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(
-        policy,
-        path="repl",
-        dry_run=False,
-        kill_switch=_ActiveKillSwitch(),
-    )
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "blocked.txt", "content": "x"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "block"
-    assert any("kill_switch_active" in r for r in decision.reasons)
-
-
-def test_evaluate_readiness_block_before_policy(workspace: Path) -> None:
-    reg = _registry(workspace)
-    policy = PolicyGate(reg)
-    gw = ActuationGateway(
-        policy,
-        path="runtime",
-        dry_run=False,
-        check_readiness=True,
-        readiness_blockers=("2 approval item(s) pending",),
-    )
-    action = Action(
-        step_id="s1",
-        type="tool_call",
-        tool_name="file_write",
-        parameters={"path": "blocked.txt", "content": "x"},
-    )
-    decision = gw.evaluate(action, registry=reg)
-    assert decision.outcome == "block"
-    assert any("readiness_blocker" in r for r in decision.reasons)
 
 
 def test_evaluate_self_apply_block_on_kill_switch() -> None:

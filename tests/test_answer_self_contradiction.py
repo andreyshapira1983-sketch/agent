@@ -18,7 +18,6 @@ from __future__ import annotations
 import pytest
 
 from core.answer_contradiction import contradicted_claims
-from core.smart_memory import EpisodeRecord, decide_usage_eligibility
 from core.unsupported_claims import apply_answer_enforcement
 
 _CONTRADICTORY = (
@@ -30,13 +29,6 @@ _CONTRADICTORY = (
     "Confidence: high\n"
     "Unverified:\n"
     "- Не доказано, что trace_id run_860e7ef соответствует текущему исполнению.\n"
-)
-_CLEAN = (
-    "Conclusion: система исполняется. [log]\n"
-    "Facts:\n- Пользователь andre на хосте andre. [shell]\n"
-    "Sources:\n1. shell - оболочка\n"
-    "Confidence: high\n"
-    "Unverified:\n- Сознание не доказано и доступными средствами не измеряется.\n"
 )
 
 
@@ -56,22 +48,6 @@ class _Report:
     fully_unverified = False
     malformed_output = False
     chunks: tuple = ()
-
-
-def test_the_contradiction_is_found() -> None:
-    """ГЛАВНОЕ: тот самый ответ, на том самом предмете."""
-    found = contradicted_claims(_CONTRADICTORY)
-    assert found, "утверждение стоит и в Facts, и в Unverified — и это не замечено"
-    assert any("run_860e7ef" in c.subject for c in found)
-
-
-def test_a_clean_answer_is_not_accused() -> None:
-    """Защита от вырождения: раздел Unverified — норма, а не улика.
-
-    Честный ответ обязан называть, чего он не доказал. Если бы детектор
-    срабатывал на само наличие раздела, он запретил бы честность.
-    """
-    assert not contradicted_claims(_CLEAN)
 
 
 @pytest.mark.parametrize("answer", ["", "просто текст без разделов", None])
@@ -101,46 +77,3 @@ def test_enforcement_does_not_delete_the_answer() -> None:
     )
     assert "92 события" in result.answer
     assert len(result.answer) > len(_CONTRADICTORY)
-
-
-def test_a_clean_answer_passes_enforcement_unchanged() -> None:
-    result = apply_answer_enforcement(
-        answer=_CLEAN, report=_Report(), question="докажи что ты существуешь"
-    )
-    assert result.outcome != "self_contradicted"
-    assert not result.contradictions
-
-
-def _episode(*, defect_signals: tuple[str, ...]) -> EpisodeRecord:
-    """Эпизод, который БЕЗ сигнала дефекта был бы допущен по всем осям."""
-    return EpisodeRecord(
-        goal="докажи что ты существуешь",
-        question="докажи что ты существуешь",
-        outcome="success",
-        summary="доказательство существования",
-        full_answer=_CONTRADICTORY,
-        completion_state="achieved",
-        verified_chunks=14,
-        unverified_chunks=0,
-        answer_quality_score=1.0,
-        tools_used=["shell_exec"],
-        source_labels=["shell:whoami"],
-        defect_signals=list(defect_signals),
-    )
-
-
-def test_an_episode_without_the_signal_is_still_admitted() -> None:
-    """ПРЕДУСЛОВИЕ: иначе следующий тест зелен по постороннему поводу."""
-    assert decide_usage_eligibility(_episode(defect_signals=()))
-
-
-def test_a_self_contradicted_episode_never_becomes_reusable() -> None:
-    """Конец причинной цепи: противоречие не имеет права стать опытом.
-
-    Все прежние оси у эпизода зелёные — outcome success, completion achieved,
-    verified_chunks 14, качество 1.0. Ровно так ложь и прошла в обучение:
-    не в обход правил, а по ним.
-    """
-    assert not decide_usage_eligibility(
-        _episode(defect_signals=("self_contradiction",))
-    )

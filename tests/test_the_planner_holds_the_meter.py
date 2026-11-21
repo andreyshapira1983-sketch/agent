@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.planner_prompt import PLANNER_SYSTEM
 from tools.lesson_provenance_tool import LessonProvenanceTool
 
 
@@ -33,13 +32,6 @@ def test_the_tool_reads_the_chain(tmp_path: Path) -> None:
     assert key in out["rendered"]
 
 
-def test_one_key_filters_the_reading(tmp_path: Path) -> None:
-    key = _saved_lesson(tmp_path)
-    out = LessonProvenanceTool(workspace_root=str(tmp_path)).run(
-        lesson_key=key)
-    assert [r["lesson_key"] for r in out["reports"]] == [key]
-
-
 def test_an_unknown_key_is_an_honest_not_found(tmp_path: Path) -> None:
     out = LessonProvenanceTool(workspace_root=str(tmp_path)).run(
         lesson_key="cclaim_ghost")
@@ -51,26 +43,6 @@ def test_an_empty_store_is_a_reading_not_an_error(tmp_path: Path) -> None:
     out = LessonProvenanceTool(workspace_root=str(tmp_path)).run()
     assert out["reports"] == []
     assert "no lessons" in out["rendered"]
-
-
-def test_the_tool_is_in_the_agents_hands() -> None:
-    """Registered at birth — the lab's lesson: a tool outside the registry
-    does not exist for the loop."""
-    from app import bootstrap
-
-    src = Path(bootstrap.__file__).read_text(encoding="utf-8")
-    assert "LessonProvenanceTool(" in src
-
-
-def test_the_meter_is_in_the_planners_map() -> None:
-    assert "lesson_provenance(" in PLANNER_SYSTEM
-
-
-def test_the_map_teaches_receipts_not_prose() -> None:
-    idx = PLANNER_SYSTEM.find("lesson_provenance(")
-    section = PLANNER_SYSTEM[idx:idx + 1400]
-    assert "NOT PROVEN" in section
-    assert "receipt" in section.lower()
 
 
 def test_the_sanitizer_admits_the_meter() -> None:

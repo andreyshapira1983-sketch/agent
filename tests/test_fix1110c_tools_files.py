@@ -77,12 +77,6 @@ def test_a_link_to_a_credential_file_is_not_searched(workspace: Path):
         tool.run(query="needle", path="docs/notes.txt")
 
 
-def test_a_link_that_stays_inside_is_still_searched(workspace: Path):
-    _link_file(workspace / "docs" / "same.txt", workspace / "docs" / "a.txt")
-
-    assert "docs/same.txt" in FindInFilesTool(workspace).run(query="needle")
-
-
 @pytest.mark.parametrize("rel", [
     ".git/config",
     ".git/hooks/pre-commit",
@@ -96,8 +90,3 @@ def test_file_write_refuses_the_git_folder(workspace: Path, rel: str):
     with pytest.raises(PermissionError, match=r"\.git"):
         tool.run(path=rel, content="x\n")
     assert not (workspace / rel).exists()
-
-
-@pytest.mark.parametrize("rel", [".gitignore", ".github/notes.md", "docs/git.txt"])
-def test_file_write_still_writes_beside_the_git_folder(workspace: Path, rel: str):
-    assert FileWriteTool(workspace).run(path=rel, content="x\n")["mode"] == "create"

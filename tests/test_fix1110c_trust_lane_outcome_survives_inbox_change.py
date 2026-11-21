@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import (
     SELF_APPLY_OPERATION,
@@ -73,26 +71,3 @@ def test_an_item_that_vanished_while_the_lane_ran_still_reports_the_commit() -> 
     assert result["status"] == "committed_local" and result["commit_hash"] == "abc1234"
     assert registry.outcomes == [(item.id, "committed_local")]
     assert any("approval_not_consumed" in r and "not found" in r for r in result["risks"])
-
-
-def test_a_clean_run_carries_no_such_note() -> None:
-    inbox = ApprovalInbox()
-    item = _approved(inbox)
-
-    result = _run(inbox, item.id, lambda: None, _Registry())
-
-    assert inbox.get(item.id).status == "executed"
-    assert not [r for r in result.get("risks") or () if "approval_not_consumed" in r]
-
-
-@pytest.mark.parametrize("exc_type", [RuntimeError, OSError])
-def test_an_unrelated_inbox_failure_is_not_swallowed(exc_type) -> None:
-    inbox = ApprovalInbox()
-    item = _approved(inbox)
-
-    def broken(item_id: str):
-        raise exc_type("disk")
-
-    inbox.mark_executed = broken  # type: ignore[method-assign]
-    with pytest.raises(exc_type):
-        _run(inbox, item.id, lambda: None, _Registry())

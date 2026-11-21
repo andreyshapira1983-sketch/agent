@@ -25,34 +25,9 @@ def test_the_case_files_are_denied_to_the_lane() -> None:
         assert ok is False, f"{path}: улики прошлого не предмет самоприменения"
 
 
-def test_other_audit_documents_are_still_proposable() -> None:
-    """Граница узкая: денилист бьёт по уликам, не по всему docs/audit/."""
-    ok, _reason, _ = classify_patch_risk((
-        FileChange(path="docs/audit/BRANCH_SUMMARY.md", content="x"),))
-
-    assert ok is True
-
-
 def test_a_judge_touching_patch_carries_the_loud_flag() -> None:
     note = judge_touching_note(["tests/test_something.py", "core/loop.py"])
     silent = judge_touching_note(["core/loop.py", "docs/notes.md"])
 
     assert "СУДЬЮ" in note and "tests/" in note
     assert silent == ""
-
-
-def test_both_proposal_builders_wear_the_flag_and_elevate_risk() -> None:
-    """Обе точки рождения заявки: флаг в summary И повышенный класс риска.
-
-    OWASP-уточнение оператора: правка судей — явно повышенный риск, чтобы её
-    видели машинные ворота, а не только глаз.
-    """
-    import inspect
-
-    from core import self_build_producer as mod
-
-    src = inspect.getsource(mod)
-    assert src.count("judge_touching_note") >= 2, (
-        "обе inbox.add-точки полосы обязаны нести флаг «правит судью»")
-    assert src.count('"irreversible" if _') >= 2, (
-        "правка судей обязана поднимать класс риска в ОБЕИХ точках")

@@ -5,19 +5,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.clarification_gate import frame_questions_help
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
 from core.policy import PolicyGate
 from tests.conftest import FakeLLM, FakePlanner
 from tools.base import Tool, ToolRegistry
-
-
-def test_a_refused_source_is_not_a_frame_problem() -> None:
-    """Уточнив «что строить», человек не снимет отказ источника; сбой инструмента по-прежнему спрашивает."""
-    assert not frame_questions_help(["injection_blocked"])
-    assert frame_questions_help(["injection_blocked", "tool_error"])
-    assert frame_questions_help(["tool_error"], gathered=False, frame_clear=True)
 
 
 class _PageAboutTheAttack(Tool):

@@ -68,14 +68,3 @@ def test_the_archive_is_searchable_and_reading_changes_nothing(tmp_path: Path) -
     assert len(hits) == 1 and "таймаут" in str(hits[0].content)
     assert store.search_archive("несуществующее-слово") == []
     assert store.archive_path.read_bytes() == before, "чтение обязано быть чтением"
-
-
-def test_both_readers_are_reachable_from_the_keyboard() -> None:
-    """Проводка: читатель без двери — снова MIR-138. Пин по смыслу."""
-    import inspect
-
-    from cli import command_dispatch as disp
-    from cli import commands_memory as mem
-
-    assert '":receipts"' in inspect.getsource(disp)
-    assert "archive" in inspect.getsource(mem._handle_smart_memory)

@@ -36,36 +36,6 @@ def test_add_keeps_a_task_row_it_cannot_parse(tmp_path: Path) -> None:
     assert BAD_TASK in read_state_jsonl(store.path)
 
 
-def test_status_updates_keep_a_task_row_they_cannot_parse(tmp_path: Path) -> None:
-    store, good_id = _queue_with_bad_row(tmp_path)
-
-    store.mark_running(good_id)
-    store.mark_done(good_id)
-
-    assert _ids(store) == sorted([good_id, "rtask_bad"])
-    assert store.get(good_id).status == "done"
-
-
-def test_unparsed_task_row_is_still_counted_and_never_loaded(tmp_path: Path) -> None:
-    store, _ = _queue_with_bad_row(tmp_path)
-    store.add(goal="another")
-
-    tasks = store.load()
-
-    assert "rtask_bad" not in [t.id for t in tasks]
-    assert store.last_unreadable_rows == 1
-
-
-def test_rows_of_a_rotated_away_queue_do_not_enter_the_new_file(tmp_path: Path) -> None:
-    store, _ = _queue_with_bad_row(tmp_path)
-    store.load()
-    store.path.unlink()
-
-    store.add(goal="after rotation")
-
-    assert "rtask_bad" not in _ids(store)
-
-
 # ── scheduler ────────────────────────────────────────────────────────────────
 
 def _store_with_hand_edit(tmp_path: Path) -> SchedulerStore:

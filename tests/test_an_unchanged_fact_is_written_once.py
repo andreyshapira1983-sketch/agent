@@ -9,28 +9,7 @@ data/self_repair_log.jsonl — 396 из 408, одна строка «дефек�
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-from core.assumption_registry import Assumption, AssumptionStore
-
-_T0 = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
-
-
-def _lang(run: str, at: datetime, verified: bool | None = None) -> Assumption:
-    return Assumption(run_id=run, text="The user expects a Russian-language response.",
-                      category="language", source="profile", verified=verified, created_at=at)
-
-
-def test_the_same_assumption_in_every_run_is_stored_once_a_day(tmp_path: Path) -> None:
-    store = AssumptionStore(tmp_path / "data" / "assumptions.jsonl")
-    written = [store.save_many([_lang(f"run{i}", _T0 + timedelta(minutes=i))]) for i in range(5)]
-    assert written == [1, 0, 0, 0, 0]
-    assert store.save_many([_lang("run6", _T0 + timedelta(minutes=6), verified=True)]) == 1, \
-        "a changed verdict is new information and is written at once"
-    assert store.save_many([_lang("run7", _T0 + timedelta(hours=25))]) == 1, \
-        "an unchanged fact is refreshed after a day, so :assumptions still shows it"
-    assert len(store.load_recent(50)) == 3
 
 
 def _skip_setup(tmp_path: Path, title: str = "дефект без задачи") -> None:

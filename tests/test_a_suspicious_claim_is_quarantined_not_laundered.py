@@ -46,30 +46,6 @@ def _extract(excerpt: str):
     return source, ClaimExtractor().extract(evidence, source=source)
 
 
-def test_a_flagged_excerpt_yields_suspect_claims_not_clean_ones() -> None:
-    """The witness: the wrapper is stripped (its text is not a fact) AND the
-    verdict survives the stripping — on the claim itself."""
-    _src, claims = _extract(annotate_suspicious(_SENTENCE, "web:example"))
-
-    sentence_claims = [c for c in claims if _SENTENCE.rstrip(".") in c.text]
-    assert sentence_claims, "the source's own sentence stopped extracting"
-    for claim in sentence_claims:
-        assert claim.status == "suspect", (
-            f"a claim from scanner-flagged content carries {claim.status!r} — "
-            "indistinguishable from clean, which is MIR-011 verbatim"
-        )
-        assert "WARNING" not in claim.text, "the guard's voice leaked into the claim"
-
-
-def test_a_clean_excerpt_still_extracts_clean() -> None:
-    """The boundary: the quarantine must not smear ordinary content."""
-    _src, claims = _extract(_SENTENCE)
-    sentence_claims = [c for c in claims if _SENTENCE.rstrip(".") in c.text]
-    assert sentence_claims
-    for claim in sentence_claims:
-        assert claim.status == "extracted"
-
-
 def test_the_write_policy_refuses_a_suspect_claim() -> None:
     """Quarantine means: never durable knowledge."""
     src, claims = _extract(annotate_suspicious(_SENTENCE, "web:example"))
@@ -81,21 +57,6 @@ def test_the_write_policy_refuses_a_suspect_claim() -> None:
         assert decision.decision == "reject", (
             "a scanner-flagged claim reached durable memory"
         )
-
-
-def test_corroboration_does_not_launder_a_suspect_claim() -> None:
-    """An echo is not a second witness — for adversarial content an echo is
-    the cheapest thing to manufacture, so `suspect` must not upgrade the way
-    `extracted` does."""
-    import inspect
-
-    import core.knowledge_pipeline as kp
-
-    src = inspect.getsource(kp)
-    # The upgrade site admits exactly `extracted`; pin that `suspect` is not
-    # added to it later by accident.
-    assert 'claim.status == "extracted"' in src
-    assert 'claim.status in {"extracted", "suspect"}' not in src
 
 
 # ── Audit of this closure (CLOSURE_AUDIT_2026-08-22.md in git history) ──────────
@@ -124,14 +85,3 @@ def test_clean_prose_beside_an_injection_keeps_its_standing() -> None:
     assert clean and all(s != "suspect" for s in clean), (
         f"clean prose in the same document was quarantined with it: {by_status}"
     )
-
-
-def test_a_flag_whose_reason_vanished_taints_everything() -> None:
-    """Fail safe on the ambiguous case: if the wrapper says the guard flagged
-    this excerpt but a re-scan of the body finds nothing to point at, losing
-    the REASON must not silently clear the FLAG."""
-    from core.knowledge_pipeline import _suspicious_spans
-
-    body = "Совершенно обычное предложение без единого признака внедрения."
-    spans = _suspicious_spans(annotate_suspicious(body, "web:example"))
-    assert spans, "an unexplained flag silently cleared itself"

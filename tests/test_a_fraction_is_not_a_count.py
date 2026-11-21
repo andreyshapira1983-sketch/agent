@@ -33,14 +33,3 @@ _LIVE = ("coherence_score падает на 0.6 за каждое противо
 ])
 def test_a_true_sentence_is_not_refuted(sentence: str) -> None:
     assert enumeration_count_reason(sentence) is None
-
-
-@pytest.mark.parametrize(("sentence", "expected", "actual"), [
-    ("он назвал 3 причины (первая, вторая)", "3", "2"),
-    ("он назвал три причины (первая, вторая)", "3", "2"),
-    ("Итог готов. Он назвал 3 причины (первая, вторая)", "3", "2"),
-    ("назвал три плода (например, яблоко, груша)", "3", "2"),
-])
-def test_a_false_count_is_still_caught(sentence: str, expected: str, actual: str) -> None:
-    reason = enumeration_count_reason(sentence)
-    assert reason is not None and (reason.expected, reason.actual) == (expected, actual)

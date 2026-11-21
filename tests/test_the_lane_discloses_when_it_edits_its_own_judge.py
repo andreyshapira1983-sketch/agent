@@ -116,21 +116,6 @@ def test_strengthening_the_judge_is_not_flagged(repo: Path) -> None:
     assert not [r for r in report.risks if "judge" in r.lower()], report.risks
 
 
-def test_a_policy_only_patch_is_not_flagged(repo: Path) -> None:
-    """Граница: без правки судьи говорить не о чем."""
-    report = run_self_apply_lane(
-        SelfApplyProposal(
-            files=(FileChange(path=_POLICY, content="x = 7\n"),),
-            reason="только политика",
-            test_paths=(_JUDGE,),
-        ),
-        workspace=repo, vcs=SafeVCS(workspace=repo),
-        test_runner=_PassingRunner(), budget_snapshot=_snapshot(),
-    )
-
-    assert report.status == "committed_local", report.reason
-    assert not [r for r in report.risks if "judge" in r.lower()], report.risks
-
 # ── и доходит ли раскрытие ДО человека ───────────────────────────────────────
 
 

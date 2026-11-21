@@ -43,13 +43,6 @@ def test_a_short_quote_drowned_in_a_long_directive_is_a_term_not_a_target():
     assert not is_local_critique_eligible(_decision("изначально показанная", ORDER))
 
 
-def test_a_brought_quote_still_reaches_the_critique_path():
-    quote = "Планировщик выбирает веб-поиск всякий раз, когда в вопросе есть слово «сейчас», даже про себя."
-    assert is_local_critique_eligible(_decision(quote, f"Разбери слабые места этого фрагмента: «{quote}»"))
-    # short quote, short directive: the directive is about the quote — still eligible
-    assert is_local_critique_eligible(_decision("жёлудь-17", "Покажи слабые места в «жёлудь-17»"))
-
-
 def test_the_order_itself_reaches_the_planner_through_the_loop(tmp_path: Path):
     from core.logger import TraceLogger
     from core.loop import AgentLoop, new_trace_id

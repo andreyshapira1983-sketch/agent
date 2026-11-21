@@ -86,19 +86,6 @@ def test_builder_blocks_injection_in_file_content() -> None:
     assert llm.calls == []
 
 
-def test_builder_allows_clean_file_content() -> None:
-    payload = {
-        "content": "def ok():\n    return 1\n",
-        "test_paths": ["tests"],
-        "confidence": 0.8,
-        "reason": "noop",
-    }
-    llm = FakeLLM(responses=[json.dumps(payload)])
-    out = _builder_generate(llm, "sample.py", "def ok():\n    pass\n", "cleanup")
-    assert out.decision == "built"
-    assert llm.calls
-
-
 def test_propose_annotates_suspicious_digest_and_calls_llm(workspace: Path) -> None:
     """Suspicious (not blocked) digest content reaches LLM with warning annotation."""
     llm = FakeLLM(

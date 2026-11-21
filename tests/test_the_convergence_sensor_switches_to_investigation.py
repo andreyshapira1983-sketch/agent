@@ -131,12 +131,3 @@ class TestInvestigationProbe:
         assert result.cycles_run == 5, goals
         # After the probe the original goal returned (half-open restore).
         assert goals[-1] == "test"
-
-    def test_default_behaviour_unchanged(self, workspace: Path, monkeypatch):
-        config = _config(convergence_window=3)  # investigate_on_repeat=False
-        result, goals = _run_traced(config, _agent(workspace), workspace, monkeypatch)
-
-        # Computed for THIS fake (identical from c1): repeat hits 3 at c3.
-        assert result.stop_reason == "converged"
-        assert result.cycles_run == 3, goals
-        assert not [g for g in goals if g.startswith(INVESTIGATION_PREFIX)]

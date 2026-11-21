@@ -34,39 +34,6 @@ def _only(monkeypatch, *providers: str) -> None:
                 monkeypatch.delenv(var, raising=False)
 
 
-def test_local_is_reached_when_every_paid_key_is_gone(monkeypatch) -> None:
-    _only(monkeypatch, "local")
-
-    assert mr._next_failover_provider(["openai", "anthropic", "huggingface"]) == "local", (
-        "все платные ключи мертвы, локальная модель настроена на этой машине — "
-        "и откат не дошёл до неё: у агента был вариант, которого он не видел"
-    )
-
-
-def test_local_never_outranks_a_paid_provider(monkeypatch) -> None:
-    """Последнее средство, а не предпочтение."""
-    _only(monkeypatch, "openai", "anthropic", "huggingface", "local")
-
-    assert mr._next_failover_provider([]) == "openai"
-    assert mr._next_failover_provider(["openai"]) == "anthropic"
-    assert mr._next_failover_provider(["openai", "anthropic"]) == "huggingface"
-
-
-def test_an_unconfigured_local_stays_out(monkeypatch) -> None:
-    """Граница: без своих переменных `local` не участвует, как и раньше."""
-    _only(monkeypatch)  # ни у кого нет учётных данных
-
-    assert mr._next_failover_provider(["openai", "anthropic", "huggingface"]) is None
-
-
-def test_a_half_configured_local_stays_out(monkeypatch) -> None:
-    """Один адрес без имени модели — не настроенный провайдер."""
-    _only(monkeypatch)
-    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080")
-
-    assert mr._next_failover_provider(["openai", "anthropic", "huggingface"]) is None
-
-
 def test_mock_is_still_excluded(monkeypatch) -> None:
     """Инвариант, который эта правка не имеет права задеть: `mock` остаётся
     вне цепочки — он входит только через AGENT_ALLOW_MOCK_ROUTING."""

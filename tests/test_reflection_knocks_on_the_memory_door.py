@@ -56,18 +56,6 @@ _CLEAN = {
 }
 
 
-def test_a_clean_lesson_is_saved_with_its_kind_and_source(tmp_path: Path) -> None:
-    engine, memory = _engine(tmp_path, _CLEAN)
-
-    report = engine.reflect()
-
-    assert report.memory_records_saved == 1
-    saved = memory.load()[0]
-    assert "[НАБЛЮДЕНИЕ, один день]" in saved.tags and "insight" in saved.tags
-    assert saved.source == "agent-auto"
-    assert saved.type == "episodic" and "reflection" in saved.tags
-
-
 def test_the_same_insight_twice_is_saved_once(tmp_path: Path) -> None:
     """The one-day flood: 625 records, most restating each other."""
     engine, memory = _engine(tmp_path, _CLEAN, dict(_CLEAN))

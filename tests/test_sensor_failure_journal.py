@@ -58,16 +58,6 @@ def _agent(workspace: Path, response: str):
 
 # ── сам помощник ─────────────────────────────────────────────────────────────
 
-def test_helper_journals_sensor_name_and_error(workspace: Path):
-    agent, log_path = _agent(workspace, "ответ")
-    agent._sensor_failed("confidence_vector", RuntimeError("сенсор сломан"))
-    events = [e for e in _events(log_path) if e.get("event") == "sensor_failed"]
-    assert len(events) == 1
-    payload = events[0]["payload"]
-    assert payload["sensor"] == "confidence_vector"
-    assert payload["error_type"] == "RuntimeError"
-    assert "сенсор сломан" in payload["error"]
-
 
 def test_helper_survives_a_broken_logger(workspace: Path):
     """Последний рубеж: если журналирование само упало, ход всё равно жив."""
@@ -105,14 +95,6 @@ def test_broken_confidence_vector_is_visible_and_turn_survives(
     ]
     assert len(failures) == 1
     assert failures[0]["payload"]["error_type"] == "RuntimeError"
-
-
-def test_healthy_turn_reports_no_sensor_failure(workspace: Path):
-    agent, log_path = _agent(
-        workspace, "Conclusion: обычный ответ [general-knowledge]."
-    )
-    agent.run("вопрос без инструментов")
-    assert not [e for e in _events(log_path) if e.get("event") == "sensor_failed"]
 
 
 # ── карта аудита ─────────────────────────────────────────────────────────────

@@ -13,18 +13,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.causal_claim_store import LessonCard, distilled_lessons, save_claim
+from core.causal_claim_store import save_claim
 from core.lesson_provenance import (
-    record_lesson_injections,
     trace_lesson_provenance,
 )
-
-
-def _card(key: str = "cclaim_test0001") -> LessonCard:
-    return LessonCard(
-        rule="rule", scope="scope", directive="directive",
-        machine_action="", evidence=(), key=key,
-    )
 
 
 def _journal_rows(tmp_path: Path) -> list[dict]:
@@ -36,53 +28,6 @@ def _journal_rows(tmp_path: Path) -> list[dict]:
         rec = json.loads(line)
         rows.append(rec.get("payload", rec))
     return rows
-
-
-def test_a_card_knows_its_claim_key(tmp_path: Path) -> None:
-    """distilled_lessons carries the store key — receipts need an identity."""
-    from tests.test_lessons_are_distilled_not_assumed import _full_ladder
-
-    key = save_claim(_full_ladder(), workspace=tmp_path, directive="d")
-    cards = distilled_lessons(tmp_path)
-    assert cards and cards[0].key == key
-
-
-def _saved_card(tmp_path: Path) -> LessonCard:
-    """A card whose key names a claim the store actually holds."""
-    from tests.test_lessons_are_distilled_not_assumed import _full_ladder
-
-    key = save_claim(_full_ladder(), workspace=tmp_path, directive="d")
-    return _card(key=key)
-
-
-def test_recording_a_delivery_proves_injection(tmp_path: Path) -> None:
-    card = _saved_card(tmp_path)
-    record_lesson_injections(tmp_path, (card,), consumer="test.builder")
-    report = trace_lesson_provenance(tmp_path, card.key)
-    link = next(lk for lk in report.links if lk.name == "injected")
-    assert link.status == "PROVEN"
-
-
-def test_no_lessons_leave_no_receipt(tmp_path: Path) -> None:
-    record_lesson_injections(tmp_path, (), consumer="test.builder")
-    assert not (tmp_path / "data" / "lesson_injections.jsonl").exists()
-
-
-def test_a_keyless_card_leaves_no_row(tmp_path: Path) -> None:
-    record_lesson_injections(
-        tmp_path, (_card(key=""),), consumer="test.builder")
-    assert not _journal_rows(tmp_path)
-
-
-def test_an_action_ref_rides_the_receipt(tmp_path: Path) -> None:
-    card = _saved_card(tmp_path)
-    record_lesson_injections(
-        tmp_path, (card,), consumer="test.builder",
-        action_ref="approval:ain_x")
-    report = trace_lesson_provenance(tmp_path, card.key)
-    link = next(lk for lk in report.links if lk.name == "acted")
-    assert link.status == "PROVEN"
-    assert "approval:ain_x" in link.refs
 
 
 def test_the_producer_leaves_the_receipt_live(tmp_path: Path) -> None:

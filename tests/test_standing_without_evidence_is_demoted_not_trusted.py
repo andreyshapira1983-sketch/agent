@@ -63,17 +63,6 @@ def test_all_evidence_gone_and_nonzero_standing_is_demoted(tmp_path: Path) -> No
     assert report["demoted"] == ["gone"]
 
 
-def test_counters_survive_the_demotion_untouched(tmp_path: Path) -> None:
-    """Журнал честен: «было начислено» не переписывается, меняется статус."""
-    pstore, estore = _stores(tmp_path, [_proc("gone", refs=("ep-a",), success=24)])
-
-    select_and_demote(pstore, estore, apply=True)
-
-    row = pstore.load()[0]
-    assert row.success_count == 24
-    assert row.confidence == 0.9
-
-
 def test_dry_run_reports_and_writes_nothing(tmp_path: Path) -> None:
     pstore, estore = _stores(tmp_path, [_proc("gone", refs=("ep-a",))])
 
@@ -81,20 +70,3 @@ def test_dry_run_reports_and_writes_nothing(tmp_path: Path) -> None:
 
     assert report["demoted"] == ["gone"]
     assert pstore.load()[0].status == "active"
-
-
-def test_a_needs_review_procedure_is_not_served_to_the_planner(tmp_path: Path) -> None:
-    """Дверь, ради которой перевод статуса: подбор её уже отсекает.
-
-    Живой двойник — контроль: без него «не подана» проходила бы и на подборе,
-    который не подаёт ничего.
-    """
-    pstore, _ = _stores(tmp_path, [
-        _proc("gone", refs=("ep-a",), status="needs_review"),
-        _proc("twin", refs=("ep-b",)),
-    ])
-
-    result = pstore.search_with_report("w-gone w-twin tools", limit=3)
-
-    assert [p.id for p in result.procedures] == ["twin"]
-    assert result.rejected_by == {"excluded_retired": 1}

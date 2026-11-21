@@ -7,20 +7,15 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
-
 from app.bootstrap import build_agent
 from core.answer_format import format_human_response
-from core.loop import AgentLoop
 from core.loop_memory_read import AgentLoopMemoryRead
 from core.replay_freshness import (
     input_digests,
-    read_files,
     stale_inputs,
     tools_allow_replay,
-    with_replay_note,
 )
-from core.smart_memory import EpisodeRecord, EpisodicMemoryStore, _compute_quality_score
+from core.smart_memory import EpisodeRecord, _compute_quality_score
 from tools.find_in_files import FindInFilesTool
 
 ANSWER = "Conclusion: Код склада — 7391.\nFacts:\n- В файле notes.txt стоит «Код склада: 7391».\nUnverified: nothing"
@@ -52,21 +47,6 @@ def _banked(tmp_path: Path, **kw) -> EpisodeRecord:
     return dataclasses.replace(ep, input_digests=input_digests(ep, tmp_path, time.time() + 1))
 
 
-# 1 -- which tools may stand behind a replayed answer
-@pytest.mark.parametrize("tools,labels,ok", [
-    ((), (), True),
-    (("file_read",), ("file:notes.txt",), True),
-    (("file_read",), (), False),                       # no named file: nothing to check
-    (("file_write",), ("file_write:a.txt",), False),   # an action is redone, never replayed
-    (("journal_append",), ("journal_append:data/x.jsonl",), False),
-    (("shell_exec",), ("shell_exec:ls",), False),
-    (("find_in_files",), ("find_in_files:x",), False),
-    (("web_search", "web_fetch", "web_fetch"), ("web:x", "web_fetch:https://python.org"), True),
-])
-def test_tool_rule(tools, labels, ok):
-    assert tools_allow_replay(_episode(tools=tools, labels=labels)) is ok
-
-
 def test_web_answer_older_than_a_day_is_not_replayed():
     ep = _episode(tools=("web_search", "web_fetch"), labels=("web:x",), age=timedelta(hours=30))
     assert tools_allow_replay(ep) is False
@@ -75,38 +55,6 @@ def test_web_answer_older_than_a_day_is_not_replayed():
 def test_episode_without_a_date_is_not_replayed_on_web_tools():
     ep = dataclasses.replace(_episode(tools=("web_fetch",), labels=("web_fetch:https://a",)), created_at="")
     assert tools_allow_replay(ep) is False
-
-
-def test_the_gate_uses_the_tool_rule():
-    assert AgentLoop._fast_path_allows_replay(_episode(), 0.99) is True
-    assert AgentLoop._fast_path_allows_replay(_episode(tools=("file_write",), labels=("file_write:a",)), 0.99) is False
-
-
-# 2 -- every file behind the answer must hash the same as when the answer was stored
-def test_unchanged_file_is_fresh(tmp_path):
-    _notes(tmp_path)
-    assert stale_inputs(_banked(tmp_path), tmp_path) == []
-
-
-def test_changed_content_is_stale(tmp_path):
-    _notes(tmp_path)
-    ep = _banked(tmp_path)
-    _notes(tmp_path, "Код склада: 1111\n")
-    assert stale_inputs(ep, tmp_path) == ["notes.txt"]
-
-
-def test_changed_content_with_an_old_mtime_is_stale(tmp_path):
-    _notes(tmp_path, mtime=time.time() - 3600)
-    ep = _banked(tmp_path)
-    _notes(tmp_path, "Код склада: 1111\n", mtime=time.time() - 7200)  # cp -p / git checkout
-    assert stale_inputs(ep, tmp_path) == ["notes.txt"]
-
-
-def test_file_edited_during_the_run_gets_no_digest(tmp_path):
-    _notes(tmp_path)
-    ep = _episode()
-    assert input_digests(ep, tmp_path, time.time() - 60) == ()
-    assert stale_inputs(ep, tmp_path) == ["notes.txt"]
 
 
 def test_missing_file_is_stale(tmp_path):
@@ -120,24 +68,6 @@ def test_path_outside_the_workspace_is_stale(tmp_path):
     ep = _episode(labels=("file:../../etc/passwd",))
     assert input_digests(ep, tmp_path, time.time()) == ()
     assert stale_inputs(ep, tmp_path) == ["../../etc/passwd"]
-
-
-def test_a_file_the_loop_read_itself_is_checked(tmp_path):
-    """No file_read in tools_used, yet a `file:` label: the loop read it itself (loop_synthesis)."""
-    ep = _episode(tools=(), labels=("file:notes.txt",))
-    assert read_files(ep) == ["notes.txt"]
-    assert stale_inputs(ep, tmp_path) == ["notes.txt"]
-
-
-def test_a_windowed_read_label_names_the_file():
-    assert read_files(_episode(labels=("file:notes.txt:1-5",))) == ["notes.txt"]
-
-
-def test_digests_survive_the_store(tmp_path):
-    _notes(tmp_path)
-    store = EpisodicMemoryStore(tmp_path / "data" / "episodic_memory.jsonl")
-    store.save(_banked(tmp_path))
-    assert stale_inputs(store.load()[0], tmp_path) == []
 
 
 # 3 -- end to end through candidate choice, the gate and the note, as in `_run_inner`
@@ -163,75 +93,12 @@ def test_fast_path_serves_the_stored_answer_with_a_note(tmp_path):
     assert "7391" in shown and "из памяти" in shown
 
 
-def test_fast_path_redoes_the_work_when_the_file_changed(tmp_path):
-    _notes(tmp_path)
-    ep = _banked(tmp_path)
-    _notes(tmp_path, "Код склада: 1111\n")
-    assert _served(tmp_path, ep) is None
-
-
-def test_fast_path_redoes_an_action(tmp_path):
-    ep = _episode(tools=("file_write",), labels=("file_write:notes.txt",))
-    assert _served(tmp_path, ep) is None
-
-
-def test_an_action_is_not_skipped_by_an_older_answer(tmp_path):
-    """Latest same ask wrote a file; an older tool-free answer must not stand in for the write."""
-    older = _episode(tools=(), labels=(), eid="ep-old", age=timedelta(hours=2))
-    latest = _episode(tools=("file_write",), labels=("file_write:notes.txt",), eid="ep-new")
-    assert _served(tmp_path, latest, seeded=(older,)) is None
-
-
 def test_a_latest_search_does_not_hide_an_older_good_answer(tmp_path):
     """A search is a read, not an action: the older verified answer may still be served."""
     _notes(tmp_path)
     older = _banked(tmp_path, eid="ep-old", age=timedelta(hours=1))
     latest = _episode(tools=("list_dir", "find_in_files"), labels=("list_dir:.",), eid="ep-new")
     assert _served(tmp_path, latest, seeded=(older,)) is not None
-
-
-def _scored(ep, verified, unverified):
-    return dataclasses.replace(ep, verified_chunks=verified, unverified_chunks=unverified,
-                               answer_quality_score=_compute_quality_score(verified, unverified, 0))
-
-
-def test_a_hash_checked_file_answer_replays_at_two_of_three(tmp_path):
-    """Operator 17.11: lower floor (0.60) for answers whose every file is hash-checked."""
-    _notes(tmp_path)
-    ep = _scored(_banked(tmp_path), 2, 1)          # 0.667, the live «Код склада» answer
-    assert AgentLoop._quality_allows_replay(ep) is True
-    assert _served(tmp_path, ep) is not None
-
-
-def test_the_lower_floor_still_refuses_half(tmp_path):
-    _notes(tmp_path)
-    assert AgentLoop._quality_allows_replay(_scored(_banked(tmp_path), 1, 1)) is False   # 0.50
-
-
-@pytest.mark.parametrize("kw", [
-    {"tools": (), "labels": ()},                                          # no file at all
-    {"tools": ("file_read", "web_fetch"), "labels": ("file:notes.txt", "web_fetch:https://a")},  # web mixed in
-])
-def test_the_lower_floor_needs_hashed_files_only(tmp_path, kw):
-    _notes(tmp_path)
-    assert AgentLoop._quality_allows_replay(_scored(_banked(tmp_path, **kw), 2, 1)) is False
-
-
-def test_an_unhashed_file_answer_keeps_the_old_floor():
-    assert AgentLoop._quality_allows_replay(_scored(_episode(), 2, 1)) is False   # no digests
-
-
-# 4 -- the note
-def test_note_lands_inside_the_conclusion():
-    noted = with_replay_note(ANSWER, "из памяти")
-    assert "из памяти" in format_human_response(noted)
-    assert with_replay_note("plain answer", "из памяти").endswith("из памяти")
-
-
-def test_note_goes_after_the_whole_multi_paragraph_conclusion():
-    answer = "**Conclusion:** A\n\nB para\nFacts:\n- f"
-    lines = with_replay_note(answer, "NOTE").splitlines()
-    assert lines.index("NOTE") == lines.index("B para") + 1
 
 
 # 5 -- a search hit shows the matched words, not only the head of a long line

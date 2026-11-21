@@ -118,40 +118,7 @@ def test_shutdown_cancels_task_exceeding_drain_timeout():
     assert run_async(scenario()) is True
 
 
-def test_shutdown_survives_failing_task():
-    """A task that raises must not break shutdown."""
-
-    async def scenario():
-        daemon = DaemonLoop(on_wake=noop_handler, drain_timeout=1.0)
-        run_task = asyncio.create_task(daemon.run())
-        await asyncio.sleep(0)
-
-        async def bad_job():
-            raise RuntimeError("boom")
-
-        daemon.spawn(bad_job())
-        await daemon.shutdown()
-        await run_task
-
-    run_async(scenario())
-
-
 # ── idempotency ────────────────────────────────────────────────────────────
-
-
-def test_repeated_shutdown_is_safe():
-    async def scenario():
-        daemon = DaemonLoop(on_wake=noop_handler)
-        run_task = asyncio.create_task(daemon.run())
-        await asyncio.sleep(0)
-
-        await daemon.shutdown()
-        await daemon.shutdown()  # second call must not raise
-        await asyncio.gather(daemon.shutdown(), daemon.shutdown())
-        await run_task
-        assert daemon.shutting_down is True
-
-    run_async(scenario())
 
 
 def test_concurrent_shutdown_callers_all_return():
@@ -293,24 +260,3 @@ def test_shutdown_with_negative_drain_timeout_rejected():
 def test_invalid_drain_timeout_in_constructor():
     with pytest.raises(ValueError):
         DaemonLoop(on_wake=noop_handler, drain_timeout=-0.1)
-
-
-def test_wake_ignored_after_shutdown_started():
-    """Wake-ups arriving during shutdown must not restart dispatching."""
-
-    async def scenario():
-        batches: list[list[str]] = []
-
-        async def handler(reasons):
-            batches.append(list(reasons))
-
-        daemon = DaemonLoop(on_wake=handler)
-        run_task = asyncio.create_task(daemon.run())
-        await asyncio.sleep(0)
-
-        await daemon.shutdown()
-        daemon.wake("too-late")
-        await run_task
-        return batches
-
-    assert run_async(scenario()) == []

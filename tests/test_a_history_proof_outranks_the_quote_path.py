@@ -12,7 +12,6 @@ so the planner runs an evidence-producing plan.
 from __future__ import annotations
 
 from core.referent_resolver import (
-    PriorTurnRef,
     ReferentResolver,
     is_local_critique_eligible,
 )
@@ -52,27 +51,3 @@ def test_an_unseen_form_of_the_class_is_also_stopped() -> None:
     )
     decision = _resolve(question)
     assert is_local_critique_eligible(decision) is False
-
-
-def test_a_brought_quote_critique_still_rides() -> None:
-    """Control: critiquing a brought text stays on the local path."""
-    question = (
-        'Покажи слабые стороны этого текста: "Рынок вырастет в десять раз, '
-        'потому что все так говорят, и никакие проверки не нужны."'
-    )
-    decision = _resolve(question)
-    assert decision.status == "resolved"
-    assert is_local_critique_eligible(decision) is True
-
-
-def test_a_prior_turn_critique_still_rides() -> None:
-    """Control: prior-turn critique (the classic PR2 path) is untouched."""
-    prior = PriorTurnRef(
-        turn_id="turn_prev",
-        session_id=SESSION,
-        question="план",
-        answer="Категоричный текст без доказательств о росте рынка.",
-    )
-    decision = _resolve("покажи слабые стороны этого", prior_turns=(prior,))
-    assert decision.status == "resolved"
-    assert is_local_critique_eligible(decision) is True

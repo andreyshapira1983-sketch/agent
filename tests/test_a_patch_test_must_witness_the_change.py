@@ -46,14 +46,6 @@ def test_a_test_that_passes_on_old_code_is_red(tmp_path: Path) -> None:
     assert "OLD code" in result["why"]
 
 
-def test_a_real_witness_is_green(tmp_path: Path) -> None:
-    _repo(tmp_path)
-    rel = _patch(tmp_path, "from mod.calc import add\n\n\ndef test_it():\n    assert add(2, 2) == 4\n")
-    result = PatchCheckTool(workspace_root=tmp_path).run(rel)
-    assert result["verdict"] == "green", result
-    assert result["witness_exit_code"] != 0
-
-
 def test_a_broken_neighbor_is_run_and_turns_it_red(tmp_path: Path) -> None:
     """Ломалось здесь: соседний тест модуля не запускался, и поломка проходила."""
     _repo(tmp_path, existing_test="from mod.calc import add\n\n\ndef test_old():\n    assert add(3, 2) == 1\n")

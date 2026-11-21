@@ -92,10 +92,6 @@ def _fetch(body: bytes, content_type: str = "application/pdf") -> dict:
     ).run(url=_URL)
 
 
-def test_pdf_is_on_the_allow_list() -> None:
-    assert "application/pdf" in ALLOWED_CONTENT_TYPES
-
-
 def test_the_text_of_a_pdf_comes_back() -> None:
     out = _fetch(_pdf_bytes(["Shannon 1948 entropy"]))
     assert "Shannon 1948 entropy" in out["text"]

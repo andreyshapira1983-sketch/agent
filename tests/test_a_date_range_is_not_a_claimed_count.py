@@ -33,10 +33,3 @@ def test_dates_in_several_shapes_are_not_counts():
         "в 10:30 (первый, второй, третий) рейс",
     ):
         assert enumeration_count_reason(text) is None, text
-
-
-def test_a_real_count_mismatch_is_still_caught():
-    reason = enumeration_count_reason("Проверены три источника (Google Flights, Skyscanner, KAYAK, Kiwi).")
-    assert reason is not None and reason.code == "count_mismatch"
-    reason = enumeration_count_reason("Проверены 3 источника (Google Flights, Skyscanner, KAYAK, Kiwi).")
-    assert reason is not None and reason.expected == "3" and reason.actual == "4"

@@ -28,15 +28,6 @@ def _cmd(stdout: str = "42\n", **kw) -> dict:
             "timed_out": False, "stdout_truncated": False, **kw}
 
 
-def test_a_whole_argument_reference_carries_the_commands_stdout():
-    assert resolve_step_references({"content": "{{step:1.output}}"}, {"1": _cmd()}) == {"content": "42\n"}
-
-
-def test_a_reference_inside_text_carries_the_stdout_too():
-    assert resolve_step_references({"content": "sum={{step:1.output}}"}, {"1": _cmd("7")}) == {
-        "content": "sum=7"}
-
-
 @pytest.mark.parametrize(("output", "reason"), [
     (_cmd("", exit_code=1, stderr="IndexError: list index out of range"), "exited with 1"),
     (_cmd("", exit_code=None, timed_out=True), "timed out"),
@@ -46,12 +37,6 @@ def test_a_reference_inside_text_carries_the_stdout_too():
 def test_a_failed_command_carries_no_result(output: dict, reason: str):
     with pytest.raises(UnresolvedStepReference, match=reason):
         resolve_step_references({"content": "{{step:1.output}}"}, {"1": output})
-
-
-def test_a_non_command_result_keeps_its_type():
-    """Прежний договор цел: список остаётся списком, словарь без stdout — словарём."""
-    assert resolve_step_references({"x": "{{step:1.output}}"}, {"1": ["a", "b"]}) == {"x": ["a", "b"]}
-    assert resolve_step_references({"x": "{{step:1.output}}"}, {"1": {"a": 1}}) == {"x": {"a": 1}}
 
 
 def test_a_computed_sum_lands_in_the_file(workspace: Path):

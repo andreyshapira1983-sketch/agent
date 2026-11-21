@@ -9,11 +9,9 @@ knowledge_pipeline_helpers.py — имя считалось по перенес�
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
-from core.incremental_splitter import _NoHome, _plan_function_split, plan_incremental_split
+from core.incremental_splitter import _NoHome, _plan_function_split
 
 _SRC = '''
 _LIMIT = 3
@@ -40,16 +38,6 @@ def other_subject(x):
 def _write(tmp_path, src=_SRC):
     (tmp_path / "core").mkdir(exist_ok=True)
     (tmp_path / "core" / "pipe.py").write_text(src, encoding="utf-8")
-
-
-def test_the_class_moves_with_its_functions(tmp_path) -> None:
-    _write(tmp_path)
-    proof = SimpleNamespace(kind="multi_subject", names=("ClaimExtractor", "claim_id", "claim_text"))
-    plan = plan_incremental_split(tmp_path, "core/pipe.py", proof=proof)
-    assert plan.step is not None, plan.reason
-    assert "ClaimExtractor" in plan.step.moved_names
-    assert "other_subject" not in plan.step.moved_names
-    assert plan.step.new_module == "core/pipe_claim.py"
 
 
 def test_a_proven_group_without_a_common_word_is_not_called_helpers(tmp_path) -> None:

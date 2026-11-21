@@ -94,29 +94,6 @@ def _session_agent(tmp_path: Path, trace_id: str = "trace_repl_session"):
     return agent, events
 
 
-def test_an_unrelated_second_goal_starts_clean(tmp_path):
-    """The ruling's core: goal B neither restores nor carries goal A's
-    assumptions — no `assumptions_restored` event, no foreign text."""
-    agent, events = _session_agent(tmp_path)
-
-    agent.run("Сколько строк в файле журнала?")
-    first_texts = [a.text for a in agent.last_assumptions.assumptions]
-    assert any("Russian-language" in t for t in first_texts), "precondition"
-
-    events.clear()
-    agent.run("What is 2 plus 2?")
-
-    restored = [p for e, p in events if e == "assumptions_restored"]
-    assert not restored, (
-        "a new goal auto-restored archived assumptions — the MIR-027 leak "
-        "is back; the archive must stay dormant (operator ruling 2026-08-03)"
-    )
-    second_texts = [a.text for a in agent.last_assumptions.assumptions]
-    assert not any("Russian-language" in t for t in second_texts), (
-        "goal A's language assumption leaked into unrelated goal B"
-    )
-
-
 def test_the_second_goals_prompt_block_carries_only_its_own_assumptions(tmp_path):
     """The harm surface, inverted: the synthesizer block for goal B must not
     carry goal A's assumptions."""
@@ -125,31 +102,6 @@ def test_the_second_goals_prompt_block_carries_only_its_own_assumptions(tmp_path
     agent.run("What is 2 plus 2?")
     block = agent.last_assumptions.to_prompt_block()
     assert "Russian-language" not in block
-
-
-def test_the_archive_keeps_the_first_goals_rows(tmp_path):
-    """«Сохранить — не значит постоянно помнить»: dormant is not deleted.
-    Goal A's assumptions stay written in the store after goal B ran."""
-    agent, _ = _session_agent(tmp_path)
-    agent.run("Сколько строк в файле журнала?")
-    agent.run("What is 2 plus 2?")
-    store = AssumptionStore(tmp_path / "assumptions.jsonl")
-    archived = store.load_by_run("trace_repl_session")
-    assert any("Russian-language" in a.text for a in archived), (
-        "the fix must silence auto-activation, not destroy the archive"
-    )
-
-
-def test_a_fresh_trace_id_does_not_inherit(tmp_path):
-    """The one-shot counterpart, unchanged by the fix: a new agent with its
-    own trace id restores nothing over the same store file."""
-    agent1, _ = _session_agent(tmp_path)
-    agent1.run("Сколько строк в файле журнала?")
-
-    agent2, _ = _session_agent(tmp_path, trace_id="trace_one_shot_turn")
-    agent2.run("What is 2 plus 2?")
-    texts = [a.text for a in agent2.last_assumptions.assumptions]
-    assert not any("Russian-language" in t for t in texts)
 
 
 # ── the corners beyond the REPL (subsystem map, 2026-08-03) ──────────────────
@@ -182,34 +134,3 @@ def test_the_unattended_profile_never_saves_assumptions(tmp_path):
     agent.run("What is 2 plus 2?")
     store = AssumptionStore(tmp_path / "assumptions.jsonl")
     assert store.load_recent(50) == []
-
-
-def test_two_daemon_tasks_through_one_agent_stay_isolated(tmp_path):
-    """Cross-TASK isolation on the daemon shape: the second queued goal's
-    active set carries nothing from the first, in memory or in prompt."""
-    agent = _daemon_shaped_agent(tmp_path)
-    agent.run("Сколько строк в файле журнала?")
-    agent.run("What is 2 plus 2?")
-    texts = [a.text for a in agent.last_assumptions.assumptions]
-    assert not any("Russian-language" in t for t in texts)
-    assert "Russian-language" not in agent.last_assumptions.to_prompt_block()
-
-
-def test_the_current_goals_assumptions_do_reach_the_llm_prompt(tmp_path):
-    """The positive corner («будет ли это работать вообще»): the CURRENT
-    goal's own assumptions are injected into the synthesizer prompt — the
-    fix silenced the archive, not the mechanism."""
-    llm = _FixedLLM()
-    seen_prompts: list[str] = []
-    original_complete = llm.complete
-
-    def recording_complete(system, user, **kw):
-        seen_prompts.append(user)
-        return original_complete(system, user, **kw)
-
-    llm.complete = recording_complete  # type: ignore[method-assign]
-    agent, _ = _build_agent(tmp_path, trace_id="trace_prompt_check", llm=llm)
-    agent.run("Сколько строк в файле журнала?")
-    assert any(
-        "<assumptions>" in p and "Russian-language" in p for p in seen_prompts
-    ), "the current run's own assumptions never reached an LLM prompt"

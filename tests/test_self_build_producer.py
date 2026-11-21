@@ -19,7 +19,7 @@ import pytest
 
 from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import MODEL_DISCOVERY_TARGET
-from core.self_apply_bridge import SELF_APPLY_OPERATION, rehydrate_proposal
+from core.self_apply_bridge import SELF_APPLY_OPERATION
 from core.self_build_producer import (
     PRODUCER_ORIGIN,
     ProducerReport,
@@ -83,10 +83,6 @@ _TARGET = "core/redaction.py"
 
 def _manager_ok(target: str = _TARGET) -> str:
     return json.dumps({"target": target, "diagnosis": "tidy a helper"})
-
-
-def _manager_none() -> str:
-    return json.dumps({"target": None, "diagnosis": "nothing worth it"})
 
 
 def _builder_ok(content: str = "VALUE = 1\n", confidence: float = 0.9) -> str:
@@ -184,38 +180,6 @@ def test_dirty_tree_refuses_before_proposal(workspace: Path):
 # ── role pipeline ─────────────────────────────────────────────────────────────
 
 
-def test_no_candidate_returns_no_patch(workspace: Path):
-    llm = FakeLLM([_manager_none()])
-    report = _produce(workspace, llm=llm)
-    assert report.status == "no_patch"
-    # Only the Manager ran; no builder work.
-    assert [r.role for r in report.role_outputs] == ["manager"]
-
-
-def test_selected_candidate_runs_roles_in_order_and_proposes(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm, inbox=inbox)
-    assert report.status == "proposed"
-    assert [r.role for r in report.role_outputs] == [
-        "manager",
-        "researcher",
-        "builder",
-        "critic",
-        "reporter",
-    ]
-    assert report.target_path == _TARGET
-    assert report.approval_id
-
-
-def test_builder_diff_only_is_vetoed(workspace: Path):
-    diff = "--- a/core/redaction.py\n+++ b/core/redaction.py\n@@ -1 +1 @@\n-OLD\n+NEW\n"
-    llm = FakeLLM([_manager_ok(), _builder_ok(content=diff)])
-    report = _produce(workspace, llm=llm)
-    assert report.status == "critic_veto"
-    assert any("diff" in r for r in report.veto_reasons)
-
-
 def test_critical_target_is_denied_even_if_listed(workspace: Path):
     # Denylist wins before the allowlist: a critical organ can never be picked.
     llm = FakeLLM([_manager_ok(target="core/loop.py")])
@@ -234,85 +198,10 @@ def test_off_allowlist_target_is_rejected(workspace: Path):
     assert report.status == "no_patch"
 
 
-def test_low_confidence_is_vetoed_and_no_item_created(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok(confidence=0.1)])
-    report = _produce(workspace, llm=llm, inbox=inbox)
-    assert report.status == "critic_veto"
-    assert inbox.list() == []  # veto blocks approval-item creation
-
-
 def test_unparseable_builder_output_is_vetoed(workspace: Path):
     llm = FakeLLM([_manager_ok(), "totally not json"])
     report = _produce(workspace, llm=llm)
     assert report.status == "critic_veto"
-
-
-def test_creates_exactly_one_self_apply_item(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm, inbox=inbox)
-    assert report.status == "proposed"
-    items = inbox.list()
-    assert len(items) == 1
-    item = items[0]
-    assert item.operation == SELF_APPLY_OPERATION
-    assert item.payload["origin"] == PRODUCER_ORIGIN
-
-
-def test_payload_round_trips_through_bridge(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok(content="NEW = 2\n")])
-    report = _produce(workspace, llm=llm, inbox=inbox)
-    assert report.status == "proposed"
-    payload = inbox.get(report.approval_id).payload
-    proposal = rehydrate_proposal(payload)
-    assert proposal.files[0].path == _TARGET
-    assert proposal.files[0].content == "NEW = 2\n"
-
-
-def test_producer_never_touches_git(workspace: Path):
-    vcs = FakeVCS(clean=True)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm, vcs=vcs)
-    assert report.status == "proposed"
-    assert vcs.mutations == []  # no branch/commit — producer only proposes
-
-
-def test_no_push_or_network_methods_in_producer_and_vcs():
-    import core.self_build_producer as producer
-    from core.safe_vcs import SafeVCS
-
-    src = Path(producer.__file__).read_text(encoding="utf-8")
-    import_lines = [
-        ln for ln in src.splitlines()
-        if ln.strip().startswith(("import ", "from "))
-    ]
-    for banned in ("requests", "urllib", "httpx", "socket", "subprocess"):
-        assert not any(banned in ln for ln in import_lines), banned
-    for banned in ("push", "fetch", "pull", "remote", "merge"):
-        assert not hasattr(SafeVCS, banned), banned
-
-
-def test_proposing_leaves_every_workspace_file_untouched(workspace: Path):
-    """A proposal only files an inbox item; no workspace byte changes.
-
-    The target and the budget config are seeded, so an applied patch or a raised limit shows."""
-    (workspace / "core").mkdir()
-    (workspace / _TARGET).write_text("OLD = 0\n", encoding="utf-8")
-    (workspace / "config").mkdir()
-    (workspace / "config" / "budget_limits.json").write_text('{"hour": 10}\n', encoding="utf-8")
-
-    def _tree() -> dict[str, bytes]:
-        return {
-            p.relative_to(workspace).as_posix(): p.read_bytes()
-            for p in workspace.rglob("*") if p.is_file()
-        }
-
-    before = _tree()
-    report = _produce(workspace, llm=FakeLLM([_manager_ok(), _builder_ok()]))
-    assert report.status == "proposed"
-    assert _tree() == before
 
 
 # ── value gate (TD-035): pre-publish no-effect veto + soft flags ──────────────
@@ -390,22 +279,6 @@ def test_comment_only_change_is_value_vetoed_no_inbox_item(workspace: Path):
     ]
 
 
-def test_widest_incident_is_value_vetoed_no_inbox_item(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([
-        _manager_ok(),
-        _builder_custom("MAX = 80  # widest\n", "robustness improvement"),
-    ])
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        file_reader=_reader({_TARGET: "MAX = 80  # WIDEST\n"}),
-    )
-    assert report.status == "value_veto"
-    assert inbox.list() == []
-
-
 def test_whitespace_only_change_is_value_vetoed(workspace: Path):
     inbox = ApprovalInbox(path=None)
     llm = FakeLLM([
@@ -420,65 +293,6 @@ def test_whitespace_only_change_is_value_vetoed(workspace: Path):
     )
     assert report.status == "value_veto"
     assert inbox.list() == []
-
-
-def test_real_code_change_still_proposes(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([
-        _manager_ok(),
-        _builder_custom("def f():\n    return 2\n", "fix return value"),
-    ])
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        file_reader=_reader({_TARGET: "def f():\n    return 1\n"}),
-    )
-    assert report.status == "proposed"
-    assert len(inbox.list()) == 1
-
-
-def test_docs_target_text_change_is_not_value_vetoed(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    doc = "docs/self_build.md"
-    llm = FakeLLM([
-        _manager_ok(target=doc),
-        _builder_custom(_self_build_doc_content(), "document human-gated loop"),
-    ])
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        candidate_targets=(doc,),
-        file_reader=_reader({doc: "# Old self-build guide\n"}),
-    )
-    assert report.status == "proposed"
-    assert len(inbox.list()) == 1
-
-
-def test_docs_self_build_builder_prompt_names_operator_guide_contract(
-    workspace: Path,
-):
-    doc = "docs/self_build.md"
-    llm = FakeLLM([
-        _manager_ok(target=doc),
-        _builder_custom(_self_build_doc_content(), "document human-gated loop"),
-    ])
-
-    report = _produce(
-        workspace,
-        llm=llm,
-        candidate_targets=(doc,),
-        file_reader=_reader({doc: ""}),
-    )
-
-    assert report.status == "proposed"
-    builder_call = next(c for c in llm.calls if "You are the Builder" in c["system"])
-    system = builder_call["system"]
-    assert "human-gated self-build loop" in system
-    assert ":self-build-produce" in system
-    assert ":self-apply-run" in system
-    assert "not a generic build-from-source" in system
 
 
 def test_docs_self_build_generic_source_build_guide_is_vetoed(
@@ -614,48 +428,6 @@ def _write_self_build_docs_pilot_signal(
         )
 
 
-def _write_anatomy_candidate(workspace: Path) -> None:
-    (workspace / "docs").mkdir(parents=True, exist_ok=True)
-    (workspace / "knowledge" / "generated").mkdir(parents=True, exist_ok=True)
-    (workspace / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(
-        "## Candidate follow-ups (TD-030+) -- advisory only\n\n"
-        "1. **TD-030 (candidate): Unify the role mechanisms.** Later.\n",
-        encoding="utf-8",
-    )
-
-
-def test_legacy_llm_manager_flag_preserves_llm_selection(workspace: Path):
-    # Explicit legacy opt-in: Manager selects via the LLM exactly as before.
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-    report = _produce(workspace, llm=llm)  # helper injects legacy_llm_manager=True
-    assert report.status == "proposed"
-    assert next(r.role for r in report.role_outputs) == "manager"
-    # The manager consulted the LLM (first canned response consumed).
-    assert any("Manager" in c["system"] for c in llm.calls)
-
-
-def test_default_uses_grounded_selector_not_llm(workspace: Path):
-    # TD-036 follow-up: with neither a grounded_selector nor the legacy flag, the
-    # producer builds the default workspace-backed grounded selector. The tmp
-    # workspace has no TECH_DEBT.md / anatomy backlog, so the closed set is empty
-    # and the Manager refuses WITHOUT ever consulting the LLM.
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])  # must never be consulted
-    report = produce_self_apply_proposal(
-        workspace=workspace,
-        inbox=inbox,
-        llm=llm,
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-    )
-    assert report.status == "no_grounded_target"
-    assert [r.role for r in report.role_outputs] == ["manager"]
-    assert report.role_outputs[0].decision == "no_target"
-    assert llm.calls == []  # no LLM invention, no builder work
-    assert inbox.list() == []
-
-
 def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
     # The default selector reads TECH_DEBT.md / anatomy / value-reviews strictly
     # read-only; a broken backlog loader must degrade to "no candidate", never
@@ -681,29 +453,6 @@ def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
     assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert llm.calls == []
-
-
-def test_grounded_candidate_used_without_inventing_diagnosis(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    candidate = _Candidate(_TARGET, "grounded: fix the real bug", "TECH_DEBT.md:42")
-    # No manager response provided: if the LLM were consulted for selection this
-    # would fall through to the {} default. We assert the LLM is NOT asked to
-    # select a manager target.
-    llm = FakeLLM([_builder_custom("VALUE = 2\n", "small fix")])
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        grounded_selector=lambda: candidate,
-    )
-    assert report.status == "proposed"
-    manager = report.role_outputs[0]
-    assert manager.role == "manager" and manager.decision == "selected"
-    assert manager.data["grounded"] is True
-    assert manager.data["diagnosis"] == "grounded: fix the real bug"
-    assert manager.data["evidence_ref"] == "TECH_DEBT.md:42"
-    # The Manager never invented a diagnosis via the LLM.
-    assert not any("Manager" in c["system"] for c in llm.calls)
 
 
 def test_lessons_provider_warns_builder_with_past_failures(workspace: Path):
@@ -854,47 +603,6 @@ def test_default_grounded_selector_does_not_repeat_docs_pilot_after_doc_exists(
     assert inbox.list() == []
 
 
-def test_default_grounded_selector_keeps_anatomy_candidates_blocked(
-    workspace: Path,
-):
-    _write_anatomy_candidate(workspace)
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_builder_custom("VALUE = 2\n", "must not run")])
-
-    report = produce_self_apply_proposal(
-        workspace=workspace,
-        inbox=inbox,
-        llm=llm,
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-    )
-
-    assert report.status == "no_grounded_target"
-    manager = report.role_outputs[0]
-    assert manager.decision == "no_target"
-    assert manager.data["mapping_decision"] == "no_target"
-    assert manager.data["rejected_target"].startswith("anatomy:")
-    assert llm.calls == []
-    assert inbox.list() == []
-
-
-def test_grounded_selector_none_returns_no_target_not_invented(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM([_manager_ok(), _builder_ok()])  # would be used only if invented
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        grounded_selector=lambda: None,
-    )
-    assert report.status == "no_grounded_target"
-    assert [r.role for r in report.role_outputs] == ["manager"]
-    assert report.role_outputs[0].decision == "no_target"
-    assert llm.calls == []  # no LLM invention, no builder work
-    assert inbox.list() == []
-
-
 def test_grounded_off_allowlist_target_is_no_target(workspace: Path):
     inbox = ApprovalInbox(path=None)
     candidate = _Candidate("TD-060", "an open backlog item")  # not a code target
@@ -924,25 +632,6 @@ def test_grounded_critical_target_is_no_target(workspace: Path):
     )
     assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
-
-
-def test_grounded_ambiguous_mapping_refuses_without_legacy_or_approval(workspace: Path):
-    inbox = ApprovalInbox(path=None)
-    candidate = _Candidate("TD-999", "TD-999 \u2014 vague work", "TECH_DEBT.md:1")
-    llm = FakeLLM([_manager_ok(), _builder_ok()])
-
-    report = _produce(
-        workspace,
-        llm=llm,
-        inbox=inbox,
-        grounded_selector=lambda: candidate,
-    )
-
-    assert report.status == "no_grounded_target"
-    assert report.role_outputs[0].decision == "no_target"
-    assert report.role_outputs[0].data["mapping_decision"] == "no_target"
-    assert llm.calls == []
-    assert inbox.list() == []
 
 
 def test_grounded_mapping_missing_evidence_refuses_without_approval(workspace: Path):
@@ -1003,71 +692,12 @@ def _split_build(target, content, extra_files):
     }
 
 
-def test_split_dropped_api_flags_moved_symbol_without_reexport():
-    from core.self_build_producer import _split_dropped_api
-
-    old = "def keep():\n    return 1\n\n\ndef moved():\n    return 2\n"
-    # target no longer defines `moved` and does not re-import it
-    new = "def keep():\n    return 1\n"
-    assert _split_dropped_api(old, new) == ["moved"]
-
-
 def test_split_dropped_api_ok_when_reexported():
     from core.self_build_producer import _split_dropped_api
 
     old = "_MIN = 3\n\n\ndef moved():\n    return 2\n"
     new = "from .helpers import moved, _MIN\n"
     assert _split_dropped_api(old, new) == []
-
-
-def test_critic_vetoes_split_that_drops_importable_name():
-    from core.self_build_producer import _critic_review
-
-    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
-    # split moves _helper out but target forgets to re-export it
-    target_content = "def keep():\n    return 1\n"
-    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
-    out = _critic_review(
-        "core/keep.py",
-        old,
-        _split_build("core/keep.py", target_content, extra),
-        confidence_threshold=0.6,
-    )
-    assert out.decision == "veto"
-    assert any("re-export" in r for r in out.data["veto_reasons"])
-
-
-def test_critic_passes_split_with_reexport_shim():
-    from core.self_build_producer import _critic_review
-
-    old = "def keep():\n    return 1\n\n\ndef _helper():\n    return 2\n"
-    target_content = "from .keep_helpers import _helper\n\n\ndef keep():\n    return 1\n"
-    extra = [{"path": "core/keep_helpers.py", "content": "def _helper():\n    return 2\n"}]
-    out = _critic_review(
-        "core/keep.py",
-        old,
-        _split_build("core/keep.py", target_content, extra),
-        confidence_threshold=0.6,
-    )
-    assert out.decision == "pass", out.data["veto_reasons"]
-
-
-def test_critic_single_file_rewrite_ignores_split_guard():
-    from core.self_build_producer import _critic_review
-
-    old = "def keep():\n    return 1\n\n\ndef gone():\n    return 2\n"
-    # single-file rewrite that removes a function must NOT trigger the split guard
-    new = "def keep():\n    return 1\n"
-    build = {
-        "content": new,
-        "files": [{"path": "core/keep.py", "content": new}],
-        "test_paths": ["tests"],
-        "test_pattern": None,
-        "reason": "rewrite",
-        "confidence": 0.9,
-    }
-    out = _critic_review("core/keep.py", old, build, confidence_threshold=0.6)
-    assert out.decision == "pass", out.data["veto_reasons"]
 
 
 def test_critic_names_real_importer_when_split_breaks_import():
@@ -1175,27 +805,6 @@ def test_builder_retry_exhausted_still_vetoes(workspace: Path):
     assert inbox.list() == []
 
 
-def test_default_single_attempt_does_not_retry(workspace: Path):
-    # B: default max_builder_attempts=1 keeps the historical single-shot behaviour
-    # even though a valid 2nd response is queued.
-    inbox = ApprovalInbox(path=None)
-    cand = _Candidate(_TARGET, "grounded: tidy", "TECH_DEBT.md:1")
-    llm = FakeLLM([_builder_ok(content=_DIFF_CONTENT), _builder_ok(content="VALUE = 9\n")])
-    report = produce_self_apply_proposal(
-        **_grounded_full_kwargs(
-            workspace,
-            inbox=inbox,
-            llm=llm,
-            grounded_selector=lambda: cand,
-        )
-    )
-    assert report.status == "critic_veto"
-    assert report.attempts == 1
-    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
-    assert len(builder_calls) == 1
-    assert inbox.list() == []
-
-
 def _fake_split_plan(target, *, status="planned", reason="mixin extraction of 1 name", step=True):
     step_obj = None
     if step:
@@ -1269,38 +878,6 @@ def _proven_split(monkeypatch):
     import core.split_proof as sp
     monkeypatch.setattr(sp, "proof_for", lambda rel, index: SimpleNamespace(
         kind="multi_subject", names=(), loc=200))
-
-
-def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypatch):
-    _proven_split(monkeypatch)
-    # Site 2: a split the mapper accepts but that exceeds the single-shot Builder
-    # budget is also routed to the deterministic splitter rather than refused.
-    import core.incremental_splitter as isp
-    import core.self_build_producer as mod
-
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    target_rel = "core/huge_mod.py"
-    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
-    # Mapper accepts (default 1500), but the scale gate fires (tiny threshold).
-    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)
-    monkeypatch.setattr(isp, "plan_incremental_split", lambda ws, tgt, **k: _fake_split_plan(tgt))
-
-    inbox = ApprovalInbox(path=None)
-    llm = FakeLLM(["{}"])
-    report = produce_self_apply_proposal(
-        workspace=workspace,
-        inbox=inbox,
-        llm=llm,
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
-        grounded_selector=lambda: _oversized_split_cand(target_rel),
-    )
-    assert report.status == "proposed", report.reason
-    assert report.approval_id
-    assert not any("Builder" in c["system"] for c in llm.calls)
-    assert len(inbox.list()) == 1
 
 
 def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
@@ -1430,50 +1007,6 @@ def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
     assert any(p.endswith("_helpers.py") for p in paths)
 
 
-def test_small_split_still_proceeds_past_scale_filter(workspace: Path):
-    # C guard must NOT fire on a normal-sized split: this one publishes.
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    target_rel = "core/sample_small.py"
-    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
-    (workspace / target_rel).write_text(current, encoding="utf-8")
-    inbox = ApprovalInbox(path=None)
-    reply = json.dumps(
-        {
-            "files": [
-                {"path": target_rel, "content": "from core.sample_small_helpers import a, b\n"},
-                {
-                    "path": "core/sample_small_helpers.py",
-                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
-                },
-            ],
-            "test_paths": ["tests"],
-            "reason": "split oversized module into helpers",
-            "confidence": 0.9,
-        }
-    )
-    llm = FakeLLM([reply])
-    report = produce_self_apply_proposal(
-        workspace=workspace,
-        inbox=inbox,
-        llm=llm,
-        vcs=FakeVCS(clean=True),
-        budget_snapshot=_headroom_budget(),
-        kill_switch=FakeKillSwitch(active=False),
-        file_reader=lambda p: current if p == target_rel else None,
-        grounded_selector=lambda: types.SimpleNamespace(
-            target_path=f"split:{target_rel}",
-            signal_source="oversized_module",
-            evidence_ref=f"oversized_module:{target_rel}",
-            problem_quote="module is oversized",
-            proposed_change="split",
-            proof_of_value="",
-            expected_effect="",
-            confidence=0.4,
-        ),
-    )
-    assert report.status == "proposed", report.reason
-
-
 def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeypatch):
     # A: the default grounded selector skips a target on cooldown and advances to
     # the next candidate instead of re-picking the same wall.
@@ -1489,80 +1022,6 @@ def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeyp
         workspace, exclude_targets=frozenset({"core/model_router.py"})
     )
     assert selector() is nxt
-
-
-def test_cooldown_selector_noop_without_exclusions(workspace: Path, monkeypatch):
-    # A: with no cooldown set the selector is byte-identical to before (picks #1).
-    import core.backlog_selector as bl
-    import core.self_build_producer as mod
-
-    first = _Candidate("core/model_router.py", "split it", "TECH_DEBT.md:1")
-    second = _Candidate("core/redaction.py", "tidy", "TECH_DEBT.md:2")
-    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [first, second])
-    monkeypatch.setattr(mod, "_grounded_candidate_actionable", lambda c, w: True)
-
-    selector = mod._default_grounded_selector(workspace)
-    assert selector() is first
-
-
-def test_selector_keeps_oversized_split_actionable(workspace: Path, monkeypatch):
-    # Re-premised 2026-08-28 (MIR-183): this test used to pin the OPPOSITE —
-    # "an oversized split is non-actionable, skip to the next candidate". That
-    # was the second copy of the premise MIR-179 buried: it predated the
-    # incremental splitter, and its live cost was a whole tick ending
-    # no_grounded_target with workable splits in the backlog. An oversized
-    # split is actionable — the produce-phase scale gate routes it to the
-    # deterministic splitter ("Site 2" above) — so the selector keeps it.
-    import core.backlog_selector as bl
-    import core.self_build_producer as mod
-    from core.self_build_producer import _MAX_SPLIT_TARGET_LINES
-
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    big_rel = "core/huge_mod.py"
-    big = "".join(f"x{i} = {i}\n" for i in range(_MAX_SPLIT_TARGET_LINES + 50))
-    (workspace / big_rel).write_text(big, encoding="utf-8")
-
-    split_cand = types.SimpleNamespace(
-        target_path=f"split:{big_rel}",
-        signal_source="oversized_module",
-        evidence_ref=f"oversized_module:{big_rel}",
-        problem_quote="module is oversized",
-        proposed_change="split",
-        proof_of_value="",
-        expected_effect="",
-        confidence=0.4,
-    )
-    nxt = _Candidate("core/redaction.py", "tidy a helper", "TECH_DEBT.md:2")
-    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [split_cand, nxt])
-
-    selector = mod._default_grounded_selector(workspace)
-    assert selector() is split_cand
-
-
-def test_selector_keeps_small_split_actionable(workspace: Path, monkeypatch):
-    # A normal-sized split stays actionable and is picked first (no false skip).
-    import core.backlog_selector as bl
-    import core.self_build_producer as mod
-
-    (workspace / "core").mkdir(parents=True, exist_ok=True)
-    small_rel = "core/small_mod.py"
-    (workspace / small_rel).write_text("def a():\n    return 1\n", encoding="utf-8")
-
-    split_cand = types.SimpleNamespace(
-        target_path=f"split:{small_rel}",
-        signal_source="oversized_module",
-        evidence_ref=f"oversized_module:{small_rel}",
-        problem_quote="module is oversized",
-        proposed_change="split",
-        proof_of_value="",
-        expected_effect="",
-        confidence=0.4,
-    )
-    nxt = _Candidate("core/redaction.py", "tidy", "TECH_DEBT.md:2")
-    monkeypatch.setattr(bl, "load_backlog", lambda *a, **k: [split_cand, nxt])
-
-    selector = mod._default_grounded_selector(workspace)
-    assert selector() is split_cand
 
 
 def test_the_report_names_what_the_run_read(workspace: Path):

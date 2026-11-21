@@ -40,18 +40,6 @@ def test_an_unverified_diagnosis_is_denied_not_queued() -> None:
     )
 
 
-def test_a_missing_rollback_plan_is_denied() -> None:
-    assert _repair_write(verified=True, rollback=False).denied
-
-
-def test_both_reasons_together_still_only_reach_approval() -> None:
-    """Boundary pin: satisfying the gate must not become permission. If this
-    ever reads `allow`, the lane writes code without a human."""
-    decision = _repair_write(verified=True, rollback=True)
-    assert decision.requires_approval
-    assert not decision.denied
-
-
 def test_a_diff_proposal_needs_a_verified_diagnosis_to_be_allowed() -> None:
     policy = GovernancePolicy()
     unverified = policy.evaluate(

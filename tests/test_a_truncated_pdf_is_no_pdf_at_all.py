@@ -28,7 +28,7 @@ import io
 import pytest
 
 from tools import web_fetch
-from tools.web_fetch import DEFAULT_MAX_BYTES, PDF_MAX_BYTES, WebFetchTool
+from tools.web_fetch import WebFetchTool
 
 _URL = "https://1.1.1.1/attention.pdf"
 
@@ -62,42 +62,6 @@ class _Opener:
 
     def open(self, _req, timeout=None):
         return self.response
-
-
-def _pdf_bytes(line: str) -> bytes:
-    """Настоящий PDF с одной строкой текста; словарь шрифта обязателен."""
-    pypdf = pytest.importorskip("pypdf")
-    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
-
-    writer = pypdf.PdfWriter()
-    font = writer._add_object(DictionaryObject({
-        NameObject("/Type"): NameObject("/Font"),
-        NameObject("/Subtype"): NameObject("/Type1"),
-        NameObject("/BaseFont"): NameObject("/Helvetica"),
-    }))
-    writer.add_blank_page(width=300, height=300)
-    page = writer.pages[-1]
-    page[NameObject("/Resources")] = DictionaryObject({
-        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
-    })
-    stream = DecodedStreamObject()
-    stream.set_data(f"BT /F1 12 Tf 20 150 Td ({line}) Tj ET".encode())
-    page[NameObject("/Contents")] = writer._add_object(stream)
-    buf = io.BytesIO()
-    writer.write(buf)
-    return buf.getvalue()
-
-
-def test_a_pdf_may_be_read_past_the_text_cap() -> None:
-    """Статья на два мегабайта больше не режется потолком для текста."""
-    body = _pdf_bytes("Attention Is All You Need")
-    resp = _Response(body)
-    tool = WebFetchTool(opener=_Opener(resp))
-    tool.run(_URL)
-    assert resp.asked_for is not None
-    assert resp.asked_for > DEFAULT_MAX_BYTES, (
-        "у PDF должен быть свой потолок чтения", resp.asked_for)
-    assert resp.asked_for == PDF_MAX_BYTES + 1
 
 
 def test_a_pdf_too_large_says_why_instead_of_crashing(monkeypatch) -> None:

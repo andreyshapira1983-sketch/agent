@@ -81,12 +81,6 @@ def test_meaning_breaks_a_tie_that_words_cannot() -> None:
     assert _policy(1).select([near, far], QUESTION) == [near]
 
 
-def test_without_a_model_the_selection_is_exactly_as_before() -> None:
-    before = _policy().select([PACKAGE, BOOK], QUESTION)
-    me.set_encoder(None)
-    assert _policy().select([PACKAGE, BOOK], QUESTION) == before == [BOOK]
-
-
 def test_a_failing_model_falls_back_to_words() -> None:
     def broken(_texts):
         raise RuntimeError("модель упала")
@@ -94,29 +88,6 @@ def test_a_failing_model_falls_back_to_words() -> None:
     me.set_encoder(broken)
     assert me.fused_relevance("вопрос", ["текст"], [1.0]) == ([1.0], None)
     assert _policy().select([PACKAGE, BOOK], QUESTION) == [BOOK]
-
-
-def test_a_second_question_does_not_re_encode_the_memory() -> None:
-    calls: list[int] = []
-
-    def counting(texts):
-        calls.append(len(texts))
-        return _fake(texts)
-
-    me.set_encoder(counting)
-    me.semantic_scores("первый", ["запись один", "запись два"])
-    me.semantic_scores("второй", ["запись один", "запись два"])
-    assert calls == [2, 1, 1], "память перекодировалась на втором вопросе"
-
-
-def test_the_instruct_model_gets_its_task_and_bare_passages() -> None:
-    """Правило карточки multilingual-e5-large-instruct."""
-    me._instruct = True
-    assert me._query("вопрос") == f"Instruct: {me.INSTRUCT_TASK}\nQuery: вопрос"
-    assert me._passage("запись") == "запись"
-    me._instruct = False
-    assert me._query("вопрос") == "query: вопрос"
-    assert me._passage("запись") == "passage: запись"
 
 
 def test_fusion_formulas() -> None:

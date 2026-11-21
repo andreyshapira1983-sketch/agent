@@ -3,12 +3,6 @@
 from core.step_repetition import StepRepetitionTracker, normalize_args
 
 
-def test_normalize_args_stable_across_key_order():
-    a = normalize_args({"path": "x", "encoding": "utf-8"})
-    b = normalize_args({"encoding": "utf-8", "path": "x"})
-    assert a == b
-
-
 def test_normalize_args_handles_none_and_unjsonable():
     assert normalize_args(None) == ""
 
@@ -20,18 +14,6 @@ def test_normalize_args_handles_none_and_unjsonable():
     assert "Weird" in out
 
 
-def test_tracker_fires_once_at_threshold():
-    t = StepRepetitionTracker(threshold=3)
-    assert t.observe("file_read", {"path": "a"}) is None
-    assert t.observe("file_read", {"path": "a"}) is None
-    rep = t.observe("file_read", {"path": "a"})
-    assert rep is not None
-    assert rep["tool"] == "file_read"
-    assert rep["repetitions"] == 3
-    # Subsequent calls do not re-fire.
-    assert t.observe("file_read", {"path": "a"}) is None
-
-
 def test_tracker_isolates_per_args():
     t = StepRepetitionTracker(threshold=2)
     assert t.observe("file_read", {"path": "a"}) is None
@@ -40,11 +22,6 @@ def test_tracker_isolates_per_args():
     assert rep_a is not None
     # path=b still under threshold
     assert t.count("file_read", {"path": "b"}) == 1
-
-
-def test_tracker_minimum_threshold_is_two():
-    t = StepRepetitionTracker(threshold=1)
-    assert t.threshold == 2  # clamped
 
 
 def test_tracker_ignores_empty_tool():

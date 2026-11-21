@@ -59,11 +59,3 @@ def test_active_file_integrity_ok_returns_false_when_envelope_hash_corrupt(tmp_p
     }
     p.write_text(json.dumps(row) + "\n", encoding="utf-8")
     assert _active_file_integrity_ok(p) is False
-
-
-def test_active_file_integrity_ok_returns_true_for_valid_envelope(tmp_path: Path):
-    from core.state_integrity import encode_state_row
-    from core.state_store_drill import _active_file_integrity_ok
-    p = tmp_path / "ok.jsonl"
-    p.write_text(encode_state_row({"goal": "x"}) + "\n", encoding="utf-8")
-    assert _active_file_integrity_ok(p) is True

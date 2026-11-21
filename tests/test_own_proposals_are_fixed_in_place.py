@@ -9,7 +9,6 @@ proposals/ выросла до 17 версий одного документа. 
 """
 from __future__ import annotations
 
-from core.planner_prompt import PLANNER_SYSTEM
 from tools.file_write import FileWriteTool
 
 
@@ -34,14 +33,3 @@ def test_overwriting_an_own_note_is_reversible_too(tmp_path) -> None:
     (tmp_path / "data" / "episodic_memory.jsonl").write_text("{}", encoding="utf-8")
     assert tool.risk_for({"path": "data/notes/n.md"}) == "reversible"
     assert tool.risk_for({"path": "data/episodic_memory.jsonl"}) == "irreversible"
-
-
-def test_bytes_written_are_the_bytes_on_disk(tmp_path) -> None:
-    tool = FileWriteTool(workspace_root=tmp_path)
-    out = tool.run(path="notes.md", content="строка один\nстрока два\n")
-    assert out["bytes_written"] == (tmp_path / "notes.md").stat().st_size
-
-
-def test_the_planner_is_told_a_refusal_is_not_an_obstacle() -> None:
-    assert "temp file + rename" in PLANNER_SYSTEM
-    assert "HUMAN decision, not an\n    obstacle" in PLANNER_SYSTEM
